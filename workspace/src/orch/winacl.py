@@ -6,6 +6,9 @@ POSIX has 0700/0600 and an lstat link check. Windows has neither, so this module
 - check_private(path): read the rights back and refuse unless the list is exactly this user and/or SYSTEM,
   allow-only, protected (no inheritance), and the path has no link or junction.
 - no_reparse(path): no symlink, junction or other reparse point on any part of the path.
+- allow_home(path) / check_scope(path): rights are only ever WRITTEN inside a guarded orch home that
+  humanproof.guarded_home resolved in this process (its real path, so a junction can not lead out). Never the
+  current folder, a workspace, the Public folder, the profile folder or anything above it. Fail closed.
 
 No child process is ever started (a planted icacls.exe or whoami.exe in the current folder or on PATH can
 not fake the answer): everything goes through the Win32 API with ctypes (advapi32). Rights are compared by
@@ -27,6 +30,7 @@ from orch.errors import Refused
 
 REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
 TAG_SYMLINK = 0xA000000C  # IO_REPARSE_TAG_SYMLINK
+TAG_NAME_SURROGATE = 0x20000000  # IsReparseTagNameSurrogate: the tag names another file system object
 TAG_MOUNT_POINT = 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT (a junction)
 SYSTEM_SID = "S-1-5-18"
 FILE_ALL_ACCESS = 0x1F01FF
@@ -36,9 +40,10 @@ ACE_INHERITED = 0x10  # INHERITED_ACE: a copy from the parent
 
 
 def link_reparse(attrs: int, tag: int) -> bool:
-    """A symlink or junction? Other reparse points (OneDrive/cloud placeholders, dedup, WSL...) are ordinary
-    files for us. A reparse point whose tag is unknown (0) counts as a link: fail closed."""
-    return bool(attrs & REPARSE) and (tag in (TAG_SYMLINK, TAG_MOUNT_POINT) or tag == 0)
+    """A name-surrogate reparse point (symlink, junction, any tag with the name-surrogate bit)? Other
+    reparse points (OneDrive/cloud placeholders, APPEXECLINK, dedup, WSL...) are ordinary files for us.
+    A reparse point whose tag is unknown (0) counts as a link: fail closed."""
+    return bool(attrs & REPARSE) and (tag == 0 or bool(tag & TAG_NAME_SURROGATE))
 
 
 def _windows() -> bool:
@@ -145,9 +150,118 @@ def user_sid() -> str:
     return _sid_cache
 
 
-def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
-    """Replace the DACL by: this user and SYSTEM, full control; protected (inheritance removed)."""
+GENERIC_WRITE_DAC = 0x00040000  # WRITE_DAC
+GENERIC_READ_CONTROL = 0x00020000  # READ_CONTROL
+FILE_SHARE_ALL = 0x7  # READ | WRITE | DELETE
+OPEN_EXISTING = 3
+FLAG_BACKUP_SEMANTICS = 0x02000000  # lets CreateFileW open a folder
+FLAG_OPEN_REPARSE_POINT = 0x00200000  # open a link itself, never its target
+
+
+def _open_target(path: Path):
+    """ONE handle on the target for the whole write (WRITE_DAC | READ_CONTROL; a link is opened itself, not
+    followed). Scope check, rights write and read-back all go through this handle, so nothing can be swapped
+    in between them. Tests replace this."""
     ctypes, wintypes, adv, k32 = _api()
+    k32.CreateFileW.argtypes = [
+        ctypes.c_wchar_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+    k32.CreateFileW.restype = ctypes.c_void_p
+    h = k32.CreateFileW(
+        str(path),
+        GENERIC_WRITE_DAC | GENERIC_READ_CONTROL,
+        FILE_SHARE_ALL,
+        None,
+        OPEN_EXISTING,
+        FLAG_BACKUP_SEMANTICS | FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if h is None or h in (0, ctypes.c_void_p(-1).value):
+        raise _no("Windows would not open it to set its rights")
+    return h
+
+
+def _close_target(h) -> None:
+    _api()[3].CloseHandle(h)
+
+
+def _handle_attrs(h) -> int:
+    """File attributes of what the handle really is. Tests replace this."""
+    ctypes, wintypes, adv, k32 = _api()
+
+    class _Info(ctypes.Structure):
+        _fields_ = [("attrs", wintypes.DWORD), ("rest", ctypes.c_ubyte * 48)]
+
+    info = _Info()
+    k32.GetFileInformationByHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    if not k32.GetFileInformationByHandle(h, ctypes.byref(info)):
+        raise _cant("a part of its path could not be checked")
+    return info.attrs
+
+
+def _handle_links(h) -> int:
+    """nNumberOfLinks of the open file (BY_HANDLE_FILE_INFORMATION, offset 40). Tests replace this."""
+    ctypes, wintypes, adv, k32 = _api()
+    buf = ctypes.create_string_buffer(52)
+    k32.GetFileInformationByHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    if not k32.GetFileInformationByHandle(h, buf):
+        raise _cant("a part of its path could not be checked")
+    return struct.unpack_from("<I", buf.raw, 40)[0]
+
+
+def _handle_tag(h) -> int:
+    """The reparse tag of what the handle is (FileAttributeTagInfo); 0 when unknown (counts as a link)."""
+    ctypes, wintypes, adv, k32 = _api()
+
+    class _Tag(ctypes.Structure):
+        _fields_ = [("attrs", wintypes.DWORD), ("tag", wintypes.DWORD)]
+
+    info = _Tag()
+    k32.GetFileInformationByHandleEx.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    if not k32.GetFileInformationByHandleEx(
+        h, 9, ctypes.byref(info), ctypes.sizeof(info)
+    ):  # 9 = FileAttributeTagInfo
+        raise _cant("a part of its path could not be checked")
+    return info.tag
+
+
+def _handle_path(h) -> str:
+    """The real path the handle points at (GetFinalPathNameByHandleW, no long-path prefix)."""
+    ctypes, wintypes, adv, k32 = _api()
+    k32.GetFinalPathNameByHandleW.argtypes = [
+        ctypes.c_void_p,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    buf = ctypes.create_unicode_buffer(32768)
+    n = k32.GetFinalPathNameByHandleW(h, buf, 32768, 0)
+    if n == 0 or n >= 32768:
+        raise _cant("a part of its path could not be checked")
+    got = buf.value
+    if got.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + got[8:]
+    if got.startswith("\\\\?\\"):
+        return got[4:]
+    return got
+
+
+def _set_dacl_on_handle(h, is_dir: bool, sid: str) -> None:
+    """Replace the DACL through the handle: this user and SYSTEM, full control; protected."""
+    ctypes, wintypes, adv, k32 = _api()
+    adv.SetSecurityInfo.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.DWORD] + [ctypes.c_void_p] * 4
+    adv.SetSecurityInfo.restype = wintypes.DWORD
     inh = "OICI" if is_dir else ""
     sddl = f"D:P(A;{inh};FA;;;{SYSTEM_SID})(A;{inh};FA;;;{sid})"
     sd = ctypes.c_void_p()
@@ -161,18 +275,45 @@ def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
         ) or not (present.value and dacl.value):
             raise _no("Windows would not set its rights")
         # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION; SE_FILE_OBJECT = 1
-        rc = adv.SetNamedSecurityInfoW(str(path), 1, 0x4 | 0x80000000, None, None, dacl, None)
-        if rc != 0:
+        if adv.SetSecurityInfo(h, 1, 0x4 | 0x80000000, None, None, dacl, None) != 0:
             raise _no("Windows would not set its rights")
     finally:
         k32.LocalFree(sd)
 
 
-def _read_dacl(path: Path) -> tuple[bool, list[tuple[int, int, int, str]]]:
-    """(protected, [(ace type, ace flags, access mask, SID string)]). Raises Refused when it cannot tell."""
+def _write_dacl(path: Path, is_dir: bool, sid: str) -> None:
+    """Replace the DACL by: this user and SYSTEM, full control; protected (inheritance removed).
+    The target is opened ONCE; a link handle is refused; the scope guard judges the handle's final path; the
+    rights are set and read back through that same handle (no check-then-use gap on the name)."""
+    check_scope(path)  # the only DACL writer: the scope guard holds here too, whoever calls it (early, cheap)
+    h = _open_target(path)
+    try:
+        attrs = _handle_attrs(h)
+        if attrs & REPARSE and link_reparse(attrs, _handle_tag(h)):  # other reparse points (OneDrive...) work
+            raise _no("it is a link or junction")
+        check_scope(_handle_path(h), final=True)  # what was REALLY opened, not the name
+        if not is_dir and _handle_links(h) != 1:  # a hard link: the same rights would show at another name
+            raise _no("it has more than one name")
+        _set_dacl_on_handle(h, is_dir, sid)
+        protected, aces = _read_dacl(path, handle=h)
+        parse_aces(protected, aces, sid)
+    finally:
+        _close_target(h)
+
+
+def _read_dacl(path: Path, handle=None) -> tuple[bool, list[tuple[int, int, int, str]]]:
+    """(protected, [(ace type, ace flags, access mask, SID string)]). Raises Refused when it cannot tell.
+    With `handle` the rights are read from that open handle (not by name)."""
     ctypes, wintypes, adv, k32 = _api()
     dacl, sd = ctypes.c_void_p(), ctypes.c_void_p()
-    rc = adv.GetNamedSecurityInfoW(str(path), 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd))
+    if handle is not None:
+        adv.GetSecurityInfo.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.DWORD] + [ctypes.c_void_p] * 5
+        adv.GetSecurityInfo.restype = wintypes.DWORD
+        rc = adv.GetSecurityInfo(handle, 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd))
+    else:
+        rc = adv.GetNamedSecurityInfoW(
+            str(path), 1, 0x4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd)
+        )
     if rc != 0:
         raise _cant("Windows would not tell its rights")
     try:
@@ -339,11 +480,109 @@ def parse_aces(protected: bool, aces: list[tuple[int, int, int, str]], sid: str)
         raise _no("your account is not on its rights list")
 
 
+# ------------------------------------------------------------------------- where rights may be written
+
+_homes: set[str] = set()  # real paths (normcase) of the guarded homes this process resolved
+
+
+def _real(path: str | os.PathLike) -> str:
+    """The real path, normcased. Windows can refuse to resolve one (WinError 448, an untrusted mount point on
+    a junction made by a user): that is a refusal with nothing written, never a crash."""
+    try:
+        return os.path.normcase(os.path.realpath(os.fspath(path)))
+    except OSError as e:
+        raise _no("its real path could not be read") from e
+
+
+def _inside(child: str, parent: str) -> bool:
+    """child is parent or below it (both real, normcased)."""
+    if child == parent:
+        return True
+    if os.path.splitdrive(child)[0] != os.path.splitdrive(parent)[0]:
+        return False
+    # pure component comparison: relpath/abspath would trim a trailing dot or space ("home." is not "home")
+    seps = os.sep + (os.altsep or "")
+
+    def comps(p: str) -> list[str]:
+        out, cur = [], ""
+        for ch in os.path.splitdrive(p)[1]:
+            if ch in seps:
+                out.append(cur)
+                cur = ""
+            else:
+                cur += ch
+        out.append(cur)
+        return [c for c in out if c]
+
+    c, par = comps(child), comps(parent)
+    return c[: len(par)] == par
+
+
+def _guard_profile() -> str:
+    """The profile folder (from the token) for the scope guard. Unknown = refused. Tests replace this."""
+    return profile_dir()
+
+
+def _forbidden(rp: str, *, is_home: bool = False) -> str | None:
+    """Why `rp` (real, normcased) may never get its rights changed by orch, or None. A guarded HOME (already
+    validated by humanproof: the account's own orch folder, or the test home) may contain the current folder:
+    ORCH_HOME=~/.orch-test with a workspace under it and the shell standing in that workspace is normal."""
+    if rp == os.path.dirname(rp):
+        return "it is a drive root"
+    try:
+        prof = _real(_guard_profile())
+    except Refused:
+        return "your profile folder could not be found"
+    if _inside(prof, rp):
+        return "it is your profile folder or above it"
+    public = _real(os.path.join(os.path.dirname(prof), "Public"))
+    if _inside(rp, public):
+        return "it is in the shared Public folder"
+    if not _inside(rp, prof):
+        return "it is outside your profile folder"
+    try:
+        cwd = _real(os.getcwd())
+    except OSError:
+        return "the current folder could not be found"
+    if not is_home and _inside(cwd, rp):
+        return "it is the current folder or above it"
+    return None
+
+
+def allow_home(path: str | os.PathLike) -> None:
+    """Record a guarded home (humanproof.guarded_home calls this). Windows only; a home in a forbidden place
+    (Public, the profile folder itself, a drive root) is refused."""
+    if not _windows():
+        return
+    rp = _real(path)
+    why = _forbidden(rp, is_home=True)
+    if why:
+        raise _no(f"orch would change rights outside its own folder: {why}")
+    _homes.add(rp)
+
+
+def check_scope(path: str | os.PathLike, final: bool = False) -> None:
+    """Refuse unless `path` (real path: links and junctions resolved) is inside a guarded home recorded by
+    allow_home, and is not a forbidden place. Called before EVERY rights write. No home recorded = refused.
+    final=True: `path` is already a handle's final path (the system resolved it), so it is only normalised,
+    never resolved again by name."""
+    if not _windows():
+        return
+    rp = os.path.normcase(os.path.normpath(os.fspath(path))) if final else _real(path)
+    why = _forbidden(rp, is_home=rp in _homes)
+    if why is None and not any(_inside(rp, h) for h in _homes):
+        why = "it is not inside orch's own folder"
+    if why:
+        raise _no(f"orch will not change the rights of {path}: {why}")
+
+
 def set_private(path: str | os.PathLike, is_dir: bool) -> None:
-    """Only this user and SYSTEM, inheritance removed; then read back and verified."""
+    """Only this user and SYSTEM, inheritance removed; then read back and verified. Only inside a guarded home
+    (check_scope runs before any write)."""
     if not _windows():
         return
     p = Path(path)
+    check_scope(p)
     no_reparse(p)
     try:
         _write_dacl(p, is_dir, user_sid())
@@ -360,7 +599,14 @@ def check_private(path: str | os.PathLike) -> None:
     if not _windows():
         return
     p = Path(path)
-    _attrs(p)  # FileNotFoundError passes through: "not there" is not "wrong rights"
+    try:
+        _attrs(p)  # FileNotFoundError passes through: "not there" is not "wrong rights"
+    except FileNotFoundError:
+        raise
+    except Refused:
+        raise
+    except OSError as e:  # e.g. WinError 448 (untrusted mount point) on a user-made junction, elevated
+        raise _cant("a part of its path could not be checked") from e
     no_reparse(p)
     sid = user_sid()
     try:

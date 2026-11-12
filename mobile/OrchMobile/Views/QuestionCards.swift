@@ -22,7 +22,7 @@ struct QuestionCard: View {
                         if q.isAllow {
                             Image(systemName: "lock").accessibilityLabel("Permission")
                         }
-                        Text(position.map { ConversationRules.needsYouText(position: $0.n, of: $0.of) } ?? "Needs you")
+                        Text(position.map { ConversationRules.needsYouText(position: $0.n, of: $0.of) } ?? "Needs your OK")
                     }.themeFont(13, .semibold).foregroundStyle(isStale ? Theme.muted : Theme.warn)
                 }
                 questionText(q)
@@ -60,21 +60,11 @@ struct QuestionCard: View {
         let attachments = model.tickets.first {
             $0.workspace == q.message.from && $0.ticket == (q.message.ticket ?? conversationId.ticket)
         }?.view?.attachments ?? []
-        var attributed = AttributedString(text)
-        for mention in ArtifactMentions.mentions(in: text, attachments: attachments) {
-            if let range = Range(mention.range, in: attributed),
-               let encoded = mention.attachmentId.addingPercentEncoding(withAllowedCharacters: .alphanumerics),
-               let url = URL(string: "orch-artifact://" + encoded) {
-                attributed[range].link = url
-                attributed[range].foregroundColor = Theme.brand
-                attributed[range].underlineStyle = .single
-            }
-        }
+        let attributed = ArtifactMentions.attributed(text, attachments: attachments)
         return Text(attributed).themeFont(17).fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("question-artifact-link")
             .environment(\.openURL, OpenURLAction { url in
-                guard url.scheme == "orch-artifact",
-                      let id = String(url.absoluteString.dropFirst("orch-artifact://".count)).removingPercentEncoding else { return .systemAction }
+                guard let id = ArtifactMentions.attachmentId(from: url) else { return .systemAction }
                 onOpenArtifact(id)
                 return .handled
             })

@@ -12,6 +12,7 @@ import pytest
 from orch import addons, cli, winfinish
 
 _REAL_HOME_FN = addons.real_home  # the true one, before any test fakes it
+_TRACE_LOG = addons._trace_log_path()  # the true fallback trace file (temp folder), before any test fakes it
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
 
@@ -26,24 +27,26 @@ def _guard_bases() -> list[Path]:
 
 
 def _snapshot_real_tool_home():
-    """{path: (size, sha256, mtime_ns)} of the watched orch homes (read only), without the fallback trace; and
-    the trace lines. A path that can not be read maps to None."""
+    """{path: (size, sha256, mtime_ns)} of the watched orch homes (read only); and the fallback trace lines
+    (from the temp trace file: orch never writes the trace into the real home). A path that can not be read
+    maps to None."""
     files, trace = {}, []
     for base in _guard_bases():
-        _snapshot_one(base, files, trace)
+        _snapshot_one(base, files)
+    try:
+        if _TRACE_LOG.is_file() and not _TRACE_LOG.is_symlink():
+            trace = _TRACE_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        pass
     return files, trace
 
 
-def _snapshot_one(base: Path, files: dict, trace: list) -> None:
+def _snapshot_one(base: Path, files: dict) -> None:
     if base.exists():
         for p in (base, *base.rglob("*")):
             try:
-                if p.name.startswith(".fallback-trace.log"):
-                    if p.name == ".fallback-trace.log" and not p.is_symlink():
-                        trace += p.read_text(encoding="utf-8", errors="replace").splitlines()
-                    continue
                 if p.is_dir() and not p.is_symlink():
-                    files[str(p)] = "dir"  # a folder's mtime moves when the trace file is made or rotated
+                    files[str(p)] = "dir"  # a folder's mtime moves with its contents, which are checked
                     continue
                 st = p.stat()
                 digest = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
@@ -78,6 +81,15 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def _no_tool_version_probe(monkeypatch):
+    """The deny-rule version check (adapters.deny_version_check) probes the tool; tests that only look at
+    an argv must not depend on a tool being installed. tests/test_deny_rules.py tests the real check."""
+    from orch import adapters
+
+    monkeypatch.setattr(adapters, "_deny_version_ok", lambda a, b=None: None)
+
+
+@pytest.fixture(autouse=True)
 def _strict_orch_home(monkeypatch, tmp_path_factory):
     """Every test: a faked real home with its own ORCH_HOME (a test that never asked for `proj` used to write
     the real ~/.orch-tool/addons.json: ORCH_HOME unset = real folder); untrusted ORCH_HOME = error."""
@@ -85,6 +97,10 @@ def _strict_orch_home(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(addons, "real_home", lambda: fake)
     monkeypatch.setenv("ORCH_HOME", str(fake / "toolhome"))
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    # a test that turns the fallback trace on writes its own file, never the shared one in the temp folder
+    trace = tmp_path_factory.mktemp("trace") / "orch-fallback-trace.log"
+    monkeypatch.setattr(addons, "_trace_log_path", lambda: trace)
+    monkeypatch.delenv("ORCH_TRACE_FALLBACKS", raising=False)  # the opt-in of a dev shell: tests turn it on
     # children and Path.home()/expanduser fallbacks must not find the real home through $HOME either
     monkeypatch.setenv("HOME", str(fake))
     monkeypatch.setenv("USERPROFILE", str(fake))
@@ -250,7 +266,35 @@ def _start_guard_off(request, monkeypatch):
     monkeypatch.setattr("orch.adapters.check_start_folder", lambda *a, **k: None)
 
 
-REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof")
+REAL_HOME_MODULES = (
+    "test_secret_store",
+    "test_install_kind",
+    "test_winacl",
+)  # they test the home pairing itself
+REAL_PROOF_MODULES = ("test_human_proof", "test_humanproof", "test_verdict_mac", "test_cli_secret")
+
+
+def ensure_signing(root):
+    """TEST HELPER: the workspace's local id and human key exist (a real proof needs both anyway)."""
+    from orch import humanproof
+    from orch.errors import Refused
+
+    try:
+        addons.workspace_id(root, create=True)
+        humanproof.human_key(root, create=True)
+    except (
+        Refused
+    ):  # a folder a test install may not use (not under ~/.orch-test): nothing can be signed there
+        pass
+
+
+def sign_done(root, tid, by="human:tester"):
+    """TEST HELPER: a ticket becomes Done the proven way (a person's verdict, signed and recorded in the
+    ledger). Fixtures never write "done" into a ticket file or call _write with it: that is Review."""
+    from orch import tickets
+
+    ensure_signing(root)
+    return tickets.set_status(root, tid, "done", by, proven=True)
 
 
 @pytest.fixture(autouse=True)
@@ -261,14 +305,52 @@ def _legacy_trust(request, monkeypatch):
     if request.module.__name__.split(".")[-1].startswith(REAL_PROOF_MODULES):
         return
     from orch import humanproof, tickets
+    from orch.errors import Refused
 
     def legacy(root, args, op, target, **kw):
         if tickets.agent_tool():
             return "agent:" + str(tickets.agent_tool())
-        return tickets.current_actor(getattr(args, "by", None))
+        who = tickets.current_actor(getattr(args, "by", None))
+        if who.startswith("human:"):
+            ensure_signing(
+                root
+            )  # a person's Done is signed: the key and the local id exist, as after a real proof
+        return who
+
+    def test_home(root):
+        """TEST-ONLY: these tests keep the workspace in pytest's temp folder, which the real pairing refuses
+        (a test workspace must live under ~/.orch-test). Their orch home is the ORCH_HOME the fixture set, so
+        a signed Done (key + ledger) works there. The pairing check itself is tested by test_human_proof*."""
+        home = Path(os.environ["ORCH_HOME"]) if os.environ.get("ORCH_HOME") else None
+        if home is None:
+            raise Refused("no test home")
+        home.mkdir(parents=True, exist_ok=True)
+        os.chmod(home, 0o700)
+        return home
 
     monkeypatch.setattr(humanproof, "person_by", legacy)
     monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
+    if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
+        monkeypatch.setattr(humanproof, "guarded_home", test_home)
+
+    def trusting(fn, proven_pos):
+        """TEST-ONLY, same trust as `legacy` above: a direct Python call as `human:` counts as the person's
+        proven verdict (key + ledger are real, only the proof ceremony is skipped)."""
+        real = fn
+
+        def call(*a, **kw):
+            ensure_signing(a[0])  # an agent finish under the grant is signed too: key + id exist after setup
+            if len(a) <= proven_pos and "proven" not in kw:
+                by = a[proven_pos - 1] if len(a) >= proven_pos else kw.get("by", "")
+                if isinstance(by, str) and by.startswith("human:"):
+                    kw["proven"] = True
+            return real(*a, **kw)
+
+        return call
+
+    monkeypatch.setattr(tickets, "set_status", trusting(tickets.set_status, 4))
+    monkeypatch.setattr(tickets, "patch", trusting(tickets.patch, 5))
+    monkeypatch.setattr(tickets, "accept_review", trusting(tickets.accept_review, 3))
 
 
 _TMUX = re.compile(r"tmux -L (orch-[0-9a-f]+) new-session .* -c (\S+)")
@@ -284,6 +366,22 @@ def stray_tmux(under: str) -> list[str]:
             if (m := _TMUX.search(line)) and m.group(2).startswith(under)
         }
     )
+
+
+def seed_profiles(root, profiles):
+    """Test setup only: like a person's `profile set` of every new or body-changed profile (the production
+    write_profiles signs only the names it is told to)."""
+    from orch import humanproof as hp
+    from orch import keystore
+
+    try:
+        old = keystore.read_profiles(root)
+    except Exception:  # noqa: BLE001
+        old = {}
+    changed = frozenset(
+        n for n, p in profiles.items() if n not in old or hp.profile_body(old[n]) != hp.profile_body(p)
+    )
+    keystore.write_profiles(root, profiles, sign=changed)
 
 
 @pytest.fixture(autouse=True)

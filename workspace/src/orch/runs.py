@@ -400,7 +400,7 @@ def _human_author(by, via, kind, phone=None) -> bool:
 
 def _pending_proof(root: Path, tid: str):
     """(human key, workspace id) for the pending MAC, or None when this workspace has no guarded home."""
-    from orch import addons, humanproof
+    from orch import humanproof
 
     try:
         ws = addons.workspace_id(root, create=True)
@@ -481,8 +481,6 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
 
 
 def _ws_id(root: Path):
-    from orch import addons
-
     return addons.workspace_id(root, create=False)
 
 
@@ -1202,7 +1200,7 @@ def plan(
     person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
     adapters.check_start_folder(name, root)
     items = undelivered(root, tid) if items is None else items
-    sid = None if fresh else tickets.sessions_for(ticket, name, host())
+    sid = None if fresh else tickets.sessions_for(root, tid, ticket, name, host())
     if (
         sid
         and adapters.transcript_exists(name, sid, root, folder=workdir_for(root, read(root, tid), tid))
@@ -1629,9 +1627,13 @@ def wrap(
         if sid and new_session and unsaved:
             sid = None  # orch chose the id, but the tool never saved that conversation: never resume it
         if not sid and resumed and rc == 0:  # a continued conversation: it was used now ("last worked")
-            sid = tickets.sessions_for(tickets.load(root, tid), name, host())
+            sid = tickets.sessions_for(root, tid, tickets.load(root, tid), name, host())
         if sid:
-            tickets.record_session(root, tid, name, sid, host())
+            if tickets.valid_session_id(sid):
+                tickets.record_session(root, tid, name, sid, host())
+            else:
+                with contextlib.suppress(Exception):
+                    tickets.log(root, tid, "Skipped recording an invalid agent session id.", "orch")
         turns += 1
         why = failure_text(rc, out)
         now = read(root, tid)

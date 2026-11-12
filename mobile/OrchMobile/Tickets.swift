@@ -7,7 +7,7 @@ struct Ticket: Identifiable, Equatable, Sendable {
         case needsYou, review, working, paused, backlog, done
         static func < (a: Status, b: Status) -> Bool { a.rawValue < b.rawValue }
         var title: String {
-            switch self { case .needsYou: "Needs you"; case .review: "Ready for review"; case .working: "Working on"; case .paused: "Paused"; case .backlog: "Not started"; case .done: "Done" }
+            switch self { case .needsYou: "Needs your OK"; case .review: "Ready for review"; case .working: "Working on"; case .paused: "Paused"; case .backlog: "Not started"; case .done: "Done" }
         }
         /// The ticket's own status word from `ticket_view.status` (open|ready|active|waiting|review|done|dropped). Unknown words: nil.
         init?(ticketStatus word: String?) {
@@ -37,13 +37,17 @@ struct Ticket: Identifiable, Equatable, Sendable {
     var key: String? = nil
     var view: TicketSnapshot? = nil
 
-    var displayTitle: String { view?.title ?? title }
+    /// First non-blank of the snapshot title, the title and the key (a blank title would give a blank chat row).
+    var displayTitle: String {
+        [view?.title, title, key].lazy.compactMap { $0 }
+            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Topic"
+    }
 
     /// One plain line under the title, from the update kind.
     var stateLine: String {
         let first = text.split(separator: " ").prefix(6).joined(separator: " ")
         switch status {
-        case .needsYou: return "Needs you"
+        case .needsYou: return "Needs your OK"
         case .working: return "Working on it"
         case .review: return "Ready for review"
         case .paused: return "Paused"
@@ -64,7 +68,7 @@ struct Ticket: Identifiable, Equatable, Sendable {
         case .review: "eye.circle.fill"
         case .paused: "pause.circle"
         case .backlog: "circle"
-        case .done: kind == "result" ? "checkmark.circle.fill" : "xmark.circle.fill"
+        case .done: kind == "failure" || kind == "stopped" ? "xmark.circle.fill" : "checkmark.circle.fill"
         }
     }
 }
@@ -91,6 +95,9 @@ enum TicketBuilder {
             // The ticket's own status (when the snapshot carries a known one) decides, whatever the note's kind: an agent's
             // "done" arrives as review, a person's Done as done. The update kind only decides for old snapshots without a status (failure and stopped keep their own sign when the ticket is done).
             if let own = Ticket.Status(ticketStatus: statusView?.status) { st = own }
+            // An update without a snapshot (a plain note) does not undo a settled Review/Done the last snapshot said
+            // (otherwise a review ticket turns Working and the review bar disappears). Other statuses keep the update kind.
+            else if statusView == nil, let own = Ticket.Status(ticketStatus: view?.status), own == .review || own == .done { st = own }
             // "active" without a running agent (an answer on the dashboard moved it on, nobody started a run): the
             // snapshot says no agent runs, so the phone never claims "Claude is working" (owner 8 Nov, IMG_6626).
             if st == .working, statusView?.running == false { st = .backlog }

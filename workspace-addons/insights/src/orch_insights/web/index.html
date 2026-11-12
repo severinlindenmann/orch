@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-prefix="__P__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Insights · orch</title>
+<link rel="stylesheet" href="__P__/kit/tokens.css">
+<link rel="stylesheet" href="__P__/kit/components.css">
+<link rel="stylesheet" href="__P__/web/insights.css">
+<script src="__P__/web/insights.js" defer></script>
+</head>
+<body>
+<main>
+<header><h1>Insights <span class="preview">Preview</span></h1>
+<p>What your agents used in the last 30 days</p>
+<p id="sharing" class="sharing" hidden></p></header>
+<p id="message" role="status">Reading the workspace record…</p>
+<section id="overview" hidden aria-label="Overview">
+<div id="needs" class="needs" aria-label="Needs a look"></div>
+<div id="tabs" class="tabs" role="tablist" aria-label="Items used"></div>
+<div class="lay">
+<section id="panel" role="tabpanel" tabindex="0">
+<div id="filters" class="filters" aria-label="Show"></div>
+<ul id="rows" class="rows"></ul></section>
+<aside id="detail" class="detail" role="dialog" aria-label="Details of the selected item" hidden></aside>
+</div>
+</section>
+</main>
+</body>
+</html>

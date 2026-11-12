@@ -1,12 +1,12 @@
 """Background process: `orch automation start|stop`. Runtime files in .orch/run/automation/ (gitignored):
 automation.json {pid, nonce, started} written by the process itself, automation.log. A pid from there is signalled only
 when the process with that pid started at the recorded moment and runs orch_automation for this folder."""
+
 from __future__ import annotations
 
 import os
 import re
 import secrets
-import signal
 import subprocess
 import sys
 import time
@@ -26,8 +26,13 @@ def _verified(root: Path, rec: dict | None) -> int | None:
     if not rec:
         return None
     pid, started, nonce = rec.get("pid"), rec.get("started"), rec.get("nonce")
-    if not (valid_pid(pid) and isinstance(started, str) and started and isinstance(nonce, str)
-            and re.fullmatch(r"[0-9a-f]{32}", nonce)):
+    if not (
+        valid_pid(pid)
+        and isinstance(started, str)
+        and started
+        and isinstance(nonce, str)
+        and re.fullmatch(r"[0-9a-f]{32}", nonce)
+    ):
         return None
     if not alive(pid) or runfiles.proc_start(pid) != started:
         return None
@@ -55,7 +60,9 @@ def announce(root: Path) -> str | None:
     if not re.fullmatch(r"[0-9a-f]{32}", nonce):
         return None
     me = os.getpid()
-    runfiles.write_json(_dir(root) / "automation.json", {"pid": me, "nonce": nonce, "started": runfiles.proc_start(me) or ""})
+    runfiles.write_json(
+        _dir(root) / "automation.json", {"pid": me, "nonce": nonce, "started": runfiles.proc_start(me) or ""}
+    )
     return nonce
 
 
@@ -78,11 +85,17 @@ def start(root: Path) -> int:
     root = root.resolve()
     nonce = secrets.token_hex(16)
     # -P: the workspace folder is never on the import path (a planted orch_automation.py there is not run)
-    kw = {"creationflags": 0x00000208} if os.name == "nt" else {"start_new_session": True}
+    from orch.procs import background_popen_kwargs
+
     with runfiles.open_append(d / "automation.log") as out:
-        proc = subprocess.Popen([sys.executable, "-P", "-m", "orch_automation", "--dir", str(root), "run"], cwd=root,
-                                stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                env={**os.environ, "ORCH_ROOT": str(root.resolve()), NONCE_ENV: nonce}, **kw)
+        proc = subprocess.Popen(
+            [sys.executable, "-P", "-m", "orch_automation", "--dir", str(root), "run"],
+            cwd=root,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "ORCH_ROOT": str(root.resolve()), NONCE_ENV: nonce},
+            **background_popen_kwargs(),
+        )
     end = time.time() + 15
     while time.time() < end:
         rec = runfiles.read_json(d / "automation.json")
@@ -97,17 +110,17 @@ def start(root: Path) -> int:
 
 
 def stop(root: Path) -> str:
-    """"stopped", "not running", or "not verified" (a pid file that is not our scheduler: nothing is signalled)."""
+    """ "stopped", "not running", or "not verified" (a pid file that is not our scheduler: nothing is signalled)."""
+    from orch.procs import stop_tree
+
     try:
-        had = runfiles.read_json(_dir(root) / "automation.json") is not None
+        rec = runfiles.read_json(_dir(root) / "automation.json")
     except RuntimeError:
         return "not verified"
-    pid = running_pid(root)
-    if not pid:
-        return "not verified" if had else "not running"
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError:
-        pass
+    if not rec:
+        return "not running"
+    if not stop_tree(rec.get("pid"), verified=lambda: _verified(root, rec) is not None):
+        runfiles.remove(_dir(root) / "automation.json")
+        return "not verified"
     runfiles.remove(_dir(root) / "automation.json")
     return "stopped"

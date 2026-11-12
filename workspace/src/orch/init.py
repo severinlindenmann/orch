@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orch import adapters, reminder_settings, skills
+from orch import adapters, net, reminder_settings, skills
 from orch.errors import Refused
+
+
+def _ensure_workspace(root: Path) -> None:
+    """New local state has no legacy session ownership to migrate."""
+    fresh = not (root / ".orch").exists()
+    (root / ".orch" / "tickets").mkdir(parents=True, exist_ok=True)
+    if fresh:
+        net.write_json(root / ".orch" / "run" / "own-sessions.adopted", {"adopted": True})
 
 
 def init(root: Path, code: str | None = None) -> list[str]:
@@ -14,7 +22,7 @@ def init(root: Path, code: str | None = None) -> list[str]:
 
     if code is not None:
         code = config.clean_code(code)  # refused before anything is written
-    (root / ".orch" / "tickets").mkdir(parents=True, exist_ok=True)
+    _ensure_workspace(root)
     if code is not None or not config.workspace_code(root):
         code = config.set_code(root, code or config.suggest_code(root.resolve().name))
     code = config.workspace_code(root)
@@ -63,6 +71,7 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
 
     rows = [r for r in addons.listing(root) if r["recommended"] and not r["active"]]
     mans = addons.discover()
+    installed = (set(addons.installed_names()) & set(mans)) | set(addons.CORE_ADDONS)
     for name, m in addons.shipped_recommended().items():  # shipped with orch, not installed yet
         mans[name] = m
         rows.append({"name": name})
@@ -84,12 +93,14 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
     out = io.StringIO()
     try:
         # one reinstall for all of them (on Windows a second background install is refused while one runs)
-        with contextlib.redirect_stdout(out), addons.batch_install(root):
+        batch = addons.batch_install(root) if set(names) - installed else contextlib.nullcontext()
+        with contextlib.redirect_stdout(out), batch:
             for n in names:
                 addons.add(root, n, yes=True)
                 if n not in addons.batched(root) and n not in before:
                     now.append(n)
     except Exception as e:
+        sys.stderr.write(out.getvalue())
         undone = list(getattr(e, "undone", []))
         for n in reversed(now):
             with contextlib.suppress(Exception):
@@ -112,8 +123,9 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
 def choose_agent(root: Path, yes: bool = False, interactive: bool = False) -> str:
     """Which agent does the work here: asked once (found agents + Other); --yes takes the first found.
     Returns one plain line to show."""
-    from orch import adapters, config
+    from orch import config
 
+    _ensure_workspace(root)  # selecting an agent can write config before init() runs
     cur = config.agent_name(root)
     if cur:
         try:
@@ -149,7 +161,7 @@ def _save(root: Path, name: str) -> None:
 
 
 def _other(root: Path) -> str:
-    from orch import adapters, config
+    from orch import config
 
     name = input("Name for it [my-agent]: ").strip() or "my-agent"
     if not config.NAME_RE.match(name):

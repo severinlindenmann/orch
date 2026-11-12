@@ -26,12 +26,40 @@
  ],
  "detail_names": [
   {
+   "run": "r_8k2m01",
+   "kind": "step",
    "id": "toolu_01ABcd",
-   "file": "toolu_01ABcd"
+   "file": "144002f0b5063b0a2c0c5ab0d541f4d4"
   },
   {
+   "run": "r_8k2m01",
+   "kind": "step",
+   "id": "Toolu_01ABcd",
+   "file": "db039331b1dc5d8ee9aa2884e98ba7b2"
+  },
+  {
+   "run": "r_8k2m01",
+   "kind": "step",
+   "id": "x_547202005627c6b9548175b580367a6a",
+   "file": "f750b592acf461bac0e5f1bd2806de26"
+  },
+  {
+   "run": "r_8k2m01",
+   "kind": "helper.start",
+   "id": "toolu_01ABcd",
+   "file": "6f5ab356f737bb241afc633b55065283"
+  },
+  {
+   "run": "r_8k2m01",
+   "kind": "run.state",
    "id": "r_8k2m01:1:item_3",
-   "file": "x_d82a7707579deefad2c433ee6537d2e6"
+   "file": "14cec2370138f260ffb1819f34501e26"
+  },
+  {
+   "run": "r_8k2m02",
+   "kind": "step",
+   "id": "toolu_01ABcd",
+   "file": "8aef2a3dd0d9d09cada098fe49e88c88"
   }
  ],
  "dedupe": [
@@ -180,6 +208,99 @@
    ],
    "keep": [
     0
+   ]
+  },
+  {
+   "name": "denial origins kept",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "denial",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "denial",
+     "via": "core",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "usage origins kept",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "usage",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "usage",
+     "via": "core",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "finished conflict kept",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 1
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "same",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": false,
+      "error": null,
+      "ms": 1
+     }
+    }
+   ],
+   "keep": [
+    0,
+    1
    ]
   }
  ],
@@ -379,7 +500,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00001/x_56222ff8dd408f5f99c51cabd2cb98d7.json",
+     "detail": "detail/r_cx00001/858ba1d1652df6fc32c53faf2851e268.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "I’ll check the directory recursively.",
@@ -437,7 +558,7 @@
       "error": null,
       "ms": null
      },
-     "detail": "detail/r_cx00001/x_429d041b6e04ea14d46bf74c174d77e2.json",
+     "detail": "detail/r_cx00001/42c6f1ca38fbb65efc001288cbdc2c22.json",
      "coverage": "full",
      "kind": "step",
      "text": "rg --files --hidden -g '!.git'"
@@ -491,7 +612,7 @@
       "error": null,
       "ms": null
      },
-     "detail": "detail/r_cx00001/x_20810cd985b98c2ecf419264f702423c.json",
+     "detail": "detail/r_cx00001/96d730c07a5d0d725921540c05d5eb91.json",
      "coverage": "full",
      "kind": "step",
      "text": "rg --files --hidden --no-ignore"
@@ -510,7 +631,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00001/x_f0d3b53d099c008a8df867f15f4ef879.json",
+     "detail": "detail/r_cx00001/8fa973bb5f0b2efcc455e0a8722bec0c.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "The files are `e1`, `readme.txt`, `notes.txt`, and `sub/a.py`.",
@@ -622,7 +743,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00002/x_18b96b33fca122cd2381e2f3505dd202.json",
+     "detail": "detail/r_cx00002/60cfc3cab706a279852ca24ffb53e429.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "I’ll run the command and check the result.",
@@ -680,7 +801,7 @@
       "error": "Exit code 1: cat: does-not-exist.txt: No such file or directory",
       "ms": null
      },
-     "detail": "detail/r_cx00002/x_1002ce30b8770d28249862796d078314.json",
+     "detail": "detail/r_cx00002/6d858702e2c9abe42cfba1f5d87fba9c.json",
      "coverage": "full",
      "kind": "step",
      "text": "cat does-not-exist.txt"
@@ -699,7 +820,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00002/x_bbcb60e7e0c1e7919dafd63d26198e59.json",
+     "detail": "detail/r_cx00002/c078573cdbc272666b2a692a88cb516c.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "The command failed with exit code 1 because `does-not-exist.txt` does not exist.",
@@ -811,7 +932,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00003/x_d8fa90b9bc2fe46deb2498cc98283117.json",
+     "detail": "detail/r_cx00003/ad7b538b0ed151a9f1c140a1b724e273.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "I’ll read readme.txt and summarize it in one sentence.",
@@ -869,7 +990,7 @@
       "error": null,
       "ms": null
      },
-     "detail": "detail/r_cx00003/x_49768c6c8f3e870256d1ff080b70eabd.json",
+     "detail": "detail/r_cx00003/a383bff788bc0335915ae0b17223a743.json",
      "coverage": "full",
      "kind": "step",
      "text": "cat readme.txt"
@@ -888,7 +1009,7 @@
      "via": "log",
      "used": null,
      "outcome": null,
-     "detail": "detail/r_cx00003/x_052a2308925891c5069c136fe1240313.json",
+     "detail": "detail/r_cx00003/c8adc89672273d0d6083ce00e15ec4f9.json",
      "coverage": "full",
      "kind": "run.state",
      "text": "Deployments run nightly at 02:00, failures page the on-call, and rollback takes one command.",
@@ -1037,6 +1158,23 @@
    "stored": "refused"
   },
   {
+   "name": "step files kept from the caller",
+   "line": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "files": ["src/app.py"]
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "files": ["src/app.py"]
+   }
+  },
+  {
    "name": "usage stored",
    "line": {
     "kind": "usage",
@@ -1051,5 +1189,150 @@
     "run": "r_8k2m01"
    }
   }
+ ],
+ "integrity": [
+  {
+   "fixture": "link",
+   "status": "tampered",
+   "reason": "link"
+  },
+  {
+   "fixture": "reparse",
+   "status": "tampered",
+   "reason": "reparse"
+  },
+  {
+   "fixture": "hardlink",
+   "status": "tampered",
+   "reason": "hardlink"
+  },
+  {
+   "fixture": "foreign_owner",
+   "status": "tampered",
+   "reason": "foreign_owner"
+  },
+  {
+   "fixture": "not_regular",
+   "status": "tampered",
+   "reason": "not_regular"
+  },
+  {
+   "fixture": "not_dir",
+   "status": "tampered",
+   "reason": "not_dir"
+  },
+  {
+   "fixture": "swapped",
+   "status": "tampered",
+   "reason": "swapped"
+  },
+  {
+   "fixture": "missing",
+   "status": "unavailable",
+   "reason": "missing"
+  },
+  {
+   "fixture": "io",
+   "status": "unavailable",
+   "reason": "io"
+  },
+  {
+   "fixture": "regular",
+   "status": "ok",
+   "reason": null
+  }
+ ],
+ "hook_namespace": [
+  {
+   "id": "r_abcdef:3",
+   "stored": "x_bcd60fea08471a8c5c1552b1c17a316f"
+  },
+  {
+   "id": "h_r_abcdef:3",
+   "stored": "x_3b969c1eb5e8da6c6a203b61effb0f60"
+  }
+ ],
+ "hook_default_id": [
+  {
+   "run": "r_abcdef",
+   "seq": 3,
+   "collector": "r_abcdef:3",
+   "hook": "h_r_abcdef:3",
+   "about": "a hook line without an id gets h_<run>:<seq>, never <run>:<seq>, which only collectors use"
+  }
+ ],
+ "reserved_ids": [
+  {
+   "via": "log",
+   "id": "h_r_abcdef:3",
+   "stored": "x_53cf797d10b9ad4f56b7dc16a7026736",
+   "about": "h_<run>:<seq> is the hook default namespace; another origin that sends such an id gets the plain sha256 form"
+  }
+ ],
+ "files_about": "activity.md, Files. files: the event's `files` on the example `base`; schema: valid against activity.schema.json; stored: what the writer keeps (null = no files field; bad entries dropped, the line kept). NFC is checked by the writer, not the schema.",
+ "files": [
+  {"name": "read one file", "base": "valid-step-started", "files": ["report-2025-11.pdf"], "schema": true, "stored": ["report-2025-11.pdf"]},
+  {"name": "edit two files", "base": "valid-step-hook", "files": ["src/app.py", "tests/test_app.py"], "schema": true, "stored": ["src/app.py", "tests/test_app.py"]},
+  {"name": "run command derived", "base": "valid-step-started", "files": ["out/invoices.csv", "scripts/export.sh", "data/2025-11/raw data.csv"], "schema": true, "stored": ["out/invoices.csv", "scripts/export.sh", "data/2025-11/raw data.csv"]},
+  {"name": "empty list", "base": "valid-step-started", "files": [], "schema": true, "stored": []},
+  {"name": "eight entries", "base": "valid-step-started", "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"], "schema": true, "stored": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"]},
+  {"name": "260 characters", "base": "valid-step-started", "files": ["d/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567"], "schema": true, "stored": ["d/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567"]},
+  {"name": "dots in names", "base": "valid-step-started", "files": [".github/workflows/ci.yml", "a..b/c.d", "..hidden"], "schema": true, "stored": [".github/workflows/ci.yml", "a..b/c.d", "..hidden"]},
+  {"name": "unicode nfc", "base": "valid-step-started", "files": ["docs/\u00dcbersicht.md"], "schema": true, "stored": ["docs/\u00dcbersicht.md"]},
+  {"name": "absolute", "base": "valid-step-started", "files": ["/etc/passwd"], "schema": false, "stored": []},
+  {"name": "dot dot first", "base": "valid-step-started", "files": ["../secret.txt"], "schema": false, "stored": []},
+  {"name": "dot dot inside", "base": "valid-step-started", "files": ["src/../../x"], "schema": false, "stored": []},
+  {"name": "dot dot last", "base": "valid-step-started", "files": ["src/.."], "schema": false, "stored": []},
+  {"name": "backslash", "base": "valid-step-started", "files": ["src\\app.py"], "schema": false, "stored": []},
+  {"name": "drive letter", "base": "valid-step-started", "files": ["C:/Users/x.txt"], "schema": false, "stored": []},
+  {"name": "unc backslash", "base": "valid-step-started", "files": ["\\\\server\\share\\x"], "schema": false, "stored": []},
+  {"name": "unc slashes", "base": "valid-step-started", "files": ["//server/share/x"], "schema": false, "stored": []},
+  {"name": "nine entries", "base": "valid-step-started", "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9"], "schema": false, "stored": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"]},
+  {"name": "261 characters", "base": "valid-step-started", "files": ["d/0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"], "schema": false, "stored": []},
+  {"name": "control character", "base": "valid-step-started", "files": ["a\tb.txt"], "schema": false, "stored": []},
+  {"name": "nul", "base": "valid-step-started", "files": ["a\u0000b"], "schema": false, "stored": []},
+  {"name": "delete character", "base": "valid-step-started", "files": ["a\u007fb"], "schema": false, "stored": []},
+  {"name": "empty string", "base": "valid-step-started", "files": [""], "schema": false, "stored": []},
+  {"name": "not a string", "base": "valid-step-started", "files": [42, null], "schema": false, "stored": []},
+  {"name": "bad entries dropped, good kept", "base": "valid-step-started", "files": ["src/ok.py", "/abs/x", "../y", "docs/fine.md"], "schema": false, "stored": ["src/ok.py", "docs/fine.md"]},
+  {"name": "not nfc", "base": "valid-step-started", "files": ["docs/U\u0308bersicht.md"], "schema": true, "stored": []},
+  {"name": "not a list", "base": "valid-step-started", "files": "src/app.py", "schema": false, "stored": null},
+  {"name": "on a run.state", "base": "valid-run-state-say", "files": ["src/app.py"], "schema": false, "stored": null},
+  {"name": "on a task.done", "base": "valid-task-done", "files": [], "schema": false, "stored": null},
+  {"name": "bidi override", "base": "valid-step-started", "files": ["src/\u202etxt.exe"], "schema": false, "stored": []},
+  {"name": "bidi isolate", "base": "valid-step-started", "files": ["a\u2066b"], "schema": false, "stored": []},
+  {"name": "zero width space", "base": "valid-step-started", "files": ["a\u200bb.py"], "schema": false, "stored": []},
+  {"name": "byte order mark", "base": "valid-step-started", "files": ["\ufeffa.py"], "schema": false, "stored": []},
+  {"name": "c1 control", "base": "valid-step-started", "files": ["a\u0085b"], "schema": false, "stored": []},
+  {"name": "line separator", "base": "valid-step-started", "files": ["a\u2028b"], "schema": false, "stored": []},
+  {"name": "home shortcut", "base": "valid-step-started", "files": ["~/x.txt"], "schema": false, "stored": []},
+  {"name": "shell variable", "base": "valid-step-started", "files": ["$HOME/x.txt"], "schema": false, "stored": []},
+  {"name": "url scheme", "base": "valid-step-started", "files": ["file:///etc/passwd"], "schema": false, "stored": []},
+  {"name": "colon after a folder is fine", "base": "valid-step-started", "files": ["notes/a:b.txt"], "schema": true, "stored": ["notes/a:b.txt"]}
+ ],
+ "files_normalise": [
+  {"name": "inside", "root": "/work/proj", "path": "/work/proj/notes.txt", "file": "notes.txt"},
+  {"name": "root slash refused", "root": "/", "path": "/etc/passwd", "file": null},
+  {"name": "home shortcut", "root": "/work/proj", "path": "~/x.txt", "file": null},
+  {"name": "url scheme", "root": "/work/proj", "path": "file:///etc/passwd", "file": null},
+  {"name": "dot segment", "root": "/work/proj", "path": "/work/proj/src/./app.py", "file": "src/app.py"},
+  {"name": "dot dot inside", "root": "/work/proj", "path": "/work/proj/src/../README.md", "file": "README.md"},
+  {"name": "root with slash", "root": "/work/proj/", "path": "/work/proj/src/app.py", "file": "src/app.py"},
+  {"name": "folder", "root": "/work/proj", "path": "/work/proj/src/", "file": "src"},
+  {"name": "escapes", "root": "/work/proj", "path": "/work/proj/../other/x.py", "file": null},
+  {"name": "sibling prefix", "root": "/work/proj", "path": "/work/projx/a.py", "file": null},
+  {"name": "outside", "root": "/work/proj", "path": "/etc/passwd", "file": null},
+  {"name": "the root itself", "root": "/work/proj", "path": "/work/proj", "file": null},
+  {"name": "the root with slash", "root": "/work/proj", "path": "/work/proj/", "file": null},
+  {"name": "relative", "root": "/work/proj", "path": "src/app.py", "file": "src/app.py"},
+  {"name": "relative dot", "root": "/work/proj", "path": "./src/app.py", "file": "src/app.py"},
+  {"name": "relative escapes", "root": "/work/proj", "path": "../x.py", "file": null},
+  {"name": "backslash", "root": "/work/proj", "path": "src\\app.py", "file": null},
+  {"name": "made nfc", "root": "/work/proj", "path": "/work/proj/docs/U\u0308bersicht.md", "file": "docs/\u00dcbersicht.md"},
+  {"name": "control character", "root": "/work/proj", "path": "/work/proj/a\nb.py", "file": null},
+  {"name": "empty", "root": "/work/proj", "path": "", "file": null},
+  {"name": "not a string", "root": "/work/proj", "path": 7, "file": null},
+  {"name": "absolute without a root", "root": null, "path": "/work/proj/notes.txt", "file": null},
+  {"name": "relative without a root", "root": null, "path": "src/a.py", "file": "src/a.py"}
  ]
 }

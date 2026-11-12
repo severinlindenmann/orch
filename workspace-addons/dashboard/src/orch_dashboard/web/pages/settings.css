@@ -41,3 +41,35 @@
 .settings .switch[aria-checked=true]::before{background:var(--brand)}
 .settings .ad-h>.switch{padding-left:48px;min-width:80px;color:var(--text)}
 .settings [data-key=settings-workspace]{order:-1}
+
+/* Separate copies: one row with a switch; the rest behind Details. */
+.settings .copies-details{padding:0 16px;border-top:1px solid var(--border)}
+.settings .copies-details[open]{padding-bottom:8px}
+.settings .copies-more{gap:16px;padding:4px 0 12px}
+.settings .copies-sub{display:grid;gap:6px;justify-items:start;min-width:0}
+.settings .copies-sub>.row,.settings .copies-choices{flex-wrap:wrap;gap:8px}
+/* "When": the unselected choice is outlined like the 4 h / 8 h / 12 h / 24 h choice (style.css .mm-hours). */
+.settings .copies-choices .btn.ghost{border-color:var(--border-strong);color:var(--text)}
+.settings .copies-choices .btn.ghost:hover{background:transparent;border-color:var(--text-muted)}
+.settings .copies-choices .btn[aria-checked=true]{cursor:default}
+.settings .copies-setup-edit{display:grid;gap:8px;width:100%}
+.settings .copies-setup-view{width:100%;gap:8px;align-items:center;flex-wrap:nowrap}
+.settings .copies-setup{width:100%;max-width:420px}
+.settings .copies-max{flex:none;width:5.5rem}
+.settings .copies-max,.settings .copies-setup{font-size:13px;min-height:36px;padding:5px 10px}
+.settings .folder-details p{margin-top:4px;overflow-wrap:anywhere}
+/* Review step: the shown review before a change (the .cmd-preview look of the Add your own helper review). */
+.settings .settings-review{margin:0 16px 16px;border-radius:8px}
+.settings .settings-review p{margin:0;overflow-wrap:anywhere}
+.settings .settings-review .settings-review-what{font-weight:600}
+.settings .settings-review:focus-visible{outline-offset:-2px}
+.settings .copies-sub>.settings-review{justify-self:stretch;margin:0}
+/* Narrow: every labelled row puts its label above the value (no label running into the value). */
+@media(max-width:720px){
+  .settings .card-row:has(>.set-label){flex-wrap:wrap}
+  .settings .card-row>.set-label{flex-basis:100%}
+  .settings .copies-max,.settings .copies-setup{min-height:44px}
+  /* stacked on a narrow screen: one full-width choice per line */
+  .settings .copies-choices{justify-self:stretch;flex-direction:column;align-items:stretch}
+  .settings .copies-choices .btn{width:100%}
+}

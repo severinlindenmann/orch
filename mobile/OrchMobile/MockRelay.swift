@@ -39,7 +39,34 @@ actor MockRelay: RelayAPI {
     private let fail = UserDefaults.standard.bool(forKey: "mockFail")
     private let empty = UserDefaults.standard.bool(forKey: "mockEmpty")
 
+    #if DEBUG
+    // Opt-in fake server storage for the mute-all relaunch UI test only.
+    private static let muteAllStorageKey = "mockPersistedMuteAllUntil"
+    #endif
+
     init(latency: Duration? = nil) {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "mockPersistMuteAll") {
+            if UserDefaults.standard.bool(forKey: "resetState") {
+                UserDefaults.standard.removeObject(forKey: Self.muteAllStorageKey)
+            }
+            phoneSettings.muteAllUntil = UserDefaults.standard.string(forKey: Self.muteAllStorageKey)
+        }
+        // Same title AND group id, different host: mute identity must include the host.
+        // Separate opt-in leaves existing group/room counts unchanged.
+        if UserDefaults.standard.bool(forKey: "mockMuteGroupPair") {
+            names[GroupMock.finance] = "Finance"
+            names[GroupMock.home] = "Home"
+            for host in [GroupMock.finance, GroupMock.home] {
+                received.append(PhoneMessage(message: TextMessage(id: "m_mutepair_" + host,
+                    from: host, to: "phones", type: "text", createdAt: Self.now(), ticket: "t_mutepair",
+                    body: TextBody(text: "Group mute isolation fixture", group: GroupInfo(
+                        id: "grp_t_mutepair", host: host, title: "Mute isolation",
+                        members: [GroupMember(ws: host, name: names[host] ?? "Workspace")], seq: 1)),
+                    key: "MUTE-1", replyTo: nil), workspaceName: names[host] ?? "Workspace"))
+            }
+        }
+        #endif
         if UserDefaults.standard.bool(forKey: "mockMakeTicket") { all.append(Self.makeTicketQuestion) }
         if UserDefaults.standard.bool(forKey: "mockReview") {
             all.append(Self.reviewQuestion)
@@ -47,10 +74,28 @@ actor MockRelay: RelayAPI {
                 ticket: Self.reviewTicketId, kind: "result", title: Self.reviewView.title, text: "Your fish test page is ready.", replyTo: nil,
                 at: Self.now(), key: "DT-2", ticketView: Self.reviewView))
         }
+        #if DEBUG
+        // #465: an agent's result still awaits the person's verdict. Opt-in keeps other fixture counts unchanged.
+        if UserDefaults.standard.bool(forKey: "mockDoneReview") {
+            for (ticket, title) in [("t_donerev1", "Done, verdict asked"), ("t_donerev2", "Done, no question")] {
+                updateLog.append(TicketUpdate(id: "m_doneupdate_" + ticket, workspace: Self.pilatus, workspaceName: "Pilatus Workspace",
+                    ticket: ticket, kind: "result", title: title, text: "The helper finished the work.", replyTo: nil,
+                    at: Self.now(), ticketView: TicketSnapshot(title: title, status: "review", running: false)))
+            }
+            all.append(Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_donereview00001", from: Self.pilatus,
+                to: "phones", type: "question", createdAt: Self.now(), ticket: "t_donerev1",
+                body: QuestionBody(questionId: "review-1", title: "Done, verdict asked", text: "Is this done?",
+                    options: ["accept", "changes"], recommended: nil, review: true)), workspaceName: "Pilatus Workspace"))
+        }
+        #endif
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
+            #if DEBUG
+            received.append(contentsOf: GroupMock.messages(long: UserDefaults.standard.bool(forKey: "mockLongGroup")))
+            #else
             received.append(contentsOf: GroupMock.messages())
+            #endif
             all.append(GroupMock.question(at: Self.now()))
         }
         if UserDefaults.standard.bool(forKey: "mockMemo") { received.append(Self.memo) }
@@ -103,6 +148,30 @@ actor MockRelay: RelayAPI {
     ]
 
     /// Fake ticket snapshots (the shape the workspace will send as `ticket_view`).
+    private static let q3Results: TicketSnapshot = {
+        let json = #"""
+        {"results":[
+          {"id":"a_cccccccccccc","from":"agent","checked":true,"title":"Q3 totals checked","at":"2026-11-05T11:20:00Z",
+           "doc":{"schema":"orch.blocks/1","from":"agent","blocks":[
+             {"type":"summary","text":"Q3 totals match the finance sheet."},
+             {"type":"kv","items":[{"key":"Sheet total","value":"CHF 1 204 300"},{"key":"Report total","value":"CHF 1 204 300"}]},
+             {"type":"file","path":"q3-chart.png","label":"Q3 chart","preview":"image"}]}},
+          {"id":"j_q3export","from":"job","title":"Q3 export","at":"2026-11-05T11:18:00Z",
+           "doc":{"schema":"orch.blocks/1","from":"job","blocks":[
+             {"type":"table","title":"Q3 export rows","columns":[{"key":"region","label":"Region"},{"key":"amount","label":"Amount"}],
+              "rows":[{"region":"North","amount":420000},{"region":"South","amount":384300},{"region":"West","amount":400000}],"total_rows":40},
+             {"type":"progress","label":"Rows exported","done":40,"total":40}]}},
+          {"id":"a_dddddddddddd","from":"orch","title":"Invoice check","at":"2026-11-05T11:10:00Z",
+           "doc":{"schema":"orch.blocks/1","from":"orch","blocks":[
+             {"type":"summary","text":"45 invoices checked."},
+             {"type":"table","title":"Checked invoices","columns":[{"key":"invoice","label":"Invoice"},{"key":"amount","label":"Amount","kind":"number"}],
+              "rows":[{"invoice":"INV-1000","amount":100},{"invoice":"INV-1001","amount":105},{"invoice":"INV-1002","amount":110},{"invoice":"INV-1003","amount":115},{"invoice":"INV-1004","amount":120},{"invoice":"INV-1005","amount":125},{"invoice":"INV-1006","amount":130},{"invoice":"INV-1007","amount":135},{"invoice":"INV-1008","amount":140},{"invoice":"INV-1009","amount":145},{"invoice":"INV-1010","amount":150},{"invoice":"INV-1011","amount":155},{"invoice":"INV-1012","amount":160},{"invoice":"INV-1013","amount":165},{"invoice":"INV-1014","amount":170},{"invoice":"INV-1015","amount":175},{"invoice":"INV-1016","amount":180},{"invoice":"INV-1017","amount":185},{"invoice":"INV-1018","amount":190},{"invoice":"INV-1019","amount":195}],"total_rows":45},
+             {"type":"link","url":"https://docs.pilatus.ch/invoices","label":"Invoice list"},
+             {"type":"summary","text":"More on the computer"}]}}
+        ]}
+        """#
+        return (try? JSONCoding.decoder.decode(TicketSnapshot.self, from: Data(json.utf8))) ?? TicketSnapshot()
+    }()
     static let q3View = TicketSnapshot(
         title: "Q3 summary for the board", status: "done", agent: "Claude", summary: "Pulled the numbers, drew the charts, the board deck is ready.",
         checklist: ["Read the Q3 sheet", "Check the totals", "Prepare the summary", "Draw the charts", "Review the board deck"].map { .init(text: $0, done: true) },
@@ -115,7 +184,8 @@ actor MockRelay: RelayAPI {
         refs: [.init(rawKind: "url", url: "https://docs.pilatus.ch/board-q3", title: "Board deck draft"),
                .init(rawKind: "ticket", ticket: "t_7k3f9q"),
                .init(rawKind: "artifact", ticket: "t_q3sum1", name: "q3-chart.png"),
-               .init(rawKind: "file", path: "docs/board/q3.md", line: 12)])
+               .init(rawKind: "file", path: "docs/board/q3.md", line: 12)],
+        results: q3Results.results)
     static let invoiceView = TicketSnapshot(
         title: "Invoice CSV export", status: "active", agent: "Claude", summary: "Writing the export.",
         checklist: [.init(text: "Read the invoice table", done: true), .init(text: "Choose the columns", done: true),
@@ -130,7 +200,7 @@ actor MockRelay: RelayAPI {
     /// Work updates per (workspace, ticket), newest per ticket is what the feed returns.
     private var updateLog: [TicketUpdate] = [
         TicketUpdate(id: "m_upd0000000000001", workspace: pilatus, workspaceName: "Pilatus Workspace", ticket: "t_q3sum1", kind: "result",
-                     title: "Q3 summary", text: "Q3 summary is ready in the shared folder.", replyTo: nil, at: "2026-11-05T11:20:00Z",
+                     title: "Q3 summary", text: "Q3 summary is ready. Have a look at artifacts/test-report.pdf in the shared folder. notes/old-plan.md is not attached.", replyTo: nil, at: "2026-11-05T11:20:00Z",
                      key: "PIL-12", ticketView: MockRelay.q3View),
         TicketUpdate(id: "m_upd0000000000002", workspace: reports, workspaceName: "Reports", ticket: "t_9k2m4q", kind: "working",
                      title: "Invoice CSV export", text: "Working on: Invoice CSV export", replyTo: nil, at: "2026-11-05T15:12:00Z",
@@ -140,7 +210,8 @@ actor MockRelay: RelayAPI {
     /// Ready-for-review fixture enabled with -mockReview YES.
     static let reviewTicketId = "t_reviewfish"
     static let reviewView = TicketSnapshot(title: "Test HTML page about fish", status: "review",
-        checklist: ["Create page", "Add fish facts", "Review page"].map { .init(text: $0, done: true) }, running: false)
+        checklist: ["Create page", "Add fish facts", "Review page"].map { .init(text: $0, done: true) }, running: false,
+        attachments: [.init(kind: "html", title: "Fish facts", url: "https://en.wikipedia.org/wiki/Fish", name: "fish.html", artifactId: "a_f15f15f15f15", rev: "r1")])
     static var reviewQuestion: Question {
         Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_review000000001", from: pilatus, to: "phones", type: "question",
             createdAt: now(), ticket: reviewTicketId, body: QuestionBody(questionId: "review-1", title: reviewView.title,
@@ -380,6 +451,12 @@ actor MockRelay: RelayAPI {
     func muteAll(_ mute: Mute) async throws -> PhoneSettings {
         try await check()
         phoneSettings.muteAllUntil = mute.wire
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "mockPersistMuteAll") {
+            if let value = mute.wire { UserDefaults.standard.set(value, forKey: Self.muteAllStorageKey) }
+            else { UserDefaults.standard.removeObject(forKey: Self.muteAllStorageKey) }
+        }
+        #endif
         return try await settings()
     }
     func setGroupMute(_ key: GroupKey, mute: Mute) async throws -> GroupMute {

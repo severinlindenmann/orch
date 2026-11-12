@@ -24,9 +24,10 @@ import stat
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import saferead, term, winacl
+from orch import saferead, term, winacl, winfinish
 from orch.errors import Refused
 
 # Switch for the read-back rule in runs.human_waiting (supervisor 9 Nov): OFF = a line counts as a person's by
@@ -36,6 +37,10 @@ ENFORCE_PENDING_MAC = True
 
 HP_MAX_LIFE = 60
 NOT_TOGETHER = "home_pairing"  # the code, for tests and logs; people read the plain texts below
+MSG_HOME_PLACE = (
+    "orch will not use that folder as its home (it is a shared or system place, or outside your profile). "
+    "Use the default orch folder in your own account."
+)
 MSG_OTHER_HOME = (
     "This workspace uses a different orch folder than your account's. "
     "Start orch normally (without ORCH_HOME) to approve things here."
@@ -66,7 +71,8 @@ OPS = frozenset(
     "check.wont_do check.wont_do_undo chat.make_ticket chat.send chat.sync chat.contacts chat.thread_sync "
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
-    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup".split()
+    "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup "
+    "copy.remove_orphaned copy.retry".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -97,8 +103,6 @@ def account_home() -> Path:
 
     if _is_windows():  # the profile folder from the process token (winacl), never the environment
         try:
-            from orch import winacl
-
             return Path(winacl.profile_dir())
         except (ImportError, AttributeError, OSError, Refused):
             pass
@@ -148,7 +152,9 @@ def install_record_text(kind: str, root: str | Path) -> str:
 def write_install_record(env_dir: Path, kind: str) -> None:
     """Only for the update that reinstalls the tool environment (which drops the record): it carries over the
     kind the installer wrote, never a new one. No orch command takes a kind from its caller."""
-    _write_private(Path(env_dir) / "orch-install.json", install_record_text(kind, env_dir))
+    # Not a secret (the installer writes it with a plain write too) and it lives in the uv tool
+    # folder, outside every guarded orch home: so NO rights change here (the scope guard would refuse it).
+    _write_private(Path(env_dir) / "orch-install.json", install_record_text(kind, env_dir), private=False)
 
 
 def install_kind() -> str:
@@ -252,6 +258,10 @@ def guarded_home(root: Path) -> Path:
             raise HomeRefused(MSG_LINKED_HOME.format(path=cand))
     if not home_ok(acct, install, real_dir, ws_real, home_real):
         raise HomeRefused(MSG_TEST_WS if ws_test else MSG_OTHER_HOME)
+    try:
+        winacl.allow_home(cand)  # Windows: rights are written only inside this home (not cwd, Public)
+    except Refused:
+        raise HomeRefused(MSG_HOME_PLACE) from None
     return cand
 
 
@@ -272,7 +282,14 @@ SAFE_DEFAULTS = {
     "conn.allow": False,
 }  # live_session and share_counts stay at the owner defaults (3C, I5): their records are dropped
 RESET_NOTICE = "orch reset its protection on this computer; please turn on again what you need."
-_SECRET_FILES = ("proofs-used.json", "delivered.json", "handoffs.json")
+_SECRET_FILES = (
+    "proofs-used.json",
+    "delivered.json",
+    "handoffs.json",
+    "wont.json",
+    "verdict.json",
+    "profile.json",
+)  # the ledgers go with the key they were signed with
 
 
 def _check_dir(p: Path) -> None:
@@ -451,12 +468,13 @@ def _check_binding(root: Path, d: Path) -> None:
         raise Refused(BINDING_MISMATCH)
 
 
-def _write_private(path: Path, text: str) -> None:
+def _write_private(path: Path, text: str, *, private: bool = True) -> None:
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            winacl.set_private(tmp, False)  # before any secret is written (Windows)
+            if private:
+                winacl.set_private(tmp, False)  # before any secret is written (Windows)
             f.write(text)
         os.replace(tmp, path)
     finally:
@@ -776,12 +794,20 @@ def is_conn_grant_key(setting) -> bool:
     return _CONN_NAME_RE.fullmatch(setting[len("conn.allow.") :]) is not None
 
 
+def is_secret_get_key(setting) -> bool:
+    """Exactly a per-profile secret switch (allow_get, agents_may_env)."""
+    return (
+        isinstance(setting, str)
+        and re.fullmatch(r"secret\.(allow_get|agents_may_env)\.[a-z][a-z0-9-]{0,31}", setting) is not None
+    )
+
+
 def record_set(root: Path, setting: str, value, by: str) -> None:
     """THE one writer of a widening setting's record, for every key in SETTING_DEFAULTS. A grant (any value
     but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
     an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
     moment where the file says on and the record is stale."""
-    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting):
+    if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting) and not is_secret_get_key(setting):
         raise Refused("That is not a setting a person has to allow.")
     if value is not False and not str(by).startswith("human:"):
         raise Refused(AGENT_REFUSED)
@@ -812,7 +838,7 @@ def conn_grants(root: Path) -> dict:
 def effective(root: Path, setting: str, file_value: bool) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
     existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
-    default = SETTING_DEFAULTS[setting]
+    default = SETTING_DEFAULTS.get(setting, False)
     try:
         path, wkey = _settings_path(root)
         data = _settings_load(root, path)
@@ -1121,7 +1147,9 @@ def wontdo_is_human(
 # The step fields the signed decision record is built from. ONE source of truth: wont_decision() reads exactly
 # these, and the sync merge pins exactly these (+ the MAC itself) while a verified decision is held
 # (orch_sync.merge._SIGNED; a test fails if the two drift apart).
-SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce")
+# wont_by / wont_at (NEW decisions only, optional): who decided and when, so a synced history line can be tied
+# to the decision; legacy decisions lack them and authorise no history line.
+SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_by", "wont_at", "wont_line")
 
 
 def wont_decision(step: dict) -> dict:
@@ -1137,6 +1165,9 @@ def wont_decision(step: dict) -> dict:
         "text": (step.get("text") if on else None),
         "covers": (step.get("covers") if on else None),
         "nonce": step.get("wont_nonce"),
+        **({"person": step["wont_by"]} if on and "wont_by" in step else {}),
+        **({"at": step["wont_at"]} if on and "wont_at" in step else {}),
+        **({"line": step["wont_line"]} if on and "wont_line" in step else {}),
     }
 
 
@@ -1153,30 +1184,102 @@ LEDGER_DAMAGED = (
 )
 
 
-def _ledger_read(root: Path) -> dict | None:
-    """The ledger entries: {} when there is none yet, None when it cannot be trusted (damaged or loose)."""
+def _ledger_load(root: Path, name: str) -> dict | None:
+    """The entries of ledger file `name`: {} when there is none yet, None when it cannot be trusted (damaged
+    or loose). ONE reader for every ledger (wont.json, verdict.json)."""
     try:
         d = key_dir(root, create=False)
-        data = _read_json(root, d / LEDGER, {"entries": {}})
-    except (Refused, OSError):
-        return None
+        try:
+            data = json.loads(_read_guarded(d / name))
+        except FileNotFoundError:
+            data = {"entries": {}}
+    except (Refused, OSError, ValueError):  # incl. LooseFile: a loose or damaged ledger vouches for nobody,
+        return None  # and a reader never resets protection (no DoS by chmod)
     ent = data.get("entries") if isinstance(data, dict) else None
     return ent if isinstance(ent, dict) else None
 
 
-def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
-    """Make `mac` the current entry. A damaged ledger is NEVER overwritten (that would wipe every other
-    entry): returns False and keeps the file."""
+def _ledger_put(root: Path, name: str, schema: str, key: str, mac: str | None) -> bool:
+    """Make `mac` the current entry of `key` in ledger file `name`. A damaged ledger is NEVER
+    overwritten (that
+    would wipe every other entry): returns False and keeps the file. ONE writer for every ledger."""
     try:
         d = key_dir(root)
         with _key_lock(d):
-            ent = _ledger_read(root)
+            ent = _ledger_load(root, name)
             if ent is None:
                 return False
-            ent[f"{ticket}:{check}"] = mac
-            _write_private(d / LEDGER, json.dumps({"schema": "orch.wont-ledger/1", "entries": ent}))
+            ent[key] = mac
+            _write_private(d / name, json.dumps({"schema": schema, "entries": ent}))
         return True
     except (Refused, OSError):
+        return False
+
+
+def _ledger_read(root: Path) -> dict | None:
+    return _ledger_load(root, LEDGER)
+
+
+def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
+    return _ledger_put(root, LEDGER, "orch.wont-ledger/1", f"{ticket}:{check}", mac)
+
+
+# The secret-profile BODY ledger (guarded home): keys/<ws>/profile.json holds, per profile name, the CURRENT
+# profile1 MAC of its body {env, files, set, run, extra} (null = tombstone, the profile was removed). The file
+# itself is editable by anything running as the user, so it vouches for nothing: secretrun/keystore verify the
+# body against this ledger and fail closed on a missing or different MAC.
+PROFILE_LEDGER = "profile.json"
+PROFILE_CHANGED = "this key profile was changed outside orch; set it up again"
+
+
+def profile_body(profile: dict) -> dict:
+    """The part of a profile the MAC covers: what runs and what it receives (the switches have their own
+    settings records)."""
+    return {
+        "env": dict(profile.get("env") or {}),
+        "files": dict(profile.get("files") or {}),
+        "set": dict(profile.get("set") or {}),
+        "run": list(profile["run"]) if profile.get("run") else None,
+        "extra": sorted(profile.get("extra") or []),
+    }
+
+
+def profile_mac(key: bytes, workspace: str, name: str, body: dict) -> str:
+    """profile1.<workspace id>.<profile name>.<canonical body {env, files, set, run, extra}>: binds WHERE it
+    belongs (another profile or workspace) and WHAT was approved."""
+    return _b64u(
+        hmac.new(
+            key, f"profile1.{workspace}.{name}.{_canon(profile_body(body))}".encode(), hashlib.sha256
+        ).digest()
+    )
+
+
+def profile_sign(root: Path, name: str, body: dict | None) -> None:
+    """Record the current MAC of profile `name` (None: tombstone). Raises Refused when it cannot be recorded
+    (the caller must not write the profile then)."""
+    from orch import addons
+
+    mac = None
+    if body is not None:
+        ws = addons.workspace_id(root, create=True)
+        mac = profile_mac(human_key(root), ws, name, body)
+    if not _ledger_put(root, PROFILE_LEDGER, "orch.profile-ledger/1", name, mac):
+        raise Refused("orch could not record this key profile. Nothing was changed.")
+
+
+def profile_verified(root: Path, name: str, body: dict) -> bool:
+    """True only when the body's MAC (this key, this workspace, this name) is the current ledger entry.
+    Never raises; no key, no workspace id or no readable ledger = False (fail closed)."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        ent = _ledger_load(root, PROFILE_LEDGER)
+        cur = ent.get(name) if ent else None
+        if not ws or not isinstance(cur, str):
+            return False
+        return hmac.compare_digest(cur, profile_mac(human_key(root, create=False), ws, name, body))
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -1240,6 +1343,229 @@ def wont_verifier(root: Path, relay_ok=None):
         return hmac.compare_digest(mac, current) and wontdo_is_human(key, ws, ticket, decision, mac, False)
 
     return person
+
+
+# ------------------------------------------------------------------------------------------- signed verdict
+
+# A ticket counts as Done on this machine only when it carries a verdict entry whose MAC is this core's own
+# verdict1 MAC over the ticket's current state AND is the CURRENT entry of this core's verdict ledger
+# (keys/<ws>/verdict.json, per ticket id the current MAC, null = tombstone). Every other raw "done" is Review.
+# Decided here (verdict_ok), applied in ONE read path (tickets._effective) and ONE write guard
+# (tickets._write).
+# Leaving Done needs no proof (more work, never less): the core tombstones the entry on every non-done write
+# and whenever it reads a non-done ticket.
+VERDICT_LEDGER = "verdict.json"
+VERDICT_MAX = 8  # verdict entries kept on one ticket
+# What a stored entry holds. ONE source of truth: the sync merge imports it (a test fails if it keeps a copy).
+VERDICT_FIELDS = ("kind", "nonce", "mac")
+# Optional, MAC-bound when present (new person verdicts): who signed and when. Legacy entries lack them and
+# cannot authorise a synced person history line (contracts/human-proof.md "Person history lines over sync").
+VERDICT_OPTIONAL = ("person", "at", "line")
+# The actor label a decision may bind (the sync merge keeps a copy, drift-tested): human:<name>, <= 64 chars.
+ACTOR_PATTERN = r"human:[A-Za-z0-9_.@ -]{1,58}"
+
+
+def history_digest(text, via) -> str:
+    """sha256 hex of the exact history line a decision's writer adds ({text, via}); bound into the MAC so only
+    THAT line can be attributed to the person over sync (the sync merge keeps a copy, drift-tested)."""
+    return hashlib.sha256(_canon({"text": text, "via": via}).encode()).hexdigest()
+
+
+def _fresh_line(line, person) -> bool:
+    """The history line the signing operation just wrote: by the signer, a text, made within seconds."""
+    try:
+        at = datetime.fromisoformat(line["at"]).timestamp()
+    except (TypeError, KeyError, ValueError):
+        return False
+    return (
+        line.get("by") == person
+        and isinstance(line.get("text"), str)
+        and abs(datetime.now(UTC).timestamp() - at) <= 5
+    )
+
+
+def bindable_actor(by) -> bool:
+    return isinstance(by, str) and re.fullmatch(ACTOR_PATTERN, by) is not None
+
+
+VERDICT_KINDS = ("person", "agent")
+
+VERDICT_LEDGER_DAMAGED = (
+    "orch's record of your Done decisions is damaged, so this was not saved. Nothing was changed. "
+    "Ask your admin to reset orch's protection on this computer, then decide again."
+)
+VERDICT_NEEDED = "Done needs your OK. Click Looks good in the dashboard."
+
+
+def verdict_checks(ticket: dict) -> str:
+    """sha256 hex of WHAT was accepted: every step's id, text, done and won't-do flags. A later change of the
+    checklist makes an old verdict stop verifying. Title, note, summary, outcome, history, evidence are not
+    bound (a person may rename a Done ticket; the agent writes its summary after finishing)."""
+    rows = [
+        [c.get("id"), c.get("text"), c.get("done") is True, c.get("wont_do") is True]
+        for c in ticket.get("checklist") or []
+    ]
+    return hashlib.sha256(_canon(rows).encode()).hexdigest()
+
+
+def verdict_record(ticket: dict, entry: dict) -> dict:
+    """The record the MAC covers. `status` is always "done" (domain separation: a future signed status gets
+    its own prefix)."""
+    return {
+        "status": "done",
+        "kind": entry.get("kind"),
+        "checks": verdict_checks(ticket),
+        "nonce": entry.get("nonce"),
+        **{k: entry[k] for k in VERDICT_OPTIONAL if k in entry},
+    }
+
+
+def verdict_mac(key: bytes, workspace: str, ticket: str, record: dict) -> str:
+    """verdict1.<workspace id>.<ticket id>.<canonical record {status, kind, checks, nonce}>. Binds WHERE it
+    belongs (another ticket or workspace) and WHAT was accepted (the checklist); the nonce makes equal
+    decisions differ. FRESHNESS comes from the ledger, not from the MAC."""
+    return _b64u(
+        hmac.new(key, f"verdict1.{workspace}.{ticket}.{_canon(record)}".encode(), hashlib.sha256).digest()
+    )
+
+
+def verdict_is_human(
+    key: bytes, workspace: str, ticket_id: str, ticket: dict, entry, ledger_current
+) -> str | None:
+    """ "current" when `entry` carries this key's MAC over the ticket's state AND that MAC is the
+    current ledger
+    entry; "stale" when the MAC is ours but no longer current (replayed, tombstoned, superseded); None when it
+    is not ours at all (another machine, forged, the checklist changed). Never raises."""
+    try:
+        if not isinstance(entry, dict) or entry.get("kind") not in VERDICT_KINDS:
+            return None
+        mac, nonce = entry.get("mac"), entry.get("nonce")
+        if not (isinstance(mac, str) and mac and isinstance(nonce, str) and nonce):
+            return None
+        mine = hmac.compare_digest(mac, verdict_mac(key, workspace, ticket_id, verdict_record(ticket, entry)))
+        if not mine:
+            return None
+        if isinstance(ledger_current, str) and hmac.compare_digest(mac, ledger_current):
+            return "current"
+        return "stale"
+    except Exception:  # noqa: BLE001 - a malformed ticket is nobody's verdict (fail closed)
+        return None
+
+
+def verdict_ledger(root: Path) -> dict | None:
+    """The verdict ledger entries ({} when none yet, None when damaged or loose)."""
+    return _ledger_load(root, VERDICT_LEDGER)
+
+
+def _verdict_ledger_put(root: Path, tid: str, mac: str | None) -> bool:
+    return _ledger_put(root, VERDICT_LEDGER, "orch.verdict-ledger/1", tid, mac)
+
+
+def verdict_sign(
+    root: Path, ticket: dict, kind: str, person: str | None = None, line: dict | None = None
+) -> dict:
+    """A fresh verdict entry for the ticket as it is NOW (its checklist must be final), recorded as the
+    CURRENT ledger entry. No key, no workspace id or a damaged ledger = Refused: never a half-signed Done."""
+    from orch import addons
+
+    if kind not in VERDICT_KINDS:
+        raise Refused(VERDICT_NEEDED)
+    tid = ticket.get("id")
+    try:
+        ws = addons.workspace_id(root, create=False)
+        key = human_key(root, create=False)
+    except (Refused, OSError):
+        raise Refused(VERDICT_LEDGER_DAMAGED) from None
+    if not ws or not isinstance(tid, str):
+        raise Refused(VERDICT_LEDGER_DAMAGED)
+    entry = {"kind": kind, "nonce": secrets.token_hex(8)}
+    if kind == "person" and bindable_actor(person) and _fresh_line(line, person):
+        entry["person"] = person
+        entry["at"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        entry["line"] = history_digest(line["text"], line.get("via"))
+    entry["mac"] = verdict_mac(key, ws, tid, verdict_record(ticket, entry))
+    if not _verdict_ledger_put(root, tid, entry["mac"]):
+        raise Refused(VERDICT_LEDGER_DAMAGED)
+    return entry
+
+
+def verdict_forget(root: Path, tid: str, ledger: dict | None = None) -> bool:
+    """Tombstone this ticket's ledger entry (it left Done, or the file was deleted). Nothing to do when there
+    is no live entry; a damaged ledger is left alone (it vouches for nobody). True when it wrote one."""
+    ent = verdict_ledger(root) if ledger is None else ledger
+    if ent and ent.get(tid) is not None:
+        return _verdict_ledger_put(root, tid, None)
+    return False
+
+
+class VerdictChecker:
+    """Asks "does this raw done ticket carry a current verdict?" The workspace id and key are read once; the
+    ledger is read at each ask (a fresh read), or once when `snapshot` (one listing)."""
+
+    def __init__(self, root: Path, snapshot: bool = False):
+        from orch import addons
+
+        self.root = root
+        self._ctx = None
+        self._tried = False
+        self._snapshot = snapshot
+        self._ledger = None
+        self._have_ledger = False
+        self._addons = addons
+
+    def _context(self):
+        if not self._tried:
+            self._tried = True
+            try:
+                ws = self._addons.workspace_id(self.root, create=False)
+                self._ctx = (ws, human_key(self.root, create=False)) if ws else None
+            except (Refused, OSError):
+                self._ctx = None
+        return self._ctx
+
+    def ledger(self) -> dict | None:
+        if self._snapshot and self._have_ledger:
+            return self._ledger
+        led = verdict_ledger(self.root)
+        if self._snapshot:
+            self._ledger, self._have_ledger = led, True
+        return led
+
+    def state(self, entry, ticket: dict) -> str | None:
+        """ "current" | "stale" | None for one entry of `ticket` (see verdict_is_human)."""
+        ctx = self._context()
+        tid = ticket.get("id") if isinstance(ticket, dict) else None
+        if ctx is None or not isinstance(tid, str):
+            return None
+        led = self.ledger()
+        if led is None:
+            return (
+                None  # damaged or loose ledger: nobody is vouched for, and nothing is judged "stale" either
+            )
+        return verdict_is_human(ctx[1], ctx[0], tid, ticket, entry, led.get(tid))
+
+    def ok(self, ticket: dict) -> bool:
+        """True only when some entry is current. Missing, loose or damaged ledger, no key, no workspace id, a
+        non-list `verdicts`, any error = False."""
+        try:
+            entries = ticket.get("verdicts")
+            if not isinstance(entries, list) or not entries:
+                return False
+            return any(self.state(e, ticket) == "current" for e in entries)
+        except Exception:  # noqa: BLE001 - fail closed
+            return False
+
+
+def verdict_ok(root: Path, ticket: dict) -> bool:
+    return VerdictChecker(root).ok(ticket)
+
+
+def verdict_verifier(root: Path):
+    """`verdict(entry, ticket) -> "current" | "stale" | None` for the sync merge: the ledger is read at
+    each call,
+    so the sync caller must read, merge and write under the ticket's lock. Fails closed (no key, no workspace
+    id, no readable ledger = None for everything)."""
+    return VerdictChecker(root).state
 
 
 def dev_can_mark(install_dev: bool, creating: bool, has_human_key: bool) -> bool:
@@ -1337,6 +1663,8 @@ HANDOFF_HEADS = {
     "chat.make_ticket": (("chat", "make-ticket"),),
     "config.agents_may_finish": (("config", "set"),),
     "config.copy_setup": (("config", "set"),),
+    "copy.remove_orphaned": (("copy", "remove-orphaned"),),
+    "copy.retry": (("copy", "retry"),),
     "config.permissions": (("config", "set"),),
     "config.agent_add": (("config", "agent", "add"),),
     "private.allow": (("private", "allow"),),
@@ -1987,7 +2315,9 @@ def update_target(repo: str, ref: str) -> str:
 UPDATE_TIMEOUT = 1800  # seconds: a hung install is stopped after 30 minutes
 
 
-def write_update_status(root: Path, state: str, reason: str = "") -> None:
+def write_update_status(
+    root: Path, state: str, reason: str = "", *, finish_offset: int | None = None
+) -> None:
     """running | finished | failed, with a short plain reason (no secrets): what the page shows afterwards."""
     if state not in ("running", "finished", "failed"):
         return
@@ -1996,7 +2326,14 @@ def write_update_status(root: Path, state: str, reason: str = "") -> None:
         with _key_lock(d):
             _write_private(
                 d / "update-status.json",
-                json.dumps({"state": state, "reason": reason[:200], "at": int(time.time())}),
+                json.dumps(
+                    {
+                        "state": state,
+                        "reason": reason[:200],
+                        "at": int(time.time()),
+                        **({"finish_offset": finish_offset} if finish_offset is not None else {}),
+                    }
+                ),
             )
 
 
@@ -2008,6 +2345,17 @@ def take_update_status(root: Path) -> dict | None:
         with _key_lock(d):
             f = d / "update-status.json"
             data = json.loads(_read_guarded(f).decode("utf-8"))
+            if isinstance(data, dict) and "finish_offset" in data:
+                from orch import addons
+
+                home = addons.home()
+                if winfinish.pending(home) or winfinish.updating(home):
+                    return {"state": "running", "reason": ""}
+                ok = winfinish.result_ok_since(home, data["finish_offset"])
+                data = {
+                    "state": "finished" if ok else "failed",
+                    "reason": "" if ok else "The background update failed; see finish.log.",
+                }
             if isinstance(data, dict) and data.get("state") in ("finished", "failed"):
                 with contextlib.suppress(OSError):
                     f.unlink()

@@ -668,9 +668,7 @@ def test_strict_untrusted_orch_home_is_an_error_and_writes_nothing(proj, run, mo
         # without the switch the old fallback stays (a note, then the real folder)
         monkeypatch.delenv("ORCH_HOME_STRICT")
         assert addons.home() == real
-    assert {p.name for p in real.rglob("*")} <= {
-        ".fallback-trace.log"
-    }  # only the fallback trace (non-strict)
+    assert not real.exists() or not any(real.rglob("*"))  # the fallback writes nothing there (non-strict)
 
 
 def test_strict_cwd_above_the_home_is_an_error(proj, monkeypatch):
@@ -704,26 +702,103 @@ def test_trusted_orch_home_never_touches_the_real_tool_folder(proj, run, monkeyp
 
 
 def _trace_lines(h):
-    f = h / ".orch-tool" / ".fallback-trace.log"
+    f = addons._trace_log_path()  # the harness points it at a per-test file outside the faked real home
+    assert not f.resolve().is_relative_to(h.resolve())
     return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines()] if f.exists() else []
 
 
-def _trace_on(h):
-    (h / ".orch-tool").mkdir(exist_ok=True)
-    (h / ".orch-tool" / ".trace-fallbacks").write_text("", encoding="utf-8")
+def _trace_on(monkeypatch):
+    monkeypatch.setenv("ORCH_TRACE_FALLBACKS", "1")  # the only opt-in: nothing in the real home turns it on
 
 
-def test_fallback_trace_is_off_without_the_machine_switch(proj, monkeypatch):
+def test_fallback_trace_is_off_without_the_env_switch(proj, monkeypatch):
     h = addons.real_home()
     monkeypatch.delenv("ORCH_HOME")
     monkeypatch.delenv("ORCH_HOME_STRICT")
+    for value in (None, "", "0"):
+        if value is None:
+            monkeypatch.delenv("ORCH_TRACE_FALLBACKS", raising=False)
+        else:
+            monkeypatch.setenv("ORCH_TRACE_FALLBACKS", value)
+        assert addons.home() == h / ".orch-tool"
+        assert not (h / ".orch-tool").exists()  # a normal install: home() only reads
+        assert not addons._trace_log_path().exists()
+
+
+def test_fallback_trace_marker_file_in_the_real_home_has_no_effect(proj, monkeypatch, capsys):
+    """#519: the old opt-in (~/.orch-tool/.trace-fallbacks) is gone: a marker there turns nothing on, and with
+    the env switch on the trace is the same with or without it; the marker is left as it was."""
+    h = addons.real_home()
+    monkeypatch.delenv("ORCH_HOME")
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    (h / ".orch-tool").mkdir()
+    (h / ".orch-tool" / ".trace-fallbacks").write_text("1", encoding="utf-8")
+    before = _listing(h)
     assert addons.home() == h / ".orch-tool"
-    assert not (h / ".orch-tool").exists()  # a normal install: home() only reads
+    assert not addons._trace_log_path().exists()
+    assert _listing(h) == before
+    assert capsys.readouterr().err == ""
+    _trace_on(monkeypatch)
+    assert addons.home() == h / ".orch-tool"
+    assert [x["reason"] for x in _trace_lines(h)] == ["unset"]
+    assert _listing(h) == before
+    assert (h / ".orch-tool" / ".trace-fallbacks").read_text(encoding="utf-8") == "1"
+
+
+def test_fallback_trace_file_lives_in_the_temp_folder_per_user():
+    import tempfile
+
+    import conftest
+
+    p = conftest._TRACE_LOG  # the unpatched path, as orch computes it
+    assert p.parent == Path(tempfile.gettempdir())
+    assert p.name.startswith("orch-fallback-trace-") and p.name.endswith(".log")
+    if hasattr(os, "getuid"):
+        assert p.name == f"orch-fallback-trace-{os.getuid()}.log"
+
+
+def _listing(d):
+    return {str(p.relative_to(d)): (p.is_symlink(), p.lstat().st_mtime_ns) for p in (d, *d.rglob("*"))}
+
+
+def test_fallback_trace_never_writes_into_the_real_home(proj, monkeypatch, tmp_path_factory):
+    """#519: HOME and ORCH_HOME aimed at a symlinked temp folder make home() fall back to the real folder;
+    with ORCH_TRACE_FALLBACKS on, the trace goes to the temp trace file and nothing under the real home is
+    made or changed."""
+    h = addons.real_home()
+    _trace_on(monkeypatch)
+    target = tmp_path_factory.mktemp("tmplike")
+    link = tmp_path_factory.mktemp("links") / "home"
+    link.symlink_to(target, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(link))
+    monkeypatch.setenv("ORCH_HOME", str(link))
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    before = _listing(h)
+    assert addons.home() == h / ".orch-tool"
+    monkeypatch.delenv("ORCH_HOME")
+    assert addons.home() == h / ".orch-tool"
+    assert _listing(h) == before  # no new file, no rotation, no touched folder
+    assert not (h / ".orch-tool").exists()
+    assert [x["reason"] for x in _trace_lines(h)] == ["untrusted:outside-home", "unset"]
+    assert addons._trace_log_path().stat().st_mode & 0o777 == 0o600
+    assert list(target.iterdir()) == []
+
+
+def test_fallback_trace_is_off_when_the_temp_folder_is_inside_the_real_home(proj, monkeypatch):
+    h = addons.real_home()
+    _trace_on(monkeypatch)
+    monkeypatch.delenv("ORCH_HOME")
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    (h / "tmp").mkdir()
+    monkeypatch.setattr(addons, "_trace_log_path", lambda: h / "tmp" / "orch-fallback-trace.log")
+    before = _listing(h)
+    assert addons.home() == h / ".orch-tool"
+    assert _listing(h) == before
 
 
 def test_fallback_trace_logs_only_real_subcommands_and_never_blocks(proj, monkeypatch):
     h = addons.real_home()
-    _trace_on(h)
+    _trace_on(monkeypatch)
     monkeypatch.delenv("ORCH_HOME")
     monkeypatch.delenv("ORCH_HOME_STRICT")
     for argv, cmd in (
@@ -736,7 +811,7 @@ def test_fallback_trace_logs_only_real_subcommands_and_never_blocks(proj, monkey
         assert _trace_lines(h)[-1]["cmd"] == cmd
     if not hasattr(os, "mkfifo"):
         return
-    log = h / ".orch-tool" / ".fallback-trace.log"
+    log = addons._trace_log_path()
     log.unlink()
     os.mkfifo(log)  # nobody reads it: a blocking open would hang every orch command
     assert addons.home() == h / ".orch-tool"
@@ -744,7 +819,7 @@ def test_fallback_trace_logs_only_real_subcommands_and_never_blocks(proj, monkey
 
 def test_fallback_trace_unset_has_the_fields_and_never_argument_values(proj, monkeypatch):
     h = addons.real_home()
-    _trace_on(h)
+    _trace_on(monkeypatch)
     monkeypatch.delenv("ORCH_HOME")
     monkeypatch.delenv("ORCH_HOME_STRICT")
     monkeypatch.setattr(
@@ -757,7 +832,7 @@ def test_fallback_trace_unset_has_the_fields_and_never_argument_values(proj, mon
     assert set(line) == {"time", "pid", "ppid", "cmd", "cwd", "reason"}
     assert line["reason"] == "unset" and line["pid"] == os.getpid() and line["cwd"] == os.getcwd()
     assert line["cmd"] == "orch addon list"
-    mode = (h / ".orch-tool" / ".fallback-trace.log").stat().st_mode & 0o777
+    mode = addons._trace_log_path().stat().st_mode & 0o777
     assert mode == 0o600
     for argv, cmd in (
         (["orch", "ticket", "new", "--token", "orn_x"], "orch ticket new"),  # two words at most
@@ -771,13 +846,13 @@ def test_fallback_trace_unset_has_the_fields_and_never_argument_values(proj, mon
         monkeypatch.setattr(sys, "argv", argv)
         addons.home()
         assert _trace_lines(h)[-1]["cmd"] == cmd
-    raw = (h / ".orch-tool" / ".fallback-trace.log").read_text(encoding="utf-8")
+    raw = addons._trace_log_path().read_text(encoding="utf-8")
     assert "orn_secret123" not in raw and "Müller" not in raw and "--token" not in raw
 
 
 def test_fallback_trace_untrusted_gets_its_reason_and_strict_writes_nothing(proj, monkeypatch):
     h = addons.real_home()
-    _trace_on(h)
+    _trace_on(monkeypatch)
     monkeypatch.delenv("ORCH_HOME_STRICT")
     monkeypatch.setenv("ORCH_HOME", str(proj / "inside"))
     addons.home()
@@ -793,51 +868,37 @@ def test_fallback_trace_untrusted_gets_its_reason_and_strict_writes_nothing(proj
     assert len(_trace_lines(h)) == 2
 
 
-def test_fallback_trace_rotates_over_256kb(proj, monkeypatch):
+def test_fallback_trace_is_bounded_over_256kb_without_rotating(proj, monkeypatch):
     h = addons.real_home()
-    _trace_on(h)
+    _trace_on(monkeypatch)
     monkeypatch.delenv("ORCH_HOME")
     monkeypatch.delenv("ORCH_HOME_STRICT")
-    d = h / ".orch-tool"
-    (d / ".fallback-trace.log").write_text("x" * (256 * 1024 + 1), encoding="utf-8")
-    addons.home()
-    assert (d / ".fallback-trace.log.1").stat().st_size == 256 * 1024 + 1
-    assert len(_trace_lines(h)) == 1
-
-
-def test_fallback_trace_rotation_failure_truncates(proj, monkeypatch):
-    h = addons.real_home()
-    _trace_on(h)
-    monkeypatch.delenv("ORCH_HOME")
-    monkeypatch.delenv("ORCH_HOME_STRICT")
-    log = h / ".orch-tool" / ".fallback-trace.log"
+    log = addons._trace_log_path()
     log.write_text("x" * (256 * 1024 + 1), encoding="utf-8")
-
-    def boom(*a, **k):
-        raise OSError("no")
-
-    monkeypatch.setattr(os, "replace", boom)
     addons.home()
     assert log.stat().st_size < 1000 and len(_trace_lines(h)) == 1
+    assert not list(log.parent.glob(f"{log.name}.*"))  # no second generation anywhere
+    assert not (h / ".orch-tool").exists()
 
 
 def test_fallback_trace_does_not_follow_a_symlink_and_fixes_the_mode(proj, monkeypatch):
     h = addons.real_home()
-    _trace_on(h)
+    _trace_on(monkeypatch)
     monkeypatch.delenv("ORCH_HOME")
     monkeypatch.delenv("ORCH_HOME_STRICT")
     d = h / ".orch-tool"
+    log = addons._trace_log_path()
     target = h / "victim.txt"
     target.write_text("keep", encoding="utf-8")
-    (d / ".fallback-trace.log").symlink_to(target)
+    log.symlink_to(target)
     assert addons.home() == d  # still works
     assert target.read_text(encoding="utf-8") == "keep"
-    (d / ".fallback-trace.log").unlink()
-    (d / ".fallback-trace.log").write_text("", encoding="utf-8")
-    (d / ".fallback-trace.log").chmod(0o666)
+    log.unlink()
+    log.write_text("", encoding="utf-8")
+    log.chmod(0o666)
     addons.home()
-    assert (d / ".fallback-trace.log").stat().st_mode & 0o777 == 0o600
-    # a symlinked tool folder is not written to at all
+    assert log.stat().st_mode & 0o777 == 0o600
+    # a symlinked tool folder is never written to
     other = h / "other"
     other.mkdir()
     d2 = h / "x2"
@@ -971,10 +1032,9 @@ def test_builtin_add_asks_on_a_tty_and_shows_what_it_adds(proj, run, tmp_path, m
     assert code == 2 and seen == ["hello"] and "Adds a dashboard tab: Hello" in err and "Add it? [y/N]" in err
     assert "Not confirmed" in err and not uv_calls
     monkeypatch.setattr(sys, "stdin", Tty("y\n"))
-    run("addon", "add", "hello")
+    assert run("addon", "add", "hello")[0] == 2  # the fake install exposes no package
     assert uv_calls and uv_calls[0][-1].endswith("#subdirectory=workspace-addons/hello")
-    reg = json.loads((Path(os.environ["ORCH_HOME"]) / "addons.json").read_text(encoding="utf-8"))
-    assert reg == [{"name": "hello", "source": "built-in", "version": "0.1.0"}]
+    assert not addons.registry_path().exists()
     # not a terminal (agents, CI): refused with the hint, nothing fetched
     seen.clear()
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
@@ -1181,3 +1241,74 @@ def test_install_repo_with_quotes_or_spaces_is_refused(monkeypatch):
     monkeypatch.setenv("ORCH_REPO", 'https://github.com/a/orch" --index-url x')
     with pytest.raises(Refused):
         addons.spec("workspace")
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("failure", ["install", "manifest", "unshipped"])
+def test_failed_add_preserves_registry(proj, tmp_path, monkeypatch, run, uv_calls, existing, failure):
+    path = addons.registry_path()
+    before = b'[  {"name": "automation", "source": "built-in", "version": "0.2.0"} ]\n'
+    if existing:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(before)
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    monkeypatch.setattr(addons, "repo", lambda: "https://github.com/example/orch")
+    source = "not-shipped"
+    if failure != "unshipped":
+        source = str(make_addon(tmp_path / "addon"))
+    if failure == "install":
+
+        def fail(args):
+            raise Refused("install failed")
+
+        monkeypatch.setattr(addons, "run_uv", fail)
+    assert run("addon", "add", source, "--yes")[0] == 2
+    assert path.read_bytes() == before if existing else not path.exists()
+    code, _, err = run("addon", "list")
+    assert code == 0
+    assert "add-on list entry" not in err
+
+
+@pytest.mark.parametrize("kind", ["normal", "test"])
+def test_sync_is_shipped_and_can_be_added(proj, monkeypatch, run, uv_calls, kind):
+    import tomllib
+
+    import jsonschema
+
+    from orch import humanproof
+
+    base = Path(__file__).resolve().parents[2]
+    folder = base / "workspace-addons" / "sync"
+    manifest = folder / "src" / "orch_sync" / addons.MANIFEST
+    jsonschema.validate(
+        tomllib.loads(manifest.read_text()),
+        json.loads((base / "contracts" / "addon-manifest.schema.json").read_text()),
+    )
+    assert "sync" in addons.SHIPPED_ADDONS
+    assert addons.folder_manifest(folder)["recommended"] is False
+    # proj fakes real_home: exercise the default home without touching the account home.
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    monkeypatch.setenv("ORCH_HOME", str(addons.real_home() / ".orch-tool"))
+    monkeypatch.setattr(humanproof, "install_kind", lambda: kind)
+    monkeypatch.setattr(addons, "repo", lambda: "https://github.com/example/orch")
+    monkeypatch.setattr(addons, "_entry_points", lambda: {"sync": "orch_sync"} if uv_calls else {})
+    monkeypatch.setattr(addons, "_manifest_file", lambda module: manifest)
+    code, _, err = run("addon", "add", "sync", "--yes")
+    assert code == 0, err
+    assert "sync" in addons.active(proj)
+    assert "--with" in uv_calls[0]
+    assert any("workspace-addons/sync" in arg for arg in uv_calls[0])
+    assert "add-on list entry" not in run("addon", "list")[2]
+
+
+@pytest.mark.parametrize("value", ["true", "false", None])
+def test_ticket_ext_inert_manifest_boolean(tmp_path, value):
+    extra = f"ticket_ext_inert = {value}" if value is not None else ""
+    folder = make_addon(tmp_path / "a", extra=extra)
+    assert addons.folder_manifest(folder)["ticket_ext_inert"] is (value == "true")
+
+
+def test_ticket_ext_inert_manifest_refuses_truthy_string(tmp_path):
+    folder = make_addon(tmp_path / "a", extra='ticket_ext_inert = "true"')
+    with pytest.raises(Refused, match="ticket_ext_inert"):
+        addons.folder_manifest(folder)

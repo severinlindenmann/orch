@@ -2,7 +2,7 @@
 
 Built from the ticket file: title, status, tasks, the last 30 history lines in plain words, and
 the proof marked for the phone (evidence with role result or check: files are uploaded as relay
-blobs, URLs and PRs become links), artifacts named in questions, options or the summary, and the
+blobs, URLs and PRs become links), artifacts named in questions, options, summary or description, and the
 ticket's refs. Secrets are cut from display text before it leaves.
 
 It rides on update texts to phones (result, failure, stopped, question) and, quietly (kind note,
@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -175,10 +176,24 @@ def size_of(view: dict) -> int:
     return len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode())
 
 
+def is_agent_history_author(by) -> bool:
+    """Only explicit agent labels are safe as unverified synced attribution."""
+    if not isinstance(by, str) or not by.isascii() or by != unicodedata.normalize("NFKC", by):
+        return False
+    label = by.casefold()
+    return bool(re.fullmatch(r"agent:[a-z0-9._-]{1,40}", label)) and not label[6:].startswith(
+        ("relay", "phone", "ph_")
+    )
+
+
 def _who(by: str) -> tuple[str, str]:
-    kind, _, name = str(by).partition(":")
+    kind, _, name = str(by).strip().partition(":")
     name = _clip(name or kind, 64) or "Someone"
-    if kind == "agent":
+    if unicodedata.normalize("NFKC", kind).casefold() == "agent":
+        # A sender suffix or raw phone id is not an agent display name.
+        label = unicodedata.normalize("NFKC", name).casefold()
+        if not re.fullmatch(r"[a-z0-9._-]{1,64}", label) or label.startswith("ph_"):
+            return "orch", "agent"
         return name[:1].upper() + name[1:], "agent"
     return name, "person"
 
@@ -186,21 +201,13 @@ def _who(by: str) -> tuple[str, str]:
 _ADMIN_NOTE = re.compile(
     r"(?:Set|Removed) ext\."
 )  # add-on settings notes: admin business, not for a phone chat
-_FROM_PREFIX = re.compile(r"From [^:\n]{1,100}: ")
-_RELAY_BY = re.compile(r"agent:relay from (ph_\S+)")  # a phone only; a workspace keeps its own label
 
 
-def _phone_line(root: Path, h: dict) -> tuple[str, str, str] | None:
-    """(who, role, text) of a text that came from a phone: its name (never the raw ph_ id), as a person."""
-    from orch import relay
-
-    m = _RELAY_BY.fullmatch(str(h.get("by", "")))
-    if not m:
-        return None
-    text = str(h.get("text", ""))
-    if h.get("via") == "phone":
-        text = _FROM_PREFIX.sub("", text, count=1)
-    return _clip(relay.name_of(root, m.group(1)), 64) or "Phone", "person", text
+def internal_wakeup(entry: dict) -> bool:
+    """Hide the legacy automation prompt that used to be logged as helper speech."""
+    return entry.get("by") != "you" and str(entry.get("text", "")).startswith(
+        "A phone text in the General conversation is waiting for you. Answer it: orch relay send "
+    )
 
 
 def _agent(root: Path, ticket: dict) -> tuple[str | None, bool]:
@@ -225,8 +232,8 @@ def phone_proof(root: Path, ticket: dict) -> list[dict]:
 
 
 def named_artifacts(root: Path, ticket: dict, artifacts: list[dict] | None = None) -> list[str]:
-    """Up to 20 artifact names mentioned in questions, options or the summary, in listing order."""
-    texts = [ticket.get("summary") or ""]
+    """Up to 20 artifact names in questions, options, summary or description, in listing order."""
+    texts = [ticket.get("summary") or "", ticket.get("description") or ""]
     for question in ticket.get("questions") or []:
         texts.append(question.get("text") or "")
         texts.extend(question.get("options") or [])
@@ -668,17 +675,17 @@ def build(root: Path, ticket: dict, atts: list[dict]) -> dict:
     agent, running = _agent(root, ticket)
     hist = []
     for h in (ticket.get("history") or [])[-HISTORY:]:
-        if _ADMIN_NOTE.match(str(h.get("text", ""))):
+        if internal_wakeup(h) or _ADMIN_NOTE.match(str(h.get("text", ""))):
             continue
-        pl = _phone_line(root, h)
-        raw = pl[2] if pl else str(h.get("text", ""))
+        # Ticket history has no verified relay sender; raw labels cannot name a phone.
+        raw = str(h.get("text", ""))
         text = _clip(tickets.history_line(raw, ticket.get("checklist") or []), 1000)
         if not text:
             continue
         at = str(h.get("at") or "")
         if not _TIME.fullmatch(at):
             continue
-        who, role = pl[:2] if pl else _who(h.get("by", ""))
+        who, role = _who(h.get("by", ""))
         hist.append({"at": at, "who": who, "role": role, "text": text})
     view: dict = {
         "title": _clip(ticket.get("title", ""), 200) or "Ticket",

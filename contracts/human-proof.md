@@ -10,7 +10,7 @@ orch-home files directly, or traces processes; such findings go to "Level 2 late
 an agent can pass any flag, scrub its environment (`env -i`) and run inside a terminal (its own tmux pane).
 
 Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Vectors: `vectors/human-proof-v1.json`
-(forged flags, missing, expired, wrong ticket, wrong action, replay, bad signature, valid; widening settings). Reference:
+(forged flags, missing, expired, wrong ticket, wrong action, replay, bad signature, valid; widening settings; `verdict` MACs). Reference:
 `hp_verify` / `hp_effective` in validate.py. T0: `… contracts/validate.py human`.
 
 ## What v2 has today, and why it is not enough
@@ -184,10 +184,10 @@ rows add a named case.
 | `focus.settings` | Settings > Add-ons > Focus: `live_session` / `session_typing` on | setting | page | `settle` |
 | `insights.settings` | Insights > Settings: `share_names`, `share_counts` on, `keep_days`, `max_mb` | setting | page | `settle` |
 | `record.delete_detail` | Delete detail for this ticket | ticket | page, terminal | `verify` delete detail |
-| `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get` | key / profile | page, terminal | `verify` key profile, `settle` allow_get |
+| `secret.add`, `secret.remove`, `secret.profile` | key store and profiles, incl. `allow_get`, `agents_may_env` | key / profile (`<profile>`, `<profile>:remove`, `<profile>:allow_get`, `<profile>:agents_may_env`; switching a flag off needs no proof) | page, terminal | `verify` key profile, `settle` allow_get; a `profile set` also records the body MAC `profile1.<ws>.<profile>.<canon {env,files,set,run,extra}>` as the current entry of the ledger `profile.json` (tombstoned by `profile remove`; secrets.md, profile body) |
 | `conn.allow` | Allow in the Used tab / Insights | connection | page, terminal | `verify` conn allow, inventory `allowed` |
 | `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons | `<id>@<hash>` (proposal.md) / id | page | proposal `steps` |
-| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict |
+| `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict; `verdict` (what makes it Done) |
 | `ticket.answer` | answering a Needs-you question | `<ticket>:<question>` | page, phone | `verify` ticket answer |
 | `relay.connect` | `orch relay connect`, changing the relay address | relay host | page, terminal | `verify` relay connect |
 | `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` (the key covers adapter, command, live command, prompt; the card's exact block shows all four, and a hand-off is refused at take time if the entry no longer hashes to the key) | page, terminal | `verify` private allow |
@@ -208,6 +208,8 @@ rows add a named case.
 | `config.permissions` | `orch config set workspace.permissions <mode>`, raising only (lowering is free for anyone) | the new `mode` | page, terminal | – |
 | `look.icon` | `orch look set` (icon and colour of the workspace, shown to peers and on shared pages) | `look` | page, terminal | – |
 | `config.copy_setup` | `orch config set workflow.copy_setup <command>`: a command orch runs in every new separate copy (clearing it needs no proof; an agent is refused) | sha256 of the command (the card shows it in full) | page, terminal | – |
+| `copy.remove_orphaned` | `orch copy remove-orphaned <ws8>`: remove copies of a project that is gone (an agent is refused) | ws8; `<ws8>:discard` with `--discard` | page, terminal | – |
+| `copy.retry` | `orch copy retry <ticket>`: retry interrupted copy cleanup (an agent is refused) | ticket id | page, terminal | – |
 | `look.shared_pages` | show the workspace name and icon on shared file pages (look.py 229) | setting | page | – |
 | `ticket.finish` | a person sets Done / Review without the checklist (tickets.py 615) | ticket | page, terminal | – |
 | `run.human_input` | input that counts as a person's and may start a run (runs.py 375-397 `human_waiting`: today any `human:` by or phone line in the agent-writable `.orch/run/pending/<tid>.jsonl`) | ticket | page, phone | `pending` |
@@ -234,7 +236,7 @@ re-appending a consumed line never delivers it again (reference `pending_is_huma
 here, so a step's decision counts as a person's only when the receiving core's relay client recorded it from a
 relay-authenticated sender (a phone, or a person-attributed message the relay authenticated; the hook compares the FULL decision
 record, never "this step was touched by a relay sender"), or when it carries the receiving core's own MAC = HMAC-SHA256(`human.key`,
-`"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of {check, wont_do, reason, text, covers, nonce}`) (an undo is
+`"wontdo1." + workspace id + "." + ticket id + "." + canonical JSON of {check, wont_do, reason, text, covers, nonce[, person, at, line]}`: `person`, `at` and `line` (the step fields `wont_by`, `wont_at`, `wont_line`) only on an "on" record made from #484 on, the actor label `human:<name>`, the UTC time of the decision and the digest of the history line it writes, inside the MAC; `humanproof.SIGNED_STEP_FIELDS` lists them) (an undo is
 the same record with `wont_do` false and `reason`, `text` and `covers` null, so a later rename of the reopened step cannot make the undo stop verifying; the nonce is random and fresh for every signing, so equal decisions get
 different MACs), a different prefix from the pending MAC so the two can never be confused, stored on the step as `wont_mac` (+
 `wont_nonce`). The MAC binds WHERE the decision belongs (a valid decision copied onto another ticket or step is not the person's) and
@@ -251,6 +253,56 @@ side dropped the decision, changed it, rewrote only the text or covers, garbled 
 deletion carries no proof; a person's removal is proven where it is made). Anything else is an agent's (reference
 `wontdo_is_human`, vectors `wont_do` and `ticket-merge-v1.json` rule `wont`).
 
+**Done needs a signed verdict** (`ticket.verdict` that makes a ticket Done, and the agent finish under the recorded `agents_may_finish` grant).
+**Invariant V1:** on a machine a ticket counts as Done only when it carries a verdict entry whose MAC is THIS core's own `verdict1` MAC over the
+ticket's current state AND is the CURRENT entry of this core's verdict ledger; every other raw `done` (an agent wrote it into the file, a peer
+brought it in through sync) is **Review** there. It is decided in one function (`humanproof.verdict_ok`, reference `verdict_is_human`, vectors
+`verdict`), applied in ONE read path (`tickets._effective`, called by `load` and `list_all`) and ONE write guard (`tickets._write`). The record
+is HMAC-SHA256(`human.key`, `"verdict1." + workspace id + "." + ticket id + "." + canonical JSON of {status, kind, checks, nonce[, person, at, line]}`), base64url:
+`status` is always `"done"`; `kind` is `"person"` (a proven verdict: page or terminal proof, the phone through the relay channel, the dev test
+human) or `"agent"` (an agent finished while the recorded grant was effective); `checks` is the sha256 hex of canonical JSON
+`[[step id, text, done is true, wont_do is true], ...]`, WHAT was accepted (a new, reworded or reopened step makes the verdict stop verifying, so
+the ticket is Review again; title, note, summary, outcome, history and evidence are not bound); `nonce` is 16 random hex, fresh per signing; `person`, `at` and `line` (only on a `kind: "person"` entry signed from #484 on, always all three, otherwise absent, never `null`) are the actor (`human:<name>`, at most 64 characters, the pattern `humanproof.ACTOR_PATTERN`) the UTC time of the signing and the digest of the history line the signing operation wrote, **inside the MAC**, so changing, adding or removing any makes the entry stop verifying. A
+different prefix from `pending1` and `wontdo1`, so the MACs can never be confused. The ticket stores `verdicts`: a list of at most 8
+`{kind, nonce, mac}` plus the optional `person`, `at` and `line` (`humanproof.VERDICT_FIELDS` + `VERDICT_OPTIONAL`, the single source the sync merge copies and a test drift-checks; a list, because a MAC can be checked only by the machine whose key made it: two machines that both accepted keep both
+entries, and one machine's signing never erases another's). **Freshness is the ledger's job:** `keys/<ws>/verdict.json` in the guarded home
+(`{"schema": "orch.verdict-ledger/1", "entries": {"<ticket id>": "<current mac>" | null}}`, 0600, written under the key lock, separate from
+`wont.json`) holds the CURRENT MAC per ticket; a MAC is accepted only when it IS the current entry, so replaying an older signed verdict, or the
+same file content after a reopen, does not verify. A missing, loose or damaged ledger vouches for nobody (fail closed); signing into a damaged
+ledger is refused with a plain message and nothing is half written. **Leaving Done needs no proof** (more work, never less): whenever the core
+writes a ticket whose status is not `done`, and whenever it reads a ticket whose file is not `done` (an agent edited it to active or review),
+it tombstones that ticket's entry (null) at that moment, so "edit to active, then back to done with the old verdict" is Review.
+Readers never rewrite the file: a raw `done` without a current verdict is shown as `review` with a computed `verdict_needed: true` (never stored);
+the writers keep a peer's raw `done` as it is while an unrelated op runs. Who signs: a person with a verified proof (the CLI `_verdict_who`
+returns `(who, proven)`; the phone through `relay._apply_review_answer`, the relay channel being the phone's proof), or an agent only while
+`agents_may_finish` is effective as a recorded grant (kind `agent`; revoking the grant later does not undo earlier agent Done tickets, new agent
+finishes go to Review); everyone else is refused, never an unsigned Done. **Sync:** `merge_ticket(..., verdict)` (`verdict(entry, ticket)` =
+`humanproof.verdict_verifier`: `"current"`, `"stale"` for the core's own MAC that is no longer current, else none; no verifier = nobody) never
+decides Done. `status` keeps the plain rule (both changed: FINAL wins; done with an open step: active); a peer's reopen wins by the normal
+three-way rule (lowering needs no proof, and the write that applies it tombstones the ledger entry). `verdicts`: every entry the core vouches for
+is the authority and is always kept, never changed or dropped, whatever a side did; the core's own stale entries are dropped; every other entry
+(another machine's, or one that cannot be checked here) is merged three-way by `mac`, deduplicated, sorted by `mac`, and capped so the total is
+at most 8, so the output is byte-identical with the sides swapped (vectors `ticket-merge-v1.json` rule `verdict`; a test fails if
+`orch_sync.merge` has drifted from `humanproof.VERDICT_FIELDS`). A Done made on another machine is Review here until a person
+here clicks Looks good (its MAC cannot be checked here: the same limit as a synced Won't do). A verified Won't do counts as resolved in `checks`;
+a Won't do the merge drops reopens its step, so the ticket is active and the verdict stops verifying. A peer agent's `kind: "agent"` entry never
+verifies here (the grant is ours).
+
+**Person history lines over sync (#484, F3).** Sync history attribution is directional (upstream = remote, mine = local). A history line that is
+in neither the base nor on this machine is **remote-only**; unless its `by` is a plain `agent:` label it is shown as `agent:sync` with the text
+prefixed "(synced, not verified here) ", EXCEPT when it is the line of a decision that is **new** in this merge. That means ALL of: (1) a decision
+THIS core verifies (a verdict entry the verdict verifier calls `current`, or a Won't do whose MAC is the current ledger entry) that carries a
+MAC-bound actor, time and line (`person` + `at` + `line` / `wont_by` + `wont_at` + `wont_line`) and was not already verified in the base or on this machine; (2) the line's
+`by` equals that actor; (3) its `{text, via}` is EXACTLY the line the decision's MAC binds (`line` = sha256 hex of canonical JSON `{"text", "via"}`, written by the signer from the history line its own operation adds, `humanproof.history_digest`; any other text, e.g. a "Patched <other fields> (status ... -> done)" line, or another `via` is not attributed); (4) its shape is the writer's exactly (only `at`, `by`, `via`, `text`, `chat_message` false; a `lost` field, `chat_message: true` or any other key means it is not the writer's line); (5) its `at` is within 5 seconds of the decision's `at`, and when several
+lines qualify the one closest to it is the decision's; (6) at most ONE line per decision (a replay, or a second line citing it, is demoted).
+**Legacy** decisions (no actor: signed before #484) still verify Done and Won't do exactly as before but authorise no history line. No migration:
+decisions signed from now on carry the actor. The step's plain `by` and `at` are the peer's input and never decide authorship. **Never demoted:**
+the person's own lines already on this machine, even unpushed ones (a returning demoted copy does not erase them). **Known limit (origin
+convergence):** a line that cannot be verified keeps its original on the machine that wrote it while the peer shows it demoted, so the two copies
+differ in that one line's attribution; history is display only and never an authority. Every other field merges byte-identically with the sides
+swapped (vectors `ticket-merge-v1.json` rule `person-history`). No migration: a raw `done` from before this core has no entry and shows as Review once; the person's Looks good
+signs it.
+
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).
 
@@ -264,6 +316,9 @@ proof is **W2b slice 1.0a** (tracked follow-up); this contract is its spec.
 - Patching the orch install, its Python environment, or tracing orch processes.
 - An agent scripting HTTP against the local page with a token it read from the orch home.
 - Phone verdicts signed with a device key enrolled at pairing and pinned in the orch home (today the relay channel proves them).
+- Verdicts verifiable on other machines: per-person or per-device signing keys, public keys pinned in each guarded home (for example Ed25519 enrolled at pairing). Today a Done made elsewhere is Review here until a person here clicks Looks good.
+- An agent reading `human.key` or editing `verdict.json` directly (same OS user, the Level 1 honest limit).
+- `dropped` is not gated: an agent can still drop a ticket (hides it as closed). It is not a Done; the same signed gate for `dropped` is a Level 1 follow-up.
 - An OS sandbox for agents (Level 2 epic, owner decision R1).
 
 ## Honest limit (Level 1, owner decision R1)

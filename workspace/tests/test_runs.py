@@ -187,7 +187,7 @@ def test_argv_resumes_only_this_agent_on_this_host(proj, new_ticket, run):
     # a session of another machine is not resumed
     tickets.record_session(proj, tid, "claude", "0a0a0a0a-0000-4000-8000-000000000000", "other-mac")
     t = tickets.load(proj, tid)
-    assert tickets.sessions_for(t, "claude", runs.host()) == "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
+    assert tickets.sessions_for(proj, tid, t, "claude", runs.host()) == "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     _choose(proj, "codex")
     j = json.loads(run("run", "argv", tid, "--json")[1])
     assert j["argv"][:5] == ["codex", "exec", "resume", "--json", "01a1ac76-7c05-70d2-824d-4854e0c9c3f8"]
@@ -323,7 +323,7 @@ def test_claim_by_hand_records_the_session(proj, new_ticket, run):
                        "--session", "f88ec2ca-0930-42dd-9d5e-00fbbd59067d", "--json")  # fmt: skip
     assert code == 0 and json.loads(out)["claimed"] is True
     assert (
-        tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host())
+        tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host())
         == "f88ec2ca-0930-42dd-9d5e-00fbbd59067d"
     )
     assert run("run", "release", tid)[0] == 0 and runs.read(proj, tid) is None
@@ -610,3 +610,23 @@ def test_plan_first_with_done_when_does_not_say_then_start(proj):
     assert "Which step, and what should change?" in prompt
     plain = tickets.create(proj, "Other", "human:me", fields={"done_when": "x"})
     assert "then start" in runs.fresh_prompt(plain, []).lower()
+
+
+@pytest.mark.parametrize("sid", ["-x", "--help"])
+@pytest.mark.parametrize("agent,mode", [("claude", "oneshot"), ("claude", "live"), ("codex", "oneshot")])
+@pytest.mark.parametrize("owned", [False, True])
+def test_option_like_session_never_resumed(proj, new_ticket, sid, agent, mode, owned):
+    tid = new_ticket()
+    ticket = tickets.load(proj, tid)
+    entry = {"id": sid, "agent": agent, "host": runs.host()}
+    ticket["sessions"] = [entry]
+    tickets.save(proj, ticket)
+    if owned:
+        path = proj / ".orch/run/own-sessions.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps([entry | {"ticket_id": tid, "first_seen": tickets.now()}]))
+        path.with_name("own-sessions.adopted").write_text("{}")
+    plan = runs.plan(proj, tid, agent=agent, mode=mode, hooks_file=str(proj / "hooks.json"))
+    assert not plan["resumed"]
+    assert plan["session"] != sid
+    assert sid not in plan["argv"]

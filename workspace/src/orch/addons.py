@@ -53,7 +53,7 @@ PAGE_PATH_RE = re.compile(r"/[A-Za-z0-9_./-]{0,200}")
 TOP_KEYS = frozenset(
     "schema orch_api name version description run skill agents_block ticket_ext background dashboard "
     "ticket_view recommended gitignore runs_agents requires needs page "
-    "ticket_links ticket_fields acts".split()
+    "ticket_links ticket_fields acts ticket_ext_inert".split()
 )
 EXT_SCHEMA_MAX = 32 * 1024
 # Built-in add-ons that ship inside the orch package (orch/builtin/<name>/orch-addon.toml): always installed,
@@ -61,7 +61,7 @@ EXT_SCHEMA_MAX = 32 * 1024
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
 # Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
-SHIPPED_ADDONS = ("automation", "dashboard", "focus")
+SHIPPED_ADDONS = ("automation", "dashboard", "focus", "sync")
 
 
 # ---------------------------------------------------------------- sources
@@ -303,12 +303,30 @@ def _trace_command() -> str:
     return " ".join(words)
 
 
+def _trace_log_path() -> Path:
+    """Where the fallback trace goes: a per-user file in the system temp folder, never under the real home
+    (the guard that warns about the real ~/.orch-tool must not write into it)."""
+    if hasattr(os, "getuid"):
+        who = str(os.getuid())
+    else:
+        import getpass
+
+        who = re.sub(r"[^A-Za-z0-9._-]", "_", getpass.getuser())
+    return Path(tempfile.gettempdir()) / f"orch-fallback-trace-{who}.log"
+
+
 def _trace_fallback(real: Path, reason: str) -> None:
-    """One line in <real>/.fallback-trace.log each time home() falls back to the real ~/.orch-tool, to find
-    who uses it. Best effort, never raises; refuses a symlinked folder or file (O_NOFOLLOW); mode 0600."""
+    """One line in the temp trace file (_trace_log_path) each time home() falls back to the real ~/.orch-tool,
+    to find who uses it. Opt-in by the environment only: ORCH_TRACE_FALLBACKS (anything but empty or 0).
+    Nothing under the real home is read or written for it (no marker file there); a temp folder inside the
+    real home turns the trace off. Best effort, never raises; refuses a symlinked file (O_NOFOLLOW) or one
+    owned by another user; mode 0600; emptied when over _TRACE_MAX."""
     try:
-        if real.is_symlink() or not (real / ".trace-fallbacks").is_file():
-            return  # opt-in per machine (a dev Mac): a normal install never writes it
+        if os.environ.get("ORCH_TRACE_FALLBACKS", "") in ("", "0"):
+            return  # off unless asked for (a dev shell): a normal install never writes it
+        log = _trace_log_path()
+        if _is_under(log.parent.resolve(), real.parent.resolve()):
+            return  # a temp folder inside the real home: write nothing (only the home itself is resolved)
         line = json.dumps(
             {
                 "time": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -319,32 +337,19 @@ def _trace_fallback(real: Path, reason: str) -> None:
                 "reason": reason,
             }
         )
-        real.mkdir(parents=True, exist_ok=True, mode=0o700)
-        log = real / ".fallback-trace.log"
-        try:
-            if not log.is_symlink() and log.stat().st_size > _TRACE_MAX:
-                # a unique name first, so two processes rotating at once can not drop a generation
-                tmp = real / f".fallback-trace.log.tmp-{os.getpid()}-{secrets.token_hex(4)}"
-                try:
-                    os.replace(log, tmp)
-                    os.replace(tmp, real / ".fallback-trace.log.1")
-                except OSError:
-                    for f in (tmp, log):  # rotation failed: never let the log grow without a bound
-                        try:
-                            if not f.is_symlink() and f.exists():
-                                os.truncate(f, 0)
-                        except OSError:
-                            pass
-        except OSError:
-            pass
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
         flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         fd = os.open(log, flags, 0o600)
         try:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
                 return  # a FIFO or device there must not block or feed orch
+            if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                return  # a shared temp folder: another user's file is not ours to write
             if hasattr(os, "fchmod"):
                 os.fchmod(fd, 0o600)
+            if st.st_size > _TRACE_MAX:
+                os.ftruncate(fd, 0)  # bounded: start over instead of keeping old generations
             os.write(fd, (line + "\n").encode("utf-8"))
         finally:
             os.close(fd)
@@ -362,8 +367,8 @@ def home_candidates() -> list[Path]:
 def home(root: Path | None = None) -> Path:
     """The user's orch folder: ORCH_HOME when trusted (see _untrusted_rule), else ~/.orch-tool.
     ORCH_HOME_STRICT (anything but empty or 0, for tests and e2e) makes every fallback an error: ORCH_HOME
-    unset or empty, untrusted, or aimed at the real folder. Every other fallback leaves one line in
-    ~/.orch-tool/.fallback-trace.log."""
+    unset or empty, untrusted, or aimed at the real folder. Every other fallback leaves one line in the temp
+    trace file when ORCH_TRACE_FALLBACKS is set (see _trace_fallback; nothing under the real home is used)."""
     real = real_home() / ".orch-tool"
     env = os.environ.get("ORCH_HOME")
     strict = os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
@@ -618,7 +623,9 @@ def _install_tool(entries: list[dict]) -> None:
     plan = _reinstall_plan()
     if plan is None and not _reinstall_anywhere():
         raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
-    with _pinned_tool_dir(Path(sys.prefix), plan is not None):
+    from orch import winfinish
+
+    with winfinish.replacing(home()), _pinned_tool_dir(Path(sys.prefix), plan is not None):
         run_uv(_tool_args(entries))
     if plan and ((plan["env"] / "bin").exists() or (plan["env"] / "Scripts").exists()):
         humanproof.write_install_record(plan["env"], plan["kind"])
@@ -634,10 +641,20 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
     tool_env_change_ok()
     if not winfinish.needed():
         _install_tool(entries)
-        if save:
-            _save_registry(entries)
-        for t in then:
-            reexec(t)
+        path = registry_path()
+        before = path.read_bytes() if save and path.exists() else None
+        try:
+            if save:
+                _save_registry(entries)  # discovery in the project step needs the new entries
+            for t in then:
+                reexec(t)
+        except Exception:
+            if save:
+                if before is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_bytes(before)
+            raise
         return True
     if winfinish.pending(home()):
         raise Refused(
@@ -887,7 +904,7 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         ):
             raise _bad("a [[ticket_view]] row needs field, label and format")
     m["ticket_view"] = tv
-    for key in ("recommended", "runs_agents", "needs"):
+    for key in ("recommended", "runs_agents", "needs", "ticket_ext_inert"):
         if not isinstance(m.setdefault(key, False), bool):
             raise _bad(f"{key} is true or false")
     gi = m.setdefault("gitignore", [])
@@ -1394,6 +1411,7 @@ class _Batch:
 
 
 # A ContextVar, not a module global: another thread (e.g. a dashboard hand-off) never joins this batch.
+# Asyncio tasks inherit this value: keep the scope synchronous and do not spawn tasks inside it.
 _BATCH: contextvars.ContextVar[_Batch | None] = contextvars.ContextVar("orch_addon_batch", default=None)
 
 

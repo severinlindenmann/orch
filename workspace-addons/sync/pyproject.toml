@@ -3,7 +3,16 @@ name = "orch-sync"
 version = "0.1.0"
 description = "orch sync add-on: keeps the workspace state in a git repo (merge and secret scan, step 2)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["orch-workspace", "jsonschema>=4", "rfc3339-validator"]
+
+[tool.uv.sources]
+orch-workspace = { path = "../../workspace", editable = true }
+
+[project.scripts]
+orch-sync = "orch_sync.cli:main"
+
+[project.entry-points."orch.addons"]
+sync = "orch_sync"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-xdist>=3", "ruff>=0.6", "jsonschema>=4", "rfc3339-validator"]
@@ -17,3 +26,10 @@ packages = ["src/orch_sync"]
 
 [tool.ruff]
 line-length = 110
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../contracts/ticket.schema.json" = "orch_sync/schemas/ticket.schema.json"
+"../../contracts/addons/automation/ext.schema.json" = "orch_sync/schemas/addons/automation/ext.schema.json"
+"../../contracts/addons/focus/ext.schema.json" = "orch_sync/schemas/addons/focus/ext.schema.json"
+
+"../../contracts/addons/sync/ext.schema.json" = "orch_sync/schemas/addons/sync/ext.schema.json"

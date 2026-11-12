@@ -36,7 +36,8 @@
     const hasStarted = t.started || v.run.run || ['review', 'done'].includes(t.status);
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Stop' : 'Continue';
-    els.compose.hidden = v.state === 'done' || (S.state.tab === 1 && t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    els.stop.setAttribute('aria-label', running ? 'Stop' : 'Continue');
+    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (S.state.tab === 1 && t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
@@ -56,6 +57,8 @@
     S.views.live.renderFeed(v, !S.state.firstRender);
     S.views.live.renderQuestions(v);
     S.views.ticket.renderProof(v);
+    S.views.used.renderUsed(v);
+    S.views.used.renderFiles(v);
     S.views.live.renderLine(v);
     S.views.live.renderWorking(v);
     S.views.session.tickTimer();
@@ -76,8 +79,18 @@
     const narrow = matchMedia('(max-width: 720px)');
     if (narrow.matches) toggleRail();
     narrow.addEventListener('change', e => { root.classList.toggle('rail-closed', e.matches); els.rail.setAttribute('aria-expanded', String(!e.matches)); els.mobileTasks.setAttribute('aria-expanded', String(!e.matches)); });
+    /* Phone width: "Add a task" folds behind "+" (the form shows while .fx-adding is set; wide screens always show it). */
+    const toggleAdd = force => {
+      const open = force === undefined ? !root.classList.contains('fx-adding') : force;
+      root.classList.toggle('fx-adding', open);
+      els.addToggle.setAttribute('aria-expanded', String(open));
+      if (open) els.addInput.focus(); else els.addToggle.focus();
+    };
+    els.addInput.addEventListener('keydown', e => { if (e.key === 'Escape' && root.classList.contains('fx-adding') && narrow.matches) { e.preventDefault(); toggleAdd(false); } });
+    /* The composer is pinned at the bottom on a phone: the pane keeps that much room below its last row. */
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => root.style.setProperty('--fx-compose-h', els.compose.offsetHeight + 'px')).observe(els.compose);
     const toggleHelp = force => { els.help.hidden = force === undefined ? !els.help.hidden : !force; if (!els.help.hidden) els.help.querySelector('button').focus(); else els.moreBtn.focus(); };
-    const selectTab = i => { S.state.tab = i; els.review.hidden = i !== 1 || S.state.view?.ticket.status !== 'review' || S.state.view?.run.running || S.state.view?.state === 'needs'; els.compose.hidden = S.state.view?.state === 'done' || (i === 1 && S.state.view?.ticket.status === 'review' && !S.state.changesRequested); els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; }); };
+    const selectTab = i => { S.state.tab = i; els.review.hidden = i !== 1 || S.state.view?.ticket.status !== 'review' || S.state.view?.run.running || S.state.view?.state === 'needs'; els.compose.hidden = S.state.view?.state === 'done' || i >= 2 || (i === 1 && S.state.view?.ticket.status === 'review' && !S.state.changesRequested); els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; }); };
     els.tabs.forEach((b, i) => b.addEventListener('click', () => selectTab(i)));
     const setPopover = (panel, button, open) => {
       panel.hidden = !open;
@@ -119,6 +132,8 @@
       const a = e.target.closest('[data-act]')?.dataset.act;
       if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
       else if (a === 'answer') S.views.live.focusQuestion(); else if (a === 'stop') S.views.live.stopToggle(); else if (a === 'fresh') S.views.live.startFresh(); else if (a === 'attach') S.views.session.showAttach();
+      else if (a === 'add-task') toggleAdd();
+      else if (a === 'all-work') { S.views.used.pickAgent(null, false); const head = els.feed.querySelector('h2'); if (head) { head.tabIndex = -1; head.focus(); } }
       else if (a === 'changes') { S.state.changesRequested = true; els.compose.hidden = false; els.msg.placeholder = 'What would you like changed?'; els.msg.focus(); }
       else if (a === 'done') {
         const button = e.target.closest('button'); button.disabled = true;
@@ -170,7 +185,7 @@
       else if (k === '/') { e.preventDefault(); els.msg.focus(); }
       else if (k === 's' || k === 'S') S.views.live.stopToggle();
       else if (k === 'j' || k === 'k') { const n = S.state.view ? S.state.view.ticket.checklist.length : 0; if (n) { cur = (S.state.sel + (k === 'j' ? 1 : -1) + n) % n; S.state.sel = cur; els.tasks.dataset.k = ''; els.tasks.dataset.picked = '1'; S.views.ticket.renderTasks(S.state.view); els.tasks.querySelectorAll('.fx-task')[S.state.sel]?.focus(); } }
-      else if (k === '1' || k === '2') selectTab(+k - 1);
+      else if (k === '1' || k === '2' || k === '3' || k === '4') selectTab(+k - 1);
     });
   }
 

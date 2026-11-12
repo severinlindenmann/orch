@@ -11,7 +11,6 @@ import json
 import os
 import re
 import secrets
-import signal
 import subprocess
 import sys
 import time
@@ -107,7 +106,11 @@ def start(root: Path, port: int | None = None) -> dict:
     d = _dir(root)
     nonce = secrets.token_hex(16)
     ready = d / f"ready-{nonce[:12]}.json"
-    kw = {"creationflags": 0x00000208} if os.name == "nt" else {"start_new_session": True}
+    from orch.procs import background_popen_kwargs, wait_port_free
+
+    if not wait_port_free(port or DEFAULT_PORT) and port:
+        raise RuntimeError(f"Something else answers on port {port}; try again in a moment.")
+
     # -P: the workspace folder is never on the import path (a planted orch_dashboard.py there is not run)
     root = root.resolve()
     cmd = [
@@ -128,9 +131,8 @@ def start(root: Path, port: int | None = None) -> dict:
             cwd=root,
             stdout=out,
             stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
             env={**os.environ, "ORCH_ROOT": str(root.resolve()), "ORCH_DASHBOARD_NONCE": nonce},
-            **kw,
+            **background_popen_kwargs(),
         )
     try:
         end = time.time() + 15
@@ -159,13 +161,16 @@ def start(root: Path, port: int | None = None) -> dict:
 
 def stop(root: Path) -> str:
     """ "stopped", "not running", or "not verified" (a pid file that is not our dashboard: nothing is signalled)."""
-    had = _record(root) is not None
-    cur = running(root)
-    if not cur:
-        return "not verified" if had else "not running"
-    try:
-        os.kill(cur["pid"], signal.SIGTERM)  # the server itself (on Windows: TerminateProcess of the server)
-    except OSError:
-        pass
+    from orch.procs import stop_tree
+
+    rec = _record(root)
+    if not rec:
+        return "not running"
+    if not stop_tree(
+        rec["pid"],
+        verified=lambda: _is_ours(root, rec["pid"], rec["port"], rec["nonce"], rec["started"]),
+    ):
+        runfiles.remove(_dir(root) / "server.json")
+        return "not verified"
     runfiles.remove(_dir(root) / "server.json")
     return "stopped"

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import os
+import signal
+import socket
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+
+_run = subprocess.run  # module-local seam: tests must not patch subprocess.run for other threads
 
 
 def orch_python_argv(*args: str) -> list[str]:
@@ -15,6 +20,66 @@ def orch_python_argv(*args: str) -> list[str]:
     (and ignores PYTHON* variables), or a planted orch.py / json.py in a workspace would run as the user.
     Every `-m orch` spawn uses this."""
     return [sys.executable, "-I", "-P", "-m", "orch", *args]
+
+
+def background_popen_kwargs() -> dict[str, int | bool]:
+    """Start a background process without a visible Windows console; callers supply log streams.
+
+    Windows: CREATE_NO_WINDOW gives the process a hidden console that its children inherit. Not
+    DETACHED_PROCESS: Windows ignores CREATE_NO_WINDOW next to it, and a venv's python.exe is a launcher
+    whose real-python child then allocates a NEW (visible) console, which is the stray terminal window."""
+    if sys.platform == "win32":
+        return {
+            "creationflags": 0x00000200 | 0x08000000,  # CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+            "stdin": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+    return {"start_new_session": True, "stdin": subprocess.DEVNULL}
+
+
+def stop_tree(pid: int, *, verified: Callable[[], bool]) -> bool:
+    """Stop only a recorded service, after its caller's full identity check.
+
+    Windows venv launchers can leave children behind: taskkill includes descendants of this pid.
+    Never walk up to a parent (which may not be ours). POSIX retains single-pid SIGTERM.
+    A taskkill failure is surfaced so callers keep the record for a later stop attempt.
+    """
+    if type(pid) is not int or pid <= 1 or not verified():
+        return False
+    if sys.platform == "win32":
+        try:
+            _run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                timeout=5,
+                check=True,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError("The service could not be stopped. Try again in a moment.") from exc
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    return True
+
+
+def wait_port_free(port: int, timeout: float = 5.0) -> bool:
+    """Allow an exiting local server time to release its listening port before starting another."""
+    end = time.monotonic() + timeout
+    while True:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                pass
+        except ConnectionRefusedError:
+            return True
+        except OSError:
+            pass  # an inconclusive probe does not establish that the port is free
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.1, remaining))
 
 
 def _iso(ts: float) -> str:

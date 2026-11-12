@@ -303,8 +303,6 @@ def _group_title(root: Path, group: str, host: str | None = None) -> str:
 
 def _member_parts(root: Path, host: str, group: str) -> dict:
     """Card parts for an act in a joined group: its title (matched on host AND id) and the host's name."""
-    from orch import relay
-
     return {
         "title": humanproof.part(_group_title(root, group, host)),
         "host": humanproof.part(relay.name_of(root, host)),
@@ -325,7 +323,7 @@ def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
     by, sub = tickets.current_actor(), args.gsub
-    tid = tickets.resolve(root, getattr(args, "ticket", None)) if hasattr(args, "ticket") else None
+    tid = tickets.resolve_cli(root, args.ticket, json_output=args.json) if hasattr(args, "ticket") else None
     ws = relay.resolve(root, args.workspace) if hasattr(args, "workspace") else None
     if sub == "list":
         v = cg.view(root)

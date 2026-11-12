@@ -71,6 +71,46 @@ def test_types_and_coverage():
         assert len(collector.feed(item(typ))) == 1
 
 
+def test_file_change_files_relative_to_the_workspace():
+    changes = [
+        {"path": "/work/proj/src/app.py", "kind": "update"},
+        {"path": "/work/proj/tests/test_app.py", "kind": "add"},
+        {"path": "/etc/hosts", "kind": "update"},
+        {"path": "/work/proj/../x.py", "kind": "add"},
+        {"path": "docs/readme.md", "kind": "add"},
+        {"path": "/work/proj/src/app.py", "kind": "update"},
+        "not a change",
+        {"kind": "delete"},
+    ]
+    edit = mapper(workspace="/work/proj").feed(item("file_change", changes=changes, status="completed"))[0]
+    assert edit["files"] == ["src/app.py", "tests/test_app.py", "docs/readme.md"]
+    assert edit["text"] == "Edit /work/proj/src/app.py"
+    many = [{"path": f"/work/proj/f{n}"} for n in range(12)]
+    assert mapper(workspace="/work/proj").feed(item("file_change", changes=many))[0]["files"] == [
+        f"f{n}" for n in range(8)
+    ]
+    outside = mapper(workspace="/work/proj").feed(item("file_change", changes=[{"path": "/etc/hosts"}]))[0]
+    assert "files" not in outside
+    assert "files" not in mapper().feed(item("file_change", changes=[{"path": "/work/proj/a.py"}]))[0]
+    assert (
+        "files" not in mapper(workspace="/work/proj").feed(item(command="cat /work/proj/a.py", path="a"))[0]
+    )
+
+
+def test_map_stream_takes_the_workspace_from_ctx():
+    line = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {"id": "i1", "type": "file_change", "changes": [{"path": "/w/p/a.py"}]},
+        }
+    )
+    (event,) = map_stream([line], dict(CTX, workspace="/w/p"))
+    assert event["files"] == ["a.py"]
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads((ROOT / "contracts/activity.schema.json").read_text())
+    jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(event)
+
+
 @pytest.mark.parametrize("unsafe", ["bad/id", "z" * 161, "bad\n"])
 def test_stable_ids(unsafe):
     lines = [
@@ -87,7 +127,7 @@ def test_stable_ids(unsafe):
     assert first[3]["id"] == "r_cx00001:2:item_0"
     expected = "x_" + hashlib.sha256(f"r_cx00001:2:{unsafe}".encode()).hexdigest()[:32]
     assert first[4]["id"] == expected
-    assert first[4]["detail"] == f"detail/r_cx00001/{expected}.json"
+    assert first[4]["detail"] == f"detail/r_cx00001/{detail_name('r_cx00001', 'step', expected)}.json"
     assert first[5]["id"] == "r_cx00001:6"
     assert [e["seq"] for e in first] == list(range(1, 7))
     assert all(e["session"] is None for e in first)
@@ -95,7 +135,7 @@ def test_stable_ids(unsafe):
 
 @pytest.mark.parametrize("case", VECTORS["detail_names"])
 def test_detail_names(case):
-    assert detail_name(case["id"]) == case["file"]
+    assert detail_name(case["run"], case["kind"], case["id"]) == case["file"]
 
 
 @pytest.mark.parametrize("line", ["", "not json", "[]", b"\xff", "null", "42", '{"item":[]}'])

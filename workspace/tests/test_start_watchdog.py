@@ -36,7 +36,8 @@ def _stub(tmp_path, monkeypatch, hang_first: bool):
     f.write_text(
         "#!/bin/sh\n"
         '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'
-        f'echo "$*" | tr "\\n" " " >> {shlex.quote(str(calls))}; echo >> {shlex.quote(str(calls))}\n'
+        '[ "$1" = "--version" ] && { echo "2.1.0 (Claude Code)"; exit 0; }\n'
+        f'printf "%s " "$@" | tr "\\n" " " >> {shlex.quote(str(calls))}; echo >> {shlex.quote(str(calls))}\n'
         + (
             f"if [ ! -f {shlex.quote(str(first))} ]; then : > {shlex.quote(str(first))}; "
             "trap '' TERM; sleep 30; exit 0; fi\n"
@@ -76,7 +77,7 @@ def test_a_start_with_no_sign_of_life_is_stopped_and_started_fresh(proj, run, tm
     ids = [re.search(r"--session-id (\S+)", ln).group(1) for ln in lines]
     assert ids[0] != ids[1]
     # the hung one is never kept; the one that worked is
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) == ids[1]
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host()) == ids[1]
     assert any("no sign of life" in h["text"] for h in tickets.load(proj, tid)["history"])
 
 
@@ -105,7 +106,7 @@ def test_a_new_session_the_tool_did_not_save_is_not_kept(proj, run, tmp_path, mo
     _session_dir(proj)  # folder there, the stub writes no conversation file
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
-    assert tickets.sessions_for(tickets.load(proj, tid), "claude", runs.host()) is None
+    assert tickets.sessions_for(proj, tid, tickets.load(proj, tid), "claude", runs.host()) is None
 
 
 def test_a_quiet_generic_agent_is_not_stopped(proj, run, monkeypatch, gen):
@@ -145,6 +146,7 @@ def test_input_is_kept_when_the_fresh_start_after_a_missing_session_hangs(proj, 
     f.write_text(
         "#!/bin/sh\n"
         '[ "$1" = "--help" ] && { echo "choices: auto"; exit 0; }\n'
+        '[ "$1" = "--version" ] && { echo "2.1.0 (Claude Code)"; exit 0; }\n'
         'for a in "$@"; do [ "$a" = "--resume" ] && '
         '{ echo "No conversation found with session ID: x"; exit 1; }; done\n'
         "sleep 30; exit 0\n"

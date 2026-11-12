@@ -28,6 +28,22 @@ def test_state_reads_contract_ticket(ws):
     assert len(t["checklist"]) == 3 and t["questions"][0]["answer"] is None
 
 
+def test_state_rev_covers_every_ticket_field(ws):
+    """The page re-renders when `rev` changes: it is a hash of the whole state, so a ticket that only gets `work`
+    (its separate copy) or any other field still changes it; the clock alone does not."""
+    f = ws / ".orch" / "tickets" / "t_7k3f9q.json"
+    before = load_state(ws)["rev"]
+    assert load_state(ws)["rev"] == before
+    t = json.loads(f.read_text())
+    t["work"] = {"folders": [{"branch": "orch/t_7k3f9q", "base": "abc", "sub": "", "host": "m"}]}
+    f.write_text(json.dumps(t))
+    with_copy = load_state(ws)["rev"]
+    assert with_copy != before
+    t["work"]["folders"][0]["sub"] = "app"
+    f.write_text(json.dumps(t))
+    assert load_state(ws)["rev"] not in (before, with_copy)
+
+
 def test_scheduler_is_not_a_dashboard_concept(ws):
     s = load_state(ws)
     assert "scheduler" not in s and s["addons"] == []  # no orch command, no add-ons: no trace of any add-on
@@ -322,6 +338,48 @@ def test_artifact_list_says_unavailable_when_orch_cannot_list(ws, act_orch):
         "files": [],
     }  # the fake exits 0 with no list
     assert ticketfiles.listing(ws, None, "t_other000x")["available"] is False
+
+
+def test_artifact_list_from_the_real_core_for_a_ticket_with_only_artifacts(tmp_path):
+    """#351: a ticket whose only files are in its artifacts folder (no evidence/, no proofs) lists them, end
+    to end through the real `orch ticket artifacts --json` (a workspace made by `orch init` + `ticket new`)."""
+    import os
+    import subprocess
+    import sys
+
+    from orch_dashboard import ticketfiles
+
+    pytest.importorskip("cryptography")  # the real CLI runs in a subprocess; this venv may lack the core deps
+    command = tmp_path / "orch-core"
+    src = Path(__file__).resolve().parents[3] / "workspace" / "src"
+    command.write_text(
+        f"#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(src)!r})\n"
+        "from orch.cli import main\nraise SystemExit(main())\n"
+    )
+    command.chmod(0o700)
+    root = tmp_path / "Demo"
+    root.mkdir()
+    env = {k: v for k, v in os.environ.items() if k not in ("ORCH_ROOT", "ORCH_BIN")}
+
+    def orch(*argv):
+        r = subprocess.run(
+            [str(command), *argv], check=False, cwd=root, capture_output=True, text=True, env=env
+        )
+        assert r.returncode == 0, r.stderr + r.stdout
+        return r.stdout
+
+    orch("init", "--yes", "--json")
+    tid = json.loads(orch("ticket", "new", "Demo with files", "--json"))["id"]
+    d = root / ".orch" / "tickets" / tid
+    (d / "artifacts" / "sub").mkdir(parents=True)
+    (d / "artifacts" / "report.md").write_text("# report")
+    (d / "artifacts" / "sub" / "data.csv").write_text("a,b\n")
+    assert not (d / "evidence").exists()
+    got = ticketfiles.listing(root, str(command), tid)
+    assert got["available"] is True
+    assert sorted(f["name"] for f in got["files"]) == ["report.md", "sub/data.csv"]
+    assert {f["name"]: f["size"] for f in got["files"]} == {"report.md": 8, "sub/data.csv": 4}
+    assert all(f["mtime"] for f in got["files"])
 
 
 def test_files_are_shown_as_text_or_picture_only(art):
@@ -738,3 +796,16 @@ def test_state_preserves_started(ws):
     result = next(t for t in load_state(ws)["tickets"] if t["id"] == ticket["id"])
     assert result["started"] is True
     assert result["status"] == "ready"
+
+
+def test_standalone_fallback_shows_a_raw_done_as_review(tmp_path):
+    """Without the orch core nothing can verify a signed verdict (V1): a raw `done` file reads as Review."""
+    from orch_dashboard import data
+
+    folder = tmp_path / ".orch" / "tickets"
+    folder.mkdir(parents=True)
+    t = json.loads((Path(__file__).parents[3] / "contracts" / "review" / "ticket.example.json").read_text())
+    t.update(id="t_abc123", title="Export", status="done")
+    (folder / "t_abc123.json").write_text(json.dumps(t))
+    tickets, _skipped = data.load_tickets(tmp_path, orch_bin=None)
+    assert [(x["id"], x["status"], x["verdict_needed"]) for x in tickets] == [("t_abc123", "review", True)]

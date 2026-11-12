@@ -1146,7 +1146,7 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
         return f"not applied to {tid}: not the current review", None
     try:
         if ans.casefold() == "accept":
-            tickets.accept_review(root, tid, by, via)
+            tickets.accept_review(root, tid, by, via, proven=True)  # the relay channel is the phone's proof
             return f"accepted {tid} (via {via})", tid
         tickets.ask_for_changes(root, tid, ans, by, via=via, phone=frm, pid="p_" + str(msg["id"])[2:])
         return f"asked for changes on {tid} (via {via})", tid
@@ -1720,20 +1720,25 @@ def frm_of(root: Path, mid: str, who: str) -> str:
     return "phones"
 
 
-def _chat_record(root: Path, mid: str, body: dict) -> None:
-    """A phone text in Chat goes to its day file (History). Never fails the intake."""
+def _chat_record(root: Path, mid: str, body: dict, frm: str | None = None, final: bool = False) -> None:
+    """Keep Chat before completing intake; retry temporary failures until the last attempt."""
     from orch import chat
 
     spoken = body.get("voice", {}).get("transcript", "") if isinstance(body.get("voice"), dict) else ""
     text = str(body.get("text") or spoken or "")
     if not text.strip():
         return
-    with contextlib.suppress(Refused, OSError, ValueError):
-        frm = frm_of(root, mid, "")
+    try:
+        frm = frm or frm_of(root, mid, "")
         if re.fullmatch(r"ph_[a-z0-9]{10}", frm):
             chat.record(root, mid, "you", "phone", text, phone=frm)
         elif re.fullmatch(r"ws_[a-z0-9]{10}", frm):  # never "you": only a paired phone speaks as the person
             chat.record(root, mid, frm, "workspace", text)
+    except (Refused, OSError, ValueError) as exc:
+        busy = isinstance(exc, Refused) and str(exc).startswith("Ticket chat is busy (")
+        if not final and (isinstance(exc, OSError) or busy):
+            raise Transient("The Chat message could not be saved.") from exc
+        log_send_failure(root, f"Chat message {mid} could not be saved", exc)
 
 
 def _continue(
@@ -1763,7 +1768,7 @@ def _continue(
             "You are this workspace's helper: you may make tickets, notes and answers, never sign, approve, "
             "close or delete anything.)"
         )
-        _chat_record(root, mid, body)
+        _chat_record(root, mid, body, frm, final=final)
     runs.pending_add(root, tid, who, "message", text, "phone", "p_" + mid[2:], phone=frm)
 
     def op(t):
@@ -1809,7 +1814,8 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     body = msg.get("body") if isinstance(msg.get("body"), dict) else {}
     who = _line(name_of(root, frm), 100) or _line(frm, 100)
     by = _by_relay(frm)
-    general = body.get("general") is True and not msg.get("ticket")
+    # A phone may address General by ticket id instead of body.general; both belong in the Chat day log.
+    general = (body.get("general") is True and not msg.get("ticket")) or _is_general(root, msg.get("ticket"))
     tid = _ticket_by_message(root, mid)
     if tid is not None and _relay_ext(root, tid).get("message") != mid:
         # a re-run of a text that continued a ticket: only an ack that did not go out is still sent

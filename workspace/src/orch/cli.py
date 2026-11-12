@@ -675,15 +675,17 @@ def _is_verdict(root: Path, args, tid: str, status) -> bool:
         return False
 
 
-def _verdict_who(root: Path, args, tid: str, data: str, by: str, shown: str = "") -> str:
-    """The person's proof for a verdict (or the plain actor when the change is no verdict)."""
+def _verdict_who(root: Path, args, tid: str, data: str, by: str, shown: str = "") -> tuple[str, bool]:
+    """(actor, proven): the person's proof for a verdict, or the plain actor when the change is no verdict.
+    `proven` is True only when person_by verified a person for this verdict; it is what lets
+    tickets.set_status / patch sign a Done."""
     try:
         status = json.loads(data).get("status")
     except (ValueError, AttributeError):
         status = None
     if not _is_verdict(root, args, tid, status):
-        return by
-    return humanproof.person_by(
+        return by, False
+    who = humanproof.person_by(
         root,
         args,
         "ticket.verdict",
@@ -691,6 +693,7 @@ def _verdict_who(root: Path, args, tid: str, data: str, by: str, shown: str = ""
         parts=humanproof.status_parts(root, tid, data),
         value=shown,  # only a word of the command itself
     )
+    return who, who.startswith("human:")
 
 
 def run(args: argparse.Namespace) -> None:
@@ -829,8 +832,8 @@ def run(args: argparse.Namespace) -> None:
         t = _visible(root, tickets.load(root, args.id))
         _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
-        who = _verdict_who(root, args, args.id, json.dumps({"status": args.status}), by())
-        t = tickets.set_status(root, args.id, args.status, who)
+        who, proven = _verdict_who(root, args, args.id, json.dumps({"status": args.status}), by())
+        t = tickets.set_status(root, args.id, args.status, who, proven)
         warn = _child_warning(root, t)
         _out(
             args,
@@ -892,10 +895,10 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.ask_for_changes(root, args.id, args.text, who, proven=who.startswith("human:"))
         _out(args, t, f"{t['title']} - sent back with your note. An agent picks it up.")
     elif cmd == "ticket" and sub == "patch":
-        who = _verdict_who(
+        who, proven = _verdict_who(
             root, args, args.id, args.data, by(), args.data
         )  # Looks good needs the person's proof
-        t = tickets.patch(root, args.id, args.if_revision, args.data, who)
+        t = tickets.patch(root, args.id, args.if_revision, args.data, who, proven)
         warn = _child_warning(root, t)
         _out(
             args,
@@ -1150,10 +1153,16 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
         return
     for c, name in _TICKET_ARGS:
         if c == cmd and isinstance(getattr(args, name, None), str):
-            setattr(args, name, tickets.resolve(root, getattr(args, name)))
+            setattr(
+                args,
+                name,
+                tickets.resolve_cli(root, getattr(args, name), json_output=getattr(args, "json", False)),
+            )
     on = getattr(args, "on", None)
     if cmd in ("ticket", "wait") and isinstance(on, str) and on.startswith("ticket:"):
-        args.on = "ticket:" + tickets.resolve(root, on[len("ticket:") :])
+        args.on = "ticket:" + tickets.resolve_cli(
+            root, on[len("ticket:") :], json_output=getattr(args, "json", False)
+        )
 
 
 def main(argv: list[str] | None = None, watchdog=None) -> int:
@@ -1163,6 +1172,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
+    if argv[:2] == ["record", "hook"]:  # a tool's hook: exit 0 whatever happens (only --strict refuses)
+        return cli_record.hook_main(argv, watchdog)
     humanproof.CURRENT_ARGV = list(argv)  # what a hand-off to the dashboard will run (H1)
     show_all = "--help-all" in argv
     argv = ["--help" if a == "--help-all" else a for a in argv]

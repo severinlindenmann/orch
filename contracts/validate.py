@@ -5,7 +5,7 @@ phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (ve
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
-With kinds (activity, secrets, jobs, blocks, inventory, addon-manifest, screen, counts, human, proposal) only those draft-02 checks run.
+With kinds (activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal) only those draft-02 checks run.
 """
 import base64
 import hashlib
@@ -16,6 +16,7 @@ import sys
 import tomllib
 import types
 import unicodedata
+import urllib.parse
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -201,7 +202,6 @@ def _core_clean(*names):
 
 # --- activity (activity.md) ------------------------------------------------------------------------------------------
 EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
-FILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 PRECEDENCE = {"hook": 2, "broker": 2, "job": 2, "core": 2, "log": 1}
 
 
@@ -214,18 +214,32 @@ def act_event_id(tool_call_id, run, seq):
     return "x_" + hashlib.sha256(tool_call_id.encode()).hexdigest()[:32]
 
 
-def act_detail_name(event_id):
-    return event_id if FILE_ID.match(event_id) else "x_" + hashlib.sha256(event_id.encode()).hexdigest()[:32]
+def act_detail_name(run, kind, event_id):
+    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/1\\0" run \\0 kind \\0 id)."""
+    data = b"orch.detail/1\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id))
+    return hashlib.sha256(data).hexdigest()[:32]
 
 
 def act_dedupe(lines):
-    """Indices of the lines readers keep: per (run, id, kind, finished) the highest precedence, ties -> first written."""
-    best = {}
-    for i, ln in enumerate(lines):
-        key = (ln["run"], ln["id"], ln["kind"], ln.get("outcome") is not None)
-        if key not in best or PRECEDENCE[ln["via"]] > PRECEDENCE[lines[best[key]]["via"]]:
-            best[key] = i
-    return sorted(best.values())
+    """Only hook/log share an origin; disagreeing finished outcomes both survive."""
+    kept = []
+    def key(line):
+        via = line["via"]
+        return (line["run"], line["id"], line["kind"], line.get("outcome") is not None,
+                "hl" if via in ("hook", "log") else via)
+    def conflict(a, b):
+        return ({a["via"], b["via"]} == {"hook", "log"} and a.get("outcome") is not None
+                and b.get("outcome") is not None
+                and any(a["outcome"].get(k) != b["outcome"].get(k) for k in ("ok", "error")))
+    for i, line in enumerate(lines):
+        matches = [j for j in kept if key(lines[j]) == key(line)]
+        if any(lines[j]["via"] == line["via"] for j in matches):
+            continue
+        if any(conflict(lines[j], line) for j in matches):
+            kept.append(i)
+        elif not any(lines[j]["via"] == line["via"] or lines[j]["via"] == "hook" for j in matches):
+            kept = [j for j in kept if j not in matches] + [i]
+    return sorted(kept)
 
 
 def _t(s):
@@ -278,6 +292,46 @@ def act_write_allowed(case):
     return False
 
 
+FILES_MAX, FILE_LEN = 8, 260
+
+
+def act_file_ok(p):
+    """One `files` entry (activity.md, Files): workspace-relative POSIX path, 1..260 chars, NFC, no leading /,
+    no .. segment, no backslash, no start with ~ $ or a scheme/drive (file: C:), no Unicode Cc, Cf, Zl, Zp."""
+    return (isinstance(p, str) and 1 <= len(p) <= FILE_LEN and unicodedata.is_normalized("NFC", p)
+            and not p.startswith("/") and not re.match(r"[~$]|[A-Za-z][A-Za-z0-9+.-]*:", p) and "\\" not in p
+            and ".." not in p.split("/")
+            and not any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in p))
+
+
+def act_files_store(kind, files):
+    """What the writer stores: None = no `files` field (not a step, not a list); else the valid entries, first 8."""
+    if kind != "step" or not isinstance(files, list):
+        return None
+    return [p for p in files if act_file_ok(p)][:FILES_MAX]
+
+
+def act_workspace_file(path, root):
+    """Producer normalisation (collectors, hook entry): workspace-relative or None (outside, the root, bad)."""
+    import posixpath
+    if not isinstance(path, str) or not path or "\\" in path or "\x00" in path:
+        return None
+    path = unicodedata.normalize("NFC", path)
+    if path.startswith("/"):
+        if not isinstance(root, str) or not root.startswith("/") or posixpath.normpath(root) == "/":
+            return None
+        prefix = posixpath.normpath(root).rstrip("/") + "/"
+        normal = posixpath.normpath(path)
+        if not normal.startswith(prefix):
+            return None
+        rel = normal[len(prefix):]
+    else:
+        rel = posixpath.normpath(path)
+    if rel in ("", ".", "..") or rel.startswith("../"):
+        return None
+    return rel if act_file_ok(rel) else None
+
+
 def _one_line(text, n):
     return " ".join(str(text).split())[:n]
 
@@ -325,12 +379,12 @@ def act_map_stream(lines, ctx):
                 first = (item.get("aggregated_output") or "").strip().splitlines()[:1]
                 err = None if ok is not False else _one_line(f"Exit code {code}: {first[0] if first else ''}".strip(), 300)
                 emit(id=eid, kind="step", text=text, used=used, outcome={"ok": ok, "error": err, "ms": None},
-                     detail=f"detail/{run}/{act_detail_name(eid)}.json")
+                     detail=f"detail/{run}/{act_detail_name(run, 'step', eid)}.json")
         elif t == "item.completed" and item.get("type") == "agent_message":
             eid = f"{run}:{turn}:{item['id']}"
             say = _one_line(item.get("text", ""), 200)
             emit(id=eid, kind="run.state", text=say, data={"state": "working", "say": say},
-                 detail=f"detail/{run}/{act_detail_name(eid)}.json")
+                 detail=f"detail/{run}/{act_detail_name(run, 'run.state', eid)}.json")
         elif t == "turn.completed":
             u = m.get("usage") or {}
             emit(kind="usage", text=f"Tokens: {u.get('input_tokens', 0)} in, {u.get('output_tokens', 0)} out",
@@ -344,12 +398,31 @@ def kind_activity():
     vd = _w("activity", "detail_file")
     _examples("activity", lambda d: _msgs(v, d))
     _examples("activity-detail", lambda d: _msgs(vd, d))
+    va = _w("activity", "record_alert")
+    _examples("activity-alert", lambda d: _msgs(va, d))
     _core_clean("activity")
     vec = _vec("activity-v1.json")
+    tamper = {"link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"}
+    for case in vec["integrity"]:
+        fixture = case["fixture"]
+        status = "tampered" if fixture in tamper else "ok" if fixture == "regular" else "unavailable"
+        _expect(f"activity integrity {fixture}", status, case["status"])
+        _expect(f"activity integrity reason {fixture}", None if fixture == "regular" else fixture, case["reason"])
+    for case in vec.get("hook_namespace", []):
+        value = "x_" + hashlib.sha256(b"orch.id.hook/1\0" + case["id"].encode()).hexdigest()[:32]
+        _expect("activity hook namespace", value, case["stored"])
+
+    for c in vec.get("hook_default_id", []):
+        _expect("activity hook default id", "h_" + c["collector"], c["hook"])
+        _expect("activity hook default id is not the collector id", c["hook"] != c["collector"], True)
+
+    for c in vec.get("reserved_ids", []):
+        _expect("activity reserved id", "x_" + hashlib.sha256(c["id"].encode()).hexdigest()[:32], c["stored"])
+
     for c in vec["ids"]:
         _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
     for c in vec["detail_names"]:
-        _expect(f"activity detail_names {c['id']}", act_detail_name(c["id"]), c["file"])
+        _expect(f"activity detail_names {c['kind']} {c['id']}", act_detail_name(c["run"], c["kind"], c["id"]), c["file"])
     for c in vec["dedupe"]:
         _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
     for c in vec["hook_entry"]:
@@ -364,6 +437,21 @@ def kind_activity():
             for e in v.iter_errors(ev):
                 fails.append(f"activity stream_mapping {c['capture']} seq {ev['seq']}: {e.message}")
         _expect(f"activity stream_mapping {c['capture']}", got, c["events"])
+    for c in vec["files"]:
+        ev = dict(json.loads((HERE / "examples" / "activity" / f"{c['base']}.json").read_text()), files=c["files"])
+        _expect(f"activity files schema {c['name']}", v.is_valid(ev), c["schema"])
+        stored = act_files_store(ev["kind"], c["files"])
+        _expect(f"activity files stored {c['name']}", stored, c["stored"])
+        ev.pop("files")
+        if stored is not None:
+            ev["files"] = stored
+        for e in v.iter_errors(ev):
+            fails.append(f"activity files stored {c['name']}: {e.message}")
+        if c["schema"] and c["stored"] != c["files"]:  # only NFC is beyond the schema
+            _expect(f"activity files nfc {c['name']}", any(isinstance(p, str) and not unicodedata.is_normalized(
+                "NFC", p) for p in c["files"]), True)
+    for c in vec["files_normalise"]:
+        _expect(f"activity files_normalise {c['name']}", act_workspace_file(c["path"], c["root"]), c["file"])
 
 
 
@@ -473,6 +561,19 @@ def sec_get(case):
     return "ok"
 
 
+def sec_agent_env(case):
+    """`orch secret env|file|exec` for an agent caller (one gate): allowed with agents_may_env, else only when the
+    whole argv equals the profile's `run` (absolute program, no extra arguments). For `mode` exec the argv is the
+    extra arguments and the whole argv is `run` + them. Non-agent callers are not restricted."""
+    if not case["agent"] or case["agents_may_env"]:
+        return "ok"
+    run = case["run"]
+    argv = (run or []) + case["argv"] if case.get("mode") == "exec" else case["argv"]
+    if run and run[0].startswith("/") and argv == run:
+        return "ok"
+    return "agent_command"
+
+
 def sec_resolve(entries):
     """Which entry is used per name ('workspace' wins) and which are shadowed."""
     used, shadowed = {}, []
@@ -506,6 +607,8 @@ def kind_secrets():
                 fails.append(f"secrets hide {c['name']}: a hidden form survives in expect: {n[:12]}...")
     for c in vec["min_len"]:
         _expect(f"secrets min_len {c['value']!r}", bool(sec_needles([{"name": "k", "type": "token", "value": c["value"]}])), c["hidden"])
+    for c in vec["agent_env"]:
+        _expect(f"secrets agent_env {c['name']}", sec_agent_env(c), c["result"])
     for c in vec["get"]:
         _expect(f"secrets get {c['name']}", sec_get(c), c["result"])
     for c in vec["resolve"]:
@@ -573,6 +676,87 @@ def kind_blocks():
 
 
 
+# --- phone results (blocks.md, Phone; message.schema.json ticket_view.results) ------------------------------------
+PHONE_KNOWN = [b for b in BLOCK_TYPES if b != "log"]  # log blocks never go to the phone
+
+
+def _cj(o):
+    return len(json.dumps(o, separators=(",", ":"), ensure_ascii=False).encode())
+
+
+def phone_trim(r, more, result_bytes, rows):
+    """Reference: what the sending workspace makes of one result for the phone (before the value hider)."""
+    r = json.loads(json.dumps(r))
+    out, cut = [], False
+    for b in r["doc"]["blocks"]:
+        t = b.get("type")
+        if t not in PHONE_KNOWN:
+            cut = True
+            continue
+        if t == "table" and len(b["rows"]) > rows:
+            b["total_rows"] = b.get("total_rows", len(b["rows"]))
+            b["rows"] = b["rows"][:rows]
+            cut = True
+        if t == "link":
+            u = urllib.parse.urlsplit(b["url"])
+            b["url"] = urllib.parse.urlunsplit((u.scheme, u.netloc, u.path, "", ""))
+        if t == "file":
+            b["path"] = b["path"].rsplit("/", 1)[-1]
+        out.append(b)
+    tail = {"type": "summary", "text": more}
+    if cut and out[-1:] != [tail]:
+        out.append(tail)
+    r["doc"]["blocks"] = out
+    while _cj(r) > result_bytes or len(out) > 50:
+        if out[-1:] != [tail]:
+            out.append(tail)
+        if len(out) == 1:
+            break
+        out.pop(-2)
+    return r
+
+
+def kind_phone_results():
+    pv = _vec("phone-results-v1.json")
+    bv, rv, mv = _w("blocks"), _w("message", "phone_result"), _w("message")
+    trim = lambda r: phone_trim(r, pv["more_text"], pv["result_bytes"], pv["table_rows"])  # noqa: E731
+
+    def snapshot_ok(label, r):
+        for m in blocks_errors(bv, r["doc"])[:1]:
+            fails.append(f"{label}: doc is not a valid orch.blocks/1 document: {m}")
+        for m in _msgs(rv, r)[:1]:
+            fails.append(f"{label}: not a valid ticket_view result: {m}")
+        if trim(r) != r:
+            fails.append(f"{label}: not in the trimmed phone form (trimming it again changes it)")
+        if _cj(r) > pv["result_bytes"]:
+            fails.append(f"{label}: over {pv['result_bytes']} bytes")
+
+    for c in pv["trim"]:
+        label = f"phone-results trim {c['name']}"
+        for m in blocks_errors(bv, c["in"]["doc"])[:1]:
+            fails.append(f"{label}: input doc invalid: {m}")
+        _expect(label, trim(c["in"]), c["out"])
+        snapshot_ok(label, c["out"])
+    cases = [c for c in _vec("ticket-view-v1.json")["cases"] if c["name"].startswith("results-")]
+    if not any(c["ok"] for c in cases) or all(c["ok"] for c in cases):
+        fails.append("ticket-view vector: needs results-* cases that pass and that are refused")
+    for c in cases:
+        label = f"ticket-view vector {c['name']}"
+        if (not _msgs(mv, c["message"])) != c["ok"]:
+            fails.append(f"{label}: expected {'ok' if c['ok'] else 'refused'}")
+        if not c["ok"]:
+            continue
+        results = c["message"]["body"]["ticket_view"].get("results", [])
+        for i, r in enumerate(results):
+            snapshot_ok(f"{label} results[{i}]", r)
+        if [r["at"] for r in results] != sorted((r["at"] for r in results), reverse=True):
+            fails.append(f"{label}: results must be newest first")
+        if len({r["id"] for r in results}) != len(results):
+            fails.append(f"{label}: result ids must be unique")
+        if _cj(results) > pv["results_bytes"] or len(results) > pv["max_results"]:
+            fails.append(f"{label}: results over {pv['results_bytes']} bytes or {pv['max_results']} items")
+
+
 # --- jobs (job-events.md) --------------------------------------------------------------------------------------------
 JOB_FINAL = ("ok", "failed", "cancelled", "lost")
 JOB_EVENT_CAP = 2000
@@ -606,7 +790,7 @@ def job_replay(events, binding, cap=JOB_EVENT_CAP):
         if t == "start" and state is not None:
             results.append("already_started")
             continue
-        if stored >= cap:
+        if stored >= cap and t != "end":  # one `end` may pass the cap so a job can always finish
             results.append("cap")
             continue
         if t == "step":
@@ -1142,6 +1326,28 @@ def wontdo_is_human(c):
     return bool(m) and hmac.compare_digest(m, _wontdo_mac(c["key"], c["workspace"], c["ticket"], c["decision"]))
 
 
+def verdict_checks(checklist):
+    """sha256 hex of canonical JSON [[id, text, done is true, wont_do is true], ...]: WHAT a verdict accepted."""
+    rows = [[x.get("id"), x.get("text"), x.get("done") is True, x.get("wont_do") is True] for x in checklist]
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def verdict_is_human(c):
+    """Done needs a signed verdict (human-proof.md): a ticket entry counts only when the ledger is readable, the entry's
+    MAC is the receiving core's own verdict1 MAC = HMAC-SHA256(human.key, "verdict1." + workspace id + "." + ticket id + "."
+    + canonical JSON of {status: "done", kind, checks, nonce}) over the ticket's CURRENT checklist (`checks`), AND it is the
+    CURRENT ledger entry for the ticket (a tombstone or a newer MAC makes it stale)."""
+    m, cur = c.get("mac"), c.get("ledger_current")
+    if c.get("ledger") != "ok" or not isinstance(m, str) or not m or not isinstance(cur, str):
+        return False
+    if c.get("kind") not in ("person", "agent"):
+        return False
+    record = {"status": "done", "kind": c["kind"], "checks": verdict_checks(c["checklist"]), "nonce": c["nonce"]}
+    canon = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    want = _b64u(hmac.new(bytes.fromhex(c["key"]), f"verdict1.{c['workspace']}.{c['ticket']}.{canon}".encode(), hashlib.sha256).digest())
+    return hmac.compare_digest(m, want) and hmac.compare_digest(m, cur)
+
+
 def relay_conn(c):
     """Where relay calls go: only the record in the guarded home; a differing workspace file refuses; env never used."""
     rec = c.get("record")
@@ -1200,6 +1406,8 @@ def kind_human():
         _expect(f"human deliver {c['name']}", pending_deliver(c), c["deliver"])
     for c in vec["wont_do"]:
         _expect(f"human wont_do {c['name']}", wontdo_is_human(c), c["human"])
+    for c in vec["verdict"]:
+        _expect(f"human verdict {c['name']}", verdict_is_human(c), c["human"])
     for c in vec["relay"]:
         _expect(f"human relay {c['name']}", relay_conn(c), c["expect"])
     for c in vec["dev_mark"]:
@@ -1339,6 +1547,7 @@ KINDS = {
     "secrets": kind_secrets,
     "jobs": kind_jobs,
     "blocks": kind_blocks,
+    "phone-results": kind_phone_results,
     "inventory": kind_inventory,
     "addon-manifest": kind_addon_manifest,
     "screen": kind_screen,
@@ -2004,7 +2213,7 @@ V_CG = Draft202012Validator(
     registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
     format_checker=FormatChecker(),
 )
-CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind")
+CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
 CG_MEMBER_ONLY = ("seen", "leave")
 CG_FILE_MAX = 26214400
 # task.status order: a status may repeat or move right, never left; the last column is final.
@@ -2081,6 +2290,8 @@ def cg_rules(m, ctx=None):
             out.append("task.ws is the member that got the task, never the host")
         if isinstance(o, dict) and (str(to).startswith("ws_") or to == "phones") and m.get("id") != cg_fanout_id(host, o["id"], to):
             out.append("host copy: id must be the fan-out id of (host, origin.id, to)")
+        if "own_seq" in b and not (b["own_seq"] is True and m.get("type") == "text" and "seq" in g and isinstance(o, dict) and o.get("from") == to and str(to).startswith("ws_")):
+            out.append("own_seq: only a text to the workspace that sent origin, with group.seq")
         if to == "phones" and m.get("type") == "text" and cg_quiet(m) and (b.get("update") or {}).get("kind") != "note":
             out.append("copy to phones outside the push set must be quiet (update.kind note)")
         if str(to).startswith("ws_"):

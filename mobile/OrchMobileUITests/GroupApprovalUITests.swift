@@ -14,7 +14,17 @@ final class GroupApprovalUITests: XCTestCase {
         for _ in 0..<6 where !(row.exists && row.isHittable) { app.swipeUp() }
         XCTAssertTrue(row.waitForExistence(timeout: 10)); row.tap()
         let card = any("group-approval")
-        for _ in 0..<8 where !card.buttons["Allow once"].isHittable { any("group-messages").swipeUp() }
+        // Let the push and the open-at-newest jumps (now and +300 ms) settle: during them the button has no valid frame and
+        // isHittable throws instead of returning false.
+        XCTAssertTrue(any("group-members").waitForExistence(timeout: 10))
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1.0)
+        // The room opens at the newest message (e2e P4.8 fix); the approval card is earlier: scroll back up to it.
+        let allow = card.buttons["Allow once"]
+        let screen = app.windows.firstMatch.frame
+        for _ in 0..<8 {
+            if allow.exists, !allow.frame.isEmpty, screen.contains(CGPoint(x: allow.frame.midX, y: allow.frame.midY)), allow.isHittable { break }
+            any("group-messages").swipeDown()
+        }
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "group-approval").count, 1, "the card is one element")
         for label in ["Allow once", "Always", "No"] {
             XCTAssertTrue(card.buttons[label].exists, "\(label) inside the card")

@@ -29,6 +29,54 @@ What Level 1 does:
 5. Deny rules for the key folder in the agent tools' own permission settings (agents.json data, written per run).
 6. Every use is a `key.use` event (activity.md). A refusal is one too.
 
+## Deny rules (slice 1.4, Level 1)
+
+orch adds deny rules to the agent tool's own permission flags on **every start** (fresh and resume, oneshot and live, every
+permission mode including `full`), generated for the workspace from the data in `agents/deny.json` (`deny` of the adapter).
+The deny **set** is the same for every adapter; an adapter only says how its tool can be told (`deny.format`).
+
+| root | path | agent's own file tools | agent's shell (command text naming it) |
+|---|---|---|---|
+| `home` | every guarded orch home candidate: `humanproof.guarded_home`, `ORCH_HOME`, `<account home>/.orch-tool` | no read, no write | refused |
+| `secrets` | `<workspace>/.orch/secrets/` (old key files) | no read, no write | refused |
+| `record` | `<workspace>/.orch/record/` | write refused, read allowed | refused (reading goes through `orch record ...`) |
+| `local-id` | `<workspace>/.orch/.local-id` | write refused, read allowed | refused |
+
+`home` covers the key store, key files, `profiles.toml`, `human.key`, the nonce store, `human-settings.json`,
+`proposals.json`, `permissions.json`, `agent-approvals.json` and the relay and dev records. Never denied: the workspace
+itself, `.orch/` tickets, `.orch/run/`, anything `orch ...` prints. A shell command is refused when its **text** contains
+a path form; orch commands never contain one, so `orch record query` and `orch secret env <profile> -- ...` work.
+
+**Format `patterns/1`** (tools with `--disallowedTools`, i.e. Claude Code): one comma-joined value merged into the tool's
+disallowed-tools flag (any spelling in the existing flags, `--disallowedTools X`, `--disallowed-tools X`, `--disallowedTools=X`, is
+merged into one; an existing list is extended, never replaced; added when there is none). The rules are added whatever the permission
+mode, including `full`. Without a workspace orch **refuses to start** such a tool. The tool that is really started must be found and report a version of
+2.0.0 or newer (patterns with `*` inside, `Read(//..)`); not found, no output, unreadable output and older all **refuse** (deny by
+default, no override): `Claude could not be checked for the deny rules: update or reinstall it, then try again.` The one flag is placed
+**last** before the `--` that precedes the prompt (it takes a list, so nothing positional may follow it).
+- Candidate homes, always: `<account home>/.orch-tool` and `ORCH_HOME` (when set), plus the guarded/trusted home when it resolves. A
+  candidate that is or contains the workspace **refuses the start** (`orch's folder contains this workspace: move the workspace out of it,
+  then try again.`): it cannot be denied without denying the workspace. A home inside the workspace is fine (only that folder is denied).
+- file tools, per root path P (`/**` and P itself): `Read(f)` (rows with read denied only) and `Edit(f)` (every row; it covers
+  every tool that changes a file, so there is no `Write` rule) for each form f of P: absolute `//<P without its leading />`; Windows
+  drive form `//c/Users/..` and `C:/Users/..`; `~/<rest>` when P is under the account home; `./<rest>` when P is under the workspace
+  (no `../` forms: not valid file patterns). Real path and as-given path (symlinked temp folders) both.
+- shell: `Bash(*<text>*)` for each text form of P: forward-slash and backslash absolute, `~/<rest>`, `$HOME/<rest>`,
+  `${HOME}/<rest>`, `$env:USERPROFILE\<rest>` and `%USERPROFILE%\<rest>` (PowerShell, cmd), relative to the workspace (incl. `../..`),
+  and for `home` the folder's own name (at least 6 characters, e.g. `.orch-tool`, `orch-tool`) and `<parent>/<name>`.
+  `record`/`local-id`/`secrets` also the workspace-relative text `.orch/record` (and `.orch\record`, ...).
+- `,` `(` `)`, spaces and control characters in a path become `*` (a wildcard in both rule kinds: never a split list, never a
+  literal). That over-blocks a few look-alike paths and never under-blocks the real one. Nothing is read from the workspace's own settings.
+- **Over-blocking:** a shell command that mentions the home folder's own name (any text containing `orch-tool`) or merely mentions `.orch/record` or the home folder's name (an `ls`, a `grep` for it) is
+  refused. **Under-blocking:** matching is exact text and case-exact (a case-insensitive file system lets `.ORCH-TOOL` through),
+  a symlink inside the workspace that points at the home is not followed, and variables, globs, `cd` plus a short name, or a built path
+  are not seen.
+
+**Format `none`** (`codex`, generic commands): orch cannot tell the tool. codex's own `workspace-write` sandbox keeps *its
+writes* inside the workspace (and `store_args`): only that sandbox protects the home from writes, and only while it is on (a
+person's own config can change it). **Reads of `home` and writes of `.orch/record` are not enforced** (Level 1: stops
+accidents, not a tool that deliberately goes there). Vectors: `vectors/deny-v1.json`.
+
 ## Where
 
 ```
@@ -106,11 +154,28 @@ run = ["pass-cli"]
 ```
 
 A profile maps variables to key names (`env`: the value in the variable; `files`: a temp file path in the variable), may set
-plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false).
+plain non-secret variables (`set`), may name its one command (`run`), and may allow `get` (`allow_get`, default false), and may let agents use its keys in any command (`agents_may_env`, default false).
 Variables that change how programs load or where they connect are refused (`$defs/env_name`: PATH, LD_*, DYLD_*, GIT_*,
-ORCH_*, proxies, CA bundles, JAVA_TOOL_OPTIONS, …). Profiles are
+ORCH_*, PATH*, PYTHON*, PERL*, RUBY*, NODE_*, LUA_*, BASH*, XDG_*, SSH_*, GPG_*, SUDO_*, `*ASKPASS*`, `*_OPTIONS`, SHELLOPTS, PS4,
+ENV, IFS, HOME, EDITOR/VISUAL/PAGER/MANPAGER/BROWSER, LESS, LESSOPEN, LESSCLOSE, LESSKEY, LESSKEYIN, LESSKEYIN_SYSTEM, LESSKEY_SYSTEM, LESSKEY_CONTENT, LESSEDIT, LESSSECURE, LESSHISTFILE, PSModulePath, CLASSPATH, PHPRC, TCLLIBPATH, R_PROFILE*, GNUPG*, NPM_CONFIG*, TMPDIR, COMSPEC, proxies, CA bundles, …; see `keystore.ENV_DENY`; matched in
+any letter case; `set` names are also structural: `^[A-Z][A-Z0-9_]{0,63}$` (a `set` or `files` name must also be one the profile's own `env` declares or one a person approved in `extra`: `profile set --extra NAME`, each
+matching the structural rule and the hard-deny, part of the body MAC; else `NAME is not an approved variable for this profile; add it with --extra`, at set, on every read and at run time; ordinary secret names NPM_TOKEN, NODE_AUTH_TOKEN, CARGO_REGISTRY_TOKEN, CARGO_REGISTRIES_*_TOKEN and GPG_PASSPHRASE are allowed in `env` only, never in `files` or `set`; the deny list is not complete, and the `extra` allowlist is the real control), at `profile set` AND again every time the profile is read or run). Profiles are
 made by a person (dashboard, `secret.profile` proof, invariant H1); an agent may not change them. `allow_get = true` counts
 only with a matching settings record (human-proof.md, Settings: records and tombstones), so editing the file alone does not enable `get`.
+
+**The profile body is MAC-bound (W2b).** `profiles.toml` is editable by anything running as the user, so it is not trusted for
+what a profile runs or receives. `profile set` (a `secret.profile` proof) stores `profile1.<workspace id>.<profile name>.<canonical
+{env, files, set, run, extra}>` under the guarded human key (HMAC-SHA256, base64url) as the profile's entry in the ledger
+`<guarded orch home>/keys/<workspace>/profile.json` (human-proof.md, Ledgers; `profile remove` tombstones it with `null`).
+`run`, `env`, `file`, `exec` and `get` recompute it and **fail closed** on a missing or different MAC (and a missing or damaged
+ledger) with `Refused: this key profile was changed outside orch; set it up again.` The switches (`allow_get`, `agents_may_env`) keep their
+own settings records and are not part of the body; rewriting a switch never signs a body that was edited outside orch. `exec` also re-runs
+the `run` program approval (absolute path, outside the workspace, not changeable by others, exists) when it starts.
+The MAC protects against an attacker who can write `profiles.toml` but can neither read `human.key` nor write `profile.json` (same folder, same
+rights: the guard is the boundary). Only the profile a person is setting (with proof) is signed; every other profile keeps its ledger entry,
+and `profile remove` always writes the tombstone, even when the file has no such profile. A profile that fails verification is shown as unusable. `profile remove` first turns both switches off and writes the tombstone, then touches the file (a damaged file refuses after that). `skills` is outside the MAC (not used to decide anything).
+**No legacy:** profiles saved before this change have no MAC and are refused until a person sets them up again (owner rule: no
+compatibility code until the pilot cut).
 
 ## Commands
 
@@ -128,12 +193,31 @@ Person-only, proven by the human channel (invariant H1, human-proof.md: a proof 
 the local page; done from the dashboard): `orch secret add <name> --type T [--file F]` (value from stdin, never
 an argument), `orch secret remove <name>`, `orch secret profile <name> …`. These are additions to the five agent commands.
 
+- **Who may run what (Level 1, stated plainly).** `env` and `file` hand the profile's keys to **whatever command the
+  caller names**, including an interpreter (`python -c`, `sh -c`, `env`, `curl`) that can write a key to a file or the
+  network. Output hiding cannot stop that; it is a best-effort safety net for accidents (a CLI that echoes its token),
+  not a control against a caller that deliberately exfiltrates. Only `exec` is bound to a command a person approved
+  (the profile's `run`, set with a `secret.profile` proof). Skills and screens say so in plain words. To limit this
+  by default, a profile has the switch `agents_may_env` (screen wording: **"Let agents use these keys in any command"**),
+  **off for every new profile and for every profile without a matching record** (deny by default). While it is off, an
+  **agent** caller (an agent tool in the environment, or `--by agent:...`) of `env`, `file` or `exec` is refused unless its whole
+  command equals the profile's `run` exactly: same argv, the program an **absolute path**, no extra arguments (for `exec`:
+  the profile's `run` plus the arguments the agent gave; vectors `agent_env`). One gate, applied before any key is read. Otherwise: `Refused: agents may only run this profile's own command. Ask the person to allow any command, or use orch secret exec <profile>.`
+  (`data.refused` = `agent_command`). An agent calling `exec` may not add arguments unless `agents_may_env` is on; a person or script caller is not restricted (exec with extra arguments stays allowed). The switch counts
+  only with a settings record (secret.agents_may_env.<profile>, like `allow_get`), set by a person with a `secret.profile`
+  proof, target `<profile>:agents_may_env`; `profile set` and `profile remove` turn it off. Turning a switch **off**
+  (`profile get-disable`, `profile agents-disable`) needs no proof: anyone may lower it, and the record then says `reset`.
+  Removing a profile has its own target `<profile>:remove` (a proof for `profile set` does not remove it). An agent that hides its
+  identity looks like a script (Level 1: not a sandbox).
+- **The profile's program is a full path.** `profile set` looks the program of `run` up once (the fixed system
+  folders and the caller's safe `PATH` entries, never the workspace or cwd) and stores its absolute path; `exec` and the
+  agent rule above never search `PATH` and refuse a stored name that is not a full path.
 - **Hiding the child's output.** stdout and stderr of the child go through pipes and the streaming hider (below) before they
   reach the caller. Interactive programs see pipes, not a terminal; that is accepted.
 - **No shell.** argv is run as given; orch never builds a shell line from a key.
 - **key.use.** One event per key per call, written before the child starts (activity.md `key.use`: `used.action` = env ·
   file · exec · get, `data.profile`, `data.command` = the program's base name, `data.skill` from `ORCH_SKILL` when set).
-  A refused call writes `outcome.ok: false` with `data.refused`: `not_in_profile`, `get_off`, `get_to_terminal`, `missing`.
+  A refused call writes `outcome.ok: false` with `data.refused`: `not_in_profile`, `get_off`, `get_to_terminal`, `missing`, `agent_command`.
 - Refusals are exit 2 with plain words: `Refused: the profile "billing" does not allow printing keys. Use orch secret env billing -- <command>.`
   The text names keys and profiles, never values.
 
@@ -170,8 +254,37 @@ prints a header).
 - **Error paths**: exception messages, tracebacks (exit 1), stderr of failed children, refusals and HTTP error bodies go
   through the same hider before they are printed, logged or recorded. A writer that cannot get a hider refuses
   (activity.md, Fail closed).
-- Known limits (Level 1): a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
-  terminal) is not found; the screen stream hides values before the terminal draws them, not inside escape sequences.
+- **What approving a `run` command means.** `profile set` stores the real path of the program and refuses one inside
+  the workspace or changeable by other users. It only warns when the program is an interpreter or a tool that runs
+  arbitrary code (sh, bash, python, node, env, git, npm, curl, ssh, ...): approving one as `run` is the same as
+  approving any command. `exec` takes extra arguments from a person or script (they are appended to the approved command); an agent
+  may add none unless `agents_may_env` is on (the same exact-argv gate as `env`/`file`). Command and path are shown in the answer.
+- **The command's processes end with the call.** On POSIX the child runs in its own session (when stdin is not a terminal) and,
+  when the call ends or is interrupted (TERM, HUP, QUIT), everything it started is ended too (TERM, then KILL).
+  Further signals during that cleanup are ignored. Pipes held by a leftover process cannot hang the call.
+- **Where a use is recorded.** A use is recorded in the record of the orch run that makes it (`ORCH_RUN` +
+  `ORCH_TICKET`), or in the unattributed run (below). An **agent** caller (agent tool in the environment, or
+  `--by agent:...`) must be inside a live run whose run and ticket belong together (the same claim orch's own runs
+  use); otherwise `env`, `file`, `exec` and `get` are refused before any key or file is touched (`Refused: an agent
+  can use keys only inside an active orch run, where the use is recorded.` / `Refused: this run is not active, so the
+  use cannot be recorded.`). A script that names a run that is not live is refused.
+- **The unattributed run.** A person or script **without** a run is recorded in the workspace's unattributed run of
+  the day: run `r_outside_<yyyymmdd>` (UTC), ticket `t_outside`, agent `main`, harness `generic`, same fail-closed
+  rule. The ticket id `t_outside` is **reserved** (a follow-up makes ticket creation refuse it). A record view shows
+  `r_outside_*` / `t_outside` as **"Outside a run"**. Retention ends such a run at the next 00:00Z taken from its
+  **id**, never from lines in the file, so it is deleted after the keep time like any run; a day's run takes at most
+  5000 lines, then further uses outside a run are refused until the next day.
+- **Level 1 limits of the record.** An agent that hides its identity (no agent tool in the environment, no
+  `--by agent:`, no run variables) looks like a script: its uses are recorded in the unattributed run, not limited. An
+  agent can read another ticket's claim and frame its uses into that run (the record has no MAC chain). Planting a
+  file at tomorrow's `r_outside_*` path stops terminal key use for that day. A switch turned off by a caller with a
+  stale `ORCH_RUN` may go unrecorded (best effort). No pid-ancestor check is made.
+- **Streams are not delayed.** Only the tail of the output that could still become a key is held back; the rest is
+  passed on at once (an MCP server on stdio keeps working). A child without a terminal on stdin gets its own session.
+  Binary key files (no text form) are hidden by the lower-case hex and the padded base64 / base64url of the
+  whole file; raw bytes, upper-case hex, unpadded or line-wrapped base64 of such a file are **not** hidden (Level 1).
+- Known limits (Level 1): a child can still open `/dev/tty` itself; a value transformed in another way (encrypted, compressed, reversed, other encodings, split by colour codes or line wrapping on a
+  terminal) is not found; the screen stream hides values before the terminal draws them, not inside escape sequences. The approved command also reads the caller's input, folder and the user's config files (Level 1).
 
 ## Wrapper examples (a skill ships them; `orch-wrapper-maker` teaches agents to write them)
 

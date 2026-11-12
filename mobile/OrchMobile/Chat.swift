@@ -8,6 +8,7 @@ enum ChatRoute: Hashable {
     case general(String)   // the General conversation of a workspace (debug `-open general:<ws>`)
     case ticket(workspace: String, ticket: String)
     case group(host: String, id: String)
+    case groupHistory
     case newChat
     case newTopic(String)
     case info(workspace: String, ticket: String?)
@@ -151,7 +152,7 @@ enum ChatBuilder {
         // History from the snapshot (last 30), without repeating a line an update text already shows.
         for (i, line) in (t?.view?.historyTail ?? []).suffix(30).enumerated() where !seenText.contains(line.text) {
             let at = line.at ?? "0000"
-            out.append(ChatItem(id: "h\(i)-" + line.id, at: at, kind: isMine(line) ? .mine(line.text, queued: false) : .theirs(line.text, label: nil, sender: line.by.map { "\($0) · \(line.role ?? "agent")" })))
+            out.append(ChatItem(id: "h\(i)-" + line.id, at: at, kind: isMine(line) ? .mine(line.text, queued: false) : .theirs(line.text, label: nil, sender: "Helper")))
         }
         for a in t?.view?.attachments ?? [] { out.append(ChatItem(id: "a-" + a.id, at: (a.at ?? t?.at ?? "0000") + "~", kind: .attachment(a))) }
         for q in d.questions where !q.isReview && !q.isMakeTicket && q.message.from == ws && q.message.ticket == ticketId { out.append(ChatItem(id: q.id, at: q.message.createdAt, kind: .question(q))) }

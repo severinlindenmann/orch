@@ -49,9 +49,56 @@ ENV_DENY = frozenset(
     "ORCH_BIN "
     "ORCH_EVENTS ORCH_RUN ORCH_JOB ORCH_HOME ORCH_ROOT HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy "
     "https_proxy all_proxy SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE CURL_CA_BUNDLE "
-    "JAVA_TOOL_OPTIONS _JAVA_OPTIONS".split()
+    "JAVA_TOOL_OPTIONS _JAVA_OPTIONS GCONV_PATH GLIBC_TUNABLES LOCPATH LUA_INIT LUA_PATH PERLLIB ZDOTDIR "
+    "DOTNET_STARTUP_HOOKS NPM_CONFIG_SCRIPT_SHELL RUSTC_WRAPPER SYSTEMROOT USERPROFILE APPDATA EDITOR PAGER "
+    "BROWSER LESSOPEN".split()
 )
-ENV_DENY_PREFIX = ("LD_", "DYLD_", "GIT_", "ORCH_")
+ENV_DENY_PREFIX = (
+    "LD_", "DYLD_", "PATH", "GIT_", "ORCH_", "PYTHON", "PERL", "RUBY", "NODE_", "BASH", "XDG_",
+    "LUA_", "GCONV", "GLIBC", "COR_", "CORECLR", "DOTNET", "RUSTC", "CARGO_", "SSH_", "GPG_", "SUDO_",
+    "PSMODULEPATH", "NPM_CONFIG", "GNUPG", "PHPRC", "TCLLIBPATH", "R_PROFILE", "CLASSPATH",
+)  # fmt: skip
+ENV_DENY_SUFFIX = ("_OPTIONS",)
+ENV_DENY_CONTAINS = ("ASKPASS",)
+_ENV_DENY_UP = frozenset(
+    {
+        *(v.upper() for v in ENV_DENY),
+        "SHELLOPTS", "PS4", "PATHEXT", "COMSPEC", "PROMPT_COMMAND", "VISUAL", "MANPAGER", "LOCPATH",
+        "TMPDIR", "TEMP", "TMP", "NPM_TOKEN", "LESS", "LESSOPEN", "LESSCLOSE", "LESSKEY", "LESSHISTFILE",
+        "LESSKEYIN", "LESSKEYIN_SYSTEM", "LESSKEY_SYSTEM", "LESSKEY_CONTENT", "LESSEDIT", "LESSSECURE",
+    }
+)  # fmt: skip
+SET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
+# Ordinary secret variable names that look like control prefixes: allowed in `env` ONLY (they carry a key's
+# value; a person's `set` and `files` never get them).
+ENV_SECRET_NAMES = re.compile(
+    r"^(NPM_TOKEN|NODE_AUTH_TOKEN|CARGO_REGISTRY_TOKEN|CARGO_REGISTRIES_[A-Z0-9_]+_TOKEN|GPG_PASSPHRASE)$"
+)
+
+
+def env_denied(var: str, sect: str = "set") -> bool:
+    """Control variables a profile may never name in env, files or set (case-insensitive: Windows folds
+    names): loader, interpreter, shell, git, ssh, editor, proxy, home/config locations. The ONE hard-deny,
+    at profile set AND on every read and run."""
+    if sect == "env" and ENV_SECRET_NAMES.fullmatch(var):
+        return False
+    up = var.upper()
+    return (
+        up in _ENV_DENY_UP
+        or up.startswith(ENV_DENY_PREFIX)
+        or up.endswith(ENV_DENY_SUFFIX)
+        or any(x in up for x in ENV_DENY_CONTAINS)
+    )
+
+
+def set_name_ok(var: str) -> bool:
+    """A plain `set` variable: structural (upper-case letters, digits, underscore, starting with a letter) AND
+    not a control variable. Follow-up: only names the profile declares or a person approves (`extra`)."""
+    return isinstance(var, str) and bool(SET_NAME_RE.fullmatch(var)) and not env_denied(var)
+
+
 RECORDS = frozenset({"relay", "dev"})  # allowlist: the other files of the key folder have other owners
 
 TOO_SHORT = "This key is too short to hide safely in records: at least 8 characters."
@@ -518,10 +565,22 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
     for pn, p in profiles.items():
         if not isinstance(pn, str) or not PROFILE_RE.match(pn) or not isinstance(p, dict):
             raise Refused("A profile name uses lower-case letters, digits and dashes.")
-        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "skills"}):
+        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "agents_may_env", "skills", "extra"}):
             raise Refused(f"The profile {pn} has a setting orch does not know.")
         if not (p.get("env") or p.get("files")):
             raise Refused(f"The profile {pn} needs at least one key.")
+        extra = p.get("extra", [])
+        if not isinstance(extra, list) or len(extra) > 16 or len(set(extra)) != len(extra):
+            raise Refused(f"The profile {pn} has a bad extra list.")
+        for x in extra:
+            if not set_name_ok(x):
+                raise Refused(f"The profile {pn} may not approve the variable {x}.")
+        # env names in `approved` are redundant with the duplicate check below (a set/files name equal to an
+        # env name is refused as "twice"); kept for clarity: effectively set/files names need `extra`.
+        approved = {
+            *(p.get("env") or {}),
+            *extra,
+        }  # the secret variables it declares + person-approved extras
         seen = set()
         for sect, cap in (("env", 16), ("files", 8), ("set", 16)):
             m = p.get(sect, {})
@@ -530,11 +589,15 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             for var, tgt in m.items():
                 if not isinstance(var, str) or not ENV_RE.match(var):
                     raise Refused(f"The profile {pn} names an unusable variable.")
-                if var in ENV_DENY or var.startswith(ENV_DENY_PREFIX):
+                if env_denied(var, sect) or (sect == "set" and not set_name_ok(var)):
                     raise Refused(f"The profile {pn} may not set the variable {var}.")
-                if var in seen:
+                if sect != "env" and var not in approved:
+                    raise Refused(
+                        f"{var} is not an approved variable for this profile; add it with --extra {var}."
+                    )
+                if var.upper() in seen:
                     raise Refused(f"The profile {pn} uses the variable {var} twice.")
-                seen.add(var)
+                seen.add(var.upper())
                 if sect == "set":
                     if (
                         not isinstance(tgt, str)
@@ -555,8 +618,9 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             or not all(isinstance(x, str) and 1 <= len(x) <= 300 for x in run)
         ):
             raise Refused(f"The profile {pn} has a bad command.")
-        if "allow_get" in p and not isinstance(p["allow_get"], bool):
-            raise Refused(f"The profile {pn} has a bad print setting.")
+        for flag in ("allow_get", "agents_may_env"):
+            if flag in p and not isinstance(p[flag], bool):
+                raise Refused(f"The profile {pn} has a bad {flag.replace('_', ' ')} setting.")
         sk = p.get("skills", [])
         if (
             not isinstance(sk, list)
@@ -578,18 +642,28 @@ def _toml(profiles: dict) -> str:
         for sect in ("env", "files", "set"):
             if p.get(sect):
                 out.append(f"{sect} = {{ " + ", ".join(f"{k} = {_q(v)}" for k, v in p[sect].items()) + " }")
+        if p.get("extra"):
+            out.append("extra = [" + ", ".join(_q(x) for x in p["extra"]) + "]")
         if p.get("run"):
             out.append("run = [" + ", ".join(_q(x) for x in p["run"]) + "]")
         if p.get("skills"):
             out.append("skills = [" + ", ".join(_q(x) for x in p["skills"]) + "]")
-        if p.get("allow_get"):
-            out.append("allow_get = true")
+        for flag in ("allow_get", "agents_may_env"):
+            if p.get(flag):
+                out.append(f"{flag} = true")
         out.append("")
     return "\n".join(out)
 
 
-def write_profiles(root: Path, profiles: dict) -> None:
-    """Replace profiles.toml (a person's action: the proof is the caller's job, slice 1.2). Names only."""
+def write_profiles(
+    root: Path, profiles: dict, *, sign: frozenset = frozenset(), tombstone: frozenset = frozenset()
+) -> None:
+    """Replace profiles.toml (a person's action: the proof is the caller's job, slice 1.2). Names only.
+    ONLY the names in `sign` (the profile the person is setting right now, with proof) get a body MAC in the
+    guarded ledger, BEFORE the file is written. Every other profile is written back as it is and its ledger
+    entry is left untouched (an edited body stays unverified, a switch change never vouches for it); a
+    removed profile (`tombstone`, passed by the caller, whatever the file says) is tombstoned. What to sign is
+    never decided from the unverified file. An unreadable old file refuses the save (nothing is signed)."""
     d = hp.key_dir(root)
     with hp._key_lock(d):
         _tighten_locked(d)
@@ -598,6 +672,13 @@ def write_profiles(root: Path, profiles: dict) -> None:
             if isinstance(e.get("value"), str):
                 values.add(e["value"])
         _profile_check(profiles, values)
+        read_profiles(root)  # Refused when damaged: never fall back to {}
+        for pn in sign:
+            if pn not in profiles:
+                raise Refused("The profile to sign is not in the profiles.")
+            hp.profile_sign(root, pn, profiles[pn])
+        for pn in tombstone:
+            hp.profile_sign(root, pn, None)
         hp._write_private(d / "profiles.toml", _toml(profiles))
 
 
@@ -616,6 +697,16 @@ def read_profiles(root: Path) -> dict:
         raise Refused("The profiles file is damaged.")
     profiles = raw.get("profile", {})
     _profile_check(profiles, set())
+    return profiles
+
+
+def read_verified_profiles(root: Path) -> dict:
+    """The profiles whose body carries a current MAC of a person (human key, guarded ledger). Any profile
+    without one, or with a body edited outside orch, is refused (fail closed, no legacy profiles)."""
+    profiles = read_profiles(root)
+    for pn, p in profiles.items():
+        if not hp.profile_verified(root, pn, p):
+            raise Refused("Refused: " + hp.PROFILE_CHANGED + ".")
     return profiles
 
 
@@ -648,3 +739,43 @@ def record_read(root: Path, record: str) -> dict | None:
     if data is not None and not isinstance(data, dict):
         raise Refused("A record in the orch folder is unreadable.")
     return data
+
+
+def all_needles(root: Path) -> dict[str, str | dict | list]:
+    """Every stored value, including shadowed admin keys, for output hiding."""
+    d = _existing_dir(root)
+    if d is None:
+        return {}
+    mine, theirs = _load(d), _load(d, admin=True)
+    out = {}
+    for entries, admin in ((mine, False), (theirs, True)):
+        for name, entry in entries.items():
+            label = name + "#admin" if admin and name in mine else name
+            if entry["type"] == "key-file":
+                try:
+                    raw = _read(d / "files" / _name(name), FILE_MAX + 1)
+                except FileNotFoundError:
+                    continue
+                try:
+                    value = raw.decode("utf-8")
+                except UnicodeDecodeError:  # a binary file: its text encodings are what can show up
+                    import base64
+
+                    value = [
+                        raw.hex(),
+                        base64.b64encode(raw).decode(),
+                        base64.urlsafe_b64encode(raw).decode(),
+                    ]
+            else:
+                value = entry.get("value")
+                if not isinstance(value, str):
+                    raise Refused("The key file is damaged.")
+                if entry["type"] == "json":
+                    try:
+                        value = json.loads(value)
+                    except ValueError:
+                        raise Refused("The key file is damaged.") from None
+                    if not isinstance(value, dict):
+                        raise Refused("The key file is damaged.")
+            out[label] = value
+    return out
