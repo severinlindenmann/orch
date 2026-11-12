@@ -20,11 +20,11 @@
   function renderUsed(v) {
     const rows = (v.board && v.board.used) || [];
     const tab = els.tabs && els.tabs[3];
-    if (tab) { tab.textContent = 'Used'; if (rows.length) tab.append(h('sup', {text: ' ' + rows.length})); }
+    if (tab) { tab.textContent = 'What it read'; S.views.ticket?.showTab(3, rows.length > 0); }  // an empty tab is hidden
     const key = keyOf(rows);
     if (!els.paneUsed || key === els.paneUsed.dataset.k) return;
     els.paneUsed.dataset.k = key;
-    const content = h('div', {class: 'fx-results fx-used-page'}, h('h2', {text: 'What the agent used'}));
+    const content = h('div', {class: 'fx-results fx-used-page'}, h('h2', {text: 'What it read'}));
     if (!rows.length) content.append(h('p', {class: 'meta', text: 'Nothing used yet.'}));
     else {
       const note = u => text(u.note).trim();
@@ -60,7 +60,7 @@
   function renderFiles(v) {
     const rows = ((v.board && v.board.files) || []).filter(f => SAFE(f.path));
     const tab = els.tabs && els.tabs[2];
-    if (tab) { tab.textContent = 'Files'; if (rows.length) tab.append(h('sup', {text: ' ' + rows.length})); }
+    if (tab) { tab.textContent = 'Files'; if (rows.length) tab.append(h('sup', {text: ' ' + rows.length})); S.views.ticket?.showTab(2, rows.length > 0); }
     const shared = sharedFiles();
     const key = keyOf([rows, [...shared]]);
     if (!els.paneFiles || key === els.paneFiles.dataset.k) return;

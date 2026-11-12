@@ -27,7 +27,7 @@
     if (context) {
       const reused = Math.max(0, Math.min(100, Number(context.reused) || 0));
       els.session.append(h('section', {class: 'fx-saved-context'}, h('h3', {text: 'Saved context'}),
-        h('p', {class: 'meta', text: v.run.label + ' remembers this conversation, ' + reused + '% reused, so replies are faster and cheaper.'}),
+        h('p', {class: 'meta', text: 'The helper remembers this conversation, ' + reused + '% reused, so replies are faster and cheaper.'}),
         h('div', {class: 'progress', role: 'progressbar', 'aria-label': 'Saved context reused', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(reused)}, h('span', {style: 'width:' + reused + '%'})),
         h('p', {class: 'meta', text: 'Refreshed ' + hhmm(context.at)})));
     }

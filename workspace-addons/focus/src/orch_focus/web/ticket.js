@@ -7,28 +7,34 @@
   function picker() {
     document.title = 'Focus · orch';
     root.classList.add('fx-picker');
-    root.append(h('header', {class: 'fx-top'}, h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'})),
-      h('main', {class: 'fx-pick'}, h('p', {class: 'eyebrow', text: 'One ticket at a time, or all at once'}), h('h1', {text: 'Where shall we focus?'}), h('p', {class: 'meta', text: 'Choose a ticket to take its next step.'})));
+    root.append(h('header', {class: 'fx-top'}, homeLink(), h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'})),
+      h('main', {class: 'fx-pick'}, h('h1', {text: 'Where shall we focus?'}), h('p', {class: 'meta', text: 'Choose a ticket to take its next step.'})));
     fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); }).then(payload => {
       const list = payload.tickets;
       root.querySelector('.fx-workspace').textContent = payload.workspace + ' / Focus';
       S.state.pickAttention = window.FocusHelpers.attentionText(list);
       pickerSub();
       const box = root.querySelector('.fx-pick');
-      if (!list.length) box.append(h('p', {class: 'muted', text: 'No open tickets.'}));
+      if (!list.some(t => t.status !== 'done')) box.append(emptyState());
       const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Check result', 'Check'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
+      /* one line: key, title, the actual next step only when it says more, and a real action chip */
       const rowFor = (t, status, action) => {
-        const next = t.next_step || action;
-        return h('a', {href: P + '/t/' + t.id + (status === 'review' ? '#results' : '')},
-          h('div', {class: 'grow'}, h('span', {class: 'mono key', text: t.key || t.id}), h('strong', {text: t.title}),
-            h('small', {text: 'Next step · ' + next})), h('span', {class: 'row-action', text: next}));
+        const next = window.FocusHelpers.nextStepText(t, action);
+        const finished = status === 'done' && t.closed_at ? stamp(t.closed_at) : '';
+        return h('a', {class: 'fx-pick-row', href: P + '/t/' + t.id + (status === 'review' ? '#results' : '')},
+          h('span', {class: 'mono key', text: t.key || t.id}), h('strong', {class: 'grow', text: t.title}),
+          next ? h('small', {text: next}) : null, finished ? h('small', {text: 'Finished ' + finished}) : null,
+          h('span', {class: 'chip fx-row-chip', text: action}));
       };
       for (const [status, label, action] of groups) {
         const needsYou = window.FocusHelpers.needsYou;
         const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status);
         if (!rows.length) continue;
-        box.append(h('section', {class: 'fx-pick-group fx-group-' + status}, h('h2', {}, label + ' ', h('span', {class: 'meta', text: '(' + rows.length + ')'})),
-          h('div', {class: 'card'}, rows.map(t => rowFor(t, status, action)))));
+        const {shown, more} = window.FocusHelpers.limitGroup(rows);
+        const card = h('div', {class: 'card'}, shown.map(t => rowFor(t, status, action)));
+        const all = more ? h('button', {class: 'btn ghost sm fx-show-all', type: 'button', text: 'Show all (' + rows.length + ')'}) : null;
+        if (all) all.addEventListener('click', () => { card.replaceChildren(...rows.map(t => rowFor(t, status, action))); all.remove(); });
+        box.append(h('section', {class: 'fx-pick-group fx-group-' + status}, h('h2', {}, label + ' ', h('span', {class: 'meta', text: '(' + rows.length + ')'})), card, all));
       }
       const done = list.filter(t => t.status === 'done').sort((a, b) => String(b.closed_at || '').localeCompare(String(a.closed_at || '')));
       if (done.length) {
@@ -59,6 +65,13 @@
     });
   }
 
+  const HOME = INAPP ? '/#home' : '/';
+  const homeLink = () => h('a', {class: 'btn ghost sm fx-home', href: HOME, target: INAPP ? '_top' : '_self'}, h('span', {'aria-hidden': 'true', text: '←'}), h('span', {text: 'Back to Home'}));
+  function emptyState() {
+    return h('div', {class: 'fx-empty'}, h('p', {class: 'muted', text: 'No open tickets.'}),
+      h('div', {class: 'row'}, h('a', {class: 'btn primary sm', href: '/#new', target: INAPP ? '_top' : '_self', text: 'Create a ticket'}), homeLink()));
+  }
+
   /* "2 agents are working. One question needs you." The agent count comes from the live cards, the rest from the tickets. */
   function pickerSub() {
     const sub = root.querySelector('.fx-pick > .meta');
@@ -69,7 +82,7 @@
   function build() {
     els.rail = h('button', {class: 'btn ghost icon sm', 'data-act': 'rail', 'aria-label': 'Show or hide tasks', 'aria-expanded': 'true', title: 'Tasks ( [ )', icon: 'table'});
     els.key = h('span', {class: 'mono key', text: TID});
-    els.title = h('h1', {text: ''});
+    els.title = h('span', {text: ''});
     els.areaChip = h('span', {class: 'chip success fx-area-chip', hidden: true, text: ''});  // the area this ticket works in (a label only)
     els.count = h('span', {text: ''});
     els.bar = h('span');
@@ -79,35 +92,37 @@
     els.time = h('span', {class: 't', text: ''});
     els.live = h('button', {class: 'fx-live', type: 'button', 'aria-expanded': 'false', 'aria-haspopup': 'dialog', 'aria-controls': 'fx-session'}, h('span', {class: 'fx-dot'}), els.agent, els.stateText, els.time);
     els.stopIc = h('span');
-    els.stopL = h('span', {class: 'opt', text: 'Stop'});
-    els.stop = h('button', {class: 'btn ghost sm', 'data-act': 'stop', title: 'Stop or continue (S)', 'aria-label': 'Stop'}, els.stopIc, els.stopL);
+    els.stopL = h('span', {class: 'opt', text: 'Pause work'});
+    els.stop = h('button', {class: 'btn ghost sm', 'data-act': 'stop', title: 'Pause work or continue (S)', 'aria-label': 'Pause work'}, els.stopIc, els.stopL);
     els.answer = h('button', {class: 'btn primary sm', 'data-act': 'answer', title: 'Answer the question below', hidden: true, text: 'Answer'});
-    const menuRow = (action, icon, label, hidden = false) => h('button', {type: 'button', 'data-act': action, hidden}, h('span', {icon}), h('span', {text: label}));
-    els.fresh = menuRow('fresh', 'plus', 'Start fresh instead', true);
-    els.attachBtn = menuRow('attach', 'external', 'Open live session', true);
-    els.full = menuRow('full', 'expand', 'Full screen');
+    /* a fixed list: what does not apply now is greyed out, never removed; desktop-only rows hide on a phone */
+    const menuRow = (action, icon, label, cls) => h('button', {type: 'button', 'data-act': action, class: cls || null}, h('span', {icon}), h('span', {text: label}));
+    els.fresh = menuRow('fresh', 'plus', 'Start fresh instead', 'fx-risky');
+    els.attachBtn = menuRow('attach', 'external', 'Open live session');
+    els.full = menuRow('full', 'expand', 'Full screen', 'fx-desktop');
     els.full.setAttribute('aria-pressed', 'false');
-    els.helpBtn = menuRow('help', 'text', 'Keyboard shortcuts');
+    els.helpBtn = menuRow('help', 'text', 'Keyboard shortcuts', 'fx-desktop');
     els.moreBtn = h('button', {class: 'btn ghost icon sm', type: 'button', icon: 'more', 'aria-label': 'More actions', 'aria-expanded': 'false', 'aria-controls': 'fx-action-menu'});
-    els.menu = h('div', {class: 'fx-popover fx-action-menu', id: 'fx-action-menu', hidden: true}, els.attachBtn, els.full, els.helpBtn, els.fresh);
+    els.menu = h('div', {class: 'fx-popover fx-action-menu', id: 'fx-action-menu', hidden: true}, els.full, els.helpBtn,
+      h('details', {class: 'fx-tech'}, h('summary', {text: 'Technical details'}), els.attachBtn), h('hr', {class: 'fx-menu-divider'}), els.fresh);
     els.more = h('div', {class: 'fx-more'}, els.moreBtn, els.menu);
     els.session = h('section', {class: 'fx-popover fx-session', id: 'fx-session', role: 'dialog', 'aria-labelledby': 'fx-session-title', tabindex: '-1', hidden: true});
     els.liveWrap = h('div', {class: 'fx-live-wrap'}, els.live, els.session);
-    els.phoneInput = h('input', {type: 'checkbox', role: 'switch'});
-    els.phone = h('label', {class: 'fx-phone', hidden: true}, els.phoneInput, 'Send questions to my phone');
     els.steps = h('div', {class: 'fx-stepper'});
     els.back = S.views.used ? S.views.used.backLink() : null;
-    const top = h('header', {class: 'fx-top'}, els.back, els.rail, h('div', {class: 'fx-title'}, h('div', {class: 'meta'}, 'Focus / ', els.key), h('div', {class: 'fx-title-row'}, els.title, els.areaChip), els.steps), h('div', {class: 'fx-prog'}, els.count, els.prog), els.liveWrap,
-      h('div', {class: 'fx-tools'}, els.phone, els.stop, els.more, h('a', {class: 'btn ghost sm fx-exit', 'aria-label': 'Exit Focus', href: INAPP ? '/#ticket/' + TID : '/', target: INAPP ? '_top' : '_self', title: INAPP ? 'Back to the ticket' : 'All tickets'}, h('span', {icon: 'x'}), h('span', {class: 'opt', text: 'Exit'}))));
+    els.mobileTasks = h('button', {class: 'chip fx-mobile-tasks', type: 'button', 'data-act': 'rail', 'aria-controls': 'fx-tasks', 'aria-expanded': 'false'});
+    const backToList = h('a', {class: 'btn ghost sm fx-exit', href: (P || '') + '/', target: '_self', title: 'Back to list'}, h('span', {'aria-hidden': 'true', text: '←'}), h('span', {class: 'opt', text: 'Back to list'}));
+    const top = h('header', {class: 'fx-top'}, backToList, els.rail, h('div', {class: 'fx-title'}, h('h1', {}, els.title), els.areaChip, h('span', {class: 'fx-key-hidden', hidden: true}, els.key)),
+      els.back, h('div', {class: 'fx-prog'}, els.count, els.prog), els.mobileTasks, h('div', {class: 'fx-tools'}, els.stop, els.more));
+    /* the status sits in the step bar: Plan · Work · Check · Done, the current step in the accent colour, then the live state */
+    const stepbar = h('div', {class: 'fx-stepbar'}, els.steps, els.liveWrap);
     els.tasks = h('div', {id: 'fx-tasks'});
     els.helpers = h('div');
     els.railNote = h('p', {class: 'meta', style: false});
     els.addInput = h('input', {class: 'input', type: 'text', maxlength: '500', placeholder: 'Add a task', 'aria-label': 'Add a task', name: 'task'});
-    els.addForm = h('form', {class: 'fx-add-task', id: 'fx-add-task'}, els.addInput, h('button', {class: 'btn ghost icon sm', type: 'submit', 'aria-label': 'Add task', icon: 'plus'}));
-    // at phone width the field folds behind "+" (focus.css); on a wide screen the field is always shown
-    els.addToggle = h('button', {class: 'btn ghost sm fx-add-toggle', type: 'button', 'data-act': 'add-task', 'aria-expanded': 'false', 'aria-controls': 'fx-add-task', 'aria-label': 'Add a task'}, h('span', {'aria-hidden': 'true', text: '+'}), h('span', {text: 'Add task'}));
-    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Tasks'}), els.railCount = h('span')), els.tasks), els.helpers, els.railNote, h('div', {class: 'fx-add-wrap'}, els.addToggle, els.addForm));
-    els.tabs = [['live', 'Live'], ['proof', 'Results'], ['files', 'Files'], ['used', 'Used']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
+    els.addForm = h('form', {class: 'fx-add-task', id: 'fx-add-task'}, els.addInput);  // one full-width field; Enter adds the task
+    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Tasks'}), els.railCount = h('span')), els.tasks), els.helpers, els.railNote, h('div', {class: 'fx-add-wrap'}, els.addForm));
+    els.tabs = [['live', 'Live'], ['proof', 'Results'], ['files', 'Files'], ['used', 'What it read']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
     els.sub = h('span', {class: 'meta', text: ''});
     els.feed = h('div', {class: 'fx-feed', role: 'log', 'aria-label': 'What the agent is doing'});
     els.working = h('div', {class: 'fx-working', hidden: true});
@@ -119,17 +134,15 @@
     els.paneFiles = h('div', {class: 'fx-pane', id: 'fx-p-files', role: 'tabpanel', 'aria-labelledby': 'fx-t-files', hidden: true});
     els.paneUsed = h('div', {class: 'fx-pane', id: 'fx-p-used', role: 'tabpanel', 'aria-labelledby': 'fx-t-used', hidden: true});
     els.attachBox = h('div', {class: 'fx-attach', hidden: true});
-    els.msg = h('textarea', {id: 'fx-msg', rows: '1', placeholder: 'Message the agent…', 'aria-label': 'Message to the agent'});
+    els.msg = h('textarea', {id: 'fx-msg', rows: '1', placeholder: 'Write a message…', 'aria-label': 'Write a message'});
     els.form = h('form', {id: 'fx-form'}, els.msg, h('button', {class: 'btn sm', 'aria-label': 'Send', text: 'Send ↑'}));
-    els.messageLabel = h('label', {for: 'fx-msg', text: 'Message the agent'});
-    const compose = els.compose = h('div', {class: 'fx-compose'}, els.messageLabel, els.form);
+    const compose = els.compose = h('div', {class: 'fx-compose'}, els.form);
     els.help = helpPanel();
     els.review = h('div', {class: 'fx-review', hidden: true}, h('div', {}, h('p', {text: 'Finished. Looks good?'}), h('p', {class: 'meta', text: 'Next step · Check result'})),
       h('button', {class: 'btn', 'data-act': 'changes', text: 'Ask for changes'}), h('button', {class: 'btn primary', 'data-act': 'done', text: 'Accept'}));
     els.complete = h('div', {class: 'fx-review', hidden: true}, h('p', {text: 'You’re all set here.'}));
     const stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, els.paneFiles, els.paneUsed, compose, els.review, els.complete, els.help);
-    els.mobileTasks = h('button', {class: 'fx-mobile-tasks', 'data-act': 'rail', 'aria-controls': 'fx-tasks', 'aria-expanded': 'false'});
-    root.replaceChildren(top, els.mobileTasks, h('div', {class: 'fx-body'}, rail, stage));
+    root.replaceChildren(top, stepbar, h('div', {class: 'fx-body'}, rail, stage));
     els.stopIc.innerHTML = ic('pause');
     root.querySelectorAll('[data-icon]').forEach(e => { e.innerHTML = ic(e.dataset.icon); });
   }
@@ -189,8 +202,10 @@
     const list = [];
     for (const c of done) for (const ev of c.evidence || []) list.push({c, ev});
     const key = keyOf([v.ticket.status, v.ticket.closed_at, v.ticket.history, v.run.label, list]);
+    const count = window.FocusHelpers.resultCount(v.ticket.checklist);  // tasks, the same unit as "1 of 1 tasks"
     els.tabs[1].textContent = 'Results';
-    if (list.length) els.tabs[1].append(h('sup', {text: ' ' + list.length}));
+    if (count) els.tabs[1].append(h('sup', {text: ' ' + count}));
+    S.views.ticket.showTab(1, !!list.length || ['review', 'done'].includes(v.ticket.status));
     if (key === els.paneProof.dataset.k) return;
     els.paneProof.dataset.k = key;
     const files = list.filter(x => x.ev.type !== 'note');
@@ -205,5 +220,13 @@
     els.paneProof.replaceChildren(content);
   }
 
-  S.register('ticket', {picker, pickerSub, build, renderTasks, taskTools, renderHelpers, renderProof});
+  /* an empty tab is hidden; if it was the open one, Live opens instead */
+  function showTab(i, on) {
+    const tab = els.tabs && els.tabs[i];
+    if (!tab || tab.hidden === !on) return;
+    tab.hidden = !on;
+    if (!on && tab.getAttribute('aria-selected') === 'true') els.tabs[0].click();
+  }
+
+  S.register('ticket', {showTab, picker, pickerSub, build, renderTasks, taskTools, renderHelpers, renderProof});
 })();
