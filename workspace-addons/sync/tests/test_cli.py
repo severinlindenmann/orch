@@ -126,6 +126,10 @@ def test_run_symlink(root, tmp_path):
 
 
 def test_off_does_not_call_git(root, monkeypatch):
+    from orch import humanproof
+
+    humanproof.human_key(root)  # a real workspace has its key folder (an unreadable pin refuses: N-1)
+
     def forbidden(*args, **kwargs):
         raise AssertionError("off must not execute git")
 
