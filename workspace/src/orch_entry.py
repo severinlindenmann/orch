@@ -52,7 +52,14 @@ def marker_path(home: Path) -> Path:
     return home / "finish.updating"
 
 
+def strict() -> bool:
+    """ORCH_HOME_STRICT (anything but empty or 0), the same test as orch.addons.home()."""
+    return os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
+
+
 def home_candidates() -> list[Path]:
+    """ORCH_HOME (when a usable folder), then the account's ~/.orch-tool. With ORCH_HOME set and strict
+    (tests, e2e lanes), only ORCH_HOME: the real home is never looked at (empty if ORCH_HOME is bad)."""
     homes = []
     env = os.environ.get("ORCH_HOME")
     if env:
@@ -64,6 +71,8 @@ def home_candidates() -> list[Path]:
                 homes.append(home)
         except (OSError, ValueError, RuntimeError):
             pass
+    if env and strict():
+        return homes
     return [*homes, (real_home() / ".orch-tool").resolve()]
 
 

@@ -68,6 +68,7 @@ def test_resolved_home_marker_blocks_entry(monkeypatch, tmp_path, case):
         home = link
     monkeypatch.setattr(orch_entry, "real_home", lambda: top)
     monkeypatch.setenv("ORCH_HOME", str(home))
+    monkeypatch.delenv("ORCH_HOME_STRICT")  # a normal install: the account default is guarded too
     orch_entry.marker_path(home).write_text(str(os.getpid()))
     assert orch_entry.home_candidates() == [home.resolve(), (top / ".orch-tool").resolve()]
     assert orch_entry.main() == 3
@@ -101,6 +102,7 @@ def test_foreign_home_owner_runs_normally(monkeypatch, symlink):
     monkeypatch.setattr(Path, "stat", foreign_stat)
     monkeypatch.setattr(orch_entry, "real_home", lambda: top)
     monkeypatch.setenv("ORCH_HOME", str(override))
+    monkeypatch.delenv("ORCH_HOME_STRICT")
     cli = types.ModuleType("orch.cli")
     cli.main = lambda: 17
     monkeypatch.setitem(sys.modules, "orch.cli", cli)
@@ -111,6 +113,49 @@ def test_foreign_home_owner_runs_normally(monkeypatch, symlink):
     default.mkdir()
     orch_entry.marker_path(default).write_text(str(os.getpid()))
     assert orch_entry.main() == 3
+
+
+def _strict_setup(monkeypatch, tmp_path):
+    top = tmp_path / "account"
+    (top / ".orch-tool").mkdir(parents=True)
+    home = tmp_path / "lane"
+    home.mkdir()
+    monkeypatch.setattr(orch_entry, "real_home", lambda: top)
+    monkeypatch.setenv("ORCH_HOME", str(home))
+    monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    cli = types.ModuleType("orch.cli")
+    cli.main = lambda: 17
+    monkeypatch.setitem(sys.modules, "orch.cli", cli)
+    return top, home
+
+
+def test_strict_home_ignores_real_home_marker(monkeypatch, tmp_path):
+    """A lane's strict ORCH_HOME is not blocked by an update marker in the account's real ~/.orch-tool."""
+    top, home = _strict_setup(monkeypatch, tmp_path)
+    orch_entry.marker_path(top / ".orch-tool").write_text(str(os.getpid()))
+    assert orch_entry.updating(top / ".orch-tool")  # the marker itself is live
+    assert orch_entry.home_candidates() == [home.resolve()]
+    assert addons.home_candidates() == [home.resolve()]
+    assert orch_entry.main() == 17
+    # non-strict: the account default is still a candidate and still blocks
+    for off in ("", "0"):
+        monkeypatch.setenv("ORCH_HOME_STRICT", off)
+        assert orch_entry.home_candidates() == [home.resolve(), (top / ".orch-tool").resolve()]
+        assert orch_entry.main() == 3
+
+
+def test_strict_home_marker_still_blocks(monkeypatch, tmp_path):
+    _, home = _strict_setup(monkeypatch, tmp_path)
+    orch_entry.marker_path(home).write_text(str(os.getpid()))
+    assert orch_entry.main() == 3
+
+
+def test_strict_bad_home_has_no_candidates(monkeypatch, tmp_path):
+    top, _ = _strict_setup(monkeypatch, tmp_path)
+    monkeypatch.setenv("ORCH_HOME", str(tmp_path / "missing"))
+    orch_entry.marker_path(top / ".orch-tool").write_text(str(os.getpid()))
+    assert orch_entry.home_candidates() == []
+    assert orch_entry.main() == 17
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX marker ownership")

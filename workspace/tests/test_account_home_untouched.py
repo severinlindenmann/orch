@@ -270,3 +270,35 @@ def test_start_update_stop_combined(fsguard):
     _cli("update")
     _cli("stop", "--all")
     assert (orch_home / "addons.json").is_file()
+
+
+def test_strict_state_writes_stay_in_orch_home(fsguard, monkeypatch, tmp_path):
+    """ORCH_HOME_STRICT: ticket, key, registry and record writes all land under ORCH_HOME; the faked account
+    home (and HOME, and the entry guard's real home) gets nothing."""
+    import orch_entry
+
+    z, orch_home, ws, _ = fsguard
+    monkeypatch.setattr(orch_entry, "real_home", lambda: z)
+    assert orch_entry.home_candidates() == [orch_home.resolve()]
+    assert addons.home_candidates() == [orch_home.resolve()]
+    assert (z / ".orch-tool").resolve() in addons.home_candidates(include_real=True)
+    _cli("init", "--yes")
+    assert _cli("ticket", "new", "strict home check", "--json", "--by", "agent:x")[0] == 0
+    addons._save_registry([{"name": "focus", "source": "built-in", "version": "0.1.0"}])
+    assert (orch_home / "addons.json").is_file()
+    monkeypatch.setattr(hp, "install_kind", lambda: "test")
+    prefix = z / ".orch-test"
+    prefix.mkdir()
+    tws = prefix / "ws"
+    (tws / ".orch").mkdir(parents=True)
+    monkeypatch.setenv("ORCH_HOME", str(prefix / "home"))
+    (prefix / "home").mkdir()
+    hp.human_key(tws, create=True)
+    # HOME may get an agent tool's own scratch folder (probing an installed `codex` makes ~/.codex/tmp),
+    # but never anything of orch's
+    assert not (tmp_path / "X" / ".orch-tool").exists() and not (tmp_path / "X" / ".orch-test").exists()
+    assert sorted(p.name for p in z.iterdir() if p.name not in (".orch-tool",)) == [
+        ".orch-test",
+        "lane-home",
+        "work",
+    ]

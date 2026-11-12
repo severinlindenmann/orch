@@ -177,7 +177,7 @@ def _avoid(cwd: Path, root: Path | None) -> frozenset:
         pass
     if root is not None:
         out.add(str(root))
-    homes = list(addons.home_candidates())
+    homes = list(addons.home_candidates(include_real=True))
     try:
         homes.append(addons.home(root))
     except Exception:  # noqa: BLE001 - no usable orch home: the candidates above are enough
