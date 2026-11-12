@@ -2477,8 +2477,15 @@ def done(root: Path, mid: str) -> dict:
         if msg.get("type") in ("delegate", "start"):
             tid = _ticket_by_message(root, mid)
             if tid is None and allowed(root, msg):
-                tid = _ticket_for(root, msg)
-                _use_once(root, msg)
+                try:
+                    tid = _ticket_for(root, msg)
+                    _use_once(root, msg)
+                except (
+                    Refused
+                ):  # e.g. its allow ticket was closed by a person meanwhile: this message is dropped
+                    tid = None  # (seen below: no retry storm), the rest of the inbox goes on
+                    with contextlib.suppress(Refused, OSError):
+                        _use_once(root, msg)  # a once-allow is spent: the message is not offered again
             res["ticket"] = tid
         _mark_seen(root, mid)
         return res
@@ -2549,7 +2556,7 @@ def _merge_allow(root: Path, atid: str, into: str, by: str) -> None:
             tk["status"], tk["waiting_on"] = "dropped", None
             tickets.add_history(tk, by, f"Joined {into}", "relay")
 
-    tickets.apply_op(root, atid, op, by=by)
+    tickets.apply_op(root, atid, op, by=tickets.SYSTEM)  # bookkeeping on a ticket that may be closed
 
 
 _WIN_RESERVED = re.compile(
