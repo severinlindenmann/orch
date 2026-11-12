@@ -213,3 +213,15 @@ def test_moving_to_local_is_no_false_alarm(root, tmp_path, preview):
     assert cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0
     st = act.status(root, cli.DEFAULTS | cli.read(root, "settings"))
     assert st["unconfirmed"] is False and st["remote"] is None
+
+
+def test_an_unreadable_pin_is_no_successful_revocation(root, tmp_path, monkeypatch, preview):
+    """N-1 (record_pin None path): leaving remote while the pin can't be read is refused, never "Saved"."""
+    from orch import humanproof
+
+    remote = bare(tmp_path)
+    assert set_remote(root, remote) == 0
+    save(root)
+    monkeypatch.setattr(humanproof, "record_pin", lambda *a, **k: None)
+    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) != 0
+    assert not (root / ".orch" / cli.ADDRESS).exists() and cli.read(root, "settings")["mode"] == "local"

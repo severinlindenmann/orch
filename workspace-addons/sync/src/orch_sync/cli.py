@@ -117,10 +117,12 @@ def revoke_address(root):
     from orch import humanproof
 
     repo.safe(root, ADDRESS).unlink(missing_ok=True)  # stops sync now either way (address_confirmed is false)
-    if not humanproof.record_pin(root, ADDRESS_KIND):
-        return  # no pin ever made ({}) or none readable (None): pin_ok refuses every copy already
-    moved = humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None})
-    if not moved:  # the guarded pin still names the old record: a restored copy would count again (N-1)
+    pin = humanproof.record_pin(root, ADDRESS_KIND)
+    if pin == {}:
+        return  # no pin was ever made: no address record can ever pass pin_ok
+    # unreadable (None: e.g. a damaged .orch/.local-id, which an agent can write) or a pin that can't move: the old
+    # pin may still name the old record, and a restored copy would count again once the pin reads again (N-1)
+    if pin is None or not humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None}):
         raise repo.Refused("orch could not record that sync left this address. Sync is stopped; try again.")
 
 
