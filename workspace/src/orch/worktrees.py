@@ -798,6 +798,7 @@ APPROVAL_NEEDED = (
     "These changes are not the ones you reviewed before marking this done: they need your approval"
 )
 NO_TIP = "none"  # --shown-tip value: the page showed no review tip
+OBJECTS_BAD = "The stored history does not check out (an object differs from its id): a person needs to look"
 NEW_CHANGES = "New changes arrived after you looked; approve them to bring them back"
 CONFLICT_PENDING = "The agent has not finished resolving a conflict"
 CRISS_CROSS = "bring it back by hand"
@@ -1921,6 +1922,18 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             return wait(CHANGED)
         if tickets.load(root, ticket).get("status") != "done":
             return None  # reopened while this was prepared: the Done that approved it is withdrawn
+        if _alive_here(root, ticket):
+            return wait("an agent is still working in the copy")
+        # Git does not re-hash objects while it merges, and the copy shares the project's object folder: check
+        # that what the merge reads is what its ids say, in this same locked section, right before it.
+        # (Residual: a process the agent left running after its run ended is not covered by _alive_here.)
+        rc, _, _ = _git(
+            ["fsck", "--strict", "--no-dangling", "--no-reflogs", "--no-progress", tip, pre["head"]],
+            top,
+            read_only=True,
+        )
+        if rc:
+            return wait(OBJECTS_BAD)
         merge_started = True
         rc, _, _ = _bb_merge(
             top,

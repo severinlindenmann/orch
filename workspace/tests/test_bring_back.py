@@ -2506,3 +2506,25 @@ def test_b13h_none_binds_between_the_run_end_read_and_write(done_copy, run, monk
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting"
     assert git(root, "rev-parse", "HEAD") == head and not (root / "late.py").exists()
+
+
+def test_b13j_overwritten_object_of_the_reviewed_tip_is_refused(done_copy):
+    """The copy shares the project's object folder: an agent that rewrites the loose blob of the reviewed tip
+    (valid zlib, other content) is caught before the merge; nothing is merged and the person is told."""
+    import zlib
+    from pathlib import Path
+
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    blob = git(copy, "rev-parse", "HEAD:code.py")
+    common = Path(git(copy, "rev-parse", "--git-common-dir"))
+    common = common if common.is_absolute() else copy / common
+    obj = common / "objects" / blob[:2] / blob[2:]
+    assert obj.exists()
+    obj.chmod(0o644)
+    obj.write_bytes(zlib.compress(b"blob 5\0EVIL\n"))
+    head = git(root, "rev-parse", "HEAD")
+    done_and_sweep(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.OBJECTS_BAD
+    assert git(root, "rev-parse", "HEAD") == head and (root / "code.py").read_text() != "EVIL\n"

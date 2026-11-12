@@ -582,6 +582,7 @@ ALLOWED = {
     "worktree", "read-tree", "update-index", "checkout-index", "ls-files", "rev-parse", "config", "branch",
     "symbolic-ref", "cat-file", "merge-base", "show-ref", "for-each-ref", "status", "diff", "log", "show",
     "merge", "commit", "add", "rm", "reset", "stash", "check-ignore", "rev-list", "check-attr", "merge-tree",
+    "fsck",
 }  # fmt: skip
 # (check-ignore reads ignore rules only: no content, no filters; --stdin is refused below)
 # (rev-list and check-attr only read: commit graph / attribute names. B13 uses them for ancestry counts and to
@@ -593,6 +594,7 @@ _REV_LIST_OK = {
     "--count", "--parents", "--first-parent", "--no-merges", "--merges", "--reverse", "-q", "--quiet", "-n",
 }  # fmt: skip
 _CHECK_ATTR_OK = {"-z", "--cached"}
+_FSCK_OK = {"--strict", "--no-dangling", "--no-reflogs", "--no-progress"}  # re-hashes what it reads
 _MERGE_TREE_OK = {
     "--write-tree",
     "--name-only",
@@ -650,6 +652,11 @@ def refusal(args: list[str]) -> str | None:
                 return (
                     "git rev-list: only --count, --parents, --first-parent, -n and similar read flags are run"
                 )
+    if cmd == "fsck":
+        if any(a.startswith("-") and a not in _FSCK_OK for a in rest) or "--" in rest:
+            return "git fsck: only --strict, --no-dangling, --no-reflogs and commit ids are run"
+        if any(not a.startswith("-") and not re.fullmatch(r"[0-9a-f]{40,64}", a) for a in rest):
+            return "git fsck: only full commit ids are run"
     if cmd == "merge-tree":
         for a in flags:
             if a.startswith("-") and a not in _MERGE_TREE_OK:
@@ -739,7 +746,9 @@ def _git_dirs(cwd: Path) -> list[Path]:
     for d in (here, *here.parents):
         dot = d / ".git"
         try:
-            if dot.is_dir() and not dot.is_symlink():
+            if dot.is_symlink():
+                return [dot]  # git follows it; hostile_history refuses it (the control folder is not ours)
+            if dot.is_dir():
                 return [dot]
             if dot.is_file():
                 line = dot.read_text(errors="replace").splitlines()[0:1]
@@ -762,6 +771,8 @@ def hostile_history(cwd: Path) -> str | None:
     """A reason when the repository carries a file git trusts for history that an agent can write (shallow
     boundary, alternates, grafts): they fake ancestry, merge bases and what a commit id contains."""
     for g in _git_dirs(cwd):
+        if g.is_symlink():
+            return HISTORY_REFUSAL
         for f in HISTORY_FILES:
             if os.path.lexists(g / f):
                 return HISTORY_REFUSAL

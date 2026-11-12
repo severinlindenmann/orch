@@ -1616,3 +1616,17 @@ def test_a_work_copy_of_a_shallow_project_is_refused(tmp_path, monkeypatch):
     assert safegit.run(["status"], wt, read_only=True, filters=False)[0] == 0
     (r / ".git" / "shallow").write_text("0" * 40 + "\n")
     assert safegit.run(["status"], wt, read_only=True, filters=False)[0] == safegit.REFUSED
+
+
+def test_fsck_runs_only_in_its_checking_form_and_a_symlinked_git_folder_is_refused(tmp_path):
+    ok = ["fsck", "--strict", "--no-dangling", "--no-reflogs", "a" * 40, "b" * 40]
+    assert safegit.refusal(ok) is None
+    for bad in (["fsck", "--lost-found"], ["fsck", "--name-objects"], ["fsck", "HEAD"], ["fsck", "--", "x"]):
+        assert safegit.refusal(bad), bad
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    moved = tmp_path / "elsewhere"
+    (r / ".git").rename(moved)
+    (r / ".git").symlink_to(moved)
+    assert safegit.hostile_history(r) == safegit.HISTORY_REFUSAL
