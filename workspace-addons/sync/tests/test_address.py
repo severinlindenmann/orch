@@ -146,3 +146,17 @@ def test_a_history_pause_looks_at_a_planted_address_never(root, tmp_path, monkey
     plant(root, remote=str(a))  # the confirmed address: it looks
     assert step._remote_moved(root, {"remote_sha": "0" * 40}, True) is True
     assert [c for c, _ in calls if NETWORK & set(c)]
+
+
+@pytest.mark.parametrize("left", ["local", "off"])
+def test_leaving_remote_revokes_the_signed_address(root, tmp_path, monkeypatch, preview, left):
+    """Gate parity: the person chose A, then left remote; planting mode=remote with A again can't reuse that choice."""
+    remote = bare(tmp_path)
+    assert set_remote(root, remote) == 0
+    save(root)
+    assert cli.main(["--dir", str(root), "set", "--mode", left]) == 0
+    assert not (root / ".orch" / cli.ADDRESS).exists()
+    plant(root, mode="remote", remote=str(remote))
+    if left == "off":
+        repo.ensure(root)
+    refused(root, monkeypatch, remote)

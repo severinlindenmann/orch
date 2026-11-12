@@ -207,6 +207,10 @@ def apply_set(root, settings, mode=None, remote=None, interval=None, kind="priva
             notice = "Anyone can read this repository" if visibility == "public" else "Make sure this repository is private"
     if chosen:
         approve_address(root, chosen)  # the address this signed choice applies (checked at every use)
+    elif mode in ("off", "local"):
+        # leaving remote revokes the signed address: planting mode=remote in settings.json later can't bring the old
+        # approval back; turning remote on again is a new signed choice
+        repo.safe(root, ADDRESS).unlink(missing_ok=True)
     settings.update(mode=mode, kind=kind, interval=interval or settings["interval"])
     save_settings(root, settings)
     from . import loop, service
