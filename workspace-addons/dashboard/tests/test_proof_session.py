@@ -604,6 +604,22 @@ def test_the_free_ops_stay_free(live):
     assert acts.proof_for("ticket.patch", {"ticket": TID, "data": {"note": "x"}}) is None
 
 
+def test_a_gated_op_without_the_page_secret_is_a_plain_refusal_not_a_crash(tmp_path):
+    """ticket.patch to Done needs a proof; a request without a page session (mint=None) is refused with the plain
+    403 text instead of calling mint(*need) on None (a TypeError that dropped the connection)."""
+    need = actions.proof_for(
+        "ticket.patch", {"ticket": TID, "data": {"status": "done"}, "if_revision": 1}, tmp_path
+    )
+    assert need is not None
+    with pytest.raises(actions.NeedsPerson, match="Open the dashboard from this computer"):
+        actions.run_op(
+            tmp_path,
+            actions.SELF,
+            "ticket.patch",
+            {"ticket": TID, "data": {"status": "done"}, "if_revision": 1},
+        )
+
+
 def test_the_core_gated_config_ops_mint_for_the_right_target():
     from orch_dashboard import actions as acts
 
