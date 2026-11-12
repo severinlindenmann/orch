@@ -1,4 +1,4 @@
-"""Files of one ticket for the Artifacts tab: the list (from `orch ticket artifacts --json`) and a safe read.
+"""Files of one ticket for the Files tab: the list (from `orch ticket artifacts --json`) and a safe read.
 
 A file is served only from `.orch/tickets/<ticket>/artifacts/` or `.orch/tickets/<ticket>/evidence/`, read through
 orch.safefile (the one hardened reader), and only plain text and pictures are shown (never as a page).

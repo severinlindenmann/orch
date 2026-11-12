@@ -493,3 +493,15 @@ test('a file is listed once per list, and Overview chips skip the file already i
   assert.ok(nodes(filesTab).some(n => n.tag === 'h2' && n.children.includes('Files')));
   assert.ok(tree.some(n => n.attrs.id === 'ticket-tab-artifacts' && n.children.includes('Files 3')));
 });
+
+test('a file that is both an artifact and a proof shows once in the Files tab and counts once', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), append(...more){this.children.push(...more);}});
+  const shot = {type:'file', ref:'.orch/tickets/t_both/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
+  const t = {id:'t_both', title:'Both', status:'doing', checklist:[{id:'a', text:'One', done:true, evidence:[shot]}]};
+  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : []};
+  vm.createContext(ctx); vm.runInContext(source, ctx);
+  ctx.snapshot = false;
+  vm.runInContext("artifactData.set('t_both', {at:Date.now(), data:{files:[{name:'shot.pdf', size:10}]}});", ctx);
+  ctx.tt = t;
+  assert.deepEqual(Array.from(vm.runInContext('[artifactEntries(tt).length, artifactCount(tt)]', ctx)), [1, 1]);
+});

@@ -394,7 +394,9 @@ const proofRows = t => array(t.checklist).flatMap(task => array(task.evidence).m
 const referenceRows = t => array(t.refs).filter(r => r && (['ticket', 'artifact', 'file'].includes(r.kind) || webLinks(t).includes(r))).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 const linkRows = t => referenceRows(t);
 const artifactProofs = t => uniqueBy(proofRows(t).filter(({ev}) => evidenceFile(t, ev) || (ev.type || ev.kind) === 'note'), ({ev}) => proofKey(t, ev));
-const artifactCount = t => artifactFiles(t).length + artifactProofs(t).length + linkRows(t).length;
+// Files tab rows: artifact files then proofs, merged so a file in both lists shows (and counts) once.
+const artifactEntries = t => uniqueBy([...artifactFiles(t).map(file => ({file})), ...artifactProofs(t)], x => x.file ? x.file.name : proofKey(t, x.ev));
+const artifactCount = t => artifactEntries(t).length + linkRows(t).length;
 // Files tab: all reference kinds, newest first.
 function linkGroups(links) {
   const groups = new Map();
@@ -500,11 +502,10 @@ function ticketReviewTile(t, file) {
     snapshot ? null : ticketButton('Open', 'outline', () => previewFile(t.id, 'artifacts', file.name)));
 }
 function artifactsPanel(t) {
-  const files = artifactFiles(t), proofs = artifactProofs(t), links = linkRows(t);
-  if (!files.length && !proofs.length && !links.length) return h('div', {className:'card artifacts-empty'}, h('h2', {}, 'Nothing here yet'), h('p', {className:'meta'}, 'Results and references from this ticket show up here.'));
+  const entries = artifactEntries(t), links = linkRows(t);
+  if (!entries.length && !links.length) return h('div', {className:'card artifacts-empty'}, h('h2', {}, 'Nothing here yet'), h('p', {className:'meta'}, 'Results and references from this ticket show up here.'));
   return h('div', {className:'stack artifact-stack'}, h('h2', {}, 'Files'),
-    files.map(file => ticketResultCard(t, {}, file, 'artifacts')),
-    proofs.map(({ev}) => ticketResultCard(t, ev, evidenceFile(t, ev))),
+    entries.map(({file, ev}) => file ? ticketResultCard(t, {}, file, 'artifacts') : ticketResultCard(t, ev, evidenceFile(t, ev))),
     links.length ? h('section', {}, h('h2', {}, 'References'), links.map(l => linkRow(t, l, false))) : null);
 }
 function ticketFiles(t) {
