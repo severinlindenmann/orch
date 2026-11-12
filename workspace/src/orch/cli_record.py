@@ -876,8 +876,8 @@ def run_model(run: str, events: list[dict], *, root=None, problem: bool = False)
         outcome = e.get("outcome") or {}
         if e["kind"] == "denial" or (e["kind"] == "key.use" and (e.get("data") or {}).get("refused")):
             result = "refused"
-        elif outcome.get("ok") is True:
-            result = "ok"
+        elif outcome.get("ok") is True and record.is_checked(e):
+            result = "ok"  # only a line orch checked can say a call went well
         elif outcome.get("ok") is False:
             result = "failed"
         else:

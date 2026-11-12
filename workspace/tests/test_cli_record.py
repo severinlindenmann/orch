@@ -250,7 +250,8 @@ def test_counts_valid_and_denominators(ws, capsys):
     )
     read = next(i for i in ans["items"] if i["name"] == "Read")
     # run A can report skills and tools; run B wrote no capability list, so it only counts for what it used
-    assert read["uses"] == 5 and read["ok"] == 1 and read["failed"] == 1 and read["unknown"] == 3
+    # the fixture's lines are hook lines (the agent's word): the one that says ok is "unknown", never "ok"
+    assert read["uses"] == 5 and read["ok"] == 0 and read["failed"] == 1 and read["unknown"] == 4
     assert read["runs"] == {"used": 2, "of": 2, "unseen": 0}
 
 

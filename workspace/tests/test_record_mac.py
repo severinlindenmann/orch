@@ -746,3 +746,17 @@ def test_a_reject_before_the_first_sealed_line_survives_sealing(store, proj_cli,
     assert [ln["changed"] for ln in lines if ln["type"] == "unavailable"] == [2]
     code, (counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
     assert counts["complete"] is False
+
+
+def test_a_hook_line_that_says_ok_is_never_counted_as_ok(store):
+    from orch import cli_record
+
+    ws, writer = store
+    done = dict(ok=True, error=None, ms=1)
+    writer.append(example(id="toolu_h", via="hook", outcome=done))  # sealed, but the agent's word
+    writer.append(example(id="toolu_l", via="log", outcome=done, at=at(2)))
+    events, _ = cli_record._events(ws, [RUN], None)
+    model = cli_record.run_model(RUN, events[RUN], root=ws)
+    assert sorted(u["result"] for u in model["uses"]) == ["ok", "unknown"]  # the hook line's "ok" is not one
+    only_hook = [e for e in events[RUN] if e["via"] == "hook"]
+    assert [u["result"] for u in cli_record.run_model(RUN, only_hook)["uses"]] == ["unknown"]
