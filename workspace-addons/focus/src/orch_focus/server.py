@@ -704,6 +704,8 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence("POST", True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
+            return self._send(403, b"This request came from another website and was refused.", "text/plain")
         from orch.pageproof import forwarded, host_ok
 
         if self.session is None or forwarded(self.headers) or not host_ok(self.headers, self.server.server_address[1]):

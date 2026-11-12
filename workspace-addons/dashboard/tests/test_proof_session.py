@@ -768,3 +768,95 @@ def test_notices_and_update_status_need_the_secret_too(live):
         "state": "failed",
         "reason": "The server said no.",
     }
+
+
+# ---- #539 (supervisor review): /session cannot be used by another local page; no secret leaks -----------------------
+
+
+def _raw(port, method, path, body=None, headers=None):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    h = {"Host": f"127.0.0.1:{port}", "Content-Type": "application/json", **(headers or {})}
+    h = {k: v for k, v in h.items() if v is not None}
+    c.request(method, path, json.dumps(body) if body is not None else None, h)
+    r = c.getresponse()
+    return r.status, {k.lower(): v for k, v in r.getheaders()}, r.read()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"Origin": "http://127.0.0.1:1"},  # another loopback port
+        {"Origin": "http://localhost:1"},
+        {"Origin": "https://evil.example"},
+        {"Origin": "null"},
+        {"Origin": None, "Sec-Fetch-Site": "cross-site"},
+        {"Origin": None},  # a non-GET without Origin
+        {"Host": "evil.example:{PORT}"},  # DNS rebinding
+        {"Host": "127.0.0.1:1"},  # wrong port in Host
+        {"Sec-Fetch-Site": "cross-site"},
+        {"X-Forwarded-For": "1.2.3.4"},
+    ],
+    ids=lambda e: ",".join(f"{k}={v}" for k, v in e.items()),
+)
+def test_session_refused_for_foreign_origin_missing_origin_or_wrong_host(live, extra):
+    root, port = live
+    tok = hp.write_launch_token(root, "dashboard")
+    base = {"Origin": f"http://127.0.0.1:{port}"}
+    extra = {k: (v.replace("{PORT}", str(port)) if isinstance(v, str) else v) for k, v in extra.items()}
+    st, hdr, body = _raw(port, "POST", "/session", {"token": tok}, {**base, **extra})
+    assert st == 403 and b"secret" not in body and "set-cookie" not in hdr
+    assert not any(k.startswith("access-control-") for k in hdr)
+    st, _, body = _raw(port, "POST", "/session", {"token": tok}, base)  # the token was not spent by the refusals
+    assert st == 200 and json.loads(body)["secret"]
+
+
+def test_no_response_carries_cors_headers_and_preflight_is_refused(live):
+    root, port = live
+    ck = session(root, port)
+    origin = {"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"}
+    for method, path, body in (
+        ("OPTIONS", "/session", None),
+        ("OPTIONS", "/api/act", None),
+        ("GET", "/api/state", None),
+        ("GET", "/", None),
+        ("POST", "/api/act", ANSWER),
+        ("POST", "/session", {"token": "x" * 30}),
+    ):
+        st, hdr, _ = _raw(port, method, path, body, {**origin, "Cookie": ck})
+        assert not any(k.startswith("access-control-") for k in hdr), (method, path)
+        if method == "OPTIONS":
+            assert st >= 400
+
+
+def test_the_secret_never_appears_in_logs_urls_redirects_or_gets(live, capfd):
+    root, port = live
+    tok = hp.write_launch_token(root, "dashboard")
+    st, hdr, body = _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
+    secret = json.loads(body)["secret"]
+    assert st == 200 and secret not in json.dumps(hdr)  # not in a header (Set-Cookie, Location, ...)
+    assert "location" not in hdr
+    ck = hdr["set-cookie"].split(";")[0]
+    for path in ("/", "/api/state", "/api/notices", "/api/update-status", "/api/live", "/api/tickets"):
+        st, hdr2, body2 = _raw(port, "GET", path, None, {"Cookie": ck, "X-Orch-Page": secret})
+        assert secret.encode() not in body2 and secret not in json.dumps(hdr2), path
+        assert "location" not in hdr2 and "access-control-allow-origin" not in hdr2
+    post(port, "/api/act", ANSWER, {"Cookie": ck, "X-Orch-Page": secret})
+    post(port, "/api/act", ANSWER, {"Cookie": ck, "X-Orch-Page": "x" * 43})
+    out = capfd.readouterr()
+    assert secret not in out.out and secret not in out.err and ck.split("=", 1)[1] not in out.err
+
+
+def test_secret_compare_is_constant_time_and_rotates_with_the_session(live, monkeypatch):
+    import inspect
+
+    src = inspect.getsource(pageproof.PageSession.authed)
+    assert "compare_digest" in src and "self.secret" in src and "== self.secret" not in src
+    root, port = live
+    tok = hp.write_launch_token(root, "dashboard")
+    _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
+    # a reused link revokes the session: the old cookie AND the old secret are dead, a new link gets a new secret
+    st, hdr, _ = _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
+    assert st == 403 and "set-cookie" not in hdr
+    tok2 = hp.write_launch_token(root, "dashboard")
+    st, hdr, body = _raw(port, "POST", "/session", {"token": tok2}, {"Origin": f"http://127.0.0.1:{port}"})
+    assert st == 200 and json.loads(body)["secret"]
