@@ -7,7 +7,7 @@ import json
 
 from orch import humanproof
 from test_pause import proof
-from test_step import NOW, TICKET, run, save, success
+from test_step import NOW, TICKET, at, run, save, success
 from test_two_machines import both, edit, load, machines
 
 from orch_sync import approval, cli, needs, pause, records, repo, step
@@ -20,7 +20,9 @@ def test_a_choice_counts_only_as_signed_for_its_remote_and_path(machines):
     remote = step.oid(b, "refs/remotes/origin/orch-state")
     decisions = {"remote_sha": remote, "files": {}}
     pause.record_choice(b, decisions, remote, TICKET, {"keep": "mine", "at": NOW})
-    pause.record_choice(b, decisions, remote, "ticket-counter.json", {"keep": "theirs", "at": NOW, "covers": 5})
+    pause.record_choice(
+        b, decisions, remote, "ticket-counter.json", {"keep": "theirs", "at": NOW, "covers": 5}
+    )
     step.write(b, "run/sync/choices.json", step.encoded(decisions))
     assert set(pause.choices(b, remote)) == {TICKET, "ticket-counter.json"}
     decisions["files"]["ticket-counter.json"]["covers"] = 10**8  # an agent widens what the person reviewed
@@ -117,12 +119,16 @@ def test_an_approval_is_never_replayed_and_a_planted_one_applies_nothing(machine
     edit(a, ext={"automation": value})
     success(a)
     success(b)
-    approval.approve(b, "t_abc123", "automation",
-                     proof(b, "sync:allow:t_abc123:automation:" + approval.digest(value), monkeypatch))
+    approval.approve(
+        b,
+        "t_abc123",
+        "automation",
+        proof(b, "sync:allow:t_abc123:automation:" + approval.digest(value), monkeypatch),
+    )
     assert load(b)["ext"]["automation"] == value
     edit(b, ext={"automation": {"enabled": False}})  # the person changes it here afterwards
     success(b)
-    edit(a, ext={"automation": value}, updated_at="2026-11-11T14:00:00Z")  # the peer re-sends the approved value
+    edit(a, ext={"automation": value}, updated_at=at(14))  # the peer re-sends the approved value
     success(a)
     success(b)
     assert load(b)["ext"]["automation"] == {"enabled": False}  # B12/#540: no replay of the old approval
@@ -130,7 +136,7 @@ def test_an_approval_is_never_replayed_and_a_planted_one_applies_nothing(machine
     store = cli.read(b, "approved")
     store["t_abc123"]["automation"] = {**store["t_abc123"]["automation"], "hash": approval.digest(other)}
     step.write(b, "run/sync/approved.json", step.encoded(store))  # planted for a new value
-    edit(a, ext={"automation": other}, updated_at="2026-11-11T15:00:00Z")
+    edit(a, ext={"automation": other}, updated_at=at(15))
     success(a)
     success(b)
     assert load(b)["ext"]["automation"] == {"enabled": False}
@@ -156,7 +162,7 @@ def test_a_stale_held_candidate_goes_when_the_peer_reverts(machines):
     assert approval.held(b, "t_abc123")
     doc = load(a)
     doc.pop("ext")
-    save(a, value={**doc, "updated_at": "2026-11-11T14:00:00Z"})  # the peer goes back to no block
+    save(a, value={**doc, "updated_at": at(14)})  # the peer goes back to no block
     success(a)
     success(b)
     assert not approval.held(b, "t_abc123")
@@ -175,7 +181,13 @@ def test_held_blocks_are_capped(machines, monkeypatch):
 def test_an_edited_pause_is_no_pause(machines):
     a, b, _ = both(machines)
     state = cli.read(b, "state")
-    state["paused"] = {"files": [TICKET], "since": NOW, "remote_sha": "0" * 40, "reason": "x", "mac": "forged"}
+    state["paused"] = {
+        "files": [TICKET],
+        "since": NOW,
+        "remote_sha": "0" * 40,
+        "reason": "x",
+        "mac": "forged",
+    }
     repo.safe(b, "run/sync/state.json").write_text(__import__("json").dumps(state))  # planted, not step.write
     assert pause.verified_pause(b, cli.read(b, "state")) is None
     assert not needs.rows(b)
@@ -217,8 +229,9 @@ def test_the_deleted_notice_does_not_launder_a_planted_pause(machines):
 def test_a_signed_pause_survives_a_write_back_and_a_changed_one_needs_signing_again(machines):
     _a, b, _ = both(machines)
     state = cli.read(b, "state")
-    state["paused"] = pause.sign(b, {"files": [TICKET, "ticket-counter.json"], "since": NOW,
-                                     "remote_sha": "0" * 40, "reason": "x"})
+    state["paused"] = pause.sign(
+        b, {"files": [TICKET, "ticket-counter.json"], "since": NOW, "remote_sha": "0" * 40, "reason": "x"}
+    )
     step.write(b, step.STATE, step.encoded(state))
     kept = pause.verified_pause(b, cli.read(b, "state"))
     assert kept and kept["files"] == [TICKET, "ticket-counter.json"]
@@ -226,7 +239,9 @@ def test_a_signed_pause_survives_a_write_back_and_a_changed_one_needs_signing_ag
     state["paused"] = pause.verified_pause(b, state)
     step.write(b, step.STATE, step.encoded(state))  # a reader writes it back unchanged
     assert pause.verified_pause(b, cli.read(b, "state")) == kept
-    state["paused"]["files"].remove(TICKET)  # changed but not signed again: dropped, never signed by the write
+    state["paused"]["files"].remove(
+        TICKET
+    )  # changed but not signed again: dropped, never signed by the write
     step.write(b, step.STATE, step.encoded(state))
     assert _stored_pause(b) is None
     state["paused"] = pause.sign(b, {**kept, "files": ["ticket-counter.json"]})
@@ -263,7 +278,7 @@ def test_the_local_add_on_values_record_is_signed_and_never_started_again(machin
     path.write_bytes(signed)
     assert approval.local_ext(b)[1]
     path.unlink()  # removed: neither turning sync on again nor a merge starts a new (all-local) record
-    edit(a, title="goes on", updated_at="2026-11-11T14:00:00Z")
+    edit(a, title="goes on", updated_at=at(14))
     success(a)
     success(b)
     assert load(b)["title"] == "goes on"
@@ -286,9 +301,11 @@ def test_a_rolled_back_local_add_on_values_record_counts_for_nothing(machines):
     current = path.read_bytes()
     path.write_bytes(first)  # an agent rolls back to the older signed copy
     old = json.loads(first)
-    assert humanproof.local_ok(b, approval.LOCAL_EXT_KIND, {k: v for k, v in old.items() if k != "mac"}, old["mac"])
+    assert humanproof.local_ok(
+        b, approval.LOCAL_EXT_KIND, {k: v for k, v in old.items() if k != "mac"}, old["mac"]
+    )
     assert approval.local_ext(b) == ({}, False)
-    edit(a, title="goes on", updated_at="2026-11-11T14:00:00Z")
+    edit(a, title="goes on", updated_at=at(14))
     success(a)
     success(b)
     assert path.read_bytes() == first  # never re-signed from the rolled back copy
@@ -308,7 +325,9 @@ def test_records_need_the_workspace_key(root):
         raise AssertionError("signed without a key")
     except repo.Refused:
         pass
-    assert not records.ok(root, "delete", "t_abc123", {"kind": "delete", "target": "t_abc123", "id": "x", "mac": "y"})
+    assert not records.ok(
+        root, "delete", "t_abc123", {"kind": "delete", "target": "t_abc123", "id": "x", "mac": "y"}
+    )
     assert humanproof.action_spent(root, "not-an-id")  # an unknown id counts as spent (fail closed)
 
 
@@ -320,17 +339,25 @@ def test_an_approved_removal_leaves_no_own_value(machines, monkeypatch):
     edit(a, ext={"automation": value})
     success(a)
     success(b)
-    approval.approve(b, "t_abc123", "automation",
-                     proof(b, "sync:allow:t_abc123:automation:" + approval.digest(value), monkeypatch))
+    approval.approve(
+        b,
+        "t_abc123",
+        "automation",
+        proof(b, "sync:allow:t_abc123:automation:" + approval.digest(value), monkeypatch),
+    )
     assert approval.local_ext(b)[0]["t_abc123"] == {"automation": approval.digest(value)}
     doc = load(a)
     doc.pop("ext")
-    save(a, value={**doc, "updated_at": "2026-11-11T14:00:00Z"})  # the peer removes the block
+    save(a, value={**doc, "updated_at": at(14)})  # the peer removes the block
     success(a)
     success(b)
     assert load(b)["ext"]["automation"] == value  # held until a person decides
-    approval.approve(b, "t_abc123", "automation",
-                     proof(b, "sync:allow:t_abc123:automation:" + approval.digest(None), monkeypatch))
+    approval.approve(
+        b,
+        "t_abc123",
+        "automation",
+        proof(b, "sync:allow:t_abc123:automation:" + approval.digest(None), monkeypatch),
+    )
     assert "automation" not in (load(b).get("ext") or {})
     known, ok = approval.local_ext(b)
     assert ok and known["t_abc123"] == {}  # automation: no own value, as for a ticket that never had one

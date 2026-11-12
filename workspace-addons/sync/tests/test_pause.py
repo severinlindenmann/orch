@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from orch import humanproof
 from orch.errors import Refused
-from test_step import ART, NOW, TICKET, configure, run, save, success, ticket, tracked
+from test_step import ART, NOW, TICKET, at, configure, run, save, success, ticket, tracked
 from test_two_machines import both, edit, hostile, load, machines, remote_sha
 
 from orch_sync import approval, cli, needs, pause, records, repo, step
@@ -42,7 +42,7 @@ def test_artifact_keep_both(machines, keep, monkeypatch):
     assert not result.get("paused") and not result.get("last_error"), result
     assert repo.safe(b, ART).read_bytes() == (b"local" if keep == "mine" else b"remote")
     if keep == "theirs":
-        assert repo.safe(b, ART).with_name("a (mine 2026-11-11).txt").read_bytes() == b"local"
+        assert repo.safe(b, ART).with_name(f"a (mine {NOW[:10]}).txt").read_bytes() == b"local"
     success(a)
     success(b)
 
@@ -167,7 +167,7 @@ def test_allow_and_ignore_need_distinct_proofs(machines, monkeypatch, decision):
 def test_rewritten_pause_resolves(machines, keep):
     a, b, _ = both(machines)
     tree = step.oid(a, "HEAD^{tree}")
-    new = step.commit(a, tree, [], "2026-11-11T13:00:00Z")
+    new = step.commit(a, tree, [], at(13))
     repo.git(a, "push", "--force", "origin", f"{new}:orch-state")
     assert run(b)["paused"]["reason"] == "The remote history was rewritten"
     result = pause.resolve(b, TICKET, keep, now=NOW)
@@ -247,7 +247,9 @@ def test_ticket_theirs_preserves_history_and_sessions(machines, monkeypatch):
     assert load(b)["title"] == "Remote title"
     assert shared in load(b)["history"]
     assert remote not in load(b)["history"]
-    assert {**remote, "by": "agent:sync", "text": "(synced, not verified here) Remote claim"} in load(b)["history"]
+    assert {**remote, "by": "agent:sync", "text": "(synced, not verified here) Remote claim"} in load(b)[
+        "history"
+    ]
     assert any(
         "Local title" in h["text"] and "my version before sync" in h["text"] for h in load(b)["history"]
     )
@@ -266,8 +268,14 @@ def test_keep_theirs_needs_person_and_keeps_local_decisions(machines, monkeypatc
     a, b, _ = both(machines)
     forged_verdict = {"kind": "person", "nonce": "0123456789abcdef", "mac": "A" * 43}
     forged_wont = {
-        "id": "c1", "text": "Pay the invoice", "done": False, "evidence": [],
-        "wont_do": True, "reason": "Not needed", "wont_nonce": "n1", "wont_mac": "forged",
+        "id": "c1",
+        "text": "Pay the invoice",
+        "done": False,
+        "evidence": [],
+        "wont_do": True,
+        "reason": "Not needed",
+        "wont_nonce": "n1",
+        "wont_mac": "forged",
     }
     edit(b, checklist=[{"id": "c1", "text": "Pay the invoice", "done": False, "evidence": []}])
     success(b)
@@ -288,8 +296,10 @@ def test_keep_theirs_needs_person_and_keeps_local_decisions(machines, monkeypatc
     assert doc["title"] == "Remote title"
     # the peer's decision fields went through the receiving core's verifiers as the REMOTE side: none counts
     assert doc["status"] != "done" and not humanproof.verdict_ok(b, doc)
-    assert all(v.get("mac") != forged_verdict["mac"] or humanproof.verdict_verifier(b)(v, doc) is None
-               for v in doc.get("verdicts", []))
+    assert all(
+        v.get("mac") != forged_verdict["mac"] or humanproof.verdict_verifier(b)(v, doc) is None
+        for v in doc.get("verdicts", [])
+    )
     assert not doc["checklist"][0].get("wont_do") and "wont_mac" not in doc["checklist"][0]
 
 
@@ -332,7 +342,10 @@ def test_keep_theirs_keeps_a_remote_wont_do_this_core_verifies(machines, monkeyp
     assert not result.get("last_error"), result
     doc = load(b)
     assert doc["title"] == "Remote title"
-    assert doc["checklist"][0]["wont_do"] is True and doc["checklist"][0]["wont_mac"] == theirs["checklist"][0]["wont_mac"]
+    assert (
+        doc["checklist"][0]["wont_do"] is True
+        and doc["checklist"][0]["wont_mac"] == theirs["checklist"][0]["wont_mac"]
+    )
 
 
 def test_ext_name_count_is_capped(machines):
@@ -395,7 +408,7 @@ def test_inert_manifest_is_local_authority(machines, monkeypatch):
     assert not approval.held(b)
 
 
-@pytest.mark.parametrize("incoming_at", ["2001-01-01T00:00:00Z", "2026-11-11T13:00:00Z"])
+@pytest.mark.parametrize("incoming_at", ["2001-01-01T00:00:00Z", at(13)])
 def test_concurrent_keys_pause_identically_without_moving_local_keys(machines, incoming_at, tmp_path):
     from test_step import ticket
 
@@ -454,7 +467,9 @@ def test_public_visibility_warns_once(root, monkeypatch, capsys):
     monkeypatch.setattr(visibility, "remote_visibility", lambda url: "public")
     address = "https://github.com/owner/repository"
     args = ["--dir", str(root), "set", "--mode", "remote", "--remote", address, "--public", "--proof-stdin"]
-    proof(root, cli.remote_target(address, public=True), monkeypatch)  # a public address: the person's own choice
+    proof(
+        root, cli.remote_target(address, public=True), monkeypatch
+    )  # a public address: the person's own choice
     assert cli.main(args) == 0
     assert "Anyone can read" in capsys.readouterr().err
     proof(root, cli.remote_target(address, public=True), monkeypatch)
@@ -557,7 +572,9 @@ def test_person_keeps_key_without_live_duplicates(machines, monkeypatch, winner)
 
     monkeypatch.setattr(step, "write", checked_write)
     remote = cli.read(b, "state")["paused"]["remote_sha"]
-    result = pause.keep_key(b, "DM1-13", winner, proof(b, f"sync:keep-key:DM1-13:{winner}:{remote}", monkeypatch), now=NOW)
+    result = pause.keep_key(
+        b, "DM1-13", winner, proof(b, f"sync:keep-key:DM1-13:{winner}:{remote}", monkeypatch), now=NOW
+    )
     assert not result.get("last_error"), result
     assert not result.get("paused")
     loser = "t_later1" if winner == "t_first1" else "t_first1"
@@ -569,7 +586,9 @@ def test_person_keeps_key_without_live_duplicates(machines, monkeypatch, winner)
     result = run(a)
     if result.get("paused"):
         remote = result["paused"]["remote_sha"]
-        pause.keep_key(a, "DM1-13", winner, proof(a, f"sync:keep-key:DM1-13:{winner}:{remote}", monkeypatch), now=NOW)
+        pause.keep_key(
+            a, "DM1-13", winner, proof(a, f"sync:keep-key:DM1-13:{winner}:{remote}", monkeypatch), now=NOW
+        )
     success(a)
     success(b)
     success(a)
@@ -615,8 +634,11 @@ def test_keep_key_reserves_live_counter_when_resume_is_offline(machines, monkeyp
     with monkeypatch.context() as m:
         m.setattr(step, "_run", resume_offline)
         result = pause.keep_key(
-            b, "DM1-5", "t_later1",
-            proof(b, f"sync:keep-key:DM1-5:t_later1:{remote}", m), now=NOW,
+            b,
+            "DM1-5",
+            "t_later1",
+            proof(b, f"sync:keep-key:DM1-5:t_later1:{remote}", m),
+            now=NOW,
         )
     assert result["last_error"] and not result.get("paused")
     reserved = max(current, 5) + 1
@@ -639,12 +661,16 @@ def test_ignore_requires_person(machines):
     success(a)
     success(b)
     with pytest.raises(Refused):
-        approval.approve(b, "t_abc123", "automation", SimpleNamespace(ignore=True, proof_stdin=False, by="agent:test"))
+        approval.approve(
+            b, "t_abc123", "automation", SimpleNamespace(ignore=True, proof_stdin=False, by="agent:test")
+        )
     assert approval.held(b)
     assert not cli.read(b, "ignored")
 
 
-@pytest.mark.parametrize("value", [{"command": "run"}, {"old_keys": ["bad"]}, {"old_keys": [f"DM1-{i}" for i in range(1, 102)]}])
+@pytest.mark.parametrize(
+    "value", [{"command": "run"}, {"old_keys": ["bad"]}, {"old_keys": [f"DM1-{i}" for i in range(1, 102)]}]
+)
 def test_invalid_sync_extension_refused(machines, value):
     a, b, bare = both(machines)
     edit(a, ext={"sync": value})
@@ -683,9 +709,16 @@ def test_keep_key_remote_only_uses_verified_merge(machines, monkeypatch, winner)
     success(b)
     original = json.loads(repo.safe(b, local).read_bytes())
     forged = {
-        "id": "c1", "text": "Email finance", "done": False, "evidence": [],
-        "wont_do": True, "reason": "forged", "by": "human:Ann", "at": NOW,
-        "wont_nonce": "n1", "wont_mac": "garbage",
+        "id": "c1",
+        "text": "Email finance",
+        "done": False,
+        "evidence": [],
+        "wont_do": True,
+        "reason": "forged",
+        "by": "human:Ann",
+        "at": NOW,
+        "wont_nonce": "n1",
+        "wont_mac": "garbage",
     }
     save(a, local, ticket() | {"id": "t_local1", "key": "DM1-99"})
     save(a, evil, ticket() | {"id": "t_evil01", "key": "DM1-5", "checklist": [forged]})
@@ -713,7 +746,9 @@ def test_keep_key_remote_only_uses_verified_merge(machines, monkeypatch, winner)
 
     monkeypatch.setattr(step, "write", checked_write)
     monkeypatch.setattr(step, "_run", resume)
-    result = pause.keep_key(b, "DM1-5", winner, proof(b, f"sync:keep-key:DM1-5:{winner}:{remote}", monkeypatch), now=NOW)
+    result = pause.keep_key(
+        b, "DM1-5", winner, proof(b, f"sync:keep-key:DM1-5:{winner}:{remote}", monkeypatch), now=NOW
+    )
     monkeypatch.setattr(step, "_run", original_run)
     assert not result.get("paused") and not result.get("last_error"), result
     success(b)
@@ -736,23 +771,36 @@ def test_keep_key_live_counter_only_reserves_selected_numbers(machines, monkeypa
     success(b)
     live_counter = {"last": current, "local_only": 7}  # Fable A9: counter fields are plain ints
     save(b, "ticket-counter.json", live_counter)
-    save(a, local, ticket() | {
-        "id": "t_local1", "key": "DM1-99", "ext": {"sync": {"old_keys": ["DM1-5"]}},
-    })
+    save(
+        a,
+        local,
+        ticket()
+        | {
+            "id": "t_local1",
+            "key": "DM1-99",
+            "ext": {"sync": {"old_keys": ["DM1-5"]}},
+        },
+    )
     save(a, remote_only, ticket() | {"id": "t_remote1", "key": "DM1-5"})
-    save(a, "ticket-counter.json", {"last": 99_999, "remote_only": 1, "local_only": 999})  # inside the jump cap
+    save(
+        a, "ticket-counter.json", {"last": 99_999, "remote_only": 1, "local_only": 999}
+    )  # inside the jump cap
     repo.git(a, "add", "--", local, remote_only, "ticket-counter.json")
     hostile(a, bare, ["commit", "-m", "remote counter inflation"])
     remote = run(b)["paused"]["remote_sha"]
     # Inspect the reservation before the normal verified merge resumes.
     monkeypatch.setattr(step, "_run", lambda *args: cli.read(b, "state"))
     pause.keep_key(
-        b, "DM1-5", "t_remote1",
-        proof(b, f"sync:keep-key:DM1-5:t_remote1:{remote}", monkeypatch), now=NOW,
+        b,
+        "DM1-5",
+        "t_remote1",
+        proof(b, f"sync:keep-key:DM1-5:t_remote1:{remote}", monkeypatch),
+        now=NOW,
     )
     assert json.loads(repo.safe(b, local).read_bytes())["key"] == "DM1-99"
     assert json.loads(repo.safe(b, "ticket-counter.json").read_bytes()) == {
-        **live_counter, "last": max(current, 99),
+        **live_counter,
+        "last": max(current, 99),
     }
 
 
@@ -789,7 +837,10 @@ def test_any_unlisted_incoming_problem_blocks_choices(machines, monkeypatch, pro
         assert repo.safe(b, ART).read_bytes() == b"local"
 
 
-@pytest.mark.parametrize("problem", ["manifest", "commit", "path", "size", "private", "local-general", "counter-schema", "counter-deletion"])
+@pytest.mark.parametrize(
+    "problem",
+    ["manifest", "commit", "path", "size", "private", "local-general", "counter-schema", "counter-deletion"],
+)
 def test_keep_key_rechecks_incoming_before_reading_tickets(machines, monkeypatch, problem):
     from test_step import ticket
 
@@ -807,9 +858,14 @@ def test_keep_key_rechecks_incoming_before_reading_tickets(machines, monkeypatch
         path = "tickets/t_later1.json"
         save(b, path, json.loads(repo.safe(b, path).read_bytes()) | {"general": True})
     else:
-        checked = incoming.Result("wrong" if problem == "commit" else remote, [
-            incoming.Problem("ticket-counter.json" if problem.startswith("counter-") else "", problem, "refused")
-        ])
+        checked = incoming.Result(
+            "wrong" if problem == "commit" else remote,
+            [
+                incoming.Problem(
+                    "ticket-counter.json" if problem.startswith("counter-") else "", problem, "refused"
+                )
+            ],
+        )
         monkeypatch.setattr(incoming, "check", lambda *a, **kw: checked)
     before = repo.safe(b, "tickets/t_later1.json").read_bytes()
     args = proof(b, f"sync:keep-key:DM1-13:t_first1:{remote}", monkeypatch)
@@ -820,8 +876,16 @@ def test_keep_key_rechecks_incoming_before_reading_tickets(machines, monkeypatch
     assert not cli.read(b, "choices")
 
 
-@pytest.mark.parametrize("files", [[], {"x": 1}, {"tickets/t_abc123/artifacts/a.txt": "mine"},
-                                   {"../x": {"keep": "mine"}}, {"tickets/t_abc123/artifacts/a.txt": {"keep": 5}}])
+@pytest.mark.parametrize(
+    "files",
+    [
+        [],
+        {"x": 1},
+        {"tickets/t_abc123/artifacts/a.txt": "mine"},
+        {"../x": {"keep": "mine"}},
+        {"tickets/t_abc123/artifacts/a.txt": {"keep": 5}},
+    ],
+)
 def test_a_malformed_choice_store_counts_for_nothing(machines, files):
     # A hand-written choices.json of any other shape is no choice: the step goes on as usual.
     a, b, _ = both(machines)
@@ -837,8 +901,16 @@ def test_a_malformed_choice_store_counts_for_nothing(machines, files):
 def _history_pause(root, remote):
     state = cli.read(root, "state")
     # made as core makes it (pause.sign); step.write never signs a pause it is given
-    state["paused"] = pause.sign(root, {"files": [], "since": NOW, "remote_sha": remote, "kind": pause.HISTORY,
-                                        "reason": "The two histories cannot be combined automatically"})
+    state["paused"] = pause.sign(
+        root,
+        {
+            "files": [],
+            "since": NOW,
+            "remote_sha": remote,
+            "kind": pause.HISTORY,
+            "reason": "The two histories cannot be combined automatically",
+        },
+    )
     step.write(root, "run/sync/state.json", step.encoded(state))
 
 
@@ -890,7 +962,9 @@ def case_clash(machines):
 
 
 def names(root):
-    return sorted(p.name for p in (root / ".orch/tickets/t_abc123/artifacts").iterdir() if not p.name.startswith("o"))
+    return sorted(
+        p.name for p in (root / ".orch/tickets/t_abc123/artifacts").iterdir() if not p.name.startswith("o")
+    )
 
 
 def test_case_clash_needs_row_and_keep_is_refused(machines):
@@ -912,12 +986,17 @@ def test_case_clash_choice_needs_a_person(machines, action):
     _, b, bare, tip = case_clash(machines)
     rename = "report (B).txt" if action == "rename" else None
     with pytest.raises(Refused):
-        pause.resolve_case(b, NEW_NAME, SimpleNamespace(proof_stdin=False, by="agent:test"), rename=rename, now=NOW)
+        pause.resolve_case(
+            b, NEW_NAME, SimpleNamespace(proof_stdin=False, by="agent:test"), rename=rename, now=NOW
+        )
     assert run(b)["paused"]["files"] == [NEW_NAME] and remote_sha(bare) == tip
     assert not cli.read(b, "choices") and not cli.read(b, "renamed")
     assert repo.safe(b, OLD_NAME).read_bytes() == b"the report"
     # the CLI refuses an agent the same way (no proof), and needs exactly one way out
-    assert cli.main(["--dir", str(b), "resolve", NEW_NAME, "--keep-local-name", "--by", "agent:x", "--json"]) == 2
+    assert (
+        cli.main(["--dir", str(b), "resolve", NEW_NAME, "--keep-local-name", "--by", "agent:x", "--json"])
+        == 2
+    )
     with pytest.raises(SystemExit):
         cli.main(["--dir", str(b), "resolve", NEW_NAME, "--keep-local-name", "--rename-local", "x.txt"])
 
@@ -926,13 +1005,17 @@ def test_case_clash_keep_local_name(machines, monkeypatch):
     a, b, bare, tip = case_clash(machines)
     remote = run(b)["paused"]["remote_sha"]
     with pytest.raises(Refused):  # a proof for renaming is not a proof for keeping
-        pause.resolve_case(b, NEW_NAME, proof(b, pause.case_target(NEW_NAME, remote, "x"), monkeypatch), now=NOW)
+        pause.resolve_case(
+            b, NEW_NAME, proof(b, pause.case_target(NEW_NAME, remote, "x"), monkeypatch), now=NOW
+        )
     args = proof(b, pause.case_target(NEW_NAME, remote), monkeypatch)
     result = pause.resolve_case(b, NEW_NAME, args, now=NOW)
     assert not result.get("paused") and not result.get("last_error"), result
     # the other computer's variant is not applied, and it is reported
     assert repo.safe(b, OLD_NAME).read_bytes() == b"the report" and names(b) == ["report.txt"]
-    assert any("Kept your file name report.txt" in n and "Report.txt is not applied" in n for n in result["notices"])
+    assert any(
+        "Kept your file name report.txt" in n and "Report.txt is not applied" in n for n in result["notices"]
+    )
     assert OLD_NAME in tracked(b) and NEW_NAME not in tracked(b)
     # this machine's name is what it shares; the remote moved, so the choice is spent and asks again if needed
     assert remote_sha(bare) != tip
@@ -967,8 +1050,11 @@ def test_case_clash_rename_local(machines, monkeypatch):
             pause.resolve_case(b, NEW_NAME, proof(b, "unused", monkeypatch), rename=bad, now=NOW)
     with pytest.raises(Refused):  # bound to the new name
         pause.resolve_case(
-            b, NEW_NAME, proof(b, pause.case_target(NEW_NAME, remote, target + "x"), monkeypatch),
-            rename="report (B).txt", now=NOW,
+            b,
+            NEW_NAME,
+            proof(b, pause.case_target(NEW_NAME, remote, target + "x"), monkeypatch),
+            rename="report (B).txt",
+            now=NOW,
         )
     args = proof(b, pause.case_target(NEW_NAME, remote, target), monkeypatch)
     result = pause.resolve_case(b, NEW_NAME, args, rename="report (B).txt", now=NOW)

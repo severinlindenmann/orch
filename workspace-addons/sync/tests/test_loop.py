@@ -154,7 +154,9 @@ def test_paused_tick_does_nothing(on, monkeypatch):
 
 def test_planted_pause_does_not_stop_the_loop(on, monkeypatch):
     settings(on, mode="local")
-    (on / ".orch/run/sync/state.json").write_text(json.dumps({"paused": {"files": [], "reason": "x", "mac": "0"}}))
+    (on / ".orch/run/sync/state.json").write_text(
+        json.dumps({"paused": {"files": [], "reason": "x", "mac": "0"}})
+    )
     calls = results(monkeypatch)
     loop.Loop(on).run_forever(once=True)
     assert calls == ["timer"]
@@ -181,10 +183,15 @@ def test_turned_off_or_sync_off_ends_the_loop(root, monkeypatch):
     calls = results(monkeypatch)
     settings(root, mode="local")
     monkeypatch.setattr(orchcli, "is_active", lambda r: False)
-    assert loop.Loop(root).run_forever(wait=lambda s: pytest.fail("no wait")) == "the sync add-on is turned off here"
+    assert (
+        loop.Loop(root).run_forever(wait=lambda s: pytest.fail("no wait"))
+        == "the sync add-on is turned off here"
+    )
     answers = iter([True, False])
     monkeypatch.setattr(orchcli, "is_active", lambda r: next(answers))
-    assert loop.Loop(root).run_forever(wait=lambda s: None) == "the sync add-on is turned off here"  # after a pass
+    assert (
+        loop.Loop(root).run_forever(wait=lambda s: None) == "the sync add-on is turned off here"
+    )  # after a pass
     assert calls == ["timer"]
     monkeypatch.setattr(orchcli, "is_active", lambda r: None)  # unknown: keep running, but sync is off here
     settings(root, mode="off")
@@ -199,8 +206,13 @@ def test_every_end_leaves_one_log_line(root, monkeypatch, capsys):
         (lambda: None, "no readable sync settings here (counted as off)"),
         (lambda: settings_file.write_text("{not json"), "no readable sync settings here (counted as off)"),
         (lambda: settings(root, mode="off"), "sync is set to off here"),
-        (lambda: (settings(root, mode="local"), monkeypatch.setattr(orchcli, "is_active", lambda r: False)),
-         "the sync add-on is turned off here"),
+        (
+            lambda: (
+                settings(root, mode="local"),
+                monkeypatch.setattr(orchcli, "is_active", lambda r: False),
+            ),
+            "the sync add-on is turned off here",
+        ),
     ):
         prepare()
         assert cli._run_loop(root) == 0
@@ -316,8 +328,13 @@ def test_a_foreground_run_blocks_a_second_loop(root, core_unknown, spawned, tmp_
     settings(root, mode="local")
     env = {k: v for k, v in os.environ.items() if k != service.NONCE_ENV}
     with open(tmp_path / "foreground.log", "w") as out:
-        fg = subprocess.Popen([sys.executable, "-P", "-m", "orch_sync", "--dir", str(root), "run"], cwd=tmp_path,
-                              stdout=out, stderr=subprocess.STDOUT, env=env)
+        fg = subprocess.Popen(
+            [sys.executable, "-P", "-m", "orch_sync", "--dir", str(root), "run"],
+            cwd=tmp_path,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
     try:
         pid = until(lambda: service.running_pid(root))
         capsys.readouterr()
@@ -360,7 +377,9 @@ def test_orch_sync_stop_waits_for_the_pass(on, monkeypatch, capsys):
     sent = []
     real_kill = os.kill
     # signal 0 is only the liveness probe (pid_alive); any real signal is recorded and NOT sent
-    monkeypatch.setattr(os, "kill", lambda pid, sig: real_kill(pid, 0) if sig == 0 else sent.append((pid, sig)))
+    monkeypatch.setattr(
+        os, "kill", lambda pid, sig: real_kill(pid, 0) if sig == 0 else sent.append((pid, sig))
+    )
     worker = threading.Thread(target=cli._run_loop, args=(on,), daemon=True)
     worker.start()
     assert entered.wait(5) and service.running_pid(on) == os.getpid()
@@ -387,7 +406,9 @@ def test_stop_never_signals_and_answers_still_running_after_its_wait(on, monkeyp
     sent = []
     real_kill = os.kill
     # signal 0 is only the liveness probe (pid_alive); any real signal is recorded and NOT sent
-    monkeypatch.setattr(os, "kill", lambda pid, sig: real_kill(pid, 0) if sig == 0 else sent.append((pid, sig)))
+    monkeypatch.setattr(
+        os, "kill", lambda pid, sig: real_kill(pid, 0) if sig == 0 else sent.append((pid, sig))
+    )
     monkeypatch.setattr(service.procs, "stop_tree", lambda *a, **k: sent.append(a))
     worker = threading.Thread(target=cli._run_loop, args=(on,), daemon=True)
     worker.start()
@@ -399,7 +420,6 @@ def test_stop_never_signals_and_answers_still_running_after_its_wait(on, monkeyp
     release.set()
     worker.join(10)
     assert not worker.is_alive() and done == ["timer"] and sent == []
-
 
 
 def test_planted_process_record_is_never_signalled(root, monkeypatch):
@@ -491,7 +511,7 @@ def test_core_is_this_python_never_orch_bin_or_path(root, tmp_path, monkeypatch)
     marker = tmp_path / "planted-ran"
     fake = tmp_path / "bin" / "orch"
     fake.parent.mkdir()
-    fake.write_text(f"#!/bin/sh\ntouch {marker}\necho '[{{\"name\": \"sync\", \"active\": true}}]'\n")
+    fake.write_text(f'#!/bin/sh\ntouch {marker}\necho \'[{{"name": "sync", "active": true}}]\'\n')
     fake.chmod(0o755)
     monkeypatch.setenv("ORCH_BIN", str(fake))
     monkeypatch.setenv("PATH", f"{fake.parent}{os.pathsep}{os.environ.get('PATH', '')}")

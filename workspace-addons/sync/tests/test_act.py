@@ -53,13 +53,20 @@ def bare(tmp_path):
 def test_status_off_then_local(root, capsys):
     assert sync(root, "status", "sync") == 0
     card = answer(capsys)
-    assert card["mode"] == "off" and card["shown"] == "off" and card["not_synced"] == [] and card["public"] is None
+    assert (
+        card["mode"] == "off"
+        and card["shown"] == "off"
+        and card["not_synced"] == []
+        and card["public"] is None
+    )
     assert sync(root, "set", "local") == 0
     assert answer(capsys)["mode"] == "local"
     assert json.loads((root / ".orch/run/sync/settings.json").read_text())["mode"] == "local"
     assert sync(root, "status", "sync") == 0
     assert answer(capsys)["shown"] == "never"
-    (root / ".orch/run/sync/state.json").write_text('{"last_error":"offline","last_ok":"2026-11-11T10:15:00Z"}')
+    (root / ".orch/run/sync/state.json").write_text(
+        '{"last_error":"offline","last_ok":"2026-11-11T10:15:00Z"}'
+    )
     assert sync(root, "status", "sync") == 0
     assert answer(capsys)["shown"] == "offline"
     (root / ".orch/run/sync/state.json").write_text('{"last_ok":"2026-11-11T10:15:00Z"}')
@@ -70,7 +77,10 @@ def test_status_off_then_local(root, capsys):
     # the argv the dashboard's generic op builds: flags, then the target after `--`
     assert cli.main(["--dir", str(root), "act", "status", "--by", "human:pat", "--json", "--", "sync"]) == 0
     assert answer(capsys)["shown"] == "off"
-    assert cli.main(["--dir", str(root), "act", "set", "--value=15", "--by", "human:pat", "--json", "--", "-x"]) == 2
+    assert (
+        cli.main(["--dir", str(root), "act", "set", "--value=15", "--by", "human:pat", "--json", "--", "-x"])
+        == 2
+    )
 
 
 def test_set_is_a_persons_click(root, monkeypatch, capsys):
@@ -83,7 +93,13 @@ def test_set_is_a_persons_click(root, monkeypatch, capsys):
 
 
 def test_check_uses_syncs_own_transport_rules(root, tmp_path, capsys, normal_install):
-    for bad in ("file:///tmp/x", "/tmp/x", "http://example.org/x", "ext::sh -c x", "https://me:pw@example.org/x"):
+    for bad in (
+        "file:///tmp/x",
+        "/tmp/x",
+        "http://example.org/x",
+        "ext::sh -c x",
+        "https://me:pw@example.org/x",
+    ):
         assert sync(root, "check", bad) == 0
         got = answer(capsys)
         assert got["ok"] is False and got["reason"], bad
@@ -133,8 +149,11 @@ def test_set_remote_without_a_proof_is_refused(root, tmp_path, monkeypatch, caps
     assert sync(root, "set", remote, "--value", "15", "--proof-target") == 0
     got = answer(capsys)
     assert got["target"] == "sync:set-remote:" + hashlib.sha256(remote.encode()).hexdigest()
-    assert got["review"] == {"title": "Sync to this address?", "value": remote,
-                             "body": "Your tickets and their files are copied there every 15 minutes."}
+    assert got["review"] == {
+        "title": "Sync to this address?",
+        "value": remote,
+        "body": "Your tickets and their files are copied there every 15 minutes.",
+    }
     assert sync(root, "set", "local", "--proof-target") == 0 and answer(capsys) == {"target": None}
     assert sync(root, "set", "local") == 0  # mode local and off stay unsigned
     assert sync(root, "set", "off") == 0
@@ -165,8 +184,14 @@ def test_public_address_waits_for_the_signed_choice(root, tmp_path, monkeypatch,
     assert answer(capsys)["text"] == "Not synced: choose a location above first"
     target = "sync:use-public:" + hashlib.sha256(remote.encode()).hexdigest()
     assert sync(root, "use-public", "pending", "--proof-target") == 0
-    assert answer(capsys) == {"target": target, "review": {
-        "title": "Use a public location?", "body": "Anyone who knows the address can read your tickets.", "value": remote}}
+    assert answer(capsys) == {
+        "target": target,
+        "review": {
+            "title": "Use a public location?",
+            "body": "Anyone who knows the address can read your tickets.",
+            "value": remote,
+        },
+    }
     assert sync(root, "use-public", "pending") == 2  # no proof: refused
     capsys.readouterr()
     proof(root, target, monkeypatch)
@@ -220,8 +245,11 @@ def test_leave_it_out_is_signed_bound_to_the_bytes_and_ends_the_pause(root, monk
     got = answer(capsys)
     target = got["target"]
     assert target == "sync:leave-out:" + hashlib.sha256(ART.encode() + b"\0" + SECRET).hexdigest()
-    assert got["review"] == {"title": "Leave a.txt out of sync?", "body": "It stays on this computer only.",
-                             "value": f"a.txt, {len(SECRET)} bytes"}
+    assert got["review"] == {
+        "title": "Leave a.txt out of sync?",
+        "body": "It stays on this computer only.",
+        "value": f"a.txt, {len(SECRET)} bytes",
+    }
     with pytest.raises(Exception, match="proof|person"):
         pause.leave_out(root, ART, SimpleNamespace(proof_stdin=False, by="agent:test"))
     proof(root, target, monkeypatch)
@@ -250,7 +278,10 @@ def test_proof_target_of_keep_theirs_is_what_resolve_checks(machines, monkeypatc
     row = rows[0]
     assert row["text"] == "Sync paused: “Mine” changed here and on another computer."
     keep = {x["verb"]: x for x in row["actions"]}
-    assert keep["keep-mine"]["review"]["here"] == "Title: Mine" and keep["keep-mine"]["review"]["there"] == "Title: Theirs"
+    assert (
+        keep["keep-mine"]["review"]["here"] == "Title: Mine"
+        and keep["keep-mine"]["review"]["there"] == "Title: Theirs"
+    )
     assert all(x["sign"] for x in row["actions"])
     assert act.proof_target(b, "keep-mine", TICKET)[0] is None
     target, review = act.proof_target(b, "keep-theirs", TICKET)
@@ -318,7 +349,9 @@ def test_a_planted_visibility_cache_cannot_skip_the_public_warning(root, tmp_pat
     monkeypatch.setattr(visibility, "remote_visibility", lambda url: probed.append(url) or "public")
     remote = f"file://{bare(tmp_path)}"
     assert sync(root, "set", "local") == 0
-    (root / ".orch/run/sync/visibility.json").write_text(json.dumps({remote: "private", cli.safe_address(remote): "private"}))
+    (root / ".orch/run/sync/visibility.json").write_text(
+        json.dumps({remote: "private", cli.safe_address(remote): "private"})
+    )
     capsys.readouterr()
     assert choose(root, remote, monkeypatch) == 0
     got = answer(capsys)
@@ -370,7 +403,9 @@ def test_allow_review_shows_the_held_value_the_target_hashes(machines):
     for kind in ("allow", "ignore"):
         target, review = act.proof_target(b, kind, "t_abc123:automation")
         assert target == f"sync:{kind}:t_abc123:automation:{hashlib.sha256(raw).hexdigest()}"
-        assert review["value"] == f"{raw.decode()} ({len(raw)} bytes)"  # whole: the payload after a long prefix shows
+        assert (
+            review["value"] == f"{raw.decode()} ({len(raw)} bytes)"
+        )  # whole: the payload after a long prefix shows
         assert "automation" in review["title"] and "t_abc123" in review["title"]
     with pytest.raises(repo.Refused):
         act.proof_target(b, "allow", "t_abc123:other")
@@ -384,19 +419,48 @@ def test_allow_review_shows_the_held_value_the_target_hashes(machines):
 
 
 def test_review_text_never_hides_a_character():
-    assert act.plain("a\u202eb\u2066c\u200bd\x9be\x07f\ufeffg") == "a\ufffdb\ufffdc\ufffdd\ufffde\ufffdf\ufffdg"
+    assert (
+        act.plain("a\u202eb\u2066c\u200bd\x9be\x07f\ufeffg") == "a\ufffdb\ufffdc\ufffdd\ufffde\ufffdf\ufffdg"
+    )
     assert act.plain("one\ntwo   three\x85four") == "one two three four"  # line breaks (also NEL): one space
     assert act.plain("x" * 10, 5) == "xxxx…"
-    assert act.plain("plain text, ünïcode 日本 é") == "plain text, ünïcode 日本 é"  # ordinary text is untouched
-    for hidden in ("\xad", "\u180e", "\ufe00", "\ufe0f", "\U000e0000", "\U000e0041", "\U000e007f",
-                   "\U000e0100", "\U000e01ef", "\u180b", "\u115f", "\u1160", "\u3164", "\uffa0", "\ue000",
-                   "\ud800", "\u0378", "\U000f0000"):
+    assert (
+        act.plain("plain text, ünïcode 日本 é") == "plain text, ünïcode 日本 é"
+    )  # ordinary text is untouched
+    for hidden in (
+        "\xad",
+        "\u180e",
+        "\ufe00",
+        "\ufe0f",
+        "\U000e0000",
+        "\U000e0041",
+        "\U000e007f",
+        "\U000e0100",
+        "\U000e01ef",
+        "\u180b",
+        "\u115f",
+        "\u1160",
+        "\u3164",
+        "\uffa0",
+        "\ue000",
+        "\ud800",
+        "\u0378",
+        "\U000f0000",
+    ):
         assert act.plain(f"a{hidden}b") == "a\ufffdb"
 
 
 def test_needs_rows_never_hide_a_character():
-    row = needs.row("paused", "k", "x\U000e0041y", "now", "cmd", ["a\xadb"], title="t\ufe0fz",
-                    actions=[needs.action("Keep", "keep-mine", "p", review={"title": "r\u180es"})])
+    row = needs.row(
+        "paused",
+        "k",
+        "x\U000e0041y",
+        "now",
+        "cmd",
+        ["a\xadb"],
+        title="t\ufe0fz",
+        actions=[needs.action("Keep", "keep-mine", "p", review={"title": "r\u180es"})],
+    )
     assert (row["text"], row["title"], row["answer"]["options"]) == ("x\ufffdy", "t\ufffdz", ["a\ufffdb"])
     assert row["actions"][0]["review"]["title"] == "r\ufffds"
 
@@ -434,7 +498,9 @@ def test_a_pause_without_a_checked_version_offers_no_saved_copy(machines, remote
     with pytest.MonkeyPatch.context() as m:
         m.setattr(step.merge, "merge_ticket", lambda *a, **k: None)
         state = run(b)
-    state["paused"] = pause.sign(b, {**{k: v for k, v in state["paused"].items() if k != "mac"}, "remote_sha": remote})
+    state["paused"] = pause.sign(
+        b, {**{k: v for k, v in state["paused"].items() if k != "mac"}, "remote_sha": remote}
+    )
     step.write(b, "run/sync/state.json", step.encoded(state))
     with pytest.raises(repo.Refused, match="Saved copy does not match the checked version"):
         pause.resolve_sides(b, TICKET)
@@ -449,7 +515,9 @@ def test_a_pause_with_no_remote_version_and_no_saved_copy_still_resolves(machine
     with pytest.MonkeyPatch.context() as m:
         m.setattr(step.merge, "merge_ticket", lambda *a, **k: None)
         state = run(b)
-    state["paused"] = pause.sign(b, {**{k: v for k, v in state["paused"].items() if k != "mac"}, "remote_sha": None})
+    state["paused"] = pause.sign(
+        b, {**{k: v for k, v in state["paused"].items() if k != "mac"}, "remote_sha": None}
+    )
     step.write(b, "run/sync/state.json", step.encoded(state))
     saved = repo.safe(b, "run/sync/theirs/" + TICKET)
     if saved.exists():
@@ -465,8 +533,11 @@ def test_leave_deleted_review_names_the_ticket(machines):
     success(a)
     target, review = act.proof_target(a, "leave-deleted", "t_abc123")
     assert target == "sync:deleted:t_abc123"
-    assert review == {"title": "Leave this ticket deleted?", "body": "It is removed on every computer that syncs.",
-                      "value": "“A task” (t_abc123)"}
+    assert review == {
+        "title": "Leave this ticket deleted?",
+        "body": "It is removed on every computer that syncs.",
+        "value": "“A task” (t_abc123)",
+    }
     for bad in ("t_zzzzzz", "../x", "t_abc123\u202e"):
         with pytest.raises(repo.Refused):
             act.proof_target(a, "leave-deleted", bad)
@@ -489,14 +560,32 @@ def test_check_sends_no_login_and_never_echoes_the_address(root, tmp_path, monke
     assert kw["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert kw["env"]["GIT_SSH_COMMAND"] == repo.TYPED_SSH and "GIT_SSH" not in kw["env"]
     assert shlex.split(repo.TYPED_SSH) == [  # none of the person's config, keys or agent identities (L-1)
-        "ssh", "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "IdentityFile=/dev/null",
-        "-o", "IdentityAgent=none", "-o", "PubkeyAuthentication=no"]
-    helpers = [cmd[i + 1] for i, v in enumerate(cmd[:-1]) if v == "-c" and cmd[i + 1].startswith("credential.helper")]
+        "ssh",
+        "-F",
+        "/dev/null",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "IdentityFile=/dev/null",
+        "-o",
+        "IdentityAgent=none",
+        "-o",
+        "PubkeyAuthentication=no",
+    ]
+    helpers = [
+        cmd[i + 1] for i, v in enumerate(cmd[:-1]) if v == "-c" and cmd[i + 1].startswith("credential.helper")
+    ]
     assert helpers == ["credential.helper="]
 
 
 def test_rows_keep_the_needs_shape(root):
-    schema = json.loads((__import__("pathlib").Path(__file__).resolve().parents[3] / "contracts/needs.schema.json").read_text())
+    schema = json.loads(
+        (
+            __import__("pathlib").Path(__file__).resolve().parents[3] / "contracts/needs.schema.json"
+        ).read_text()
+    )
     configure(root)
     save(root)
     save(root, ART, SECRET)
@@ -511,18 +600,21 @@ def test_a_two_sided_review_too_large_as_a_whole_is_refused(root, monkeypatch):
     clipped; a review that fits is returned as it is."""
     side = "k: " + "x" * 2000
     assert len(side) < act.REVIEW_MAX
-    monkeypatch.setattr(act, "_proof_target", lambda *a: ("sync:keep-theirs:" + "0" * 64,
-                                                         {"title": "Keep?", "here": side, "there": side}))
+    monkeypatch.setattr(
+        act,
+        "_proof_target",
+        lambda *a: ("sync:keep-theirs:" + "0" * 64, {"title": "Keep?", "here": side, "there": side}),
+    )
     with pytest.raises(repo.Refused, match="too large to review here"):
         act.proof_target(root, "keep-theirs", "tickets/t_abc123.json")
-    small = {"title": "Keep?", "here": "a", "there": "\U0001F600" * 1800}  # 3600 UTF-16 units + 6: fits
+    small = {"title": "Keep?", "here": "a", "there": "\U0001f600" * 1800}  # 3600 UTF-16 units + 6: fits
     monkeypatch.setattr(act, "_proof_target", lambda *a: ("t", small))
     assert act.proof_target(root, "keep-theirs", "tickets/t_abc123.json") == ("t", small)
-    big = {"title": "Keep?", "here": "a", "there": "\U0001F600" * 1950}  # 1950 characters but 3900 units
+    big = {"title": "Keep?", "here": "a", "there": "\U0001f600" * 1950}  # 1950 characters but 3900 units
     monkeypatch.setattr(act, "_proof_target", lambda *a: ("t", big))
     with pytest.raises(repo.Refused, match="too large to review here"):
         act.proof_target(root, "keep-theirs", "tickets/t_abc123.json")
 
 
 def test_review_size_counts_utf16_units():
-    assert act._units("a") == 1 and act._units("\U0001F600") == 2  # an astral character is 2 in the dashboard
+    assert act._units("a") == 1 and act._units("\U0001f600") == 2  # an astral character is 2 in the dashboard
