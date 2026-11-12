@@ -92,7 +92,8 @@ def test_list_shows_a_paused_repeat_as_off(ws, capsys):
     assert "off" in capsys.readouterr().out
 
 
-def test_list_says_the_repeat_in_plain_words_with_local_time_and_zone(ws, capsys):
+def test_list_says_the_repeat_in_plain_words_with_local_time_and_zone(ws, capsys, set_tz):
+    set_tz("Europe/Zurich")
     add_ticket(
         ws, "t_rec00002", ext={"automation": {"recurring": True, "cron": "0 8 * * 1", "tz": "Europe/Zurich"}}
     )

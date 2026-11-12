@@ -544,6 +544,14 @@
             "type": "integer",
             "minimum": 0
           },
+          "changed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "removed": {
+            "type": "integer",
+            "minimum": 0
+          },
           "run": {
             "oneOf": [
               {
@@ -578,7 +586,8 @@
               "content",
               "removed",
               "unverified",
-              "old_key"
+              "old_key",
+              "unchecked"
             ]
           },
           "message": {
@@ -592,6 +601,49 @@
     "complete": {
       "type": "boolean",
       "description": "false when `unavailable` is not empty: the counts are partial."
+    },
+    "per_run": {
+      "type": "array",
+      "description": "Each counted run: `protected` false when its agent tool is not known from a checked collector line or cannot be given deny rules; then `note` is the marker text (record.UNPROTECTED_TEXT).",
+      "items": {
+        "type": "object",
+        "required": [
+          "run",
+          "protected"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "run": {
+            "type": "string",
+            "pattern": "^r_[a-z0-9_]{6,32}$"
+          },
+          "protected": {
+            "type": "boolean"
+          },
+          "note": {
+            "const": "Records from this helper can't be fully checked."
+          }
+        },
+        "if": {
+          "properties": {
+            "protected": {
+              "const": false
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "note"
+          ]
+        },
+        "else": {
+          "not": {
+            "required": [
+              "note"
+            ]
+          }
+        }
+      }
     }
   }
 }

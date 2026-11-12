@@ -59,6 +59,22 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
+  insights:
+    # The Insights suite includes the check that the bundled counts schema equals the contract: without this job
+    # a contract change drifts silently (#590 came back after the per_run/changed/removed additions).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workspace-addons/insights
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q -n auto
   tool-name-scan:
     # The cross-tree scan lives in the workspace tests but also reads workspace-addons/,
     # so it must run on add-on-only changes, where the workspace job is skipped.
