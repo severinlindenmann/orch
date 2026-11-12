@@ -816,6 +816,57 @@ def record_head_names(root: Path) -> list[str]:
     return sorted(n[:-5] for n in names if n.endswith(".json") and _RUN_NAME.fullmatch(n[:-5]))
 
 
+def record_rejects_read(root: Path, run: str) -> int:
+    """How many spool entries of a run were rejected while it has no chain head (a small MACed counter in the
+    guarded home, `record-heads/<run>.rej`): 0 when none. A counter that fails its MAC counts as 1 (it is
+    loud, never quietly zero)."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None or not isinstance(run, str) or not _RUN_NAME.fullmatch(run):
+        return 0
+    try:
+        body = json.loads(_read_guarded(key_dir(root, create=False) / "record-heads" / f"{run}.rej"))
+        ok = (
+            body.get("schema") == "orch.record-rejects/1"
+            and body.get("run") == run
+            and type(body.get("n")) is int
+            and body["n"] >= 0
+            and hmac.compare_digest(record_auth.head_mac(rec[2], rec[0], body).encode(), body["hm"].encode())
+        )
+        return body["n"] if ok else 1
+    except FileNotFoundError:
+        return 0
+    except (Refused, OSError, ValueError, TypeError, AttributeError, KeyError, RecursionError):
+        return 1
+
+
+def record_rejects_bump(root: Path, run: str) -> bool:
+    """Count one rejected spool entry for a run that has no chain head. False when it could not be kept."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return False
+    try:
+        path = _head_path(root, run, True).with_suffix(".rej")
+        body = {"schema": "orch.record-rejects/1", "run": run, "n": record_rejects_read(root, run) + 1}
+        body["hm"] = record_auth.head_mac(rec[2], rec[0], body)
+        _write_private(path, json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
+        return True
+    except (Refused, OSError, ValueError):
+        return False
+
+
+def record_reject_names(root: Path) -> list[str]:
+    """Run names that have a rejected-entries counter (see record_rejects_read)."""
+    try:
+        names = os.listdir(key_dir(root, create=False) / "record-heads")
+    except (Refused, OSError, ValueError):
+        return []
+    return sorted(n[:-4] for n in names if n.endswith(".rej") and _RUN_NAME.fullmatch(n[:-4]))
+
+
 def record_head_state(root: Path, run: str) -> str:
     """Whether a run has a chain head in the guarded home: "present", "absent" or "unknown". "absent" only
     when the guarded home, the workspace id and this workspace's key folder all resolve cleanly AND the head

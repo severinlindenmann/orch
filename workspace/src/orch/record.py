@@ -836,6 +836,7 @@ class _View:
     last_seq: int = 0
     last_mac: str | None = None
     before: tuple = ()  # lines made before protection, recorded in the head
+    rejected: int = 0  # spool entries refused for this run (head.rejected, or the counter of a headless run)
 
 
 def _legacy_parse_prefix(pre, run):
@@ -867,22 +868,28 @@ def _verified(workspace, run, raw) -> _View:
         if mode != "legacy":
             raise RecordTampered("unverified")  # sealed lines or a head, and no key: fail closed
         return _legacy_view(raw, run)
+    # (a run with no key returns above; below the counters can be read)
     head, _ = humanproof.record_head_read(workspace, run) if state == "present" else (None, True)
     verified, mode, pre = _chain(workspace, run, raw, rec, head, present)
     if mode == "legacy":
-        return _legacy_view(raw, run)
+        view = _legacy_view(raw, run)
+        view.rejected = humanproof.record_rejects_read(workspace, run)
+        view.changed += view.rejected
+        return view
     old, _skipped = _legacy_parse_prefix(pre, run)
+    rejected = int((head or {}).get("rejected") or 0)
     if not verified.events and not old and (verified.changed or verified.removed):
         raise RecordTampered(verified.reason)
     return _View(
         verified.events,
-        verified.changed,
+        verified.changed + rejected,  # a refused spool entry is a change outside orch, though it is gone
         verified.removed,
-        verified.reason or ("unchecked" if old else None),
+        verified.reason or ("content" if rejected else None) or ("unchecked" if old else None),
         unchecked=len(old),
         last_seq=verified.last_seq,
         last_mac=verified.last_mac,
         before=tuple(old),
+        rejected=rejected,
     )
 
 
@@ -890,7 +897,7 @@ def _legacy_view(raw, run):
     events, skipped = _legacy_parse(raw, run)
     return _View(
         events,
-        changed=skipped,
+        changed=0,  # unreadable lines of a legacy run are part of "not checked", not a change
         reason="unchecked" if events or skipped else None,
         legacy=True,
         unchecked=len(events) + skipped,
@@ -1236,6 +1243,16 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
                 return _report(workspace, unknown, "run", run, seen_by)
             if gone:  # the file is gone but orch wrote lines to it (not pruned): removed outside orch
                 return _report(workspace, RecordTampered("removed"), "run", run, seen_by)
+            rejected = humanproof.record_rejects_read(workspace, run)
+            if rejected:  # a planted spool entry was refused for a run that has no file and no head
+                return ReadResult(
+                    "ok",
+                    [],
+                    changed=rejected,
+                    reason="content",
+                    message=_MESSAGES["content"],
+                    pending=pending,
+                )
             if pending:
                 return ReadResult("ok", [], reason="pending", message=_MESSAGES["pending"], pending=pending)
         return _report(workspace, error, "run", run, seen_by)
@@ -1328,8 +1345,11 @@ def list_runs(workspace):
                 gone.append(name)
     if problem is not None and not (problem.status == "unavailable" and problem.reason == "missing"):
         return problem
-    if not files and not gone and problem is not None:
+    if not files and not gone and not humanproof.record_reject_names(workspace) and problem is not None:
         return problem
+    for name in humanproof.record_reject_names(workspace):
+        if name not in files and name not in gone:
+            gone.append(name)
     return ReadResult("ok", sorted([*files, *gone]))
 
 
@@ -1723,6 +1743,8 @@ class RecordWriter:
         tail = self._sealed_tail(run)
         if tail is not None:
             self._move_head(run, None, tail[0], tail[1], rejected=1)
+        else:
+            humanproof.record_rejects_bump(self.workspace, run)  # a small guarded counter, no head
 
     def _sealed_tail(self, run):
         """(seq, mac) of the last verified line of a run that has sealed lines, else None."""

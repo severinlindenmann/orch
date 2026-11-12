@@ -230,6 +230,9 @@ SAFE_ATTRIBUTE_CALLS = {
     "humanproof.record_head_names",
     "humanproof.record_cutover_ensure",
     "humanproof.record_cutover_read",
+    "humanproof.record_reject_names",
+    "humanproof.record_rejects_bump",
+    "humanproof.record_rejects_read",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
@@ -276,6 +279,7 @@ SAFE_ATTRIBUTE_VALUES = {
     "view.before",
     "problem.reason",
     "problem.status",
+    "view.rejected",
 }
 ERROR_BOUNDARIES = {
     "_alert",

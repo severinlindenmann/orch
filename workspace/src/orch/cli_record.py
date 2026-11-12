@@ -355,17 +355,24 @@ def _problems(run: str, result) -> list[dict]:
         found[0].alert = result.alert
         return found
     out = []
-    if result.reason in ("content", "removed", "unchecked") or result.changed or result.removed:
-        reason = result.reason if result.reason in ("content", "removed", "unchecked") else "content"
+    # one problem for each thing that is wrong, so that one never hides another: lines changed outside orch,
+    # lines that are gone, lines made before orch checked them
+    for reason, changed, removed in (
+        ("content", result.changed, 0),
+        ("removed", 0, result.removed),
+        ("unchecked", 0, 0),
+    ):
+        if not (changed or removed or (reason == "unchecked" and (result.unchecked or result.legacy))):
+            continue
         found = _Problem(
             run=run,
             status="ok",
             reason=reason,
             message=record.problem_message(reason),
-            changed=result.changed,
-            removed=result.removed,
+            changed=changed,
+            removed=removed,
         )
-        found.legacy = result.legacy  # decided once, by the read status (never from the reason text)
+        found.legacy = reason == "unchecked" and result.legacy  # decided once, by the read status
         out.append(found)
     if result.pending:
         out.append(

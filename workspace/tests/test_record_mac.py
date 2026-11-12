@@ -649,3 +649,38 @@ def test_a_planted_link_folder_or_fifo_at_a_spool_name_is_rejected_and_never_blo
     writer.append(example(id="toolu_4", at=at(4)))
     assert not name.exists() and not name.is_symlink() and outside.read_text() == "keep"
     assert record._pending_count(ws, RUN) == 0
+
+
+def test_rejected_spool_entries_are_counted_as_changed_in_every_view(store, proj_cli, capsys):
+    ws, writer = store
+    write3(writer)
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    (d / ("0" * 19 + "1_" + "a" * 32 + ".json")).write_text("{}")
+    writer.append(example(id="toolu_4", at=at(4)))
+    r = read_run(ws, RUN)
+    assert (r.changed, r.reason) == (1, "content") and len(r.unwrap()) == 4
+    code, lines = cli_lines(capsys, "tail", "--run", RUN)
+    (mark,) = [ln for ln in lines if ln["type"] == "unavailable"]
+    assert (mark["reason"], mark["changed"]) == ("content", 1)
+    code, (counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
+    assert counts["complete"] is False
+    # a run with no file and no head keeps a count in a small guarded counter
+    d2 = record_dir(ws) / "pending" / "r_nothere01"
+    d2.mkdir(parents=True)
+    (d2 / ("0" * 19 + "1_" + "b" * 32 + ".json")).write_text("{}")
+    writer.drain("r_nothere01", check_lock=lambda: None)
+    assert hp.record_rejects_read(ws, "r_nothere01") == 1 and "r_nothere01" in record.list_runs(ws).value
+    gone = read_run(ws, "r_nothere01")
+    assert (gone.status, gone.changed, gone.reason) == ("ok", 1, "content")
+
+
+def test_content_and_unchecked_are_both_told(store, proj_cli, capsys):
+    ws, writer = store
+    _legacy_run(ws, writer)
+    write3(writer)
+    writer.append(example(run=OTHER, id="toolu_n", via="log", at=at(9)))  # the upgrade of the legacy run
+    with runfile(ws, OTHER).open("a") as f:
+        f.write(json.dumps(dict(planted(via="core", run=OTHER), seq=5)) + "\n")  # a plant behind the lines
+    code, lines = cli_lines(capsys, "tail", "--run", OTHER)
+    assert sorted(ln["reason"] for ln in lines if ln["type"] == "unavailable") == ["content", "unchecked"]
