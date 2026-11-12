@@ -1307,11 +1307,25 @@ def read_meta(workspace):
 
 
 def list_runs(workspace):
+    """Every run orch knows: the run files AND the runs that have a chain head (not pruned) but no file, so a
+    deleted run file (or runs/ folder) cannot hide a run: reading such a run says `removed`."""
+    files, problem = [], None
     try:
         names = _entries(workspace, ("runs",))
-        return ReadResult("ok", sorted(n[:-6] for n in names if re.fullmatch(_RUN + r"\.jsonl", n)))
+        files = [n[:-6] for n in names if re.fullmatch(_RUN + r"\.jsonl", n)]
     except (RecordTampered, RecordUnavailable) as error:
-        return _report(workspace, error, "folder", None, "reader")
+        problem = _report(workspace, error, "folder", None, "reader")
+    gone = []
+    for name in humanproof.record_head_names(workspace):
+        if name not in files:
+            head, _ = humanproof.record_head_read(workspace, name)
+            if head is not None and head["seq"] and not head.get("pruned"):
+                gone.append(name)
+    if problem is not None and not (problem.status == "unavailable" and problem.reason == "missing"):
+        return problem
+    if not files and not gone and problem is not None:
+        return problem
+    return ReadResult("ok", sorted([*files, *gone]))
 
 
 @dataclass(frozen=True)

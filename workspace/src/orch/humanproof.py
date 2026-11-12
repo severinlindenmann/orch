@@ -737,6 +737,16 @@ def ensure_record_key(root: Path) -> bool:
         return False
 
 
+def record_head_names(root: Path) -> list[str]:
+    """The run names that have a chain head file in the guarded home (a name only, nothing is checked). []
+    when there is none or the key folder cannot be looked at (the readers fail closed on their own then)."""
+    try:
+        names = os.listdir(key_dir(root, create=False) / "record-heads")
+    except (Refused, OSError, ValueError):
+        return []
+    return sorted(n[:-5] for n in names if n.endswith(".json") and _RUN_NAME.fullmatch(n[:-5]))
+
+
 def record_head_state(root: Path, run: str) -> str:
     """Whether a run has a chain head in the guarded home: "present", "absent" or "unknown". "absent" only
     when the guarded home, the workspace id and this workspace's key folder all resolve cleanly AND the head

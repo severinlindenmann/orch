@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from test_fakeorch import FAKES, check, validator
 
-from orch import cli, cli_record, hider
+from orch import cli, cli_record, hider, record
 from orch.record import RecordWriter, record_dir
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -600,12 +600,19 @@ def test_marker_state_follows_the_run(ws):
             check(validator("cli-answer", "stream_line"), ln, "marker")
 
 
+def prune(ws, run):
+    """What retention does: the tombstone in the head first, then the run file goes (a file that is gone
+    without it is `removed`)."""
+    record._tombstone(ws, run, "2026-11-16T10:00:00Z")
+    run_file(ws, run).unlink(missing_ok=True)
+
+
 def test_follow_drops_cursor_entries_of_pruned_runs(ws):
     since = cli_record.TailCursor({RUN_A: 4, RUN_B: 2}).encode()
 
     def between(n):
         if n == 1:
-            run_file(ws, RUN_B).unlink()
+            prune(ws, RUN_B)
 
     out = follow(ws, 25, between, since=since)
     ping = [ln for ln in out if ln["type"] == "ping"][-1]
@@ -653,7 +660,7 @@ def test_vanished_tampered_run_is_missing_not_recovered(ws):
     hardlink(ws)
 
     def between(n):
-        run_file(ws).unlink(missing_ok=True)
+        prune(ws, RUN_B)
 
     out = follow(ws, 3, between)
     marks = [(m["status"], m["reason"]) for m in out if m["type"] == "unavailable"]
@@ -721,6 +728,7 @@ def test_med_vanish_and_return_is_missing_then_recovered(ws):
 
     def between(n):
         if n == 1:
+            record._tombstone(ws, RUN_B, "2026-11-16T10:00:00Z")  # pruned on purpose (retention does this)
             path.rename(away)
         elif n == 2:
             away.rename(path)

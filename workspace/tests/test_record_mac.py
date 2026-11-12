@@ -546,3 +546,24 @@ def test_checked_markers_of_events_details_and_run_model(store, proj_cli, capsys
     assert cli_record.run_model("r_x", [state])["protected"] is True
     assert cli_record.run_model("r_x", [dict(state, via="hook")])["protected"] is False
     assert cli_record.run_model("r_x", [dict(state, before_protection=True)])["protected"] is False
+
+
+def test_a_deleted_run_file_or_runs_folder_cannot_hide_the_run(store, proj_cli, capsys):
+    ws, writer = store
+    write3(writer)
+    write3(writer, OTHER)
+    runfile(ws).unlink()
+    assert record.list_runs(ws).value == [RUN, OTHER]
+    code, lines = cli_lines(capsys, "tail")
+    marks = [(ln["run"], ln["status"], ln["reason"]) for ln in lines if ln["type"] == "unavailable"]
+    assert marks == [(RUN, "tampered", "removed")] and len([x for x in lines if x["type"] == "event"]) == 3
+    code, (counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
+    assert counts["complete"] is False
+    for f in (record_dir(ws) / "runs").iterdir():  # the whole folder
+        f.unlink()
+    (record_dir(ws) / "runs").rmdir()
+    assert record.list_runs(ws).value == [RUN, OTHER]
+    code, lines = cli_lines(capsys, "tail")
+    assert {ln["run"] for ln in lines if ln["type"] == "unavailable"} == {RUN, OTHER}
+    code, (counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
+    assert counts["complete"] is False and counts["runs"] == 0

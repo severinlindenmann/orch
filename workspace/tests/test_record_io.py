@@ -226,6 +226,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "record_auth.start_state",
     "self._sealed_tail",
     "whole.split",
+    "gone.append",
+    "humanproof.record_head_names",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
@@ -270,6 +272,8 @@ SAFE_ATTRIBUTE_VALUES = {
     "view.value",
     "self.message",
     "view.before",
+    "problem.reason",
+    "problem.status",
 }
 ERROR_BOUNDARIES = {
     "_alert",
