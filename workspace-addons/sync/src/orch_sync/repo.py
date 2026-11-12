@@ -345,6 +345,9 @@ def ensure(root):
         tickets.adopt_own_sessions(Path(root))
     if current == 'ready':
         return
+    if current == 'needs-move':
+        raise Refused('needs-move: your orch files are kept in your team repository. Answer "Move your orch files out '
+                      'of the team repository?" first; sync starts after that')
     if current != 'new':
         raise Refused(f'{current}: explicit consent flow is not available yet')
     if not version_ok(root):

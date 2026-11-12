@@ -3,6 +3,7 @@
 import hashlib
 import re
 import shlex
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -88,6 +89,8 @@ def _unconfirmed(root):
 
 
 def row(kind, key, text, since, command, options, ticket=None, title="Sync needs you", tone="needs-you", actions=None):
+    # whole seconds (the core's collector drops other times); a non-text value becomes now, still a valid time
+    since = re.sub(r"\.\d+(?=Z$)", "", since) if isinstance(since, str) else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     # peer, file or agent text (titles, names, reasons): one line, nothing hidden (L-2)
     from .act import plain
 
