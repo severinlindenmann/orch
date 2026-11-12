@@ -280,7 +280,7 @@ def _run(args, root: Path) -> int:
         if res.get("until"):
             text = f"{args.ticket} wakes once at {res['until']}."
         elif res["recurring"]:
-            text = f"{args.ticket} repeats: {cron_human(res['cron'], plain.zone(res['tz']))} ({res['tz']})."
+            text = f"{args.ticket} repeats: {cron_human(res['cron'], plain.zone(res['tz']), local=plain.zone(res['tz']))} ({res['tz']})."
         else:
             text = f"{args.ticket} no longer repeats."
         running = bool(service.running_pid(root))
