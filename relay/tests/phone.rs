@@ -124,7 +124,7 @@ async fn phone_question_push_answer_first_wins() {
             &p,
             "POST",
             "/v1/phone/push",
-            Some(json!({"apns_token": "abcdef0123", "sandbox": true}))
+            Some(json!({"apns_token": "abcdef0123000000000000000000000000000000000000000000000000000000", "sandbox": true}))
         )
         .await
         .0,
@@ -135,7 +135,13 @@ async fn phone_question_push_answer_first_wins() {
     {
         let sent = t.push.sent.lock().unwrap();
         assert_eq!(sent.len(), 1);
-        assert_eq!((sent[0].0, sent[0].1.as_str()), (true, "abcdef0123"));
+        assert_eq!(
+            (sent[0].0, sent[0].1.as_str()),
+            (
+                true,
+                "abcdef0123000000000000000000000000000000000000000000000000000000"
+            )
+        );
         let pl = &sent[0].2;
         assert_eq!(pl["aps"]["alert"]["title"], "Pilatus Workspace");
         assert_eq!(pl["aps"]["alert"]["body"].as_str().unwrap().len(), 120);
@@ -289,7 +295,7 @@ async fn phone_dead_apns_token_is_removed() {
         &p,
         "POST",
         "/v1/phone/push",
-        Some(json!({"apns_token": "abcdef0123", "sandbox": false})),
+        Some(json!({"apns_token": "abcdef0123000000000000000000000000000000000000000000000000000000", "sandbox": false})),
     )
     .await;
     *t.push.fail.lock().unwrap() = Some(orch_relay::push::PushError {
@@ -315,7 +321,7 @@ async fn phone_reply_paired_workspace_can_send_to_its_phone() {
         &p,
         "POST",
         "/v1/phone/push",
-        Some(json!({"apns_token": "abcdef0123", "sandbox": true})),
+        Some(json!({"apns_token": "abcdef0123000000000000000000000000000000000000000000000000000000", "sandbox": true})),
     )
     .await;
     let (s, _) = t
@@ -487,7 +493,7 @@ async fn phone_text_push_budget_skips_extra_pushes_but_keeps_texts() {
         &p,
         "POST",
         "/v1/phone/push",
-        Some(json!({"apns_token": "abcdef0123", "sandbox": true})),
+        Some(json!({"apns_token": "abcdef0123000000000000000000000000000000000000000000000000000000", "sandbox": true})),
     )
     .await;
     for i in 0..5 {
@@ -726,7 +732,7 @@ async fn push_on(t: &T, p: &(String, String)) {
         p,
         "POST",
         "/v1/phone/push",
-        Some(json!({"apns_token": "abcdef0123", "sandbox": true})),
+        Some(json!({"apns_token": "abcdef0123000000000000000000000000000000000000000000000000000000", "sandbox": true})),
     )
     .await;
 }

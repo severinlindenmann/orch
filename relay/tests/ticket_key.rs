@@ -9,7 +9,7 @@ async fn push_on(t: &T, p: &(String, String)) {
         p,
         "POST",
         "/v1/phone/push",
-        Some(json!({"apns_token": "abcdef0123", "sandbox": true})),
+        Some(json!({"apns_token": "abcdef0123000000000000000000000000000000000000000000000000000000", "sandbox": true})),
     )
     .await;
 }

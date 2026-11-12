@@ -122,7 +122,7 @@ impl Fixture {
                     p,
                     "POST",
                     "/v1/phone/push",
-                    Some(json!({"apns_token":"abcdef0123", "sandbox":true})),
+                    Some(json!({"apns_token":"abcdef0123000000000000000000000000000000000000000000000000000000", "sandbox":true})),
                 )
                 .await;
             assert_eq!(s, 204, "{v}");
