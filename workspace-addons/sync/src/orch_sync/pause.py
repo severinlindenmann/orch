@@ -6,14 +6,52 @@ from pathlib import Path
 
 from orch import config, humanproof, syncgate, tickets
 
-from . import cli, incoming, paths, repo, scan
+from . import cli, incoming, paths, records, repo, scan
+
+HISTORY = "history"  # the pause kind of two histories git cannot combine (no file to choose)
+JUMP = "Ticket numbers jumped far ahead on the other computer"  # a person checks the counter (Fable A9)
 
 
 class Pause(repo.Refused):
-    def __init__(self, reason, files=(), *, key_clashes=None):
+    def __init__(self, reason, files=(), *, key_clashes=None, case_names=None, kind=None):
         super().__init__(reason)
         self.files = list(files)
         self.key_clashes = key_clashes
+        self.case_names = case_names  # {incoming path: this machine's path that differs only in case}
+        self.kind = kind
+
+
+PAUSED_KIND = "sync-paused"
+
+
+def sign(root, paused):
+    """Sign a pause this core made or changed in this process (its files, reason, kind, remote, clashes) with its
+    local1 MAC. Only capture and the person's resolutions call it: an agent can write state.json, but an edited or
+    planted pause (a reason that lowers what needs a proof, a remote it never reviewed) is no pause at all."""
+    body = {k: v for k, v in paused.items() if k != "mac"}
+    mac = humanproof.local_sign(root, PAUSED_KIND, body)
+    return {**body, "mac": mac} if mac else None  # unsigned = no pause (sync looks again)
+
+
+def seal(root, state):
+    """Before state.json is written: keep the pause only as this core signed it (verified_pause), else drop it.
+    Never signs: a planted pause written back by any core write would otherwise come out signed."""
+    state["paused"] = verified_pause(root, state)
+    return state
+
+
+def verified_pause(root, state):
+    """The pause in `state` (with its mac, so writing it back unchanged keeps it) when this core signed exactly
+    it, else None. A caller that changes it signs it again (sign); a changed pause it forgets is dropped."""
+    paused = state.get("paused") if isinstance(state, dict) else None
+    if not isinstance(paused, dict):
+        return None
+    body = {k: v for k, v in paused.items() if k != "mac"}
+    if not humanproof.local_ok(root, PAUSED_KIND, body, paused.get("mac")):
+        return None
+    if not isinstance(body.get("files"), list) or not isinstance(body.get("reason"), str):
+        return None
+    return paused
 
 
 def capture(root, state, error, remote, now):
@@ -21,11 +59,20 @@ def capture(root, state, error, remote, now):
 
     ours = step.entries(root, step.oid(root, "HEAD"))
     theirs = step.entries(root, remote)
-    files = error.files or sorted(p for p in ours.keys() | theirs.keys() if ours.get(p) != theirs.get(p))
+    kind = getattr(error, "kind", None)
+    if kind == HISTORY:
+        files = []  # nothing to choose per file: its own Needs row; it clears when the remote changes
+    else:
+        files = error.files or sorted(p for p in ours.keys() | theirs.keys() if ours.get(p) != theirs.get(p))
     files = sorted({p for p in files if paths.allowed(p)})
-    state["paused"] = {"files": files, "since": now, "remote_sha": remote, "reason": str(error)}
+    paused = {"files": files, "since": now, "remote_sha": remote, "reason": str(error)}
+    if kind:
+        paused["kind"] = kind
     if error.key_clashes:
-        state["paused"]["key_clashes"] = error.key_clashes
+        paused["key_clashes"] = error.key_clashes
+    if error.case_names:
+        paused["case_names"] = {p: v for p, v in error.case_names.items() if p in files}
+    state["paused"] = sign(root, paused)  # the one place a new pause is made (Pause raised in this process)
     # Manifest is written last by the step. Saved bytes are never used without matching its sha.
     for path in files:
         data = step.blob(root, theirs.get(path))
@@ -37,13 +84,53 @@ def capture(root, state, error, remote, now):
     step.write(root, "run/sync/theirs.json", step.encoded({"remote_sha": remote}))
 
 
+CHOICES = ("mine", "theirs", "key")
+
+
 def choices(root, remote):
+    """The choices for exactly this remote commit: only entries this core signed for exactly that remote and
+    path (records "choice"); an entry of any other shape, edited (keep, covers, local, ...) or planted counts
+    for nothing."""
     data = cli.read(root, "choices")
-    return data.get("files", {}) if data.get("remote_sha") == remote else {}
+    files = data.get("files")
+    if data.get("remote_sha") != remote or not isinstance(files, dict):
+        return {}
+    return {
+        p: e
+        for p, e in files.items()
+        if isinstance(p, str)
+        and paths.allowed(p)
+        and isinstance(e, dict)
+        and (e.get("keep") in CHOICES or (e.get("keep") == LOCAL_NAME and isinstance(e.get("local"), str)))
+        and records.ok(root, "choice", f"{remote}:{p}", e)
+    }
 
 
-def selected(root, path):
-    return repo.safe(root, "run/sync/choices/" + path).read_bytes()
+def record_choice(root, decisions, remote, path, fields, data=None):
+    """Put a signed choice for `path` (bound to the reviewed remote, and to the chosen bytes) into `decisions`."""
+    if data is not None:
+        fields = {**fields, "sha256": hashlib.sha256(data).hexdigest()}
+    decisions["files"][path] = records.make(root, "choice", f"{remote}:{path}", fields)
+
+
+def selected(root, path, entry):
+    """The chosen bytes of `path`: only when they are exactly the bytes its signed choice names. `entry` is the
+    VERIFIED choice (from choices()); the store is never read again here (no swap between the two reads)."""
+    data = repo.safe(root, "run/sync/choices/" + path).read_bytes()
+    if not isinstance(entry, dict) or entry.get("sha256") != hashlib.sha256(data).hexdigest():
+        drop_choice(root, path)  # the chosen bytes were changed: that choice is gone
+        raise Pause(f"{Path(path).name} changed after your choice; choose again", [path])
+    return data
+
+
+def drop_choice(root, path):
+    """Forget the choice for `path` (it is asked again). A store of any other shape is reset."""
+    from . import step
+
+    store = cli.read(root, "choices")
+    files = store.get("files") if isinstance(store.get("files"), dict) else {}
+    files.pop(path, None)
+    step.write(root, "run/sync/choices.json", step.encoded({**store, "files": files}))
 
 
 def checked_tree(root, remote, index):
@@ -55,25 +142,91 @@ def checked_tree(root, remote, index):
         return remote
     repo.git(root, "read-tree", remote, index=index)
     for path in decisions:
-        data = selected(root, path)
+        if decisions[path].get("keep") == LOCAL_NAME:
+            _keep_local_name(root, remote, index, path, decisions[path])
+            continue
+        data = selected(root, path, decisions[path])
         live = repo.safe(root, path)
         if decisions[path].get("incoming"):
-            if paths.TICKET.fullmatch(path) and live.exists():
-                raise repo.Refused(f"{path}: busy; the incoming ticket now exists locally")
-        elif not live.exists() or live.read_bytes() != data:
-            raise repo.Refused(f"{path}: busy; the selected copy changed")
+            changed = paths.TICKET.fullmatch(path) and live.exists()
+        else:
+            changed = not live.exists() or live.read_bytes() != data
+        if changed:
+            # Fable B7: the file moved on after the choice. Drop that one choice and ask again, never refuse
+            # every later run (the path is no longer paused, so it could not be chosen again).
+            drop_choice(root, path)
+            raise Pause(f"{Path(path).name} changed after your choice; choose again", [path])
         step.put(root, index, path, data)
     tree = repo.git(root, "write-tree", index=index).stdout.decode().strip()
-    return step.commit(root, tree, [remote], decisions[next(iter(decisions))]["at"])
+    at = next((e.get("at") for e in decisions.values() if isinstance(e.get("at"), str)), None)
+    return step.commit(root, tree, [remote], at or datetime.now(UTC).isoformat().replace("+00:00", "Z"))
+
+
+LOCAL_NAME = "local-name"
+CASE_PROBLEM = "Same name as a local file in different case"  # incoming.check
+
+
+def _keep_local_name(root, remote, index, path, decision):
+    """A person kept this machine's file name: the remote's case variant `path` is not applied (left out of
+    the checked tree), and this machine's file is left as the merge base had it, so the remote side changes
+    nothing about it (a remote case-only rename is not a deletion here)."""
+    from . import step
+
+    local = decision.get("local")
+    if not isinstance(local, str) or not paths.allowed(local) or not repo.safe(root, local).is_file():
+        # The local file moved on after the choice: ask again (Fable B7), never refuse every later run.
+        drop_choice(root, path)
+        raise Pause(f"{Path(path).name} changed after your choice; choose again", [path])
+    repo.git(root, "update-index", "--force-remove", "--", path, index=index)
+    common = repo.git(root, "merge-base", "HEAD", remote, allowed_codes=(0, 1, 128)).stdout.decode().strip()
+    base = step.entries(root, common or None).get(local) if common else None
+    if base:
+        repo.git(root, "update-index", "--add", "--cacheinfo", f"100644,{base[1]},{local}", index=index)
+    else:
+        repo.git(root, "update-index", "--force-remove", "--", local, index=index)
+
+
+ALLOWED_PROBLEMS = ("held-ext", "needs-confirm", "cannot-check")
+
+
+def blocking(checked, path=None):
+    """Fable B6: every incoming problem blocks a choice except an explicit allowlist, and except a content
+    problem on the very file being chosen (the choice is what settles it; theirs is rescanned below)."""
+    return [
+        p
+        for p in checked.problems
+        if p.code not in ALLOWED_PROBLEMS
+        and not (path and p.path == path and p.code not in ("path", "size", "private"))
+    ]
 
 
 def findings(root, path, data):
+    """What blocks `data`: a cannot-check finding counts as settled only by this core's signed record that a
+    person allowed exactly these bytes at exactly this path (records "file")."""
     approved = cli.read(root, "checked-files")
-    return [
-        f
-        for f in scan.scan_blob(path, data)
-        if f.code != "cannot-check" or approved.get(path) != hashlib.sha256(data).hexdigest()
-    ]
+    hashed = hashlib.sha256(data).hexdigest()
+    allowed = records.ok(root, "file", f"{path}:{hashed}", approved.get(path))
+    return [f for f in scan.scan_blob(path, data) if f.code != "cannot-check" or not allowed]
+
+
+def local_decisions(doc, local):
+    """A chosen remote ticket with what only this machine decides taken from its own copy: the key and old
+    keys (ext.sync) and Done (a peer's Done never becomes Done here by a choice). The peer's Won't do,
+    verdict and approval fields stay as they came: the caller merges the chosen copy as the REMOTE side
+    (merge_document(local, local, chosen)), so the receiving core's verifiers decide each one and an
+    unverified one stays unverified (Fable B2). Nothing in the chosen copy becomes locally trusted."""
+    out = {k: v for k, v in doc.items() if k != "key"}
+    out.update({k: local[k] for k in ("key",) if k in local})
+    if out.get("status") == "done" and local.get("status") != "done":
+        out["status"] = local.get("status", "review")
+    ext = dict(out["ext"]) if isinstance(out.get("ext"), dict) else {}
+    if isinstance(local.get("ext"), dict) and "sync" in local["ext"]:
+        ext["sync"] = local["ext"]["sync"]
+    else:
+        ext.pop("sync", None)
+    if ext or "ext" in out:
+        out["ext"] = ext
+    return out
 
 
 def resolve(root, path, keep, args=None, *, now=None):
@@ -82,26 +235,21 @@ def resolve(root, path, keep, args=None, *, now=None):
     now = now or datetime.now(UTC).isoformat().replace("+00:00", "Z")
     with step.step_lock(root):
         state = cli.read(root, "state")
-        paused = state.get("paused")
+        paused = state["paused"] = verified_pause(root, state)
         if not paths.allowed(path) or not paused or path not in paused["files"]:
             raise repo.Refused("This file is not waiting for a choice")
         if any(path == f"tickets/{t['id']}.json" for group in paused.get("key_clashes", {}).values() for t in group):
             raise repo.Refused("Use orch sync keep-key for a ticket number clash")
+        if path in (paused.get("case_names") or {}):
+            # On a disk that ignores case, either copy would overwrite the other file.
+            raise repo.Refused("Use --keep-local-name or --rename-local <new name>: the names differ only in case")
         settings = cli.DEFAULTS | cli.read(root, "settings")
         remote = paused["remote_sha"]
         if settings["mode"] == "remote":
             if not cli.remote_allowed():
                 raise repo.Refused("Remote sync is preview-only")
             repo.check(root)
-            repo.git(
-                root,
-                "fetch",
-                "--no-tags",
-                "--prune",
-                "origin",
-                "+refs/heads/*:refs/remotes/origin/*",
-                timeout=60,
-            )
+            repo.fetch(root)
             current = step.oid(root, "refs/remotes/origin/orch-state")
             if current != remote:
                 state["paused"] = None
@@ -112,9 +260,7 @@ def resolve(root, path, keep, args=None, *, now=None):
             raise repo.Refused("Saved copy is no longer current")
         # Check original incoming content even for Keep mine. Unsafe unrelated files still block.
         checked = incoming.check(root, remote, base=None) if remote else None
-        if checked and (
-            checked.commit != remote or any(p.code in ("path", "size") for p in checked.problems)
-        ):
+        if checked and (checked.commit != remote or blocking(checked, path)):
             raise repo.Refused("Incoming files could not be checked")
         with (
             syncgate.hold(root),
@@ -123,9 +269,8 @@ def resolve(root, path, keep, args=None, *, now=None):
             ),
         ):
             live = repo.safe(root, path)
-            mine = (
-                live.read_bytes() if live.exists() else step.blob(root, step.entries(root, "HEAD").get(path))
-            )
+            head = step.blob(root, step.entries(root, "HEAD").get(path))
+            mine = live.read_bytes() if live.exists() else head
             saved = repo.safe(root, "run/sync/theirs/" + path)
             theirs = saved.read_bytes() if saved.exists() else None
             if remote and theirs != step.blob(root, step.entries(root, remote).get(path)):
@@ -149,8 +294,9 @@ def resolve(root, path, keep, args=None, *, now=None):
                 )
                 config.require_person(by, "allow this unchecked file")
                 approved = cli.read(root, "checked-files")
-                approved[path] = hashed
+                approved[path] = records.make(root, "file", f"{path}:{hashed}", {"path": path, "sha256": hashed})
                 step.write(root, "run/sync/checked-files.json", step.encoded(approved))
+            covers = None
             if paths.TICKET.fullmatch(path):
                 doc = step.document(path, data)
                 try:
@@ -159,14 +305,23 @@ def resolve(root, path, keep, args=None, *, now=None):
                     if keep == "mine":
                         raise
                     local = {}  # The raw bytes are retained locally below.
-                doc = step.held_ticket(root, path, doc, local, doc)
-                # Re-run authority-sensitive merge rules; synced human text is never proof.
-                # Selecting a remote copy does not make its history locally trusted.
-                # Mirror the chosen fields, but only locally present history lines.
-                trusted = {**doc, "history": [h for h in doc.get("history", []) if h in local.get("history", [])]}
-                doc = step.merge_document(root, path, {}, trusted, doc, now)
-                doc = step.held_ticket(root, path, doc, local, doc)
-                if keep == "theirs" and mine != data:
+                adopting = keep == "theirs" and data == theirs and mine != data
+                if adopting:
+                    # Fable B2: adopting a peer's ticket is a person's decision, bound to these exact bytes.
+                    by = humanproof.person_by(
+                        root,
+                        args,
+                        "addon.act",
+                        "sync:keep-theirs:" + hashlib.sha256(path.encode() + b"\0" + data).hexdigest(),
+                        no_handoff="Keeping their copy of a ticket needs a person's proof over stdin.",
+                    )
+                    config.require_person(by, "keep their copy of this ticket")
+                    doc = local_decisions(doc, local)
+                # The chosen copy is the remote side of a merge whose base and local side are this machine's
+                # copy: its plain fields win, while the receiving core's verifiers decide every Won't do and
+                # verdict, its remote-only history lines are demoted (merge.py), and held ext stays held.
+                doc = step.merge_document(root, path, local, local, doc, now)
+                if adopting:
                     raw = mine or b"{}"
                     backup = "run/sync/mine/" + path + "-" + hashlib.sha256(raw).hexdigest()
                     step.write(root, backup, raw)
@@ -186,6 +341,29 @@ def resolve(root, path, keep, args=None, *, now=None):
                     )
                 data = data if doc == incoming.strict_load(data) else step.encoded(doc)
                 step.document(path, data)
+            elif path == "ticket-counter.json":
+                # Fable B9: a counter only ever goes up and keeps its strict shape, whichever copy is chosen.
+                from . import merge
+
+                docs = [step.document(path, d) for d in (mine, theirs) if d is not None]
+                jump = paused.get("reason") == JUMP
+                if keep == "theirs" and len(docs) == 2:
+                    data = step.encoded(merge.merge_counter({}, *docs))
+                step.document(path, data)
+                # Everything that can refuse runs before the proof, so a refusal never uses it up (LOW-4).
+                # The person's proven choice covers the incoming numbers they reviewed (a far key included).
+                covers = step.top_number(root, remote) if jump and remote else None
+                if keep == "theirs" or jump:
+                    # M3: numbers only go up, so their counter (or clearing a jump at all) is a person's
+                    # decision, bound to the reviewed remote commit.
+                    by = humanproof.person_by(
+                        root,
+                        args,
+                        "addon.act",
+                        f"sync:keep-{keep}-counter:{remote}",
+                        no_handoff="Choosing the ticket counter needs a person's proof over stdin.",
+                    )
+                    config.require_person(by, "choose the ticket counter")
             elif paths.ARTIFACT.fullmatch(path) and keep == "theirs" and mine is not None and mine != data:
                 # No overwrite even on retries or two choices on the same day.
                 suffix = f" (mine {now[:10]})"
@@ -199,15 +377,172 @@ def resolve(root, path, keep, args=None, *, now=None):
                     )
                 step.write(root, backup, mine)
             decisions = cli.read(root, "choices")
-            if not decisions or decisions.get("remote_sha") != remote:
+            if not decisions or decisions.get("remote_sha") != remote or not isinstance(decisions.get("files"), dict):
                 decisions = {"remote_sha": remote, "files": {}}
             step.write(root, "run/sync/choices/" + path, data)
-            decisions["files"][path] = {"keep": keep, "at": now}
+            fields = {"keep": keep, "at": now, **({"covers": covers} if covers is not None else {})}
+            record_choice(root, decisions, remote, path, fields, data)  # covers is inside the signature
             step.write(root, "run/sync/choices.json", step.encoded(decisions))
             step.write(root, path, data)
             paused["files"].remove(path)
-            if not paused["files"]:
+            state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
+            step.write(root, "run/sync/state.json", step.encoded(state))
+        if state["paused"]:
+            return state
+        return step._run(root, "resolved", now, cli.remote_allowed())
+
+
+def take_target(remote, tree):
+    """The proof target of take-remote: the reviewed remote commit AND the exact tree that will be applied."""
+    return f"sync:take-remote:{remote}:{tree}"
+
+
+def take_remote(root, args, *, now=None):
+    """A person's way out of a HISTORY pause (several or no merge bases): take the other computer's history as
+    the new base. Everything goes through the normal merge authority (step.taken_tree); every check that can
+    refuse runs BEFORE the proof, and the proof is bound to the exact tree that is then applied."""
+    import tempfile
+
+    from . import step
+
+    now = now or datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    with step.step_lock(root):
+        state = cli.read(root, "state")
+        paused = verified_pause(root, state)
+        if not paused or paused.get("kind") != HISTORY:
+            raise repo.Refused("Sync is not waiting for this choice")
+        remote = paused["remote_sha"]
+        settings = cli.DEFAULTS | cli.read(root, "settings")
+        if settings["mode"] == "remote":
+            if not cli.remote_allowed():
+                raise repo.Refused("Remote sync is preview-only")
+            repo.check(root)
+            repo.set_remote(root, settings["remote"])
+            repo.fetch(root)
+            if step.oid(root, "refs/remotes/origin/orch-state") != remote:
                 state["paused"] = None
+                step.write(root, "run/sync/state.json", step.encoded(state))
+                result = step._run(root, "remote changed; review again", now, True)
+                return result | {"review_again": True}
+        checked = incoming.check(root, remote, base=None) if remote else None
+        if not checked or checked.commit != remote or blocking(checked):
+            raise repo.Refused("Incoming files could not be checked")
+        scratch = repo.safe(root, "run/tmp-sync")
+        scratch.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as folder:
+            index = Path(folder) / "index"
+            with syncgate.hold(root):
+                head = step.oid(root, "HEAD")
+                tree = step.stage(root, head, index, state, now)  # this machine's live files are the base
+                if not head or tree != step.oid(root, head + "^{tree}"):
+                    new = step.commit(root, tree, [head], now)
+                    repo.git(root, "update-ref", "refs/heads/orch-state", new, head or "0" * 40)
+                    head = new
+                repo.git(root, "read-tree", head, index=index)  # the temp index (apply sets the default one)
+            tree, merges = step.taken_tree(root, head, remote, index, now)
+            by = humanproof.person_by(
+                root,
+                args,
+                "addon.act",
+                take_target(remote, tree),
+                no_handoff="Taking the other computer's history needs a person's proof over stdin.",
+            )
+            config.require_person(by, "take the other computer's history")
+            new = step.commit(root, tree, [head, remote], now)
+            step.write(
+                root,
+                "run/sync/pending.json",
+                step.encoded({"old": head, "new": new, "url": settings.get("remote"), "remote": remote,
+                              "merges": merges}),
+            )
+            with syncgate.hold(root):
+                step.apply(root, head, new, state, merges)
+            repo.safe(root, "run/sync/pending.json").unlink()
+        state["paused"] = None
+        step.write(root, "run/sync/state.json", step.encoded(state))
+    return step._run(root, "took the other computer's history", now, cli.remote_allowed())
+
+
+def case_target(path, remote, target=None):
+    """The proof target of a name choice: bound to the incoming name, the reviewed remote and the new name."""
+    parts = [path, str(remote), target] if target else [path, str(remote)]
+    digest = hashlib.sha256("\0".join(parts).encode()).hexdigest()
+    return f"sync:case-rename:{digest}" if target else f"sync:case-keep:{digest}"
+
+
+def resolve_case(root, path, args, *, rename=None, now=None):
+    """A person's way out of a name that differs from this machine's only in case (`path` = the incoming name;
+    on a disk that ignores case both are one file). Keep this machine's file name: the other computer's variant
+    is not applied while the remote stays at the reviewed commit (it is reported each time; a new remote commit
+    asks again). Or rename this machine's file (`rename`: a new file name in the same folder): then both
+    arrive. Bound to the reviewed remote commit, the path and the new name; agents are refused."""
+    import os
+
+    from . import step
+
+    now = now or datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    with step.step_lock(root):
+        state = cli.read(root, "state")
+        paused = state["paused"] = verified_pause(root, state)
+        case = (paused or {}).get("case_names") or {}
+        if not paused or path not in paused["files"] or path not in case:
+            raise repo.Refused("This file has no name clash waiting for a choice")
+        local = case[path]
+        if not isinstance(local, str) or not paths.allowed(local) or not repo.safe(root, local).is_file():
+            raise repo.Refused("Your file is no longer there; run sync again")
+        remote = paused["remote_sha"]
+        settings = cli.DEFAULTS | cli.read(root, "settings")
+        if settings["mode"] == "remote":
+            if not cli.remote_allowed():
+                raise repo.Refused("Remote sync is preview-only")
+            repo.check(root)
+            repo.fetch(root)
+            if step.oid(root, "refs/remotes/origin/orch-state") != remote:
+                state["paused"] = None
+                step.write(root, "run/sync/state.json", step.encoded(state))
+                result = step._run(root, "remote changed; review again", now, True)
+                return result | {"review_again": True}
+        target = None
+        if rename is not None:
+            name = str(rename)
+            if not name or name in (".", "..") or name != name.strip() or any(c in name for c in "/\\\0"):
+                raise repo.Refused("Give a new file name, without folders")
+            if not paths.ARTIFACT.fullmatch(local):
+                raise repo.Refused("Only a ticket's files can be renamed")
+            folder = local.rsplit("/", 1)[0]
+            target = f"{folder}/{name}"
+            if not paths.allowed(target) or not paths.ARTIFACT.fullmatch(target):
+                raise repo.Refused("This name cannot be synced; choose another")
+            taken = {incoming._fold(p) for p in (*step.entries(root, "HEAD"), *step.entries(root, remote))}
+            taken |= {incoming._fold(f"{folder}/{f.name}") for f in repo.safe(root, folder).iterdir()}
+            if incoming._fold(target) in taken:
+                raise repo.Refused("A file with this name (in any case) is already there; choose another")
+        by = humanproof.person_by(
+            root,
+            args,
+            "addon.act",
+            case_target(path, remote, target),
+            no_handoff="Choosing a file name needs a person's proof over stdin.",
+        )
+        config.require_person(by, "choose a file name")
+        with syncgate.hold(root), tickets.sync_apply(root, local.split("/")[1].removesuffix(".json")):
+            if target:
+                source, dest = repo.safe(root, local), repo.safe(root, target)
+                if os.path.lexists(dest):
+                    raise repo.Refused("A file with this name is already there; choose another")
+                os.rename(source, dest)
+                renamed = cli.read(root, "renamed")
+                renamed[local] = target
+                step.write(root, "run/sync/renamed.json", step.encoded(renamed))
+            else:
+                decisions = cli.read(root, "choices")
+                if decisions.get("remote_sha") != remote or not isinstance(decisions.get("files"), dict):
+                    decisions = {"remote_sha": remote, "files": {}}
+                record_choice(root, decisions, remote, path, {"keep": LOCAL_NAME, "local": local, "at": now})
+                step.write(root, "run/sync/choices.json", step.encoded(decisions))
+            paused["files"].remove(path)
+            case.pop(path)
+            state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
             step.write(root, "run/sync/state.json", step.encoded(state))
         if state["paused"]:
             return state
@@ -225,7 +560,7 @@ def keep_key(root, key, tid, args, *, now=None):
     now = now or datetime.now(UTC).isoformat().replace("+00:00", "Z")
     with step.step_lock(root), syncgate.hold(root), ExitStack() as locks:
         state = cli.read(root, "state")
-        paused = state.get("paused") or {}
+        paused = state["paused"] = verified_pause(root, state) or {}
         candidates = paused.get("key_clashes", {}).get(key, [])
         if tid not in {t["id"] for t in candidates}:
             raise repo.Refused("No such ticket in this key clash")
@@ -235,25 +570,28 @@ def keep_key(root, key, tid, args, *, now=None):
             if not cli.remote_allowed():
                 raise repo.Refused("Remote sync is preview-only")
             repo.check(root)
-            repo.git(root, "fetch", "--no-tags", "origin", "+refs/heads/*:refs/remotes/origin/*", timeout=60)
+            repo.fetch(root)
             if step.oid(root, "refs/remotes/origin/orch-state") != remote:
                 raise repo.Refused("Remote changed; review again before choosing a key")
         if cli.read(root, "theirs").get("remote_sha") != remote:
             raise repo.Refused("Saved copy is no longer current")
         checked = incoming.check(root, remote, base=None)
-        if checked.commit != remote or any(
-            p.code in ("path", "size") or p.path == "ticket-counter.json" for p in checked.problems
-        ):
-            raise repo.Refused("Incoming files could not be checked")
         if any(p.code == "private" for p in checked.problems):
             raise repo.Refused("General ticket stays local")
+        if checked.commit != remote or blocking(checked) or any(
+            p.path == "ticket-counter.json" for p in checked.problems
+        ):
+            raise repo.Refused("Incoming files could not be checked")
         by = humanproof.person_by(
             root, args, "addon.act", f"sync:keep-key:{key}:{tid}:{remote}",
             no_handoff="Choosing a ticket number needs a person's proof over stdin.",
         )
         config.require_person(by, "choose a ticket number")
         ours, theirs = step.entries(root, "HEAD"), step.entries(root, remote)
+        common = repo.git(root, "merge-base", "HEAD", remote, allowed_codes=(0, 1)).stdout.decode().strip()
+        base_rows = step.entries(root, common or None)
         docs, originals = {}, {}
+        group = {t["id"] for t in candidates}
         for path in sorted(ours.keys() | theirs.keys()):
             if not paths.TICKET.fullmatch(path):
                 continue
@@ -265,10 +603,14 @@ def keep_key(root, key, tid, args, *, now=None):
             other = step.document(path, step.blob(root, theirs[path])) if path in theirs else {}
             if local.get("general") is True or other.get("general") is True:
                 raise repo.Refused("General ticket stays local")
+            doc = local or other
+            if local and other and Path(path).stem in group and local != other:
+                # Fable B10: keep the peer's edits to a ticket in this group; only the key changes below.
+                base = step.document(path, step.blob(root, base_rows[path])) if path in base_rows else {}
+                doc = step.merge_document(root, path, base, local, {**other, "key": local.get("key")}, now)
             # Only this person's chosen group may be changed by this decision.
-            docs[Path(path).stem] = local or other
+            docs[Path(path).stem] = doc
         locks.enter_context(tickets.sync_apply(root, "key"))
-        group = {t["id"] for t in candidates}
         if any(i not in docs or docs[i].get("key") != key for i in group):
             raise repo.Refused("Ticket numbers changed; review again")
         counter_path = "ticket-counter.json"
@@ -279,8 +621,10 @@ def keep_key(root, key, tid, args, *, now=None):
             incoming.strict_load(step.blob(root, theirs.get(counter_path)) or b"{}"),
             [k for doc in docs.values() for k in [doc.get("key"), *merge.old_keys_of(doc)]],
         )
-        if counter_path in choices(root, remote):
-            counter = merge.merge_counter({}, counter, incoming.strict_load(selected(root, counter_path)))
+        if counter_choice := choices(root, remote).get(counter_path):
+            counter = merge.merge_counter(
+                {}, counter, incoming.strict_load(selected(root, counter_path, counter_choice))
+            )
         selected_docs = {}
         for i in sorted(group):
             doc = docs[i]
@@ -288,7 +632,17 @@ def keep_key(root, key, tid, args, *, now=None):
                 path = f"tickets/{i}.json"
                 incoming_doc = step.document(path, step.blob(root, theirs[path])) if path in theirs else {}
                 incoming_key = incoming_doc.get("key")
-                if incoming_key and incoming_key != key and key in merge.old_keys_of(incoming_doc):
+                used = {d.get("key") for j, d in docs.items() if j != i}
+                if (
+                    isinstance(incoming_key, str)
+                    and incoming_key != key
+                    and key in merge.old_keys_of(incoming_doc)
+                    # Fable B9: the peer's number must be this prefix, unused here and within reach of the
+                    # counter; otherwise allocate locally.
+                    and incoming_key.rsplit("-", 1)[0] == key.rsplit("-", 1)[0]
+                    and 0 < merge._key_n(incoming_key) <= counter["last"] + 1
+                    and incoming_key not in used
+                ):
                     new = incoming_key
                 else:
                     counter["last"] += 1
@@ -297,7 +651,9 @@ def keep_key(root, key, tid, args, *, now=None):
                     new = f"{key.rsplit('-', 1)[0]}-{counter['last']}"
                 doc.setdefault("ext", {}).setdefault("sync", {})["old_keys"] = sorted(set(merge.old_keys_of(doc)) | {key})
                 doc["key"] = new
-                doc.setdefault("history", []).append({"at": now, "by": by, "text": f"sync: key changed from {key} to {new} (person chose {tid})"})
+                line = {"at": now, "by": by, "text": f"sync: key changed from {key} to {new} (person chose {tid})"}
+                if line not in doc.setdefault("history", []):
+                    doc["history"].append(line)
             path = f"tickets/{i}.json"
             data = step.encoded(doc)
             step.document(path, data)
@@ -309,7 +665,7 @@ def keep_key(root, key, tid, args, *, now=None):
         if len(keys) != len(set(keys)) or any(k in other_keys for k in keys):
             raise repo.Refused("The chosen numbers conflict with another ticket")
         decisions = cli.read(root, "choices")
-        if decisions.get("remote_sha") != remote:
+        if decisions.get("remote_sha") != remote or not isinstance(decisions.get("files"), dict):
             decisions = {"remote_sha": remote, "files": {}}
         selected_docs[counter_path] = step.encoded(counter)
         # Reserve in the live counter too, so offline ticket creation cannot reuse a
@@ -325,10 +681,10 @@ def keep_key(root, key, tid, args, *, now=None):
             is_incoming = path == counter_path or originals[path] is None
             if path == counter_path or not is_incoming:
                 step.write(root, path, live_reservation if path == counter_path else data)
-            decisions["files"][path] = {"keep": "key", "at": now, "incoming": is_incoming}
+            record_choice(root, decisions, remote, path, {"keep": "key", "at": now, "incoming": is_incoming}, data)
         step.write(root, "run/sync/choices.json", step.encoded(decisions))
         paused["key_clashes"].pop(key)
         paused["files"] = [p for p in paused["files"] if p not in selected_docs]
-        state["paused"] = paused if paused["files"] else None
+        state["paused"] = sign(root, paused) if paused["files"] else None  # changed by core: signed again
         step.write(root, "run/sync/state.json", step.encoded(state))
     return state if state["paused"] else step._run(root, "key chosen", now, cli.remote_allowed())

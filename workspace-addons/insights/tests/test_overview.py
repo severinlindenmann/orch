@@ -16,6 +16,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from orch_insights.lists import build_list
 from orch_insights.overview import ERROR, PARTIAL, build_overview
 from orch_insights.server import read_counts
 
@@ -44,8 +45,9 @@ def item(answer, **changes):
     return result
 
 
-def all_rows(view):
-    return [row for tab in view["tabs"].values() for row in tab["rows"]]
+def all_rows(answer):
+    # 2.10: the rows moved from the overview to the lists (/api/list/<tab>); the overview keeps counts.
+    return [row for tab in ("skills", "connections", "keys") for row in build_list(answer, tab)["rows"]]
 
 
 def test_manifest_and_packaged_assets():
@@ -70,14 +72,19 @@ def test_manifest_contract():
 
 def test_example_denominators_inventory_and_privacy(answer):
     view = build_overview(answer)
-    row = view["tabs"]["skills"]["rows"][0]
+    assert {tab: value["count"] for tab, value in view["tabs"].items()} == {
+        "skills": 3,
+        "connections": 3,
+        "keys": 2,
+    }
+    row = build_list(answer, "skills")["rows"][0]
     assert row["name"] == "Invoice export"
     assert row["numbers"] == "5 of 23 runs"
     assert row["unseen"] == "4 runs can't tell"
     assert row["label"] == "Working well"
-    connections = view["tabs"]["connections"]["rows"]
+    connections = build_list(answer, "connections")["rows"]
     assert any(row["name"] == "Google Drive" for row in connections)
-    assert any(row["name"] == "google-sa.json" for row in view["tabs"]["keys"]["rows"])
+    assert any(row["name"] == "google-sa.json" for row in build_list(answer, "keys")["rows"])
     for word in ("MCP", "NetBird", "VPN", "sha256"):
         assert word not in json.dumps(view)
 
@@ -105,7 +112,7 @@ def test_contract_vectors(case, nothing):
         if entry["kind"] == "tool":
             continue
         tab = {"skill": "skills", "mcp": "connections", "key": "keys"}[entry["kind"]]
-        rows = view["tabs"][tab]["rows"]
+        rows = build_list(answer, tab)["rows"]
         expected_name = (
             entry["name"] if entry["kind"] == "key" else entry["name"].replace("-", " ").capitalize()
         )
@@ -127,8 +134,8 @@ def test_all_health_labels_and_sorting(answer):
         item(answer, name="recent", first_seen="2026-11-15T00:00:00Z"),
         item(answer, name="uncertain", uses=0, ok=0, failed=0, seen="unknown"),
     ]
-    view = build_overview(answer)
-    rows = {row["name"]: row for row in view["tabs"]["skills"]["rows"]}
+    view = build_list(answer, "skills")
+    rows = {row["name"]: row for row in view["rows"]}
     assert rows["Working"]["label"] == "Working well"
     assert rows["Failing"]["label"] == "Needs a look"
     assert rows["Idle"]["label"] == "Not used"
@@ -137,7 +144,7 @@ def test_all_health_labels_and_sorting(answer):
     assert rows["Uncertain"]["label"] == "Can't tell yet"
     assert rows["Uncertain"]["uses"] is None
     assert "0" not in rows["Uncertain"]["numbers"]
-    assert view["tabs"]["skills"]["rows"][0]["name"] == "Failing"
+    assert view["rows"][0]["name"] == "Failing"
 
 
 @pytest.mark.parametrize(
@@ -154,18 +161,19 @@ def test_health_thresholds(answer, uses, failed, refused, kind, expected):
     answer["items"] = [
         item(answer, kind=kind, uses=uses, failed=failed, refused=refused, ok=uses - failed - refused)
     ]
-    row = next(row for row in all_rows(build_overview(answer)) if row["uses"] == uses)
+    row = next(row for row in all_rows(answer) if row["uses"] == uses)
     assert row["health"] == expected
 
 
 def test_inventory_dedup_and_hidden_kinds(answer):
-    original = build_overview(answer)
+    original, original_rows = build_overview(answer), all_rows(answer)
     answer["items"] += [item(answer, kind=kind, name=f"hidden-{kind}") for kind in ("tool", "helper", "job")]
     answer["items"].append(copy.deepcopy(answer["items"][0]))
     result = build_overview(answer)
     assert result["tabs"] == original["tabs"]
-    assert "hidden-" not in json.dumps(result)
-    inventory_only = next(row for row in all_rows(result) if row["name"] == "Google Drive")
+    assert all_rows(answer) == original_rows
+    assert "hidden-" not in json.dumps(result) + json.dumps(all_rows(answer))
+    inventory_only = next(row for row in all_rows(answer) if row["name"] == "Google Drive")
     assert inventory_only["health"] == "unknown" and inventory_only["uses"] is None
 
 

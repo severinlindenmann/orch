@@ -440,36 +440,48 @@ REMINDER_TIMEOUT = 5  # seconds; the reminder hook must never hold up a turn
 
 
 def reminder_doc(name: str, root: Path | None = None) -> dict | None:
-    """The reminder hooks (`reminder_hooks` in agents/reminder.json) as the tool's settings, or None.
-    The data holds `orch work-check --hook <tool>`; the command written is the ABSOLUTE one
-    (reminder_settings.hook_command), never `orch` found through a run's PATH."""
-    rh = load(name, root).get("reminder_hooks")
-    if not rh:
+    """The run's own hooks from agents/reminder.json as ONE settings blob of the tool, or None: the reminder
+    hooks (`reminder_hooks`, `orch work-check --hook <tool>`) and the record hooks (`record_hooks`,
+    `orch record hook` before and after every tool call; the tool's payload carries its tool-call id). Oneshot
+    passes it inline (oneshot.settings_args), live merges it into the per-run hooks file (hooks_doc): one
+    --settings either way, so no second config can override this one. The data names the orch command; the
+    command written is the ABSOLUTE one (reminder_settings: python -I, never `orch` found through a run's
+    PATH). Record hooks only make sense inside a run (ORCH_RUN/ORCH_TICKET), the only place this goes."""
+    a = load(name, root)
+    rh, rec = a.get("reminder_hooks") or {}, a.get("record_hooks") or {}
+    if not rh and not rec:
         return None
     from orch import reminder_settings
 
     try:
-        command = reminder_settings.hook_command(name)
+        reminder = reminder_settings.hook_command(name)
+        recorder = reminder_settings.record_hook_command()
     except ValueError:
-        return None  # an interpreter path no shell can carry safely: no reminder hooks, the run goes on
+        return None  # an interpreter path no shell can carry safely: no orch hooks, the run goes on
     if not reminder_settings.can_import_cached():
-        return None  # the hook's own `python -I` cannot import orch: no reminder hooks, the run goes on
-    return {
-        "hooks": {
-            event: [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": command,
-                            "timeout": REMINDER_TIMEOUT,
-                        }
-                    ]
-                }
-            ]
-            for event in rh
-        }
-    }
+        return None  # the hook's own `python -I` cannot import orch: no orch hooks, the run goes on
+
+    def group(command: str, matcher: str | None = None) -> dict:
+        g = {"hooks": [{"type": "command", "command": command, "timeout": REMINDER_TIMEOUT}]}
+        return {"matcher": matcher, **g} if matcher is not None else g
+
+    hooks: dict[str, list] = {event: [group(reminder)] for event in rh}
+    for event in rec:  # every tool ("*"); its own group next to any other on the same event
+        hooks.setdefault(event, []).append(group(recorder, "*"))
+    return {"hooks": hooks}
+
+
+_COLLECTORS = {"claude-stream-json/1": "orch.collect_claude"}  # oneshot.events format -> its collector
+
+
+def collector(name: str, root: Path | None = None):
+    """The module that maps this agent's output to record events (its `oneshot.events` format, agents/
+    capabilities.json): `collect(lines, writer, ctx)` for the oneshot stdout and `hook_line(payload)` for the
+    tool's own hook payload (record_hooks). None: orch cannot read this agent's output."""
+    import importlib
+
+    module = _COLLECTORS.get((load(name, root).get("oneshot") or {}).get("events"))
+    return importlib.import_module(module) if module else None
 
 
 def hooks_doc(name: str, run_id: str, root: Path | None = None) -> dict | None:

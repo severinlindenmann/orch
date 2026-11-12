@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, procs, runhooks, services, tickets
+from orch import adapters, addons, history, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -349,7 +349,7 @@ def _new_record(
         "pending": False,
         "stop_requested": None,
         "seen_revision": tickets.revision(ticket),
-        "seen_history": len(ticket.get("history") or []),
+        "seen_history": history.length(ticket),
     }
     if reason:
         rec["reason"] = reason[:200]
@@ -753,7 +753,7 @@ def renew(root: Path, tid: str, run: str, ticket: dict | None = None, seen: bool
         rec.pop("maybe_stale_since", None)
         if seen and ticket is not None:
             rec["seen_revision"] = tickets.revision(ticket)
-            rec["seen_history"] = len(ticket.get("history") or [])
+            rec["seen_history"] = history.length(ticket)
         _write(root, rec)
         return rec
 
@@ -1088,7 +1088,9 @@ def _plan_first_plan(ticket: dict) -> list[str]:
     ]
 
 
-def fresh_prompt(ticket: dict, items: list[dict]) -> str:
+def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
+    """`root`: the ticket's workspace (required: never looked up, a lookup can find another workspace)."""
+    ticket = history.shown_ticket(root, ticket)  # person fields as this machine can prove them
     tid = ticket["id"]
     out = [
         f"Work on orch ticket {tid}: {_clip(ticket.get('title', ''), 200)}.",
@@ -1141,7 +1143,7 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
                 for c in declined[:20]
             )
         )
-    hist = (ticket.get("history") or [])[-5:]
+    hist = history.lines(root, ticket)[-5:]
     if hist:
         out.append(
             "What changed lately:\n"
@@ -1152,13 +1154,14 @@ def fresh_prompt(ticket: dict, items: list[dict]) -> str:
     return "\n\n".join(out)[:12000]
 
 
-def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str) -> str:
+def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str, root: Path) -> str:
+    ticket = history.shown_ticket(root, ticket)  # `root` required, as in fresh_prompt
     tid = ticket["id"]
     news = []
-    for h in ticket.get("history") or []:
+    for h in history.lines(root, ticket):
         if since and h.get("at", "") <= since:
             continue
-        if h.get("by") == f"agent:{agent}":
+        if h.get("by") == f"agent:{agent}" and not history.is_reserved_label(h.get("by")):
             continue
         news.append(f"- {h.get('by', '?')}: {_clip(h.get('text', ''), 300)}")
     parts = _description_plan(ticket)
@@ -1226,7 +1229,7 @@ def plan(
             ),
             None,
         )
-        v["prompt"] = prompt if prompt is not None else resume_prompt(ticket, items, since, name)
+        v["prompt"] = prompt if prompt is not None else resume_prompt(ticket, items, since, name, root)
         argv = adapters.render(name, "resume", mode, v, root)
         resumed = argv is not None
     new_session = None
@@ -1240,7 +1243,7 @@ def plan(
 
                 text = chat.helper_prompt(root, ticket, items, _items_text(items) if items else "")
             else:
-                text = fresh_prompt(ticket, items)
+                text = fresh_prompt(ticket, items, root)
             if not (a.get("files") or {}).get("instructions_link"):  # this agent does not read the local file
                 from orch import harness
 
@@ -1500,6 +1503,25 @@ def _run_turn(
         return rc, f.read().decode("utf-8", "replace")
 
 
+def _record_turn(root: Path, run: str, tid: str, name: str, work: Path, out: str) -> None:
+    """One turn's stdout lines (this turn's only, stderr mixed in: the collector skips what is not its
+    format) to the run's record (run_record.collect_turn). Recording never stops a run: a refused record
+    (tampered, unavailable) has already left its integrity alert (record._report); anything else (a collector
+    that breaks on a new output format, a full disk) leaves one trace under the run, `collector_error` with
+    the exception's type (never its message), and the run goes on."""
+    try:
+        from orch import run_record
+
+        run_record.collect_turn(root, run, tid, name, work, out.splitlines())
+    except Refused:
+        pass
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            from orch import record
+
+            record.note_lost(root, run, "collector_error", error=type(e).__name__)
+
+
 def set_process_fields(root: Path, tid: str, run: str, **fields) -> None:
     with locked(root, tid):
         rec = read(root, tid)
@@ -1587,21 +1609,29 @@ def wrap(
     # only an agent that streams its steps is expected to say something at once; others may work quietly
     streams = adapters.caps(name, root).get("stream") and mode == "oneshot"
     watch = start_watchdog_seconds() if streams else None
+
+    def collected(result):  # a streamed turn's stdout lines go to the record (run_record), never stop the run
+        if streams:
+            _record_turn(root, run, tid, name, work, result[1])
+        return result
+
     turns = 0
     while True:
         ids = list(item_ids or [])
         turn_items = [i for i in _pending_read(root, tid) if i["id"] in ids]
         flags: dict = {}
-        rc, out = _run_turn(
-            argv,
-            work,
-            stdin,
-            log,
-            env,
-            (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None,
-            on_proc,
-            watch,
-            flags,
+        rc, out = collected(
+            _run_turn(
+                argv,
+                work,
+                stdin,
+                log,
+                env,
+                (lambda ids=ids: mark_delivered(root, tid, ids)) if ids else None,
+                on_proc,
+                watch,
+                flags,
+            )
         )
         if flags.get("hung"):  # no sign of life: stop it and start fresh once (its session was never saved)
             with contextlib.suppress(Exception):
@@ -1610,13 +1640,13 @@ def wrap(
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session, resumed = p["argv"], p["stdin"], p["session"], False
             flags.clear()
-            rc, out = _run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags)
+            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags))
         elif resumed and rc != 0 and adapters.session_missing(name, out, root):
             # only "that session does not exist" starts fresh; the input of this turn goes in with it
             p = plan(root, tid, fresh=True, mode=mode, allow=allow, agent=name, items=turn_items)
             argv, stdin, new_session = p["argv"], p["stdin"], p["session"]
             flags.clear()
-            rc, out = _run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags)
+            rc, out = collected(_run_turn(argv, work, stdin, log, env, None, on_proc, watch, flags))
         if flags.get("hung"):  # the last try hung too: no further try; this turn's input waits for the next
             again = [i["id"] for i in turn_items if i.get("via") != "start"]  # a start prompt is made anew
             if undeliver(root, tid, again):
@@ -1746,8 +1776,8 @@ def footer(root: Path, argv_by: str | None, tid_hint: str | None = None) -> str 
     if tickets.revision(ticket) <= rec.get("seen_revision", 0):
         renew(root, tid, run)
         return None
-    own = {f"agent:{rec.get('agent')}", argv_by}
-    news = [h for h in (ticket.get("history") or [])[rec.get("seen_history", 0) :] if h.get("by") not in own]
+    own = {f"agent:{rec.get('agent')}", argv_by} - {history.SYNC_BY}  # a demoted line is never "own"
+    news = [h for h in history.lines(root, ticket)[rec.get("seen_history", 0) :] if h.get("by") not in own]
     renew(root, tid, run, ticket, seen=True)
     if not news:
         return None

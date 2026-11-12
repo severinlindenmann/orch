@@ -28,10 +28,31 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--brand)
 .tabs button[aria-selected="true"] { color: var(--text); border-color: var(--brand); }
 .rows { padding: 0; margin: 0; list-style: none; border: 1px solid var(--border); border-radius: 12px;
   background: var(--surface); overflow: hidden; }
-.row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 150px 110px; align-items: center;
-  gap: 12px; padding: 14px 12px; }
+.row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 150px 130px 150px; align-items: center;
+  gap: 12px; padding: 14px 12px; cursor: pointer; }
 .row + .row { border-top: 1px solid var(--border); }
+.row:not(.head):hover { background: var(--surface-2); }
 .row.selected { background: var(--surface-2); box-shadow: inset 3px 0 var(--brand); }
+.row.head { cursor: default; padding: 10px 12px; color: var(--text-muted); font-size: 12px; }
+.row.head:hover { background: none; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.filters .chip { cursor: pointer; background: none; }
+.lay { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.lay:has(.detail:not([hidden])) { grid-template-columns: minmax(0, 1fr) 340px; }
+.detail { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; gap: 10px; overflow-wrap: anywhere; position: sticky; top: 16px; }
+.detail h2 { margin: 0; font-size: 16px; }
+.detail h3 { margin: 6px 0 0; font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: .06em; }
+.panel-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.close { padding: 2px 9px; background: none; }
+.figures { margin: 0; padding-left: 18px; color: var(--text-muted); }
+.detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.detail dt { color: var(--text-muted); }
+.detail dd { margin: 0; }
+.note { font-size: 12px; }
+.fold summary { cursor: pointer; color: var(--text-muted); }
+.fold dl { margin-top: 8px; }
 .tile { width: 28px; height: 28px; border-radius: 7px; background: var(--surface-3);
   display: grid; place-items: center; color: var(--text-muted); }
 .name { font-weight: 500; }
@@ -49,6 +70,23 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--brand)
 .card.warn { background: color-mix(in srgb, var(--warning) 4%, var(--surface)); }
 .card, .row, #message { overflow-wrap: anywhere; }
 .empty { padding: 20px; color: var(--text-muted); }
+.settings-link { margin-top: 12px; margin-left: 8px; }
+.settings h2 { font-size: 18px; margin: 0 0 12px; }
+.settings #settings-body { display: grid; gap: 12px; }
+.set-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+  overflow-wrap: anywhere; }
+.set-card h2 { font-size: 14px; margin: 0 0 6px; }
+.set-card h3 { margin: 10px 0 4px; font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: .06em; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.seg .chip { cursor: pointer; background: none; }
+.seg .chip.active { background: var(--surface-2); border-color: var(--brand); }
+.seg .chip:disabled { cursor: not-allowed; opacity: .5; }
+.locked { color: var(--text-muted); font-style: italic; }
+.set-card .row { grid-template-columns: minmax(0, 1fr) auto; cursor: default; }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
+  max-width: 420px; }
+.confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 @media (max-width: 600px) {
   main { padding: 24px 16px; }
   header { margin-bottom: 24px; }
@@ -56,5 +94,9 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--brand)
   .tabs { gap: 0; }
   .tabs button { padding: 10px 8px; font-size: 13px; }
   .row { grid-template-columns: 28px minmax(0, 1fr); gap: 6px 12px; }
-  .health, .usage { grid-column: 2; text-align: left; }
+  .row.head { display: none; }
+  .row > .source, .row > .usage, .row > .state { grid-column: 2; text-align: left; }
+  .lay:has(.detail:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+  .detail { position: fixed; left: 0; right: 0; bottom: 0; top: auto; max-height: 75vh; overflow-y: auto;
+    border-radius: 16px 16px 0 0; z-index: 10; box-shadow: 0 -8px 24px rgb(0 0 0 / 40%); }
 }

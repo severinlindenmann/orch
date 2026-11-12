@@ -6,15 +6,21 @@ enum ReviewRules {
         let id = question.message.body.questionId
         guard id.hasPrefix("review-") else { return nil }
         let number = id.dropFirst("review-".count)
-        guard !number.isEmpty, number.allSatisfy({ $0 >= "0" && $0 <= "9" }) else { return nil }
+        // At most 9 digits: Int(...) of a huge number is nil and must never pass as a round.
+        guard !number.isEmpty, number.count <= 9, number.allSatisfy({ $0 >= "0" && $0 <= "9" }) else { return nil }
         return Int(number)
+    }
+
+    /// A "review-…" id without a usable round number (e.g. 20 digits) is never picked; legacy ids keep round 0.
+    private static func hasBadRound(_ question: Question) -> Bool {
+        question.message.body.questionId.hasPrefix("review-") && roundNumber(question) == nil
     }
 
     static func reviewQuestion(ticket: Ticket?, workspaceId: String, ticketId: String,
                                questions: [Question], answers: [String: String]) -> Question? {
         guard let ticket, ticket.status == .review, ticket.workspace == workspaceId, ticket.ticket == ticketId else { return nil }
         return questions.filter {
-            $0.message.from == workspaceId && $0.message.ticket == ticketId && $0.isReview && answers[$0.id] == nil
+            $0.message.from == workspaceId && $0.message.ticket == ticketId && $0.isReview && answers[$0.id] == nil && !hasBadRound($0)
         }.max {
             let lhsRound = roundNumber($0) ?? 0
             let rhsRound = roundNumber($1) ?? 0

@@ -30,7 +30,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, procs, runhooks, runs, tickets
+from orch import adapters, history, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 MAX_LIVE = 4
@@ -950,18 +950,21 @@ def pass_answer(root: Path, tid: str, q: dict, by: str, proven: bool = False) ->
     return resume_after_answer(root, tid, q, by)
 
 
-def _asker(ticket: dict, qid: str) -> str | None:
-    """The agent name that asked qid (the exact line `orch ask` writes), else None."""
-    for h in ticket.get("history") or []:
+def _asker(root: Path, ticket: dict, qid: str) -> str | None:
+    """The agent name that asked qid (the exact line `orch ask` writes), else None. The reserved sync label is
+    never an asker."""
+    for h in history.lines(root, ticket):
         who = str(h.get("by", ""))
+        if history.is_reserved_label(who):
+            continue
         if who.startswith("agent:") and re.fullmatch(rf"Asked {re.escape(qid)}, waiting", str(h.get("text"))):
             return who.partition(":")[2]
     return None
 
 
 def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
-    ticket = tickets.load(root, tid)
-    asker = _asker(ticket, q["id"]) if q.get("kind") in (None, "plain") else None
+    ticket = history.shown_ticket(root, tickets.load(root, tid))  # every person field as proven here
+    asker = _asker(root, ticket, q["id"]) if q.get("kind") in (None, "plain") else None
     if not asker or ticket.get("status") in ("done", "dropped") or tickets._open_questions(ticket):
         return None  # tickets.answer left it Ready (not Working): nobody works on it
     try:

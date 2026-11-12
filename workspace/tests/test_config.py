@@ -245,7 +245,7 @@ def test_agents_test_not_installed_and_unknown(proj, run, capsys, fake_path):
 RESERVED = [
     ("focus", "live_session", True, False),
     ("focus", "session_typing", False, True),
-    ("record", "keep_days", 90, 12),
+    ("record", "keep_days", 90, 30),  # an allowed value (others are snapped: test_insights_settings.py)
     ("record", "max_mb", 2048, 512),
     ("insights", "share_counts", True, False),
     ("insights", "share_names", False, True),
@@ -254,17 +254,28 @@ RESERVED = [
 
 @pytest.mark.parametrize("section,key,default,valid", RESERVED)
 def test_reserved_config(proj, section, key, default, valid):
-    getter = getattr(config, f"{section}_{key}")
+    # the FILE parsing; record_* / insights_* are the effective values (with the person's record), tested in
+    # test_insights_settings.py
+    def getter(root):
+        if section == "focus":  # the focus getters are the file value itself
+            assert getattr(config, f"{section}_{key}")(root) == config.file_value(root, section, key)
+        return config.file_value(root, section, key)
+
     assert getter(None) == default
     assert getter(proj) == default
     config.set_key(proj, section, key, valid)
     assert getter(proj) == valid
     wrong = ['"wrong"', "[]", "{}", "1.5", "1" if isinstance(default, bool) else "true"]
-    if not isinstance(default, bool):
-        wrong += ["0", "-1"]
     for value in wrong:
         config.path(proj).write_text(f"[{section}]\n{key} = {value}\n")
         assert getter(proj) == default
+    if not isinstance(default, bool):  # a whole number <= 0 means "as little as possible": the floor (L2)
+        from orch import humanproof
+
+        floor = humanproof.RETENTION_FLOOR[config._RETENTION_SETTINGS[(section, key)]]
+        for value in ("0", "-1"):
+            config.path(proj).write_text(f"[{section}]\n{key} = {value}\n")
+            assert getter(proj) == floor < default
     config.path(proj).write_text("invalid toml [")
     assert getter(proj) == default
     config.path(proj).write_text(f"{section} = 4\n")

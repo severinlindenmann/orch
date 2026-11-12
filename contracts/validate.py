@@ -214,31 +214,48 @@ def act_event_id(tool_call_id, run, seq):
     return "x_" + hashlib.sha256(tool_call_id.encode()).hexdigest()[:32]
 
 
-def act_detail_name(run, kind, event_id):
-    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/1\\0" run \\0 kind \\0 id)."""
-    data = b"orch.detail/1\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id))
+def act_detail_name(run, kind, event_id, ticket):
+    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/2\\0" run \\0 kind \\0 id \\0 ticket).
+    Two tickets never share a detail file. An event with no ticket has NO detail file: None."""
+    if not ticket:
+        return None
+    data = b"orch.detail/2\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id, ticket))
     return hashlib.sha256(data).hexdigest()[:32]
 
 
+def act_detail_path(run, kind, event_id, ticket):
+    name = act_detail_name(run, kind, event_id, ticket)
+    return None if name is None else f"detail/{run}/{name}.json"
+
+
 def act_dedupe(lines):
-    """Only hook/log share an origin; disagreeing finished outcomes both survive."""
+    """Only hook/log share an origin. For one key the log line wins, started and finished alike: it replaces
+    the hook line, and a hook line after any log line of that call (run, id, kind; started or finished) is
+    dropped. When the two disagree (`used`, `text`, `files`, or both finished and the hook's not provisional:
+    `ok`/`error`) both are kept (the log line carries `conflict`). Repeats of one origin keep the first."""
     kept = []
     def key(line):
         via = line["via"]
         return (line["run"], line["id"], line["kind"], line.get("outcome") is not None,
                 "hl" if via in ("hook", "log") else via)
-    def conflict(a, b):
-        return ({a["via"], b["via"]} == {"hook", "log"} and a.get("outcome") is not None
-                and b.get("outcome") is not None
-                and any(a["outcome"].get(k) != b["outcome"].get(k) for k in ("ok", "error")))
+    def provisional(line):
+        return line["via"] == "hook" and line.get("outcome") is not None and line["outcome"].get("ok") is None
+    def agree(hook, log):
+        if (any(hook.get(k) != log.get(k) for k in ("used", "text"))
+                or (hook.get("files") or []) != (log.get("files") or [])):
+            return False
+        if hook.get("outcome") is None or log.get("outcome") is None or provisional(hook):
+            return True
+        return all(hook["outcome"].get(k) == log["outcome"].get(k) for k in ("ok", "error"))
     for i, line in enumerate(lines):
         matches = [j for j in kept if key(lines[j]) == key(line)]
         if any(lines[j]["via"] == line["via"] for j in matches):
             continue
-        if any(conflict(lines[j], line) for j in matches):
-            kept.append(i)
-        elif not any(lines[j]["via"] == line["via"] or lines[j]["via"] == "hook" for j in matches):
-            kept = [j for j in kept if j not in matches] + [i]
+        if line["via"] == "hook" and any(
+            lines[j]["via"] == "log" and all(lines[j][k] == line[k] for k in ("run", "id", "kind")) for j in kept
+        ):
+            continue
+        kept = [j for j in kept if not (j in matches and line["via"] == "log" and agree(lines[j], line))] + [i]
     return sorted(kept)
 
 
@@ -246,7 +263,7 @@ def _t(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
 
 
-HOOK_KINDS = ("step", "denial", "helper.start", "helper.end", "usage")
+HOOK_KINDS = ("step", "helper.start", "helper.end")  # only kinds whose line can be provisional
 
 
 def act_hook_accept(line):
@@ -352,7 +369,7 @@ def act_map_stream(lines, ctx):
 
     def emit(**k):
         ev = {"v": 1, "id": k.pop("id", None), "seq": len(out) + 1, "run": run, "session": session, "agent": "main",
-              "parent": None, "at": ctx["at"], "ticket": ctx["ticket"], "harness": ctx["harness"], "via": "log",
+              "parent": None, "at": ctx["at"], "ticket": ctx.get("ticket"), "harness": ctx["harness"], "via": "log",
               "used": None, "outcome": None, "detail": None, "coverage": "full"}
         ev.update(k)
         if ev["id"] is None:
@@ -379,12 +396,12 @@ def act_map_stream(lines, ctx):
                 first = (item.get("aggregated_output") or "").strip().splitlines()[:1]
                 err = None if ok is not False else _one_line(f"Exit code {code}: {first[0] if first else ''}".strip(), 300)
                 emit(id=eid, kind="step", text=text, used=used, outcome={"ok": ok, "error": err, "ms": None},
-                     detail=f"detail/{run}/{act_detail_name(run, 'step', eid)}.json")
+                     detail=act_detail_path(run, 'step', eid, ctx.get('ticket')))
         elif t == "item.completed" and item.get("type") == "agent_message":
             eid = f"{run}:{turn}:{item['id']}"
             say = _one_line(item.get("text", ""), 200)
             emit(id=eid, kind="run.state", text=say, data={"state": "working", "say": say},
-                 detail=f"detail/{run}/{act_detail_name(run, 'run.state', eid)}.json")
+                 detail=act_detail_path(run, 'run.state', eid, ctx.get('ticket')))
         elif t == "turn.completed":
             u = m.get("usage") or {}
             emit(kind="usage", text=f"Tokens: {u.get('input_tokens', 0)} in, {u.get('output_tokens', 0)} out",
@@ -400,6 +417,8 @@ def kind_activity():
     _examples("activity-detail", lambda d: _msgs(vd, d))
     va = _w("activity", "record_alert")
     _examples("activity-alert", lambda d: _msgs(va, d))
+    vc = _w("activity", "record_change")
+    _examples("activity-change", lambda d: _msgs(vc, d))
     _core_clean("activity")
     vec = _vec("activity-v1.json")
     tamper = {"link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"}
@@ -422,7 +441,16 @@ def kind_activity():
     for c in vec["ids"]:
         _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
     for c in vec["detail_names"]:
-        _expect(f"activity detail_names {c['kind']} {c['id']}", act_detail_name(c["run"], c["kind"], c["id"]), c["file"])
+        _expect(f"activity detail_names {c['kind']} {c['id']} {c.get('ticket')}",
+                act_detail_name(c["run"], c["kind"], c["id"], c.get("ticket")), c["file"])
+    shared = {}
+    for c in vec["detail_names"]:
+        if c.get("ticket"):
+            shared.setdefault((c["run"], c["kind"], c["id"]), {})[c["ticket"]] = c["file"]
+    _expect("activity detail_names: two tickets with the same run, kind and id get different names",
+            any(len(set(t.values())) == len(t) > 1 for t in shared.values()), True)
+    _expect("activity detail_names: a ticketless case has no detail file",
+            any(not c.get("ticket") and c["file"] is None for c in vec["detail_names"]), True)
     for c in vec["dedupe"]:
         _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
     for c in vec["hook_entry"]:
@@ -2213,7 +2241,7 @@ V_CG = Draft202012Validator(
     registry=Registry().with_resource(_msg_schema["$id"], Resource.from_contents(_msg_schema)),
     format_checker=FormatChecker(),
 )
-CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind")
+CG_HOST_ONLY = ("group_event", "shared_ticket", "origin", "echo_of", "shared_files", "question_kind", "own_seq")
 CG_MEMBER_ONLY = ("seen", "leave")
 CG_FILE_MAX = 26214400
 # task.status order: a status may repeat or move right, never left; the last column is final.
@@ -2290,6 +2318,8 @@ def cg_rules(m, ctx=None):
             out.append("task.ws is the member that got the task, never the host")
         if isinstance(o, dict) and (str(to).startswith("ws_") or to == "phones") and m.get("id") != cg_fanout_id(host, o["id"], to):
             out.append("host copy: id must be the fan-out id of (host, origin.id, to)")
+        if "own_seq" in b and not (b["own_seq"] is True and m.get("type") == "text" and "seq" in g and isinstance(o, dict) and o.get("from") == to and str(to).startswith("ws_")):
+            out.append("own_seq: only a text to the workspace that sent origin, with group.seq")
         if to == "phones" and m.get("type") == "text" and cg_quiet(m) and (b.get("update") or {}).get("kind") != "note":
             out.append("copy to phones outside the push set must be quiet (update.kind note)")
         if str(to).startswith("ws_"):

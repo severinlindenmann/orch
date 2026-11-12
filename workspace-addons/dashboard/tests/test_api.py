@@ -28,6 +28,22 @@ def test_state_reads_contract_ticket(ws):
     assert len(t["checklist"]) == 3 and t["questions"][0]["answer"] is None
 
 
+def test_state_rev_covers_every_ticket_field(ws):
+    """The page re-renders when `rev` changes: it is a hash of the whole state, so a ticket that only gets `work`
+    (its separate copy) or any other field still changes it; the clock alone does not."""
+    f = ws / ".orch" / "tickets" / "t_7k3f9q.json"
+    before = load_state(ws)["rev"]
+    assert load_state(ws)["rev"] == before
+    t = json.loads(f.read_text())
+    t["work"] = {"folders": [{"branch": "orch/t_7k3f9q", "base": "abc", "sub": "", "host": "m"}]}
+    f.write_text(json.dumps(t))
+    with_copy = load_state(ws)["rev"]
+    assert with_copy != before
+    t["work"]["folders"][0]["sub"] = "app"
+    f.write_text(json.dumps(t))
+    assert load_state(ws)["rev"] not in (before, with_copy)
+
+
 def test_scheduler_is_not_a_dashboard_concept(ws):
     s = load_state(ws)
     assert "scheduler" not in s and s["addons"] == []  # no orch command, no add-ons: no trace of any add-on

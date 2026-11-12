@@ -3,19 +3,25 @@
 A live agent session calls it from its tool hooks (before and after every tool call) with ONE event as a JSON
 line on stdin. It must be fast and must never get in the agent's way, so by default it ends with exit 0 and
 says in one plain stderr line why nothing was recorded. What it never does:
-- write a kind the hook may not write (record.hook_entry_filter: no run.state, ask, task.*, key.use, job,
-  session.input) or any `via` but "hook";
+- write a kind the hook may not write (record.HOOK_KINDS: step, helper.start, helper.end only; no denial,
+  usage, run.state, ask, task.*, key.use, job, session.input) or any `via` but "hook";
 - trust the caller for the run, the ticket, the harness or the time: the run and ticket come from ORCH_RUN /
   ORCH_TICKET and must name a live claim that belong together AND the calling process must be a descendant of
   that claim's process (the wrapper or the agent), so a process outside the run cannot write into it by
   setting the same variables (the pid must match the recorded start time, never just "not different"); a line
   naming another run is dropped;
+- say how a call ended: on every path (the tool's payload or an event-shaped line) any line with an outcome
+  is written provisional (`ok`, `error`, `ms` null); the log's line of that call replaces it;
 - write when key hiding is not ready (no registered hider: nothing is written, never raw);
 - read anything but the one run file (the writer's per-run strict read; no scan of other runs).
 A hook line that cannot be written leaves a short trace: under the run (record.note_lost) only for a proven
 caller, else in one global file without a run id (record.note_unattributed); none when there was no run.
 The event id is the tool's own tool-call id (the agent's own field), put in `id` by the caller; the record
-hashes an unsafe one once, the same way for hook and collector, so the two dedupe. Event-shaped lines only.
+hashes an unsafe one once, the same way for hook and collector, so the two dedupe. Taken: an event-shaped
+line (it has a `kind`), or the agent tool's own hook payload as its before/after-tool hook sends it (the
+wiring: `record_hooks` in agents/reminder.json), mapped by that tool's collector (adapters.collector,
+hook_line) to a step whose id is the payload's tool-call id. Files are made relative to the folder the run
+works in (its copy, else the workspace).
 --strict turns every "not recorded" into a refusal (exit 2) for scripts and tests.
 """
 
@@ -27,6 +33,7 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from orch import record
 from orch.errors import Refused
@@ -97,9 +104,10 @@ def _ancestors() -> set[int] | None:
     return found
 
 
-def require_run(root, ids) -> None:
+def require_run(root, ids) -> dict:
     """ORCH_RUN + ORCH_TICKET must name a live claim (secretrun's check) and this process must be inside the
-    claim's process tree (its wrapper pid or its agent pid is an ancestor, with the recorded start time)."""
+    claim's process tree (its wrapper pid or its agent pid is an ancestor, with the recorded start time).
+    Returns the claim."""
     from orch import procs, runs, secretrun
 
     try:
@@ -113,8 +121,9 @@ def require_run(root, ids) -> None:
             if isinstance(pid, int) and pid in mine:
                 started = rec.get(started_key)
                 now = procs.pid_started(pid) if started else None
+                # only a positive match: a pid whose start time is unknown could be a reused one
                 if started and now and runs.same_start(now, started):
-                    return  # only a positive match: a pid whose start time is unknown could be a reused one
+                    return rec
         raise NotRecorded("This call is not from inside that run, so nothing was recorded.", "other_run")
     raise NotRecorded("Cannot tell where this call comes from, so nothing was recorded.", "not_provable")
 
@@ -127,6 +136,29 @@ def _parse(text: str) -> dict:
     if not isinstance(value, dict):
         raise NotRecorded(_BAD, "invalid")
     return value
+
+
+def _from_tool(raw: dict, tool, root) -> dict:
+    """An event-shaped line (it has a `kind`) as it is; else the agent tool's own hook payload as an event
+    line whose id is the tool-call id, mapped by the collector of the tool this process runs under
+    (adapters.collector: hook_line, the same mapping as for its log, so the two lines dedupe)."""
+    if "kind" in raw:
+        return raw
+    from orch import adapters
+
+    try:
+        mapper = adapters.collector(tool, root) if isinstance(tool, str) else None
+    except Refused:
+        mapper = None
+    if mapper is None:
+        raise NotRecorded(_BAD, "invalid")
+    try:
+        line = mapper.hook_line(raw)
+    except ValueError:
+        raise NotRecorded(_BAD, "invalid") from None
+    if line is None:
+        raise NotRecorded("A helper is recorded from the agent's log; nothing was recorded here.")
+    return line
 
 
 def _minimal() -> dict:
@@ -165,6 +197,10 @@ def _event(raw: dict, ids, tool, root=None) -> tuple[dict, dict | None]:
         "via": "hook",
         "detail": None,
     }
+    if isinstance(event["outcome"], dict):  # every hook kind (record.HOOK_KINDS)
+        # whatever the caller sent: a hook line is the agent's word and never says how a call ended (no `ok`,
+        # `error` or `ms`); the log's line of that call does (contracts/activity.md, Precedence and dedupe)
+        event["outcome"] = {"ok": None, "error": None, "ms": None}
     if filtered["kind"] != "step":
         event.setdefault("used", None)  # only a step names the thing it used
     files = filtered.get(
@@ -180,9 +216,10 @@ def _event(raw: dict, ids, tool, root=None) -> tuple[dict, dict | None]:
     return event, payload
 
 
-def _writer(root):
-    """The writer with a registered hider, else one built from this workspace's key
-    store (secretrun's wiring); no hider = recording is off (never raw)."""
+def record_writer(root):
+    """The writer every out-of-core origin of a run uses (this hook entry, the oneshot wrapper's collector,
+    `orch job`): the one with a registered hider, else one built from this workspace's key store (secretrun's
+    wiring); no hider = recording is off (RecordOff; never raw)."""
     try:
         return record.registered_writer(root)
     except record.RecordOff:
@@ -205,23 +242,27 @@ def hook(root, text: str, environ=None, *, too_large: bool = False, before_write
         raise NotRecorded("Not inside an orch run; nothing was recorded.")
     # require_run, _parse and _event below never write; the first write is behind before_write
     try:
-        require_run(root, ids)
+        claim = require_run(root, ids)
     except NotRecorded as e:  # the caller is not proven: the claimed run id is its word, so nothing under it
         if e.reason:
             before_write()
             record.note_unattributed(root, e.reason)
         raise
     try:
-        from orch import tickets
+        from orch import tickets, worktrees
 
+        # files are relative to the folder the run works in, as given and resolved (/tmp -> /private/tmp)
+        folder = Path(worktrees.workdir_for(root, claim, ids[1]))
+        work = [str(folder), str(folder.resolve())]
+        tool = tickets.agent_tool()
         if too_large:
-            event, payload = _event(_minimal(), ids, tickets.agent_tool(), root)
+            event, payload = _event(_minimal(), ids, tool, work)
             payload = _TOO_BIG
         else:
-            event, payload = _event(_parse(text), ids, tickets.agent_tool(), root)
+            event, payload = _event(_from_tool(_parse(text), tool, root), ids, tool, work)
         before_write()
         try:
-            writer = _writer(root)
+            writer = record_writer(root)
         except record.RecordOff:
             raise NotRecorded("Recording is off until key hiding is ready.", "hider_off") from None
         return writer.append(event, detail=payload, lock_wait=LOCK_WAIT)

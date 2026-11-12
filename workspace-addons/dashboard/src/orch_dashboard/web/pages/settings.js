@@ -2,6 +2,13 @@
 // Settings, add-on pages and add-on actions.
 let settingsTab = 'general';
 const settingsBusy = new Set();
+// A long path keeps its start and its end: "/Users/me/…/team/pilatus". The full path is in the row's title.
+const middleShort = (value, max = 48) => {
+  const text = String(value ?? '');
+  if (text.length <= max) return text;
+  const tail = Math.ceil((max - 1) / 2), head = max - 1 - tail;
+  return text.slice(0, head) + '…' + text.slice(-tail);
+};
 const settingsText = (tag, attrs, value) => {
   const node = h(tag, attrs);
   node.textContent = String(value ?? '');
@@ -186,9 +193,11 @@ function settingsPage() {
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons']].map(([id, label]) => id === 'phone' ? h('a', {href:'#addon/' + phoneAddon.name, 'data-key':'settings-phone'}, label) : h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [privateCard(settings), snapshot ? null : window.OrchMobileMode?.settingsSection(h), snapshot ? null : window.OrchLook?.settingsSection(), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-      // The folder path is a detail: the row says where in plain words, the path opens under Details.
-      h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'}, h('p', {}, 'Stored on this computer'),
-        h('details', {className:'folder-details', 'data-key':'settings-folder-details'}, h('summary', {}, 'Details'), settingsText('p', {className:'mono meta'}, settings.folder)))))),
+      // Owner fb11: the folder is visible on the row without a click (long paths shortened in the middle, the full
+      // path on hover); the plain words and the full path stay under Details.
+      h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
+        settingsText('p', {className:'mono folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder)),
+        h('details', {className:'folder-details', 'data-key':'settings-folder-details'}, h('summary', {}, 'Details'), h('p', {className:'meta'}, 'Stored on this computer'), settingsText('p', {className:'mono meta'}, settings.folder)))))),
       shareCard(settings), workflowCard(settings), copiesCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),

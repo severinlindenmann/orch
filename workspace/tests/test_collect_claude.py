@@ -80,7 +80,8 @@ def test_real_capture():
     assert bash_end["outcome"]["ok"] is False
     assert bash_end["outcome"]["error"].startswith("Exit code 1")
     assert bash_end["text"] == "Attempt to print a file that does not exist"
-    assert bash_end["detail"] == f"detail/{CTX['run']}/{detail_name(CTX['run'], 'step', bash_end['id'])}.json"
+    name = detail_name(CTX["run"], "step", bash_end["id"], CTX["ticket"])
+    assert bash_end["detail"] == f"detail/{CTX['run']}/{name}.json"
     assert all(e["session"] == "00000002-0000-4000-8000-000000000002" for e in events[1:])
     assert events[-2]["data"]["tokens_in"] == 4 + 24629 + 47004 and events[-2]["data"]["tokens_out"] == 345
     assert events[-1]["data"]["state"] == "idle"
@@ -173,7 +174,10 @@ def test_ids_stable_and_unsafe_ids_stay_raw_for_the_writer():
     assert first == second
     assert first[0]["id"] == first[1]["id"] == unsafe  # never pre-hashed: the writer hashes once
     hashed = "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]
-    assert first[1]["detail"] == f"detail/{CTX['run']}/{detail_name(CTX['run'], 'step', hashed)}.json"
+    assert (
+        first[1]["detail"]
+        == f"detail/{CTX['run']}/{detail_name(CTX['run'], 'step', hashed, CTX['ticket'])}.json"
+    )
     assert first[3]["id"] == "ok_1"
 
 
@@ -183,7 +187,7 @@ def test_unsafe_id_dedupes_with_a_hook_line_through_the_writer(store):
     collect([use(unsafe), result(unsafe)], writer, CTX)
     done = [e for e in mapper().events([use(unsafe), result(unsafe)]) if e["outcome"]][0]
     hook = dict(done, via="hook", detail=None)
-    writer.append(hook)  # hooks win: appended, and readers dedupe on (run, id, kind, finished, via class)
+    assert writer.append(hook) is None  # after the log's line: dropped (the log wins, same hashed id)
     finished = [e for e in read_run(ws, CTX["run"]).unwrap() if e["kind"] == "step" and e["outcome"]]
     assert len(finished) == 1
     assert finished[0]["id"] == "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]

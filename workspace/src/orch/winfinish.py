@@ -140,6 +140,17 @@ finally:
         else:
             with open(path, "wb") as f:
                 f.write(registry_before)
+    if code != 0 and job.get("consents"):  # the consents this install recorded turn nothing on later
+        try:
+            cpath, wid, names = job["consents"]
+            with open(cpath, encoding="utf-8") as f:
+                items = json.load(f)
+            items = [e for e in items if not (e.get("workspace_id") == wid and e.get("name") in names)]
+            with open(cpath + ".tmp", "w", encoding="utf-8") as f:
+                f.write(json.dumps(items, indent=2))
+            os.replace(cpath + ".tmp", cpath)
+        except Exception:
+            say("could not drop the consents: " + str(job["consents"]))
     try:
         os.remove(job["pending"])
     except OSError:
@@ -239,6 +250,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "registry": [str(registry[0]), registry[1]] if registry else None,
         "env": (extra or {}).get("env"),
         "record": (extra or {}).get("record"),
+        "consents": (extra or {}).get("consents"),  # [consent.json, workspace id, names]: dropped on failure
         "then": [{"argv": [str(py), "-I", "-P", "-m", "orch", *t], "cwd": str(cwd)} for t in then],
         "log": str(log_path(home)),
         "done": done,
