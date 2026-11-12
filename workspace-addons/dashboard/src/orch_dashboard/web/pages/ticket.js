@@ -567,7 +567,7 @@ function taskRows(t) {
     let menu = null;
     if (!snapshot && task.id) {
       // The open menu and the typed reason survive render() (the background refresh redraws the row): kept in
-      // taskMenus under tid:check until it is submitted, closed or Escaped; never redrawn while focus is inside.
+      // taskMenus under tid:check until it is submitted, closed or Escaped; never redrawn while the cursor is inside it.
       const menuKey = t.id + ':' + task.id, formKey = 'task-menu-' + task.id;
       const isOpen = taskMenus.has(menuKey);
       const reason = h('input', {type:'text', className:'input', placeholder:'Reason (optional)', 'aria-label':'Reason (optional)', maxlength:200});
