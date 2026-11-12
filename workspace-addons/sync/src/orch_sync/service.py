@@ -8,7 +8,6 @@ import json
 import os
 import re
 import secrets
-import signal
 import time
 from pathlib import Path
 
@@ -185,20 +184,12 @@ def start(root, wait=15.0):
     raise repo.Refused("Sync did not start. See .orch/run/sync/loop.log")
 
 
-def _force(root, rec, pid):
-    """After STOP_WAIT: end the loop the hard way, after the same check (Windows: with its children)."""
-    if os.name == "nt":
-        procs.stop_tree(pid, verified=lambda: _verified(root, rec) == pid)
-    elif _verified(root, rec) == pid:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-
-
 def stop(root, wait=STOP_WAIT):
-    """ "stopped", "not running" (no record, or its pid is gone), or "not verified" (a live process that is not
-    our loop: nothing is signalled). The loop is asked to end after its pass; forced only after `wait` seconds."""
+    """ "stopped", "still running", "not running" (no record, or its pid is gone), or "not verified" (a live
+    process that is not our loop). The loop is ASKED to end after its pass (the stop file it polls); nothing is
+    ever signalled or killed: a pid comes from a file an agent can write, so it never decides what gets a signal.
+    If the loop has not ended after `wait` seconds (a long pass), the answer is "still running"; the stop file
+    stays, so the loop still ends after its pass."""
     rec = read(root, RECORD)
     if not rec:
         return "not running"
@@ -214,8 +205,7 @@ def stop(root, wait=STOP_WAIT):
     end = time.monotonic() + wait
     while _verified(root, rec) == pid:
         if time.monotonic() >= end:
-            _force(root, rec, pid)
-            break
+            return "still running"  # the stop file stays: it ends after its pass
         time.sleep(0.1)
     repo.safe(root, STOP).unlink(missing_ok=True)
     _drop(root, rec)

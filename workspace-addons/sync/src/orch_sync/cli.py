@@ -314,6 +314,8 @@ def main(argv=None):
 
             res = service.stop(root)
             result = {"stopped": res == "stopped"}
+            if res == "still running":
+                result["note"] = "Sync is finishing its current round and stops right after it."
             if res == "not verified":
                 result["note"] = "A file in .orch/run/sync/ names a process that is not the sync loop; nothing was stopped."
         if args.cmd == "set" and not args.json:

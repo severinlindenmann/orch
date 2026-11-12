@@ -355,8 +355,10 @@ def test_orch_sync_stop_waits_for_the_pass(on, monkeypatch, capsys):
     settings(on, mode="local")
     monkeypatch.setattr(loop, "POLL", 0.01)
     entered, release, done = slow_pass(monkeypatch)
-    forced = []
-    monkeypatch.setattr(service, "_force", lambda *a: forced.append(a))
+    sent = []
+    real_kill = os.kill
+    # signal 0 is only the liveness probe (pid_alive); any real signal is recorded and NOT sent
+    monkeypatch.setattr(os, "kill", lambda pid, sig: real_kill(pid, 0) if sig == 0 else sent.append((pid, sig)))
     worker = threading.Thread(target=cli._run_loop, args=(on,), daemon=True)
     worker.start()
     assert entered.wait(5) and service.running_pid(on) == os.getpid()
@@ -369,29 +371,33 @@ def test_orch_sync_stop_waits_for_the_pass(on, monkeypatch, capsys):
     release.set()
     stopper.join(10)
     worker.join(10)
-    assert answer == ["stopped"] and forced == [] and done == ["timer"]
+    assert answer == ["stopped"] and sent == [] and done == ["timer"]
     assert not service.lock_held(on) and not (on / ".orch/run/sync/process.json").exists()
     assert not (on / ".orch/run/sync/stop").exists()
     assert capsys.readouterr().out.splitlines()[-1] == "sync: the loop ended: stopped on request"
 
 
-def test_stop_forces_only_after_its_wait(on, monkeypatch):
+def test_stop_never_signals_and_answers_still_running_after_its_wait(on, monkeypatch):
+    """A pid comes from a file an agent can write: stop only asks (the stop file), never signals or kills."""
     settings(on, mode="local")
     monkeypatch.setattr(loop, "POLL", 0.01)
     entered, release, done = slow_pass(monkeypatch)
-    forced = []
-    monkeypatch.setattr(service, "_force", lambda root, rec, pid: forced.append(pid))
+    sent = []
+    real_kill = os.kill
+    # signal 0 is only the liveness probe (pid_alive); any real signal is recorded and NOT sent
+    monkeypatch.setattr(os, "kill", lambda pid, sig: real_kill(pid, 0) if sig == 0 else sent.append((pid, sig)))
+    monkeypatch.setattr(service.procs, "stop_tree", lambda *a, **k: sent.append(a))
     worker = threading.Thread(target=cli._run_loop, args=(on,), daemon=True)
     worker.start()
     assert entered.wait(5)
     begin = time.monotonic()
-    assert service.stop(on, wait=0.5) == "stopped"
-    assert time.monotonic() - begin >= 0.5 and forced == [os.getpid()] and done == []
-    monkeypatch.setattr(orchcli, "is_active", lambda r: False)  # (nothing was really forced) end the thread
+    assert service.stop(on, wait=0.5) == "still running"
+    assert time.monotonic() - begin >= 0.5 and sent == [] and done == []
+    assert (on / ".orch/run/sync/stop").exists()  # the loop still ends after its pass
     release.set()
-    loop.wake_up(on)
     worker.join(10)
-    assert not worker.is_alive()
+    assert not worker.is_alive() and done == ["timer"] and sent == []
+
 
 
 def test_planted_process_record_is_never_signalled(root, monkeypatch):
