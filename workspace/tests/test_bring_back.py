@@ -2256,3 +2256,169 @@ def test_b13f_review_shows_commits_and_files(done_copy, run):
     assert code == 0, err
     review = json.loads(out)
     assert review["commits"] == 1 and review["files"] == 2
+
+
+# ---------------------------------------------------------------- B13g (automated HIGH on B13f)
+
+
+def agent_commits(copy, name="late.py"):
+    """The agent's run goes on after the review began and commits one more file in the copy."""
+    (copy / name).write_text("late\n")
+    git(copy, "add", name)
+    git(copy, "commit", "-qm", "late")
+    return git(copy, "rev-parse", "HEAD")
+
+
+def test_b13g_run_end_never_moves_a_recorded_review_tip(done_copy):
+    """(a) The person looked at the recorded tip; the agent's run commits more and ends: the new tip is not
+    "reviewed". The recorded tip is forgotten (a later run end records nothing either) and the Done waits for
+    an explicit approval; nothing is merged."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    looked = git(copy, "rev-parse", "HEAD")
+    assert worktrees._copy_authority(root, tid)["review_tip"] == looked
+    agent_commits(copy)
+    worktrees.on_run_ended(root, tid)
+    assert not worktrees._copy_authority(root, tid).get("review_tip")
+    worktrees.on_run_ended(root, tid)  # one more run ending in this round: still nothing recorded
+    assert not worktrees._copy_authority(root, tid).get("review_tip")
+    head, before = git(root, "rev-parse", "HEAD"), project_hashes(root)
+    result = finish(root, tid)
+    assert tickets.load(root, tid)["status"] == "done"
+    assert result["state"] == "waiting" and result["reason"] == worktrees.APPROVAL_NEEDED
+    assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
+    assert git(root, "rev-parse", "HEAD") == head and project_hashes(root) == before
+    assert not (root / "late.py").exists()
+
+
+def test_b13g_run_end_with_the_same_tip_keeps_it(done_copy):
+    """(b) A run that ends without moving the branch keeps the recorded tip: the Done brings it back."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    looked = git(copy, "rev-parse", "HEAD")
+    known = worktrees._copy_authority(root, tid)
+    worktrees.on_run_ended(root, tid)
+    after = worktrees._copy_authority(root, tid)
+    assert (after["review_tip"], after["review_at"]) == (looked, known["review_at"])
+    assert finish(root, tid)["state"] == "merged"
+    assert (root / "code.py").read_text() == "print(2)\n"
+
+
+def test_b13g_agent_done_while_alive_records_at_run_end(done_copy, monkeypatch):
+    """(c) The agent's own move to Review while its run is alive records nothing; the tip at the end of
+    that run is what the person is shown, and it is recorded then (also after more commits in that run)."""
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_alive_here", lambda *a: {"live": True})
+        tickets.set_status(root, tid, "review", "human:test")
+        assert not worktrees._copy_authority(root, tid).get("review_tip")
+        last = agent_commits(copy)
+    worktrees.on_run_ended(root, tid)
+    assert worktrees._copy_authority(root, tid)["review_tip"] == last
+    assert finish(root, tid)["state"] == "merged"
+    assert (root / "late.py").read_text() == "late\n"
+
+
+def test_b13g_entering_review_again_replaces_the_tip(done_copy):
+    """(d) Only a new round (the ticket enters Review again after more work) replaces the recorded tip,
+    also after a run end forgot it."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    agent_commits(copy, "one.py")
+    worktrees.on_run_ended(root, tid)
+    assert not worktrees._copy_authority(root, tid).get("review_tip")
+    tickets.set_status(root, tid, "active", "human:test")
+    newest = agent_commits(copy, "two.py")
+    to_review(root, tid)
+    assert worktrees._copy_authority(root, tid)["review_tip"] == newest
+    assert finish(root, tid)["state"] == "merged"
+    assert (root / "two.py").read_text() == "late\n"
+
+
+def cli_done(run, root, tid, how, *extra):
+    if how == "status":
+        return run("ticket", "status", tid, "done", *extra, "--by", "human:pat")
+    rev = f"--if-revision={tickets.load(root, tid)['revision']}"
+    return run("ticket", "patch", tid, '{"status": "done"}', rev, *extra, "--by", "human:pat")
+
+
+@pytest.mark.parametrize("how", ["status", "patch"])
+def test_b13g_done_on_a_stale_page_needs_approval(done_copy, run, how):
+    """(e) The page showed the tip of an earlier round; more work came to Review since. The Done is recorded
+    (never blocked), but it approves nothing: the bring-back waits, and the person is told in plain words."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    shown = git(copy, "rev-parse", "HEAD")
+    tickets.set_status(root, tid, "active", "human:test")
+    agent_commits(copy)
+    to_review(root, tid)
+    assert worktrees._copy_authority(root, tid)["review_tip"] != shown
+    head = git(root, "rev-parse", "HEAD")
+    code, out, err = cli_done(run, root, tid, how, f"--shown-tip={shown}")
+    assert code == 0, err
+    assert worktrees.NEW_CHANGES in out
+    assert tickets.load(root, tid)["status"] == "done"
+    worktrees.sweep(root)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.NEW_CHANGES
+    assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
+    assert git(root, "rev-parse", "HEAD") == head and not (root / "late.py").exists()
+
+
+@pytest.mark.parametrize("how", ["status", "patch"])
+def test_b13g_done_on_the_shown_tip_merges(done_copy, run, how):
+    """(e) The displayed tip is the recorded one and the branch is still there: the Done brings it back."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    shown = worktrees._copy_authority(root, tid)["review_tip"]
+    code, out, err = cli_done(run, root, tid, how, f"--shown-tip={shown}")
+    assert code == 0, err
+    assert worktrees.NEW_CHANGES not in out
+    worktrees.sweep(root)
+    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
+    assert (root / "code.py").read_text() == "print(2)\n"
+
+
+def test_b13g_moved_branch_after_display_needs_approval(done_copy, run):
+    """(e) The branch moved after the page showed the recorded tip (the run is still going): the Done
+    approves nothing, whatever the recorded tip says by the time the sweep looks."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    shown = worktrees._copy_authority(root, tid)["review_tip"]
+    agent_commits(copy)
+    code, out, err = cli_done(run, root, tid, "status", f"--shown-tip={shown}")
+    assert code == 0, err
+    assert worktrees.NEW_CHANGES in out
+    assert not worktrees._copy_authority(root, tid).get("review_tip")
+    worktrees.sweep(root)
+    assert tickets.load(root, tid)["work"]["bring_back"]["reason"] == worktrees.NEW_CHANGES
+    assert not (root / "late.py").exists()
+
+
+@pytest.mark.parametrize(
+    "bad", ["HEAD", "a" * 39, "a" * 65, "A" * 40, "g" * 40, " " + "a" * 40, "a" * 40 + "\n", "", "--x"]
+)
+def test_b13g_forged_displayed_tip_is_ignored(done_copy, run, bad):
+    """(f) A displayed tip that is not 40-64 lowercase hex is ignored: the Done is judged as without one."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    assert worktrees.bind_shown(root, tid, bad) is True
+    assert worktrees._copy_authority(root, tid).get("review_tip")
+    code, out, err = cli_done(run, root, tid, "patch", f"--shown-tip={bad}")
+    assert code == 0, err
+    assert worktrees.NEW_CHANGES not in out
+    worktrees.sweep(root)
+    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
+
+
+def test_b13g_displayed_tip_without_a_person_changes_nothing(done_copy, run):
+    """Only a person's Done binds a displayed tip: anyone else naming one never forgets the review."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    rev = f"--if-revision={tickets.load(root, tid)['revision']}"
+    tip = f"--shown-tip={'b' * 40}"
+    code, out, err = run("ticket", "patch", tid, '{"status": "done"}', rev, tip, "--by", "agent:test")
+    assert worktrees.NEW_CHANGES not in out + err
+    assert tickets.load(root, tid)["status"] == "review"  # an agent's Done is no Done
+    assert worktrees._copy_authority(root, tid).get("review_tip")

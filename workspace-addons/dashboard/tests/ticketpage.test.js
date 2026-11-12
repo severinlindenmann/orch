@@ -109,6 +109,27 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   c.snapshot = true;
   assert.equal(nodes(c.ticketBringBackRow({id:'t_abc123', bring_back:b})).filter(n => n.tag === 'button').length, 0);
 });
+test('Accept shows the reviewed tip and sends the full tip with the Done (B13g)', () => {
+  const moves = [];
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), moveTicket:(...a) => { moves.push(a); return Promise.resolve(); }});
+  const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
+  const tip = '0123456789abcdef'.repeat(2) + '01234567';
+  const editor = c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:tip});
+  const text = JSON.stringify(editor);
+  assert.match(text, /0123456789ab/);  // the short tip the person looks at
+  assert.doesNotMatch(text, new RegExp(tip));
+  nodes(editor).find(n => n.tag === 'button' && n.children.includes('Accept')).onclick();
+  assert.equal(JSON.stringify(moves), JSON.stringify([['t_abc123', 'done', false, {review_tip:tip}]]));
+  // No recorded tip, or something that is no tip: no line, and the Done carries nothing.
+  for (const bad of [undefined, 'HEAD', 'A'.repeat(40), 'a'.repeat(39), '<b>' + 'a'.repeat(40)]) {
+    moves.length = 0;
+    const plain = c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:bad});
+    assert.equal(nodes(plain).filter(n => n.attrs?.['data-key'] === 'ticket-review-tip').length, 0);
+    nodes(plain).find(n => n.tag === 'button' && n.children.includes('Accept')).onclick();
+    assert.equal(JSON.stringify(moves), JSON.stringify([['t_abc123', 'done', false, {}]]));
+  }
+});
 test('a failed change request shows a plain error; snapshot never submits notes', async () => {
   const calls = [], c = context({act:async op => { calls.push(op); return {ok:false, text:'Failed'}; }});
   assert.equal(await c.ticketSendChanges({id:'t_test'}, 'Fix this'), false);

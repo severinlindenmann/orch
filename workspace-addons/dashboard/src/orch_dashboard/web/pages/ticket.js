@@ -760,8 +760,12 @@ async function ticketSendChanges(t, note) {
 function ticketChangesEditor(t) {
   const key = 'ticket-changes-' + t.id;
   const host = h('div', {'data-key':key});
-  const done = ticketButton('Accept', 'primary', () => moveTicket(t.id, 'done'));
+  // B13g: the tip recorded for this review is shown, and Accept sends that same tip: the core tells when
+  // new changes arrived after you looked (the Done still happens; bringing them back then needs your OK).
+  const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
+  const done = ticketButton('Accept', 'primary', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}));
   const row = h('div', {className:'row ticket-review-actions'});
+  const shown = tip ? h('span', {className:'meta', 'data-key':'ticket-review-tip'}, 'Changes up to ', h('code', {}, tip.slice(0, 12))) : null;
   const open = ticketButton('Ask for changes', 'outline', () => {
     locks.add(key);
     let sending = false;
@@ -784,7 +788,7 @@ function ticketChangesEditor(t) {
     };
     host.replaceChildren(h('div', {className:'ticket-ask-line'}, input, send, cancel)); input.focus();
   });
-  row.append(done, open); host.append(row); return host;
+  row.append(...[done, open, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},

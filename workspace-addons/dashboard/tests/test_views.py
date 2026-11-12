@@ -377,7 +377,8 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     move = js[js.index("function moveTicket") :]
     move = move[: move.index("function list()")]
     assert (
-        "actRetry('ticket.patch', () => ({ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision})"
+        # `extra` (Accept's shown review tip, B13g) goes first: it never overrides ticket, status or revision
+        "actRetry('ticket.patch', () => ({...extra, ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision})"
         in move
     )
     assert "if (!t || t.status === status" in move  # dropping on the same column does nothing

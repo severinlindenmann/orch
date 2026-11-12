@@ -94,6 +94,54 @@ def test_malformed_review_offers_no_approval(review):
     assert view["reason_code"] == "waiting"
 
 
+def test_done_click_sends_the_displayed_review_tip():
+    """B13g: "Accept" sends the review tip the page showed; the core binds the Done to it."""
+    args = {"ticket": "t_abcdef", "data": {"status": "done"}, "if_revision": 3, "review_tip": "a" * 40}
+    argv = actions.build_argv("ticket.patch", args)
+    assert argv[:4] == ["ticket", "patch", "t_abcdef", "--if-revision=3"]
+    assert f"--shown-tip={'a' * 40}" in argv
+    assert actions.proof_for("ticket.patch", args) == ("ticket.verdict", "t_abcdef")  # same proof as before
+    assert "--shown-tip=" + "b" * 64 in actions.build_argv("ticket.patch", {**args, "review_tip": "b" * 64})
+    other = actions.build_argv("ticket.patch", {**args, "data": {"status": "active"}})
+    assert not any(a.startswith("--shown-tip") for a in other)
+
+
+@pytest.mark.parametrize(
+    "bad", ["HEAD", "a" * 39, "a" * 65, "A" * 40, "g" * 40, "a" * 40 + "\n", "--x", "", None, 7, ["a" * 40]]
+)
+def test_forged_displayed_tip_is_ignored(bad):
+    """B13g (f): a tip that is not 40-64 lowercase hex never reaches the command: the Done is judged as
+    without one (no error, the person's Done is never blocked)."""
+    args = {"ticket": "t_abcdef", "data": {"status": "done"}, "if_revision": 3, "review_tip": bad}
+    argv = actions.build_argv("ticket.patch", args)
+    assert not any(str(a).startswith("--shown-tip") for a in argv)
+    assert argv[-1] == json.dumps({"status": "done"})
+
+
+def test_ticket_in_review_shows_the_recorded_review_tip(tmp_path, monkeypatch):
+    """B13g: the ticket view gets the review tip from the core's signed record; a value written into the
+    ticket file (agent-writable) is never shown."""
+    from orch import worktrees
+
+    base = {"schema": "orch.ticket/1", "title": "T"}
+    rows_in = [
+        {**base, "id": "t_review1", "status": "review", "review_tip": "f" * 40},
+        {**base, "id": "t_review2", "status": "review"},
+        {**base, "id": "t_active1", "status": "active", "review_tip": "f" * 40},
+    ]
+    monkeypatch.setattr(data, "run_orch", lambda *a: json.loads(json.dumps(rows_in)))
+    recorded = {"t_review1": "c" * 40, "t_review2": None, "t_active1": "d" * 40}
+    monkeypatch.setattr(worktrees, "review_tip", lambda root, tid: recorded[tid])
+    rows, _ = data.load_tickets(tmp_path, "orch")
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["t_review1"]["review_tip"] == "c" * 40
+    assert "review_tip" not in by_id["t_review2"]
+    assert "review_tip" not in by_id["t_active1"]
+    monkeypatch.setattr(worktrees, "review_tip", lambda root, tid: "<b>not a tip</b>")
+    rows, _ = data.load_tickets(tmp_path, "orch")
+    assert all("review_tip" not in r for r in rows)
+
+
 def test_review_metadata_comes_from_core_command(tmp_path, monkeypatch):
     example = Path(__file__).resolve().parents[3] / "contracts/examples/ticket/valid-bring-back.json"
     ticket = json.loads(example.read_text())

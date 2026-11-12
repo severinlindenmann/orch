@@ -61,6 +61,7 @@ SETUP_TIMEOUT = 600
 ID_ARGS = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits made by orch (bring-back)
 _TID = re.compile(r"t_[a-z0-9]{6,16}")
 _WS8 = re.compile(r"[0-9a-f]{8}")
+_SHA = re.compile(r"[0-9a-f]{40,64}")
 
 
 # ---------------------------------------------------------------- git, as argv lists only
@@ -796,6 +797,7 @@ BRING_BACK_TIMEOUT = None  # git is never killed in the middle of a merge (desig
 APPROVAL_NEEDED = (
     "These changes are not the ones you reviewed before marking this done: they need your approval"
 )
+NEW_CHANGES = "New changes arrived after you looked; approve them to bring them back"
 CONFLICT_PENDING = "The agent has not finished resolving a conflict"
 CRISS_CROSS = "bring it back by hand"
 BASE_CHANGED = "Your project's history changed since the copy was made. A person needs to check it."
@@ -829,6 +831,7 @@ MERGE_DEFAULTS = {
 # unsigned pending file. Unknown codes show the generic "waiting" text.
 BRING_BACK_REASONS = {
     "approval": APPROVAL_NEEDED,
+    "newer": NEW_CHANGES,
     "conflict": CONFLICT_PENDING,
     "manual": CRISS_CROSS,
     "base": BASE_CHANGED,
@@ -1258,12 +1261,16 @@ def approve_copy(root: Path, ticket: str, target: str) -> dict:
 ROUND_KEYS = (
     "review_tip",
     "review_at",
+    "review_void",
+    "shown_stale",
     "done_seen",
     "reviewed_tip",
     "reviewed_at",
     "controls_tip",
     "finished",
 )
+# What one review (entering Review) records; any status change forgets it.
+REVIEW_KEYS = ("review_tip", "review_at", "review_void", "shown_stale")
 
 
 def _branch_tip(top: Path, ticket: str) -> str | None:
@@ -1291,11 +1298,31 @@ def _copy_holds_tip(root: Path, top: Path, ticket: str, tip: str) -> bool:
     )
 
 
-def _record_review_locked(root: Path, ticket: str) -> None:
-    """The ticket entered Review, or its run ended while it is in Review: record the tip the person is
-    shown now (signed store). Only when no run holds the copy and everything in it is committed; otherwise
-    there is no review tip and the Done needs an explicit approval. The copies lock is held."""
-    _copy_authority(root, ticket, lambda r: (r.pop("review_tip", None), r.pop("review_at", None)))
+def _forget_review(r: dict) -> None:
+    """The recorded review tip no longer is what the branch holds: forget it for the rest of this round (a
+    later run end never records again), so the Done needs an explicit approval of the tip it brings."""
+    r.pop("review_tip", None)
+    r.pop("review_at", None)
+    r["review_void"] = True
+
+
+def _record_review_locked(root: Path, ticket: str, new_round: bool = True) -> None:
+    """The ticket entered Review (`new_round`), or its run ended while it is in Review: record the tip the
+    person is shown now (signed store). Only when no run holds the copy and everything in it is committed;
+    otherwise there is no review tip and the Done needs an explicit approval. A run end never MOVES a tip
+    recorded in this round (the person may have looked at it already): it only records one when none was
+    (the agent's own move to Review while its run was alive), and forgets the recorded one when the branch
+    moved on since. The copies lock is held."""
+    known = _copy_authority(root, ticket)
+    if new_round:
+        _copy_authority(root, ticket, lambda r: [r.pop(k, None) for k in REVIEW_KEYS])
+    elif known.get("review_void"):
+        return
+    elif known.get("review_tip"):
+        top = _top_of(root)
+        if (_branch_tip(top, ticket) if top is not None else None) != known["review_tip"]:
+            _copy_authority(root, ticket, _forget_review)
+        return
     if tickets.load(root, ticket).get("status") != "review" or _alive_here(root, ticket):
         return
     top = _top_of(root)
@@ -1339,6 +1366,45 @@ def _judge_done_locked(root: Path, ticket: str) -> None:
     if tip is None or tip != review_tip or not _copy_holds_tip(root, top, ticket, tip):
         return
     _copy_authority(root, ticket, lambda r: r.update(reviewed_tip=tip, reviewed_at=tickets.now()))
+
+
+def review_tip(root: Path, ticket: str) -> str | None:
+    """The tip recorded for the review shown now (the person's page shows it and sends it back with the
+    Done), or None. Read only; never raises."""
+    try:
+        if not _has_work(root, ticket):
+            return None
+        tip = _copy_authority(root, ticket).get("review_tip")
+    except Exception:  # noqa: BLE001 - nothing to show: the Done is judged as without a shown tip
+        return None
+    return tip if isinstance(tip, str) and _SHA.fullmatch(tip) else None
+
+
+def bind_shown(root: Path, ticket: str, shown) -> bool:
+    """A person's Done names the review tip their page showed (`shown`, 40-64 lowercase hex; anything else
+    is ignored and the Done is judged as before). Called BEFORE the Done is written: when the branch or the
+    recorded review tip is no longer that tip, new changes arrived after they looked, so the recorded tip is
+    forgotten (the Done still happens; bringing the work back then waits for their approval of the new tip)
+    and False is returned. True otherwise."""
+    if not isinstance(shown, str) or not _SHA.fullmatch(shown):
+        return True
+
+    def stale(r):
+        _forget_review(r)
+        r["shown_stale"] = True
+
+    try:
+        if not _has_work(root, ticket):
+            return True
+        with _scoped(root):
+            top = _top_of(root)
+            tip = _branch_tip(top, ticket) if top is not None else None
+            if tip == shown and _copy_authority(root, ticket).get("review_tip") == shown:
+                return True
+            _copy_authority(root, ticket, stale)
+    except (OSError, ValueError, Refused):
+        return True  # no readable store: nothing recorded there can approve the Done either
+    return False
 
 
 def _record_done_tip(root: Path, ticket: str) -> None:
@@ -1740,7 +1806,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         if hard:
             return wait(hard)
         if authority.get("reviewed_tip") != tip:
-            return wait(APPROVAL_NEEDED)
+            return wait(NEW_CHANGES if authority.get("shown_stale") else APPROVAL_NEEDED)
         if control and authority.get("controls_tip") != tip:
             return wait(
                 "Your work touches files that control orch or git ("
@@ -2677,7 +2743,7 @@ def on_status(root: Path, ticket: str, before: str | None, after: str | None) ->
         with _scoped(root):
 
             def forget(r):
-                for k in ROUND_KEYS if before == "done" else ("review_tip", "review_at"):
+                for k in ROUND_KEYS if before == "done" else REVIEW_KEYS:
                     r.pop(k, None)
 
             _copy_authority(root, ticket, forget)
@@ -2689,11 +2755,12 @@ def on_status(root: Path, ticket: str, before: str | None, after: str | None) ->
 
 
 def on_run_ended(root: Path, tid: str) -> None:
-    # A run that ends while its ticket is in Review: what is in the copy now is what the person reviews.
+    # A run that ends while its ticket is in Review: what is in the copy now is what the person reviews,
+    # unless a tip was recorded in this round already (that one is kept, or forgotten when the branch moved).
     with contextlib.suppress(Exception):
         if tickets.load(root, tid).get("status") == "review" and _has_work(root, tid):
             with _scoped(root), runs.locked(root, LOCK_ID, wait=SWEEP_WAIT):
-                _record_review_locked(root, tid)
+                _record_review_locked(root, tid, new_round=False)
     schedule_sweep(root)
 
 

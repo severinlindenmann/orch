@@ -144,7 +144,8 @@ function board() {
 }
 const movePending = new Map();
 // Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
-function moveTicket(id, status, undoing = false) {
+// `extra`: more arguments of the change (Accept on a ticket in Review sends the review tip it showed).
+function moveTicket(id, status, undoing = false, extra = {}) {
   const t = ticketOf(id), lock = 'status-' + id;
   if (!t || t.status === status || snapshot || locks.has(lock) || changeUnavailable()) return Promise.resolve();
   const previous = t.status, revision = t.revision;
@@ -163,7 +164,7 @@ function moveTicket(id, status, undoing = false) {
   }
   const run = (async () => {
     let result;
-    try { result = await actRetry('ticket.patch', () => ({ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision}), () => { const now = ticketOf(id); return !!now && now.status === previous; }); }
+    try { result = await actRetry('ticket.patch', () => ({...extra, ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision}), () => { const now = ticketOf(id); return !!now && now.status === previous; }); }
     catch (err) { result = {ok:false, status:0, text:String(err?.message || err)}; }
     await fade;
     locks.delete(lock);

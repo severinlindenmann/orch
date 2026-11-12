@@ -63,6 +63,7 @@ LONG_NOTE = (
 )
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
+SHA = re.compile(r"[0-9a-f]{40,64}")
 DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
 ADDON = re.compile(r"[a-z][a-z0-9-]{1,31}")
 VERB = re.compile(r"[a-z][a-z-]{0,20}")
@@ -374,7 +375,7 @@ def _ticket_paste(a):
 
 
 def _ticket_patch(a):
-    _only(a, ("ticket", "data", "if_revision"))
+    _only(a, ("ticket", "data", "if_revision", "review_tip"))
     data = a.get("data")
     if not isinstance(data, dict) or not data or set(data) - set(PATCH_KEYS):
         raise BadRequest("Nothing to change, or a field that cannot be changed here.")
@@ -386,9 +387,15 @@ def _ticket_patch(a):
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
+    flags = [f"--if-revision={rev}"]
+    # "Accept" sends the review tip the page showed; the core binds the Done to it. Anything that is not a
+    # commit id is ignored (the Done is then judged as without one, never refused).
+    tip = a.get("review_tip")
+    if data.get("status") == "done" and isinstance(tip, str) and SHA.fullmatch(tip):
+        flags.append(f"--shown-tip={tip}")
     return (
         ["ticket", "patch", _tid(a.get("ticket"))],
-        [f"--if-revision={rev}"],
+        flags,
         [json.dumps(data, ensure_ascii=False)],
     )
 
