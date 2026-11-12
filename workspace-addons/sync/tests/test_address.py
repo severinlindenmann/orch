@@ -225,3 +225,16 @@ def test_an_unreadable_pin_is_no_successful_revocation(root, tmp_path, monkeypat
     monkeypatch.setattr(humanproof, "record_pin", lambda *a, **k: None)
     assert cli.main(["--dir", str(root), "set", "--mode", "local"]) != 0
     assert not (root / ".orch" / cli.ADDRESS).exists() and cli.read(root, "settings")["mode"] == "local"
+
+
+def test_a_planted_folder_at_the_record_still_moves_the_pin(root, tmp_path, preview):
+    """Leaving remote while run/sync/address.json is a planted folder: the error shows, and the pin moves anyway."""
+    from orch import humanproof
+
+    assert set_remote(root, bare(tmp_path)) == 0
+    before = humanproof.record_pin(root, cli.ADDRESS_KIND)["counter"]
+    record = root / ".orch" / cli.ADDRESS
+    record.unlink()
+    record.mkdir()
+    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) != 0
+    assert humanproof.record_pin(root, cli.ADDRESS_KIND)["counter"] == before + 1

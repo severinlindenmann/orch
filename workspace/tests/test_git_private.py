@@ -126,6 +126,26 @@ def test_move_to_private_untracks_and_keeps_files_and_commits_nothing(proj, run)
     )  # now ignored
 
 
+def test_move_runs_no_clean_filter_an_agent_planted(proj, run, tmp_path):
+    """HIGH finding: `git rm --cached` re-hashes stat-dirty files, which runs the repo's clean filter. The
+    person's signed Move click must never run a program the repository's config names."""
+    repo(proj)
+    make_files(proj, run)
+    canary = tmp_path / "CANARY"
+    prog = tmp_path / "clean.sh"
+    prog.write_text(f"#!/bin/sh\ntouch {canary}\ncat\n")
+    prog.chmod(0o755)
+    git(proj, "add", "-f", ".orch")
+    git(proj, "commit", "-qm", "oops")
+    git(proj, "config", "filter.x.clean", str(prog))
+    (proj / ".git" / "info" / "attributes").write_text(".orch/** filter=x\n")
+    os.utime(proj / ".orch" / "tickets" / "DM1-1.json", (1, 1))  # stat-dirty: git must re-hash it
+    code, out, err = run("private", "move")
+    assert code == 0, out + err
+    assert not canary.exists()
+    assert harness.tracked_private(proj) == []
+
+
 def test_move_is_for_a_person_not_an_agent(proj, run, monkeypatch):
     repo(proj)
     monkeypatch.setenv("CLAUDECODE", "1")

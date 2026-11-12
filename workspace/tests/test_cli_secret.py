@@ -144,6 +144,8 @@ def _proof(ws, op, target, by="human:pat", **kw):
 
 def _cli(run, monkeypatch, proof, *argv, stdin_rest=""):
     monkeypatch.setattr("sys.stdin", io.StringIO((proof + "\n" if proof is not None else "") + stdin_rest))
+    if argv[1:3] == ("profile", "set") and "--run" in argv:
+        argv = (*argv, "--any-command")  # these tests are about other rules (#577: the forms have their own)
     return run(*argv, "--proof-stdin")
 
 
@@ -1007,6 +1009,7 @@ def test_sigterm_ends_the_command_and_everything_it_started(store, ws):
     assert signal.getsignal(signal.SIGTERM) is before  # handlers restored
 
 
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")  # #579 regression
 @pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
 def test_a_second_signal_during_cleanup_is_ignored(store, ws):
     import signal
@@ -2220,11 +2223,11 @@ def test_options_hidden_in_addresses_are_refused(ws):
 
 
 def test_an_o_option_is_refused_for_programs_that_can_run_a_command_through_it(ws):
-    for program in ("/usr/bin/ssh", "/usr/bin/git", "scp", "/usr/bin/rsync", "sftp"):
+    for kind in ("ssh", "git", "scp", "rsync"):
         for arg in ("-oProxyCommand=x", "-o", "-oStrictHostKeyChecking=no"):
-            with pytest.raises(Refused, match="-o option"):
-                secretrun.check_arguments(ws, [arg], program)
-    secretrun.check_arguments(ws, ["-oProxyCommand=x"], "/usr/bin/true")  # not such a program: not our rule
+            with pytest.raises(Refused, match="fixed forms"):
+                secretrun.check_arguments(ws, [arg, "h"], kind)
+    secretrun.check_arguments(ws, ["-oProxyCommand=x"])  # any command: not our rule
 
 
 def test_only_plain_web_and_git_addresses_are_not_paths(ws):
