@@ -574,7 +574,11 @@
               "foreign_owner",
               "not_regular",
               "not_dir",
-              "swapped"
+              "swapped",
+              "content",
+              "removed",
+              "unverified",
+              "old_key"
             ]
           },
           "message": {

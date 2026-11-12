@@ -45,7 +45,7 @@ def confirm(
         # an update restarts this server: run it detached with no timeout, answer the click at once, and let the
         # restarted server adopt this page's session so the open tab keeps working
         if session is not None:
-            humanproof.write_resume_cookie(root, session.server, session.cookie)
+            humanproof.write_resume_cookie(root, session.server, session.cookie, session.secret)
         try:
             pid = (start or start_detached)(
                 item["argv"], mint(item["op"], item["target"]), orch_bin=orch_bin, cwd=root, env=env

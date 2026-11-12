@@ -56,6 +56,9 @@ def live(monkeypatch):
     assert not leftovers, f"tmux servers left behind: {leftovers}"
 
 
+SECRETS = {}  # cookie -> page secret of the sessions this module signed in
+
+
 def http_post(port, path, body, cookie=None):
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
     h = {
@@ -65,15 +68,19 @@ def http_post(port, path, body, cookie=None):
     }
     if cookie:
         h["Cookie"] = cookie
+        if cookie in SECRETS:
+            h["X-Orch-Page"] = SECRETS[cookie]
     c.request("POST", path, json.dumps(body), h)
     r = c.getresponse()
     return r.status, r.getheader("Set-Cookie"), r.read().decode()
 
 
 def signed_in(root, port):
-    st, ck, _ = http_post(port, "/session", {"token": hp.write_launch_token(root, "dashboard")})
-    assert st == 204
-    return ck.split(";")[0]
+    st, ck, body = http_post(port, "/session", {"token": hp.write_launch_token(root, "dashboard")})
+    assert st == 200
+    cookie = ck.split(";")[0]
+    SECRETS[cookie] = json.loads(body)["secret"]
+    return cookie
 
 
 def act(root, port, ck, op, args):

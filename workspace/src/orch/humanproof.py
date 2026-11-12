@@ -2791,23 +2791,30 @@ RESUME_LIFE = (
 )
 
 
-def write_resume_cookie(root: Path, server: str, cookie: str) -> bool:
+def write_resume_cookie(root: Path, server: str, cookie: str, secret: str) -> bool:
     """Called by a page server just before it lets an update (which restarts it) run: the restarted server
-    adopts this cookie once, so the person's open tab keeps its session (no extra click). Narrow on purpose:
-    one server, one use, 15 minutes, written only after a person's click."""
-    if server not in ("focus", "dashboard") or not isinstance(cookie, str) or not 20 <= len(cookie) <= 80:
+    adopts this cookie and page secret once, so the person's open tab keeps its session (no extra click).
+    Narrow on purpose: one server, one use, 15 minutes, written only after a person's click."""
+    if (
+        server not in ("focus", "dashboard")
+        or not isinstance(cookie, str)
+        or not isinstance(secret, str)
+        or not 20 <= len(cookie) <= 80
+        or not 20 <= len(secret) <= 80
+    ):
         return False
     try:
         _write_private(
-            key_dir(root) / f"resume-{server}.cookie", f"{cookie}\n{int(time.time()) + RESUME_LIFE}\n"
+            key_dir(root) / f"resume-{server}.cookie",
+            f"{cookie}\n{secret}\n{int(time.time()) + RESUME_LIFE}\n",
         )
         return True
     except (Refused, OSError):
         return False
 
 
-def take_resume_cookie(root: Path, server: str) -> str | None:
-    """The cookie a restarted server may adopt, once; the file is removed whatever it holds."""
+def take_resume_session(root: Path, server: str) -> tuple[str, str] | None:
+    """The (cookie, page secret) a restarted server may adopt, once; the file is removed whatever it holds."""
     if server not in ("focus", "dashboard"):
         return None
     try:
@@ -2821,8 +2828,14 @@ def take_resume_cookie(root: Path, server: str) -> str | None:
                     f.unlink()
     except (Refused, OSError, ValueError):
         return None
-    if len(lines) == 2 and lines[1].isdigit() and int(lines[1]) > time.time() and 20 <= len(lines[0]) <= 80:
-        return lines[0]
+    if (
+        len(lines) == 3
+        and lines[2].isdigit()
+        and int(lines[2]) > time.time()
+        and 20 <= len(lines[0]) <= 80
+        and 20 <= len(lines[1]) <= 80
+    ):
+        return lines[0], lines[1]
     return None
 
 
