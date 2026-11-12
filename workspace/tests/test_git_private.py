@@ -635,3 +635,18 @@ def test_move_refuses_when_discovery_fails(proj, run, monkeypatch, rc):
     assert code != 0 and "Nothing to move" not in out + err and "Nothing was changed" in out + err
     monkeypatch.setattr(safegit, "run_bytes", real)
     assert git(proj, "ls-files").stdout.split() == [".orch/unknown"]
+
+
+def test_a_bare_flag_set_by_an_agent_never_hides_tracked_orch_files(proj, run):
+    """Review: core.bare=true (an agent can set it) makes git say "not a work tree"; that must refuse, never
+    read as "no repo" (which would make Move say nothing to move and sync drop the Move row)."""
+    repo(proj)
+    make_files(proj, run)
+    git(proj, "add", "-f", ".orch")
+    git(proj, "commit", "-qm", "oops")
+    git(proj, "config", "core.bare", "true")
+    with pytest.raises(Refused):
+        harness._in_git_repo(proj)
+    assert harness.private_tracked(proj) is None
+    code, out, _ = run("private", "move")
+    assert code != 0 and "Nothing to move" not in out

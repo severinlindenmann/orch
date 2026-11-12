@@ -351,7 +351,17 @@ def _in_git_repo(root: Path) -> bool:
                 ) from None
         return False
     if rc == 0:
-        return out.strip() == b"true"
+        if out.strip() == b"true":
+            return True
+        # git says "not a work tree" although a .git is here (e.g. core.bare=true, which an agent can set in the
+        # repo config): never "no repo", or the files it tracks would be hidden from Move and sync
+        for d in (root.absolute(), *root.absolute().parents):
+            if os.path.lexists(d / ".git"):
+                raise Refused(
+                    "git says this folder is not a working copy although it has a git repository (check the "
+                    "repository settings, e.g. core.bare). Nothing was stored."
+                )
+        return False
     if rc not in (124, 125, 126) and "not a git repository" in err.lower():
         return False
     if rc in (124, 125, 126):
