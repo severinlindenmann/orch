@@ -528,3 +528,31 @@ def test_sync_free_outputs_are_what_they_were(proj, run, monkeypatch, capsys):
     assert got == want
     assert "human:alice" in got["show_json"]
     assert not Path(proj, *history.OWN_LINES).exists()
+
+
+def test_a_step_is_bound_to_its_covers(synced):
+    """Opus review LOW: the doing mark also binds what the step covers."""
+    root, tid = synced
+    tickets.check_start(root, tid, "c1", "human:tester")
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == "human:tester"
+    _plant(root, tid, lambda d: d["checklist"][0].update({"covers": ["something else"]}))
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == history.SYNC_BY
+
+
+def test_a_store_without_answers_verifies_and_removing_answers_breaks_its_mac(synced):
+    """Store format: `answers` is written only once it holds a digest (older stores verify); a store that has
+    answers and loses the key fails its MAC, so the whole store stops verifying (fail closed)."""
+    root, tid = synced
+    tickets.check_start(root, tid, "c1", "human:tester")  # a store without any answer
+    p = history._own_path(root, tid)
+    assert "answers" not in json.loads(p.read_text())
+    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["by"] == "human:tester"
+    tickets.ask(root, tid, "Which?", ["a", "b"], None, "agent:claude")
+    tickets.answer(root, tid, "q1", "a", "human:tester", "cli")
+    data = json.loads(p.read_text())
+    assert data.get("answers")
+    assert history.shown_ticket(root, _raw(root, tid))["questions"][0]["answered_by"] == "human:tester"
+    p.write_text(json.dumps({k: v for k, v in data.items() if k != "answers"}))
+    shown = history.shown_ticket(root, _raw(root, tid))
+    assert shown["questions"][0]["answered_by"] == history.SYNC_BY
+    assert shown["checklist"][0]["by"] == history.SYNC_BY  # the whole store no longer verifies
