@@ -523,8 +523,7 @@ def move_to_private(root: Path, by: str | None = None) -> list[str]:
             ["rm", "--cached", "-f", "-q", "--", *[f":(literal){f}" for f in chunk]],
             root,
             60,
-            read_only=False,
-            filters=False,
+            read_only=False,  # filters stay ON: rm --cached re-hashes stat-dirty files (the clean filter runs)
         )
         if rc != 0:
             if i:
