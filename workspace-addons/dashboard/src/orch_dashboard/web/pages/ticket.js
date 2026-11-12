@@ -548,7 +548,8 @@ function focusTicketAnswer() {
 function taskProofChips(t, task) {
   const chips = array(task.evidence).map(ev => {
     const kind = ev.type || ev.kind, file = evidenceFile(t, ev), label = proofLabel(ev);
-    if (file && !snapshot) return h('button', {type:'button', className:'chip proof-chip', title:'Open', onclick:() => previewFile(t.id, 'evidence', file.name)}, clean(ev.title || file.name.split('/').pop()));
+    // a real click handler (h() only sets attributes, so an onclick there would be a dead attribute)
+    if (file && !snapshot) return Object.assign(button(clean(ev.title || file.name.split('/').pop()), 'chip proof-chip', () => previewFile(t.id, 'evidence', file.name)), {title:'Open'});
     if (file) return h('span', {className:'chip proof-chip'}, clean(ev.title || file.name.split('/').pop()));
     if (['pr', 'url'].includes(kind) && /^https?:\/\//i.test(String(ev.ref || ''))) return h('a', {className:'chip proof-chip', href:safeHref(ev.ref), target:'_blank', rel:'noopener noreferrer'}, label);
     return null;
