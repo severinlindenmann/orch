@@ -87,6 +87,8 @@ accidents, not a tool that deliberately goes there). Vectors: `vectors/deny-v1.j
     admin-keys.json                       0600, same shape, source admin: written only by `orch relay refresh`
     files/<name>                          0600, key-file values (≤ 1 MB)
     profiles.toml                         0600, $defs/profiles: names only
+    record-heads/<run>.json               0600, the chain head of one run's record (activity.md, Authenticated record), MACed with the record
+                                          subkey derived from human.key (HKDF-SHA256, domain orch.record/1), never with human.key itself
 ```
 
 - **Guarded orch home (decision N11/N14, rationale below).** The key store, the hider, `human.key`, the nonce store,

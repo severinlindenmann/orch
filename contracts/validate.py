@@ -424,6 +424,152 @@ def act_map_stream(lines, ctx):
     return out
 
 
+# --- activity: record MAC (activity.md, Authenticated record). Stdlib only, independent of orch.record_auth ----------
+import hmac as _hmac
+
+_RA_TAIL = re.compile(rb',"auth":\{"k":"([0-9a-f]{8})","p":"([A-Za-z0-9_-]{43})","m":"([A-Za-z0-9_-]{43})"\}\}$')
+
+
+def _ra_b64(b):
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+
+def _ra_hm(key, *parts):
+    return _ra_b64(_hmac.new(key, b"".join(parts), hashlib.sha256).digest())
+
+
+def ra_derive(human_key, ws):
+    prk = _hmac.new(b"orch.record/1", human_key, hashlib.sha256).digest()
+    rk = _hmac.new(prk, b"orch.record.mac/1\0" + ws.encode() + b"\x01", hashlib.sha256).digest()
+    return rk, hashlib.sha256(b"orch.record.kid/1\0" + rk).hexdigest()[:8]
+
+
+def ra_genesis(rk, ws, run, job=None):
+    if job is None:
+        return _ra_hm(rk, b"orch.record.genesis/1\0", ws.encode(), b"\0", run.encode())
+    return _ra_hm(rk, b"orch.record.job.genesis/1\0", ws.encode(), b"\0", run.encode(), b"\0", job.encode())
+
+
+def ra_mac(rk, ws, run, seq, prev, body, job=None):
+    dom, scope = (b"orch.record.line/1\0", run.encode()) if job is None else (
+        b"orch.record.job/1\0", run.encode() + b"\0" + job.encode())
+    return _ra_hm(rk, dom, ws.encode(), b"\0", scope, b"\0", str(seq).encode(), b"\0", prev.encode(), b"\0", body)
+
+
+def ra_seal(rk, kid, ws, run, seq, prev, body, job=None):
+    return body[:-1] + b',"auth":{"k":"%s","p":"%s","m":"%s"}}\n' % (
+        kid.encode(), prev.encode(), ra_mac(rk, ws, run, seq, prev, body, job).encode())
+
+
+def _ra_nodup(pairs):
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise ValueError(k)
+        d[k] = v
+    return d
+
+
+def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
+    """Reference of record_auth.verify_run: {shown, changed, removed, reason}."""
+    start = ra_genesis(rk, ws, run, job)
+    shown, last_seq, last_mac = [], 0, None
+    removed = bad = noauth = oldkey = pend = 0
+    gaps = []
+    for line in raw.split(b"\n"):
+        if not line:
+            continue
+        m = _RA_TAIL.search(line) if len(line) > 125 else None
+        if m is None or m.start() != len(line) - 125:
+            noauth += 1
+            continue
+        k, prev, mac = (g.decode() for g in m.groups())
+        body = line[: m.start()] + b"}"
+        if k != kid:
+            oldkey += 1
+            pend += 1
+            continue
+        try:
+            o = json.loads(body.decode(), object_pairs_hook=_ra_nodup)
+        except ValueError:
+            o = None
+        seq = o.get("seq") if isinstance(o, dict) else None
+        if (not isinstance(o, dict) or "auth" in o or o.get("run") != run or (job is not None and o.get("job") != job)
+                or type(seq) is not int or seq < 1 or not _hmac.compare_digest(
+                    ra_mac(rk, ws, run, seq, prev, body, job), mac)):
+            bad += 1
+            continue
+        if seq <= last_seq:
+            bad += 1
+            for n, (lo, hi) in enumerate(gaps):
+                if lo <= seq <= hi:
+                    gaps[n:n + 1] = [r for r in ((lo, seq - 1), (seq + 1, hi)) if r[0] <= r[1]]
+                    removed -= 1
+                    break
+            continue
+        if seq == last_seq + 1:
+            if prev != (last_mac or start):
+                bad += 1
+                continue
+        else:
+            gap = seq - last_seq - 1
+            if prev == start:
+                gap = max(0, gap - pend)
+            if gap:
+                removed += gap
+                gaps.append((last_seq + 1, last_seq + gap))
+        pend = 0
+        shown.append(seq)
+        last_seq, last_mac = seq, mac
+    if head and head.get("kid") == kid:
+        removed += max(0, head["seq"] - last_seq)
+    changed = bad + noauth + oldkey
+    if changed:
+        reason = "content" if bad or (noauth and shown) else ("unverified" if noauth else "old_key")
+    else:
+        reason = "removed" if removed else None
+    return {"shown": shown, "changed": changed, "removed": removed, "reason": reason}
+
+
+def ra_check(vec):
+    """Replay vectors/activity-v1.json record_auth."""
+    r = vec["record_auth"]
+    hk, ws, run = bytes.fromhex(r["human_key"]), r["ws"], r["run"]
+    rk, kid = ra_derive(hk, ws)
+    _expect("activity record_auth rk", rk.hex(), r["rk"])
+    _expect("activity record_auth kid", kid, r["kid"])
+    _expect("activity record_auth genesis", ra_genesis(rk, ws, run), r["genesis"])
+    _expect("activity record_auth job genesis", ra_genesis(rk, ws, run, r["job"]), r["job_genesis"])
+    _expect("activity record_auth kid_old differs", ra_derive(bytes.fromhex(r["human_key_old"]), ws)[1], r["kid_old"])
+    _expect("activity record_auth suffix length", len(_RA_TAIL.search(bytes.fromhex(r["seal"][0]["line_hex"])).group(0)), 125)
+    for c in r["seal"]:
+        body = bytes.fromhex(c["body_hex"])
+        _expect(f"activity record_auth seal {c['seq']}", ra_seal(rk, kid, ws, run, c["seq"], c["prev"], body).hex(), c["line_hex"])
+    for c in r["verify"]:
+        raw = b"".join(bytes.fromhex(x) for x in c["lines"])
+        _expect(f"activity record_auth verify {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"]), c["expect"])
+    for c in r["job_streams"]:
+        raw = b"".join(bytes.fromhex(x) for x in c["lines"])
+        _expect(f"activity record_auth job {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], c["job"]), c["expect"])
+    for c in r["spool"]:
+        entry = c["entry"]
+        ok = (c["sm"] is not None and re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", c["file"]) is not None
+              and c["file"] not in c["drained"] and c["file"][:20] >= c["floor"]
+              and _hmac.compare_digest(_ra_hm(rk, b"orch.record.spool/1\0", ws.encode(), b"\0", run.encode(), b"\0",
+                                              c["file"].encode(), b"\0", json.dumps(entry, sort_keys=True, separators=(",", ":"),
+                                                                                     ensure_ascii=False).encode()), c["sm"]))
+        _expect(f"activity record_auth spool {c['name']}", ok, c["drain"])
+    for c in r["detail"]:
+        got = "ok" if hashlib.sha256(bytes.fromhex(c["file_hex"])).hexdigest()[:32] == c["detail_hash"] else "swapped"
+        _expect(f"activity record_auth detail {c['name']}", got, c["detail"])
+    for c in r["heads"]:
+        h = dict(c["head"])
+        hm = h.pop("hm")
+        want = _ra_hm(rk, b"orch.record.head/1\0", ws.encode(), b"\0",
+                      json.dumps(h, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode())
+        _expect(f"activity record_auth head {c['name']}", _hmac.compare_digest(want, hm), c["ok"])
+
+
 def kind_activity():
     v = _w("activity")
     vd = _w("activity", "detail_file")
@@ -435,6 +581,22 @@ def kind_activity():
     _examples("activity-change", lambda d: _msgs(vc, d))
     _core_clean("activity")
     vec = _vec("activity-v1.json")
+    ra_check(vec)
+    vs = _w("activity", "sealed_event")
+    _examples("activity-sealed", lambda d: _msgs(vs, d))
+    vb = _w("activity", "event_body")
+    for c in vec["record_auth"]["verify"][:1]:
+        for x in c["lines"]:
+            line = bytes.fromhex(x)
+            doc = json.loads(line)
+            for e in _msgs(vs, doc):
+                fails.append(f"activity sealed_event vector line: {e}")
+            body = dict(doc)
+            body.pop("auth")
+            for e in _msgs(vb, body):
+                fails.append(f"activity event_body vector line: {e}")
+            _expect("activity event_body refuses auth", bool(_msgs(vb, doc)), True)
+            _expect("activity sealed_event needs auth", bool(_msgs(vs, body)), True)
     tamper = {"link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"}
     for case in vec["integrity"]:
         fixture = case["fixture"]

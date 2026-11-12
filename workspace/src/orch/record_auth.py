@@ -1,0 +1,305 @@
+"""Record MAC: authenticated record lines, one hash chain per run.
+
+Contract: contracts/activity.md, "Authenticated record".
+
+Pure core, stdlib only, no I/O, no clock, no globals. It never reads a key: every function takes the record
+subkey `rk` (derived once by `humanproof.record_key`). The independent reference is `contracts/validate.py`
+(`record_verify`), which uses `hmac` directly and shares no code with this module.
+
+Invariant A1: a line counts only when it carries this workspace's MAC over its exact bytes, its run, its
+seq and its predecessor's MAC. `verify_run` is the one place that decides it. Nothing here logs or raises a
+text that contains key material.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import re
+from dataclasses import dataclass, field
+
+SUFFIX_LEN = 125  # b',"auth":{"k":"' + 8 + b'","p":"' + 43 + b'","m":"' + 43 + b'"}}'
+_SUFFIX = re.compile(
+    rb',"auth":\{"k":"([0-9a-f]{8})","p":"([A-Za-z0-9_-]{43})","m":"([A-Za-z0-9_-]{43})"\}\}\Z'
+)
+_TAIL = SUFFIX_LEN
+
+_SALT = b"orch.record/1"
+_D_MAC = b"orch.record.mac/1\0"
+_D_KID = b"orch.record.kid/1\0"
+_D_GENESIS = b"orch.record.genesis/1\0"
+_D_LINE = b"orch.record.line/1\0"
+_D_SPOOL = b"orch.record.spool/1\0"
+_D_JOB = b"orch.record.job/1\0"
+_D_JOB_GENESIS = b"orch.record.job.genesis/1\0"
+_D_HEAD = b"orch.record.head/1\0"
+
+REASONS = ("content", "removed", "unverified", "old_key")
+
+
+class SealError(ValueError):
+    """The body cannot be sealed (never carries key material)."""
+
+
+def _b64u(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")
+
+
+def _mac(rk: bytes, msg: bytes) -> str:
+    return _b64u(hmac.new(rk, msg, hashlib.sha256).digest())
+
+
+def _enc(s: str) -> bytes:
+    return s.encode("utf-8")
+
+
+def canon_strict(obj) -> bytes:
+    """Canonical JSON bytes (sorted keys, compact, UTF-8, no NaN/Infinity) for MACs over structures."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode(
+        "utf-8"
+    )
+
+
+# ------------------------------ key
+
+
+def derive(human_key: bytes, ws: str) -> tuple[bytes, str]:
+    """(rk, kid) from the workspace's human key: HKDF-SHA256 (extract, one expand block). A subkey, never the
+    human key itself, so a record MAC can never pass as a profile1/action1/verdict1/local1 MAC."""
+    if not isinstance(human_key, bytes | bytearray) or len(human_key) != 32:
+        raise SealError("bad key")
+    prk = hmac.new(_SALT, bytes(human_key), hashlib.sha256).digest()
+    rk = hmac.new(prk, _D_MAC + _enc(ws) + b"\x01", hashlib.sha256).digest()
+    kid = hashlib.sha256(_D_KID + rk).hexdigest()[:8]
+    return rk, kid
+
+
+def genesis(rk: bytes, ws: str, run: str) -> str:
+    """The `p` of seq 1 of a run (and of the first line of a new key segment)."""
+    return _mac(rk, _D_GENESIS + _enc(ws) + b"\0" + _enc(run))
+
+
+def job_genesis(rk: bytes, ws: str, run: str, job: str) -> str:
+    return _mac(rk, _D_JOB_GENESIS + _enc(ws) + b"\0" + _enc(run) + b"\0" + _enc(job))
+
+
+# ------------------------------ seal
+
+
+def _line_msg(domain: bytes, ws: str, scope: tuple[str, ...], seq: int, prev: str, body: bytes) -> bytes:
+    parts = [domain, _enc(ws), b"\0"]
+    for s in scope:
+        parts += [_enc(s), b"\0"]
+    parts += [_enc(str(seq)), b"\0", _enc(prev), b"\0", body]
+    return b"".join(parts)
+
+
+def _seal(rk, kid, domain, ws, scope, seq, prev, body) -> bytes:
+    if not isinstance(body, bytes) or not body.endswith(b"}") or b"\n" in body:
+        raise SealError("bad body")
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 1:
+        raise SealError("bad seq")
+    if not re.fullmatch(r"[0-9a-f]{8}", kid or "") or not re.fullmatch(r"[A-Za-z0-9_-]{43}", prev or ""):
+        raise SealError("bad link")
+    m = _mac(rk, _line_msg(domain, ws, scope, seq, prev, body))
+    return (
+        body[:-1] + b',"auth":{"k":"' + _enc(kid) + b'","p":"' + _enc(prev) + b'","m":"' + _enc(m) + b'"}}\n'
+    )
+
+
+def seal(rk: bytes, kid: str, ws: str, run: str, seq: int, prev: str, body: bytes) -> bytes:
+    """One run line: `body` (the compact JSON the writer built, no `auth` key) plus the fixed-length auth
+    suffix and a newline. `prev` is the MAC of the previous line (`genesis` for seq 1)."""
+    return _seal(rk, kid, _D_LINE, ws, (run,), seq, prev, body)
+
+
+def job_seal(rk: bytes, kid: str, ws: str, run: str, job: str, seq: int, prev: str, body: bytes) -> bytes:
+    """One job-stream line (same shape, own domain, scope run + job)."""
+    return _seal(rk, kid, _D_JOB, ws, (run, job), seq, prev, body)
+
+
+def split(line: bytes):
+    """(body, kid, prev, mac) of a sealed line (newline optional), or None when it has no auth suffix.
+    The body is the exact bytes orch wrote: cutting the fixed suffix and appending `}` gives them back, no
+    re-serialisation."""
+    if line.endswith(b"\n"):
+        line = line[:-1]
+    if len(line) <= SUFFIX_LEN:
+        return None
+    m = _SUFFIX.search(line, len(line) - SUFFIX_LEN)
+    if m is None or m.start() != len(line) - SUFFIX_LEN:
+        return None
+    return line[: m.start()] + b"}", m.group(1).decode(), m.group(2).decode(), m.group(3).decode()
+
+
+# ------------------------------ verify
+
+
+def _no_dupes(pairs):
+    out = {}
+    for k, v in pairs:
+        if k in out:
+            raise ValueError("duplicate key")
+        out[k] = v
+    return out
+
+
+def _parse(body: bytes):
+    try:
+        obj = json.loads(body.decode("utf-8"), object_pairs_hook=_no_dupes)
+    except (ValueError, RecursionError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+@dataclass
+class Verified:
+    events: list = field(default_factory=list)  # parsed bodies (dicts, no auth), file order
+    last_seq: int = 0
+    last_mac: str | None = None
+    changed: int = (
+        0  # lines that are not genuine, in place (planted, edited, replayed, reordered, no auth, old key)
+    )
+    removed: int = 0  # genuine lines that are gone (middle deleted, tail truncated)
+    reason: str | None = None  # content | removed | unverified | old_key | None
+
+
+def verify_run(
+    raw: bytes, run: str, ws: str, rk: bytes, kid: str, head: dict | None = None, *, job: str | None = None
+) -> Verified:
+    """Decide which lines of a run file (or, with `job`, of a job stream) count. `head` is the guarded home's
+    {kid, seq, mac} for the file, already checked by the caller (None = no head). Verified lines are never
+    moved,
+    rewritten or dropped; every other line is `changed`. See activity.md for the table of cases."""
+    domain, scope = (_D_JOB, (run, job)) if job is not None else (_D_LINE, (run,))
+    start = job_genesis(rk, ws, run, job) if job is not None else genesis(rk, ws, run)
+    out = Verified()
+    n_bad = n_noauth = n_oldkey = 0
+    old_pending = 0  # old-key lines seen since the last verified line (a key rotation inserts a new segment)
+    gaps: list[
+        tuple[int, int]
+    ] = []  # [lo, hi] seq ranges skipped by a resync, to un-count a line that only moved
+    for line in raw.split(b"\n"):
+        if not line:
+            continue
+        parts = split(line)
+        if parts is None:
+            n_noauth += 1
+            continue
+        body, k, prev, mac = parts
+        if not hmac.compare_digest(k.encode(), kid.encode()):
+            n_oldkey += 1
+            old_pending += 1
+            continue
+        obj = _parse(body)
+        seq = obj.get("seq") if obj is not None else None
+        if (
+            obj is None
+            or "auth" in obj
+            or obj.get("run") != run
+            or (job is not None and obj.get("job") != job)
+            or not isinstance(seq, int)
+            or isinstance(seq, bool)
+            or seq < 1
+        ):
+            n_bad += 1
+            continue
+        want = _mac(rk, _line_msg(domain, ws, scope, seq, prev, body))
+        if not hmac.compare_digest(want.encode(), mac.encode()):
+            n_bad += 1
+            continue
+        # a genuine line (only the key makes one); now the chain
+        if seq <= out.last_seq:
+            # a replayed or duplicated line, an older copy, or a line that was moved behind its successor
+            n_bad += 1
+            if _unskip(gaps, seq):
+                out.removed -= 1  # it was counted as removed when its successor resynced: it only moved
+            continue
+        if seq == out.last_seq + 1:
+            if not hmac.compare_digest(prev.encode(), (out.last_mac or start).encode()):
+                n_bad += 1  # right place, wrong link: spliced from another copy of this run
+                continue
+        else:
+            gap = seq - out.last_seq - 1
+            if hmac.compare_digest(
+                prev.encode(), start.encode()
+            ):  # a new key segment: the old lines before it are old_key, not removed
+                gap = max(0, gap - old_pending)
+            if gap:
+                out.removed += gap
+                gaps.append((out.last_seq + 1, out.last_seq + gap))
+        old_pending = 0
+        out.events.append(obj)
+        out.last_seq, out.last_mac = seq, mac
+    if head and head.get("kid") == kid and isinstance(head.get("seq"), int):
+        out.removed += max(0, head["seq"] - out.last_seq)
+    out.changed = n_bad + n_noauth + n_oldkey
+    out.reason = _reason(out, n_bad, n_noauth, n_oldkey)
+    return out
+
+
+def _unskip(gaps: list, seq: int) -> bool:
+    for n, (lo, hi) in enumerate(gaps):
+        if lo <= seq <= hi:
+            gaps[n : n + 1] = [r for r in ((lo, seq - 1), (seq + 1, hi)) if r[0] <= r[1]]
+            return True
+    return False
+
+
+def _reason(v: Verified, n_bad: int, n_noauth: int, n_oldkey: int) -> str | None:
+    if v.changed:
+        if n_bad or (n_noauth and v.events):
+            return "content"  # lines are shown, so the plain "changed outside orch" marker
+        return "unverified" if n_noauth else "old_key"
+    return "removed" if v.removed else None
+
+
+# ------------------------------ spool, head, detail
+
+
+def spool_mac(rk: bytes, ws: str, run: str, name: str, entry: dict) -> str:
+    """`sm` of a pending/<run>/<name> entry: over {event, payload, default_id} (the file name is bound)."""
+    msg = _D_SPOOL + _enc(ws) + b"\0" + _enc(run) + b"\0" + _enc(name) + b"\0" + canon_strict(entry)
+    return _mac(rk, msg)
+
+
+def spool_ok(rk: bytes, ws: str, run: str, name: str, entry: dict, sm) -> bool:
+    if not isinstance(sm, str):
+        return False
+    try:
+        return hmac.compare_digest(spool_mac(rk, ws, run, name, entry).encode(), sm.encode())
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return False
+
+
+def drain_ok(rk: bytes, ws: str, run: str, name: str, entry: dict, sm, drained, floor: str) -> bool:
+    """True iff a spool entry may be drained: its `sm` fits, its name was not drained before and is not older
+    than the
+    head's `drained_floor` (a replayed genuine entry). Names are `<020d time_ns>_<32 hex>.json`."""
+    if not isinstance(name, str) or not re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", name):
+        return False
+    if name in drained or name[:20] < floor:
+        return False
+    return spool_ok(rk, ws, run, name, entry, sm)
+
+
+def head_mac(rk: bytes, ws: str, head: dict) -> str:
+    """`hm` of a chain head: over the head without its own `hm`."""
+    body = {k: v for k, v in head.items() if k != "hm"}
+    return _mac(rk, _D_HEAD + _enc(ws) + b"\0" + canon_strict(body))
+
+
+def head_ok(rk: bytes, ws: str, head) -> bool:
+    if not isinstance(head, dict) or not isinstance(head.get("hm"), str):
+        return False
+    try:
+        return hmac.compare_digest(head_mac(rk, ws, head).encode(), head["hm"].encode())
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return False
+
+
+def detail_hash(data: bytes) -> str:
+    """`detail_hash` of a line: 32 hex = first 16 bytes of sha256 of the detail file's exact bytes."""
+    return hashlib.sha256(data).hexdigest()[:32]
