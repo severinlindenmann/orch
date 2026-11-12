@@ -1674,10 +1674,11 @@ def _fsck(top: Path, *ids: str) -> int:
         _ctx.deadline = before
 
 
-def _files_match(top: Path, touched) -> bool:
+def _files_match(top: Path, touched, commit: str) -> bool:
     """Every touched file in the folder hashes (in Python: git's stat shortcut is not trusted) to the blob id
-    the index holds for it (mode 100644/100755 only; a missing file, link or gitlink is skipped: refused
-    before the merge already)."""
+    of `commit` (mode 100644/100755 only; a missing file, link or gitlink is skipped: refused before the
+    merge already). A file that changed since `commit` (the person's later commit: its blob differs from the
+    index) is theirs and not checked."""
     listing = _bb_read(top, ["ls-files", "-s", "-z"], strip=False)
     index = {}
     for entry in listing.split("\0"):
@@ -1689,6 +1690,10 @@ def _files_match(top: Path, touched) -> bool:
         mode, blob = index.get(name, (None, None))
         if mode not in ("100644", "100755"):
             continue
+        if commit != "HEAD":
+            rc, there, _ = _git(["rev-parse", "--verify", "-q", f"{commit}:{name}"], top, read_only=True)
+            if rc or there != blob:
+                continue
         path = top / name
         try:
             if path.is_symlink() or not path.is_file():
@@ -1713,7 +1718,7 @@ def _after_merge(top: Path, touched, merge_commit: str) -> str | None:
     rc = _fsck(top, merge_commit)
     if rc == 124:
         return "later"
-    if rc != 0 or not _files_match(top, touched):
+    if rc != 0 or not _files_match(top, touched, merge_commit):
         return "bad"
     return None
 
@@ -1794,38 +1799,37 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
         return None
     if journal is None:
         return None
-    mc = journal.get("merge_commit")
-    if (
-        journal.get("post_check")
-        and isinstance(mc, str)
-        and head != mc
-        and head != journal.get("pre_head")
-        and _git(["merge-base", "--is-ancestor", mc, head], top, read_only=True)[0] == 0
-    ):
-        return (
-            CHANGED  # work was added on top of a merge whose check has not passed: ancestry certifies nothing
-        )
     if head != journal.get("pre_head"):
-        parents = _bb_read(top, ["rev-list", "--parents", "-n", "1", "HEAD"]).split()
-        if parents[1:] == [journal.get("pre_head"), journal.get("tip")] and _bb_read(
-            top, ["rev-parse", "HEAD^{tree}"]
-        ) != journal.get("tree"):
-            return CHANGED  # orch's merge commit holds something else than was checked: a person looks
-        if parents[1:] == [journal.get("pre_head"), journal.get("tip")]:
-            # orch's own merge commit (the run stopped, or its post-merge check could not finish or failed
-            # and the rollback was refused): it never counts as merged before that check has passed.
+        # Is orch's own merge commit M (parents [pre_head, tip]) in the history since? Then it never counts as
+        # merged before its post-merge check has passed, whatever was committed on top meanwhile, and whatever
+        # the journal says (a stop between the merge and the journal write leaves no verdict at all).
+        listing = _bb_read(
+            top, ["rev-list", "--parents", "--merges", f"{journal.get('pre_head')}..HEAD"], strip=False
+        )
+        mine = next(
+            (
+                f[0]
+                for f in (line.split() for line in listing.splitlines())
+                if len(f) == 3 and f[1:] == [journal.get("pre_head"), journal.get("tip")]
+            ),
+            None,
+        )
+        if mine is not None:
+            if _bb_read(top, ["rev-parse", f"{mine}^{{tree}}"]) != journal.get("tree"):
+                return CHANGED  # orch's merge commit holds something else than was checked: a person looks
             if journal.get("post_check") == "bad":
                 return CHANGED  # a failed check stays until a person has looked
+            _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": mine})
             names = _bb_read(
-                top, ["diff", "--name-only", "--no-renames", "-z", journal["pre_head"], head], strip=False
+                top, ["diff", "--name-only", "--no-renames", "-z", journal["pre_head"], mine], strip=False
             )
-            problem = _after_merge(top, [n for n in names.split("\0") if n], head)
+            problem = _after_merge(top, [n for n in names.split("\0") if n], mine)
             if problem == "bad":
-                _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": head})
+                _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": mine})
             if problem:
                 return CHANGED
             # passed on this very commit: it is orch's merge, recorded as such (the normal checks follow)
-            _copy_authority(root, ticket, lambda r: r.update(merged=head))
+            _copy_authority(root, ticket, lambda r: r.update(merged=mine))
         _set_journal(root, ticket, None)  # orch's merge finished, or the person moved on: checks run again
         return None
     if journal.get("touched"):
@@ -2090,7 +2094,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 and _bb_read(top, ["rev-parse", "HEAD"]) == parents[0]
                 and _bb_read(top, ["symbolic-ref", "-q", "HEAD"]) == pre["branch"]
                 and _git(["reset", "--keep", pre["head"]], top)[0] == 0
-                and _files_match(top, touched)
+                and _files_match(top, touched, pre["head"])
                 and _fsck(top, pre["head"]) == 0
             ):
                 _set_journal(root, ticket, None)  # rolled back and verified: nothing of the merge is left

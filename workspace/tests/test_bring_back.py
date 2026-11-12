@@ -2692,6 +2692,8 @@ def test_b13q_a_merge_whose_post_check_failed_is_never_counted_merged_later(done
 
 @pytest.mark.parametrize("problem", ["later", "bad"])
 def test_b13q_a_commit_on_top_of_an_unchecked_merge_certifies_nothing(done_copy, monkeypatch, problem):
+    """Work committed on top of orch's merge never certifies it: the check runs on the merge commit itself.
+    Still failing -> CHANGED, never merged; a timed-out one passes later, a failed one stays for a person."""
     root, tid, copy = done_copy
     to_review(root, tid)
     with monkeypatch.context() as m:
@@ -2702,10 +2704,18 @@ def test_b13q_a_commit_on_top_of_an_unchecked_merge_certifies_nothing(done_copy,
     git(
         root, "-c", "user.name=p", "-c", "user.email=p@x", "commit", "--allow-empty", "-qm", "person works on"
     )
-    worktrees.sweep(root)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: problem)
+        worktrees.sweep(root)
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
     assert not worktrees._copy_authority(root, tid).get("merged")
+    worktrees.sweep(root)  # the real check runs on the merge commit now
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    if problem == "later":
+        assert back["state"] == "merged", back
+    else:
+        assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
 
 
 def test_b13q_a_failed_recheck_is_written_as_bad_and_a_later_pass_does_not_certify(done_copy, monkeypatch):
@@ -2726,7 +2736,9 @@ def test_b13q_a_failed_recheck_is_written_as_bad_and_a_later_pass_does_not_certi
     assert not worktrees._copy_authority(root, tid).get("merged")
 
 
-def test_b13r_orch_stopped_inside_the_check_then_a_commit_on_top_certifies_nothing(done_copy, monkeypatch):
+def test_b13r_orch_stopped_inside_the_check_then_a_commit_on_top_is_checked_not_certified(
+    done_copy, monkeypatch
+):
     root, tid, copy = done_copy
     to_review(root, tid)
 
@@ -2741,7 +2753,11 @@ def test_b13r_orch_stopped_inside_the_check_then_a_commit_on_top_certifies_nothi
     git(
         root, "-c", "user.name=p", "-c", "user.email=p@x", "commit", "--allow-empty", "-qm", "person works on"
     )
-    worktrees.sweep(root)
+    calls = []
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: calls.append(a) or "bad")
+        worktrees.sweep(root)
+    assert calls  # the check ran on the merge commit; ancestry did not certify it
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
     assert not worktrees._copy_authority(root, tid).get("merged")
