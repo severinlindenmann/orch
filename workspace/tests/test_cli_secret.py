@@ -47,21 +47,25 @@ def _use_as_person(argv, unproven):
         or os.environ.get("CLAUDECODE")
     ):
         return argv, None
-    return (*argv[:2], "--proof-stdin", *argv[2:]), _proof(
-        next(d for d in (Path.cwd(), *Path.cwd().parents) if (d / ".orch").is_dir()),
-        "secret.profile",
-        argv[2] + ":use",
-    ) + "\n"
+    rest = list(argv[3:])
+    words = rest[1:] if rest[:1] == ["--"] else rest
+    target = secretrun.use_target(argv[2], argv[1], words if argv[1] != "get" else rest[:1])
+    ws = next(d for d in (Path.cwd(), *Path.cwd().parents) if (d / ".orch").is_dir())
+    return (*argv[:2], "--proof-stdin", *argv[2:]), _proof(ws, "secret.profile", target) + "\n"
 
 
 @pytest.fixture(autouse=True)
-def _trust_the_test_interpreter(monkeypatch):
+def _trust_the_test_interpreter(monkeypatch, request):
     """The test interpreter lives in folders the test user owns, so it could never be approved as a command.
     For these tests only, those exact paths (the interpreter and its parents) count as not user-writable;
     every other path (the tests' own programs) keeps the real answer."""
+    if request.node.get_closest_marker("real_checks"):
+        return
     trusted = set(secretrun._chain(os.path.realpath(PY)))
     real = secretrun._user_can_write
     monkeypatch.setattr(secretrun, "_user_can_write", lambda p: False if p in trusted else real(p))
+    # (this machine's Xcode folder is in the user's own Applications: the Xcode tests use the real check)
+    monkeypatch.setattr(secretrun, "_check_xcode", lambda path, ws: None)
 
 
 @pytest.fixture
@@ -1826,9 +1830,11 @@ def test_h1_get_without_a_proof_is_agent_level_and_needs_a_run(store, run, ws, m
 def test_h1_a_proof_for_another_profile_or_op_does_not_make_a_person(store, run, ws, monkeypatch):
     monkeypatch.delenv("CLAUDECODE", raising=False)
     for proof in (
-        _proof(ws, "secret.profile", "svc:use"),  # another profile
+        _proof(
+            ws, "secret.profile", secretrun.use_target("svc", "env", ["/bin/echo", "x"])
+        ),  # another profile
         _proof(ws, "secret.profile", "plain:allow_get"),  # another target
-        _proof(ws, "secret.add", "plain:use"),  # another op
+        _proof(ws, "secret.add", secretrun.use_target("plain", "env", ["/bin/echo", "x"])),  # another op
     ):
         code, out, err = _cli(run, monkeypatch, proof, "secret", "env", "plain", "--", "/bin/echo", "x")
         assert code == 2 and "x\n" != out
@@ -1836,7 +1842,7 @@ def test_h1_a_proof_for_another_profile_or_op_does_not_make_a_person(store, run,
 
 def test_h1_a_person_proof_is_single_use(store, run, ws, monkeypatch):
     monkeypatch.delenv("CLAUDECODE", raising=False)
-    proof = _proof(ws, "secret.profile", "plain:use")
+    proof = _proof(ws, "secret.profile", secretrun.use_target("plain", "env", [PY, "-c", "pass"]))
     argv = ("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "pass")
     monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
     assert run(*argv, unproven=True)[0] == 0
@@ -1846,7 +1852,12 @@ def test_h1_a_person_proof_is_single_use(store, run, ws, monkeypatch):
 
 def test_h1_an_agent_marker_with_a_valid_proof_stays_an_agent(store, run, ws, monkeypatch):
     monkeypatch.setenv("CLAUDECODE", "1")
-    monkeypatch.setattr("sys.stdin", io.StringIO(_proof(ws, "secret.profile", "plain:use") + "\n"))
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            _proof(ws, "secret.profile", secretrun.use_target("plain", "env", [PY, "-c", "pass"])) + "\n"
+        ),
+    )
     code, out, err = run("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "pass", unproven=True)
     assert code == 2
 
@@ -1906,6 +1917,7 @@ def test_h3_the_real_home_only_with_the_persons_real_home_setting(store, run, ws
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+@pytest.mark.real_checks
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode shims are a macOS thing")
 def test_xcode_shims_are_checked_where_they_really_run(ws, monkeypatch, tmp_path):
     dev = tmp_path / "Developer"
@@ -2023,3 +2035,79 @@ def test_h2_a_user_writable_or_linked_or_missing_path_argument_is_refused(
 
 def test_h2_the_stored_command_is_checked_again_for_argument_less_system_programs(store, ws):
     assert secretrun.approve_program(ws, "/usr/bin/true")[0]
+
+
+def test_a_proof_for_one_mode_and_command_is_refused_for_another(store, run, ws, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    proof = _proof(ws, "secret.profile", secretrun.use_target("plain", "env", [PY, "-c", "pass"]))
+    for argv in (
+        ("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "print(1)"),  # another command
+        ("secret", "exec", "--proof-stdin", "plain", "--", PY, "-c", "pass"),  # another mode
+    ):
+        monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
+        assert run(*argv, unproven=True)[0] == 2, argv
+    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
+    assert run("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "pass", unproven=True)[0] == 0
+
+
+def test_nothing_starts_as_root(ws, monkeypatch):
+    monkeypatch.setattr(secretrun.os, "getuid", lambda: 0)
+    with pytest.raises(Refused, match="as root"):
+        secretrun.approve_program(ws, "/usr/bin/true")
+
+
+def test_a_real_home_profile_is_for_the_person_only(store, run, ws, monkeypatch, in_run):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    prof = keystore.read_profiles(ws)
+    prof["home"] = {"env": {"T": "other-token"}, "files": {}, "real_home": True, "agents_may_env": True}
+    seed_profiles(ws, prof)
+    code, out, err = run("secret", "env", "home", "--", "/usr/bin/true", unproven=True)
+    assert code == 2 and "only you can run it" in err
+    code, out, err = run("secret", "env", "home", "--", "/usr/bin/true")  # the proven person may
+    assert code == 0, err
+
+
+def test_a_command_argument_is_checked_again_at_every_start(store, run, ws, monkeypatch, tmp_path):
+    mine = tmp_path / "data.txt"
+    mine.write_text("x")
+    prof = keystore.read_profiles(ws)
+    prof["late"] = {"env": {"T": "other-token"}, "files": {}, "run": ["/usr/bin/true", str(mine)]}
+    seed_profiles(ws, prof)  # (forged: a person would have been refused at set)
+    code, out, err = run("secret", "exec", "late")
+    assert code == 2 and "belongs to your own user" in err
+
+
+def test_set_values_that_are_paths_follow_the_same_rule_but_web_addresses_do_not(store, run, ws, monkeypatch):
+    code, out, err = _set(run, monkeypatch, ws, "sv", "--set", "A=../etc/passwd", "--extra", "A")
+    assert code == 2 and "full path" in err
+    code, out, err = _set(run, monkeypatch, ws, "sv", "--set", "A=https://example.test/x", "--extra", "A")
+    assert code == 0, out + err
+
+
+def test_an_unreadable_script_program_is_refused(ws, tmp_path):
+    with pytest.raises(Refused):
+        secretrun._check_shebang(ws, str(tmp_path / "missing"), 0)
+
+
+@pytest.mark.real_checks
+@pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
+def test_the_developer_folder_itself_must_be_safe_for_any_usr_bin_program(ws, monkeypatch, tmp_path):
+    dev = tmp_path / "Developer"  # owned by the test user
+    dev.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(dev)
+    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
+    with pytest.raises(Refused, match="belongs to your own user"):
+        secretrun.approve_program(ws, "/usr/bin/true")
+
+
+@pytest.mark.real_checks
+def test_without_the_trusted_test_interpreter_the_interpreter_is_refused(ws):
+    with pytest.raises(Refused):
+        secretrun.approve_program(ws, sys.executable)
+
+
+def test_get_is_refused_on_windows(store, ws, monkeypatch):
+    monkeypatch.setattr(secretrun, "_windows", lambda: True)
+    with pytest.raises(Refused, match="Windows"):
+        secretrun.get(ws, "plain", "other-token", stdout_is_tty=False, out=io.BytesIO(), agent=False)

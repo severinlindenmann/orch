@@ -45,19 +45,22 @@ def add_parsers(sub, common) -> None:
                     )  # person: the command may see your home
 
 
-def _agent(root, args, profile) -> bool:
+def _agent(root, args, profile, mode, words) -> bool:
     """True unless a PERSON proves otherwise (H1). Nothing the caller controls (an environment variable, a
-    flag, being a script) lowers it: a caller is a person only with a valid single-use hp1 proof for
-    `secret.profile` with target `<profile>:use` on the first line of stdin
-    (`orch secret env --proof-stdin <profile> ...`),
-    minted by the dashboard or the person's key. tickets.agent_tool() and --by agent:... only ever add a
-    reason to refuse."""
+    flag, being a script) lowers it: a caller is a person only with a valid single-use hp1 proof on the first
+    line of stdin (`orch secret env --proof-stdin <profile> ...`) for `secret.profile`, bound to this exact
+    call (target `<profile>:use:<sha256 of mode and command words>`), minted by the person's key.
+    tickets.agent_tool() and --by agent:... only ever add a reason to refuse."""
     if tickets.agent_tool() or str(getattr(args, "by", None) or "").startswith("agent:"):
         return True
     if not getattr(args, "proof_stdin", False):
         return True
     who = hp.verify_and_consume(
-        root, hp.read_proof_line(), "secret.profile", profile + ":use", getattr(args, "by", None)
+        root,
+        hp.read_proof_line(),
+        "secret.profile",
+        secretrun.use_target(profile, mode, words),
+        getattr(args, "by", None),
     )
     return not who.startswith("human:")
 
@@ -96,28 +99,6 @@ def _file_bytes(path):
         raise Refused("Refused: could not read the key file.") from None
 
 
-def _check_arguments(arguments, root) -> None:
-    """One fail-closed rule for the arguments of a profile's command: an argument with a path separator
-    must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative path), must not go
-    through a link, and neither it nor any parent may be inside the workspace or changeable by you (an agent
-    running as you could change it)."""
-    ws = os.path.realpath(root)
-    for arg in arguments:
-        if "/" not in arg and "\\" not in arg and not (os.altsep and os.altsep in arg):
-            continue
-        if not os.path.isabs(arg) or "\0" in arg or "\\" in arg:
-            raise Refused(
-                "Refused: an argument with a path must be a full path on its own, "
-                "not inside an option and not relative."
-            )
-        real = os.path.realpath(arg)
-        if real != os.path.normpath(arg):
-            raise Refused("Refused: a path in the command goes through a link; give the real path.")
-        if not os.path.exists(real):
-            raise Refused("Refused: a file named in the command does not exist.")
-        secretrun._check_chain(real, ws)
-
-
 def _change_profile(root, args, who):
     """Returns the extra fields for the answer (the resolved command, warnings)."""
     name, action = args.name, args.profile_action
@@ -136,10 +117,11 @@ def _change_profile(root, args, who):
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
+            secretrun.check_arguments(root, profile["set"].values())
             if args.run:  # found once, here: stored as the real full path, never searched later
                 path, warnings = secretrun.approve_program(root, args.run[0])
                 profile["run"] = [path, *args.run[1:]]
-                _check_arguments(args.run[1:], root)
+                secretrun.check_arguments(root, args.run[1:])
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
             if args.real_home:
                 profile["real_home"] = True
@@ -185,7 +167,7 @@ def dispatch(args, root: Path) -> bool:
             rest,
             stdout=sys.stdout.buffer,
             stderr=sys.stderr.buffer,
-            agent=_agent(root, args, args.profile),
+            agent=_agent(root, args, args.profile, action, rest),
         )
         sys.stdout.flush()
         sys.stderr.flush()
@@ -198,7 +180,7 @@ def dispatch(args, root: Path) -> bool:
             args.key,
             stdout_is_tty=term.is_terminal(sys.stdout),
             out=sys.stdout.buffer,
-            agent=_agent(root, args, args.profile),
+            agent=_agent(root, args, args.profile, "get", [args.key]),
         )
     elif action == "list":
         answer = secretrun.list_answer(root)

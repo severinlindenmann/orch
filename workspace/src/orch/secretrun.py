@@ -10,6 +10,7 @@ set_recorder() replaces the writer (tests).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -241,6 +242,7 @@ def _under(path: str, base: str) -> bool:
 XCODE_SELECT_LINK = (
     "/var/db/xcode_select_link"  # macOS: where /usr/bin/git, make, python3 ... really run from
 )
+ROOT_REFUSED = "Refused: orch does not start key commands as root. Run it as your own user."
 WINDOWS = "Refused: orch secret commands that start programs are not available on Windows yet."
 
 
@@ -279,23 +281,32 @@ def _check_chain(real: str, ws: str) -> None:
         raise Refused(USER_OWNED)
 
 
-def _xcode_shims(path: str) -> list[str]:
-    """macOS: /usr/bin/git, make, python3, clang ... are stubs that run the real tool from the folder
-    xcode-select points to. Those real binaries (if they exist) are what the program really is."""
+def _developer_dir() -> str:
+    """Where the macOS command line tools live: what xcode-select points to, else the standard folder."""
+    link = os.path.realpath(XCODE_SELECT_LINK)
+    return link if os.path.isdir(link) else "/Library/Developer/CommandLineTools"
+
+
+def _check_xcode(path: str, ws: str) -> None:
+    """macOS: /usr/bin/git, make, python3, clang ... are stubs that run the real tool from the developer
+    folder. For any /usr/bin program that folder must itself be safe, and so must a real tool found there."""
     if sys.platform != "darwin" or os.path.dirname(path) != "/usr/bin":
-        return []
-    try:
-        dev = os.path.realpath(XCODE_SELECT_LINK)
-    except OSError:
-        return []
+        return
+    dev = _developer_dir()
+    if os.path.isdir(dev):
+        _check_chain(dev, ws)
     name = os.path.basename(path)
-    out = [os.path.join(dev, "usr", "bin", name)]
+    candidates = [os.path.join(dev, "usr", "bin", name)]
     toolchains = os.path.join(dev, "Toolchains")
     try:
-        out += [os.path.join(toolchains, t, "usr", "bin", name) for t in sorted(os.listdir(toolchains))]
+        candidates += [
+            os.path.join(toolchains, t, "usr", "bin", name) for t in sorted(os.listdir(toolchains))
+        ]
     except OSError:
         pass
-    return [os.path.realpath(c) for c in out if os.path.isfile(c)]
+    for c in candidates:
+        if os.path.isfile(c):
+            _check_chain(os.path.realpath(c), ws)
 
 
 def approve_program(root, name, *, _depth=0):
@@ -309,14 +320,15 @@ def approve_program(root, name, *, _depth=0):
     approving anything."""
     if _windows():
         raise Refused(WINDOWS)
+    if hasattr(os, "getuid") and os.getuid() == 0:
+        raise Refused(ROOT_REFUSED)  # no root exemption: nothing counts as user-writable under root
     if not os.path.isabs(name) and (os.sep in name or (os.altsep and os.altsep in name) or "/" in name):
         raise Refused("Refused: give the program as a full path or a plain name, not a relative path.")
     path = resolve_program(root, name)
     real = os.path.realpath(path)
     ws = os.path.realpath(root)
     _check_chain(real, ws)
-    for target in _xcode_shims(path):
-        _check_chain(target, ws)
+    _check_xcode(path, ws)
     _check_shebang(root, real, _depth)
     warnings = []
     if RISKY_PROGRAMS.match(os.path.basename(real)) or RISKY_PROGRAMS.match(os.path.basename(name)):
@@ -334,13 +346,44 @@ def _check_shebang(root, real: str, depth: int) -> None:
         with open(real, "rb") as f:
             head = f.read(256)
     except OSError:
-        return
+        raise Refused(SHEBANG_REFUSED) from None
     if not head.startswith(b"#!"):
         return
     parts = head[2:].split(b"\n", 1)[0].decode("utf-8", "replace").split()
     if depth >= 2 or not parts or not os.path.isabs(parts[0]) or os.path.basename(parts[0]) == "env":
         raise Refused(SHEBANG_REFUSED)
     approve_program(root, parts[0], _depth=depth + 1)
+
+
+_URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+
+
+def check_arguments(root, arguments) -> None:
+    """One fail-closed rule for the arguments of a profile's command and for its `set` values: one with a path
+    separator must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative path), must not
+    go through a link, and neither it nor any parent may be inside the workspace or changeable by you (an
+    agent running as you could change it). Web addresses (scheme://) are not paths."""
+    ws = os.path.realpath(root)
+    for arg in arguments:
+        if _URL.match(arg) or ("/" not in arg and "\\" not in arg and not (os.altsep and os.altsep in arg)):
+            continue
+        if not os.path.isabs(arg) or "\0" in arg or "\\" in arg:
+            raise Refused(
+                "Refused: an argument with a path must be a full path on its own, "
+                "not inside an option and not relative."
+            )
+        real = os.path.realpath(arg)
+        if real != os.path.normpath(arg):
+            raise Refused("Refused: a path in the command goes through a link; give the real path.")
+        if not os.path.exists(real):
+            raise Refused("Refused: a file named in the command does not exist.")
+        _check_chain(real, ws)
+
+
+def use_target(profile: str, mode: str, argv) -> str:
+    """The target of a person's proof for one call: the profile, the mode and the exact command words."""
+    digest = hashlib.sha256("\0".join([mode, *argv]).encode("utf-8", "surrogateescape")).hexdigest()
+    return f"{profile}:use:{digest}"
 
 
 def safe_path_dirs(root):
@@ -604,6 +647,9 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             raise Refused(WINDOWS)
         require_run(root, agent)  # before any key or file is touched
         profile = _profile(root, profile_name)
+        if agent and profile.get("real_home") is True:  # the real HOME undoes the containment: person only
+            raise Refused("Refused: this profile uses your real home folder, so only you can run it.")
+        check_arguments(root, profile.get("set", {}).values())
         if mode not in ("env", "file", "exec"):
             raise Refused("Refused: unknown secret command.")
         sweep_tmp(root)
@@ -626,6 +672,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                     "Refused: this profile's command is not a full path. Ask the person to set it again."
                 )
             approve_program(root, run0)  # still a safe, existing program now
+            check_arguments(root, profile["run"][1:])
         if mode == "env" and not profile.get("env") and profile.get("files"):
             raise Refused("Refused: this profile needs files. Use orch secret file.")
         needles = keystore.all_needles(root)
@@ -697,6 +744,8 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
 
 
 def _get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
+    if _windows():
+        raise Refused(WINDOWS)
     require_run(root, agent)
     profile = _profile(root, profile_name)
     h = hider.Hider(keystore.all_needles(root))
