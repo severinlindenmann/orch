@@ -63,8 +63,19 @@ def _days_words(days: set[int]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def cron_human(expr: str, tz=None) -> str:
-    """Plain words for a 5-field cron read in `tz` (UTC when None, then said so): "Every 5 minutes", "Mondays at 08:00"."""
+def local_next(expr: str, tz=None, now: datetime | None = None, local=None) -> tuple[datetime, int] | None:
+    """The next run in the person's zone (`local`, default this computer's) and how many days it moves
+    against the cron's own zone (`tz`, UTC when None). The one conversion the words and "Next run" share."""
+    nxt = next_after(expr, now or datetime.now(UTC), tz)
+    if nxt is None:
+        return None
+    here = nxt.astimezone(local) if local else nxt.astimezone()
+    return here, (here.date() - nxt.astimezone(tz or UTC).date()).days
+
+
+def cron_human(expr: str, tz=None, now: datetime | None = None, local=None) -> str:
+    """Plain words for a 5-field cron read in `tz` (UTC when None), said in the person's local time:
+    "Every 5 minutes", "Mondays at 08:00"."""
     try:
         m, h, dom, mon, dow = expr.split()
     except ValueError:
@@ -78,17 +89,19 @@ def cron_human(expr: str, tz=None) -> str:
             return "Every hour" if int(m) == 0 else f"Every hour at {int(m)} past"
     if dom == mon == dow == "*" and m.isdigit() and h.startswith("*/") and h[2:].isdigit():
         return f"Every {int(h[2:])} hours"
-    if m.isdigit() and h.isdigit() and mon == "*":
-        at = f"{int(h) % 24:02d}:{int(m) % 60:02d}" + ("" if tz else " UTC")
+    if m.isdigit() and h.isdigit() and mon == "*" and (ln := local_next(expr, tz, now, local)):
+        here, shift = ln
+        at = here.strftime("%H:%M")
         if dom == "*" and dow == "*":
             return f"Every day at {at}"
         if dom == "*":
             days = _dows(dow)
             if days:
-                return f"{_days_words(days)} at {at}"
-        if dow == "*" and dom.isdigit():
-            return f"Every month on day {int(dom)} at {at}"
-    return f"On a custom plan ({expr}{'' if tz else ', UTC'})"
+                return f"{_days_words({(d + shift) % 7 for d in days})} at {at}"
+        # a day the local conversion moves is only safe while every month has it
+        if dow == "*" and dom.isdigit() and (shift == 0 or 1 <= int(dom) + shift <= 28):
+            return f"Every month on day {int(dom) + shift} at {at}"
+    return f"On a custom plan ({expr})"
 
 
 def _every(gap: int) -> str:
@@ -150,7 +163,9 @@ def _events(tickets: list[dict], now: datetime, horizon: datetime) -> list[tuple
         cron = _repeats(t)
         nxt = next_after(cron, now, _tz(t)) if cron else None
         if nxt and nxt <= horizon:
-            out.append((nxt, t, f"{cron_human(cron, _tz(t))} · next {nxt.astimezone().strftime('%a %H:%M')}"))
+            out.append(
+                (nxt, t, f"{cron_human(cron, _tz(t), now)} · next {nxt.astimezone().strftime('%a %H:%M')}")
+            )
     return sorted(out, key=lambda e: e[0])
 
 
@@ -263,13 +278,16 @@ def _schedules(tickets: list[dict], now: datetime) -> list[dict]:
         sched = (t.get("ext") or {}).get("automation") or {}
         paused = sched.get("paused") is True
         tz = _tz(t)
-        words = cron_human(cron, tz)
+        words = cron_human(cron, tz, now)
         nxt = next_after(cron, now, tz)
-        nxt_s = nxt.astimezone().strftime("%a %d %b, %H:%M") if nxt else "none"
+        here = local_next(cron, tz, now)
+        nxt_s = here[0].strftime("%a %d %b, %H:%M") if here else "none"
         last = parse(sched.get("last_run"))
+        # the cron's own zone only when it is not the person's (then it explains the technical cron)
+        other = here and (tz or UTC).utcoffset(nxt) != here[0].utcoffset()
         detail = [
             {"label": "Repeats", "value": clean(words, 200)},
-            {"label": "Time zone", "value": clean(sched.get("tz") or "UTC", 60)},
+            *([{"label": "Time zone", "value": clean(sched.get("tz") or "UTC", 60)}] if other else []),
             {"label": "Next run", "value": f"Off · would run {nxt_s}" if paused else nxt_s},
             {
                 "label": "Last run",

@@ -106,6 +106,26 @@ def T(h=0, m=0, d=4):
 
 
 @pytest.fixture
+def set_tz():
+    """Set this process's zone ($TZ + tzset) for one test; the previous zone is restored afterwards."""
+    import os
+    import time
+
+    old = os.environ.get("TZ")
+
+    def set_(name: str) -> None:
+        os.environ["TZ"] = name
+        time.tzset()
+
+    yield set_
+    if old is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = old
+    time.tzset()
+
+
+@pytest.fixture
 def ws(tmp_path, monkeypatch):
     root = tmp_path / "ws"
     (root / ".orch" / "tickets").mkdir(parents=True)
