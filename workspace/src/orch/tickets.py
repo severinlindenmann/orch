@@ -489,6 +489,10 @@ SYSTEM = "system"
 CLOSED_AGENT = "This ticket is closed, so the agent can't change it."
 
 
+class ClosedRefused(Refused):
+    """The closed-ticket agent guard said no (not a busy lock or a sync wait): dropped, never retried."""
+
+
 def _agent_actor(by: str) -> bool:
     """An agent wrote it: `by` is agent:*, or a human:* claimed from inside an agent's environment (a run sets
     ORCH_AGENT, so an agent run cannot pass for a person; the same rule as _is_person). System actors (orch)
@@ -504,7 +508,7 @@ def _refuse_closed_agent(root: Path, tid: str, by: str) -> None:
     ticket = _load_raw(root, tid)
     status = _effective(root, ticket)["status"] if ticket.get("status") == "done" else ticket.get("status")
     if status in CLOSED:
-        raise Refused(CLOSED_AGENT)
+        raise ClosedRefused(CLOSED_AGENT)
 
 
 def apply_op(
@@ -532,7 +536,7 @@ def apply_op(
         if raw_status == "done":
             ticket["status"] = eff_status  # ops see what readers see: an unsigned Done is Review
         if eff_status in CLOSED and _agent_actor(by):
-            raise Refused(CLOSED_AGENT)
+            raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
         if expect is not None and _get(ticket, expect[0]) != expect[1]:

@@ -2480,9 +2480,7 @@ def done(root: Path, mid: str) -> dict:
                 try:
                     tid = _ticket_for(root, msg)
                     _use_once(root, msg)
-                except (
-                    Refused
-                ):  # e.g. its allow ticket was closed by a person meanwhile: this message is dropped
+                except tickets.ClosedRefused:  # its allow ticket was closed meanwhile: drop this message
                     tid = None  # (seen below: no retry storm), the rest of the inbox goes on
                     with contextlib.suppress(Refused, OSError):
                         _use_once(root, msg)  # a once-allow is spent: the message is not offered again
