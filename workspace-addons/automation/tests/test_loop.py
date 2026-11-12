@@ -302,6 +302,15 @@ def test_input_held_by_a_person_stop_starts_no_run_until_new_input_arrives(ws):
     assert runs_started(ws) == ["t_queue020"]
 
 
+def test_held_ids_that_are_not_a_list_of_strings_hold_nothing(ws):
+    """A stop_held_ids that is not a list (a string would match by substring) is no hold: the input starts."""
+    add_ticket(ws, "t_queue030", status="ready")
+    (ws / "ended-t_queue030").write_text("")
+    (ws / "pending-t_queue030").write_text(json.dumps(["p_answer0030"]))
+    (ws / "stop-held-t_queue030").write_text(json.dumps("p_answer0030 p_other"))
+    assert Scheduler(ws).tick(T(8)) == ["t_queue030"]
+
+
 def test_a_text_in_chat_starts_the_helper_once(ws):
     """The Chat's hidden ticket is in no list: core names it (orch chat status); the same queued-input rules
     apply (a person's text only, once per item, nothing while a run holds it)."""

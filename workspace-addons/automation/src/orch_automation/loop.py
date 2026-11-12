@@ -247,7 +247,8 @@ class Scheduler:
             st = orchcli.run_status(self.root, tid)
             if not st or st.get("running") is not False:
                 continue
-            held = st.get("stop_held_ids") or []  # a person stopped the run while these waited: no restart
+            held = st.get("stop_held_ids")  # a person stopped the run while these waited: no restart
+            held = [i for i in held if isinstance(i, str)] if isinstance(held, list) else []  # else: no hold
             ids = [i for i in st.get("human_pending_ids") or [] if isinstance(i, str) and i not in held]
             mine = load_state(self.root).get(tid, {})
             tries = {

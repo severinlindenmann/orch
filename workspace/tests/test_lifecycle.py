@@ -123,6 +123,146 @@ def test_run_stop_with_waiting_input_holds_it_from_the_automation(proj, run):
     assert json.loads(run("run", "status", tid, "--json")[1])["stop_held_ids"] == []
 
 
+def _held(run, tid):
+    code, out, err = run("run", "status", tid, "--json")
+    assert code == 0, err
+    return json.loads(out)["stop_held_ids"]
+
+
+def test_an_explicit_start_after_a_stop_clears_the_hold(proj, run, gen, one_step):
+    """H1: a person's (CLI) start ends the hold; the automation's own start (--by agent:automation) keeps
+    it."""
+    gen("--silent 0.2")
+    tid = _new(run)
+    first = runs.pending_add(proj, tid, "human:owner", "message", "one more thing")
+    _stop_a_run(proj, run, tid)
+    path = runs_live._held_path(proj, tid)
+    assert path.exists()
+    assert run("run", "start", tid, "--by", runs_live.AUTOMATION_BY)[0] == 0
+    _wait(proj, tid)
+    assert path.exists()
+    runs_live._write_held(proj, tid, [first["id"]])
+    assert run("run", "start", tid, "--by", "human:t")[0] == 0
+    _wait(proj, tid)
+    assert not path.exists()
+
+
+def test_only_a_person_stop_with_a_run_sets_a_hold(proj, run):
+    """H2: the default stop (automation, idle cleanup, run end, a close) holds nothing; a CLI stop with no run
+    record holds nothing either."""
+    import subprocess
+    import sys
+
+    tid = _new(run)
+    runs.pending_add(proj, tid, "human:owner", "message", "one more thing")
+    path = runs_live._held_path(proj, tid)
+    assert run("run", "stop", tid)[0] == 0  # nothing runs: no record, no hold
+    assert not path.exists() and _held(run, tid) == []
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        runs.claim(proj, tid, "human:t", "fake", "oneshot", pid=p.pid)
+        assert runs_live.stop(proj, tid) is True
+    finally:
+        p.kill()
+        p.wait()
+    assert not path.exists() and _held(run, tid) == []
+
+
+def test_a_hold_that_can_not_be_written_never_breaks_the_stop(proj, run):
+    """H3: the stop-held folder is a file (mkdir fails), or the write fails: the stop still stops."""
+    tid = _new(run)
+    runs.pending_add(proj, tid, "human:owner", "message", "one more thing")
+    folder = runs_live._held_path(proj, tid).parent
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    folder.write_text("not a folder")
+    _stop_a_run(proj, run, tid)
+    assert runs.read(proj, tid) is None and _held(run, tid) == []
+    folder.unlink()
+    folder.mkdir()
+    folder.chmod(0o500)  # the write fails (OSError)
+    try:
+        _stop_a_run(proj, run, tid)
+    finally:
+        folder.chmod(0o700)
+    assert runs.read(proj, tid) is None and _held(run, tid) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{"ids": "PENDING"}',
+        '{"ids": [1, 2]}',
+        '{"ids": ["PENDING", null]}',
+        '{"ids": {"PENDING": 1}}',
+        '["PENDING"]',
+        '"PENDING"',
+        "not json",
+        "\udcff",
+    ],
+)
+def test_a_bad_hold_file_is_no_hold_and_status_never_crashes_on_stop(proj, run, body):
+    """H4: ids must be a list of strings; anything else is no hold."""
+    tid = _new(run)
+    first = runs.pending_add(proj, tid, "human:owner", "message", "one more thing")
+    path = runs_live._held_path(proj, tid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body.replace("PENDING", first["id"]).encode("utf-8", "surrogateescape"))
+    assert _held(run, tid) == []
+
+
+def test_status_filters_a_stale_stop_hold_without_rewriting_it(proj, run):
+    """M1: status only reads; an id no longer waiting is filtered out, the file is left as it was."""
+    tid = _new(run)
+    first = runs.pending_add(proj, tid, "human:owner", "message", "one more thing")
+    path = runs_live._held_path(proj, tid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = json.dumps({"ids": ["p_gone000001", first["id"]]}) + "\n"
+    path.write_text(body)
+    assert _held(run, tid) == [first["id"]]
+    assert path.read_text() == body
+
+
+def test_a_linked_oversized_or_special_stop_hold_is_no_hold(proj, run):
+    """M2: a symlinked stop-held folder or file, a folder in the file's place, or a file over 64 KB: no
+    hold."""
+    tid = _new(run)
+    first = runs.pending_add(proj, tid, "human:owner", "message", "one more thing")
+    path = runs_live._held_path(proj, tid)
+    good = json.dumps({"ids": [first["id"]]})
+    elsewhere = proj / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / path.name).write_text(good)
+    path.parent.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.symlink_to(elsewhere, target_is_directory=True)
+    assert _held(run, tid) == []
+    path.parent.unlink()
+    path.parent.mkdir()
+    path.symlink_to(elsewhere / path.name)
+    assert _held(run, tid) == []
+    path.unlink()
+    path.mkdir()
+    assert _held(run, tid) == []
+    path.rmdir()
+    path.write_text(good + " " * runs_live.HELD_MAX)
+    assert _held(run, tid) == []
+    path.write_text(good)
+    assert _held(run, tid) == [first["id"]]
+
+
+@pytest.mark.parametrize("bad", ["..", "../t_abc123", "t_abc/../x", "/etc/passwd", "a/b", ""])
+def test_a_bad_ticket_id_never_reaches_the_stop_hold_path(proj, bad):
+    """M3: the id shape is checked before any hold path is built, read, written or removed."""
+    for call in (
+        lambda: runs_live._held_path(proj, bad),
+        lambda: runs_live.stop_held(proj, bad, []),
+        lambda: runs_live._write_held(proj, bad, ["p_x"]),
+        lambda: runs_live.clear_held(proj, bad),
+    ):
+        with pytest.raises(Refused):
+            call()
+    assert not (runs.run_dir(proj) / "stop-held").exists()
+
+
 def test_a_run_lock_is_never_empty(proj, monkeypatch):
     """A stop could hit the wrapper between creating its run lock and writing its name into it; that empty
     lock looked like a live writer for 30 s and the stop gave up ("busy"). The lock is now linked into place
