@@ -68,7 +68,7 @@
   }
 
   function renderFeed(v) {
-    const key = keyOf([v.record_notes, v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.board.step, v.events, v.ticket.history, S.state.agentFilter || null, S.state.agentFilter ? [v.board.helper_tree, v.board.agent_now] : null]);
+    const key = keyOf([v.record_notes, v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.ticket.status, v.ticket.questions, v.board.step, v.events, v.ticket.history, S.state.agentFilter || null, S.state.agentFilter ? [v.board.helper_tree, v.board.agent_now] : null]);
     if (key === S.state.lastFeedKey) return;
     S.state.lastFeedKey = key;
     const helper = S.state.agentFilter && S.state.agentFilter !== 'main' && ((v.board && v.board.helper_tree) || []).some(x => x.agent === S.state.agentFilter);
