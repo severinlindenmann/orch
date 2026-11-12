@@ -861,7 +861,7 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         ["merge-tree", "--trivial-merge", "a", "b", "c"],
         ["rev-list", "--output=/tmp/x", "HEAD"],
         ["rev-list", "--exec=x", "HEAD"],
-        ["rev-list", "--count", "--objects", "HEAD"],
+        ["rev-list", "--count", "--objects", "--filter=blob:none", "HEAD"],
         ["check-attr", "--source", "x", "filter", "--", "f"],
         ["check-attr", "--all", "--", "f"],
         ["check-attr", "-z", "--stdin", "filter"],
@@ -1683,6 +1683,7 @@ def test_filters_off_allowlist_is_only_what_callers_need():
         "check-attr",
         "worktree",
         "ls-files",
+        "for-each-ref",  # names of the work branches, listed once per dashboard load (B13 follow-up)
     }
 
 
@@ -1795,6 +1796,17 @@ def test_every_fsck_format_id_can_really_be_ignored(tmp_path):
         assert "Cannot demote" not in p.stderr, i
 
 
+def test_colour_is_off_for_every_call(tmp_path, monkeypatch):
+    """A repo's own config (color.diff=always) must not put escape codes into what orch parses."""
+    seen = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
+    )
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    safegit.run(["rev-parse", "HEAD"], tmp_path, read_only=True, filters=False)
+    assert "color.ui=never" in seen[-1] and "color.diff=never" in seen[-1]
+
+
 UNKNOWN_GLOBALS = [
     ["--shallow-file", "x", "rev-parse", "HEAD"],
     ["--shallow-file", "rev-parse", "rm", "--cached", "a.txt"],
@@ -1825,3 +1837,9 @@ def test_the_closed_list_of_leading_options_has_exact_arity():
     assert safegit.subcommand_index(["-C", "x", "rev-parse"]) == 2  # exactly one value
     assert safegit.subcommand_index(["--no-optional-locks", "--literal-pathspecs", "rev-parse"]) == 2
     assert safegit.subcommand_index(["-C", "rev-parse"]) == 2  # -C swallows one word, as git does
+
+
+def test_for_each_ref_runs_without_filters_only_with_the_names_format():
+    assert safegit.filters_off_refusal(["for-each-ref", "--format=%(refname)", "refs/heads/orch/"]) is None
+    assert safegit.filters_off_refusal(["for-each-ref", "--format=%(contents)", "refs/heads/"]) is not None
+    assert safegit.filters_off_refusal(["for-each-ref", "--shell", "refs/heads/"]) is not None

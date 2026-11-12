@@ -6,7 +6,10 @@ function changeUnavailable() {
   return true;
 }
 function changeError(result) {
-  return result.status === 0 ? "Can't reach orch. Your change was not sent." : window.DashHelpers.scrubText(result.text);
+  if (result.status === 0) return "Can't reach orch. Your change was not sent.";
+  const text = window.DashHelpers.scrubText(result.text);
+  // the page was older than the ticket (a new round started, the work changed): nothing was approved
+  return /changed while you worked|Read it again/i.test(text) ? 'This ticket changed since you opened it. Look at it again, then accept.' : text;
 }
 function ticketTitle(t, needsYou = false) {
   return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), needsYou || (questions(t).length && shown(t).status !== 'done') ? chip('Needs you', 'attn') : statusChip(t));
@@ -57,7 +60,7 @@ function needRow(row, newest, questionCount = 1) {
 // The only core op a row may name is the existing, signed private.move, and only in a row of the sync add-on. Its button
 // and sign step always use the core's own words below: a row's label and review are never shown for a core op.
 const NEED_OPS = {'private.move':{label:'Move', title:'Move your orch files out of the team repository?',
-  body:'Why: your tickets sit in your team’s repository, so everyone on the team sees each change. Where: they stay in this folder on this computer; the team repository no longer keeps them. Your team’s files are not touched.',
+  body:'Why: your team’s repository holds orch files that are not shared with the team, so everyone on the team sees each change. Where: they stay in this folder on this computer; the team repository no longer keeps them. Your team’s files are not touched.',
   done:'Moved your orch files.'}};
 const needOp = (row, a) => row.source === 'sync' && typeof a.op === 'string' && Object.prototype.hasOwnProperty.call(NEED_OPS, a.op) ? NEED_OPS[a.op] : null;
 const needLabel = a => a.core ? a.core.label : a.label;

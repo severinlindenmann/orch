@@ -115,7 +115,8 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.send_header(
-            "Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'"
+            "Content-Security-Policy",
+            csp or "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'",
         )
         self.end_headers()
         self.wfile.write(body)
@@ -547,7 +548,10 @@ class Handler(BaseHTTPRequestHandler):
             # the add-on's own answer to this click (a Sync card's status, a check): shown as plain text only
             answer = json.dumps(extra)
             if len(answer) <= 32_768:
-                state["act_answer"] = {"addon": str((body.get("args") or {}).get("addon"))[:32], "answer": extra}
+                state["act_answer"] = {
+                    "addon": str((body.get("args") or {}).get("addon"))[:32],
+                    "answer": extra,
+                }
         if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
             att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
             state["attached"] = {

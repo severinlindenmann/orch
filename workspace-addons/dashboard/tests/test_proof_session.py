@@ -85,7 +85,12 @@ def test_launch_token_bootstraps_the_cookie_once(live):
     root, port = live
     tok = hp.write_launch_token(root, "dashboard")
     st, ck, _ = post(port, "/session", {"token": tok})
-    assert st == 200 and "HttpOnly" in ck and "SameSite=Strict" in ck and ck.startswith(f"orch_page_dashboard_{port}=")
+    assert (
+        st == 200
+        and "HttpOnly" in ck
+        and "SameSite=Strict" in ck
+        and ck.startswith(f"orch_page_dashboard_{port}=")
+    )
     assert post(port, "/session", {"token": tok})[0] == 403  # single use
     assert post(port, "/session", {"token": "x" * 30})[0] == 403
 
@@ -151,18 +156,30 @@ def test_two_loopback_servers_keep_independent_sessions(live, monkeypatch):
         act = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
         ck1 = session(root, port)
         ck2 = session(root, port2)  # signing in to the second server ...
-        assert ck1.split("=")[0] == f"orch_page_dashboard_{port}" and ck2.split("=")[0] == f"orch_page_dashboard_{port2}"
+        assert (
+            ck1.split("=")[0] == f"orch_page_dashboard_{port}"
+            and ck2.split("=")[0] == f"orch_page_dashboard_{port2}"
+        )
         both = f"{ck1}; {ck2}"  # ... leaves the first cookie in the browser jar (different names)
         page1, page2 = {"X-Orch-Page": SECRETS[ck1]}, {"X-Orch-Page": SECRETS[ck2]}  # each page's own secret
         assert post(port, "/api/act", act, {"Cookie": both, **page1})[0] == 200  # first still signed in
         assert post(port2, "/api/act", act, {"Cookie": both, **page2})[0] == 200
         n = len(ran)
-        assert post(port2, "/api/act", act, {"Cookie": ck1, **page2})[0] == 403  # one's cookie is no session on the other
+        assert (
+            post(port2, "/api/act", act, {"Cookie": ck1, **page2})[0] == 403
+        )  # one's cookie is no session on the other
         assert post(port, "/api/act", act, {"Cookie": ck2, **page1})[0] == 403
-        assert post(port2, "/api/act", act, {"Cookie": ck2, **page1})[0] == 403  # nor is one's secret the other's
+        assert (
+            post(port2, "/api/act", act, {"Cookie": ck2, **page1})[0] == 403
+        )  # nor is one's secret the other's
         value1 = ck1.split("=", 1)[1]  # nor is its value under the other's name
-        assert post(port2, "/api/act", act, {"Cookie": f"orch_page_dashboard_{port2}={value1}", **page2})[0] == 403
-        assert post(port2, "/api/act", act, {"Cookie": f"orch_page={value1}", **page2})[0] == 403  # the old shared name
+        assert (
+            post(port2, "/api/act", act, {"Cookie": f"orch_page_dashboard_{port2}={value1}", **page2})[0]
+            == 403
+        )
+        assert (
+            post(port2, "/api/act", act, {"Cookie": f"orch_page={value1}", **page2})[0] == 403
+        )  # the old shared name
         assert len(ran) == n
     finally:
         srv2.shutdown()
@@ -244,7 +261,10 @@ def test_a_notice_is_read_not_consumed_and_only_the_ack_of_a_session_clears_it(l
 
     def get(cookie=None):
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        h = {"Host": f"127.0.0.1:{port}", **({"Cookie": cookie, "X-Orch-Page": SECRETS[cookie]} if cookie else {})}
+        h = {
+            "Host": f"127.0.0.1:{port}",
+            **({"Cookie": cookie, "X-Orch-Page": SECRETS[cookie]} if cookie else {}),
+        }
         c.request("GET", "/api/notices", headers=h)
         return json.loads(c.getresponse().read())
 
@@ -714,7 +734,10 @@ def test_every_mint_route_refuses_the_cookie_alone(live, monkeypatch, body):
     from orch_dashboard import handoff
 
     monkeypatch.setattr(handoff, "run_with_proof", lambda *a, **k: ran.append(a))
-    only_cookie = {"Cookie": ck, "X-Orch-Page": None}  # what a foreign local page that got the cookie can send
+    only_cookie = {
+        "Cookie": ck,
+        "X-Orch-Page": None,
+    }  # what a foreign local page that got the cookie can send
     wrong = {"Cookie": ck, "X-Orch-Page": "x" * 43}
     for h in (only_cookie, wrong, {"Cookie": ck, "X-Orch-Page": ck.split("=", 1)[1]}):
         st, _, _ = post(port, "/api/act", body, h)
@@ -808,7 +831,9 @@ def test_session_refused_for_foreign_origin_missing_origin_or_wrong_host(live, e
     st, hdr, body = _raw(port, "POST", "/session", {"token": tok}, {**base, **extra})
     assert st == 403 and b"secret" not in body and "set-cookie" not in hdr
     assert not any(k.startswith("access-control-") for k in hdr)
-    st, _, body = _raw(port, "POST", "/session", {"token": tok}, base)  # the token was not spent by the refusals
+    st, _, body = _raw(
+        port, "POST", "/session", {"token": tok}, base
+    )  # the token was not spent by the refusals
     assert st == 200 and json.loads(body)["secret"]
 
 
@@ -867,8 +892,12 @@ def test_secret_compare_is_constant_time_and_rotates_with_the_session(live):
     assert st == 200 and new_secret and new_secret != old_secret
     new_ck = hdr["set-cookie"].split(";")[0]
     assert new_ck != old_ck
-    assert post(port, "/api/act", ANSWER, {"Cookie": old_ck, "X-Orch-Page": old_secret})[0] == 403  # old pair dead
-    assert post(port, "/api/act", ANSWER, {"Cookie": new_ck, "X-Orch-Page": old_secret})[0] == 403  # old secret dead
+    assert (
+        post(port, "/api/act", ANSWER, {"Cookie": old_ck, "X-Orch-Page": old_secret})[0] == 403
+    )  # old pair dead
+    assert (
+        post(port, "/api/act", ANSWER, {"Cookie": new_ck, "X-Orch-Page": old_secret})[0] == 403
+    )  # old secret dead
 
 
 def test_every_dashboard_answer_forbids_framing_by_other_sites(live):
