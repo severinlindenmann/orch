@@ -3040,11 +3040,18 @@ def test_b13x_a_new_folder_where_the_merge_deleted_a_file_is_never_hard_reset(do
     assert got["ln"] == "link" and got["missing"] == "absent"
 
 
-def test_b13x_autocrlf_input_never_means_crlf(done_copy):
+def test_b13x_only_autocrlf_true_means_crlf(done_copy):
     root, tid, copy = done_copy
     git(root, "config", "core.eol", "crlf")
-    assert worktrees._crlf_checkout(root) is True
+    assert worktrees._crlf_checkout(root) is False  # eol alone converts nothing
     git(root, "config", "core.autocrlf", "input")
     assert worktrees._crlf_checkout(root) is False
     git(root, "config", "core.autocrlf", "true")
     assert worktrees._crlf_checkout(root) is True
+
+
+def test_b13x_an_assume_unchanged_entry_blocks_a_hard_rollback(done_copy):
+    root, tid, copy = done_copy
+    assert worktrees._index_flagged(root) is False
+    git(root, "update-index", "--assume-unchanged", "code.py")
+    assert worktrees._index_flagged(root) is True

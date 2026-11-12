@@ -1039,17 +1039,11 @@ def _blob_id(data: bytes, sha: str) -> str:
 
 
 def _crlf_checkout(top: Path) -> bool:
-    """The project's git writes CRLF line ends on checkout: core.autocrlf=true (git for Windows' default), or
-    core.eol=crlf while core.autocrlf is unset. autocrlf=input|false never writes CRLF (git's precedence:
-    autocrlf wins over eol): only then is a CRLF form of a blob what the folder should hold."""
+    """The project's git writes CRLF line ends on checkout: core.autocrlf=true, git for Windows' default.
+    (core.eol=crlf alone converts nothing without a text attribute, and attributes are refused before a merge;
+    autocrlf=input|false never writes CRLF.) Only then is the CRLF form of a blob what the folder should hold."""
     rc, out, _ = _git(["config", "--get", "core.autocrlf"], top, read_only=True)
-    mode = out.strip().lower() if rc == 0 else ""
-    if mode == "true":
-        return True
-    if mode in ("input", "false"):
-        return False
-    rc, out, _ = _git(["config", "--get", "core.eol"], top, read_only=True)
-    return rc == 0 and out.strip().lower() == "crlf"
+    return rc == 0 and out.strip().lower() == "true"
 
 
 def _bytes_match_blob(data: bytes, sha: str, crlf: bool = False) -> bool:
@@ -1822,6 +1816,8 @@ def _history_ok_below(top: Path, commit: str) -> bool:
                 return False
             g = m.groupdict()
             ids = [g[k] for k in "abcd" if g[k]]
+            for pm in re.finditer(r"objects/([0-9a-f]{2})/([0-9a-f]{38,62})", ln):  # the stored-at id too
+                ids.append(pm.group(1) + pm.group(2))
             if g["e"] and g["f"]:
                 ids.append(g["e"] + g["f"])
             if g["g"] and g["h"]:
@@ -1836,6 +1832,13 @@ def _history_ok_below(top: Path, commit: str) -> bool:
         return not (bad & reachable)
     except (OSError, ValueError, Refused):
         return False
+
+
+def _index_flagged(top: Path) -> bool:
+    """Any tracked file marked assume-unchanged / skip-worktree / otherwise not a plain entry in the shared
+    index: git would then not see (and a --hard could overwrite) a person's edit there."""
+    listing = _bb_read(top, ["ls-files", "-v", "-z"], strip=False)
+    return any(f and not f.startswith("H ") for f in listing.split("\0"))
 
 
 def _roll_back(top: Path, prep, touched, pre: dict, merge_commit: str, written: dict) -> str:
@@ -1866,6 +1869,7 @@ def _roll_back(top: Path, prep, touched, pre: dict, merge_commit: str, written: 
             or _git(["diff", "--cached", "--quiet", "--no-renames", merge_commit], top, read_only=True)[0]
             != 0
             or any(f[:2] in ("??", "!!") and _hits(prep, f[3:]) for f in _bb_status(top).split("\0") if f)
+            or _index_flagged(top)
         ):
             return "kept"  # untracked or ignored files, folders, links: a --hard could delete a person's
         if _git(["reset", "--hard", pre["head"]], top)[0] != 0:
