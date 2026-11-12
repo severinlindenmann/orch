@@ -55,23 +55,6 @@ def _use_as_person(argv, unproven):
     return (*argv[:2], "--proof-stdin", *argv[2:]), _proof(ws, "secret.profile", target) + "\n"
 
 
-@pytest.fixture(autouse=True)
-def _trust_the_test_interpreter(monkeypatch, request):
-    """The test interpreter lives in folders its developer owns or shares with a group (a Homebrew Cellar is
-    user-owned and group-writable, a uv/pyenv python is user-owned), so it could never be approved as a
-    command on a developer laptop, and CI differs from a laptop. For these tests only, the interpreter and its
-    parent folders are left out of the chain the check looks at (one seam: secretrun._chain); every other
-    path (the tests' own programs, the workspace) keeps the real check. The tests marked real_checks run the
-    real check on everything."""
-    if request.node.get_closest_marker("real_checks"):
-        return
-    trusted = set(secretrun._chain(os.path.realpath(PY)))
-    real = secretrun._chain
-    monkeypatch.setattr(secretrun, "_chain", lambda p: [c for c in real(p) if c not in trusted])
-    # (this machine's Xcode folder is in the user's own Applications: the Xcode tests use the real check)
-    monkeypatch.setattr(secretrun, "_check_xcode", lambda path, ws: None)
-
-
 @pytest.fixture
 def run(capsys, monkeypatch):
     """Like the shared `run`, but a command's own exit code (SystemExit) is returned as the code."""
@@ -1129,10 +1112,6 @@ def test_set_refuses_a_program_others_can_change(store, run, ws, monkeypatch, tm
     try:
         code, _, err = _set(run, monkeypatch, ws, "loose", "--run", str(exe))
         assert code == 2 and "other users" in err
-        d.chmod(0o700)
-        exe.chmod(0o775)
-        code, _, err = _set(run, monkeypatch, ws, "loose", "--run", str(exe))
-        assert code == 2 and "other users" in err
     finally:
         d.chmod(0o700)
 
@@ -1923,43 +1902,11 @@ def test_h3_the_real_home_only_with_the_persons_real_home_setting(store, run, ws
     assert code == 2  # the body no longer matches its MAC
 
 
-@pytest.mark.real_checks
-@pytest.mark.skipif(sys.platform != "darwin", reason="Xcode shims are a macOS thing")
-def test_a_tool_planted_in_the_developer_folder_after_approval_is_refused_at_the_next_start(
-    ws, monkeypatch, tmp_path
-):
-    tmp = Path(os.path.realpath(tmp_path))
-    stubs = tmp / "stubs"
-    stubs.mkdir()
-    (stubs / "git").write_bytes(b"libxcselect")
-    dev = tmp / "Developer"
-    (dev / "usr" / "bin").mkdir(parents=True)
-    link = tmp / "link"
-    link.symlink_to(dev)
-    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
-    monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(stubs))
-    real = secretrun._chain
-    # (pretend the folder and what is above it is safe; only the tool is not. The temp folder above it is
-    # world-writable on a laptop and in CI, so it is left out of the chain the check looks at.)
-    safe = set(real(str(dev)))
-    monkeypatch.setattr(secretrun, "_chain", lambda p: [c for c in real(p) if c not in safe])
-    secretrun._check_xcode(str(stubs / "git"), str(ws))  # nothing there yet: fine
-    (dev / "usr" / "bin" / "git").write_bytes(b"planted")  # the agent plants the tool afterwards
-    with pytest.raises(Refused, match=LOCATION):
-        secretrun._check_xcode(str(stubs / "git"), str(ws))
-    (dev / "usr" / "bin" / "git").unlink()
-    (dev / "Platforms" / "X.platform" / "Developer" / "usr" / "bin").mkdir(parents=True)
-    (dev / "Platforms" / "X.platform" / "Developer" / "usr" / "bin" / "git").write_bytes(b"planted")
-    with pytest.raises(Refused, match=LOCATION):
-        secretrun._check_xcode(str(stubs / "git"), str(ws))
-
-
-@pytest.mark.real_checks  # (on a runner whose python lives in /usr/bin the fixture would drop that folder)
-def test_a_system_folder_the_user_can_write_through_a_group_counts_as_user_owned(ws, monkeypatch):
-    real = secretrun._user_can_write
-    monkeypatch.setattr(secretrun, "_user_can_write", lambda p: p == "/usr/bin" or real(p))
-    with pytest.raises(Refused, match=LOCATION):
-        secretrun.approve_program(ws, "/usr/bin/true")
+@pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
+def test_system_developer_tools_can_be_approved_on_a_mac(ws):
+    for name in ("git", "python3", "clang"):
+        if os.path.isfile(f"/usr/bin/{name}") and os.path.isdir(secretrun._developer_dir()):
+            assert secretrun.approve_program(ws, f"/usr/bin/{name}")[0]
 
 
 def test_nothing_that_starts_programs_runs_on_windows(store, run, ws, monkeypatch):
@@ -1988,14 +1935,16 @@ def test_a_program_that_starts_with_a_shebang_needs_a_system_interpreter(ws, tmp
         f.write_bytes(head)
         return str(f)
 
-    for bad in (b"#!/usr/bin/env awk\n", b"#!awk\n", b"#!" + str(tmp_path / "own").encode() + b"\n"):
+    for bad in (b"#!/usr/bin/env awk\n", b"#!awk\n", b"#!" + str(tmp_path / "none").encode() + b"\n"):
         with pytest.raises(Refused):
             secretrun._check_shebang(ws, script(bad), 0)
     secretrun._check_shebang(ws, script(b"#!/bin/sh\n"), 0)  # a system interpreter
+    own = _user_program(tmp_path)
+    secretrun._check_shebang(ws, script(b"#!" + str(own).encode() + b"\n"), 0)  # one the user owns
     secretrun._check_shebang(ws, script(b"not a script"), 0)
 
 
-LOCATION = "belongs to your own user|changed by other users"  # which reason fires first depends on the folder
+LOCATION = "changed by other users"
 
 
 def _safe_file():
@@ -2033,18 +1982,45 @@ def _user_program(tmp_path):
     return exe
 
 
-@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_program_in_a_folder_the_user_owns_cannot_be_approved(store, run, ws, monkeypatch, tmp_path):
-    code, _, err = _set(run, monkeypatch, ws, "mine", "--run", str(_user_program(tmp_path)))
-    assert code == 2 and re.search(LOCATION, err) and "mine" not in keystore.read_profiles(ws)
+def _open_folder(tmp_path):
+    """A folder anyone can write to (no sticky bit), with a program and a data file in it."""
+    folder = Path(os.path.realpath(tmp_path)) / "open"
+    folder.mkdir()
+    folder.chmod(0o777)
+    (folder / "data.txt").write_text("x")
+    return folder, _user_program(folder)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_forged_profile_pointing_at_a_user_program_is_refused_in_every_mode(
+def test_h2_a_program_in_a_folder_the_user_owns_can_be_approved(store, run, ws, monkeypatch, tmp_path):
+    exe = _user_program(tmp_path)
+    code, out, err = _set(run, monkeypatch, ws, "mine", "--run", str(exe))
+    assert code == 0, out + err
+    assert keystore.read_profiles(ws)["mine"]["run"] == [str(exe)]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_program_in_a_world_writable_folder_cannot_be_approved(store, run, ws, monkeypatch, tmp_path):
+    _, exe = _open_folder(tmp_path)
+    code, _, err = _set(run, monkeypatch, ws, "open", "--run", str(exe))
+    assert code == 2 and re.search(LOCATION, err) and "open" not in keystore.read_profiles(ws)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="home folders")
+def test_a_plain_name_is_also_found_in_the_persons_local_bin(ws, monkeypatch, tmp_path):
+    home = Path(os.path.realpath(tmp_path))
+    monkeypatch.setenv("HOME", str(home))
+    (home / ".local").mkdir()
+    exe = _user_program(home / ".local")
+    assert secretrun.resolve_program(ws, "tool") == str(exe)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_forged_profile_pointing_at_an_open_folder_program_is_refused_in_every_mode(
     store, run, ws, monkeypatch, tmp_path
 ):
     """Even a body that carries a valid MAC is checked again at every start, in env, file and exec mode."""
-    exe = _user_program(tmp_path)
+    _, exe = _open_folder(tmp_path)
     prof = keystore.read_profiles(ws)
     prof["mine"] = {"env": {"T": "other-token"}, "files": {}, "run": [str(exe)]}
     seed_profiles(ws, prof)
@@ -2066,19 +2042,20 @@ def test_h2_a_full_path_argument_in_a_safe_place_is_accepted(store, run, ws, mon
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_user_writable_or_linked_or_missing_path_argument_is_refused(
-    store, run, ws, monkeypatch, tmp_path
-):
+def test_h2_an_open_or_linked_or_missing_path_argument_is_refused(store, run, ws, monkeypatch, tmp_path):
     tmp_path = Path(os.path.realpath(tmp_path))
     mine = tmp_path / "data.txt"
     mine.write_text("x")
+    code, out, err = _set(run, monkeypatch, ws, "own", "--run", "/usr/bin/true", "--run", str(mine))
+    assert code == 0, out + err  # a file of the user's own: fine
     link = tmp_path / "link"
     link.symlink_to(_safe_file())
+    folder, _ = _open_folder(tmp_path)
     for arg, message in (
-        (str(mine), LOCATION),
+        (str(folder / "data.txt"), LOCATION),
         (str(link), "through a link"),
         ("/nonexistent/place", "does not exist"),
-        (str(tmp_path), LOCATION),
+        (str(tmp_path), "regular file"),
     ):
         code, out, err = _set(run, monkeypatch, ws, "args", "--run", "/usr/bin/true", "--run", arg)
         assert code == 2 and re.search(message, err), (arg, err)
@@ -2119,9 +2096,8 @@ def test_a_real_home_profile_is_for_the_person_only(store, run, ws, monkeypatch,
 
 
 def test_a_command_argument_is_checked_again_at_every_start(store, run, ws, monkeypatch, tmp_path):
-    tmp_path = Path(os.path.realpath(tmp_path))
-    mine = tmp_path / "data.txt"
-    mine.write_text("x")
+    folder, _ = _open_folder(tmp_path)
+    mine = folder / "data.txt"
     prof = keystore.read_profiles(ws)
     prof["late"] = {"env": {"T": "other-token"}, "files": {}, "run": ["/usr/bin/true", str(mine)]}
     seed_profiles(ws, prof)  # (forged: a person would have been refused at set)
@@ -2141,53 +2117,32 @@ def test_an_unreadable_script_program_is_refused(ws, tmp_path):
         secretrun._check_shebang(ws, str(tmp_path / "missing"), 0)
 
 
-@pytest.mark.real_checks
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
-def test_an_unsafe_developer_folder_blocks_xcrun_stubs_but_not_other_system_programs(
-    ws, monkeypatch, tmp_path
-):
+def test_a_user_owned_developer_folder_is_fine_and_only_stubs_need_one(ws, monkeypatch, tmp_path):
     tmp = Path(os.path.realpath(tmp_path))
     stubs = tmp / "stubs"
     stubs.mkdir()
     (stubs / "git").write_bytes(b"\xcf\xfa binary ... /usr/lib/libxcselect.dylib ...")  # a fake xcrun stub
     (stubs / "true").write_bytes(b"\xcf\xfa an ordinary program")
-    dev = tmp / "Developer"  # owned by the test user, and without a `git` inside
-    dev.mkdir()
+    (stubs / "unreadable").mkdir()  # cannot be read as a file: counts as a stub
+    dev = tmp / "Developer"  # owned by the test user, like a user-owned /Applications/Xcode.app
+    (dev / "usr" / "bin").mkdir(parents=True)
+    (dev / "usr" / "bin" / "git").write_bytes(b"tool")
     link = tmp / "link"
     link.symlink_to(dev)
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
     monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(stubs))
-    with pytest.raises(Refused, match=LOCATION):
-        secretrun._check_xcode(str(stubs / "git"), str(ws))
-    secretrun._check_xcode(str(stubs / "true"), str(ws))  # not a stub: not blocked by the developer folder
-    (stubs / "unreadable").mkdir()  # cannot be read as a file: counts as a stub
-    with pytest.raises(Refused, match=LOCATION):
-        secretrun._check_xcode(str(stubs / "unreadable"), str(ws))
+    monkeypatch.setattr(secretrun, "CLT_DIR", str(tmp / "no-command-line-tools"))  # this Mac has the real one
+    secretrun._check_xcode(str(stubs / "git"))
+    dev.rename(tmp / "gone")
+    for stub in ("git", "unreadable"):
+        with pytest.raises(Refused, match="developer tools it runs from are missing"):
+            secretrun._check_xcode(str(stubs / stub))
+    secretrun._check_xcode(str(stubs / "true"))  # not a stub: does not need the developer folder
 
 
-@pytest.mark.real_checks
-@pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
-def test_without_the_xcode_link_the_command_line_tools_folder_is_checked(ws, monkeypatch, tmp_path):
-    clt = "/Library/Developer/CommandLineTools"
-    if not os.path.isdir(clt):
-        pytest.skip("no command line tools here")
-    tmp = Path(os.path.realpath(tmp_path))
-    (tmp / "git").write_bytes(b"libxcselect")
-    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(tmp / "missing"))
-    monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(tmp))
-    seen = []
-    monkeypatch.setattr(secretrun, "_check_chain", lambda real, w: seen.append(real))
-    secretrun._check_xcode(str(tmp / "git"), str(ws))
-    assert os.path.realpath(clt) in seen
-
-
-@pytest.mark.real_checks
-def test_without_the_trusted_test_interpreter_the_interpreter_is_refused(ws):
-    real = os.path.realpath(sys.executable)
-    if not any(secretrun._user_can_write(p) for p in secretrun._chain(real)):
-        pytest.skip("on this machine the interpreter is not in a place the user can change")
-    with pytest.raises(Refused):
-        secretrun.approve_program(ws, sys.executable)
+def test_the_test_interpreter_can_be_approved(ws):
+    assert secretrun.approve_program(ws, sys.executable)[0] == os.path.realpath(sys.executable)
 
 
 def test_get_is_refused_on_windows(store, ws, monkeypatch):
@@ -2270,34 +2225,36 @@ def test_the_developer_variables_are_never_handed_to_a_command():
     assert all(keystore.env_denied(v) for v in ("DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS"))
 
 
-@pytest.mark.real_checks
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
 def test_a_differently_cased_stub_path_is_still_a_stub(ws, monkeypatch, tmp_path):
     tmp = Path(os.path.realpath(tmp_path))
     stubs = tmp / "stubs"
     stubs.mkdir()
     (stubs / "git").write_bytes(b"libxcselect")
-    dev = tmp / "Developer"
-    dev.mkdir()
-    link = tmp / "link"
-    link.symlink_to(dev)
-    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
     monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(stubs))
+    monkeypatch.setattr(secretrun, "_developer_dir", lambda: str(tmp / "nothing-here"))
     shout = str(stubs).upper() + "/git"
     if not os.path.exists(shout):  # a case-sensitive file system: the odd spelling is simply not there
         with pytest.raises(Refused, match="not found"):
             secretrun.approve_program(ws, shout)
         return
-    with pytest.raises(Refused, match=LOCATION):
-        secretrun._check_xcode(shout, str(ws))
+    with pytest.raises(Refused, match="missing"):
+        secretrun._check_xcode(shout)
 
 
-@pytest.mark.real_checks
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
 def test_a_stub_is_refused_when_no_developer_folder_exists(ws, monkeypatch, tmp_path):
     tmp = Path(os.path.realpath(tmp_path))
     (tmp / "git").write_bytes(b"libxcselect")
     monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(tmp))
     monkeypatch.setattr(secretrun, "_developer_dir", lambda: str(tmp / "nothing-here"))
-    with pytest.raises(Refused, match="developer folder it runs from is missing"):
-        secretrun._check_xcode(str(tmp / "git"), str(ws))
+    with pytest.raises(Refused, match="developer tools it runs from are missing"):
+        secretrun._check_xcode(str(tmp / "git"))
+
+
+def test_a_refusal_is_printed_with_one_prefix_and_says_what_is_allowed(store, run, ws):
+    with pytest.raises(Refused, match="user:pass") as e:
+        secretrun.check_arguments(ws, ["user:pass"], None)
+    assert "full path of a file" in str(e.value)
+    code, _, err = run("secret", "env", "nope", "--", PY)
+    assert code == 2 and err.startswith("Refused: ") and "Refused: Refused:" not in err

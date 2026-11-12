@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -554,6 +555,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("question")
     x.add_argument("answer")
     x.add_argument("--via", default="cli", metavar="WORD", help="where the answer comes from (default cli)")
+    x.add_argument(
+        "--question-digest", metavar="D", help=argparse.SUPPRESS
+    )  # the question as the page showed it (bound into the person's proof)
 
     lk = sub.add_parser("ref", help="references to useful work").add_subparsers(dest="sub", required=True)
     x = lk.add_parser("add", parents=[common], help="add a reference to a ticket")
@@ -1065,15 +1069,38 @@ def run(args: argparse.Namespace) -> None:
             "is now waiting for an answer.",
         )
     elif cmd == "answer":
-        # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says
+        # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says.
+        # The question is read BEFORE it is shown for the proof: if it changes after that, the answer refuses.
+        shown_q = next(
+            (x for x in tickets.load(root, args.id).get("questions") or [] if x.get("id") == args.question),
+            None,
+        )
+        shown_digest = tickets.question_digest(shown_q)  # no question shown: any answer is refused
+        given = getattr(args, "question_digest", None)
+        if given is not None and not re.fullmatch(r"[0-9a-f]{64}", given):
+            raise Refused("This question changed or can't be checked. Ask again.")
+        if getattr(args, "proof_stdin", False):
+            # the proof was made for the question the PAGE showed: its digest is part of the signed target,
+            # and the answer below is refused unless the current question is still exactly that one
+            if given is None:
+                raise Refused("This question changed or can't be checked. Ask again.")
+            shown_digest = given
+        elif given is not None and given != shown_digest:
+            raise Refused(
+                f"{args.question} changed after it was shown. Look at the question again, then answer."
+            )
+        argv = humanproof._clean_argv(humanproof.CURRENT_ARGV)
+        if argv is not None and given is None:  # the page's resumed command carries the digest shown here
+            argv = [*argv[:1], "--question-digest", shown_digest, *argv[1:]]
         who = humanproof.person_by(
             root,
             args,
             "ticket.answer",
-            f"{args.id}:{args.question}",
+            f"{args.id}:{args.question}:{shown_digest}",
+            argv=argv,
             parts={
                 "title": humanproof.ticket_name(root, args.id),
-                "question": humanproof.question_text(root, args.id, args.question),
+                "question": humanproof.question_text(root, args.id, args.question, shown_q),
             },
             value=args.answer,
         )
@@ -1081,7 +1108,9 @@ def run(args: argparse.Namespace) -> None:
             raise Refused("This question was sent to the phones. Only a human answers it.")
         if who.startswith("human:"):
             runs.require_signing(root)  # a person's answer that could not be signed is refused, not half done
-        t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
+        t, q = tickets.answer(
+            root, args.id, args.question, args.answer, who, args.via, expected_question_digest=shown_digest
+        )
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent
@@ -1233,7 +1262,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
 
     def refuse(e: Refused) -> int:
         # a confirmation that could not be asked (no terminal) is a question: no "Refused:" in front
-        print(f"{e}" if getattr(e, "confirm", False) else f"Refused: {e}", file=sys.stderr)
+        plain = getattr(e, "confirm", False) or str(e).startswith("Refused:")  # many messages carry their own
+        print(f"{e}" if plain else f"Refused: {e}", file=sys.stderr)
         if want_json:
             print(json.dumps({"error": str(e), **getattr(e, "extra", {})}, ensure_ascii=False))
         return 2

@@ -484,6 +484,36 @@ def _try_again(name: str) -> str:
     )
 
 
+_BINDINGS: dict = {}  # per process: binding.json path -> (file identity, the realpath it names)
+
+
+def _binding_realpath(f: Path):
+    """The `realpath` a binding.json names. Read again only when the file's identity (device, inode, times,
+    size, mode, owner, links) changed, so a swapped or edited file is always read afresh; every failure path
+    is the uncached one (never cached)."""
+    st = f.lstat()
+    if not POSIX:  # file ids are not reliable on Windows: always read afresh
+        return json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
+    ident = (
+        st.st_dev,
+        st.st_ino,
+        st.st_mtime_ns,
+        st.st_ctime_ns,
+        st.st_size,
+        st.st_mode,
+        st.st_uid,
+        st.st_nlink,
+    )
+    hit = _BINDINGS.get(str(f))
+    if hit is not None and hit[0] == ident:
+        return hit[1]
+    stored = json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
+    if len(_BINDINGS) > 512:
+        _BINDINGS.clear()
+    _BINDINGS[str(f)] = (ident, stored)
+    return stored
+
+
 def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
     """Names of the key folders in `home` whose binding.json names this workspace's real path (identity by
     samefile where both exist, else equal real paths). A folder with no or a damaged binding names nothing."""
@@ -502,7 +532,7 @@ def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
         try:
             if not stat.S_ISDIR((keys / name).lstat().st_mode):  # keys.lock and the like
                 continue
-            stored = json.loads(_read_guarded(keys / name / "binding.json").decode("utf-8")).get("realpath")
+            stored = _binding_realpath(keys / name / "binding.json")
         except FileNotFoundError:  # no binding.json: bound to nothing
             continue
         except (ValueError, AttributeError):  # garbage JSON: bound to nothing
@@ -668,6 +698,8 @@ def human_key(root: Path, create: bool = True) -> bytes:
             except (
                 LooseFile
             ) as e:  # a loose key is never read: rotate it (old proofs and MACs stop verifying)
+                if getattr(_LOADING_OLD, "active", False):
+                    raise  # a reset is already reading the old key: it carries nothing over
                 reset_protection(root, str(e))
                 raw = _read_guarded(f)
             hexkey = raw.decode("utf-8", "replace").strip()
@@ -676,6 +708,7 @@ def human_key(root: Path, create: bool = True) -> bytes:
                 raise Refused("There is no human key here yet.") from None
             hexkey = secrets.token_hex(32)
             _write_private(f, hexkey + "\n")
+            record_cutover_ensure(root)  # protection begins here: the runs that exist now are the legacy ones
     try:
         key = bytes.fromhex(hexkey)
     except ValueError as e:
@@ -699,6 +732,8 @@ def record_key(root: Path, create: bool = False) -> tuple[str, str, bytes] | Non
     from orch import record_auth
 
     try:
+        # the id is the key folder's own name, after key_dir healed a lost or forged .local-id (#587): a file
+        # an agent can write never switches recording off or changes what is MACed
         d = key_dir(root, create=create)
         ws = d.name  # the healed id (_healed_id), never the raw .local-id read before healing
         f = d / "human.key"
@@ -729,6 +764,456 @@ def _head_path(root: Path, run: str, create: bool) -> Path:
     if create:
         _private_dir(d / "record-heads", d)
     return d / "record-heads" / f"{run}.json"
+
+
+def ensure_record_key(root: Path) -> bool:
+    """Make the workspace's human key (and so its record key) when a run is claimed: the one place a key is
+    created for recording (a writer never creates it, no key = recording is off). False when this folder has
+    no usable guarded home (nothing is made, nothing is raised: the run starts, it records nothing)."""
+    try:
+        guarded_home(root)
+        made = record_key(root, create=True) is not None
+    except Refused:
+        return False
+    if made:
+        _cutover_upgrade(root)
+    return made
+
+
+def _cutover_upgrade(root: Path) -> None:
+    """The record upgrade, exactly once per workspace: a key made before the upgrade marker existed. The MACed
+    marker (record-upgrade.json, `upgrade: true`) is written FIRST and holds the old-format spool names that
+    existed now. The cutover list is built ONLY when no chain head exists at all (a genuine pre-protection
+    install: no run was ever sealed); if any head exists the list stays missing (nothing is legacy). No file
+    time is used anywhere. A present marker (valid or not) means done. Never raises."""
+    try:
+        path = _upgrade_path(root)
+        if path.exists() or path.is_symlink():  # cheap: done already, keys.lock is not taken
+            return
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            if path.exists() or path.is_symlink():
+                return
+            now_ns = time.time_ns()
+            if not _upgrade_mark(root, now_ns, real=True, old=_old_spool_names(root)):
+                return
+            if not record_head_names(root) and not record_reject_names(root):
+                _cutover_write(root, _iso_s(now_ns))
+    except (Refused, OSError, ValueError):
+        return
+
+
+def _old_spool_names(root: Path) -> dict:
+    """{run: [names]} of the spool entries that exist now (the old format: they cannot be told from planted
+    ones by name, so they are recorded once, MACed, at the upgrade). At most 2000 names."""
+    out, total = {}, 0
+    base = root / ".orch" / "record" / "pending"
+    try:
+        runs = sorted(os.listdir(base))
+    except OSError:
+        return {}
+    for run in runs:
+        if not _RUN_NAME.fullmatch(run):
+            continue
+        try:  # a run folder that cannot be listed is skipped: the other runs' names are still recorded
+            names = [
+                n
+                for n in sorted(os.listdir(base / run))
+                if re.fullmatch(r"[0-9]{20}_[0-9a-f]{32}\.json", n)
+                and stat.S_ISREG(os.lstat(base / run / n).st_mode)
+            ][: max(0, 2000 - total)]
+        except OSError:
+            continue
+        if names:
+            out[run] = names
+            total += len(names)
+    return out
+
+
+def _iso_s(ns: int) -> str:
+    return datetime.fromtimestamp(ns // 10**9, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _iso_ns(ns: int) -> str:
+    t = datetime.fromtimestamp(ns // 10**9, UTC).replace(microsecond=(ns // 1000) % 10**6)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _upgrade_path(root: Path) -> Path:
+    return key_dir(root, create=False) / "record-upgrade.json"
+
+
+def _upgrade_mark(
+    root: Path, now_ns: int, at: str | None = None, *, real: bool = False, old: dict | None = None
+) -> bool:
+    """Write the upgrade marker (MACed with the current record key). `real`: from a genuine upgrade
+    (an install that had recorded before); `old`: the old-format spool names of that moment."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return False
+    body = {
+        "schema": "orch.record-upgrade/1",
+        "kid": rec[1],
+        "at": at or _iso_ns(now_ns),
+        "upgrade": bool(real),
+        "old": old or {},
+    }
+    body["cm"] = record_auth.upgrade_mac(rec[2], rec[0], body)
+    try:
+        _write_private(_upgrade_path(root), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
+    except (Refused, OSError, ValueError):
+        return False
+    return True
+
+
+def _upgrade_load(root: Path) -> dict | None:
+    """The upgrade marker's body when it verifies under the current record key, else None."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return None
+    try:
+        body = json.loads(_read_guarded(_upgrade_path(root)))
+        ok = (
+            isinstance(body, dict)
+            and body.get("schema") == "orch.record-upgrade/1"
+            and body.get("kid") == rec[1]
+            and isinstance(body.get("at"), str)
+            and isinstance(body.get("upgrade"), bool)
+            and isinstance(body.get("old"), dict)
+            and isinstance(body.get("cm"), str)
+            and hmac.compare_digest(
+                record_auth.upgrade_mac(rec[2], rec[0], body).encode(), body["cm"].encode()
+            )
+        )
+    except (FileNotFoundError, Refused, OSError, ValueError, TypeError, UnicodeError, RecursionError):
+        return None
+    return body if ok else None
+
+
+def record_upgrade_at(root: Path) -> str | None:
+    """When the record upgrade ran (orch's own time, MACed in record-upgrade.json), or None."""
+    body = _upgrade_load(root)
+    return body["at"] if body else None
+
+
+def record_upgrade_old(root: Path, run: str) -> set[str]:
+    """The old-format spool names of `run` that existed at a REAL upgrade (MACed in the marker): the only
+    old-format names a drain may read. Empty for a fresh key, an unverified marker or any other run."""
+    body = _upgrade_load(root)
+    if not body or not body["upgrade"]:
+        return set()
+    names = body["old"].get(run)
+    return {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
+
+
+def _cutover_path(root: Path) -> Path:
+    return key_dir(root, create=False) / "record-cutover.json"
+
+
+def _cutover_load(root: Path):
+    """(state, runs, at): state None (no list yet), False (damaged or fails its MAC) or True."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return False, set(), None
+    try:
+        raw = _read_guarded(_cutover_path(root))
+    except FileNotFoundError:
+        return None, set(), None
+    except (Refused, OSError, ValueError):
+        return False, set(), None
+    try:
+        body = json.loads(raw)
+        ok = (
+            isinstance(body, dict)
+            and body.get("schema") == "orch.record-cutover/1"
+            and body.get("kid") == rec[1]
+            and isinstance(body.get("runs"), list)
+            and isinstance(body.get("at"), str)
+            and isinstance(body.get("cm"), str)
+            and hmac.compare_digest(
+                record_auth.cutover_mac(rec[2], rec[0], body).encode(), body["cm"].encode()
+            )
+        )
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return False, set(), None
+    return (True, set(body["runs"]), body["at"]) if ok else (False, set(), None)
+
+
+def record_cutover_at(root: Path) -> str | None:
+    """When protection began for this workspace (orch's own time, MACed in the cutover list), or None. The
+    only age retention may use for a legacy run: a file's mtime is the agent's to set."""
+    state, _runs, at = _cutover_load(root)
+    return at if state else None
+
+
+def record_cutover_read(root: Path) -> set[str] | None | bool:
+    """The runs that existed when protection began (the only runs whose unsigned lines may be shown as "not
+    checked, before protection"): a set; None when no list was made yet (nothing was written since the
+    upgrade); False when it is damaged or fails its MAC (no run may then be treated as legacy)."""
+    state, runs, _at = _cutover_load(root)
+    return runs if state else state
+
+
+def record_reset_note(root: Path) -> None:
+    """Remember, MACed with the NEW record key, when a protection reset changed the key: the only age
+    retention may use for runs of the old key. Never raises."""
+    from orch import record_auth
+
+    try:
+        rec = record_key(root)
+        if rec is None:
+            return
+        body = {
+            "schema": "orch.record-reset/1",
+            "kid": rec[1],
+            "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        body["cm"] = record_auth.cutover_mac(rec[2], rec[0], body)
+        _write_private(
+            key_dir(root, create=False) / "record-reset.json",
+            json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n",
+        )
+    except (Refused, OSError, ValueError):
+        return
+
+
+def record_reset_at(root: Path) -> str | None:
+    """When the current record key was made by a protection reset (MACed), or None."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return None
+    try:
+        body = json.loads(_read_guarded(key_dir(root, create=False) / "record-reset.json"))
+        ok = (
+            body.get("schema") == "orch.record-reset/1"
+            and body.get("kid") == rec[1]
+            and isinstance(body.get("at"), str)
+            and hmac.compare_digest(
+                record_auth.cutover_mac(rec[2], rec[0], body).encode(), body["cm"].encode()
+            )
+        )
+    except (FileNotFoundError, Refused, OSError, ValueError, TypeError, AttributeError, KeyError):
+        return None
+    return body["at"] if ok else None
+
+
+def _cutover_reseal(root: Path, listed) -> None:
+    """After a key rotation: the same runs and time, MACed with the NEW record key, when the old list verified
+    under the old key. A list that did not verify is left as it is (it then fails: no run is legacy)."""
+    from orch import record_auth
+
+    state, runs, at = listed
+    rec = record_key(root)
+    if not state or rec is None:
+        return
+    body = {"schema": "orch.record-cutover/1", "kid": rec[1], "runs": sorted(runs), "at": at}
+    body["cm"] = record_auth.cutover_mac(rec[2], rec[0], body)
+    try:
+        _write_private(_cutover_path(root), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
+    except (Refused, OSError, ValueError):
+        return
+
+
+def _upgrade_reseal(root: Path, body: dict | None) -> None:
+    """After a key rotation: the same marker (time, upgrade flag), MACed with the NEW record key, when the old
+    marker verified under the old key. Its old names are dropped: their entries were MACed with the old key
+    and can no longer verify. One that did not verify is left as it is (present: the upgrade never runs
+    again)."""
+    if body is not None:
+        _upgrade_mark(root, 0, body["at"], real=body["upgrade"], old={})
+
+
+def record_cutover_ensure(root: Path) -> None:
+    """Write the cutover list once, at the moment the human key is made (human_key, create branch and nowhere
+    else): the unsigned run files in the workspace's record folder at that moment. Never changed afterwards (a
+    later run is never legacy); a list that is missing while a key exists means no legacy. Never raises."""
+
+    now_ns = time.time_ns()
+    try:
+        path = _upgrade_path(root)
+        if not (path.exists() or path.is_symlink()):
+            _upgrade_mark(root, now_ns)  # the key is new: there is nothing to upgrade, ever
+    except (Refused, OSError, ValueError):
+        pass
+    _cutover_write(root, _iso_s(now_ns))
+
+
+def _cutover_write(root: Path, at: str) -> None:
+    """Write the cutover list when it is missing: the unsigned run files in the record folder now (no file
+    time is looked at). Never raises."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return
+    try:
+        path = _cutover_path(root)
+        if path.exists() or path.is_symlink():
+            return
+        runs = root / ".orch" / "record" / "runs"
+        names = sorted(
+            n[:-6] for n in os.listdir(runs) if _RUN_NAME.fullmatch(n[:-6]) and n.endswith(".jsonl")
+        )
+    except FileNotFoundError:
+        names = []
+    except (Refused, OSError, ValueError):
+        names = []  # cannot be listed: no run is legacy (never a silent give-up, never a guess)
+    body = {"schema": "orch.record-cutover/1", "kid": rec[1], "runs": names, "at": at}
+    body["cm"] = record_auth.cutover_mac(rec[2], rec[0], body)
+    try:
+        _write_private(path, json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
+    except (Refused, OSError, ValueError):
+        return
+
+
+def record_head_names(root: Path) -> list[str]:
+    """The run names that have a chain head file in the guarded home (a name only, nothing is checked). []
+    when there is none or the key folder cannot be looked at (the readers fail closed on their own then)."""
+    try:
+        names = os.listdir(key_dir(root, create=False) / "record-heads")
+    except (Refused, OSError, ValueError):
+        return []
+    return sorted(n[:-5] for n in names if n.endswith(".json") and _RUN_NAME.fullmatch(n[:-5]))
+
+
+def record_rejects_read(root: Path, run: str) -> int:
+    """How many spool entries of a run were rejected while it has no chain head (a small MACed counter in the
+    guarded home, `record-heads/<run>.rej`): 0 when none. A counter that fails its MAC counts as 1 (it is
+    loud, never quietly zero)."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None or not isinstance(run, str) or not _RUN_NAME.fullmatch(run):
+        return 0
+    try:
+        body = json.loads(_read_guarded(key_dir(root, create=False) / "record-heads" / f"{run}.rej"))
+        ok = (
+            body.get("schema") == "orch.record-rejects/1"
+            and body.get("run") == run
+            and type(body.get("n")) is int
+            and body["n"] >= 0
+            and hmac.compare_digest(record_auth.head_mac(rec[2], rec[0], body).encode(), body["hm"].encode())
+        )
+        return body["n"] if ok else 1
+    except FileNotFoundError:
+        return 0
+    except (Refused, OSError, ValueError, TypeError, AttributeError, KeyError, RecursionError):
+        return 1
+
+
+def record_rejects_bump(root: Path, run: str) -> bool:
+    """Count one rejected spool entry for a run that has no chain head. False when it could not be kept."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return False
+    try:
+        path = _head_path(root, run, True).with_suffix(".rej")
+        body = {"schema": "orch.record-rejects/1", "run": run, "n": record_rejects_read(root, run) + 1}
+        body["hm"] = record_auth.head_mac(rec[2], rec[0], body)
+        _write_private(path, json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
+        return True
+    except (Refused, OSError, ValueError):
+        return False
+
+
+def record_reject_names(root: Path) -> list[str]:
+    """Run names that have a rejected-entries counter (see record_rejects_read)."""
+    try:
+        names = os.listdir(key_dir(root, create=False) / "record-heads")
+    except (Refused, OSError, ValueError):
+        return []
+    return sorted(n[:-4] for n in names if n.endswith(".rej") and _RUN_NAME.fullmatch(n[:-4]))
+
+
+def record_head_carry(root: Path, run: str) -> dict:
+    """What a new chain segment may take over from the run's head of the OLD key (after a protection reset):
+    its key id (wording only: lines of it read as old key), the number of rejected spool entries and the
+    drained names, each re-checked for shape. The old head cannot be verified with the new key, so nothing
+    that decides trust is taken (no legacy prefix, no tombstone). {} when there is none."""
+    try:
+        raw = json.loads(_read_guarded(_head_path(root, run, False)))
+        out = {}
+        if (
+            isinstance(raw, dict)
+            and raw.get("run") == run
+            and re.fullmatch(r"[0-9a-f]{8}", str(raw.get("kid")))
+        ):
+            out["old_kid"] = raw["kid"]
+            earlier = raw.get("old_kids") if isinstance(raw.get("old_kids"), list) else []
+            kids = []
+            for k in [*earlier, raw["kid"]]:  # reset order, the newest last
+                if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{8}", k):
+                    if k in kids:
+                        kids.remove(k)
+                    kids.append(k)
+            out["old_kids"] = kids[-8:]
+            if type(raw.get("rejected")) is int and 0 <= raw["rejected"] < 10**6:
+                out["rejected"] = raw["rejected"]
+            names = raw.get("drained")
+            if isinstance(names, list):
+                out["drained"] = [
+                    n
+                    for n in names
+                    if isinstance(n, str) and re.fullmatch(r"[0-9]{20}_[0-9a-f]{32}\.json", n)
+                ][-512:]
+            floor = raw.get("drained_floor")
+            if isinstance(floor, str) and re.fullmatch(r"[0-9]{20}", floor):
+                out["drained_floor"] = floor
+        return out
+    except (FileNotFoundError, Refused, OSError, ValueError, TypeError, RecursionError):
+        return {}
+
+
+def record_head_old_live(root: Path, run: str) -> bool:
+    """Whether the run's head is one of another key id (made before a protection reset) that is shaped like a
+    head with lines and not pruned. Its MAC cannot be checked with the new key: it only says the run existed
+    (it is listed and a missing file reads as `removed`), it never makes anything trusted."""
+    rec = record_key(root)
+    try:
+        raw = json.loads(_read_guarded(_head_path(root, run, False)))
+    except (FileNotFoundError, Refused, OSError, ValueError, RecursionError):
+        return False
+    return (
+        rec is not None
+        and isinstance(raw, dict)
+        and raw.get("schema") == "orch.record-head/1"
+        and raw.get("run") == run
+        and isinstance(raw.get("kid"), str)
+        and raw["kid"] != rec[1]
+        and type(raw.get("seq")) is int
+        and raw["seq"] > 0
+        and not raw.get("pruned")
+    )
+
+
+def record_head_state(root: Path, run: str) -> str:
+    """Whether a run has a chain head in the guarded home: "present", "absent" or "unknown". "absent" only
+    when the guarded home, the workspace id and this workspace's key folder all resolve cleanly AND the head
+    file is truly not there. Anything else (a missing or forged local id, a key folder that is missing,
+    linked, loose or unreadable, a head folder that cannot be read) is "unknown": the caller must fail
+    closed (a run that may have a chain is never read as a legacy run). No key is needed, nothing is
+    checked."""
+    try:
+        if not isinstance(run, str) or not _RUN_NAME.fullmatch(run):
+            return "unknown"
+        d = key_dir(root, create=False)
+        head = d / "record-heads" / f"{run}.json"
+        head.lstat()
+        return "present"
+    except FileNotFoundError:
+        return "absent"  # key_dir resolved (a missing folder is a Refused there); only the head is missing
+    except (Refused, OSError, ValueError):
+        return "unknown"
 
 
 def record_head_read(root: Path, run: str) -> tuple[dict | None, bool | str]:
@@ -779,6 +1264,16 @@ def record_head_write(root: Path, run: str, head: dict) -> None:
     _write_private(
         _head_path(root, run, True), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n"
     )
+
+
+def record_head_try_write(root: Path, run: str, head: dict) -> bool:
+    """record_head_write that never raises: False when the head could not be written (no key, a bad home, a
+    full disk). The caller reports it; the line it follows is stored and verifies without the head."""
+    try:
+        record_head_write(root, run, head)
+        return True
+    except (Refused, OSError, ValueError):
+        return False
 
 
 # ------------------------------------------------------------------------------------------- hp1 proofs
@@ -1221,6 +1716,9 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+_LOADING_OLD = threading.local()  # .active: a reset is reading the old key in this thread
+
+
 def reset_protection(root: Path, reason: str) -> None:
     """ONE response to a loose secret or integrity file (human.key, human-settings.json, proofs-used,
     delivered, handoffs, the dev record): tighten the folders, rotate human.key (old proofs and MACs stop
@@ -1234,7 +1732,27 @@ def reset_protection(root: Path, reason: str) -> None:
     ws = d.name
     with _key_lock(d):
         _RESETS += 1
+        # under the OLD key, and only when that key file is itself sound (a loose key may have leaked: its
+        # list is not carried over, so no run is legacy afterwards): only a list that verifies is carried
+        try:
+            loose = file_problem(d / "human.key") is not None
+        except OSError:
+            loose = True
+        listed = (False, set(), None)
+        upgraded = None
+        if not loose:
+            _LOADING_OLD.active = True  # human_key must not start a reset of its own while this one reads it
+            try:
+                listed = _cutover_load(root)
+                upgraded = _upgrade_load(root)
+            except Refused:  # a key that cannot be read soundly carries nothing over
+                listed, upgraded = (False, set(), None), None
+            finally:
+                _LOADING_OLD.active = False
         _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
+        _cutover_reseal(root, listed)
+        _upgrade_reseal(root, upgraded)
+        record_reset_note(root)  # when the record key changed (orch's own time; old-key runs age from it)
         for name in _SECRET_FILES:
             with contextlib.suppress(OSError):
                 (d / name).unlink()
@@ -2403,11 +2921,13 @@ def ticket_name(root: Path, tid: str) -> str:
     return part(t) or "this ticket"
 
 
-def question_text(root: Path, tid: str, qid: str) -> str:
+def question_text(root: Path, tid: str, qid: str, q: dict | None = None) -> str:
+    """q: the question already read by the caller (shown as is, not read again); None: read it here."""
     from orch import tickets
 
     try:
-        q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
+        if q is None:
+            q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
         t = str((q or {}).get("text", ""))
     except (Refused, OSError, ValueError, AttributeError):
         t = ""

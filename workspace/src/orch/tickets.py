@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -2283,7 +2284,35 @@ def ask(
     return apply_op(root, tid, op, by=by)
 
 
-def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tuple[dict, dict]:
+QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
+
+
+def question_digest(q) -> str:
+    """sha256 of what a person is shown of a question (id, text, options, kind, action, recommended).
+    A question that cannot be encoded gives QUESTION_UNENCODABLE, which no answer is accepted against."""
+    if not isinstance(q, dict):
+        return QUESTION_UNENCODABLE
+    shown = {k: q.get(k) for k in ("id", "text", "options", "kind", "action", "recommended")}
+    try:
+        canon = json.dumps(shown, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+    except (TypeError, ValueError, UnicodeError):
+        return QUESTION_UNENCODABLE
+
+
+def answer(
+    root: Path,
+    tid: str,
+    qid: str,
+    text: str,
+    by: str,
+    via: str,
+    *,
+    expected_question_digest: str | None = None,
+) -> tuple[dict, dict]:
+    """expected_question_digest: question_digest of the question as the person was shown it; the answer is
+    refused when the question is no longer that one, or could not be encoded. None: not checked (a caller that
+    kept no digest, e.g. a relay record from before digests)."""
     if not VIA_RE.fullmatch(via):
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
     if not text.strip():
@@ -2297,6 +2326,10 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
             raise Refused(f"Ticket {tid} has no question {qid}.")
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
+        if expected_question_digest is not None and (
+            expected_question_digest == QUESTION_UNENCODABLE or question_digest(q) != expected_question_digest
+        ):
+            raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
         ans = text
         for opt in q["options"]:  # an option matches case-insensitively: store its spelling; else free text
             if opt.casefold() == ans.casefold():

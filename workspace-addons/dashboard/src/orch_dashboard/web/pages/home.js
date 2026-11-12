@@ -32,7 +32,7 @@ function needRow(row, newest, questionCount = 1) {
         locks.add(key);
         host.querySelectorAll('button').forEach(b => { b.disabled = true; });
         try {
-          const result = await act('answer', {ticket:row.ticket, question:row.answer.question, answer:option});
+          const result = await act('answer', {ticket:row.ticket, question:row.answer.question, digest:row.answer.digest, answer:option});
           window.orch.toast(result.ok ? 'Answered' : changeError(result), result.ok ? 'ok' : 'error');
         } finally {
           locks.delete(key);

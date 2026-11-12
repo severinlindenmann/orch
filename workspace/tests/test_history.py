@@ -382,6 +382,39 @@ def test_evidence_is_bound_to_the_step_content(synced):
     assert ev["by"] == history.SYNC_BY
 
 
+def test_an_answer_to_a_rewritten_question_is_refused(synced):
+    root, tid = synced
+    tickets.ask(root, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
+    shown = tickets.question_digest(tickets.load(root, tid)["questions"][0])
+    _plant(root, tid, lambda d: d["questions"][0].update({"text": "Deploy to production?"}))
+    with pytest.raises(Refused, match="changed after it was shown"):
+        tickets.answer(root, tid, "q1", "yes", "human:tester", "cli", expected_question_digest=shown)
+    assert _raw(root, tid)["questions"][0]["answer"] is None
+    now = tickets.question_digest(_raw(root, tid)["questions"][0])
+    tickets.answer(root, tid, "q1", "no", "human:tester", "cli", expected_question_digest=now)
+
+
+def test_an_answer_to_a_question_with_a_swapped_recommendation_is_refused(synced):
+    root, tid = synced
+    tickets.ask(root, tid, "Deploy where?", ["staging", "production"], "staging", "agent:claude")
+    shown = tickets.question_digest(tickets.load(root, tid)["questions"][0])
+    _plant(root, tid, lambda d: d["questions"][0].update({"recommended": "production"}))
+    with pytest.raises(Refused, match="changed after it was shown"):
+        tickets.answer(root, tid, "q1", "production", "human:tester", "cli", expected_question_digest=shown)
+    assert _raw(root, tid)["questions"][0]["answer"] is None
+
+
+def test_an_answer_against_a_question_that_could_not_be_encoded_is_refused(synced):
+    root, tid = synced
+    tickets.ask(root, tid, "Deploy?", ["yes", "no"], None, "agent:claude")
+    expected = tickets.question_digest({"id": "q1", "text": float("nan")})
+    assert expected == tickets.QUESTION_UNENCODABLE
+    with pytest.raises(Refused, match="changed after it was shown"):
+        tickets.answer(root, tid, "q1", "yes", "human:tester", "cli", expected_question_digest=expected)
+    assert _raw(root, tid)["questions"][0]["answer"] is None
+    tickets.answer(root, tid, "q1", "yes", "human:tester", "cli")  # no digest kept (legacy): not checked
+
+
 def test_adoption_covers_answers_steps_and_evidence(proj):
     ensure_signing(proj)
     t = tickets.create(proj, "Before sync", "human:tester")

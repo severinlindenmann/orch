@@ -331,6 +331,48 @@
         "complete": {
           "type": "boolean",
           "description": "false when `unavailable` is not empty: the counts are partial."
+        },
+        "per_run": {
+          "type": "array",
+          "description": "Each counted run: `protected` false when its agent tool is not known from a checked collector line or cannot be given deny rules; then `note` is the marker text (record.UNPROTECTED_TEXT).",
+          "items": {
+            "type": "object",
+            "required": [
+              "run",
+              "protected"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "run": {
+                "$ref": "activity.schema.json#/$defs/run"
+              },
+              "protected": {
+                "type": "boolean"
+              },
+              "note": {
+                "const": "Records from this helper can't be fully checked."
+              }
+            },
+            "if": {
+              "properties": {
+                "protected": {
+                  "const": false
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "note"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "note"
+                ]
+              }
+            }
+          }
         }
       }
     },

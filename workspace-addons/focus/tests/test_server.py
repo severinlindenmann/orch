@@ -103,12 +103,20 @@ def test_ops_build_exact_argv(server, fake_orch):
         )[0]
         == 200
     )
-    assert go("answer", {"ticket": TID, "question": "q1", "answer": "CHF"})[0] == 200
+    assert go("answer", {"ticket": TID, "question": "q1", "digest": "a" * 64, "answer": "CHF"})[0] == 200
     assert go("check.add", {"ticket": TID, "text": "--new task"})[0] == 200
     got = [
         c
         for c in calls(fake_orch)
-        if c[:2] not in (["run", "status"], ["ticket", "show"], ["run", "session"], ["ext", "set"], ["agents", "--json"], ["relay", "mobile"])
+        if c[:2]
+        not in (
+            ["run", "status"],
+            ["ticket", "show"],
+            ["run", "session"],
+            ["ext", "set"],
+            ["agents", "--json"],
+            ["relay", "mobile"],
+        )
     ]
     assert got[0][:4] == ["run", "start", TID, "--by"] and got[0][4] == "focus"
     assert "--fresh" in got[1]
@@ -137,6 +145,11 @@ def test_bad_ops_are_400_and_run_nothing(server, fake_orch, op, args):
 def test_build_argv_unknown_and_types():
     with pytest.raises(actions.BadRequest):
         actions.build_argv(["x"], {})
+    for d in (None, "x", "A" * 64):  # an answer without the digest of the question shown: refused
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("answer", {"ticket": "t_abc123", "question": "q1", "answer": "a", "digest": d})
+    with pytest.raises(actions.BadRequest):
+        actions.proof_for("answer", {"ticket": "t_abc123", "question": "q1", "answer": "a"})
     with pytest.raises(actions.BadRequest):
         actions.build_argv("run.stop", [])
 
@@ -290,7 +303,7 @@ def test_oneshot_denial_asks_and_run_send_note(server, ws, fake_orch):
     ev = {
         "v": 1, "id": "toolu_d1", "seq": 1, "run": "r_den00001", "agent": "main", "at": "2026-11-16T09:12:05Z",
         "ticket": TID, "via": "log", "kind": "denial", "text": "Not allowed by this workspace",
-        "used": {"kind": "tool", "name": "WebFetch", "action": None, "source": "builtin", "version": None},
+        "checked": True, "used": {"kind": "tool", "name": "WebFetch", "action": None, "source": "builtin", "version": None},
         "outcome": {"ok": False, "error": "Not allowed by this workspace", "ms": None},
     }  # fmt: skip
     line = json.dumps({"type": "event", "cursor": "rc1.x", "event": ev})
@@ -440,7 +453,12 @@ def test_run_send_argv_parses_on_every_python(tmp_path):
     common.add_argument("--json", action="store_true")
     common.add_argument("--by")
     top = argparse.ArgumentParser()
-    x = top.add_subparsers(dest="cmd").add_parser("run").add_subparsers(dest="sub").add_parser("send", parents=[common])
+    x = (
+        top.add_subparsers(dest="cmd")
+        .add_parser("run")
+        .add_subparsers(dest="sub")
+        .add_parser("send", parents=[common])
+    )
     x.add_argument("ticket")
     x.add_argument("text", nargs="?")
     ns = top.parse_args(argv)
@@ -451,6 +469,7 @@ def test_listen_backlog_is_large(server):
     # the default backlog of 5 resets connections when a page loads many files at once (blank Focus page)
     assert server.request_queue_size >= 128
 
+
 def test_view_carries_the_hold_reason_only_while_the_run_runs(server, ws, fake_orch):
     """fb18 (hold-why): the core's one-line reason shows as `hold`; it is empty without one or without a run."""
     import json
@@ -458,10 +477,21 @@ def test_view_carries_the_hold_reason_only_while_the_run_runs(server, ws, fake_o
     tracker = server.RequestHandlerClass.keywords["tracker"]
     status = fake_orch.parent / "status.json"
     why = "Waiting: clear the text in the agent's window."
-    status.write_text(json.dumps({"running": True, "state": "alive", "claim": {"mode": "live", "run": "r_abcd1234"}, "hold": why + "\n<b>x</b>"}))
+    status.write_text(
+        json.dumps(
+            {
+                "running": True,
+                "state": "alive",
+                "claim": {"mode": "live", "run": "r_abcd1234"},
+                "hold": why + "\n<b>x</b>",
+            }
+        )
+    )
     tracker.status_cache.clear()
     assert tracker.view(TID)["hold"] == why + " <b>x</b>"
-    status.write_text(json.dumps({"running": True, "state": "alive", "claim": {"mode": "live", "run": "r_abcd1234"}}))
+    status.write_text(
+        json.dumps({"running": True, "state": "alive", "claim": {"mode": "live", "run": "r_abcd1234"}})
+    )
     tracker.status_cache.clear()
     assert tracker.view(TID)["hold"] == ""
     status.write_text(json.dumps({"running": False, "hold": why}))
@@ -478,14 +508,29 @@ def test_wont_do_argv(reason, monkeypatch):
         args["reason"] = reason
         flags = [f"--reason={reason}"]
     assert actions.build_argv("check.wont_do", args) == [
-        "check", "wont-do", TID, "c2", *flags, "--by", "human:test", "--json"
+        "check",
+        "wont-do",
+        TID,
+        "c2",
+        *flags,
+        "--by",
+        "human:test",
+        "--json",
     ]
 
 
-@pytest.mark.parametrize("extra", [
-    {"reason": "x" * 201}, {"reason": 1}, {"reason": None}, {"reason": "a\x00b"},
-    {"reason": "a\nb"}, {"reason": "a\rb"}, {"agent": "x"},
-])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"reason": "x" * 201},
+        {"reason": 1},
+        {"reason": None},
+        {"reason": "a\x00b"},
+        {"reason": "a\nb"},
+        {"reason": "a\rb"},
+        {"agent": "x"},
+    ],
+)
 def test_wont_do_bad_args(extra):
     with pytest.raises(actions.BadRequest):
         actions.build_argv("check.wont_do", {"ticket": TID, "check": "c2", **extra})

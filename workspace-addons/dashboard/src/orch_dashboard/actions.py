@@ -126,7 +126,7 @@ PROOF_OPS = {
         "copy.retry",
         lambda a: f"approve:{a.get('ticket')}:{a.get('tip')}:{a.get('control_paths')}:{a.get('paths_hash')}",
     ),
-    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
+    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}:{_question_digest(a)}"),
     "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
     "chat.say": ("chat.send", lambda a: "general"),
     "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
@@ -274,11 +274,19 @@ def _only(args: dict, allowed: tuple[str, ...]) -> None:
         raise BadRequest(f"Not allowed here: {', '.join(extra)}.")
 
 
+def _question_digest(a):
+    """The digest of the question as the page showed it (sent back with the answer): no digest, no answer."""
+    d = a.get("digest")
+    if not (isinstance(d, str) and re.fullmatch(r"[0-9a-f]{64}", d)):
+        raise BadRequest("This question changed or can't be checked. Ask again.")
+    return d
+
+
 def _answer(a):
-    _only(a, ("ticket", "question", "answer"))
+    _only(a, ("ticket", "question", "answer", "digest"))
     return (
         ["answer", _tid(a.get("ticket")), _qid(a.get("question"))],
-        ["--via", "dashboard"],
+        ["--via", "dashboard", "--question-digest", _question_digest(a)],
         [_text(a.get("answer"), "answer")],
     )
 

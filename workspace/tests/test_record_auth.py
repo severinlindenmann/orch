@@ -18,6 +18,8 @@ from orch import humanproof as hp
 from orch import record_auth as ra
 from orch.errors import Refused
 
+pytestmark = pytest.mark.no_record_key  # this module builds its own guarded test homes (fixture tws)
+
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 VEC = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text())["record_auth"]
 HK = bytes.fromhex(VEC["human_key"])
@@ -74,7 +76,26 @@ def test_seal_matches_vector(c):
 
 @pytest.mark.parametrize("c", VEC["verify"], ids=_ids(VEC["verify"]))
 def test_verify_vectors(c):
-    assert _summary(ra.verify_run(_raw(c["lines"]), RUN, WS, RK, KID, c["head"])) == c["expect"]
+    olds = c.get("old_kids")
+    got = ra.verify_run(_raw(c["lines"]), RUN, WS, RK, KID, c["head"], old_kid=olds and set(olds))
+    assert _summary(got) == c["expect"]
+
+
+@pytest.mark.parametrize("c", VEC["legacy"], ids=_ids(VEC["legacy"]))
+def test_legacy_vectors(c):
+    raw = b"".join(bytes.fromhex(x) if x.endswith("0a") else bytes.fromhex(x) + b"\n" for x in c["lines"])
+    if c["head"] == "unknown":
+        # the head state is the guarded home's, decided in humanproof (never "legacy"): see the damage tests
+        assert c["expect"]["mode"] == "unverified"
+        return
+    mode, _rest, unchecked = ra.legacy_split(raw, c["head"] == "present")
+    assert {"mode": mode, "unchecked": unchecked} == c["expect"]
+
+
+@pytest.mark.parametrize("c", VEC["legacy_prefix"], ids=_ids(VEC["legacy_prefix"]))
+def test_legacy_prefix_vectors(c):
+    pre, base = ra.legacy_prefix(bytes.fromhex(c["raw_hex"]), c["head"])
+    assert {"prefix_lines": len([x for x in pre.split(b"\n") if x]), "base": base} == c["expect"]
 
 
 @pytest.mark.parametrize("c", VEC["job_streams"], ids=_ids(VEC["job_streams"]))
@@ -85,6 +106,9 @@ def test_job_vectors(c):
 
 @pytest.mark.parametrize("c", VEC["spool"], ids=_ids(VEC["spool"]))
 def test_spool_vectors(c):
+    if "name_ok" in c:
+        assert ra.spool_name_ok(RK, WS, RUN, c["file"]) is c["name_ok"]
+        return
     assert ra.drain_ok(RK, WS, RUN, c["file"], c["entry"], c["sm"], c["drained"], c["floor"]) is c["drain"]
 
 
@@ -227,14 +251,14 @@ def test_planted_unknown_kid_is_changed_once_the_current_key_verified():
     v = ra.verify_run(a + planted + b, RUN, WS, RK, KID)
     assert [e["seq"] for e in v.events] == [1, 2] and (v.changed, v.reason) == (1, "content")
     # before any verified line it can only be the old segment of a rotation
-    v = ra.verify_run(planted + a, RUN, WS, RK, KID)
+    v = ra.verify_run(planted + a, RUN, WS, RK, KID, old_kid={"00000000"})
     assert (v.changed, v.reason) == (1, "old_key") and [e["seq"] for e in v.events] == [1]
 
 
 def test_key_missing_or_wrong_verifies_nothing():
     lines = b"".join(_chain(3))
     other_rk, other_kid = ra.derive(b"\x07" * 32, WS)
-    v = ra.verify_run(lines, RUN, WS, other_rk, other_kid)
+    v = ra.verify_run(lines, RUN, WS, other_rk, other_kid, old_kid={KID})
     assert v.events == [] and v.changed == 3 and v.reason == "old_key"
     with pytest.raises(ra.SealError):
         ra.derive(b"", WS)  # no key: nothing is derived, nothing sealed
@@ -447,9 +471,186 @@ def test_unsigned_current_shape_records_still_validate():
     assert body.is_valid(unsigned) and not sealed.is_valid(unsigned)
 
 
-def test_runtime_does_not_use_the_record_mac_yet():
+def test_only_the_record_store_and_the_key_helpers_use_the_record_mac():
     src = Path(__file__).resolve().parents[1] / "src/orch"
     users = [
         p.name for p in src.glob("*.py") if p.name != "record_auth.py" and "record_auth" in p.read_text()
     ]
-    assert users == ["humanproof.py"]  # S2 wires record.py; S1 changes no behaviour
+    assert sorted(users) == ["humanproof.py", "record.py"]  # the one writer (_commit) and the one reader
+
+
+# ------------------------------ S2: the writer and the readers fail closed (real guarded test home)
+
+
+def _sealed_ws(tws):
+    """A test workspace with a key and a sealed run of two lines (written by the writer)."""
+    from orch import hider as hiding
+    from orch.record import RecordWriter
+
+    addons.workspace_id(tws, create=True)
+    hp.human_key(tws)
+    w = RecordWriter(tws, hider=hiding.Hider({"k": "KEYVALUE-abc123XYZ-secret"}))
+    ev = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    for n in (1, 2):
+        w.append(dict(ev, run="r_8k2m01", id=f"toolu_{n}"))
+    return w
+
+
+def _tail(capsys, tws, monkeypatch, run="r_8k2m01"):
+    from orch import cli
+
+    monkeypatch.chdir(tws)
+    code = cli.main(["record", "tail", "--run", run, "--json"])
+    return code, [json.loads(x) for x in capsys.readouterr().out.splitlines()]
+
+
+def test_writer_is_off_without_a_key_and_nothing_is_written(tws):
+    from orch import hider as hiding
+    from orch import record
+
+    addons.workspace_id(tws, create=True)
+    w = record.RecordWriter(tws, hider=hiding.Hider({"k": "KEYVALUE-abc123XYZ-secret"}))
+    ev = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    with pytest.raises(record.RecordOff, match="protection is ready"):
+        w.append(dict(ev, run="r_8k2m01"))
+    assert not (tws / ".orch/record").exists()
+
+
+@pytest.mark.parametrize(
+    "damage", ["id_removed", "id_forged", "key_folder_unreadable", "key_removed", "second_folder"]
+)
+def test_a_damaged_guarded_home_never_downgrades_a_sealed_run_to_legacy(tws, capsys, monkeypatch, damage):
+    from orch import record
+
+    _sealed_ws(tws)
+    assert [e["id"] for e in record.read_run(tws, "r_8k2m01").unwrap()] == ["toolu_1", "toolu_2"]
+    # strip the auth too: if any state fell back to the legacy parse, these plain lines would show
+    run = tws / ".orch/record/runs/r_8k2m01.jsonl"
+    run.write_text(
+        "".join(json.dumps(json.loads(ra.split(x)[0])) + "\n" for x in run.read_bytes().splitlines())
+    )
+    kd = hp.key_dir(tws, create=False)
+    if damage == "id_removed":
+        (tws / ".orch/.local-id").unlink()
+    elif damage == "id_forged":
+        (tws / ".orch/.local-id").write_text("ab" * 16 + "\n")
+    elif damage == "second_folder":  # an attacker-made second folder bound to this path (SECOND_FOLDER)
+        other = kd.parent / ("ab" * 16)
+        other.mkdir(mode=0o700)
+        (other / "binding.json").write_text(
+            json.dumps({"schema": "orch.binding/1", "realpath": os.path.realpath(tws)}) + "\n"
+        )
+        (tws / ".orch/.local-id").write_text("cd" * 16 + "\n")
+    elif damage == "key_folder_unreadable":
+        kd.chmod(0)
+    else:
+        (kd / "human.key").unlink()
+    try:
+        read = record.read_run(tws, "r_8k2m01")
+        # a lost or forged local id is healed from the one bound key folder (#587): the stripped lines are
+        # then judged against the head that is there. Never shown as a legacy run either way.
+        assert (read.status, read.reason) == ("tampered", "unverified") and read.value is None
+        code, lines = _tail(capsys, tws, monkeypatch)
+        assert code == 2 and lines[0]["code"] == "tampered"
+        assert "orch cannot check these records" in lines[0]["error"]
+    finally:
+        kd.chmod(0o700)
+
+
+def test_a_run_with_only_a_head_and_no_sealed_line_is_unverified_without_a_key(tws):
+    from orch import record
+
+    _sealed_ws(tws)
+    run = tws / ".orch/record/runs/r_8k2m01.jsonl"
+    run.write_text('{"v":1}\n')
+    (hp.key_dir(tws, create=False) / "human.key").unlink()
+    assert record.read_run(tws, "r_8k2m01").reason == "unverified"  # the head is there: never legacy
+
+
+def test_a_genuine_legacy_run_in_a_clean_home_is_shown_not_checked(tws, capsys, monkeypatch):
+    from orch import record
+
+    ev = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    runs = tws / ".orch/record/runs"
+    runs.mkdir(parents=True)
+    (runs / "r_old00001.jsonl").write_text(json.dumps(dict(ev, run="r_old00001", seq=1)) + "\n")
+    _sealed_ws(tws)  # the first sealed write lists the run that existed (cutover)
+    read = record.read_run(tws, "r_old00001")
+    assert (read.status, read.legacy, read.reason) == ("ok", True, "unchecked")
+    code, lines = _tail(capsys, tws, monkeypatch, "r_old00001")
+    assert code == 0 and [ln["event"]["checked"] for ln in lines if ln["type"] == "event"] == [False]
+
+
+def test_a_key_rotation_hides_the_old_lines_and_the_new_segment_is_verified(tws):
+    from orch import hider as hiding
+    from orch import record
+
+    w = _sealed_ws(tws)
+    f = hp.key_dir(tws, create=False) / "human.key"
+    f.write_text("11" * 32 + "\n")
+    st = f.stat()
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    ev = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    stored = w.append(dict(ev, run="r_8k2m01", id="toolu_new"))
+    assert stored["seq"] == 1  # a new segment: seq 1 with the new genesis
+    read = record.read_run(tws, "r_8k2m01")
+    assert (read.reason, read.changed) == ("old_key", 2) and [e["id"] for e in read.unwrap()] == ["toolu_new"]
+    assert hiding  # noqa: B015
+
+
+def test_an_unknown_home_state_with_no_run_file_is_unverified_not_missing(tws):
+    from orch import record
+
+    _sealed_ws(tws)
+    assert record.read_run(tws, "r_nofile01").reason == "missing"  # clean home, no such run
+    kd = hp.key_dir(tws, create=False)
+    other = kd.parent / ("ab" * 16)  # a second key folder bound to the same path: the home cannot be trusted
+    other.mkdir(mode=0o700)
+    (other / "binding.json").write_text(
+        json.dumps({"schema": "orch.binding/1", "realpath": os.path.realpath(tws)}) + "\n"
+    )
+    read = record.read_run(tws, "r_nofile01")
+    assert (read.status, read.reason) == ("tampered", "unverified")
+
+
+@pytest.mark.parametrize("damage", ["removed", "forged"])
+def test_a_lost_or_forged_local_id_never_switches_recording_off_or_changes_the_mac(tws, damage):
+    from orch import record
+
+    w = _sealed_ws(tws)
+    before = hp.record_key(tws)
+    idf = tws / ".orch/.local-id"
+    if damage == "removed":
+        idf.unlink()
+    else:
+        idf.write_text("ef" * 16 + "\n")
+    assert hp.record_key(tws) == before  # the id is the key folder's name, healed from the trusted home
+    ev = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    assert w.append(dict(ev, run="r_8k2m01", id="toolu_3"))["seq"] == 3  # still seals
+    assert [e["id"] for e in record.read_run(tws, "r_8k2m01").unwrap()] == ["toolu_1", "toolu_2", "toolu_3"]
+    # a spool entry made now carries the right workspace id: it still drains
+    lock = tws / ".orch/record/runs/r_8k2m01.lock"
+    lock.touch()
+    import orch.record as rec
+
+    old, rec._LOCK_WAIT = rec._LOCK_WAIT, 0.01
+    try:
+        w.append(dict(ev, run="r_8k2m01", id="toolu_s"))
+    finally:
+        rec._LOCK_WAIT = old
+    lock.unlink()
+    w.append(dict(ev, run="r_8k2m01", id="toolu_4"))
+    assert "toolu_s" in [e["id"] for e in record.read_run(tws, "r_8k2m01").unwrap()]
+
+
+@pytest.mark.parametrize("bad", [True, False, 1, ["aaaaaaaa", 2]])
+def test_old_kid_must_be_none_a_str_or_strs(bad):
+    with pytest.raises(TypeError):
+        ra.verify_run(b"", RUN, WS, RK, KID, old_kid=bad)
+
+
+def test_spool_name_is_bound_to_run_and_time():
+    name = ra.spool_name(RK, WS, RUN, 1234)
+    assert name.startswith("0" * 16 + "1234_") and ra.spool_name_ok(RK, WS, RUN, name)
+    assert not ra.spool_name_ok(RK, WS, "r_other01", name)
+    assert not ra.spool_name_ok(RK, WS, RUN, "0" * 16 + "1235" + name[20:])

@@ -8,7 +8,7 @@ import pytest
 from orch import history, humanproof
 from orch.errors import Refused
 from test_pause import _history_pause, proof
-from test_step import NOW, run, save, success
+from test_step import NOW, at, run, save, success
 from test_two_machines import both, edit, load, machines, remote_sha
 
 from orch_sync import pause, repo, step
@@ -88,7 +88,7 @@ def test_take_remote_needs_a_signed_history_pause(machines, monkeypatch):
 def test_no_merge_base_is_a_history_pause_not_a_silent_merge(machines):
     a, b, _bare = both(machines)
     tree = step.oid(a, "HEAD^{tree}")
-    new = step.commit(a, tree, [], "2026-11-11T13:00:00Z")  # a new history: no common commit
+    new = step.commit(a, tree, [], at(13))  # a new history: no common commit
     repo.git(a, "push", "--force", "origin", f"{new}:orch-state")
     state = repo.safe(b, "run/sync/state.json")
     import json

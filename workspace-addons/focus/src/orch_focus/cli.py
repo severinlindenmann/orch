@@ -113,10 +113,17 @@ def _area(args, root: Path) -> int:
             text = f"Put the ticket in the area {a['name']}."
         else:
             rows = areas.load(root)
-            print(json.dumps(rows) if as_json else "\n".join(f"{r['name']} ({r['state']}): {r['path']}" for r in rows) or "No areas yet.")
+            print(
+                json.dumps(rows)
+                if as_json
+                else "\n".join(f"{r['name']} ({r['state']}): {r['path']}" for r in rows) or "No areas yet."
+            )
             return 0
     except areas.BadArea as e:
-        print(json.dumps({"error": str(e)}) if as_json else f"Refused: {e}", file=None if as_json else sys.stderr)
+        print(
+            json.dumps({"error": str(e)}) if as_json else f"Refused: {e}",
+            file=None if as_json else sys.stderr,
+        )
         return 2
     print(json.dumps(a) if as_json else text)
     return 0

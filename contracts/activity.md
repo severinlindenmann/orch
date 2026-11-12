@@ -421,9 +421,11 @@ are not hidden. File identity checks (above) do not authenticate content; the re
 
 ## Authenticated record (Gate G1 H1, issue #563)
 
-Slice S1 defines the contract and the pure core (`workspace/src/orch/record_auth.py`, independent reference in
-`validate.py`, vectors `record_auth` in `vectors/activity-v1.json`). The writer and the readers adopt it in S2/S3; until
-then the files and screens behave as before and the limits below apply to the whole record.
+Slice S1 defined the contract and the pure core (`workspace/src/orch/record_auth.py`, independent reference in
+`validate.py`, vectors `record_auth` in `vectors/activity-v1.json`). Slice S2 adopts it in the writer
+(`record.RecordWriter._commit`, the only place that seals a run line) and in the one read path
+(`record._verified`, behind `read_run`, `run_lines` and every CLI view). Job streams, retention, alerts and
+counts files follow in S3 and are not sealed yet.
 
 **Invariant A1.** A record line counts (shown, deduped, counted, used for retention, run state or caps) only when it
 carries this workspace's record MAC over its exact bytes, its run, its seq and its predecessor's MAC, AND it links into
@@ -459,7 +461,7 @@ authenticates its detail file. Schema: `$defs/event_body` (what the writer valid
 number, so a planted junk line cannot shift later lines. The head (authority for rollback) is
 `<guarded home>/keys/<ws>/record-heads/<run>.json`, 0600, written under the run lock after the line:
 `{"schema": "orch.record-head/1", "run", "kid", "seq", "mac", "jobs": {"<job>": {"seq", "mac"}}, "rejected", "drained",
-"drained_floor", "pruned", "hm"}` where `hm = b64u(HMAC(rk, "orch.record.head/1\0" + ws + 0 + canonical JSON of the head
+"drained_floor", "pruned", "legacy_lines", "legacy_hash", "hm"}` where `hm = b64u(HMAC(rk, "orch.record.head/1\0" + ws + 0 + canonical JSON of the head
 without hm))` (sorted keys, compact). A crash between line and head leaves verified lines beyond the head; readers
 accept them and the next commit moves the head. The head is bound to its run (`run` is inside `hm` and a reader requires
 it to equal the run it reads, so one run's head copied over another's never verifies). A head with a wrong `hm`, `run`
@@ -499,7 +501,11 @@ seq 1 with `p` = the genesis of the new key and rewrites the head (the old head 
 old lines stay in the file before it and are `old_key`, never `removed`. Lines without `auth` are `changed`. No migration (pre-release).
 
 **Spool and drain.** A spool entry `pending/<run>/<time_uuid>.json` carries `sm = b64u(HMAC(rk, "orch.record.spool/1\0" +
-ws + 0 + run + 0 + name + 0 + canonical JSON of {event, payload, default_id}))`; the file name is bound. It is sealed
+ws + 0 + run + 0 + name + 0 + canonical JSON of {event, payload, default_id}))`; the file name is bound. The name
+proves itself: `name = <time_ns, 20 digits>_<hex of the first 16 bytes of HMAC-SHA256(rk, "orch.record.spoolname/1\0"
++ ws + 0 + run + 0 + <the 20 digits>)>.json` (`record_auth.spool_name` / `spool_name_ok`, constant-time compare), so
+the drain reads only files under a proven name and refuses every other well-shaped name by its exact name without
+reading it (vectors `record_auth.spool`, `name_ok`). It is sealed
 into the chain only when drained under the lock. An entry with a missing or wrong `sm`, a name already drained, or a
 name older than `drained_floor` is never committed: it is deleted by exact path, counted in `head.rejected` and alerted.
 The MACed object is exactly `{event, payload, default_id}`: an entry with any other key (`sm` aside) is refused.
@@ -507,6 +513,106 @@ The MACed object is exactly `{event, payload, default_id}`: an entry with any ot
 **Job streams** (`jobs/<run>/<job>.jsonl`) use the same seal with domain `orch.record.job/1\0`, scope run + job, genesis
 `orch.record.job.genesis/1` and the head entry `jobs.<job>`; `replace_last` re-seals the new last line with the same seq. A job line carries its `job` inside the MACed body (the
 reader checks it equals the stream's job), as it carries `run`.
+
+**Writer (S2).** Under the run lock, `_commit` takes the next `seq` and `p` from the LAST VERIFIED line of the
+current key id in the file; only when the chain head (current key id, MAC ok) is ahead of it (the file was cut
+short) does it continue at `head.seq + 1` with `p = head.mac`; with no verified line of the current key and no such
+head it starts at seq 1 with the genesis. A head of another key id, a damaged head or a deleted head never restarts
+a chain in the middle of a run. The line is sealed, written with one `write()`, then the head is written (a head
+write that fails is alerted, not raised). No key, no recording (`RecordOff`, nothing written, not even a spool
+entry). The key is made when a run is claimed (`humanproof.ensure_record_key`), never by a writer.
+
+**Foreign key ids (LOW-A).** Lines with a key id other than the current one are held pending while no line of the
+current key has verified. At the end they are `old_key` only when the rotation shape holds: the first verified line
+of the current key is seq 1, or no line verifies and no head of the current key with `seq >= 1` exists. Otherwise
+(the first verified line has `seq != 1`, a gap; or no line verifies but a current-key head says there were lines)
+they are `changed`, reason `content`. After a verified line they are always `changed`.
+
+**Legacy runs.** A run file made before orch sealed lines is a legacy run, decided in ONE place (the read status,
+`ReadResult.legacy`): the guarded home, the workspace id and the key folder resolve cleanly, the head file is truly
+absent, and no line of the file carries `auth`. Its lines are read as before (schema check, `seq` = line number),
+shown, each marked `checked: false`, with the read reason `unchecked` and the text "These records were made before
+orch checked them." (`record.UNCHECKED_TEXT`); they are never counted as orch-checked (counts exclude the run and
+say `complete: false`), never used for permissions, retention or shared counts. Any other state is never legacy:
+a run with a head or a sealed line is verified as a whole and its unsigned lines (stripped, prepended, appended) are
+`changed`, reason `content`, and not shown; an unknown state of the guarded home (a missing or forged local id, a
+key folder that is missing, linked, loose or unreadable) is `tampered`, reason `unverified`, for every run. When the
+writer FIRST seals a run that already has legacy lines, it records them once in the chain head (guarded store,
+covered by the head MAC): `legacy_lines` = n (the non-empty lines it found, a cut-off last line completed) and
+`legacy_hash` = sha256 hex of the exact bytes up to and including the newline of the n-th line. The chain then
+numbers on after them (the first sealed line is seq n + 1, `p` = the genesis). A reader shows those lines when the
+file still starts with exactly that prefix (same count, same hash, none of its lines sealed): `checked: false`,
+`before_protection: true`, reason `unchecked`, never counted as orch-checked, never believed by permissions,
+retention, run state or caps. Anything else unsigned (prepended, edited, removed or added behind the prefix, a
+prefix whose hash differs) is `changed`, reason `content`, not shown. Vectors `record_auth.legacy` and
+`record_auth.legacy_prefix`.
+
+**Readers (S2).** `orch record tail` shows the events of the verified view with a computed `checked` (false for
+`via: hook` and for every line of a legacy run, true otherwise; never stored), the cursor is the verified seq, and
+one marker per change of `(reason, changed, removed)`. `query` and `counts` use the same view; any run with changed,
+removed or unchecked lines makes `counts` `complete: false`. `run_model` has `complete` and `protected`: `protected`
+is false for a run by a tool orch cannot give deny rules (codex, generic: the adapter's `deny.format` is `none`) and
+whenever the tool is not known from a checked line of orch's own collector (`via: log`, sealed; never a hook line); those
+runs show "Records from this helper can't be fully checked." (`record.UNPROTECTED_TEXT`). `--detail` takes the
+`detail_hash` from the verified line that points at the file (never from the caller): a file with other bytes, or a
+sealed line that has a detail pointer but no `detail_hash`, is refused as `swapped` ("Details changed outside orch.");
+only a legacy run reads a detail with no hash.
+
+**Cutover, counters, quarantine, retention (S2).**
+- *Cutover list.* The first sealed write makes `<guarded home>/keys/<ws>/record-cutover.json` (MACed, `cm`): the runs
+  whose unsigned files existed at that moment. Only those runs may have their unsigned lines shown as legacy or
+  recorded as a legacy prefix; every other run's unsigned lines are `changed` (a predictable run name, a file the agent
+  made first, a pruned run's name: a tombstone counts as a head). No list yet: runs without a head or sealed line read
+  as legacy (shown, labelled, never trusted). A list that fails its MAC: no run is legacy.
+- *Rejected spool entries* are counted twice over and summed, never folded: `head.rejected`, and for a run without a
+  head the MACed counter `record-heads/<run>.rej`. Every reader adds them to `changed` (reason `content`). A counter
+  that fails its MAC counts as 1.
+- *Spool folder.* Entries are flat regular files named `\d{20}_[0-9a-f]{32}\.json`, at most 3 MB. Any other name is
+  alerted (`swapped`) and never counted. A planted entry (bad MAC, link, special file, oversized) is removed by its exact
+  name; a folder is renamed once into `.orch/record/quarantine/<run>/` (only orch writes there). Nothing under `pending/`
+  is ever sized or deleted recursively, and nothing deeper than 8 levels is walked anywhere.
+- *Runs are listed from the files and the heads* (non-pruned): a run file or `runs/` deleted shows as `removed`.
+- *Retention.* A true legacy run (on the cutover list) is pruned once the recorded cutover time (orch's own, MACed) is
+  older than `keep_days` and never counts toward `max_mb`. A tampered, unverified, removed or old-key run (made before
+  a protection reset: its segment cannot be verified with the new key) is NEVER pruned by retention (only the person's
+  delete-all removes it; retention reports it). Toward `max_mb` count only the run file of a verified run and the detail
+  files its sealed lines point at; other files under `detail/<run>/` and `jobs/<run>/` are removed with the run but
+  never counted. An old-key head with lines (not pruned) lists its run; with the file gone it reads as `removed`. Retention (a file's mtime is the agent's to set and decides nothing). The tombstone is written before the run file is
+  deleted. A planted spool entry never blocks retention (entries whose MAC fails are refused under the run lock).
+  The cutover list is made when the key is made. A recorded legacy prefix
+  that is gone from the file counts as `removed`.
+- *Trust markers.* `record.is_sealed` / `record.is_checked` are the only definitions (events, details, counts, run
+  model, retention, caps). Only a checked line can count a call as `ok`; a hook line's `ok` is `unknown`. Add-ons
+  (Focus) drive denials and run state only from lines with `checked: true` and keep orch's problem markers.
+- *Earlier keys (`old_kid`, `record-reset.json`).* A protection reset writes `<guarded home>/keys/<ws>/record-reset.json`
+  `{"schema": "orch.record-reset/1", "kid", "at", "cm"}` (`cm` = MAC with the new record key; `at` is orch's own time) and
+  re-seals the cutover list under the new key when it verified under the old one (a loose old key carries nothing over).
+  The first commit of a run after a reset keeps `old_kid` / `old_kids` (the earlier key ids, shape-checked) in the new
+  head. Lines of a key id other than the current one are old history (`old_key`) only for exactly those ids and only
+  in front of the chain; any other foreign key id is `changed`, reason `content` (vectors `record_auth.verify`,
+  `old_kids`). The cutover list is made only when the human key is made; a list missing while a key exists means no
+  run is legacy, with one exception, the record upgrade, which happens exactly once per workspace. Its marker
+  `<guarded home>/keys/<ws>/record-upgrade.json` `{"schema": "orch.record-upgrade/1", "kid", "at", "upgrade", "old",
+  "cm"}` (`cm` = MAC with the record key, domain `orch.record.upgrade/1`; `at` is orch's own time) is written when the
+  key is made (`upgrade: false`), or, for a key made before the upgrade, by `ensure_record_key` at the first orch call
+  after the update, before any agent action (`upgrade: true`, `old` = the old-format spool names of that moment per
+  run): the marker FIRST, then the cutover list from the run files, but ONLY when no chain head and no rejects counter
+  exists at all (a genuine pre-protection install). If any head exists the list stays missing: nothing is legacy. No
+  file time (mtime) is looked at anywhere in the upgrade. A present marker (valid or not) means the upgrade is done: it
+  never runs again, and a list missing afterwards means no run is legacy (the writer never makes it). A protection
+  reset re-seals the marker under the new key when it verified under the old, sound key. Stated limit (Level 1): a
+  run planted before that first call after the update, on an install that never sealed a run, is adopted as legacy.
+  *Old-format spool names.* An entry named `<20 digits>_<32 hex>.json` without its name proof (made before name proofs)
+  is read only when its name is in the marker's `old` set for that run (a real upgrade, MACed) and not already drained;
+  its `sm` (which binds the name) must then verify as for any entry; at most 50 such entries per drain, the rest on the
+  next call. Every other unproven name is refused unread; a fresh key (`upgrade: false`) accepts none. Files planted before the very first key exists are adopted as legacy (listed)
+  and shown as not checked. The drain lists at most 50000 names per call (more: alerted once, reason `content`),
+  checks every listed name's proof (by name, unread) before anything is cut, processes names that carry their proof first, in sorted order, then refuses at most 50 well-shaped names without
+  their proof per call by their exact name, never reading them (invalid names never consume the valid-name work);
+  names that are not spool-shaped are alerted (`swapped`). Retention's spool check uses the same name check first.
+  Record and detail sizes count at most 10000 spool/quarantine entries.
+- *Not in S2:* job streams, alerts and counts files are not sealed yet (S3); a protection reset does not carry the legacy
+  prefix or tombstones over to the new key (fail closed: the old unsigned lines are `changed`).
 
 ### Known limit (Level 1)
 

@@ -198,9 +198,11 @@ def test_a_live_session_is_counted_under_any_mac_language(ws, fake_orch, monkeyp
 
     monkeypatch.setenv("LC_ALL", "C")
     monkeypatch.setenv("LANG", "C")
-    core_form = livedata._core_start(subprocess.run(  # what core writes in the claim record (UTC, ISO)
-        ["ps", "-o", "lstart=", "-p", str(os.getpid())], capture_output=True, text=True, check=True
-    ).stdout.strip())
+    core_form = livedata._core_start(
+        subprocess.run(  # what core writes in the claim record (UTC, ISO)
+            ["ps", "-o", "lstart=", "-p", str(os.getpid())], capture_output=True, text=True, check=True
+        ).stdout.strip()
+    )
     assert core_form
     monkeypatch.setenv("LC_ALL", loc)
     monkeypatch.setenv("LANG", loc)
