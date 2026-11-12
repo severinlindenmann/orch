@@ -168,6 +168,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "self.hider.hide_cut",
     "self.hider.hide_json",
     "self.hider.hide_text",
+    "hider.hide_text",
+    "hider.leaks",
     "stored.get",
     "super().__init__",
     "time.time_ns",
@@ -1449,3 +1451,95 @@ def test_retention_checks_lock_immediately_before_deletion(store, monkeypatch, t
     assert jobs.exists() and runfile(ws).exists()
     if target == "detail":
         assert (record.record_dir(ws) / "detail" / RUN).exists()
+
+
+# --- G1 M1: the writer's view of the run file is the reader's view ---
+def test_a_planted_invalid_log_line_does_not_make_the_writer_drop_the_real_line(store):
+    ws, writer = store
+    writer.append(event(id="first"))
+    # schema-invalid (no `text`, `at`, ...) but with the right seq and the id of the next real line
+    planted = {"run": RUN, "seq": 2, "id": "toolu_next", "kind": "step", "outcome": None, "via": "log"}
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    stored = writer.append(event(id="toolu_next", via="log"))
+    assert stored is not None and stored["seq"] == 3
+    assert [e["id"] for e in record.read_run(ws, RUN).unwrap()] == ["first", "toolu_next"]
+
+
+def test_a_planted_wrong_seq_line_is_not_trusted_by_the_writer(store):
+    ws, writer = store
+    writer.append(event(id="first"))
+    planted = dict(event(id="toolu_next", via="log"), run=RUN, seq=10**18)
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    stored = writer.append(event(id="toolu_next", via="log"))
+    assert stored is not None and stored["seq"] == 3
+
+
+def test_a_planted_huge_id_does_not_move_the_collectors_seq_start(store):
+    from orch import run_record
+
+    ws, writer = store
+    writer.append(event(id="first"))
+    writer.append(
+        event(id=f"{RUN}:999999999999999999", via="log")
+    )  # a line that passes every check but its id
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(dict(event(id="x"), run=RUN, seq=10**18)) + "\n")
+    seq, _ = run_record._so_far(ws, RUN)
+    assert seq < 100
+    alerts = "".join(p.read_text() for p in (record.record_dir(ws) / "alerts").glob("*.jsonl"))
+    assert '"reason":"content"' in alerts
+
+
+def test_ids_that_ran_ahead_by_dropped_events_stay_numbered_after_many_turns(store):
+    from orch import run_record
+
+    ws, writer = store
+    # three turns that each dropped 600 events: the id counter runs 600 ahead of the seqs every time
+    for n, id_no in enumerate((1, 601, 1201, 1801), 1):
+        assert writer.append(event(id=f"{RUN}:{id_no}", via="log"))["seq"] == n
+    seq, _ = run_record._so_far(ws, RUN)
+    assert seq == 1801  # the next id-less line gets 1802: new, so the writer does not drop it
+    assert not (record.record_dir(ws) / "alerts").exists()
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(dict(event(id=f"{RUN}:{10**18}"), run=RUN, seq=5)) + "\n")
+    assert run_record._so_far(ws, RUN)[0] == 1801
+
+
+def test_a_planted_line_with_another_id_cannot_decide_about_a_detail_file(store):
+    ws, writer = store
+    started = writer.append(event(id="toolu_d"), detail=DETAIL)
+    planted = dict(started, id="toolu_other", seq=2, outcome=dict(ok=True, error=None, ms=1), via="hook")
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    finished = writer.append(
+        event(id="toolu_d", outcome=dict(ok=True, error=None, ms=2)),
+        detail={"input": "new-input", "output": "new-output"},
+    )
+    assert finished["detail"] == started["detail"]
+    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()
+
+
+def test_planted_helper_names_do_not_crash_or_skew_the_collector(store):
+    from orch import run_record
+
+    ws, writer = store
+    writer.append(event(id="first"))
+    with runfile(ws).open("a") as f:
+        for n, agent in enumerate(("h_3", "h_" + "9" * 5000, "h_99999999", "h_" + "٣" * 3), 2):
+            f.write(json.dumps(dict(event(id=f"p{n}"), run=RUN, seq=n, via="log", agent=agent)) + "\n")
+    assert run_record._so_far(ws, RUN)[1] == 3
+
+
+def test_a_planted_line_of_another_ticket_cannot_decide_about_a_detail_file(store):
+    ws, writer = store
+    started = writer.append(event(id="toolu_d"), detail=DETAIL)
+    planted = dict(started, ticket="t_other1", via="core", seq=2, outcome=dict(ok=True, error=None, ms=1))
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    writer.append(
+        event(id="toolu_d", outcome=dict(ok=True, error=None, ms=2)),
+        detail={"input": "new-input", "output": "new-output"},
+    )
+    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()

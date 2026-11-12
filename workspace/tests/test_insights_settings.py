@@ -1625,8 +1625,10 @@ def test_delete_detail_keeps_other_tickets_detail_in_a_shared_run(ws, rec, run, 
 def _plant(ws, run_id, line):
     """An agent with file access appends a raw line to a run file (no writer, no hider)."""
     path = record_dir(ws) / "runs" / f"{run_id}.jsonl"
+    # a planted line readers trust carries its physical line number as seq (G1 H2); a wrong seq is skipped
+    seq = len(path.read_bytes().splitlines()) + 1 if path.exists() else 1
     with path.open("a") as f:
-        f.write(json.dumps(line) + "\n")
+        f.write(json.dumps(dict(line, seq=seq)) + "\n")
 
 
 def _own_line(ws, run_id, n):

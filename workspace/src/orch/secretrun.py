@@ -2,13 +2,15 @@
 
 Every use is written to the run's record (`.orch/record`, record.py) as a key.use event BEFORE the command
 starts and before any key file is written, without any value; a writer that cannot write (no hider, damaged
-record) stops the command. A call outside a run by a person or script (no ORCH_RUN / ORCH_TICKET) goes to the
-workspace's unattributed run of the day (run r_outside_<yyyymmdd>, ticket t_outside); an agent outside a run
-is refused. set_recorder() replaces the writer (tests).
+record) stops the command. A call outside a run by a PROVEN person (hp1 proof, cli_secret) goes to the
+workspace's unattributed run of the day (run r_outside_<yyyymmdd>, ticket t_outside); every other caller
+(`agent=True`, the default of the CLI: nothing the caller controls can lower it) outside a run is refused.
+set_recorder() replaces the writer (tests).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -20,7 +22,7 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
+import urllib.parse
 
 from orch import hider, keystore, launchenv, term
 from orch import humanproof as hp
@@ -45,10 +47,11 @@ BAD_RUN = "Refused: this run is not active, so the use cannot be recorded."
 
 
 def require_run(root, agent) -> None:
-    """The run a use is recorded in. An agent must have one (ORCH_RUN + ORCH_TICKET naming a live claim that
-    belong together, like orch's own runs), or the call is refused before any key is read. A person or script
-    without a run is not refused (its uses go to the unattributed run of the day); with a run named in its
-    environment the same check applies (nothing is written into another run's record)."""
+    """The run a use is recorded in. Every caller not proven as a person (`agent=True`) must have one
+    (ORCH_RUN + ORCH_TICKET naming a live claim that belong together, like orch's own runs), or the call is
+    refused before any key is read. A proven person without a run is not refused (its uses go to the
+    unattributed run of the day); with a run named in its environment the same check applies (nothing is
+    written into another run's record)."""
     ids = _run_ids()
     if ids is None:
         if agent:
@@ -216,6 +219,19 @@ def record_change(root, action, profile, by):
         pass
 
 
+SHEBANG_REFUSED = (
+    "Refused: this program is a script whose interpreter orch cannot approve (env, a relative path, or a "
+    "program in a folder you own). Approve the interpreter itself as the command and give the script as an "
+    "argument."
+)
+USER_OWNED_DEV = (
+    "Refused: this program is a macOS developer-tools stub and the developer folder it runs from is missing."
+)
+USER_OWNED = (
+    "Refused: the program or a folder above it belongs to your own user, so an agent running as you could "
+    "replace it. Choose a program in a system folder, or approve this exact file as the person."
+)
+
 RISKY_PROGRAMS = re.compile(
     r"^(sh|bash|zsh|dash|ksh|fish|csh|tcsh|env|xargs|python[0-9.]*|node|npx|npm|pip[0-9.]*|perl|ruby|php|lua|"
     r"java|git|osascript|pwsh|powershell|cmd|ssh|curl|wget|psql|mysql|sqlite3|redis-cli|mongosh)(\.exe)?$",
@@ -227,32 +243,127 @@ def _under(path: str, base: str) -> bool:
     return path == base or path.startswith(base.rstrip(os.sep) + os.sep)
 
 
-def approve_program(root, name):
-    """What a person approves as a profile's `run` program: (real path, warnings). Refused: a relative path;
-    the program or a folder above it inside the workspace, or changeable by others (group/other-writable; the
-    root and admin groups of a normal system are fine). Interpreters and tools that run arbitrary code (sh,
-    python, node, env, git, npm, curl, and database clients that read commands from stdin or run shell
-    escapes: psql, mysql, sqlite3, redis-cli, mongosh) are allowed but warned about: approving one is
-    approving anything."""
-    if not os.path.isabs(name) and (os.sep in name or (os.altsep and os.altsep in name) or "/" in name):
-        raise Refused("Refused: give the program as a full path or a plain name, not a relative path.")
-    path = resolve_program(root, name)
-    real = os.path.realpath(path)
-    ws = os.path.realpath(root)
+XCODE_SELECT_LINK = (
+    "/var/db/xcode_select_link"  # macOS: where /usr/bin/git, make, python3 ... really run from
+)
+ROOT_REFUSED = "Refused: orch does not use keys as root. Run it as a normal user or a service user."
+WINDOWS = "Refused: orch secret commands that start programs are not available on Windows yet."
+
+
+def _refuse_root() -> None:
+    if hasattr(os, "getuid") and os.getuid() == 0:
+        raise Refused(ROOT_REFUSED)
+
+
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+def _user_can_write(p: str) -> bool:
+    """The current user (not root) can change this file or folder: owner, group, ACL or admin group."""
+    if os.getuid() == 0:
+        return False
+    st = os.stat(p)
+    return (st.st_uid != 0 and st.st_uid == os.getuid()) or os.access(p, os.W_OK)
+
+
+def _chain(real: str) -> list[str]:
     here, chain = real, []
     while True:
         chain.append(here)
         up = os.path.dirname(here)
         if up == here:
-            break
+            return chain
         here = up
+
+
+def _check_chain(real: str, ws: str) -> None:
+    chain = _chain(real)
     for p in chain:
         if _under(p, ws):
             raise Refused("Refused: the program lies inside this workspace; an agent could change it.")
-        if os.name != "nt":
-            st = os.stat(p)
-            if st.st_mode & 0o002 or (st.st_mode & 0o020 and st.st_gid not in (0, 80)):
-                raise Refused("Refused: the program or a folder above it can be changed by other users.")
+        st = os.stat(p)
+        group_open = st.st_mode & 0o020 and st.st_gid != 0
+        if st.st_mode & 0o002 or (group_open and (st.st_uid == os.getuid() or not _user_can_write(p))):
+            raise Refused("Refused: the program or a folder above it can be changed by other users.")
+    if any(_user_can_write(p) for p in chain):
+        raise Refused(USER_OWNED)
+
+
+def _developer_dir() -> str:
+    """Where the macOS command line tools live: what xcode-select points to, else the standard folder."""
+    link = os.path.realpath(XCODE_SELECT_LINK)
+    return link if os.path.isdir(link) else "/Library/Developer/CommandLineTools"
+
+
+XCRUN_STUB_DIR = "/usr/bin"  # where macOS keeps its xcrun stubs (git, python3, clang ...)
+
+
+def _is_xcrun_stub(path: str) -> bool:
+    """An xcrun stub names libxcselect inside; one that cannot be read counts as a stub (fail closed)."""
+    try:
+        with open(path, "rb") as f:
+            return b"libxcselect" in f.read(4 * 1024 * 1024)
+    except OSError:
+        return True
+
+
+def _in_stub_dir(path: str) -> bool:
+    """Is the program in the xcrun stub folder? Compared by file identity (the file system ignores case);
+    any error counts as yes."""
+    try:
+        return os.path.samefile(os.path.dirname(path), XCRUN_STUB_DIR)
+    except OSError:
+        return True
+
+
+def _check_xcode(path: str, ws: str) -> None:
+    """macOS: /usr/bin/git, make, python3, clang ... are stubs that run the real tool from the developer
+    folder (chosen by xcode-select, never by the caller's environment). For such a stub that folder must be
+    safe whether or not a tool of that name is found there, and so must the tool. Other /usr/bin programs
+    do not depend on it."""
+    if sys.platform != "darwin" or not _in_stub_dir(path) or not _is_xcrun_stub(path):
+        return
+    dev = _developer_dir()
+    if not os.path.isdir(dev):  # no developer folder to run the real tool from: not a program to approve
+        raise Refused(USER_OWNED_DEV)
+    _check_chain(dev, ws)
+    name = os.path.basename(path)
+    candidates = [os.path.join(dev, "usr", "bin", name)]
+    toolchains = os.path.join(dev, "Toolchains")
+    for base, rest in (
+        (toolchains, ("usr", "bin")),
+        (os.path.join(dev, "Platforms"), ("Developer", "usr", "bin")),
+    ):
+        try:
+            candidates += [os.path.join(base, t, *rest, name) for t in sorted(os.listdir(base))]
+        except OSError:
+            pass
+    for c in candidates:
+        if os.path.isfile(c):
+            _check_chain(os.path.realpath(c), ws)
+
+
+def approve_program(root, name, *, _depth=0):
+    """What a person approves as a profile's `run` program: (real path, warnings). Refused: a relative path;
+    the program or a folder above it inside the workspace, changeable by other users, or changeable by the
+    current user (owner, group such as admin, or ACL: an agent running as that user can rewrite it). On macOS
+    a /usr/bin stub whose real tool lives in a user-writable developer folder is refused too. A program that
+    starts with #! needs a system interpreter (env is refused). Interpreters and tools that run arbitrary code
+    (sh, python, node, env, git, npm, curl, and database clients that read commands from stdin or run shell
+    escapes: psql, mysql, sqlite3, redis-cli, mongosh) are allowed but warned about: approving one is
+    approving anything."""
+    if _windows():
+        raise Refused(WINDOWS)
+    _refuse_root()  # no root exemption: nothing counts as user-writable under root
+    if not os.path.isabs(name) and (os.sep in name or (os.altsep and os.altsep in name) or "/" in name):
+        raise Refused("Refused: give the program as a full path or a plain name, not a relative path.")
+    path = resolve_program(root, name)
+    real = os.path.realpath(path)
+    ws = os.path.realpath(root)
+    _check_chain(real, ws)
+    _check_xcode(path, ws)
+    _check_shebang(root, real, _depth)
     warnings = []
     if RISKY_PROGRAMS.match(os.path.basename(real)) or RISKY_PROGRAMS.match(os.path.basename(name)):
         warnings.append(
@@ -262,28 +373,123 @@ def approve_program(root, name):
     return real, warnings
 
 
-def safe_path_dirs(root):
-    fixed = ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin", "/usr/sbin", "/sbin"]
-    if os.name == "nt":
-        fixed = [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")]
-    result = [p for p in fixed if os.path.isdir(p)]
-    workspace = Path(root).resolve()
-    for p in os.environ.get("PATH", "").split(os.pathsep):
-        if not os.path.isabs(p) or not os.path.isdir(p) or Path(p).resolve().is_relative_to(workspace):
+def _check_shebang(root, real: str, depth: int) -> None:
+    """A program that starts with #! is run by its interpreter: that must be an approved system program too
+    (env and relative interpreters are refused)."""
+    try:
+        with open(real, "rb") as f:
+            head = f.read(256)
+    except OSError:
+        raise Refused(SHEBANG_REFUSED) from None
+    if not head.startswith(b"#!"):
+        return
+    parts = head[2:].split(b"\n", 1)[0].decode("utf-8", "replace").split()
+    if depth >= 2 or not parts or not os.path.isabs(parts[0]) or os.path.basename(parts[0]) == "env":
+        raise Refused(SHEBANG_REFUSED)
+    approve_program(root, parts[0], _depth=depth + 1)
+
+
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")  # looks like scheme:... (jdbc:, sqlite3:, mailto:)
+_WEB_SCHEMES = ("http", "https", "ssh", "git")  # the only schemes whose values are not looked at as paths
+
+
+def _is_plain_address(value: str) -> bool:
+    """A web or git address with no path hidden in it: scheme://..., exact lowercase scheme from the list, no
+    whitespace, and no query value that looks like a path (also percent-encoded). Anything else is not an
+    address: it goes through the path rules. A value that cannot be parsed is refused."""
+    m = re.match(r"^([a-z]+)://", value)
+    if not m or m[1] not in _WEB_SCHEMES or re.search(r"\s", value):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(value)
+        query = parts.query
+        pairs = urllib.parse.parse_qsl(query, keep_blank_values=True)
+    except ValueError:
+        raise Refused("Refused: an address in the command could not be read.") from None
+    if "%2f" in query.lower() or "%5c" in query.lower():
+        return False
+    host_part = urllib.parse.unquote(
+        parts.netloc
+    )  # a user or host that starts with - is an option, not an address
+    if host_part.startswith("-") or any(
+        p.startswith("-") for p in host_part.replace("@", ":").split(":")[:2]
+    ):
+        return False
+    if "@-" in host_part:
+        return False
+    return not any(
+        "/" in v or "\\" in v or v[:1] in ("~", ".", "/") for v in (x for pair in pairs for x in pair)
+    )
+
+
+_OPTION_TAKERS = {"ssh", "scp", "sftp", "git", "rsync"}  # programs that run a command given with -o
+
+
+def check_arguments(root, arguments, program=None) -> None:
+    """One fail-closed rule for the arguments of a profile's command and for its `set` values: one with a path
+    separator must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative path), must not
+    go through a link, and neither it nor any parent may be inside the workspace or changeable by you (an
+    agent running as you could change it). Only plain http, https, ssh and git addresses are not paths."""
+    ws = os.path.realpath(root)
+    takes_options = os.path.basename(program or "").lower().removesuffix(".exe") in _OPTION_TAKERS
+    for arg in arguments:
+        if takes_options and arg.startswith("-o"):
+            raise Refused("Refused: an -o option can run a command through this program and is not allowed.")
+        if re.match(r"^[^\s/]*@-", arg) or re.match(r"^[^\s/:]+:-", arg):
+            raise Refused("Refused: an argument looks like an option hidden in an address.")
+        if _is_plain_address(arg):
             continue
+        if (
+            "/" not in arg
+            and "\\" not in arg
+            and not (os.altsep and os.altsep in arg)
+            and not _SCHEME.match(arg)
+        ):
+            continue
+        if not os.path.isabs(arg) or "\0" in arg or "\\" in arg:
+            raise Refused(
+                "Refused: an argument with a path must be a full path on its own, "
+                "not inside an option and not relative."
+            )
+        real = os.path.realpath(arg)
+        if real != os.path.normpath(arg):
+            raise Refused("Refused: a path in the command goes through a link; give the real path.")
+        if not os.path.exists(real):
+            raise Refused("Refused: a file named in the command does not exist.")
+        _check_chain(real, ws)
+        if not os.path.isfile(real):
+            raise Refused("Refused: a path in the command must be a regular file.")
+
+
+def use_target(profile: str, mode: str, argv) -> str:
+    """The target of a person's proof for one call: the profile, the mode and the exact command words."""
+    digest = hashlib.sha256("\0".join([mode, *argv]).encode("utf-8", "surrogateescape")).hexdigest()
+    return f"{profile}:use:{digest}"
+
+
+def safe_path_dirs(root):
+    """The only folders a plain program name is searched in, and the child's PATH: fixed system folders that
+    belong to root and nobody else can change. Never the caller's PATH (an agent can prepend to it)."""
+    fixed = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    if os.name == "nt":
+        return [
+            p
+            for p in [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")]
+            if os.path.isdir(p)
+        ]
+    result = []
+    for p in fixed:
         try:
             info = os.stat(p)
         except OSError:
             continue
-        if os.name != "nt" and (info.st_mode & 0o022 or info.st_uid not in (0, os.getuid())):
-            continue
-        if p not in result:
+        if info.st_uid == 0 and not info.st_mode & 0o022 and p not in result:
             result.append(p)
     return result
 
 
-def _environment(dirs):
-    names = "LANG LC_ALL LC_CTYPE TERM TZ USER LOGNAME TMPDIR".split()
+def _environment(dirs, private, real_home=False):
+    names = "LANG LC_ALL LC_CTYPE TERM TZ USER LOGNAME".split()
     if os.name == "nt":
         names += "SYSTEMROOT COMSPEC PATHEXT USERPROFILE APPDATA LOCALAPPDATA TEMP TMP".split()
     env = {
@@ -292,9 +498,14 @@ def _environment(dirs):
         if k in os.environ and len(os.environ[k]) <= 200 and "\0" not in os.environ[k]
     }
     env["PATH"] = os.pathsep.join(dirs)
-    home = launchenv.user_home()
-    if home is not None:
-        env["HOME"] = str(home)
+    # H3: the child works in a private empty folder: no planted config, scripts or modules of the caller's
+    # cwd or home are loaded. Programs that read their config from the real home are not contained unless a
+    # person approved real_home (then HOME is the real one; the cwd stays private).
+    home = launchenv.user_home() if real_home else None
+    env["HOME"] = str(home if home is not None else private)
+    if os.name == "nt":
+        env["TEMP"] = env["TMP"] = str(private)
+    env["TMPDIR"] = str(private)  # never the caller's (key-bearing temp files land only in our folder)
     return env
 
 
@@ -348,7 +559,7 @@ def sweep_tmp(root):
         if not stat.S_ISDIR(info.st_mode):
             continue
         if not _pid_alive(int(p.name.split("-", 1)[0])):
-            shutil.rmtree(p)
+            shutil.rmtree(p, ignore_errors=True)  # one undeletable folder must not stop every use
 
 
 AGENT_COMMAND = (
@@ -441,7 +652,7 @@ def _kill_group(pid: int, grace: float = 2.0) -> None:
             time.sleep(0.02)
 
 
-def _child(command, env, h, stdout, stderr):
+def _child(command, env, h, stdout, stderr, cwd=None):
     child = None
     threads, errors = [], []
     main = threading.current_thread() is threading.main_thread()
@@ -470,6 +681,7 @@ def _child(command, env, h, stdout, stderr):
             child = subprocess.Popen(
                 command,
                 env=env,
+                cwd=cwd,
                 shell=False,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -512,12 +724,17 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
     temp = None
     h = None
     try:
+        if _windows():
+            raise Refused(WINDOWS)
+        _refuse_root()
         require_run(root, agent)  # before any key or file is touched
         profile = _profile(root, profile_name)
+        if agent and profile.get("real_home") is True:  # the real HOME undoes the containment: person only
+            raise Refused("Refused: this profile uses your real home folder, so only you can run it.")
+        check_arguments(root, profile.get("set", {}).values(), (profile.get("run") or [None])[0])
         if mode not in ("env", "file", "exec"):
             raise Refused("Refused: unknown secret command.")
-        if mode in ("file", "exec"):
-            sweep_tmp(root)
+        sweep_tmp(root)
         command = list(argv)
         if mode == "exec":
             if not profile.get("run"):
@@ -527,10 +744,17 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                     "Refused: this profile's command is not a full path. "
                     "Ask the person to set the profile again."
                 )
-            approve_program(root, profile["run"][0])  # still a safe, existing program at exec time
             command = profile["run"] + command
         if not command:
             raise Refused("Refused: give a command to run.")
+        run0 = (profile.get("run") or [None])[0]
+        if run0 is not None and command[0] == run0:  # the profile's own program, in every mode
+            if not os.path.isabs(run0):
+                raise Refused(
+                    "Refused: this profile's command is not a full path. Ask the person to set it again."
+                )
+            approve_program(root, run0)  # still a safe, existing program now
+            check_arguments(root, profile["run"][1:], run0)
         if mode == "env" and not profile.get("env") and profile.get("files"):
             raise Refused("Refused: this profile needs files. Use orch secret file.")
         needles = keystore.all_needles(root)
@@ -547,7 +771,11 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             raise Refused("Refused: no keys are available for hiding output.")
         dirs = safe_path_dirs(root)
         command[0] = _program(command[0], dirs, h)
-        env = _environment(dirs)
+        home = hp.guarded_home(root)
+        parent = home / "keys" / "tmp"
+        candidate = parent / f"{os.getpid()}-{secrets.token_hex(8)}"
+        private = candidate / "~home"  # empty: the child's cwd and HOME (a key name can never be "~home")
+        env = _environment(dirs, private, profile.get("real_home") is True)
         env.update(profile.get("set", {}))
         types = {row["name"]: row["type"] for row in keystore.list_keys(root) if row["state"] != "shadowed"}
         for var, name in profile.get("env", {}).items():
@@ -561,15 +789,13 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             )
         for name in names:  # recorded BEFORE any key file is written (a failing record leaves nothing behind)
             recorder.record(name)
+        hp._private_dir(parent, home)
+        candidate.mkdir(mode=0o700)
+        temp = candidate
+        hp.winacl.set_private(temp, True)
+        hp._private_dir(temp, parent)
+        private.mkdir(mode=0o700)
         if files:
-            home = hp.guarded_home(root)
-            parent = home / "keys" / "tmp"
-            hp._private_dir(parent, home)
-            candidate = parent / f"{os.getpid()}-{secrets.token_hex(8)}"
-            candidate.mkdir(mode=0o700)
-            temp = candidate
-            hp.winacl.set_private(temp, True)
-            hp._private_dir(temp, parent)
             paths = {}
             for var, name in files.items():
                 if name not in paths:
@@ -586,7 +812,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                 )
                 for arg in command
             ]
-        return _child(command, env, h, stdout, stderr)
+        return _child(command, env, h, stdout, stderr, cwd=str(private))
     except Refused as exc:
         raise Refused(h.hide_text(str(exc)) if h else str(exc)) from None
     except Exception:
@@ -600,6 +826,9 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
 
 
 def _get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
+    if _windows():
+        raise Refused(WINDOWS)
+    _refuse_root()
     require_run(root, agent)
     profile = _profile(root, profile_name)
     h = hider.Hider(keystore.all_needles(root))
@@ -611,6 +840,8 @@ def _get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
 
     if key not in {*profile.get("env", {}).values(), *profile.get("files", {}).values()}:
         refuse("not_in_profile", f'Refused: the profile "{profile_name}" does not hold the key "{key}".')
+    if agent:  # printing a key is for a proven person's pipelines only, whatever allow_get says
+        refuse("get_agent", "Refused: only the person can print a key. Use orch secret env instead.")
     if not _switch_on(root, profile_name, "allow_get"):
         refuse(
             "get_off",

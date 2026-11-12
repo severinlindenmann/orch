@@ -73,7 +73,10 @@ def test_plain_op_lands_on_latest_revision(proj, new_ticket):
     t = tickets.load(proj, tid)  # an old copy
     tickets.log(proj, tid, "one", "agent:x")
     tickets.apply_op(
-        proj, tid, lambda x: x["history"].append({"at": tickets.now(), "by": "agent:x", "text": "two"})
+        proj,
+        tid,
+        lambda x: x["history"].append({"at": tickets.now(), "by": "agent:x", "text": "two"}),
+        by=tickets.SYSTEM,
     )
     assert t["revision"] < tickets.load(proj, tid)["revision"]
     assert [h["text"] for h in read(proj, tid)["history"]][-2:] == ["one", "two"]
@@ -102,7 +105,9 @@ def test_agent_can_reorder_wont_do_steps_but_cannot_change_decisions(proj, new_t
     assert moved["checklist"] == list(reversed(before))
     for edit in ({"wont_do": False}, {"reason": "Changed"}, {"by": "agent:codex"}):
         with pytest.raises(tickets.Refused, match="Only a person"):
-            tickets.apply_op(proj, tid, lambda t, edit=edit: t["checklist"][0].update(edit))
+            tickets.apply_op(
+                proj, tid, lambda t, edit=edit: t["checklist"][0].update(edit), by=tickets.SYSTEM
+            )
         assert read(proj, tid) == moved
 
 
@@ -121,10 +126,10 @@ def test_reword_step_respects_persons_wont_do(proj, new_ticket, monkeypatch, age
 
     if agent and wont_do:
         with pytest.raises(tickets.Refused, match="Only a person"):
-            tickets.apply_op(proj, tid, reword)
+            tickets.apply_op(proj, tid, reword, by=tickets.SYSTEM)
         assert read(proj, tid) == before
     else:
-        tickets.apply_op(proj, tid, reword)
+        tickets.apply_op(proj, tid, reword, by=tickets.SYSTEM)
         expected = {**before["checklist"][0], "text": "Ask sales"}
         assert read(proj, tid)["checklist"][0] == expected
 
@@ -146,7 +151,7 @@ def test_agent_cannot_duplicate_wont_do_step(proj, new_ticket, monkeypatch, reop
             original.pop("reason", None)
 
     with pytest.raises(tickets.Refused, match="Duplicate checklist step ids"):
-        tickets.apply_op(proj, tid, attack)
+        tickets.apply_op(proj, tid, attack, by=tickets.SYSTEM)
     assert read(proj, tid) == before
 
 

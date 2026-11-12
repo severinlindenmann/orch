@@ -193,6 +193,30 @@ def test_unsafe_id_dedupes_with_a_hook_line_through_the_writer(store):
     assert finished[0]["id"] == "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]
 
 
+@pytest.mark.parametrize(
+    "interrupt, code", [(None, "tool_failed"), (False, "tool_failed"), (True, "interrupted")]
+)
+def test_a_failure_hook_maps_to_a_failed_end_with_a_fixed_code(interrupt, code):
+    from orch.collect_claude import hook_line
+
+    raw = {
+        "hook_event_name": "PostToolUseFailure", "tool_name": "Bash", "tool_use_id": "toolu_f1",
+        "tool_input": {"command": "rm -rf build"}, "error": "Exit code 1\n" + "x" * 50_000,
+    }  # fmt: skip
+    if interrupt is not None:
+        raw["is_interrupt"] = interrupt
+    got = hook_line(raw)
+    assert got["outcome"] == {"ok": False, "error": code, "ms": None}  # never the error text
+    assert (got["id"], got["kind"], got["text"]) == ("toolu_f1", "step", "Run rm -rf build")
+    assert got["payload"]["input"] == {"command": "rm -rf build"}
+    out = got["payload"]["output"]  # the error text, cut like any hook output (hidden by the writer)
+    assert out.startswith("Exit code 1\n") and out.endswith("more characters]") and len(out) < 33_000
+    pre = hook_line(dict(raw, hook_event_name="PreToolUse"))
+    post = hook_line(dict(raw, hook_event_name="PostToolUse"))
+    assert pre["outcome"] is None and "payload" not in pre
+    assert post["outcome"] == {"ok": None, "error": None, "ms": None}  # a success never says it ended well
+
+
 def test_result_events_get_stable_ids_from_the_line():
     done = json.dumps({"type": "result", "uuid": "u9", "is_error": False, "usage": {"output_tokens": 1}})
     one = ClaudeMapperFor(seq_start=0).feed(done)

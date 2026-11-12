@@ -125,7 +125,7 @@ def _evidence_ticket(proj, new_ticket, docs, done=True):
     def op(t):
         t["checklist"] = [{"id": "c1", "text": "Export", "done": done, "evidence": evs}]
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     return tid
 
 
@@ -285,7 +285,7 @@ def test_deeply_nested_or_huge_proof_file_never_fails_the_send(proj, new_ticket,
             }
         ]
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     assert "results" not in phone_view.view_for(proj, tid)
 
 
@@ -783,7 +783,7 @@ def _evidence_files(proj, new_ticket, files, title="Deploy"):
     def op(t):
         t["checklist"] = [{"id": "c1", "text": "Deploy", "done": True, "evidence": evs}]
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     return tid
 
 
@@ -853,7 +853,7 @@ def test_h5_stored_values_never_leave_in_any_text_of_the_view(proj, run, new_tic
         t["summary"] = f"Done, new value {VALUE}"
         # url/file evidence: covered by the backlog upload-gate PR (phone_view.attachments), not #497
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     code, _, err = run("relay", "send", "phones", "Finished", "--ticket", tid, "--update", "result")
     assert code == 0, err
     assert VALUE not in json.dumps(conn.sent, ensure_ascii=False), "no message at all carries it"
@@ -1279,6 +1279,6 @@ def test_r3_l7_more_mysql_family_commands(text, want):
 def test_update_title_no_prefix_of_a_stored_value_after_a_collapse(proj, new_ticket):
     keystore.add(proj, "db-cred", "token", VALUE)
     tid = new_ticket("Title")
-    tickets.apply_op(proj, tid, lambda t: t.update(title="a" + " " * 365 + VALUE))
+    tickets.apply_op(proj, tid, lambda t: t.update(title="a" + " " * 365 + VALUE), by=tickets.SYSTEM)
     title = relay._update_title(proj, tid)
     assert title is None or VALUE[:8] not in title

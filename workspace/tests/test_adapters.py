@@ -58,8 +58,10 @@ DENY = adapters.permission_args("claude", None, "ask")
 assert DENY[0] == "--disallowedTools" and "orch private" in DENY[1] and "agent-approvals" in DENY[1]
 # the reminder hooks go in inline for a one-shot run (`orch work-check --hook claude`, never blocks)
 _REMINDER_CMD = reminder_settings.hook_command("claude")  # absolute, quoted, never errors
-# ... and in the SAME blob the record hooks (`orch record hook`, before and after every tool call, W2b 1.7)
+# ... and in the SAME blob the record hooks (`orch record hook`, before and after every tool call, a failed
+# one too, W2b 1.7)
 _RECORD_CMD = reminder_settings.record_hook_command()
+_RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
 _REMINDER = {
     **{
         e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
@@ -67,7 +69,7 @@ _REMINDER = {
     },
     **{
         e: [{"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}]
-        for e in ("PreToolUse", "PostToolUse")
+        for e in _RECORD_EVENTS
     },
 }
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
@@ -569,8 +571,8 @@ def test_hooks_doc_comes_from_data():
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
     run_events = {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
-    assert set(cmds) == run_events | {"PreToolUse", "PostToolUse"}
-    for event in ("PreToolUse", "PostToolUse"):  # the record hook: the only group there, every tool
+    assert set(cmds) == run_events | set(_RECORD_EVENTS)
+    for event in _RECORD_EVENTS:  # the record hook: the only group there, every tool
         assert d["hooks"][event] == [
             {"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}
         ]
@@ -605,7 +607,7 @@ def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
     def both(doc):
         for event in ("SessionStart", "UserPromptSubmit"):
             assert _REMINDER_CMD in _orch_groups(doc, event)
-        for event in ("PreToolUse", "PostToolUse"):
+        for event in _RECORD_EVENTS:
             assert _orch_groups(doc, event) == [_RECORD_CMD]
         assert not any(_RECORD_CMD in _orch_groups(doc, e) for e in ("SessionStart", "UserPromptSubmit"))
 
@@ -650,7 +652,7 @@ def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
     assert cmd_words == argv  # cmd: the quoted path is one word (adapters._split's rule)
     monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)  # no such interpreter here
     doc = adapters.reminder_doc("claude")
-    assert _orch_groups(doc, "PreToolUse") == _orch_groups(doc, "PostToolUse") == [cmd]
+    assert all(_orch_groups(doc, e) == [cmd] for e in _RECORD_EVENTS)
     assert _orch_groups(doc, "SessionStart") == [f"{want} -I -P -m orch work-check --hook claude"]
 
 

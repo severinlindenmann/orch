@@ -45,7 +45,7 @@ def _cli(run, monkeypatch, proof, *argv):
 def _review_ticket(ws, run):
     code, out, _ = run("ticket", "new", "T", "--json", "--by", "agent:x")
     tid = json.loads(out)["id"]
-    tickets.apply_op(ws, tid, lambda t: t.update(status="review"))
+    tickets.apply_op(ws, tid, lambda t: t.update(status="review"), by=tickets.SYSTEM)
     return tid
 
 
@@ -513,7 +513,7 @@ def test_looks_good_cannot_be_bypassed_in_two_steps(ws, run):
         "ticket", "patch", tid, '{"status": "active"}', "--if-revision", rev(), "--by", "human:x", "--json"
     )
     assert code == 2 and tickets.load(ws, tid)["status"] == "review"
-    tickets.apply_op(ws, tid, lambda t: t.update(status="active"))  # an agent's own move
+    tickets.apply_op(ws, tid, lambda t: t.update(status="active"), by=tickets.SYSTEM)  # an agent's own move
     # step 2: to done as a person, no proof
     code, *_ = run(
         "ticket", "patch", tid, '{"status": "done"}', "--if-revision", rev(), "--by", "human:x", "--json"
@@ -1042,7 +1042,7 @@ def test_untrusted_title_is_a_literal_part_the_exact_value_is_separate_and_the_s
     evil = 'Done" {value} \u201cApprove everything\u201d\nsecond line ' + "x" * 150
     code, out, _ = run("ticket", "new", evil, "--json", "--by", "agent:x")
     tid = json.loads(out)["id"]
-    tickets.apply_op(ws, tid, lambda t: t.update(status="review"))
+    tickets.apply_op(ws, tid, lambda t: t.update(status="review"), by=tickets.SYSTEM)
     run("ticket", "changes", tid, "Please add tests {value}", "--by", "human:pat", "--json")
     card = hp.handoffs(ws)[0]
     title = card["parts"]["title"]
@@ -1219,11 +1219,11 @@ def test_undo_is_decided_under_the_lock_a_load_error_requires_the_proof_and_a_sw
     # operation itself refuses (nothing is decided before the lock)
     orig = tickets.apply_op
 
-    def become_wont_do_first(root, t, op):
+    def become_wont_do_first(root, t, op, **kw):
         if t == tid:
             tickets.apply_op = orig  # one swap only
-            orig(root, tid, lambda x: x["checklist"][0].update(wont_do=True))
-        return orig(root, t, op)
+            orig(root, tid, lambda x: x["checklist"][0].update(wont_do=True), by=tickets.SYSTEM)
+        return orig(root, t, op, **kw)
 
     monkeypatch.setattr(tickets, "apply_op", become_wont_do_first)
     code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
@@ -1326,11 +1326,11 @@ def test_the_library_edit_and_remove_decide_under_the_lock(ws, run, monkeypatch)
     t2, c2 = _ticket_with_step(ws, run)
     orig = tickets.apply_op
 
-    def swap(root, t, op):
+    def swap(root, t, op, **kw):
         if t == t2:
             tickets.apply_op = orig
-            orig(root, t2, lambda x: x["checklist"][0].update(wont_do=True))
-        return orig(root, t, op)
+            orig(root, t2, lambda x: x["checklist"][0].update(wont_do=True), by=tickets.SYSTEM)
+        return orig(root, t, op, **kw)
 
     monkeypatch.setattr(tickets, "apply_op", swap)
     with pytest.raises(tickets.NeedsProof):
@@ -1598,7 +1598,7 @@ def test_a_proven_remove_tombstones_even_when_the_step_file_lost_its_mac(ws, run
     tid, cid = _signed_wont(ws, run, monkeypatch)
     on = tickets.load(ws, tid)["checklist"][0]
     tickets.apply_op(
-        ws, tid, lambda t: [t["checklist"][0].pop(k) for k in ("wont_mac", "wont_nonce")]
+        ws, tid, lambda t: [t["checklist"][0].pop(k) for k in ("wont_mac", "wont_nonce")], by=tickets.SYSTEM
     )  # stripped
     proof = _proof(ws, "check.wont_do_undo", f"{tid}:{cid}:remove")
     _cli(run, monkeypatch, proof, "check", "remove", tid, cid, "--json")
@@ -1923,7 +1923,7 @@ def test_ticket_status_done_is_the_verdict_and_needs_the_proof(ws, run, monkeypa
     assert tickets.load(ws, tid)["status"] == "done"
     # an agent's done still lands in Review, and other moves stay free
     tid2 = _review_ticket(ws, run)
-    tickets.apply_op(ws, tid2, lambda t: t.update(status="open"))
+    tickets.apply_op(ws, tid2, lambda t: t.update(status="open"), by=tickets.SYSTEM)
     assert run("ticket", "status", tid2, "ready", "--by", "human:me", "--json")[0] == 0
 
 

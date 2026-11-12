@@ -402,7 +402,12 @@ def _phone_ticket(root, title="From the phone", parent=None):
     from orch import tickets
 
     t = tickets.create(root, title, "human:ph_aaaaaaaaaa", parent=parent)
-    tickets.apply_op(root, t["id"], lambda tk: tk.setdefault("ext", {}).update(relay={"origin": "phone"}))
+    tickets.apply_op(
+        root,
+        t["id"],
+        lambda tk: tk.setdefault("ext", {}).update(relay={"origin": "phone"}),
+        by=tickets.SYSTEM,
+    )
     return t["id"]
 
 
@@ -464,9 +469,14 @@ def test_question_to_phone_continued_ticket_and_broken_parent(on_state, monkeypa
     cont = tickets.create(on_state, "Dashboard ticket the phone wrote to", "human:sev")["id"]
     assert not mm.question_to_phone(on_state, cont)
     # a peer workspace's message (relay._ticket_for) only fills messages: not from the phone
-    tickets.apply_op(on_state, cont, lambda tk: tk.setdefault("ext", {}).update(relay={"messages": ["m_1"]}))
+    tickets.apply_op(
+        on_state,
+        cont,
+        lambda tk: tk.setdefault("ext", {}).update(relay={"messages": ["m_1"]}),
+        by=tickets.SYSTEM,
+    )
     assert not mm.question_to_phone(on_state, cont)
-    tickets.apply_op(on_state, cont, lambda tk: tk["ext"]["relay"].update(phone=True))
+    tickets.apply_op(on_state, cont, lambda tk: tk["ext"]["relay"].update(phone=True), by=tickets.SYSTEM)
     assert mm.question_to_phone(on_state, cont)
     bad = tickets.create(on_state, "Broken parent", "human:sev")["id"]
     for parent in (["t_x"], 7):

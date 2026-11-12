@@ -747,3 +747,46 @@ def test_a_repaired_torn_file_is_reread(live, monkeypatch):
 
     monkeypatch.setattr(record, "_write_new", other)
     refused("tampered", send, root, job, type="log", text="x")
+
+
+# --- G1 H3: job streams have the same backstop and the same escaped forms ---
+def test_append_job_requires_a_hider_and_refuses_a_leaking_line(live):
+    root, run, _ = live
+    job = start(root)
+    with pytest.raises(TypeError):
+        record.append_job(root, run, job, lambda events, size: (None, False, None), valid=lambda e: True)
+    leaking = {"v": 1, "type": "log", "stream": "out", "text": SECRET, "job": job, "run": run, "seq": 2}
+    with pytest.raises(record.RecordInvalid):
+        record.append_job(
+            root,
+            run,
+            job,
+            lambda events, size: (dict(leaking, seq=len(events) + 1), False, None),
+            valid=lambda e: True,
+            hider=hider.Hider({"deploy-key": SECRET}),
+        )
+    assert SECRET.encode() not in everything(root)
+
+
+def test_awkward_key_forms_in_a_job_stream_never_reach_the_record_folder(live):
+    root, run, _ = live
+    key = 'p@ss"w0rd\\ZZ-9'
+    raw = key.encode()
+    forms = {
+        key,
+        json.dumps(key)[1:-1],
+        json.dumps(json.dumps(key))[1:-1][1:-1],
+        urllib.parse.quote(key, safe=""),
+        base64.b64encode(raw).decode().rstrip("="),
+        base64.b64encode(b"\0" + raw).decode()[2:],
+        base64.b64encode(b"\0\0" + raw).decode()[3:],
+    }
+    job = start(root)
+    with hider.use_hider(hider.Hider({"deploy-key": key})):
+        for f in sorted(forms):
+            send(root, job, type="log", text=f"value {f} end")
+            send(root, job, type="step", step="s1", label=f"x {f}", state="running")
+    blob = everything(root)
+    for f in forms:
+        assert f.encode() not in blob and json.dumps(f)[1:-1].encode() not in blob, f
+    assert b"[hidden" in blob
