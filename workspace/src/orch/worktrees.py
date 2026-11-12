@@ -1717,11 +1717,13 @@ def _fsck(top: Path, *ids: str) -> int:
         _ctx.deadline = before
 
 
-def _files_match(top: Path, touched, commit: str) -> bool:
+def _files_match(top: Path, touched, commit: str, also: str | None = None) -> bool:
     """Every touched file in the folder hashes (in Python: git's stat shortcut is not trusted) to the blob id
     of `commit` (mode 100644/100755 only; a missing file, link or gitlink is skipped: refused before the
     merge already). A file that changed since `commit` (its blob differs from the index) cannot be checked
-    against it: the check does not pass, so a swapped file cannot hide behind a later `git add`."""
+    against it: the check does not pass, so a swapped file cannot hide behind a later `git add`. `also`: a
+    file may instead hold the content of that other commit (a project moved back to the commit before the
+    merge keeps the merged files as its own modifications)."""
     listing = _bb_read(top, ["ls-files", "-s", "-z"], strip=False)
     index = {}
     for entry in listing.split("\0"):
@@ -1750,7 +1752,13 @@ def _files_match(top: Path, touched, commit: str) -> bool:
                         h.update(chunk)
                 ok = h.hexdigest() == blob
             else:
-                ok = _bytes_match_blob(path.read_bytes(), blob, crlf)
+                data = path.read_bytes()
+                ok = _bytes_match_blob(data, blob, crlf)
+                if not ok and also:
+                    rc, other, _ = _git(
+                        ["rev-parse", "--verify", "-q", f"{also}:{name}"], top, read_only=True
+                    )
+                    ok = rc == 0 and _bytes_match_blob(data, other, crlf)
         except OSError:
             return False
         if not ok:
@@ -1884,8 +1892,14 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
         # orch's merge was committed and its check did not pass, and the project is back at the commit before
         # it (the person moved it back): nothing is left to undo. The ordinary checks (overlap, index) judge
         # the files that may still be modified in the folder.
-        _set_journal(root, ticket, None)
-        return None
+        # (orch's own rollback leaves the same state when its verification failed: that stays for a person)
+        if (
+            _files_match(top, _touched(top, journal["tip"]), head, also=journal.get("tip"))
+            and _fsck(top, head) == 0
+        ):
+            _set_journal(root, ticket, None)
+            return None
+        return OBJECTS_BAD
     if journal.get("touched"):
         _ctx.snapshot_touched = _prep(_touched(top, journal["tip"]))
     if _bb_snapshot(top)["hash"] == journal.get("pre_hash"):

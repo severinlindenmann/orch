@@ -2899,3 +2899,20 @@ def test_b13v_a_plain_git_reset_back_to_the_pre_merge_commit_is_an_exit(done_cop
     assert "journal" not in worktrees._copy_authority(root, tid)
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["reason"] != worktrees.INTERRUPTED_BB, back
+
+
+def test_b13v_a_reset_back_with_swapped_bytes_in_the_folder_stays_for_a_person(done_copy, monkeypatch):
+    """Back at the pre-merge commit, but the files that should match it do not: the journal stays."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    pre = git(root, "rev-parse", "HEAD")
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: "bad")
+        m.setattr(worktrees, "_bb_status", lambda top: "?? person-file\0")
+        done_and_sweep(root, tid)
+    git(root, "reset", "-q", "--hard", pre)
+    monkeypatch.setattr(worktrees, "_files_match", lambda *a, **k: False)
+    worktrees.bring_back(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["reason"] == worktrees.OBJECTS_BAD, back
+    assert worktrees._copy_authority(root, tid)["journal"]["post_check"] == "bad"
