@@ -361,17 +361,21 @@ def test_extra_file_check_hook_counts_as_loose(tws, monkeypatch):
 # ---------------------------------------------------------------- a reset never widens, never accepts a proof
 
 
+def _key_lock_held(d):
+    return hp._LOCKS.__dict__.get("held", {}).get((str(d), "keys.lock"), 0) > 0
+
+
 def test_reset_holds_the_key_lock(tws, monkeypatch):
     hp.human_key(tws)
     d = hp.key_dir(tws)
     seen = []
     real = hp._write_private
-    monkeypatch.setattr(hp, "_write_private", lambda p, t: (seen.append(hp._lock_held(d)), real(p, t))[1])
+    monkeypatch.setattr(hp, "_write_private", lambda p, t: (seen.append(_key_lock_held(d)), real(p, t))[1])
     hp.reset_protection(tws, "test:mode")
     assert seen and all(seen)  # every write of the reset ran under keys.lock
-    assert not hp._lock_held(d)  # and it was released
+    assert not _key_lock_held(d)  # and it was released
     with hp._key_lock(d), hp._key_lock(d):  # re-entrant for readers that already hold it
-        assert hp._lock_held(d)
+        assert _key_lock_held(d)
     assert not (d / "keys.lock").exists()
 
 
