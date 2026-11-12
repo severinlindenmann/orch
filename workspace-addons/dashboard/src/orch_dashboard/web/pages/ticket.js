@@ -558,6 +558,12 @@ function taskProofChips(t, task) {
 // Open task menus and their typed reason, keyed tid:check; kept across render() until submit, Escape or close.
 const taskMenus = new Map();
 function taskRows(t) {
+  // a task that is gone (removed while its menu was open) must not leave its redraw lock or draft behind
+  if (!snapshot) {
+    const ids = new Set(array(t.checklist).map(c => c.id));
+    for (const key of [...locks]) if (String(key).startsWith('task-menu-') && !ids.has(String(key).slice(10))) locks.delete(key);
+    for (const key of [...taskMenus.keys()]) if (key.startsWith(t.id + ':') && !ids.has(key.slice(t.id.length + 1))) taskMenus.delete(key);
+  }
   return array(t.checklist).map((task, i) => {
     const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
     const doing = !task.wont_do && task.state === 'doing';

@@ -324,6 +324,14 @@ test('an open task menu and its typed reason survive render() until submit, Esca
   assert.equal(draw().form.hidden, true);
   assert.equal(draw().input.value, '');
   assert.ok(!locks.has('task-menu-c1'));
+  // a task removed while its menu was open leaves no lock or draft behind
+  ui = draw(); ui.more.onclick(); ui.input.value = 'draft'; ui.input.listeners.input(); ui.form.listeners.focusin();
+  assert.ok(locks.has('task-menu-c1'));
+  t.checklist = [];
+  c.taskRows(t);
+  assert.ok(!locks.has('task-menu-c1'));
+  t.checklist = [{id:'c1', text:'Try this', done:false}];
+  assert.equal(draw().form.hidden, true);
   // submit clears it too
   ui = draw(); ui.more.onclick(); ui.input.value = 'Changed plans'; ui.input.listeners.input();
   await ui.form.onsubmit({preventDefault(){}});
