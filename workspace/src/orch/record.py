@@ -664,20 +664,22 @@ def _key(event):
 
 def _provisional(event):
     """A hook's finished line that does not know how the call ended (`ok: null`; the hook entry writes every
-    finished step this way)."""
+    finished step this way unless it claims a failure, hook_outcome)."""
     return event["via"] == "hook" and event["outcome"] is not None and event["outcome"]["ok"] is None
 
 
 def _agree(old, event):
     """The hook line `old` of a call says what the log line `event` of that call says: what was used, the
-    text, the files, and (when both are finished and the hook's is not provisional) `ok` and `error`."""
+    text, the files, and (when both are finished and the hook's is not provisional) `ok` and `error`; a hook's
+    fixed failure code (HOOK_ERRORS) is never the log's text, so against it only `ok` counts."""
     if any(old.get(k) != event.get(k) for k in ("used", "text")) or (old.get("files") or []) != (
         event.get("files") or []
     ):
         return False
     if old["outcome"] is None or event["outcome"] is None or _provisional(old):
         return True
-    return all(old["outcome"][k] == event["outcome"][k] for k in ("ok", "error"))
+    keys = ("ok",) if old["outcome"]["error"] in HOOK_ERRORS else ("ok", "error")
+    return all(old["outcome"][k] == event["outcome"][k] for k in keys)
 
 
 def _replaces(old, event):
@@ -1461,12 +1463,27 @@ def _files_in_budget(files: list[str]) -> list[str]:
 # replaces it). A `denial` must say ok: false and `usage` carries numbers no log line checks, so both are the
 # log's (and the core's) alone: from the agent's side of the trust boundary they would assert an outcome.
 HOOK_KINDS = ("step", "helper.start", "helper.end")
+# The only `error` a hook end may carry: a fixed code, never the tool's own text (that goes to the detail).
+HOOK_ERRORS = ("tool_failed", "interrupted")
 
 
 def hook_entry_filter(line: dict) -> dict | None:
+    """What the hook entry takes: a hook kind only, `via` forced to hook, an outcome as hook_outcome says."""
     if not isinstance(line, dict) or line.get("kind") not in HOOK_KINDS:
         raise RecordRefused("This kind of record is not allowed here.")
-    return dict(line, via="hook")
+    outcome = line.get("outcome")
+    return dict(line, via="hook", **({"outcome": hook_outcome(outcome)} if isinstance(outcome, dict) else {}))
+
+
+def hook_outcome(outcome: dict) -> dict:
+    """The outcome the hook entry stores for a finished line, whatever the caller sent (activity.md,
+    Precedence and dedupe): a claimed failure (`ok: false`) is kept with a fixed code (HOOK_ERRORS; any other
+    error is `tool_failed`), since it only narrows trust; anything else is provisional (`ok: null`), so a hook
+    line never says a call ended well. `ms` is always null (the agent's clock)."""
+    if "ok" in outcome and outcome["ok"] is False:
+        error = outcome["error"] if "error" in outcome else None
+        return {"ok": False, "error": error if error in HOOK_ERRORS else "tool_failed", "ms": None}
+    return {"ok": None, "error": None, "ms": None}
 
 
 def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int = 2048) -> dict:

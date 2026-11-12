@@ -184,7 +184,7 @@
         "record_hooks": {
           "type": "object", "propertyNames": { "pattern": "^[A-Za-z]{1,32}$" },
           "additionalProperties": { "type": "string", "pattern": "^orch record hook$" },
-          "description": "Optional. Tool hook event (before/after a tool call) -> exactly `orch record hook` (activity.md, The hook entry is narrow): the tool's own hook payload with its tool-call id goes to the record. In the same settings blob as reminder_hooks (one --settings: per-run hooks file for live, inline for oneshot), for every tool, absolute interpreter like reminder_hooks. The command always exits 0."
+          "description": "Optional. Tool hook event (before/after a tool call, after a failed one) -> exactly `orch record hook` (activity.md, The hook entry is narrow): the tool's own hook payload with its tool-call id goes to the record. In the same settings blob as reminder_hooks (one --settings: per-run hooks file for live, inline for oneshot), for every tool, absolute interpreter like reminder_hooks. The command always exits 0."
         },
         "reminder": {
           "type": "object", "required": ["settings_file", "output"], "additionalProperties": false,
