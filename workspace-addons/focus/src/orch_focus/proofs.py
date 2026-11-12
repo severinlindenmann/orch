@@ -90,9 +90,7 @@ def read(root: Path, tid, name, mode: str) -> tuple[int, bytes, str, dict]:
     if mode == "view" and ext not in IMAGES and ext not in TEXT and ext != "pdf":
         return NOPE
     try:
-        data = safefile.read_ticket_file(
-            root, tid, FOLDER, name, VIEW_MAX if mode == "view" else DL_MAX
-        )
+        data = safefile.read_ticket_file(root, tid, FOLDER, name, VIEW_MAX if mode == "view" else DL_MAX)
     except safefile.TooLarge:
         return 413, b"That file is too large to show. Download it instead.", "text/plain", {}
     if data is None:

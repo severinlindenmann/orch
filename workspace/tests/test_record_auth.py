@@ -76,7 +76,11 @@ def test_seal_matches_vector(c):
 
 @pytest.mark.parametrize("c", VEC["verify"], ids=_ids(VEC["verify"]))
 def test_verify_vectors(c):
-    assert _summary(ra.verify_run(_raw(c["lines"]), RUN, WS, RK, KID, c["head"])) == c["expect"]
+    olds = c.get("old_kids")
+    got = ra.verify_run(
+        _raw(c["lines"]), RUN, WS, RK, KID, c["head"], old_kid=True if olds is None else set(olds)
+    )
+    assert _summary(got) == c["expect"]
 
 
 @pytest.mark.parametrize("c", VEC["legacy"], ids=_ids(VEC["legacy"]))

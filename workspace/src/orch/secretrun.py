@@ -149,7 +149,10 @@ def _write_record(root, ev):
             and hp.record_head_state(root, line["run"]) != "unknown"
         )
         # anything else that is not a clean read counts as the cap reached (fail closed)
-        if (read.status != "ok" and not fresh and not junk) or len(own) >= OUTSIDE_DAY_CAP:
+        # what orch's own chain head says was written counts too: cutting or deleting the file cannot reset it
+        head, _ = hp.record_head_read(root, line["run"])
+        seen = max(len(own), int(head["seq"]) if head else 0)
+        if (read.status != "ok" and not fresh and not junk) or seen >= OUTSIDE_DAY_CAP:
             raise Refused("Refused: too many key uses outside a run today.")
     record_writer(root).append(line)
 

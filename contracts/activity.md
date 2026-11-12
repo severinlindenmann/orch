@@ -578,6 +578,15 @@ only a legacy run reads a detail with no hash.
 - *Trust markers.* `record.is_sealed` / `record.is_checked` are the only definitions (events, details, counts, run
   model, retention, caps). Only a checked line can count a call as `ok`; a hook line's `ok` is `unknown`. Add-ons
   (Focus) drive denials and run state only from lines with `checked: true` and keep orch's problem markers.
+- *Earlier keys (`old_kid`, `record-reset.json`).* A protection reset writes `<guarded home>/keys/<ws>/record-reset.json`
+  `{"schema": "orch.record-reset/1", "kid", "at", "cm"}` (`cm` = MAC with the new record key; `at` is orch's own time) and
+  re-seals the cutover list under the new key when it verified under the old one (a loose old key carries nothing over).
+  The first commit of a run after a reset keeps `old_kid` / `old_kids` (the earlier key ids, shape-checked) in the new
+  head. Lines of a key id other than the current one are old history (`old_key`) only for exactly those ids and only
+  in front of the chain; any other foreign key id is `changed`, reason `content` (vectors `record_auth.verify`,
+  `old_kids`). The cutover list is made only when the human key is made; a list missing while a key exists means no
+  run is legacy. The drain looks at 1000 names per call, refuses at most 50 planted entries per call and still commits
+  every entry that passes its MAC.
 - *Not in S2:* job streams, alerts and counts files are not sealed yet (S3); a protection reset does not carry the legacy
   prefix or tombstones over to the new key (fail closed: the old unsigned lines are `changed`).
 

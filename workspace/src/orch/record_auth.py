@@ -282,8 +282,13 @@ def finish(state: State, kid: str, head: dict | None = None, *, old_kid=True) ->
             rotation = out.events[0]["seq"] == s.base + 1
         else:
             rotation = not has_head
-        if rotation and old_kid is not None and old_kid is not False:
-            n_oldkey = s.pending if old_kid is True else s.kids.get(old_kid, 0)
+        olds = (
+            {old_kid}
+            if isinstance(old_kid, str)
+            else (set(old_kid) if old_kid not in (None, True) else set())
+        )
+        if rotation and (old_kid is True or olds):
+            n_oldkey = s.pending if old_kid is True else sum(s.kids.get(k, 0) for k in olds)
             n_bad += s.pending - n_oldkey
         else:
             n_bad += s.pending
@@ -303,12 +308,20 @@ def start_state(base: int = 0) -> State:
 
 
 def verify_run(
-    raw: bytes, run: str, ws: str, rk: bytes, kid: str, head: dict | None = None, *, job: str | None = None
+    raw: bytes,
+    run: str,
+    ws: str,
+    rk: bytes,
+    kid: str,
+    head: dict | None = None,
+    *,
+    job: str | None = None,
+    old_kid=True,
 ) -> Verified:
     """Decide which lines of a run file (or, with `job`, of a job stream) count. `head` is the guarded home's
     {kid, seq, mac} for the file, already checked by the caller (None = no head). Verified lines are never
     moved, rewritten or dropped; every other line is `changed`. See activity.md for the table of cases."""
-    return finish(scan(State(), raw, run, ws, rk, kid, job=job), kid, head)
+    return finish(scan(State(), raw, run, ws, rk, kid, job=job), kid, head, old_kid=old_kid)
 
 
 def _unskip(gaps: list, seq: int) -> bool:

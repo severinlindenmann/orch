@@ -470,7 +470,7 @@ def _ra_nodup(pairs):
     return d
 
 
-def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
+def ra_verify(raw, run, ws, rk, kid, head=None, job=None, old_kids=None):
     """Reference of record_auth.verify_run: {shown, changed, removed, reason}."""
     start = ra_genesis(rk, ws, run, job)
     shown, last_seq, last_mac = [], 0, None
@@ -488,8 +488,10 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
         if k != kid:
             if shown:
                 bad += 1
-            else:
+            elif old_kids is None or k in old_kids:  # only the recorded old key ids are history (None: any)
                 oldkey += 1  # held: becomes `bad` at the end unless the rotation shape holds (below)
+            else:
+                bad += 1
             continue
         try:
             o = json.loads(body.decode(), object_pairs_hook=_ra_nodup)
@@ -583,7 +585,7 @@ def ra_check(vec):
         _expect(f"activity record_auth seal {c['seq']}", ra_seal(rk, kid, ws, run, c["seq"], c["prev"], body).hex(), c["line_hex"])
     for c in r["verify"]:
         raw = b"".join(bytes.fromhex(x) for x in c["lines"])
-        _expect(f"activity record_auth verify {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"]), c["expect"])
+        _expect(f"activity record_auth verify {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], None, c.get("old_kids")), c["expect"])
     for c in r["legacy"]:
         raw = b"".join(bytes.fromhex(x) + b"\n" if not bytes.fromhex(x).endswith(b"\n") else bytes.fromhex(x) for x in c["lines"])
         _expect(f"activity record_auth legacy {c['name']}", ra_legacy(raw, c["head"]), c["expect"])

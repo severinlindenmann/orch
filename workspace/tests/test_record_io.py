@@ -48,6 +48,7 @@ CORE = {
     "_unlink",
     "_write_new",
     "_size",
+    "_one_size",
     "_file_size",
     "_rmtree",
     "_rename_aside",
@@ -242,6 +243,9 @@ SAFE_ATTRIBUTE_CALLS = {
     "humanproof.record_head_carry",
     "humanproof.record_reset_at",
     "carry.get",
+    "os.stat",
+    "out.add",
+    "source.get",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
@@ -289,6 +293,7 @@ SAFE_ATTRIBUTE_VALUES = {
     "problem.reason",
     "problem.status",
     "view.rejected",
+    "directory.fd",
 }
 ERROR_BOUNDARIES = {
     "_alert",
@@ -320,6 +325,7 @@ ERROR_BOUNDARIES = {
     "_sealed_tail",
     "_reject_bad_spool",
     "_reject_entry",
+    "_flat_size",
 }
 
 

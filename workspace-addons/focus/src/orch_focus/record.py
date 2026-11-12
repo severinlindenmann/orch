@@ -115,7 +115,10 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
         if kind == "helper.start":
             return [make("helper.start", id=eid, parent=e.get("parent"))]
         if kind == "helper.end":
-            return [make("helper.end", id=eid, ok=(done or {}).get("ok") is not False)]
+            ok = (
+                (done or {}).get("ok") is not False if checked else (done or {}).get("ok")
+            )  # unchecked: unknown
+            return [make("helper.end", id=eid, ok=ok)]
         if kind == "run.state":
             if not checked:
                 return []

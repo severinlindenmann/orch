@@ -486,6 +486,8 @@ def _binding_realpath(f: Path):
     size, mode, owner, links) changed, so a swapped or edited file is always read afresh; every failure path
     is the uncached one (never cached)."""
     st = f.lstat()
+    if not POSIX:  # file ids are not reliable on Windows: always read afresh
+        return json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
     ident = (
         st.st_dev,
         st.st_ino,
@@ -761,10 +763,7 @@ def ensure_record_key(root: Path) -> bool:
     no usable guarded home (nothing is made, nothing is raised: the run starts, it records nothing)."""
     try:
         guarded_home(root)
-        made = record_key(root, create=True) is not None
-        if made:
-            record_cutover_ensure(root)
-        return made
+        return record_key(root, create=True) is not None
     except Refused:
         return False
 
@@ -864,10 +863,27 @@ def record_reset_at(root: Path) -> str | None:
     return body["at"] if ok else None
 
 
+def _cutover_reseal(root: Path, listed) -> None:
+    """After a key rotation: the same runs and time, MACed with the NEW record key, when the old list verified
+    under the old key. A list that did not verify is left as it is (it then fails: no run is legacy)."""
+    from orch import record_auth
+
+    state, runs, at = listed
+    rec = record_key(root)
+    if not state or rec is None:
+        return
+    body = {"schema": "orch.record-cutover/1", "kid": rec[1], "runs": sorted(runs), "at": at}
+    body["cm"] = record_auth.cutover_mac(rec[2], rec[0], body)
+    try:
+        _write_private(_cutover_path(root), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
+    except (Refused, OSError, ValueError):
+        return
+
+
 def record_cutover_ensure(root: Path) -> None:
-    """Write the cutover list once, when the record key is first used for writing: the unsigned run files in
-    the workspace's record folder at that moment. Never changed afterwards (a later run is never legacy).
-    Never raises: without it no run is adopted as legacy by the writer."""
+    """Write the cutover list once, at the moment the human key is made (human_key, create branch and nowhere
+    else): the unsigned run files in the workspace's record folder at that moment. Never changed afterwards (a
+    later run is never legacy); a list that is missing while a key exists means no legacy. Never raises."""
     from orch import record_auth
 
     rec = record_key(root)
@@ -885,7 +901,7 @@ def record_cutover_ensure(root: Path) -> None:
     except FileNotFoundError:
         names = []
     except (Refused, OSError, ValueError):
-        return
+        names = []  # cannot be listed: no run is legacy (never a silent give-up, never a guess)
     body = {
         "schema": "orch.record-cutover/1",
         "kid": rec[1],
@@ -974,6 +990,14 @@ def record_head_carry(root: Path, run: str) -> dict:
             and re.fullmatch(r"[0-9a-f]{8}", str(raw.get("kid")))
         ):
             out["old_kid"] = raw["kid"]
+            earlier = raw.get("old_kids") if isinstance(raw.get("old_kids"), list) else []
+            out["old_kids"] = sorted(
+                {
+                    k
+                    for k in [*earlier, raw["kid"], raw.get("old_kid")]
+                    if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{8}", k)
+                }
+            )[:8]
             if type(raw.get("rejected")) is int and 0 <= raw["rejected"] < 10**6:
                 out["rejected"] = raw["rejected"]
             names = raw.get("drained")
@@ -1524,7 +1548,15 @@ def reset_protection(root: Path, reason: str) -> None:
     ws = d.name
     with _key_lock(d):
         _RESETS += 1
+        # under the OLD key, and only when that key file is itself sound (a loose key may have leaked: its
+        # list is not carried over, so no run is legacy afterwards): only a list that verifies is carried
+        try:
+            loose = file_problem(d / "human.key") is not None
+        except OSError:
+            loose = True
+        listed = (False, set(), None) if loose else _cutover_load(root)
         _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
+        _cutover_reseal(root, listed)
         record_reset_note(root)  # when the record key changed (orch's own time; old-key runs age from it)
         for name in _SECRET_FILES:
             with contextlib.suppress(OSError):

@@ -557,6 +557,29 @@ def _file_size(ws, rel):
         _close(fd)
 
 
+def _flat_size(ws, name):
+    """Bytes of the direct entries of record/<name>/ and of record/<name>/<run>/ (one level each), by lstat:
+    a planted tree below is never walked."""
+    total = 0
+    try:
+        for run in _entries(ws, (name,)):
+            try:
+                total += sum(_one_size(ws, (name, run, n)) for n in _entries(ws, (name, run)))
+            except (RecordTampered, RecordUnavailable):
+                continue  # not a folder of ours: not counted, not walked
+    except (RecordTampered, RecordUnavailable):
+        return 0
+    return total
+
+
+def _one_size(ws, rel):
+    """The size of one entry by lstat, a folder or special file counted as 0."""
+    with _walk(ws, rel[:-1]) as directory:
+        kw = {"dir_fd": directory.fd} if _FD else {}
+        info = os.stat(rel[-1] if _FD else directory.path / rel[-1], follow_symlinks=False, **kw)
+    return info.st_size if stat.S_ISREG(info.st_mode) else 0
+
+
 def _rename_aside(ws, rel, run, *, inside=False):
     """Move one entry (of any kind, a link is not followed) out of the spool, atomically, under a name orch
     makes: into quarantine/<run>/ (a folder only orch writes), or with `inside` within its own folder under a
@@ -831,6 +854,17 @@ _VERIFIED: dict = {}
 _VERIFIED_MAX = 64
 
 
+def _old_kids(carry, head):
+    """The key ids orch recorded as earlier keys of this run (a protection reset), from the old head's carry
+    and the current head: only lines of exactly these ids can be old history."""
+    out = set()
+    for source in (carry or {}, head or {}):
+        for k in [source.get("old_kid"), *(source.get("old_kids") or [])]:
+            if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{8}", k):
+                out.add(k)
+    return out or None
+
+
 def _chain(workspace, run, raw, rec, head, head_present, old_kid=None):
     """(Verified, mode, legacy prefix bytes) of a run file's bytes: the one place that decides which lines
     count (record_auth.verify_run's walk, resumed from the cache). `head` is the checked chain head or None;
@@ -912,7 +946,7 @@ def _verified(workspace, run, raw) -> _View:
     head, hstate = humanproof.record_head_read(workspace, run) if state == "present" else (None, True)
     carry = humanproof.record_head_carry(workspace, run) if hstate == "old_key" else {}
     # a head of another key id: the run lived through a protection reset (or a new segment carries its old id)
-    old_kid = carry.get("old_kid") or (head or {}).get("old_kid")  # recorded by orch at the reset
+    old_kid = _old_kids(carry, head)  # recorded by orch at the reset(s)
     verified, mode, pre = _chain(workspace, run, raw, rec, head, present, old_kid)
     if mode == "legacy":
         view = _legacy_view(raw, run)
@@ -961,6 +995,7 @@ def _legacy_view(raw, run):
 
 _SPOOL_MAX_BYTES = 3 * 1024**2  # one line (8 KB), its detail (1 MB) and the escaping of both
 _SPOOL_NAME = re.compile(r"[0-9]{20}_[0-9a-f]{32}\.json")
+_SPOOL_LIST_MAX = 1000  # names looked at per drain: a flood is told once and cannot make a write endless
 _REJECT_BATCH = (
     50  # planted entries refused per drain: the rest on the next one (a flood cannot stall a write)
 )
@@ -1613,7 +1648,6 @@ class RecordWriter:
             raise RecordOff(_OFF_KEY)
         ws_id, kid, rk = rec
         # once, BEFORE this run's file is made: which runs existed (unsigned) when protection began
-        humanproof.record_cutover_ensure(self.workspace)
         fd = _open(self.workspace, ("runs", run + ".jsonl"), "read_append", create_dirs=True)
         try:
             check_lock()
@@ -1630,7 +1664,7 @@ class RecordWriter:
             if head is not None and head.get("pruned"):
                 head = None
             carry = humanproof.record_head_carry(self.workspace, run) if head_state == "old_key" else {}
-            old_kid = carry.get("old_kid") or (head or {}).get("old_kid")
+            old_kid = _old_kids(carry, head)
             view, mode, _pre = _chain(self.workspace, run, raw, rec, head, present, old_kid)
             previous = view.events  # verified lines only: an unverified line never suppresses a real one
             legacy = None
@@ -1783,9 +1817,18 @@ class RecordWriter:
         if rec is None:
             raise RecordOff(_OFF_KEY)
         refused = 0
-        for name in sorted(names):
+
+        def refuse(rel):
+            """Refuse one planted entry, but only up to the batch: past it the entry stays for the next call
+            while every entry that passes its MAC is still committed (a flood cannot starve a genuine one)."""
             if refused >= _REJECT_BATCH:
-                break  # the rest on the next drain
+                return 0
+            _reject_entry(self.workspace, run, rel)
+            return 1
+
+        if len(names) > _SPOOL_LIST_MAX:
+            _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
+        for name in sorted(names)[:_SPOOL_LIST_MAX]:
             check_lock()
             rel = ("pending", run, name)
             if not _SPOOL_NAME.fullmatch(name):  # orch never names an entry so: left, alerted, not counted
@@ -1793,15 +1836,13 @@ class RecordWriter:
                 continue
             try:
                 if _file_size(self.workspace, rel) > _SPOOL_MAX_BYTES:
-                    refused += 1
-                    _reject_entry(self.workspace, run, rel)  # never more than a line and its detail
+                    refused += refuse(rel)  # never more than a line and its detail
                     continue
                 pending = _read_json(self.workspace, rel)
             except (RecordTampered, RecordUnavailable) as error:
                 _report(self.workspace, error, "folder", run, "writer")
                 if isinstance(error, RecordTampered):
-                    refused += 1
-                    _reject_entry(self.workspace, run, rel)  # a link, a special file, a folder, not JSON
+                    refused += refuse(rel)  # a link, a special file, a folder, not JSON
                 continue
             head, _ = humanproof.record_head_read(self.workspace, run)
             drained = (head or {}).get("drained", [])
@@ -1810,8 +1851,7 @@ class RecordWriter:
             if entry is None or not record_auth.drain_ok(
                 rec[2], rec[0], run, name, entry, pending.get("sm"), drained, floor
             ):
-                refused += 1
-                _reject_entry(self.workspace, run, rel)
+                refused += refuse(rel)
                 continue
             try:
                 event = pending["event"]
@@ -1832,16 +1872,14 @@ class RecordWriter:
                 self._serialized(pending)
                 self._line(event)
             except (KeyError, TypeError, ValueError, RecursionError, RecordInvalid):
-                refused += 1
-                _reject_entry(self.workspace, run, rel)
+                refused += refuse(rel)
                 continue
             try:
                 self._commit(event, payload, pending["default_id"], check_lock=check_lock, drained=name)
             except (KeyError, TypeError, ValueError, UnicodeError, RecursionError, RecordInvalid):
                 # one bad entry is skipped with a trace, never raised: every later write and every
                 # run_lines(drain=...) of the run would fail with it. A lock or run-file problem still raises.
-                refused += 1
-                _reject_entry(self.workspace, run, rel)
+                refused += refuse(rel)
                 continue
             try:
                 with _io():
@@ -2268,9 +2306,12 @@ def record_sizes(workspace):
             if error.reason != "missing":
                 raise
             names = []
-        # pending/ and quarantine/ hold what an agent can plant: counted flat (their entries, never walked)
+        # pending/ and quarantine/ hold what an agent can plant: only their direct entries are counted, flat
+        # (one lstat each, nothing below them is walked)
         flat = ("pending", "quarantine")
         total = sum(_size(workspace, (name,)) for name in names if name not in flat)
+        for name in flat:
+            total += _flat_size(workspace, name)
         return ReadResult("ok", dict(record=total, detail=_size(workspace, ("detail",))))
     except RecordInvalid:
         return _report(workspace, RecordTampered("swapped"), "folder", None, "reader")

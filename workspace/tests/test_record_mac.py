@@ -344,11 +344,16 @@ def proj_cli(store, monkeypatch):
     return ws
 
 
+def _reset(ws):
+    """A real protection reset (the key rotates, the reset time is recorded)."""
+    hp.reset_protection(ws, "test reset")
+
+
 def _relist(ws):
     """The cutover list, made again after a test wrote a legacy run file by hand: in life it is made when
     the key is made, so the runs of that moment are the legacy ones."""
     (hp.key_dir(ws, create=False) / "record-cutover.json").unlink(missing_ok=True)
-    hp.record_cutover_ensure(ws)
+    hp.record_cutover_ensure(ws)  # a test stand-in for "these runs existed when the key was made"
 
 
 def _legacy_run(ws, writer, run=OTHER):
@@ -984,18 +989,14 @@ def test_med2_a_run_planted_after_the_key_exists_is_never_legacy(store):
 def test_med4_a_reset_run_is_pruned_from_the_recorded_reset_and_never_counted(store):
     ws, writer = store
     write3(writer)
-    f = hp.key_dir(ws, create=False) / "human.key"
-    f.write_text("11" * 32 + "\n")
-    st = f.stat()
-    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
-    hp.record_reset_note(ws)
+    _reset(ws)
     r = read_run(ws, RUN)
     assert (r.status, r.reason) == ("tampered", "old_key")
     at_reset = hp.record_reset_at(ws)
     assert at_reset
-    assert record.apply_retention(ws, at_reset, 90, 2048, lambda *a: None)["delete_run"] == []
+    assert record.apply_retention(ws, at_reset, 90, 2048, lambda r, es: None)["delete_run"] == []
     later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 100 * 86400))
-    assert record.apply_retention(ws, later, 90, 2048, lambda *a: None)["delete_run"] == [RUN]
+    assert record.apply_retention(ws, later, 90, 2048, lambda r, es: None)["delete_run"] == [RUN]
 
 
 def test_low1_made_up_key_ids_are_content_not_old_key():
@@ -1007,15 +1008,31 @@ def test_low1_made_up_key_ids_are_content_not_old_key():
     assert (out.changed, out.reason) == (2, "content")
 
 
-def test_low2_the_hook_with_no_record_key_is_a_lost_trace_not_a_crash(store):
-    from orch import record_hook
+def test_low2_the_hook_with_no_record_key_is_a_lost_trace_not_a_crash(proj_cli, monkeypatch):
+    from orch import record_hook, runs, tickets
 
-    ws, writer = store
-    mine = record_dir(ws)
-    assert mine  # the store exists
-    # RecordOff from the writer becomes the same hider_off trace as a missing hider
-    src = Path(record_hook.__file__).read_text()
-    assert "except record.RecordOff:  # no record key either" in src
+    t = tickets.create(proj_cli, "T", "human:t")
+    rec = runs.claim(proj_cli, t["id"], "agent:x", "claude", pid=os.getpid())
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    monkeypatch.setenv("ORCH_TICKET", t["id"])
+
+    class Off:
+        def append(self, *a, **k):
+            raise record.RecordOff("off")
+
+    monkeypatch.setattr(record_hook, "record_writer", lambda root: Off())
+    line = json.dumps(
+        {
+            "kind": "step",
+            "id": "toolu_1",
+            "text": "Read a",
+            "outcome": None,
+            "used": {"kind": "tool", "name": "Read", "action": None, "source": "builtin", "version": None},
+        }
+    )
+    with pytest.raises(record_hook.NotRecorded) as caught:
+        record_hook.hook(proj_cli, line)
+    assert caught.value.reason == "hider_off"
 
 
 def test_low4_a_deep_quarantine_does_not_make_the_sizes_tampered(store):
@@ -1030,13 +1047,13 @@ def test_low4_a_deep_quarantine_does_not_make_the_sizes_tampered(store):
     assert sizes.status == "ok"
 
 
-def test_low6_protected_comes_from_the_claim_not_from_hook_lines(proj_cli):
+def test_low6_a_forged_claim_does_not_remove_the_marker(proj_cli):
     from orch import cli_record, runs, tickets
 
     t = tickets.create(proj_cli, "T", "human:t")
-    rec = runs.claim(proj_cli, t["id"], "agent:x", "codex", pid=os.getpid())
+    rec = runs.claim(proj_cli, t["id"], "agent:x", "claude", pid=os.getpid())  # a claim file says claude
     line = dict(example(run=rec["run"], ticket=t["id"], via="hook", harness="claude"), checked=False)
-    assert cli_record.run_model(rec["run"], [line], root=proj_cli)["protected"] is False  # codex: marker
+    assert cli_record.run_model(rec["run"], [line], root=proj_cli)["protected"] is False  # the marker stays
 
 
 def test_low8_a_new_segment_keeps_what_is_safe_from_the_old_head(store):
@@ -1046,10 +1063,7 @@ def test_low8_a_new_segment_keeps_what_is_safe_from_the_old_head(store):
     d.mkdir(parents=True)
     (d / ("0" * 19 + "1_" + "a" * 32 + ".json")).write_text("{}")
     writer.append(example(id="toolu_4", at=at(4)))  # one rejected, in the head
-    f = hp.key_dir(ws, create=False) / "human.key"
-    f.write_text("11" * 32 + "\n")
-    st = f.stat()
-    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    _reset(ws)
     writer.append(example(id="toolu_5", at=at(5)))
     head, _ = hp.record_head_read(ws, RUN)
     assert (
@@ -1057,17 +1071,20 @@ def test_low8_a_new_segment_keeps_what_is_safe_from_the_old_head(store):
     )
 
 
-def test_low9_a_flood_of_planted_entries_is_refused_in_batches(store):
+def test_low9_a_flood_of_planted_entries_never_starves_a_genuine_one(store, monkeypatch):
     ws, writer = store
     write3(writer)
+    lock = record_dir(ws) / "runs" / f"{RUN}.lock"
+    lock.touch()
+    monkeypatch.setattr(record, "_LOCK_WAIT", 0.01)
+    writer.append(example(id="toolu_g", at=at(8)))  # spooled: the lock is busy
+    lock.unlink()
     d = _spool_dir(ws)
-    d.mkdir(parents=True)
-    for n in range(120):
+    for n in range(60):  # names that sort BEFORE the genuine one
         (d / (f"{n:020d}_" + "b" * 32 + ".json")).write_text("{}")
-    writer.append(example(id="toolu_4", at=at(4)))
-    assert len(list(d.iterdir())) == 120 - record._REJECT_BATCH
-    writer.append(example(id="toolu_5", at=at(5)))
-    assert len(list(d.iterdir())) == 120 - 2 * record._REJECT_BATCH
+    writer.append(example(id="toolu_4", at=at(4)))  # one write: the genuine entry is committed
+    assert "toolu_g" in ids(ws)
+    assert len(list(d.iterdir())) == 60 - record._REJECT_BATCH  # the rest wait for the next call
 
 
 def test_low7_non_ascii_digits_are_not_a_spool_name():
@@ -1075,24 +1092,21 @@ def test_low7_non_ascii_digits_are_not_a_spool_name():
     assert not ra.drain_ok(b"k" * 32, "ws", RUN, "٣" * 20 + "_" + "a" * 32 + ".json", {}, "x", [], "0" * 20)
 
 
-def test_low12_a_line_that_fails_its_checks_leaves_no_detail_file(store):
+def test_low12_a_line_that_fails_its_checks_leaves_no_detail_file(store, monkeypatch):
     ws, writer = store
-    big = {"input": "x" * 400_000, "output": "y"}
-    long_text = "t" * 400
-    ev = example(id="toolu_big", text=long_text, data={"pad": ["z" * 1500] * 5})
-    try:
-        writer.append(ev, detail=big)
-    except record.RecordRefused:
-        pass
-    found = (
-        list((record_dir(ws) / "detail" / RUN).glob("*.json"))
-        if (record_dir(ws) / "detail" / RUN).exists()
-        else []
-    )
-    stored = [e for e in read_run(ws, RUN).unwrap() if e["id"] == "toolu_big"]
-    assert bool(found) == bool(
-        stored and stored[0].get("detail")
-    )  # a file only with a line that points at it
+    real = record._hidden_line
+
+    def refuse_the_dry_run(hider_, obj):
+        if obj.get("detail_hash") == "0" * 32:
+            raise record.RecordInvalid()
+        return real(hider_, obj)
+
+    monkeypatch.setattr(record, "_hidden_line", refuse_the_dry_run)
+    with pytest.raises(record.RecordRefused):
+        writer.append(example(id="toolu_big"), detail={"input": "i", "output": "o"})
+    detail = record_dir(ws) / "detail" / RUN
+    assert not detail.exists() or list(detail.iterdir()) == []
+    assert read_run(ws, RUN).reason == "missing"  # no line either
 
 
 @pytest.mark.slow
@@ -1118,11 +1132,7 @@ def test_foreign_key_lines_are_old_history_only_for_the_exact_recorded_old_kid(s
     ws, writer = store
     write3(writer)
     old_kid = hp.record_key(ws)[1]
-    f = hp.key_dir(ws, create=False) / "human.key"
-    f.write_text("11" * 32 + "\n")
-    st = f.stat()
-    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
-    hp.record_reset_note(ws)
+    _reset(ws)
     r = read_run(ws, RUN)
     assert (r.status, r.reason) == ("tampered", "old_key")  # the exact old kid: history
     # a genuine pre-reset run (no current-key lines) is pruned from the reset time
@@ -1137,3 +1147,80 @@ def test_foreign_key_lines_are_old_history_only_for_the_exact_recorded_old_kid(s
     assert r.changed >= 1
     res = record.apply_retention(ws, later, 90, 2048, lambda *a: None)
     assert RUN not in res["delete_run"] and runfile(ws).exists()
+
+
+def test_delta_med1_cutting_the_outside_file_does_not_reset_the_day_cap(store, monkeypatch):
+    from orch import secretrun
+    from orch.errors import Refused
+
+    ws, writer = store
+    run = "r_outside_20261116"
+    monkeypatch.setattr(secretrun, "_run_ids", lambda: None)
+    monkeypatch.setattr(secretrun, "require_run", lambda *a: None)
+    count = iter(range(100))
+    monkeypatch.setattr(secretrun, "_record_event", lambda root, ev: example(run=run, id=f"u{next(count)}"))
+    monkeypatch.setattr(secretrun, "OUTSIDE_DAY_CAP", 3)
+    monkeypatch.setattr(secretrun, "record_writer", lambda root: writer)
+    for _ in range(3):
+        secretrun._write_record(ws, {})
+    runfile(ws, run).unlink()  # the file is cut away: orch's own head still knows
+    with pytest.raises(Refused, match="too many key uses"):
+        secretrun._write_record(ws, {})
+
+
+def test_delta_med2_a_missing_list_while_a_key_exists_means_no_legacy(store):
+    ws, writer = store
+    (hp.key_dir(ws, create=False) / "record-cutover.json").unlink()
+    runfile(ws, "r_planted01").parent.mkdir(parents=True, exist_ok=True)
+    runfile(ws, "r_planted01").write_text(
+        json.dumps(dict(example(run="r_planted01", via="log"), seq=1)) + "\n"
+    )
+    write3(writer)  # no write makes a list again
+    assert hp.record_cutover_read(ws) is None
+    r = read_run(ws, "r_planted01")
+    assert (r.status, r.legacy) == ("tampered", False)
+
+
+def test_delta_med3_a_real_legacy_run_stays_not_checked_after_a_real_reset(store):
+    ws, writer = store
+    _legacy_run(ws, writer)
+    assert read_run(ws, OTHER).legacy is True
+    _reset(ws)
+    r = read_run(ws, OTHER)
+    assert (r.status, r.legacy, r.reason) == ("ok", True, "unchecked")
+    # a list that did not verify under the old key is not carried: no legacy afterwards
+    _legacy_run(ws, writer, "r_second01")
+    path = hp.key_dir(ws, create=False) / "record-cutover.json"
+    path.write_text(path.read_text().replace('"runs":[', '"runs":["r_evil0001",'))
+    _reset(ws)
+    assert read_run(ws, "r_second01").status == "tampered"
+
+
+def test_delta_med5_a_forged_claim_never_names_the_tool(store):
+    src = Path(record.__file__).parent / "cli_record.py"
+    assert "_claim_agent" not in src.read_text()
+
+
+def test_delta_low7_flat_sizes_count_direct_entries_of_pending_and_quarantine(store):
+    ws, writer = store
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    (d / ("0" * 19 + "1_" + "a" * 32 + ".json")).write_text("x" * 1000)
+    base = record.record_sizes(ws).value["record"]
+    assert base >= 1000
+    deep = record_dir(ws) / "quarantine" / RUN / "q_1"
+    deep.mkdir(parents=True)
+    (deep / "big").write_text("y" * 5000)  # below a quarantined folder: never walked
+    assert record.record_sizes(ws).value["record"] == base
+
+
+def test_delta_low8_a_run_through_two_resets_keeps_its_first_key_lines_as_history(store):
+    ws, writer = store
+    write3(writer)
+    _reset(ws)
+    writer.append(example(id="toolu_b", at=at(7)))
+    _reset(ws)
+    writer.append(example(id="toolu_c", at=at(8)))
+    r = read_run(ws, RUN)
+    assert r.status == "ok" and r.reason == "old_key" and [e["id"] for e in r.unwrap()] == ["toolu_c"]
+    assert r.changed == 4  # 3 lines of the first key and 1 of the second: all history, none planted
