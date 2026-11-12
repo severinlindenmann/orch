@@ -1266,6 +1266,7 @@ ROUND_KEYS = (
     "review_at",
     "review_void",
     "shown_stale",
+    "done_shown",
     "done_seen",
     "reviewed_tip",
     "reviewed_at",
@@ -1366,6 +1367,10 @@ def _judge_done_locked(root: Path, ticket: str) -> None:
     review_tip, review_at = known.get("review_tip"), known.get("review_at")
     if known.get("review_void") or not review_tip or not isinstance(review_at, str):
         return
+    # What the person's page showed at the Done (set by bind_shown, kept across a status bounce): only that
+    # very tip can be approved, never "none", never one an agent recorded after it.
+    if known.get("done_shown") is not None and known["done_shown"] != review_tip:
+        return
     t = tickets.load(root, ticket)
     if t.get("status") != "done" or _alive_here(root, ticket) or not _person_done(root, t, review_at):
         return
@@ -1394,10 +1399,11 @@ def bind_shown(root: Path, ticket: str, shown) -> bool:
     recorded review tip is no longer that tip, new changes arrived after they looked, so the recorded tip is
     forgotten (the Done still happens; bringing the work back then waits for their approval of the new tip)
     and False is returned. True otherwise."""
+    unbound = shown is None  # a Done without a shown tip (terminal, older clients): as before
     if shown == NO_TIP:
         # The page showed no tip: any tip recorded since (a run ended later) was never seen.
         shown = None
-    elif not isinstance(shown, str) or not _SHA.fullmatch(shown):
+    elif not unbound and (not isinstance(shown, str) or not _SHA.fullmatch(shown)):
         return True
 
     def stale(r):
@@ -1405,6 +1411,12 @@ def bind_shown(root: Path, ticket: str, shown) -> bool:
         r["shown_stale"] = True
 
     def judge(r):  # one store update: what is recorded and what is voided cannot interleave with a run end
+        if unbound:
+            r.pop("done_shown", None)
+            return
+        r["done_shown"] = (
+            shown or "none"
+        )  # kept until the ticket leaves Done: a status bounce cannot clear it
         if shown is None:
             if r.get("review_tip"):
                 stale(r)

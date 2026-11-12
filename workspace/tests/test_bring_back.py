@@ -2570,3 +2570,39 @@ def test_b13k_any_other_fsck_failure_refuses(done_copy, monkeypatch):
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting" and back["reason"] == worktrees.OBJECTS_BAD
     assert git(root, "rev-parse", "HEAD") == head
+
+
+def test_b13n_shown_tip_then_status_bounce_approves_nothing_unseen(done_copy):
+    """The page showed tip T and the Done was bound to it; before the Done is written the status bounces
+    (Review -> Active -> Review) with more work recorded: the Done approves only what it was bound to."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    shown = git(copy, "rev-parse", "HEAD")
+    assert worktrees.bind_shown(root, tid, shown) is True
+    tickets.set_status(root, tid, "active", "agent:x")
+    agent_commits(copy)
+    to_review(root, tid)
+    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    worktrees.sweep(root)
+    assert not (root / "late.py").exists()
+    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "waiting"
+
+
+def test_b13n_none_then_status_bounce_approves_nothing_unseen(done_copy):
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    assert worktrees.bind_shown(root, tid, "none") is True
+    tickets.set_status(root, tid, "review", "agent:x")  # records a tip (no run alive), void gone
+    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    worktrees.sweep(root)
+    assert (root / "code.py").read_text() != "print(2)\n"
+    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "waiting"
+
+
+def test_b13n_a_done_without_a_shown_tip_clears_an_old_binding(done_copy):
+    """A failed earlier attempt left a binding; a terminal Done (no shown tip) is judged as before."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    assert worktrees.bind_shown(root, tid, "none") is False  # then the Done write failed
+    assert worktrees.bind_shown(root, tid, None) is True  # terminal Done: no page involved
+    assert "done_shown" not in worktrees._copy_authority(root, tid)

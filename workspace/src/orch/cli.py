@@ -705,7 +705,7 @@ def _looked_at_this(root: Path, args, tid: str, status, proven: bool) -> bool:
     the Done is written: False when new changes arrived after they looked (the Done still happens; bringing
     the work back waits for their approval). Without a shown tip (the terminal, older pages) nothing
     changes."""
-    if status != "done" or not proven or getattr(args, "shown_tip", None) is None:
+    if status != "done" or not proven:
         return True
     try:
         if tickets.load(root, tid)["status"] == "done":
@@ -714,7 +714,7 @@ def _looked_at_this(root: Path, args, tid: str, status, proven: bool) -> bool:
         return True
     from orch import worktrees
 
-    return worktrees.bind_shown(root, tid, args.shown_tip)
+    return worktrees.bind_shown(root, tid, getattr(args, "shown_tip", None))
 
 
 def _with_notice(t: dict, warn, looked: bool) -> dict:
