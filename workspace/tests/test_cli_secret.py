@@ -2018,8 +2018,8 @@ def test_h2_files_swapped_after_the_hash_run_the_approved_bytes(store, run, ws, 
     real = secretrun._pinned_copy
     swapped, seen = [], {}
 
-    def swap_after_copy(root, path, want, temp, name):
-        copy = real(root, path, want, temp, name)
+    def swap_after_copy(path, want, temp, name, *, program):
+        copy = real(path, want, temp, name, program=program)
         seen[name] = Path(copy).read_bytes()
         if name == "~arg0":
             Path(path).write_text("planted\n")  # swapped right after the bytes were read
@@ -2057,25 +2057,47 @@ def test_h2_a_binary_swapped_before_the_copy_is_not_started(store, run, ws, monk
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
 @pytest.mark.parametrize(
-    "shebang,ok",
+    "head",
     [
-        ("#!/usr/bin/awk -f\nBEGIN{{}}\n", True),
-        ("#!/usr/bin/env awk\n", False),
-        ("#!/bin/sh\n", False),
-        ("#!/usr/bin/python3\n", False),
-        ("#!{own}\n", False),  # a user-owned interpreter
-        ("#!awk\n", False),  # not an absolute path
+        b"#!/bin/sh\n",
+        b"#!/usr/bin/awk -f\n",
+        b"#!/usr/bin/env awk\n",
+        b"#!/usr/bin/python3.13\n",
+        b"#!/usr/bin/nice -n 5 /usr/bin/awk\n",
+        b"#!/bin/sh\r\n",
+        b"#!awk",
     ],
 )
-def test_h2_a_pinned_script_needs_a_system_interpreter(store, run, ws, monkeypatch, tmp_path, shebang, ok):
+def test_h2_a_script_cannot_be_approved_from_a_user_owned_place(store, run, ws, monkeypatch, tmp_path, head):
     monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    own = _user_prog(tmp_path, "/usr/bin/true")
     script = tmp_path / "bin" / "job"
-    script.write_text(shebang.format(own=own))
+    script.parent.mkdir()
+    script.write_bytes(head + b"BEGIN{}\n")
     script.chmod(0o755)
-    assert _set(run, monkeypatch, ws, "mine", "--run", str(script), "--allow-user-owned")[0] in (0, 2)
-    if "mine" not in keystore.read_profiles(ws):  # refused already when the person saved it
-        assert not ok
-        return
+    _set(run, monkeypatch, ws, "mine", "--run", str(script), "--allow-user-owned")
+    if "mine" in keystore.read_profiles(ws):  # (saved only if the set-time check is not the one that refuses)
+        code, out, err = run("secret", "exec", "mine")
+        assert code == 2 and "script cannot be approved" in err
+    else:
+        assert "mine" not in keystore.read_profiles(ws)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_script_given_as_an_argument_to_a_system_interpreter_is_pinned_and_copied(
+    store, run, ws, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    script = tmp_path / "bin" / "job.awk"
+    script.parent.mkdir()
+    script.write_text('#!/usr/bin/awk -f\nBEGIN { print "approved" }\n')
+    code, out, err = _set(
+        run, monkeypatch, ws, "mine", "--run", "/usr/bin/awk", "--run=-f", "--run", str(script)
+    )
+    assert code == 0, out + err
+    prof = keystore.read_profiles(ws)["mine"]
+    assert str(script) in prof["run_pins"] and "run_sha256" not in prof
     code, out, err = run("secret", "exec", "mine")
-    assert (code == 0) == ok, (code, err)
+    assert code == 0 and "approved" in out, err
+    script.write_text('#!/usr/bin/awk -f\nBEGIN { print "planted" }\n')
+    code, out, err = run("secret", "exec", "mine")
+    assert code == 2 and "planted" not in out and "has changed" in err

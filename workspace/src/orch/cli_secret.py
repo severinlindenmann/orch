@@ -124,16 +124,16 @@ def _change_profile(root, args, who):
                 if args.allow_user_owned:  # the person pins this exact file; checked before every start
                     with open(path, "rb") as f:
                         profile["run_sha256"] = hashlib.sha256(f.read()).hexdigest()
-                    pins = {}
-                    for arg in args.run[1:]:
-                        if os.path.isfile(arg):
-                            if not os.path.isabs(arg):
-                                raise Refused("Refused: name files in the command with their full path.")
-                            with open(arg, "rb") as f:
-                                pins[arg] = hashlib.sha256(f.read()).hexdigest()
-                    if pins:
-                        profile["run_pins"] = pins
                     warnings = [*warnings, secretrun.PIN_TEXT]
+                pins = {}
+                for arg in args.run[1:]:
+                    if os.path.isfile(arg):
+                        if not os.path.isabs(arg):
+                            raise Refused("Refused: name files in the command with their full path.")
+                        with open(arg, "rb") as f:
+                            pins[arg] = hashlib.sha256(f.read()).hexdigest()
+                if pins:
+                    profile["run_pins"] = pins
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
             if args.real_home:
                 profile["real_home"] = True
