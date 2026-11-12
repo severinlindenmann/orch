@@ -24,7 +24,8 @@
             h('small', {text: 'Next step · ' + next})), h('span', {class: 'row-action', text: next}));
       };
       for (const [status, label, action] of groups) {
-        const rows = list.filter(t => t.status === status);
+        const needsYou = window.FocusHelpers.needsYou;
+        const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status && !needsYou(t));
         if (!rows.length) continue;
         box.append(h('section', {class: 'fx-pick-group fx-group-' + status}, h('h2', {}, label + ' ', h('span', {class: 'meta', text: '(' + rows.length + ')'})),
           h('div', {class: 'card'}, rows.map(t => rowFor(t, status, action)))));

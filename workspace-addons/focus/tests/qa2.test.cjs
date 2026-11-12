@@ -21,9 +21,15 @@ test('stage tracks mid-work questions and prioritizes review and done', () => {
 });
 test('picker counts and done timestamps use real data', () => {
   assert.equal(H.attentionText([]), 'Nothing needs you right now.');
-  assert.equal(H.attentionText([{status:'waiting',question_count:2},{status:'review'}]), 'Two questions and one result need your look.');
+  assert.equal(H.attentionText([{status:'waiting',question_count:2},{status:'review'}]), 'One question and one result need your look.');
   assert.equal(H.completedAt({}),null);
   assert.equal(H.completedAt({history:[{text:'Status review -> done', at:'2026-11-08T09:12:00Z'}]}),'2026-11-08T09:12:00Z');
+});
+test('the picker line and the Needs you group count the same tickets, one per ticket', () => {
+  const list = [{status:'waiting',question_count:2}, {status:'active',question_count:1}, {status:'waiting'}, {status:'done',question_count:1}, {status:'open'}];
+  const needs = list.filter(H.needsYou);
+  assert.equal(needs.length, 3);
+  assert.equal(H.attentionText(list), 'Three questions need you.');
 });
 test('the hold reason is plain text while the run runs and gone when absent', () => {
   const why = "Waiting: the agent's window is scrolled up.";

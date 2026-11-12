@@ -56,11 +56,20 @@ test('home renders one need card per ticket with question count and yellow chip'
   const c = context([t], {needsList:() => needs});
   const home = c.home(), text = JSON.stringify(home);
   assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
-  assert.match(text, /2 questions/); assert.match(text, /Needs you \(1\)/); assert.match(text, /2 questions for you/);
+  assert.match(text, /2 questions/); assert.match(text, /Needs you \(1\)/); assert.match(text, /· 1 question for you ·/);
   assert.match(text, /First\?/); assert.doesNotMatch(text, /Second\?/);
   assert.equal(nodes(home, n => n.attrs?.className === 'chip attn').length, 1);
   needs.shift();
   assert.match(JSON.stringify(c.home()), /Second\?/);
+});
+test('home: the greeting and the Needs you heading show the same count (one per ticket plus failed starts)', () => {
+  const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'active', questions:[{id:id + '1', text:'One?'}, {id:id + '2', text:'Two?'}]}));
+  const needs = items.flatMap(t => t.questions.map(q => ({id:q.id, ticket:t.id, title:q.text, answer:{question:q.id}})));
+  const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
+  assert.match(text, /Needs you \(3\)/); assert.match(text, /· 3 questions for you ·/);
+  assert.equal(helpers.needsYouCount(needs, []), 3);
+  assert.equal(helpers.needsYouCount([{id:'x'}, {id:'y', ticket:'a'}, {id:'z', ticket:'a'}], [['b']]), 3);
+  assert.equal(helpers.needsYouCount([], []), 0);
 });
 
 // Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.
