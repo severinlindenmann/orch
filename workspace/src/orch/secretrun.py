@@ -426,10 +426,11 @@ def _is_plain_address(value: str) -> bool:
 # that must come first, the options (exact words, each at most once, before the operands; None = no value,
 # else the slot type of the next word) and the operand slots. Nothing glued (-p22, -av, --opt=x), no
 # abbreviation, nothing after the last operand. "copy" operands: exactly one is remote (host:path).
+# No sftp: it reads commands from stdin (!cmd runs a local shell, put/lls/get reach any local file), so any
+# sftp is "any command" and needs the person's --any-command.
 TEMPLATES = {
     "ssh": ((), {"-p": "port", "-l": "user", "-i": "key"}, ("host",)),
     "scp": ((), {"-P": "port", "-i": "key"}, ("copy", "copy")),
-    "sftp": ((), {"-P": "port", "-i": "key"}, ("host",)),
     "rsync": ((), dict.fromkeys(["-a", "-r", "-t", "-v", "-z", "-n", "--delete"]), ("copy", "copy")),
     "git": (("ls-remote",), dict.fromkeys(["--heads", "--tags"]), ("url",)),
 }
@@ -444,7 +445,7 @@ _SLOTS = {
 }
 SET_AGAIN = "Refused: this profile was saved by an older orch or its program changed. Set the profile again."
 NOT_A_FORM = (
-    "Refused: orch runs ssh, scp, sftp, rsync and git ls-remote only in a few fixed forms, and this command "
+    "Refused: orch runs ssh, scp, rsync and git ls-remote only in a few fixed forms, and this command "
     "is not one of them. To allow any command, the person sets the profile with --any-command."
 )
 REAL_HOME_ANY = (
@@ -453,10 +454,10 @@ REAL_HOME_ANY = (
 )
 
 
-def program_kind(real: str) -> str:
-    """What a program really is, from the real file and never from the name it was given: one of TEMPLATES
+def program_kind(real: str, names=TEMPLATES) -> str:
+    """What a program really is, from the real file and never from the name it was given: one of `names`
     only when it is the same file (device and inode) as the system program of that name; else "other"."""
-    for name in TEMPLATES:
+    for name in names:
         for d in safe_path_dirs(None):
             try:
                 if os.path.samefile(os.path.join(d, name), real):
@@ -619,11 +620,11 @@ def _environment(dirs, private, real_home=False):
     return env
 
 
-def neutral_ssh(command, env, dirs, h):
+def neutral_ssh(command, env, dirs, h, private=None):
     """Every ssh orch starts reads no ssh or git config an agent could write (OpenSSH reads ~/.ssh/config
     from the account's home, not $HOME): ssh, scp and sftp get -F none, rsync gets its ssh from orch (-e),
-    git gets GIT_SSH_COMMAND and no system or global config. The kind comes from the real file."""
-    kind = program_kind(os.path.realpath(command[0]))
+    git gets GIT_SSH_COMMAND and no system, global or repository config. The kind comes from the real file."""
+    kind = program_kind(os.path.realpath(command[0]), (*TEMPLATES, "sftp"))
     if kind in ("ssh", "scp", "sftp"):
         return [command[0], "-F", "none", *command[1:]]
     if kind not in ("rsync", "git"):
@@ -631,14 +632,38 @@ def neutral_ssh(command, env, dirs, h):
     ssh = _program("ssh", dirs, h) + " -F none"
     if kind == "rsync":
         return [command[0], "-e", ssh, *command[1:]]
+    if private is None:
+        raise Refused("Refused: could not run the command.")
+    private = os.path.abspath(str(private))
+    for k in [k for k in env if k.upper().startswith("GIT_") or "ASKPASS" in k.upper()]:
+        del env[k]  # nothing inherited or from the profile steers git: only what is set below
+    # No repository discovery: a .git an agent planted in a parent folder of the private cwd (with
+    # core.sshCommand, credential.helper, url.*.insteadOf, hooks ...) is never read. GIT_DIR names a folder
+    # that does not exist; the ceiling stops any upward search at the private folder's parent.
+    config = {
+        "credential.helper": "",
+        "core.sshCommand": ssh,
+        "core.fsmonitor": "false",
+        "core.hooksPath": os.devnull,
+        "core.askPass": "",
+        "protocol.allow": "never",
+        "protocol.https.allow": "always",
+        "protocol.http.allow": "always",
+        "protocol.ssh.allow": "always",
+    }
     env.update(
+        GIT_DIR=os.path.join(private, "no-git-dir"),
+        GIT_CEILING_DIRECTORIES=os.path.dirname(private),
         GIT_SSH_COMMAND=ssh,
         GIT_SSH_VARIANT="ssh",
         GIT_CONFIG_NOSYSTEM="1",
         GIT_CONFIG_GLOBAL=os.devnull,
-        GIT_ALLOW_PROTOCOL="https:http:ssh:git",
+        GIT_ALLOW_PROTOCOL="https:http:ssh",
         GIT_TERMINAL_PROMPT="0",
+        GIT_CONFIG_COUNT=str(len(config)),
     )
+    for i, (k, v) in enumerate(config.items()):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
     return command
 
 
@@ -918,7 +943,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         private = candidate / "~home"  # empty: the child's cwd and HOME (a key name can never be "~home")
         env = _environment(dirs, private, profile.get("real_home") is True)
         env.update(profile.get("set", {}))
-        command = neutral_ssh(command, env, dirs, h)
+        command = neutral_ssh(command, env, dirs, h, private)
         types = {row["name"]: row["type"] for row in keystore.list_keys(root) if row["state"] != "shadowed"}
         for var, name in profile.get("env", {}).items():
             value = values[name]

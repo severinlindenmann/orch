@@ -2222,7 +2222,7 @@ def test_options_hidden_in_addresses_are_refused(ws):
 
 
 def test_an_o_option_is_refused_for_programs_that_can_run_a_command_through_it(ws):
-    for kind in ("ssh", "git", "scp", "rsync", "sftp"):
+    for kind in ("ssh", "git", "scp", "rsync"):
         for arg in ("-oProxyCommand=x", "-o", "-oStrictHostKeyChecking=no"):
             with pytest.raises(Refused, match="fixed forms"):
                 secretrun.check_arguments(ws, [arg, "h"], kind)
