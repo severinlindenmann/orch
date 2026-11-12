@@ -9,13 +9,16 @@ import pytest
 from orch import keystore, secretrun
 from orch.errors import Refused
 
+# a real root-owned file, no link (/usr/bin/true is one on macOS, a link on merged-/usr Linux)
+TRUE = os.path.realpath(shutil.which("true", path="/usr/bin:/bin") or "/usr/bin/true")
+
 VALID = [
     ("ssh", ["host"]),
     ("ssh", ["me@db.example.com"]),
     ("ssh", ["-p", "2222", "-l", "me", "-i", "{file:KEY}", "host"]),
-    ("scp", ["-P", "22", "/usr/bin/true", "me@h:dir/b"]),
-    ("scp", ["h:/srv/x", "/usr/bin/true"]),
-    ("rsync", ["-a", "-v", "-z", "--delete", "/usr/bin/true", "me@h:backup/"]),
+    ("scp", ["-P", "22", TRUE, "me@h:dir/b"]),
+    ("scp", ["h:/srv/x", TRUE]),
+    ("rsync", ["-a", "-v", "-z", "--delete", TRUE, "me@h:backup/"]),
     ("git", ["ls-remote", "https://example.test/r.git"]),
     ("git", ["ls-remote", "--heads", "git@github.com:o/r.git"]),
 ]
