@@ -33,7 +33,7 @@ _OFF = "Recording is off until key hiding is ready."
 _OFF_KEY = "Recording is off until orch's protection is ready."
 # The one place for the plain words about records made before orch checked them (Focus and the phone show it).
 UNCHECKED_TEXT = "These records were made before orch checked them."
-# The one place for the marker of a run by a helper whose deny rules orch cannot set (codex, generic).
+# The one place for the marker of a run by a helper whose deny rules orch cannot set.
 UNPROTECTED_TEXT = "Records from this helper can't be fully checked."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"

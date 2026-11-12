@@ -290,7 +290,7 @@ def test_oneshot_denial_asks_and_run_send_note(server, ws, fake_orch):
     ev = {
         "v": 1, "id": "toolu_d1", "seq": 1, "run": "r_den00001", "agent": "main", "at": "2026-11-16T09:12:05Z",
         "ticket": TID, "via": "log", "kind": "denial", "text": "Not allowed by this workspace",
-        "used": {"kind": "tool", "name": "WebFetch", "action": None, "source": "builtin", "version": None},
+        "checked": True, "used": {"kind": "tool", "name": "WebFetch", "action": None, "source": "builtin", "version": None},
         "outcome": {"ok": False, "error": "Not allowed by this workspace", "ms": None},
     }  # fmt: skip
     line = json.dumps({"type": "event", "cursor": "rc1.x", "event": ev})
