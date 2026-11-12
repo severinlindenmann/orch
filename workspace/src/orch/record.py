@@ -844,6 +844,7 @@ def _shown(events):
     """The lines a reader keeps, in file order: `_decision` against the lines kept so far, a kept log line
     replacing the hook lines it `_replaces`. Indexed by key and by call (each holds a few lines: one per
     origin), so a long run is not rescanned for every line; the result is the one of that rescan."""
+    events = list(events)  # read twice when the fallback runs: never a one-shot iterator
     try:
         return _shown_indexed(events)
     except TypeError:  # an unhashable key part: the plain rescan decides
