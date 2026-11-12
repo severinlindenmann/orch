@@ -2606,3 +2606,31 @@ def test_b13n_a_done_without_a_shown_tip_clears_an_old_binding(done_copy):
     assert worktrees.bind_shown(root, tid, "none") is False  # then the Done write failed
     assert worktrees.bind_shown(root, tid, None) is True  # terminal Done: no page involved
     assert "done_shown" not in worktrees._copy_authority(root, tid)
+
+
+def test_b13o_blob_swapped_between_the_check_and_the_merge_is_rolled_back(done_copy, monkeypatch):
+    """The object check before the merge passed; the blob is rewritten after it. The merge writes the bad
+    bytes: the check after the merge finds them, rolls back to where the project was, nothing is merged."""
+    import zlib
+    from pathlib import Path
+
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    blob = git(copy, "rev-parse", "HEAD:code.py")
+    common = Path(git(copy, "rev-parse", "--git-common-dir"))
+    common = common if common.is_absolute() else copy / common
+    obj = common / "objects" / blob[:2] / blob[2:]
+    real = worktrees._bb_merge
+
+    def swap_then_merge(top, args):
+        obj.chmod(0o644)
+        obj.write_bytes(zlib.compress(b"blob 5\0EVIL\n"))
+        return real(top, args)
+
+    monkeypatch.setattr(worktrees, "_bb_merge", swap_then_merge)
+    head = git(root, "rev-parse", "HEAD")
+    done_and_sweep(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.FILES_CHANGED, back
+    assert git(root, "rev-parse", "HEAD") == head
+    assert (root / "code.py").read_text() != "EVIL\n"

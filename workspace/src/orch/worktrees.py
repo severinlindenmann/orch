@@ -811,6 +811,7 @@ INTERRUPTED_BB = (
     "then use Review and bring back."
 )
 MERGING = "a merge is in progress in your folder"
+FILES_CHANGED = "The copy's files changed during the merge; nothing was merged"
 CHANGED = "your folder changed while saving - nothing was removed"
 OVERLAP = "your folder has changes in the same places"
 UPDATE = "your project changed in the same places; ask the agent to update"
@@ -1657,6 +1658,57 @@ def _bb_merge(top: Path, args: list[str]):
         _ctx.deadline = before
 
 
+def _fsck(top: Path, *ids: str) -> int:
+    """rc of orch's object check over the history of `ids` (see safegit.FSCK_FORMAT_OK); 124: it ran out of
+    time. The sweep is detached, so the check gets its full time, like the merge."""
+    before = getattr(_ctx, "deadline", None)
+    _ctx.deadline = None
+    try:
+        return _git(
+            ["fsck", "--no-dangling", "--no-reflogs", "--no-progress", *ids],
+            top,
+            FSCK_TIMEOUT,
+            read_only=True,
+        )[0]
+    finally:
+        _ctx.deadline = before
+
+
+def _after_merge_ok(top: Path, touched, merge_commit: str) -> bool:
+    """Checked after the merge, in the same locked section: what the merge WROTE is what its commit says.
+    The copy shares the project's object folder, so a blob swapped between the check before the merge and
+    the merge itself would land on disk (and may be swapped back afterwards): every merged file is hashed
+    here (git's stat shortcut is not trusted) against the blob id in the new commit, and the objects
+    reachable from the commit must hash to their ids."""
+    if _fsck(top, merge_commit) != 0:
+        return False
+    listing = _bb_read(top, ["ls-files", "-s", "-z"], strip=False)
+    index = {}
+    for entry in listing.split("\0"):
+        meta, _, name = entry.partition("\t")
+        parts = meta.split()
+        if name and len(parts) == 3 and parts[2] == "0":
+            index[name] = (parts[0], parts[1])
+    for name in touched:
+        mode, blob = index.get(name, (None, None))
+        if mode not in ("100644", "100755"):
+            continue  # gone, a link or a gitlink: refused before the merge already
+        path = top / name
+        try:
+            if path.is_symlink() or not path.is_file():
+                return False
+            h = hashlib.sha256() if len(blob) == 64 else hashlib.sha1()
+            h.update(b"blob %d\0" % path.stat().st_size)
+            with path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+        except OSError:
+            return False
+        if h.hexdigest() != blob:
+            return False
+    return True
+
+
 def _set_journal(root: Path, ticket: str, value: dict | None) -> None:
     """The record of one merge attempt lives in the signed copies store (never in the project's agent-
     writable files): only orch can write one that a recovery trusts."""
@@ -1943,17 +1995,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         # (No --strict. orch's fsck call ignores only a listed set of format-only messages of old imported
         # history (safegit.FSCK_FORMAT_OK); ANY other non-zero result refuses. The sweep is detached, so the
         # check gets its full time, like the merge.)
-        before = getattr(_ctx, "deadline", None)
-        _ctx.deadline = None
-        try:
-            rc, _, _ = _git(
-                ["fsck", "--no-dangling", "--no-reflogs", "--no-progress", tip, pre["head"]],
-                top,
-                FSCK_TIMEOUT,
-                read_only=True,
-            )
-        finally:
-            _ctx.deadline = before
+        rc = _fsck(top, tip, pre["head"])
         if rc == 124:
             return wait("checking the stored history needs more time; the next sweep will try again")
         if rc:
@@ -1988,6 +2030,19 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             return wait(CHANGED)
         if _bb_read(top, ["rev-parse", "HEAD^{tree}"]) != tree:
             return wait(CHANGED)  # the journal stays: this merge commit is not what was checked
+        if not _after_merge_ok(top, touched, _bb_read(top, ["rev-parse", "HEAD"])):
+            # Back to where the project was. --hard only when the folder had no changes outside the merged
+            # files (git's --keep refuses over files whose bytes it finds swapped); otherwise a person looks.
+            # (ignored files are not touched by a reset)
+            clean = not any(
+                f[:2] != "!!" and ("R" in f[:2] or "C" in f[:2] or not _hits(prep, f[3:]))
+                for f in pre["status"].split("\0")
+                if f
+            )
+            if clean and _git(["reset", "--hard", pre["head"]], top)[0] == 0:
+                _set_journal(root, ticket, None)
+                return wait(FILES_CHANGED)
+            return wait(CHANGED)  # the journal stays: a person needs to look
         try:
             after = _bb_snapshot(top)
             compare = ("branch", "status", "files")
