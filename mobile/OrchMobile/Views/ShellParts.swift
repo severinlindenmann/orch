@@ -5,6 +5,7 @@ struct ShellAvatar: View {
     var size: CGFloat = 46
     /// When set, shows the green dot while the workspace is online (re-checked every minute so "online" expires).
     var lastSeen: String?? = nil
+    @Environment(AppModel.self) private var model: AppModel?
     private var tint: Color {
         let hash = name.utf8.reduce(UInt64(5381)) { ($0 &* 33) &+ UInt64($1) }
         return [Theme.brand, Color(red: 0.76, green: 0.64, blue: 0.88), Color(red: 0.85, green: 0.71, blue: 0.46)][Int(hash % 3)]
@@ -16,7 +17,7 @@ struct ShellAvatar: View {
             .overlay(alignment: .bottomTrailing) {
                 if let lastSeen {
                     TimelineView(.everyMinute) { context in
-                        Circle().fill(Presence.of(lastSeen: lastSeen, now: context.date).isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
+                        Circle().fill(WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: context.date)).isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
                             .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
                     }
                 }
@@ -38,12 +39,13 @@ struct ShellBadge: View {
 
 struct PresenceLine: View {
     let lastSeen: String?
+    @Environment(AppModel.self) private var model: AppModel?
     var body: some View {
         TimelineView(.everyMinute) { context in
-            let presence = Presence.of(lastSeen: lastSeen, now: context.date)
+            let status = WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: context.date))
             HStack(spacing: 5) {
-                Circle().fill(presence.isOnline ? Theme.online : Theme.muted).frame(width: 7, height: 7).accessibilityHidden(true)
-                Text(presence.line(now: context.date)).themeFont(13).foregroundStyle(Theme.muted)
+                Circle().fill(status.isOnline ? Theme.online : Theme.muted).frame(width: 7, height: 7).accessibilityHidden(true)
+                Text(status.text(now: context.date)).themeFont(13).foregroundStyle(Theme.muted)
             }.accessibilityElement(children: .combine)
         }
     }

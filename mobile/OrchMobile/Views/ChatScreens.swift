@@ -268,10 +268,10 @@ struct ConversationView: View {
         if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
         else {
             TimelineView(.everyMinute) { context in
-                let presence = model.presence(of: resolved.workspace, now: context.date)
+                let status = model.status(of: resolved.workspace, now: context.date)
                 HStack(spacing: 4) {
-                    if presence.isOnline { PresenceDot() }
-                    Text((resolved.ticket != nil ? "\(workspaceName) · " : "") + presence.line(now: context.date))
+                    if status.isOnline { PresenceDot() }
+                    Text((resolved.ticket != nil ? "\(workspaceName) · " : "") + status.text(now: context.date))
                         .lineLimit(1).truncationMode(.tail)
                 }
             }.themeFont(13).foregroundStyle(Theme.muted)

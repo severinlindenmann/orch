@@ -37,3 +37,29 @@ enum Presence: Equatable, Sendable {
         return t.prefix(1).lowercased() + t.dropFirst()
     }
 }
+
+/// The one status shown for a workspace in chat headers, avatar dots and Settings. It combines this phone's link to the
+/// server (`AppModel.connection`) with the workspace's presence. "Checking…" at launch counts as connected so it doesn't flash "Offline".
+enum WorkspaceStatus: Equatable, Sendable {
+    case online
+    case notReachable(Presence)
+    case offline
+
+    static func of(connection: AppModel.Connection, presence: Presence) -> WorkspaceStatus {
+        if connection == .unreachable { return .offline }
+        return presence == .online ? .online : .notReachable(presence)
+    }
+
+    var isOnline: Bool { self == .online }
+
+    /// "Online", "Computer not reachable, last seen 14:02" (local time), "Computer not reachable" (never seen), "Offline, no connection".
+    func text(now: Date = Date(), calendar: Calendar = .current) -> String {
+        switch self {
+        case .online: return "Online"
+        case .offline: return "Offline, no connection"
+        case .notReachable(let p):
+            guard case .lastSeen = p else { return "Computer not reachable" }
+            return "Computer not reachable, " + p.line(now: now, calendar: calendar)
+        }
+    }
+}

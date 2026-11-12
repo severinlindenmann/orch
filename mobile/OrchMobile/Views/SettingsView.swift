@@ -56,7 +56,7 @@ struct SettingsView: View {
                                         WorkspaceBadge(name: WorkspaceAlias.name(for: summary.workspace), icon: summary.workspace.icon, color: summary.workspace.color, size: 42)
                                         VStack(alignment: .leading, spacing: 6) {
                                             Text(WorkspaceAlias.name(for: summary.workspace)).themeFont(17)
-                                            Text("Your computer · Connected").themeFont(13).foregroundStyle(Theme.muted)
+                                            TimelineView(.everyMinute) { context in Text(model.status(lastSeen: summary.workspace.lastSeen, now: context.date).text(now: context.date)) }.themeFont(13).foregroundStyle(Theme.muted)
                                         }
                                         Spacer(); ShellChevron()
                                     }.padding(16).frame(minHeight: 64).contentShape(Rectangle())

@@ -483,6 +483,8 @@ final class AppModel {
     /// A "starting" conversation becomes its topic once the workspace acked it; others are returned unchanged.
     func resolve(_ id: ConversationID) -> ConversationID { ConversationBuilder.resolve(id, conversationInputs) }
     func presence(of workspaceId: String, now: Date = Date()) -> Presence { workspace(workspaceId)?.presence(now: now) ?? .unknown }
+    func status(of workspaceId: String, now: Date = Date()) -> WorkspaceStatus { WorkspaceStatus.of(connection: connection, presence: presence(of: workspaceId, now: now)) }
+    func status(lastSeen: String?, now: Date = Date()) -> WorkspaceStatus { WorkspaceStatus.of(connection: connection, presence: Presence.of(lastSeen: lastSeen, now: now)) }
 
     func unread(_ id: ConversationID) -> Int { readState.unread(ReadState.key(id), in: conversationItems(id)) }
     // Archive, delete, auto-archive (phone-local)
