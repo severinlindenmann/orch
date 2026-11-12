@@ -370,3 +370,23 @@ def test_h_an_unchecked_tool_end_keeps_its_unknown_outcome():
         "valid-step-started.json", via="log", checked=True, outcome={"ok": True, "error": None, "ms": 1}
     )
     assert to_events(checked, TICKET, RUN)[0]["data"]["ok"] is True
+
+
+def test_s3_unchecked_steps_say_why_and_checked_steps_say_nothing():
+    name = "valid-step-started.json"
+    old = to_events(example(name, checked=False, before_protection=True), TICKET, RUN)
+    assert old[0]["data"]["source"] == "hook" and old[0]["data"]["before"] is True
+    hook = to_events(example(name, checked=False), TICKET, RUN)
+    assert "before" not in hook[0]["data"]
+    ok = to_events(example(name, via="log", checked=True, before_protection=True), TICKET, RUN)
+    assert "before" not in ok[0]["data"] and ok[0]["data"]["source"] == "log"
+
+
+def test_s3_problems_are_orch_words_once_and_skip_stream_news(tmp_path):
+    f = RecordFeed(tmp_path, None, RUN, TICKET)
+    changed, unchecked = "Some records were changed outside orch.", "Some records cannot be checked."
+    lines = (("content", changed), ("recovered", "Again."), ("unchecked", unchecked), ("content", changed))
+    for reason, msg in lines:
+        doc = {"type": "unavailable", "run": RUN, "status": "ok", "reason": reason, "message": msg}
+        f._line(json.dumps(doc).encode())
+    assert f.problems() == [changed, unchecked]

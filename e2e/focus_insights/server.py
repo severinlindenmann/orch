@@ -77,6 +77,15 @@ for tid, (run, steps) in RUNS.items():
                     "event": event(run, tid, i + 1, text, ago(m), used, files, kind, agent, parent)})
         for i, (text, used, files, kind, agent, parent, m) in enumerate(steps)
     ]  # fmt: skip
+# the second run shows what orch could not check: its last step was only reported by the agent (a hook line,
+# "not checked" mark) and one line was changed outside orch (the quiet run warning)
+_last = json.loads(lines["t_pil2bbbb"][-1])
+_last["event"].update(via="hook", checked=False)
+lines["t_pil2bbbb"][-1] = json.dumps(_last)
+lines["t_pil2bbbb"].append(json.dumps({
+    "type": "unavailable", "status": "ok", "reason": "content", "changed": 1, "removed": 0,
+    "message": "Some records of this run were changed outside orch. To be safe, orch does not show them. Nothing was deleted.",
+}))  # fmt: skip
 (fake / "events.json").write_text(json.dumps(lines))
 (fake / "runs.json").write_text(json.dumps({tid: run for tid, (run, _) in RUNS.items()}))
 (fake / "orch").write_text(f'''#!{sys.executable}

@@ -556,3 +556,6 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
   .fx-clash-wrap{padding:16px 20px 0}
   .fx-agent-s{white-space:normal}
 }
+.fx-unchecked{display:inline-block;margin-left:6px;padding:0 5px;border:1px solid var(--border);border-radius:4px;font-size:10.5px;line-height:16px;color:var(--text-faint);white-space:nowrap;cursor:help;vertical-align:baseline}
+.fx-record-note{margin:4px 0 8px;font-size:12px;line-height:1.5;color:var(--warning)}
+.fx-ln-card .fx-record-note{margin:6px 14px 0}

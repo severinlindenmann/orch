@@ -545,3 +545,7 @@ def test_wont_do_counts_as_resolved(server, ws):
     v = json.loads(body)
     assert st == 200 and v["done"] == 2 and v["total"] == 2
     assert v["ticket"]["checklist"][1]["done"] is False
+
+
+def test_s3_view_carries_record_notes(server):
+    assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["record_notes"] == []
