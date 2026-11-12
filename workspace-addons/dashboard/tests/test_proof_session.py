@@ -107,7 +107,9 @@ def test_click_without_a_session_is_watch_only(live, monkeypatch):
     ran = []
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
     st, _, _body = post(
-        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
     )
     assert st == 403 and ran == []
 
@@ -153,7 +155,10 @@ def test_two_loopback_servers_keep_independent_sessions(live, monkeypatch):
             returncode, stdout, stderr = 0, "{}", ""
 
         monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **kw: ran.append(argv) or R())
-        act = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
+        act = {
+            "op": "answer",
+            "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"},
+        }
         ck1 = session(root, port)
         ck2 = session(root, port2)  # signing in to the second server ...
         assert (
@@ -280,7 +285,9 @@ def test_a_notice_is_read_not_consumed_and_only_the_ack_of_a_session_clears_it(l
 
 def test_dismiss_needs_a_session(live):
     root, port = live
-    hp.request_handoff(root, "ticket.answer", "t_a:q1:" + "a" * 64, "L", "x", argv=["answer", "t_a", "q1", "--", "x"])
+    hp.request_handoff(
+        root, "ticket.answer", "t_a:q1:" + "a" * 64, "L", "x", argv=["answer", "t_a", "q1", "--", "x"]
+    )
     hid = hp.handoffs(root)[0]["id"]
     assert post(port, "/api/act", {"op": "handoff.dismiss", "args": {"id": hid}})[0] == 403
     assert hp.handoffs(root)  # still there

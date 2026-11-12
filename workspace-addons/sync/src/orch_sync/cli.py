@@ -14,8 +14,20 @@ from orch.errors import Refused as CoreRefused
 from . import repo
 from .settings import DEFAULTS, minutes
 
-ACT_VERBS = ("status", "check", "set", "now", "use-public", "keep-mine", "keep-theirs", "leave-out", "allow",
-             "ignore", "leave-deleted", "restored")
+ACT_VERBS = (
+    "status",
+    "check",
+    "set",
+    "now",
+    "use-public",
+    "keep-mine",
+    "keep-theirs",
+    "leave-out",
+    "allow",
+    "ignore",
+    "leave-deleted",
+    "restored",
+)
 
 
 def remote_allowed():
@@ -39,7 +51,10 @@ def safe_address(url):
 def consent(settings):
     """What turning sync on means, in plain words: what, where, how often, and that it can be turned off."""
     if settings["mode"] == "local":
-        where, often = "on this computer only; nothing leaves it", "every 5 minutes at most, when something changed"
+        where, often = (
+            "on this computer only; nothing leaves it",
+            "every 5 minutes at most, when something changed",
+        )
     else:
         where = f"on this computer and at {safe_address(settings.get('remote') or '')}"
         often = f"every {minutes(settings)} minutes"
@@ -54,8 +69,11 @@ def status_line(s):
     if s["mode"] == "off":
         return "Sync is off."
     run = f"running, next {s['next_run']}" if s["running"] else "not running (orch sync start)"
-    return (f"Sync: {s['mode']}, every {s['interval']} minutes, {run}. Last synced: {s['last_ok'] or 'never'}. "
-            f"Paused: {'yes' if s['paused'] else 'no'}." + (f" Problem: {s['last_error']}" if s["last_error"] else ""))
+    return (
+        f"Sync: {s['mode']}, every {s['interval']} minutes, {run}. Last synced: {s['last_ok'] or 'never'}. "
+        f"Paused: {'yes' if s['paused'] else 'no'}."
+        + (f" Problem: {s['last_error']}" if s["last_error"] else "")
+    )
 
 
 def save_settings(root, settings):
@@ -81,7 +99,9 @@ def remote_target(address, public=False):
 
 
 ADDRESS = "run/sync/address.json"  # the address the person's signed set-remote / use-public choice applied
-ADDRESS_KIND = "sync-remote-address"  # its local1 domain: only apply_set writes (signs) it, after the person's proof
+ADDRESS_KIND = (
+    "sync-remote-address"  # its local1 domain: only apply_set writes (signs) it, after the person's proof
+)
 UNCONFIRMED = "Sync found an address you did not choose and did not use it. Choose where to sync in Settings."
 
 
@@ -117,9 +137,14 @@ def revoke_address(root):
     from orch import humanproof
 
     try:
-        repo.safe(root, ADDRESS).unlink(missing_ok=True)  # stops sync now either way (address_confirmed is false)
+        repo.safe(root, ADDRESS).unlink(
+            missing_ok=True
+        )  # stops sync now either way (address_confirmed is false)
         failed = None
-    except (OSError, repo.Refused) as e:  # a planted folder or link: the pin still moves, the person sees the error
+    except (
+        OSError,
+        repo.Refused,
+    ) as e:  # a planted folder or link: the pin still moves, the person sees the error
         failed = e
     pin = humanproof.record_pin(root, ADDRESS_KIND)
     # unreadable (None: e.g. a damaged .orch/.local-id, which an agent can write) or a pin that can't move: the old
@@ -128,7 +153,9 @@ def revoke_address(root):
     if pin is None or (pin != {} and not humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None})):
         raise repo.Refused("orch could not record that sync left this address. Sync is stopped; try again.")
     if failed is not None:
-        raise repo.Refused("orch could not remove the sync address record. Sync is stopped; ask the owner to clear it.")
+        raise repo.Refused(
+            "orch could not remove the sync address record. Sync is stopped; ask the owner to clear it."
+        )
 
 
 def address_confirmed(root, address):
@@ -168,8 +195,10 @@ class PublicAddress(repo.Refused):
     """A public address on a plain choice: never used then (the person's use-public choice is a separate one)."""
 
     def __init__(self, address):
-        super().__init__("This sync address is public. Anyone can read your tickets. Choose it in the dashboard "
-                         "(Settings, General, Sync), or add --public with a person's proof")
+        super().__init__(
+            "This sync address is public. Anyone can read your tickets. Choose it in the dashboard "
+            "(Settings, General, Sync), or add --public with a person's proof"
+        )
         self.address = address
 
 
@@ -184,13 +213,20 @@ def _remote_gate(root, address, args, public):
     visibility = remote_visibility(address)
     if visibility == "public" and not public:
         raise PublicAddress(address)
-    by = humanproof.person_by(root, args, "addon.act", remote_target(address, public),
-                              no_handoff="Choosing where sync keeps a copy needs a person's proof over stdin.")
+    by = humanproof.person_by(
+        root,
+        args,
+        "addon.act",
+        remote_target(address, public),
+        no_handoff="Choosing where sync keeps a copy needs a person's proof over stdin.",
+    )
     config.require_person(by, "choose where sync keeps a copy")
     return visibility
 
 
-def apply_set(root, settings, mode=None, remote=None, interval=None, kind="private", *, args=None, public=False):
+def apply_set(
+    root, settings, mode=None, remote=None, interval=None, kind="private", *, args=None, public=False
+):
     """`orch sync set` (also `orch sync act set` and `use-public`): check, save and wake the loop. Returns
     (settings, notice): the notice is the visibility line for a remote address seen for the first time, else None.
     Choosing or changing the remote address (`remote`, or turning remote on with the stored one) is a person's
@@ -217,7 +253,9 @@ def apply_set(root, settings, mode=None, remote=None, interval=None, kind="priva
     chosen = remote or (settings.get("remote") if mode == "remote" and settings["mode"] != "remote" else None)
     visibility = None
     if chosen:
-        visibility = _remote_gate(root, chosen, args, public)  # everything that can refuse ran before the proof
+        visibility = _remote_gate(
+            root, chosen, args, public
+        )  # everything that can refuse ran before the proof
     if mode != "off":
         repo.ensure(root)
     notice = None
@@ -231,14 +269,22 @@ def apply_set(root, settings, mode=None, remote=None, interval=None, kind="priva
             from .step import encoded, write
 
             write(root, "run/sync/visibility.json", encoded(notices))
-            notice = "Anyone can read this repository" if visibility == "public" else "Make sure this repository is private"
+            notice = (
+                "Anyone can read this repository"
+                if visibility == "public"
+                else "Make sure this repository is private"
+            )
     if chosen:
         approve_address(root, chosen)  # the address this signed choice applies (checked at every use)
     elif mode in ("off", "local"):
         # leaving remote revokes the signed address: planting mode=remote in settings.json later can't bring the old
         # approval back (nor can a restored copy: the pin moved on); turning remote on again is a new signed choice
-        settings.pop("remote", None)  # off or local: no stored address that could look unconfirmed later (N-3)
-        save_settings(root, {**settings, "mode": mode})  # stop using the address first, then revoke (fails closed)
+        settings.pop(
+            "remote", None
+        )  # off or local: no stored address that could look unconfirmed later (N-3)
+        save_settings(
+            root, {**settings, "mode": mode}
+        )  # stop using the address first, then revoke (fails closed)
         revoke_address(root)
     settings.update(mode=mode, kind=kind, interval=interval or settings["interval"])
     save_settings(root, settings)
@@ -297,7 +343,9 @@ def deleted(root, ticket, keep, args):
             if not old:
                 raise repo.Refused("This ticket has no synced copy to leave deleted")
             allowed = read(root, "allow-delete")
-            allowed[ticket] = records.make(root, "delete", f"{ticket}:{old[1]}", {"ticket": ticket, "blob": old[1]})
+            allowed[ticket] = records.make(
+                root, "delete", f"{ticket}:{old[1]}", {"ticket": ticket, "blob": old[1]}
+            )
             write(root, "run/sync/allow-delete.json", encoded(allowed))
         state["deleted"].pop(ticket)
         from .pause import verified_pause
@@ -393,7 +441,9 @@ def main(argv=None):
     p.add_argument("verb", choices=ACT_VERBS)
     p.add_argument("target")
     p.add_argument("--value")
-    p.add_argument("--proof-target", action="store_true", help="say what a signed verb needs proven; changes nothing")
+    p.add_argument(
+        "--proof-target", action="store_true", help="say what a signed verb needs proven; changes nothing"
+    )
     p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
@@ -414,8 +464,16 @@ def main(argv=None):
             return 0
         if args.cmd == "set":
             asked = args.mode
-            settings, notice = apply_set(root, settings, args.mode, args.remote, args.interval, args.kind, args=args,
-                                         public=args.public)
+            settings, notice = apply_set(
+                root,
+                settings,
+                args.mode,
+                args.remote,
+                args.interval,
+                args.kind,
+                args=args,
+                public=args.public,
+            )
             if notice:
                 print(notice, file=sys.stderr)
             result = settings
@@ -476,13 +534,19 @@ def main(argv=None):
         elif args.cmd == "start":
             from . import orchcli, service
 
-            if settings["mode"] == "off":  # a normal state (orch start starts every add-on): quiet, not an error
+            if (
+                settings["mode"] == "off"
+            ):  # a normal state (orch start starts every add-on): quiet, not an error
                 result = {"running": False, "off": True, "message": "Sync is off here: nothing to start."}
             elif (active := orchcli.is_active(root)) is None:
-                raise repo.Refused("Could not check whether the sync add-on is on here (orch did not answer). "
-                                   "Try again: orch sync start")
+                raise repo.Refused(
+                    "Could not check whether the sync add-on is on here (orch did not answer). "
+                    "Try again: orch sync start"
+                )
             elif not active:
-                raise repo.Refused("The sync add-on is not on here. A person turns it on: orch addon add sync")
+                raise repo.Refused(
+                    "The sync add-on is not on here. A person turns it on: orch addon add sync"
+                )
             else:
                 result = {"running": True, "pid": service.start(root)}
         elif args.cmd == "stop":
@@ -493,14 +557,20 @@ def main(argv=None):
             if res == "still running":
                 result["note"] = "Sync is finishing its current round and stops right after it."
             if res == "not verified":
-                result["note"] = "A file in .orch/run/sync/ names a process that is not the sync loop; nothing was stopped."
+                result["note"] = (
+                    "A file in .orch/run/sync/ names a process that is not the sync loop; nothing was stopped."
+                )
         if args.cmd == "set" and not args.json:
             message = (
                 "Sync is off"
                 if settings["mode"] == "off"
                 else (
                     f"Sync: {settings['mode']}, every {minutes(settings)} minutes"
-                    + (f", to {safe_address(settings.get('remote') or '')}" if settings["mode"] == "remote" else "")
+                    + (
+                        f", to {safe_address(settings.get('remote') or '')}"
+                        if settings["mode"] == "remote"
+                        else ""
+                    )
                 )
             )
             print(message)
@@ -508,7 +578,11 @@ def main(argv=None):
             print(json.dumps(result) if args.json else str(result))
         return 0
     except Exception as e:  # noqa: BLE001 - Fable B14: fail closed on any error, including hostile data shapes
-        message = str(e) if isinstance(e, (ValueError, OSError, CoreRefused)) else f"Sync stopped: {type(e).__name__}"
+        message = (
+            str(e)
+            if isinstance(e, (ValueError, OSError, CoreRefused))
+            else f"Sync stopped: {type(e).__name__}"
+        )
         print(
             json.dumps({"error": message}) if args.json else f"Refused: {message}",
             file=sys.stdout if args.json else sys.stderr,

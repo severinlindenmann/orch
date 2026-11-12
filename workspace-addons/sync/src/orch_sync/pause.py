@@ -238,11 +238,17 @@ def resolve(root, path, keep, args=None, *, now=None):
         paused = state["paused"] = verified_pause(root, state)
         if not paths.allowed(path) or not paused or path not in paused["files"]:
             raise repo.Refused("This file is not waiting for a choice")
-        if any(path == f"tickets/{t['id']}.json" for group in paused.get("key_clashes", {}).values() for t in group):
+        if any(
+            path == f"tickets/{t['id']}.json"
+            for group in paused.get("key_clashes", {}).values()
+            for t in group
+        ):
             raise repo.Refused("Use orch sync keep-key for a ticket number clash")
         if path in (paused.get("case_names") or {}):
             # On a disk that ignores case, either copy would overwrite the other file.
-            raise repo.Refused("Use --keep-local-name or --rename-local <new name>: the names differ only in case")
+            raise repo.Refused(
+                "Use --keep-local-name or --rename-local <new name>: the names differ only in case"
+            )
         settings = cli.DEFAULTS | cli.read(root, "settings")
         remote = paused["remote_sha"]
         if settings["mode"] == "remote":
@@ -294,7 +300,9 @@ def resolve(root, path, keep, args=None, *, now=None):
                 )
                 config.require_person(by, "allow this unchecked file")
                 approved = cli.read(root, "checked-files")
-                approved[path] = records.make(root, "file", f"{path}:{hashed}", {"path": path, "sha256": hashed})
+                approved[path] = records.make(
+                    root, "file", f"{path}:{hashed}", {"path": path, "sha256": hashed}
+                )
                 step.write(root, "run/sync/checked-files.json", step.encoded(approved))
             covers = None
             if paths.TICKET.fullmatch(path):
@@ -377,7 +385,11 @@ def resolve(root, path, keep, args=None, *, now=None):
                     )
                 step.write(root, backup, mine)
             decisions = cli.read(root, "choices")
-            if not decisions or decisions.get("remote_sha") != remote or not isinstance(decisions.get("files"), dict):
+            if (
+                not decisions
+                or decisions.get("remote_sha") != remote
+                or not isinstance(decisions.get("files"), dict)
+            ):
                 decisions = {"remote_sha": remote, "files": {}}
             step.write(root, "run/sync/choices/" + path, data)
             fields = {"keep": keep, "at": now, **({"covers": covers} if covers is not None else {})}
@@ -403,14 +415,18 @@ def resolve_sides(root, path):
     if not paths.allowed(path) or not paused or path not in paused["files"]:
         raise repo.Refused("This file is not waiting for a choice")
     remote = paused["remote_sha"]
-    if remote is not None and (not isinstance(remote, str) or not remote):  # only None means "no remote version"
+    if remote is not None and (
+        not isinstance(remote, str) or not remote
+    ):  # only None means "no remote version"
         raise repo.Refused("Saved copy does not match the checked version")
     live = repo.safe(root, path)
     head = step.blob(root, step.entries(root, "HEAD").get(path))
     mine = live.read_bytes() if live.exists() else head
     saved = repo.safe(root, "run/sync/theirs/" + path)
     theirs = saved.read_bytes() if saved.exists() else None
-    if remote is None:  # a pause before any remote version (first push, local mode): no saved copy can be checked (L-3)
+    if (
+        remote is None
+    ):  # a pause before any remote version (first push, local mode): no saved copy can be checked (L-3)
         if theirs is not None:
             raise repo.Refused("Saved copy does not match the checked version")
     elif theirs != step.blob(root, step.entries(root, remote).get(path)):
@@ -440,7 +456,9 @@ def resolve_target(root, path, keep, sides=None):
 def left_bytes(root, path):
     """The file on this computer a person may leave out: an artifact only (a ticket is edited instead)."""
     if not paths.ARTIFACT.fullmatch(path):
-        raise repo.Refused("Only a file of a ticket can be left out; edit the ticket to take out the password or key")
+        raise repo.Refused(
+            "Only a file of a ticket can be left out; edit the ticket to take out the password or key"
+        )
     live = repo.safe(root, path)
     if repo.is_link(live) or not live.is_file():
         raise repo.Refused("Only a file on this computer can be left out")
@@ -465,7 +483,11 @@ def left_out_names(root):
     out = []
     for path, entry in sorted(cli.read(root, "left-out").items()):
         hashed = entry.get("sha256") if isinstance(entry, dict) else None
-        if isinstance(path, str) and isinstance(hashed, str) and records.ok(root, "left-out", f"{path}:{hashed}", entry):
+        if (
+            isinstance(path, str)
+            and isinstance(hashed, str)
+            and records.ok(root, "left-out", f"{path}:{hashed}", entry)
+        ):
             out.append(path)
     return out
 
@@ -479,7 +501,12 @@ def leave_out(root, path, args, *, now=None):
     with step.step_lock(root):
         state = cli.read(root, "state")
         paused = state["paused"] = verified_pause(root, state)
-        if not paths.allowed(path) or not paused or path not in paused["files"] or "secret" not in paused["reason"]:
+        if (
+            not paths.allowed(path)
+            or not paused
+            or path not in paused["files"]
+            or "secret" not in paused["reason"]
+        ):
             raise repo.Refused("This file is not waiting for a choice")
         data = left_bytes(root, path)
         hashed = hashlib.sha256(data).hexdigest()
@@ -562,8 +589,15 @@ def take_remote(root, args, *, now=None):
             step.write(
                 root,
                 "run/sync/pending.json",
-                step.encoded({"old": head, "new": new, "url": settings.get("remote"), "remote": remote,
-                              "merges": merges}),
+                step.encoded(
+                    {
+                        "old": head,
+                        "new": new,
+                        "url": settings.get("remote"),
+                        "remote": remote,
+                        "merges": merges,
+                    }
+                ),
             )
             with syncgate.hold(root):
                 step.apply(root, head, new, state, merges)
@@ -688,12 +722,17 @@ def keep_key(root, key, tid, args, *, now=None):
         checked = incoming.check(root, remote, base=None)
         if any(p.code == "private" for p in checked.problems):
             raise repo.Refused("General ticket stays local")
-        if checked.commit != remote or blocking(checked) or any(
-            p.path == "ticket-counter.json" for p in checked.problems
+        if (
+            checked.commit != remote
+            or blocking(checked)
+            or any(p.path == "ticket-counter.json" for p in checked.problems)
         ):
             raise repo.Refused("Incoming files could not be checked")
         by = humanproof.person_by(
-            root, args, "addon.act", f"sync:keep-key:{key}:{tid}:{remote}",
+            root,
+            args,
+            "addon.act",
+            f"sync:keep-key:{key}:{tid}:{remote}",
             no_handoff="Choosing a ticket number needs a person's proof over stdin.",
         )
         config.require_person(by, "choose a ticket number")
@@ -725,9 +764,12 @@ def keep_key(root, key, tid, args, *, now=None):
             raise repo.Refused("Ticket numbers changed; review again")
         counter_path = "ticket-counter.json"
         live_counter_path = repo.safe(root, counter_path)
-        live_counter = incoming.strict_load(live_counter_path.read_bytes()) if live_counter_path.exists() else {}
+        live_counter = (
+            incoming.strict_load(live_counter_path.read_bytes()) if live_counter_path.exists() else {}
+        )
         counter = merge.merge_counter(
-            {}, live_counter,
+            {},
+            live_counter,
             incoming.strict_load(step.blob(root, theirs.get(counter_path)) or b"{}"),
             [k for doc in docs.values() for k in [doc.get("key"), *merge.old_keys_of(doc)]],
         )
@@ -759,9 +801,15 @@ def keep_key(root, key, tid, args, *, now=None):
                     if counter["last"] > merge.MAX_COUNTER:
                         raise repo.Refused("Ticket counter exhausted")
                     new = f"{key.rsplit('-', 1)[0]}-{counter['last']}"
-                doc.setdefault("ext", {}).setdefault("sync", {})["old_keys"] = sorted(set(merge.old_keys_of(doc)) | {key})
+                doc.setdefault("ext", {}).setdefault("sync", {})["old_keys"] = sorted(
+                    set(merge.old_keys_of(doc)) | {key}
+                )
                 doc["key"] = new
-                line = {"at": now, "by": by, "text": f"sync: key changed from {key} to {new} (person chose {tid})"}
+                line = {
+                    "at": now,
+                    "by": by,
+                    "text": f"sync: key changed from {key} to {new} (person chose {tid})",
+                }
                 if line not in doc.setdefault("history", []):
                     doc["history"].append(line)
             path = f"tickets/{i}.json"
@@ -781,17 +829,25 @@ def keep_key(root, key, tid, args, *, now=None):
         # Reserve in the live counter too, so offline ticket creation cannot reuse a
         # selected number. Only reserve this decision's keys, never remote counter fields.
         allocated_max = max(int(k.rsplit("-", 1)[1]) for k in keys)
-        live_reservation = step.encoded({**live_counter, "last": max(live_counter.get("last", 0), allocated_max)})
+        live_reservation = step.encoded(
+            {**live_counter, "last": max(live_counter.get("last", 0), allocated_max)}
+        )
         # Save the reservation first and move local losers before resuming the merge.
         # Remote-only tickets stay in sync state until the verified incoming merge.
-        order = [counter_path] + [p for p in selected_docs if p not in (counter_path, f"tickets/{tid}.json")] + [f"tickets/{tid}.json"]
+        order = (
+            [counter_path]
+            + [p for p in selected_docs if p not in (counter_path, f"tickets/{tid}.json")]
+            + [f"tickets/{tid}.json"]
+        )
         for path in order:
             data = selected_docs[path]
             step.write(root, "run/sync/choices/" + path, data)
             is_incoming = path == counter_path or originals[path] is None
             if path == counter_path or not is_incoming:
                 step.write(root, path, live_reservation if path == counter_path else data)
-            record_choice(root, decisions, remote, path, {"keep": "key", "at": now, "incoming": is_incoming}, data)
+            record_choice(
+                root, decisions, remote, path, {"keep": "key", "at": now, "incoming": is_incoming}, data
+            )
         step.write(root, "run/sync/choices.json", step.encoded(decisions))
         paused["key_clashes"].pop(key)
         paused["files"] = [p for p in paused["files"] if p not in selected_docs]

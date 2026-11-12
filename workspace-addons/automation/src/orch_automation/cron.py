@@ -1,4 +1,5 @@
 """5-field cron, read in the job's time zone (UTC when none). Missed runs collapse into one catch-up run."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, tzinfo

@@ -182,7 +182,9 @@ def test_a_missing_guarded_pin_while_sync_is_on_refuses(root):
     for t in ({"id": TID, "ext": {"automation": block}}, {"id": "t_new001", "ext": {"automation": block}}):
         assert not syncapproval.allowed(root, t)
     path = root / ".orch/run/sync/local-ext.json"
-    path.write_text(signed(root, "sync-local-ext", "orch.sync-local-ext/1", {}, pin=False))  # signed, never pinned
+    path.write_text(
+        signed(root, "sync-local-ext", "orch.sync-local-ext/1", {}, pin=False)
+    )  # signed, never pinned
     assert not syncapproval.allowed(root, {"id": "t_new001", "ext": {"automation": block}})
 
 

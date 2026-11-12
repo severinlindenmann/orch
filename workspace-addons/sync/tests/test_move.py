@@ -1,5 +1,6 @@
 """The Move flow: the outer (team) repository tracks .orch files, so sync does not start until a person's click
 untracks them (the core's private.move, the only outer-repository write) and the state repository takes over."""
+
 import re
 import subprocess
 
@@ -13,7 +14,9 @@ ID = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
 
 
 def outer(root, *args):
-    return subprocess.run(["git", *ID, "-C", str(root), *args], capture_output=True, check=True).stdout.decode()
+    return subprocess.run(
+        ["git", *ID, "-C", str(root), *args], capture_output=True, check=True
+    ).stdout.decode()
 
 
 @pytest.fixture
@@ -59,7 +62,6 @@ def test_every_row_time_is_one_the_core_accepts():
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", odd["since"])
 
 
-
 def test_move_untracks_orch_only_commits_nothing_then_sync_starts(team):
     head = outer(team, "rev-parse", "HEAD")
     moved = harness.move_to_private(team, "human:Pat")
@@ -97,13 +99,24 @@ def test_outer_hooks_and_config_never_run(team):
     script.write_text(f'#!/bin/sh\necho "$0" >> "{canary}"\n')
     script.chmod(0o755)
     hooks = team / ".git" / "hooks"
-    for name in ("pre-commit", "post-commit", "reference-transaction", "post-index-change", "pre-push", "fsmonitor-watchman"):
+    for name in (
+        "pre-commit",
+        "post-commit",
+        "reference-transaction",
+        "post-index-change",
+        "pre-push",
+        "fsmonitor-watchman",
+    ):
         (hooks / name).write_text(f'#!/bin/sh\necho {name} >> "{canary}"\n')
         (hooks / name).chmod(0o755)
     config = team / ".git" / "config"
-    config.write_text(config.read_text() + f'[core]\n\tfsmonitor = {script}\n\thooksPath = {hooks}\n'
-                      f'[alias]\n\trm = !{script}\n')
-    moved = harness.move_to_private(team, "human:Pat")  # the Move really runs, with the hostile config neutralised
+    config.write_text(
+        config.read_text() + f"[core]\n\tfsmonitor = {script}\n\thooksPath = {hooks}\n"
+        f"[alias]\n\trm = !{script}\n"
+    )
+    moved = harness.move_to_private(
+        team, "human:Pat"
+    )  # the Move really runs, with the hostile config neutralised
     assert moved and harness.tracked_private(team) == []
     assert not canary.exists()
 
@@ -114,7 +127,9 @@ def test_move_with_the_persons_proof_on_the_command_line(team, monkeypatch, caps
     from orch import cli as orch_cli
     from orch import humanproof
 
-    token = humanproof.mint(humanproof.human_key(team), humanproof.new_payload("private.move", "move", "human:Pat"))
+    token = humanproof.mint(
+        humanproof.human_key(team), humanproof.new_payload("private.move", "move", "human:Pat")
+    )
     monkeypatch.chdir(team)
     monkeypatch.setattr("sys.stdin", io.StringIO(token + "\n"))
     head = outer(team, "rev-parse", "HEAD")

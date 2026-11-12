@@ -26,8 +26,14 @@ def bare(tmp_path, name="remote.git"):
 
 
 def has_state(path):
-    return subprocess.run(["git", "--git-dir", str(path), "rev-parse", "--verify", "-q", "orch-state"],
-                          check=False, capture_output=True).returncode == 0
+    return (
+        subprocess.run(
+            ["git", "--git-dir", str(path), "rev-parse", "--verify", "-q", "orch-state"],
+            check=False,
+            capture_output=True,
+        ).returncode
+        == 0
+    )
 
 
 def plant(root, **values):
@@ -46,8 +52,10 @@ def refused(root, monkeypatch, *remotes):
     """A sync step makes no network call, says why in plain words and shows a Needs row."""
     calls = recorded(monkeypatch, fake_network=False)
     state = run(root)
-    assert state["last_error"] == cli.UNCONFIRMED == (
-        "Sync found an address you did not choose and did not use it. Choose where to sync in Settings."
+    assert (
+        state["last_error"]
+        == cli.UNCONFIRMED
+        == ("Sync found an address you did not choose and did not use it. Choose where to sync in Settings.")
     )
     assert not [c for c, _ in calls if NETWORK & set(c)]
     assert not any(has_state(r) for r in remotes)
@@ -144,7 +152,9 @@ def test_a_history_pause_looks_at_a_planted_address_never(root, tmp_path, monkey
     calls = recorded(monkeypatch, fake_network=False)
     assert step._remote_moved(root, {"remote_sha": "0" * 40}, True) is False
     assert not [c for c, _ in calls if NETWORK & set(c)]
-    assert repo.git(root, "config", "remote.origin.url").stdout.decode().strip() == str(a)  # never pointed at B
+    assert repo.git(root, "config", "remote.origin.url").stdout.decode().strip() == str(
+        a
+    )  # never pointed at B
     plant(root, remote=str(a))  # the confirmed address: it looks
     assert step._remote_moved(root, {"remote_sha": "0" * 40}, True) is True
     assert [c for c, _ in calls if NETWORK & set(c)]
@@ -175,7 +185,9 @@ def test_a_restored_older_record_confirms_nothing(root, tmp_path, monkeypatch, p
     (root / ".orch" / cli.ADDRESS).write_text(old)
     plant(root, mode="remote", remote=str(a))
     refused(root, monkeypatch, a)
-    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0  # revoked: the same copy still refused
+    assert (
+        cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0
+    )  # revoked: the same copy still refused
     (root / ".orch" / cli.ADDRESS).write_text(old)
     plant(root, mode="remote", remote=str(a))
     refused(root, monkeypatch, a)
@@ -190,7 +202,11 @@ def test_an_unconfirmed_address_is_never_shown_as_the_persons(root, tmp_path, pr
     assert st["remote"] is None and st["confirmed"] is False and st["unconfirmed"] is True
     assert set_remote(root, remote) == 0
     st = act.status(root, cli.DEFAULTS | cli.read(root, "settings"))
-    assert st["remote"] == cli.safe_address(str(remote)) and st["confirmed"] is True and st["unconfirmed"] is False
+    assert (
+        st["remote"] == cli.safe_address(str(remote))
+        and st["confirmed"] is True
+        and st["unconfirmed"] is False
+    )
 
 
 def test_a_failed_revocation_stops_sync_and_says_so(root, tmp_path, monkeypatch, preview):

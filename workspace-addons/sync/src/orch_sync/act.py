@@ -26,7 +26,9 @@ WHY = {
     "the local file cannot be synced; it was kept as it is": "stays on this computer",
 }
 SECRET_WHY = "may contain a password or access key"
-PUBLIC = "pending-public"  # run/sync/pending-public.json: a public address waiting for the person's signed choice
+PUBLIC = (
+    "pending-public"  # run/sync/pending-public.json: a public address waiting for the person's signed choice
+)
 PUBLIC_KIND = "sync-pending-public"  # its local1 domain: only set_where writes (signs) it
 NO_ADDRESS = "Sync can't use this address: https or ssh, without a password"
 # what a sign step never shows as such: decided by Unicode category, not by a list that has gaps: control (Cc), format
@@ -68,8 +70,10 @@ def plain(value, limit=200):
 
 
 REVIEW_MAX = 3000  # characters a sign step shows in full (the dashboard allows 4000 per review)
-TOO_LARGE = ("This change is too large to review here, so it can't be signed in the dashboard. "
-             "See it with: orch sync needs --json, then decide on the command line.")
+TOO_LARGE = (
+    "This change is too large to review here, so it can't be signed in the dashboard. "
+    "See it with: orch sync needs --json, then decide on the command line."
+)
 
 
 def whole(value):
@@ -153,11 +157,16 @@ def status(root, settings):
     result = cli.status_result(root, settings)
     state = result["state"]
     shown = (
-        "off" if settings["mode"] == "off"
-        else "syncing" if _syncing(root)
-        else "paused" if result["paused"]
-        else "offline" if result["last_error"] == "offline"
-        else "synced" if result["last_ok"]
+        "off"
+        if settings["mode"] == "off"
+        else "syncing"
+        if _syncing(root)
+        else "paused"
+        if result["paused"]
+        else "offline"
+        if result["last_error"] == "offline"
+        else "synced"
+        if result["last_ok"]
         else "never"
     )
     public = pending_public(root)
@@ -213,7 +222,11 @@ def _interval(value):
 def _same_address(root, settings, target):
     """Remote sync to exactly this address already, as the person confirmed it: a click that only changes how often
     chooses no address. An address settings.json names without that record is chosen again (signed)."""
-    return settings["mode"] == "remote" and target == settings.get("remote") and cli.address_confirmed(root, target)
+    return (
+        settings["mode"] == "remote"
+        and target == settings.get("remote")
+        and cli.address_confirmed(root, target)
+    )
 
 
 def set_where(root, settings, target, value, args):
@@ -232,20 +245,38 @@ def set_where(root, settings, target, value, args):
     repo.validate_url(target)
     if _same_address(root, settings, target):  # only how often: unsigned
         settings, _ = cli.apply_set(root, settings, interval=minutes)
-        return {"mode": settings["mode"], "remote": cli.safe_address(target), "interval": minutes, "text": "Saved."}
+        return {
+            "mode": settings["mode"],
+            "remote": cli.safe_address(target),
+            "interval": minutes,
+            "text": "Saved.",
+        }
     try:
         settings, _ = cli.apply_set(root, settings, "remote", target, minutes, args=args)
     except cli.PublicAddress:
         # visibility probed just now (never a cached answer); the person chose this address (its proof), and that
         # it is public waits for their own choice
-        by = humanproof.person_by(root, args, "addon.act", cli.remote_target(target),
-                                  no_handoff="Choosing where sync keeps a copy needs a person's proof over stdin.")
+        by = humanproof.person_by(
+            root,
+            args,
+            "addon.act",
+            cli.remote_target(target),
+            no_handoff="Choosing where sync keeps a copy needs a person's proof over stdin.",
+        )
         config.require_person(by, "choose where sync keeps a copy")
         _write_public(root, target, minutes)
-        return {"mode": settings["mode"], "public": cli.safe_address(target),
-                "text": "This sync address is public. Anyone can read your tickets."}
+        return {
+            "mode": settings["mode"],
+            "public": cli.safe_address(target),
+            "text": "This sync address is public. Anyone can read your tickets.",
+        }
     _forget_public(root)
-    return {"mode": settings["mode"], "remote": cli.safe_address(target), "interval": minutes, "text": "Saved."}
+    return {
+        "mode": settings["mode"],
+        "remote": cli.safe_address(target),
+        "interval": minutes,
+        "text": "Saved.",
+    }
 
 
 def _public_review(pending):
@@ -266,10 +297,15 @@ def use_public(root, settings, args):
         if pending is None:
             raise repo.Refused("No public address waits for a choice")
         remote = pending["remote"]
-        settings, _ = cli.apply_set(root, settings, "remote", remote, _interval(pending["interval"]), args=args,
-                                    public=True)
+        settings, _ = cli.apply_set(
+            root, settings, "remote", remote, _interval(pending["interval"]), args=args, public=True
+        )
         _forget_public(root)
-    return {"mode": settings["mode"], "remote": cli.safe_address(remote), "text": "Using the public location."}
+    return {
+        "mode": settings["mode"],
+        "remote": cli.safe_address(remote),
+        "text": "Using the public location.",
+    }
 
 
 def now(root, settings):
@@ -281,7 +317,10 @@ def now(root, settings):
 
     if verified_pause(root, cli.read(root, "state")):
         n = max(_paused_needs(root), 1)
-        return {"still_paused": n, "text": f"Still paused: {n} thing{'s' if n > 1 else ''} need{'' if n > 1 else 's'} you"}
+        return {
+            "still_paused": n,
+            "text": f"Still paused: {n} thing{'s' if n > 1 else ''} need{'' if n > 1 else 's'} you",
+        }
     if pending_public(root):
         return {"choose_first": True, "text": "Not synced: choose a location above first"}
     if settings["mode"] == "off":
@@ -318,9 +357,15 @@ def _held_review(root, target, kind):
     raw = canonical(found[0]["value"])  # the bytes approve() hashes
     name = plain(addon, 40)
     review = (
-        {"title": f"Allow {name} to use this change on {tid}?", "body": "The change from the other computer is used here."}
+        {
+            "title": f"Allow {name} to use this change on {tid}?",
+            "body": "The change from the other computer is used here.",
+        }
         if kind == "allow"
-        else {"title": f"Ignore this change of {name} on {tid}?", "body": "It is not used here. A different change asks again."}
+        else {
+            "title": f"Ignore this change of {name} on {tid}?",
+            "body": "It is not used here. A different change asks again.",
+        }
     )
     review["value"] = f"{whole(raw.decode('utf-8', 'replace'))} ({len(raw)} bytes)"
     return f"sync:{kind}:{tid}:{addon}:{hashlib.sha256(raw).hexdigest()}", review
@@ -355,9 +400,15 @@ def _keep_review(path, keep, sides):
     title = (a.get("title") or b.get("title")) if ticket else None
     name = plain(title, 80) if isinstance(title, str) and title.strip() else plain(Path(path).name, 120)
     review = (
-        {"title": f"Keep your version of “{name}”?", "body": "The change from the other computer is set aside."}
+        {
+            "title": f"Keep your version of “{name}”?",
+            "body": "The change from the other computer is set aside.",
+        }
         if keep == "mine"
-        else {"title": f"Keep the other computer’s version of “{name}”?", "body": "The change made here is set aside."}
+        else {
+            "title": f"Keep the other computer’s version of “{name}”?",
+            "body": "The change made here is set aside.",
+        }
     )
     review["here"] = _side(path, (a, keys), mine, "Removed here.")
     review["there"] = _side(path, (b, keys), theirs, "Removed there.")
@@ -377,8 +428,11 @@ def _deleted_review(root, tid):
         raise repo.Refused("This ticket has no synced copy to leave deleted")
     title = _doc(blob(root, old)).get("title")
     shown = f"“{plain(title, 120)}” ({tid})" if isinstance(title, str) and title.strip() else tid
-    return "sync:deleted:" + tid, {"title": "Leave this ticket deleted?",
-                                    "body": "It is removed on every computer that syncs.", "value": shown}
+    return "sync:deleted:" + tid, {
+        "title": "Leave this ticket deleted?",
+        "body": "It is removed on every computer that syncs.",
+        "value": shown,
+    }
 
 
 REVIEW_TOTAL = 3800  # UTF-16 units of all shown review fields together (the dashboard shows 4000 per review)
@@ -411,8 +465,10 @@ def _proof_target(root, verb, target, value=None):
         data = pause.left_bytes(root, target)
         name = plain(Path(target).name, 120)
         return pause.leave_out_target(root, target, data), {
-            "title": f"Leave {name} out of sync?", "body": "It stays on this computer only.",
-            "value": f"{name}, {len(data)} bytes"}
+            "title": f"Leave {name} out of sync?",
+            "body": "It stays on this computer only.",
+            "value": f"{name}, {len(data)} bytes",
+        }
     if verb in ("allow", "ignore"):
         return _held_review(root, target, verb)
     if verb == "leave-deleted":
@@ -430,7 +486,8 @@ def _proof_target(root, verb, target, value=None):
         return cli.remote_target(target), {
             "title": "Sync to this address?",
             "body": f"Your tickets and their files are copied there every {minutes} minutes.",
-            "value": _address(target)}
+            "value": _address(target),
+        }
     return None, None
 
 
@@ -453,7 +510,10 @@ def act(root, settings, args):
         from .pause import resolve
 
         result = resolve(root, target, verb.removeprefix("keep-"), args)
-        return {"paused": bool(result.get("paused")), "text": "Kept your version." if verb == "keep-mine" else "Kept the other version."}
+        return {
+            "paused": bool(result.get("paused")),
+            "text": "Kept your version." if verb == "keep-mine" else "Kept the other version.",
+        }
     if verb == "leave-out":
         from .pause import leave_out
 

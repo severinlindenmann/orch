@@ -31,8 +31,15 @@ def action(label, verb=None, target=None, *, sign=False, review=None, op=None, l
     return out
 
 
-FIELDS = (("title", "Title"), ("status", "Status"), ("due", "Due"), ("owner", "Owner"), ("note", "Note"),
-          ("done_when", "Done when"), ("summary", "Summary"))
+FIELDS = (
+    ("title", "Title"),
+    ("status", "Status"),
+    ("due", "Due"),
+    ("owner", "Owner"),
+    ("note", "Note"),
+    ("done_when", "Done when"),
+    ("summary", "Summary"),
+)
 
 
 def _doc(data):
@@ -57,14 +64,23 @@ def _sides(root, path):
     except Exception:  # noqa: BLE001 - only the wording suffers: the row still shows
         return None, "", ""
     if not paths.TICKET.fullmatch(path):
-        return None, "Changed on this computer." if mine else "Removed here.", "Changed on the other computer." if theirs else "Removed there."
+        return (
+            None,
+            "Changed on this computer." if mine else "Removed here.",
+            "Changed on the other computer." if theirs else "Removed there.",
+        )
     a, b = _doc(mine), _doc(theirs)
+
     def clip(v):
         return " ".join(str(v).split())[:60] if v not in (None, "") else "empty"
 
     diff = [(label, a.get(k), b.get(k)) for k, label in FIELDS if a.get(k) != b.get(k)]
-    here = "; ".join(f"{label}: {clip(x)}" for label, x, _ in diff[:3]) or ("Other changes." if mine else "Removed here.")
-    there = "; ".join(f"{label}: {clip(y)}" for label, _, y in diff[:3]) or ("Other changes." if theirs else "Removed there.")
+    here = "; ".join(f"{label}: {clip(x)}" for label, x, _ in diff[:3]) or (
+        "Other changes." if mine else "Removed here."
+    )
+    there = "; ".join(f"{label}: {clip(y)}" for label, _, y in diff[:3]) or (
+        "Other changes." if theirs else "Removed there."
+    )
     title = a.get("title") or b.get("title")
     return (str(title)[:80] if isinstance(title, str) and title.strip() else None), here, there
 
@@ -88,9 +104,24 @@ def _unconfirmed(root):
     return settings.get("mode") == "remote" and not cli.address_confirmed(root, settings.get("remote"))
 
 
-def row(kind, key, text, since, command, options, ticket=None, title="Sync needs you", tone="needs-you", actions=None):
+def row(
+    kind,
+    key,
+    text,
+    since,
+    command,
+    options,
+    ticket=None,
+    title="Sync needs you",
+    tone="needs-you",
+    actions=None,
+):
     # whole seconds (the core's collector drops other times); a non-text value becomes now, still a valid time
-    since = re.sub(r"\.\d+(?=Z$)", "", since) if isinstance(since, str) else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    since = (
+        re.sub(r"\.\d+(?=Z$)", "", since)
+        if isinstance(since, str)
+        else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    )
     # peer, file or agent text (titles, names, reasons): one line, nothing hidden (L-2)
     from .act import plain
 
@@ -166,7 +197,7 @@ def rows(root):
                     paused["since"],
                     f"orch sync keep-key {shlex.quote(key)} <ticket-id> --proof-stdin",
                     (
-                        [f"{t['title'][:77 - len(t['id'])]} ({t['id']})" for t in candidates]
+                        [f"{t['title'][: 77 - len(t['id'])]} ({t['id']})" for t in candidates]
                         if len(candidates) <= 8
                         else []
                     ),
@@ -214,20 +245,54 @@ def rows(root):
             if secret:
                 art = paths.ARTIFACT.fullmatch(path)
                 acts = [
-                    action("Leave it out", "leave-out", path, sign=True, review={
-                        "title": f"Leave {Path(path).name} out of sync?", "body": "It stays on this computer only.",
-                        "done": "Left out. It stays on this computer."}) if art else None,
-                    action("View file", view={"ticket": path.split("/")[1], "name": path.split("/artifacts/", 1)[-1]})
-                    if art else None,
+                    action(
+                        "Leave it out",
+                        "leave-out",
+                        path,
+                        sign=True,
+                        review={
+                            "title": f"Leave {Path(path).name} out of sync?",
+                            "body": "It stays on this computer only.",
+                            "done": "Left out. It stays on this computer.",
+                        },
+                    )
+                    if art
+                    else None,
+                    action(
+                        "View file",
+                        view={"ticket": path.split("/")[1], "name": path.split("/artifacts/", 1)[-1]},
+                    )
+                    if art
+                    else None,
                 ]
             else:
                 acts = [
-                    action("Keep mine", "keep-mine", path, sign=True, review={
-                        "title": f"Keep your version of “{name}”?", "body": "The change from the other computer is set aside.",
-                        "here": here, "there": there, "done": "Kept your version."}),
-                    action("Keep theirs", "keep-theirs", path, sign=True, review={
-                        "title": f"Keep the other computer’s version of “{name}”?", "body": "The change made here is set aside.",
-                        "here": here, "there": there, "done": "Kept the other version."}),
+                    action(
+                        "Keep mine",
+                        "keep-mine",
+                        path,
+                        sign=True,
+                        review={
+                            "title": f"Keep your version of “{name}”?",
+                            "body": "The change from the other computer is set aside.",
+                            "here": here,
+                            "there": there,
+                            "done": "Kept your version.",
+                        },
+                    ),
+                    action(
+                        "Keep theirs",
+                        "keep-theirs",
+                        path,
+                        sign=True,
+                        review={
+                            "title": f"Keep the other computer’s version of “{name}”?",
+                            "body": "The change made here is set aside.",
+                            "here": here,
+                            "there": there,
+                            "done": "Kept the other version.",
+                        },
+                    ),
                 ]
             out.append(
                 row(
@@ -261,7 +326,9 @@ def rows(root):
     for tid, names in grouped.items():
         # LOW-7: an add-on name from the other computer is shown only when it is an installed add-on's
         # (never free text from the peer in a person's row or an agent's --json)
-        shown = sorted({n if n in installed and ADDON.fullmatch(n) else "an add-on not installed here" for n in names})
+        shown = sorted(
+            {n if n in installed and ADDON.fullmatch(n) else "an add-on not installed here" for n in names}
+        )
         first = min((n for n in names if n in installed and ADDON.fullmatch(n)), default=None)
         out.append(
             row(
@@ -269,17 +336,37 @@ def rows(root):
                 tid,
                 f"A synced ticket wants {', '.join(shown)} to run something. Allow?",
                 dates[tid],
-                f"orch sync approve {shlex.quote(tid)} {shlex.quote(first)}" if first else "orch sync needs --json",
+                f"orch sync approve {shlex.quote(tid)} {shlex.quote(first)}"
+                if first
+                else "orch sync needs --json",
                 ["Allow", "Ignore"] if first else None,
                 ticket=tid,
                 actions=[
-                    action("Allow", "allow", f"{tid}:{first}", sign=True, review={
-                        "title": f"Allow {first} to run something on this ticket?",
-                        "body": "The change from the other computer is used here.", "done": "Allowed."}),
-                    action("Ignore", "ignore", f"{tid}:{first}", sign=True, review={
-                        "title": f"Ignore this change of {first}?",
-                        "body": "It is not used here. A different change asks again.", "done": "Ignored."}),
-                ] if first else None,
+                    action(
+                        "Allow",
+                        "allow",
+                        f"{tid}:{first}",
+                        sign=True,
+                        review={
+                            "title": f"Allow {first} to run something on this ticket?",
+                            "body": "The change from the other computer is used here.",
+                            "done": "Allowed.",
+                        },
+                    ),
+                    action(
+                        "Ignore",
+                        "ignore",
+                        f"{tid}:{first}",
+                        sign=True,
+                        review={
+                            "title": f"Ignore this change of {first}?",
+                            "body": "It is not used here. A different change asks again.",
+                            "done": "Ignored.",
+                        },
+                    ),
+                ]
+                if first
+                else None,
             )
         )
     # Fable A2: a path that could not be applied this tick (the local file is kept as it is). Until it applies.
@@ -311,9 +398,17 @@ def rows(root):
                 ["Leave deleted", "OK"],
                 ticket=tid,
                 actions=[
-                    action("Leave deleted", "leave-deleted", tid, sign=True, review={
-                        "title": "Leave this ticket deleted?",
-                        "body": "It is removed on every computer that syncs.", "done": "Left deleted."}),
+                    action(
+                        "Leave deleted",
+                        "leave-deleted",
+                        tid,
+                        sign=True,
+                        review={
+                            "title": "Leave this ticket deleted?",
+                            "body": "It is removed on every computer that syncs.",
+                            "done": "Left deleted.",
+                        },
+                    ),
                     action("OK", "restored", tid),
                 ],
             )
@@ -342,12 +437,18 @@ def rows(root):
                 None,
                 title="Sync",
                 actions=[
-                    action("Move", op="private.move", sign=True, review={
-                        "title": "Move your orch files out of the team repository?",
-                        "body": "Why: your tickets sit in your team’s repository, so everyone on the team sees each "
-                                "change. Where: they stay in this folder on this computer; the team repository no "
-                                "longer keeps them. Your team’s files are not touched.",
-                        "done": "Moved your orch files."}),
+                    action(
+                        "Move",
+                        op="private.move",
+                        sign=True,
+                        review={
+                            "title": "Move your orch files out of the team repository?",
+                            "body": "Why: your tickets sit in your team’s repository, so everyone on the team sees each "
+                            "change. Where: they stay in this folder on this computer; the team repository no "
+                            "longer keeps them. Your team’s files are not touched.",
+                            "done": "Moved your orch files.",
+                        },
+                    ),
                     action("Not now", later=True),
                 ],
             )

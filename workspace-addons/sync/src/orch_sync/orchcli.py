@@ -2,6 +2,7 @@
 
 The core is this Python's own orch (`python -I -P -m orch`, procs.orch_python_argv), like the dashboard and focus
 call it: never ORCH_BIN and never a name looked up on PATH or in the workspace folder."""
+
 import json
 import os
 import subprocess
@@ -15,10 +16,17 @@ _run, _popen = subprocess.run, subprocess.Popen  # module-local seams: tests nev
 def call(root, *args):
     from orch.procs import orch_python_argv
 
-    env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_') and k != 'ORCH_BIN'}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") and k != "ORCH_BIN"}
     try:
-        p = _run(orch_python_argv(*args, '--json'), cwd=root, env=env, stdin=subprocess.DEVNULL,
-                           capture_output=True, timeout=60, check=True)
+        p = _run(
+            orch_python_argv(*args, "--json"),
+            cwd=root,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=60,
+            check=True,
+        )
         return json.loads(p.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -26,10 +34,10 @@ def call(root, *args):
 
 def is_active(root):
     """Is the sync add-on turned on here? None = could not find out (keep running), like automation."""
-    data = call(root, 'addon', 'list')
+    data = call(root, "addon", "list")
     if not isinstance(data, list):
         return None
-    return any(isinstance(a, dict) and a.get('name') == 'sync' and bool(a.get('active')) for a in data)
+    return any(isinstance(a, dict) and a.get("name") == "sync" and bool(a.get("active")) for a in data)
 
 
 def spawn(args, out, env):
@@ -39,6 +47,12 @@ def spawn(args, out, env):
 
     exe = sys.executable
     if not exe or not os.path.isabs(exe):
-        raise OSError('This Python does not know its own path; sync cannot start in the background')
-    return _popen([exe, '-P', '-m', 'orch_sync', *args], cwd=HOME, stdout=out,
-                            stderr=subprocess.STDOUT, env=env, **background_popen_kwargs())
+        raise OSError("This Python does not know its own path; sync cannot start in the background")
+    return _popen(
+        [exe, "-P", "-m", "orch_sync", *args],
+        cwd=HOME,
+        stdout=out,
+        stderr=subprocess.STDOUT,
+        env=env,
+        **background_popen_kwargs(),
+    )
