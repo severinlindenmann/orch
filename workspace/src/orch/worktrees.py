@@ -1785,7 +1785,7 @@ _FSCK_OBJECT_LINE = re.compile(
     r"missing (?:blob|tree|commit|tag) (?P<c>[0-9a-f]{40,64})|"
     r"broken link from\s+\S+ (?P<d>[0-9a-f]{40,64})|"
     r"unable to unpack header of \.?\S*objects/(?P<e>[0-9a-f]{2})/(?P<f>[0-9a-f]{38,62})|"
-    r"inflate: .*|unable to unpack .*|\S*objects/(?P<g>[0-9a-f]{2})/(?P<h>[0-9a-f]{38,62}).*"
+    r"inflate: .*|unable to unpack .*|(?:\./|\.git/|/)\S*objects/(?P<g>[0-9a-f]{2})/(?P<h>[0-9a-f]{38,62}).*"
     r")"
 )
 
@@ -1904,7 +1904,9 @@ def _roll_back(top: Path, prep, touched, pre: dict, merge_commit: str, written: 
     return "unverified"
 
 
-def _written_hashes(top: Path, touched, merge_end_ns: int | None = None) -> dict:
+def _written_hashes(
+    top: Path, touched, merge_end_ns: int | None = None, merge_start_ns: int | None = None
+) -> dict:
     """What the merged files hold on disk right after the merge, as Python hashes taken HERE (in memory, out
     of the agent's reach): the folder is untouched since the merge exactly while it still hashes to this.
     A person's edit differs from it; so does anything written to the folder later."""
@@ -1918,8 +1920,11 @@ def _written_hashes(top: Path, touched, merge_end_ns: int | None = None) -> dict
                 out[name] = "absent"
             elif path.is_file():
                 out[name] = "file:" + hashlib.sha256(path.read_bytes()).hexdigest()
-                if merge_end_ns is not None and path.stat().st_mtime_ns > merge_end_ns:
-                    out[name] = "other"  # written after the merge ended: not the merge's output
+                mt = path.stat().st_mtime_ns
+                if (merge_end_ns is not None and mt > merge_end_ns) or (
+                    merge_start_ns is not None and mt < merge_start_ns - 2_000_000_000
+                ):
+                    out[name] = "other"  # not written while the merge ran: not the merge's output
             else:
                 out[name] = "other"  # a folder or anything else: never part of what the merge wrote
         except OSError:
@@ -2282,6 +2287,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         if rc:
             return wait(OBJECTS_BAD)
         merge_started = True
+        merge_start_ns = time.time_ns()
         rc, _, _ = _bb_merge(
             top,
             [
@@ -2313,7 +2319,9 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         if _bb_read(top, ["rev-parse", "HEAD^{tree}"]) != tree:
             return wait(CHANGED)  # the journal stays: this merge commit is not what was checked
         done_round = round_at_start
-        written = _written_hashes(top, touched, merge_end_ns)  # in memory, right after the merge
+        written = _written_hashes(
+            top, touched, merge_end_ns, merge_start_ns
+        )  # in memory, right after the merge
         # Recorded in the signed journal BEFORE the check (it can take minutes and orch may be stopped in it):
         # ancestry alone never certifies this merge; _recover re-runs the check for "pending" and keeps "bad".
         _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": parents[0]})
