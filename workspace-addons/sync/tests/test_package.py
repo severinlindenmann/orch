@@ -27,8 +27,13 @@ def test_agents_block_says_person_only_actions_need_proof():
     for word in ("resolve", "approve", "take-remote", "keep-key", "proof", "Ask the person", "never run"):
         assert word in block
     skill = (root / "SKILL.md").read_text()
-    for cmd in ("orch sync start", "orch sync stop", "orch sync status --json", "orch sync now --json",
-                "orch sync set --interval"):
+    for cmd in (
+        "orch sync start",
+        "orch sync stop",
+        "orch sync status --json",
+        "orch sync now --json",
+        "orch sync set --interval",
+    ):
         assert cmd in skill
     assert not PRODUCTS.search(block + skill)
 

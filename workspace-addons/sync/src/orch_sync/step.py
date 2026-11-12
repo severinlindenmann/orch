@@ -56,7 +56,9 @@ STATE = "run/sync/state.json"
 
 
 def write(root, relative, data):
-    if relative == STATE:  # keeps the pause only as this core signed it, never signs one (pause.seal / pause.sign)
+    if (
+        relative == STATE
+    ):  # keeps the pause only as this core signed it, never signs one (pause.seal / pause.sign)
         data = encoded(pause.seal(root, json.loads(data)))
     p = repo.safe(root, relative)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -305,7 +307,11 @@ def stage(root, head, index, state, now):
     moved = {
         p
         for p, new in renamed.items()
-        if isinstance(new, str) and p in old and p not in rows and new in rows and new not in old
+        if isinstance(new, str)
+        and p in old
+        and p not in rows
+        and new in rows
+        and new not in old
         and rows[new][1] == old[p][1]
     }
     if any(p not in old for p in renamed):
@@ -412,7 +418,11 @@ def merged_tree(root, head, remote, index, now, first=False):
     for path in sorted(base_rows.keys() | local_rows.keys() | remote_rows.keys()):
         if not paths.TICKET.fullmatch(path):
             continue
-        local = document(path, blob(root, local_rows.get(path) or base_rows.get(path))) if path in local_rows or path in base_rows else {}
+        local = (
+            document(path, blob(root, local_rows.get(path) or base_rows.get(path)))
+            if path in local_rows or path in base_rows
+            else {}
+        )
         incoming_doc = document(path, blob(root, remote_rows[path])) if path in remote_rows else {}
         for side, d in enumerate((local, incoming_doc)):
             keys[side].extend(merge._key_n(k) for k in [d.get("key"), *merge.old_keys_of(d)])
@@ -742,7 +752,9 @@ def _run(root, reason, now, remote_allowed):
         if network and not remote_allowed:
             raise repo.Refused("Remote sync is preview-only")
         if network:
-            cli.confirmed_remote(root, settings)  # settings.json is agent-writable: only the address a person chose
+            cli.confirmed_remote(
+                root, settings
+            )  # settings.json is agent-writable: only the address a person chose
         repo.ensure(root)
         repo.recover(root)
         for attempt in range(2):
@@ -781,7 +793,9 @@ def _run(root, reason, now, remote_allowed):
                         if pause.choices(root, remote):
                             with tempfile.TemporaryDirectory(dir=repo.local_dir(root)) as folder:
                                 checked_ref = pause.checked_tree(root, remote, Path(folder) / "index")
-                        result = incoming.check(root, checked_ref, base=base, local=head, gone=_renamed_away(root))
+                        result = incoming.check(
+                            root, checked_ref, base=base, local=head, gone=_renamed_away(root)
+                        )
                         problems = [
                             p
                             for p in result.problems
@@ -934,7 +948,9 @@ def _case_names(root, head, problems):
 def _renamed_away(root):
     """Local files a person renamed (orch sync resolve --rename-local) that are gone from this disk: the next
     stage commits the rename before the merge, so they clash with no incoming name."""
-    return {p for p in cli.read(root, "renamed") if paths.allowed(p) and not os.path.lexists(repo.safe(root, p))}
+    return {
+        p for p in cli.read(root, "renamed") if paths.allowed(p) and not os.path.lexists(repo.safe(root, p))
+    }
 
 
 def _settle_unapplied(root, state, head):

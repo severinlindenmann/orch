@@ -46,7 +46,9 @@ def test_the_plain_set_path_is_gated_too(root, monkeypatch, capsys):
     from orch import tickets
 
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    monkeypatch.setattr(tickets, "agent_tool", lambda: None)  # not even the heuristic helps: the proof decides
+    monkeypatch.setattr(
+        tickets, "agent_tool", lambda: None
+    )  # not even the heuristic helps: the proof decides
     address = "https://host/repo"
     assert run(root, "set", "--mode", "remote", "--remote", address) == 2
     assert "proof" in json.loads(capsys.readouterr().out)["error"]
@@ -142,7 +144,11 @@ def test_start_is_quiet_while_off(root, capsys):
     # sync off is a normal state: `orch start` (which starts every background add-on) shows no error for it
     capsys.readouterr()
     assert run(root, "start", "--json") == 0
-    assert json.loads(capsys.readouterr().out) == {"running": False, "off": True, "message": "Sync is off here: nothing to start."}
+    assert json.loads(capsys.readouterr().out) == {
+        "running": False,
+        "off": True,
+        "message": "Sync is off here: nothing to start.",
+    }
     assert run(root, "stop") == 0
     assert run(root, "needs") == 0
 
@@ -169,15 +175,34 @@ def test_start_needs_the_addon_on_here(root, monkeypatch, capsys):
 def test_status_fields(root, monkeypatch, capsys):
     from orch_sync import service
 
-    keys = {"mode", "interval", "running", "last_ok", "last_try", "last_error", "ahead", "behind", "paused",
-            "next_run"}
+    keys = {
+        "mode",
+        "interval",
+        "running",
+        "last_ok",
+        "last_try",
+        "last_error",
+        "ahead",
+        "behind",
+        "paused",
+        "next_run",
+    }
     assert run(root, "set", "--mode", "local") == 0
     (root / ".orch/run/sync/state.json").write_text(
-        json.dumps({"last_ok": "2026-11-12T10:00:00Z", "ahead": 2, "behind": 0, "last_error": None,
-                    "paused": {"files": [], "reason": "planted", "mac": "0"}})
+        json.dumps(
+            {
+                "last_ok": "2026-11-12T10:00:00Z",
+                "ahead": 2,
+                "behind": 0,
+                "last_error": None,
+                "paused": {"files": [], "reason": "planted", "mac": "0"},
+            }
+        )
     )
     (root / ".orch/run/sync/loop.json").write_text(
-        json.dumps({"last_try": "2026-11-12T10:05:00Z", "next_run": "2026-11-12T10:10:00Z", "last_error": "offline"})
+        json.dumps(
+            {"last_try": "2026-11-12T10:05:00Z", "next_run": "2026-11-12T10:10:00Z", "last_error": "offline"}
+        )
     )
     capsys.readouterr()
     assert run(root, "status") == 0
@@ -186,13 +211,19 @@ def test_status_fields(root, monkeypatch, capsys):
     assert data["interval"] == 5 and data["running"] is False and data["next_run"] is None
     assert data["paused"] is False  # a planted (unsigned) pause is no pause
     assert (data["last_ok"], data["last_try"], data["last_error"], data["ahead"]) == (
-        "2026-11-12T10:00:00Z", "2026-11-12T10:05:00Z", "offline", 2)
+        "2026-11-12T10:00:00Z",
+        "2026-11-12T10:05:00Z",
+        "offline",
+        2,
+    )
     monkeypatch.setattr(service, "running_pid", lambda r: 4242)
     assert run(root, "status") == 0
     data = json.loads(capsys.readouterr().out)
     assert data["running"] is True and data["next_run"] == "2026-11-12T10:10:00Z"
     assert cli.main(["--dir", str(root), "status"]) == 0
-    assert capsys.readouterr().out.startswith("Sync: local, every 5 minutes, running, next 2026-11-12T10:10:00Z.")
+    assert capsys.readouterr().out.startswith(
+        "Sync: local, every 5 minutes, running, next 2026-11-12T10:10:00Z."
+    )
 
 
 def test_set_interval_validates_and_wakes(root, monkeypatch, capsys):
@@ -209,7 +240,10 @@ def test_set_interval_validates_and_wakes(root, monkeypatch, capsys):
     assert not wake.exists()  # nothing runs: nothing to wake
     monkeypatch.setattr(service, "running_pid", lambda r: 4242)
     assert run(root, "set", "--interval", "60") == 0
-    assert json.loads(settings.read_text())["interval"] == 60 and json.loads(settings.read_text())["mode"] == "remote"
+    assert (
+        json.loads(settings.read_text())["interval"] == 60
+        and json.loads(settings.read_text())["mode"] == "remote"
+    )
     assert wake.exists()
 
 
@@ -249,8 +283,11 @@ def test_set_summary_never_shows_credentials(root, monkeypatch, capsys):
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
     (root / ".orch/run/sync").mkdir(parents=True)
     (root / ".orch/run/sync/settings.json").write_text(
-        json.dumps({"mode": "local", "remote": "https://me:pw@host/repo", "interval": 15, "kind": "private"}))
-    proof(root, cli.remote_target("https://me:pw@host/repo"), monkeypatch)  # turning remote on chooses that address
+        json.dumps({"mode": "local", "remote": "https://me:pw@host/repo", "interval": 15, "kind": "private"})
+    )
+    proof(
+        root, cli.remote_target("https://me:pw@host/repo"), monkeypatch
+    )  # turning remote on chooses that address
     assert cli.main(["--dir", str(root), "set", "--mode", "remote", "--proof-stdin"]) == 0
     out = capsys.readouterr()
     assert out.out.strip() == "Sync: remote, every 15 minutes, to https://host/repo"
@@ -261,8 +298,13 @@ def test_turning_on_shows_what_where_how_often(root, capsys):
     assert cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0
     out = capsys.readouterr()
     assert out.out.strip() == "Sync: local, every 5 minutes"
-    for words in ("tickets and their files", "never copies secrets or private files", "on this computer only",
-                  "every 5 minutes at most", "turn it off any time"):
+    for words in (
+        "tickets and their files",
+        "never copies secrets or private files",
+        "on this computer only",
+        "every 5 minutes at most",
+        "turn it off any time",
+    ):
         assert words in out.err
     assert run(root, "set", "--mode", "local") == 0
     assert "on this computer only" in json.loads(capsys.readouterr().out)["consent"]

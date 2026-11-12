@@ -767,7 +767,9 @@ if sys.argv[1:3] == ["publish", "list"]:
     act_orch.write_text(script)
     secrets = ws / ".orch" / "secrets"
     secrets.mkdir(parents=True, exist_ok=True)
-    (secrets / "publish.json").write_text(json.dumps({"url": "https://example.test", "workspace": "w", "token": "t"}))
+    (secrets / "publish.json").write_text(
+        json.dumps({"url": "https://example.test", "workspace": "w", "token": "t"})
+    )
     code, body, _ = get(act_server + "/api/links")
     assert code == 200
     rows = json.loads(body)["links"]
@@ -810,7 +812,11 @@ FILE = {"id": "f_a", "name": "R", "size": 3, "expires_at": None, "key": "secrets
 
 def test_a_link_never_uses_an_address_the_server_supplies(act_server, act_orch, ws):
     rows = _links_with(
-        act_server, act_orch, ws, {"url": "https://pub.example.test"}, [{**FILE, "url": "https://evil.example/f/x"}]
+        act_server,
+        act_orch,
+        ws,
+        {"url": "https://pub.example.test"},
+        [{**FILE, "url": "https://evil.example/f/x"}],
     )
     assert rows[0]["link"] == "https://pub.example.test/f/f_a#k=secretsecretsecret1"
     rows = _links_with(act_server, act_orch, ws, {}, [{**FILE, "url": "https://evil.example/f/x"}])
@@ -823,7 +829,11 @@ def test_a_saved_sub_path_is_kept_and_odd_addresses_are_refused(act_server, act_
     # self-hosted on localhost or a LAN address, TLS optional: http is fine, exactly the saved base
     rows = _links_with(act_server, act_orch, ws, {"url": "http://192.168.1.20:8080"}, [FILE])
     assert rows[0]["link"] == "http://192.168.1.20:8080/f/f_a#k=secretsecretsecret1"
-    for bad in ("https://user@pub.example.test", "https://pub.example.test/a?x=1", "https://pub.example.test/a b"):
+    for bad in (
+        "https://user@pub.example.test",
+        "https://pub.example.test/a?x=1",
+        "https://pub.example.test/a b",
+    ):
         assert _links_with(act_server, act_orch, ws, {"url": bad}, [FILE])[0]["link"] is None
 
 

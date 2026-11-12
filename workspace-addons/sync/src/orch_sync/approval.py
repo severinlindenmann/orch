@@ -209,7 +209,9 @@ def approve(root, tid, addon, args):
             root, args, "addon.act", target, no_handoff="This approval needs a person's proof over stdin."
         )
         config.require_person(by, "approve this synced change")
-        entry = records.make(root, kind, f"{tid}:{addon}:{hashed}", {"ticket": tid, "addon": addon, "hash": hashed})
+        entry = records.make(
+            root, kind, f"{tid}:{addon}:{hashed}", {"ticket": tid, "addon": addon, "hash": hashed}
+        )
         if kind == "ignore":
             ignored = cli.read(root, "ignored")
             if not isinstance(ignored.get(tid), dict):
@@ -236,7 +238,9 @@ def approve(root, tid, addon, args):
         write(root, "run/sync/approved.json", encoded(store))
         known, known_ok = local_ext(root)  # this machine's own value now (the automation add-on reads it)
         if known_ok and isinstance(known.get(tid), dict):
-            if block["value"] is None:  # a removal: no own value any more (absent, as for a ticket without it)
+            if (
+                block["value"] is None
+            ):  # a removal: no own value any more (absent, as for a ticket without it)
                 known[tid].pop(addon, None)
             else:
                 known[tid][addon] = hashed

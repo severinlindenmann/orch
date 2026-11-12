@@ -88,8 +88,14 @@ def lock_held(root):
 def _verified(root, rec):
     """The recorded pid when the loop lock is held and that pid is alive with the recorded start time, else None."""
     pid, started, nonce = rec.get("pid"), rec.get("started"), rec.get("nonce")
-    if not (type(pid) is int and pid > 1 and isinstance(started, str) and started
-            and isinstance(nonce, str) and NONCE.fullmatch(nonce)):
+    if not (
+        type(pid) is int
+        and pid > 1
+        and isinstance(started, str)
+        and started
+        and isinstance(nonce, str)
+        and NONCE.fullmatch(nonce)
+    ):
         return None
     if not lock_held(root) or not services.pid_alive(pid):
         return None
@@ -176,7 +182,9 @@ def start(root, wait=15.0):
             if pid := running_pid(root):
                 return pid  # our child found the lock taken: another start (or a foreground run) won
             died = died or time.monotonic()
-            if time.monotonic() - died > 3.0:  # gone, and no other loop showed up in time: don't wait the rest
+            if (
+                time.monotonic() - died > 3.0
+            ):  # gone, and no other loop showed up in time: don't wait the rest
                 break
         time.sleep(0.1)
     if proc.poll() is None:

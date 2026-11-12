@@ -15,6 +15,7 @@ class Crash(BaseException):  # a killed process: no `except Exception` in the st
 
 ID = ("-c", "user.name=test", "-c", "user.email=test@example.invalid")  # machines have no git identity
 
+
 @pytest.fixture
 def machines(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
@@ -462,7 +463,9 @@ def test_merge_uses_checked_commit_when_remote_ref_moves(machines, monkeypatch, 
     def commit_once(root, tree, parent, message):
         # A commit no step ever builds itself (its own message and date), so it can never coincide with one.
         date = at(9)
-        made = repo.git(root, *ID, "commit-tree", tree, "-p", parent, input=message.encode(), commit_date=date)
+        made = repo.git(
+            root, *ID, "commit-tree", tree, "-p", parent, input=message.encode(), commit_date=date
+        )
         return made.stdout.decode().strip()
 
     def racing_check(root, ref, **kwargs):
@@ -998,7 +1001,11 @@ def test_unapplied_path_is_a_needs_row_until_it_applies(machines):
         (need,) = [r for r in needs.rows(b) if r["kind"] == "sync:unapplied"]
         assert need["text"] == "A file couldn't be updated: t_abc123.json. orch will try again."
         assert need["cli"] == "orch sync status --json" and need["ticket"] == "t_abc123"
-        assert need["tone"] == "warn" and "answer" not in need and need["since"] == re.sub(r"\.\d+(?=Z$)", "", state["unapplied"][TICKET])  # whole seconds, as the core takes them
+        assert (
+            need["tone"] == "warn"
+            and "answer" not in need
+            and need["since"] == re.sub(r"\.\d+(?=Z$)", "", state["unapplied"][TICKET])
+        )  # whole seconds, as the core takes them
         schema = json.loads((Path(__file__).resolve().parents[3] / "contracts/needs.schema.json").read_text())
         Draft202012Validator(schema).validate(needs.rows(b))
     # the file can be synced again: it applies (as a local edit)
