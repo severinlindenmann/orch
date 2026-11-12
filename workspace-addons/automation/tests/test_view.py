@@ -15,15 +15,9 @@ SCHEMA = json.loads(
 
 
 @pytest.fixture(autouse=True)
-def utc(monkeypatch):
+def utc(set_tz):
     """Views show local time: run these tests in UTC."""
-    import time
-
-    monkeypatch.setenv("TZ", "UTC")
-    time.tzset()
-    yield
-    monkeypatch.undo()
-    time.tzset()
+    set_tz("UTC")
 
 
 def check(view):
@@ -148,6 +142,7 @@ def test_notice_says_next_run_when_running(ws, monkeypatch):
         ("0 8 * * 1-5", "Weekdays at 08:00"),
         ("0 8 * * 6,0", "Weekends at 08:00"),
         ("0 9 1 * *", "Every month on day 1 at 09:00"),
+        ("0 9 31 * *", "Every month on day 31 at 09:00"),
         ("0 9 1 1 *", "On a custom plan (0 9 1 1 *)"),
     ],
 )
@@ -156,7 +151,7 @@ def test_cron_in_plain_words(cron, words):
 
     from orch_automation.view import cron_human
 
-    assert cron_human(cron, ZoneInfo("UTC")) == words
+    assert cron_human(cron, ZoneInfo("UTC"), None, ZoneInfo("UTC")) == words
 
 
 def test_cron_words_are_in_the_local_zone_never_utc():
@@ -170,12 +165,9 @@ def test_cron_words_are_in_the_local_zone_never_utc():
     assert cron_human("0 2 * * 1", None, T(8), ny) == "Sundays at 21:00"  # the day moves with the time
 
 
-def test_schedule_time_is_shown_once_in_local_time(ws, monkeypatch):
+def test_schedule_time_is_shown_once_in_local_time(ws, set_tz):
     """D15: a cron without a zone (read in UTC) must not read '07:00 UTC' next to a local '08:00'."""
-    import time
-
-    monkeypatch.setenv("TZ", "Europe/Zurich")
-    time.tzset()
+    set_tz("Europe/Zurich")
     add_ticket(ws, "t_utc00001", title="Report", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
     add_ticket(
         ws,

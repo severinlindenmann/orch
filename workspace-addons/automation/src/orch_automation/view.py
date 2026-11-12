@@ -98,7 +98,8 @@ def cron_human(expr: str, tz=None, now: datetime | None = None, local=None) -> s
             days = _dows(dow)
             if days:
                 return f"{_days_words({(d + shift) % 7 for d in days})} at {at}"
-        if dow == "*" and dom.isdigit() and 1 <= int(dom) + shift <= 28:
+        # a day the local conversion moves is only safe while every month has it
+        if dow == "*" and dom.isdigit() and (shift == 0 or 1 <= int(dom) + shift <= 28):
             return f"Every month on day {int(dom) + shift} at {at}"
     return f"On a custom plan ({expr})"
 
