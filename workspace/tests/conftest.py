@@ -400,7 +400,7 @@ _RECORD_MODULES = re.compile(
 
 
 @pytest.fixture(autouse=True)
-def _record_keys(request, tmp_path_factory):
+def _record_keys(request, monkeypatch, tmp_path_factory, _legacy_trust):
     """The record writer is fail closed: no human key, no recording (record_auth, activity.md). The record
     test modules write in plain tmp folders that are no guarded workspace, so for them the guarded home falls
     back to a test folder and the record key is made on first use. This is this test package's fixture only:
@@ -422,11 +422,11 @@ def _record_keys(request, tmp_path_factory):
         except hp.HomeRefused:
             return fallback
 
-    # its own patcher: a test that calls monkeypatch.undo() must not undo the key setup
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(hp, "guarded_home", home)
-        mp.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
-        yield
+    # the shared monkeypatch, set up after `_legacy_trust` (so undone before it): every patch of
+    # humanproof.guarded_home is undone in the reverse order, none leaks into the next test (test_winacl)
+    monkeypatch.setattr(hp, "guarded_home", home)
+    monkeypatch.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
+    yield
 
 
 def seal_lines(root, run, events, *, start=1, link=None):

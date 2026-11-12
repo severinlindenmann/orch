@@ -110,7 +110,8 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
             used, files = _label(e), clean_files(e.get("files")) or None
             if done is None:
                 return [make("tool.start", id=eid, used=used, files=files)]
-            return [make("tool.end", id=eid, ok=done.get("ok") is not False, used=used, files=files)]
+            ok = done.get("ok") is not False if checked else done.get("ok")  # a hook's "ok" is only its word
+            return [make("tool.end", id=eid, ok=ok, used=used, files=files)]
         if kind == "helper.start":
             return [make("helper.start", id=eid, parent=e.get("parent"))]
         if kind == "helper.end":
@@ -121,6 +122,8 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
             state = _data(e).get("state")
             return [make("run.state", state="idle" if state == "waiting_you" else state)] if state else []
         if kind == "usage":
+            if not checked:
+                return []  # numbers no log line checks: only orch's own count
             d = _data(e)
             if not isinstance(d.get("used"), (int, float)) or isinstance(d.get("used"), bool):
                 return []

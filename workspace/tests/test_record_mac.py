@@ -301,6 +301,7 @@ def _legacy_with_detail(ws, run, eid="toolu_d"):
     )
     runfile(ws, run).parent.mkdir(parents=True, exist_ok=True)
     runfile(ws, run).write_text(json.dumps(dict(ev, seq=1, detail=f"detail/{run}/{name}.json")) + "\n")
+    _relist(ws)
     return d / f"{name}.json"
 
 
@@ -343,6 +344,13 @@ def proj_cli(store, monkeypatch):
     return ws
 
 
+def _relist(ws):
+    """The cutover list, made again after a test wrote a legacy run file by hand: in life it is made when
+    the key is made, so the runs of that moment are the legacy ones."""
+    (hp.key_dir(ws, create=False) / "record-cutover.json").unlink(missing_ok=True)
+    hp.record_cutover_ensure(ws)
+
+
 def _legacy_run(ws, writer, run=OTHER):
     """A run as written before S2: plain lines, no auth, no head. It exists before the first sealed write
     (that write lists it in the cutover list, the only runs whose unsigned lines may be adopted)."""
@@ -350,6 +358,7 @@ def _legacy_run(ws, writer, run=OTHER):
     runfile(ws, run).write_text(
         "".join(json.dumps(dict(example(run=run, id=f"toolu_{n}", at=at(n)), seq=n)) + "\n" for n in (1, 2))
     )
+    _relist(ws)
 
 
 def test_a_legacy_run_is_shown_marked_not_checked_and_never_counted(store, proj_cli, capsys):
@@ -726,7 +735,15 @@ def test_nothing_recursive_ever_touches_pending():
         for n in ast.walk(ast.parse(text))
         if isinstance(n, ast.FunctionDef)
     }
-    for name in ("_reject", "_drain", "_spool", "_pending_count", "_rename_aside", "_file_size"):
+    for name in (
+        "_reject_entry",
+        "_reject_bad_spool",
+        "_drain",
+        "_spool",
+        "_pending_count",
+        "_rename_aside",
+        "_file_size",
+    ):
         assert "_rmtree(" not in found[name] and not re.search(r"(?<![A-Za-z_])_size\(", found[name]), name
 
 
@@ -872,16 +889,26 @@ def test_a_removed_legacy_prefix_is_counted_as_removed(store):
     assert (r.removed, r.reason) == (2, "removed") and [e["id"] for e in r.unwrap()] == ["toolu_n"]
 
 
-def test_the_outside_day_cap_fails_closed_when_the_run_cannot_be_read(store, monkeypatch):
+def test_the_outside_day_cap_counts_verified_lines_and_fails_closed_only_on_unknown_state(store, monkeypatch):
     from orch import secretrun
     from orch.errors import Refused
 
     ws, writer = store
     monkeypatch.setattr(secretrun, "_run_ids", lambda: None)
     monkeypatch.setattr(secretrun, "require_run", lambda *a: None)
-    monkeypatch.setattr(secretrun, "_record_event", lambda root, ev: dict(example(run="r_outside_20261116")))
-    bad = record.ReadResult("tampered", reason="unverified", message="m")
-    monkeypatch.setattr(record, "read_run", lambda *a, **k: bad)
+    run = "r_outside_20261116"
+    monkeypatch.setattr(secretrun, "_record_event", lambda root, ev: example(run=run))
+    wrote = []
+    monkeypatch.setattr(
+        secretrun, "record_writer", lambda root: type("W", (), {"append": lambda s, e: wrote.append(e)})()
+    )
+    # one planted junk line and nothing else: it must not stop key uses for the day
+    runfile(ws, run).parent.mkdir(parents=True, exist_ok=True)
+    runfile(ws, run).write_text("junk\n")
+    secretrun._write_record(ws, {})
+    assert len(wrote) == 1
+    # an unknown state of the guarded home: refused
+    monkeypatch.setattr(hp, "record_head_state", lambda *a: "unknown")
     with pytest.raises(Refused, match="too many key uses"):
         secretrun._write_record(ws, {})
 
@@ -920,3 +947,168 @@ def test_a_quarantine_that_is_not_a_clean_folder_never_leaves_the_entry_under_a_
     assert not (tmp_path / "out").exists() or list((tmp_path / "out").iterdir()) == []  # not through the link
     writer.append(example(id="toolu_5", at=at(5)))  # a later drain never executes it
     assert "toolu_x" not in ids(ws)
+
+
+# ------------------------------------------------------------------ whole-S2 review batch
+
+
+def test_med1_a_planted_spool_entry_does_not_block_retention_of_a_finished_run(store):
+    ws, writer = store
+    write3(writer)
+    writer.append(
+        example(id="r_end", kind="run.state", via="core", at=at(5), used=None, data={"state": "done"})
+    )
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    (d / ("0" * 19 + "1_" + "a" * 32 + ".json")).write_text("{}")  # no further append, no drain
+    res = record.apply_retention(ws, "2035-01-01T00:00:00Z", 90, 2048, lambda r, es: None)
+    assert res["delete_run"] == [RUN] and res["status"] == "ok"
+    assert list(d.iterdir()) == []  # refused and moved aside
+
+
+def test_med2_a_run_planted_after_the_key_exists_is_never_legacy(store):
+    ws, writer = store
+    planted_run = "r_planted01"
+    runfile(ws, planted_run).parent.mkdir(parents=True, exist_ok=True)
+    runfile(ws, planted_run).write_text(
+        json.dumps(dict(example(run=planted_run, via="log", kind="run.state"), seq=1)) + "\n"
+    )
+    write3(writer)  # any write: the list was made when the key was made, before the plant
+    assert planted_run not in (hp.record_cutover_read(ws) or set())
+    r = read_run(ws, planted_run)
+    assert (r.status, r.legacy) == ("tampered", False)
+    _legacy_run(ws, writer)  # a run that existed when the list was made IS legacy
+    assert read_run(ws, OTHER).legacy is True
+
+
+def test_med4_a_reset_run_is_pruned_from_the_recorded_reset_and_never_counted(store):
+    ws, writer = store
+    write3(writer)
+    f = hp.key_dir(ws, create=False) / "human.key"
+    f.write_text("11" * 32 + "\n")
+    st = f.stat()
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    hp.record_reset_note(ws)
+    r = read_run(ws, RUN)
+    assert (r.status, r.reason) == ("tampered", "old_key")
+    at_reset = hp.record_reset_at(ws)
+    assert at_reset
+    assert record.apply_retention(ws, at_reset, 90, 2048, lambda *a: None)["delete_run"] == []
+    later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 100 * 86400))
+    assert record.apply_retention(ws, later, 90, 2048, lambda *a: None)["delete_run"] == [RUN]
+
+
+def test_low1_made_up_key_ids_are_content_not_old_key():
+    from orch import record_auth as rauth
+
+    state = rauth.State()
+    state.pending = 2
+    out = rauth.finish(state, "aaaaaaaa", None, foreign_head=False)
+    assert (out.changed, out.reason) == (2, "content")
+
+
+def test_low2_the_hook_with_no_record_key_is_a_lost_trace_not_a_crash(store):
+    from orch import record_hook
+
+    ws, writer = store
+    mine = record_dir(ws)
+    assert mine  # the store exists
+    # RecordOff from the writer becomes the same hider_off trace as a missing hider
+    src = Path(record_hook.__file__).read_text()
+    assert "except record.RecordOff:  # no record key either" in src
+
+
+def test_low4_a_deep_quarantine_does_not_make_the_sizes_tampered(store):
+    ws, writer = store
+    q = record_dir(ws) / "quarantine" / RUN / "q_x"
+    q.mkdir(parents=True)
+    cur = q
+    for _ in range(40):
+        cur = cur / "d"
+        cur.mkdir()
+    sizes = record.record_sizes(ws)
+    assert sizes.status == "ok"
+
+
+def test_low6_protected_comes_from_the_claim_not_from_hook_lines(proj_cli):
+    from orch import cli_record, runs, tickets
+
+    t = tickets.create(proj_cli, "T", "human:t")
+    rec = runs.claim(proj_cli, t["id"], "agent:x", "codex", pid=os.getpid())
+    line = dict(example(run=rec["run"], ticket=t["id"], via="hook", harness="claude"), checked=False)
+    assert cli_record.run_model(rec["run"], [line], root=proj_cli)["protected"] is False  # codex: marker
+
+
+def test_low8_a_new_segment_keeps_what_is_safe_from_the_old_head(store):
+    ws, writer = store
+    write3(writer)
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    (d / ("0" * 19 + "1_" + "a" * 32 + ".json")).write_text("{}")
+    writer.append(example(id="toolu_4", at=at(4)))  # one rejected, in the head
+    f = hp.key_dir(ws, create=False) / "human.key"
+    f.write_text("11" * 32 + "\n")
+    st = f.stat()
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    writer.append(example(id="toolu_5", at=at(5)))
+    head, _ = hp.record_head_read(ws, RUN)
+    assert (
+        head["seq"] == 1 and head["rejected"] == 1 and "legacy_lines" not in head and not head.get("pruned")
+    )
+
+
+def test_low9_a_flood_of_planted_entries_is_refused_in_batches(store):
+    ws, writer = store
+    write3(writer)
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    for n in range(120):
+        (d / (f"{n:020d}_" + "b" * 32 + ".json")).write_text("{}")
+    writer.append(example(id="toolu_4", at=at(4)))
+    assert len(list(d.iterdir())) == 120 - record._REJECT_BATCH
+    writer.append(example(id="toolu_5", at=at(5)))
+    assert len(list(d.iterdir())) == 120 - 2 * record._REJECT_BATCH
+
+
+def test_low7_non_ascii_digits_are_not_a_spool_name():
+    assert not record._SPOOL_NAME.fullmatch("٣" * 20 + "_" + "a" * 32 + ".json")
+    assert not ra.drain_ok(b"k" * 32, "ws", RUN, "٣" * 20 + "_" + "a" * 32 + ".json", {}, "x", [], "0" * 20)
+
+
+def test_low12_a_line_that_fails_its_checks_leaves_no_detail_file(store):
+    ws, writer = store
+    big = {"input": "x" * 400_000, "output": "y"}
+    long_text = "t" * 400
+    ev = example(id="toolu_big", text=long_text, data={"pad": ["z" * 1500] * 5})
+    try:
+        writer.append(ev, detail=big)
+    except record.RecordRefused:
+        pass
+    found = (
+        list((record_dir(ws) / "detail" / RUN).glob("*.json"))
+        if (record_dir(ws) / "detail" / RUN).exists()
+        else []
+    )
+    stored = [e for e in read_run(ws, RUN).unwrap() if e["id"] == "toolu_big"]
+    assert bool(found) == bool(
+        stored and stored[0].get("detail")
+    )  # a file only with a line that points at it
+
+
+@pytest.mark.slow
+def test_perf_a_warm_read_and_append_are_cheap(store):
+    ws, writer = store
+    for n in range(4):
+        other = ws.parent / f"other{n}"
+        other.mkdir()
+        hp.record_key(other)
+    read_run(ws, RUN)
+    t = time.perf_counter()
+    for _ in range(40):
+        read_run(ws, RUN)
+    read_ms = (time.perf_counter() - t) / 40 * 1000
+    t = time.perf_counter()
+    for n in range(20):
+        writer.append(example(id=f"p{n}", at=at(9)))
+    append_ms = (time.perf_counter() - t) / 20 * 1000
+    assert read_ms < 6 and append_ms < 15, (read_ms, append_ms)

@@ -126,7 +126,7 @@ def test_a_copy_of_the_whole_record_into_another_workspace_verifies_nothing(stor
         (record_dir(ws) / "runs" / f"{RUN}.jsonl").read_bytes()
     )
     r = read_run(other, RUN)
-    assert r.status == "tampered" and r.reason in ("unverified", "content", "old_key") and r.value is None
+    assert r.status == "tampered" and r.reason == "content" and r.value is None
 
 
 def test_a_forged_rejects_counter_counts_loudly_never_as_zero(store):

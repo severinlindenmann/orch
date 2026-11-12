@@ -140,8 +140,16 @@ def _write_record(root, ev):
         # verified lines only (a planted line can neither raise nor lower it); a legacy run is not counted
         own = [e for e in read.value or [] if record.is_sealed(e)]
         fresh = read.status == "unavailable" and read.reason == "missing"  # nothing recorded yet today
+        # a file with planted junk and no verified line counts zero verified lines (a junk line must not stop
+        # key uses for the day), but only while the key and the guarded home can be looked at
+        junk = (
+            read.status == "tampered"
+            and read.reason in ("unverified", "content", "removed", "old_key")
+            and hp.record_key(root) is not None
+            and hp.record_head_state(root, line["run"]) != "unknown"
+        )
         # anything else that is not a clean read counts as the cap reached (fail closed)
-        if (read.status != "ok" and not fresh) or len(own) >= OUTSIDE_DAY_CAP:
+        if (read.status != "ok" and not fresh and not junk) or len(own) >= OUTSIDE_DAY_CAP:
             raise Refused("Refused: too many key uses outside a run today.")
     record_writer(root).append(line)
 

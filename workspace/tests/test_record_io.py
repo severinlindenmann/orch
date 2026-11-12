@@ -239,6 +239,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "run.get",
     "raw.split",
     "humanproof.record_cutover_at",
+    "humanproof.record_head_carry",
+    "humanproof.record_reset_at",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
@@ -315,6 +317,8 @@ ERROR_BOUNDARIES = {
     "append_job",
     "_reject",
     "_sealed_tail",
+    "_reject_bad_spool",
+    "_reject_entry",
 }
 
 

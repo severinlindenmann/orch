@@ -840,6 +840,17 @@ def _window(args) -> tuple[str, str]:
     return (end - timedelta(days=days - 1)).strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
+def _claim_agent(root, run, ticket):
+    """The agent tool named by the live claim of this run, or None (no claim any more, or another run's)."""
+    if root is None or not isinstance(ticket, str) or not _TICKET.fullmatch(ticket):
+        return None
+    from orch import runs
+
+    claim = runs.read(root, ticket)
+    agent = claim.get("agent") if claim and claim.get("run") == run else None
+    return agent if isinstance(agent, str) else None
+
+
 def run_model(run: str, events: list[dict], *, root=None, problem: bool = False) -> dict:
     """One run as counts.md sees it: ticket, day started, what its agent tool can report, uses. `complete` is
     false when the run had lines changed, removed or unchecked (activity.md, Authenticated record);
@@ -886,10 +897,10 @@ def run_model(run: str, events: list[dict], *, root=None, problem: bool = False)
     if sees is None:  # no capability list was written: only what the run actually used is known to be seen
         sees = sorted({i["kind"] for i in items})
     first = events[0]["at"] if events else None
-    # the harness only from a checked line orch's own collector wrote (via log, sealed, not a hook line): a
-    # hook line is the agent's word and could claim another tool. Unknown means "not protected": the marker
-    # is shown.
-    harness = next(
+    # the tool from the run's CLAIM (orch's own file, made when the run started), else from a checked line
+    # orch's own collector wrote (via log, sealed, not a hook line): a hook line is the agent's word and could
+    # claim another tool. Unknown means "not protected": the marker is shown.
+    harness = _claim_agent(root, run, events[0].get("ticket") if events else None) or next(
         (e.get("harness") for e in events if e.get("via") == "log" and record.is_checked(e)),
         None,
     )

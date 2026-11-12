@@ -478,6 +478,34 @@ def _try_again(name: str) -> str:
     )
 
 
+_BINDINGS: dict = {}  # per process: binding.json path -> (file identity, the realpath it names)
+
+
+def _binding_realpath(f: Path):
+    """The `realpath` a binding.json names. Read again only when the file's identity (device, inode, times,
+    size, mode, owner, links) changed, so a swapped or edited file is always read afresh; every failure path
+    is the uncached one (never cached)."""
+    st = f.lstat()
+    ident = (
+        st.st_dev,
+        st.st_ino,
+        st.st_mtime_ns,
+        st.st_ctime_ns,
+        st.st_size,
+        st.st_mode,
+        st.st_uid,
+        st.st_nlink,
+    )
+    hit = _BINDINGS.get(str(f))
+    if hit is not None and hit[0] == ident:
+        return hit[1]
+    stored = json.loads(_read_guarded(f).decode("utf-8")).get("realpath")
+    if len(_BINDINGS) > 512:
+        _BINDINGS.clear()
+    _BINDINGS[str(f)] = (ident, stored)
+    return stored
+
+
 def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
     """Names of the key folders in `home` whose binding.json names this workspace's real path (identity by
     samefile where both exist, else equal real paths). A folder with no or a damaged binding names nothing."""
@@ -496,7 +524,7 @@ def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
         try:
             if not stat.S_ISDIR((keys / name).lstat().st_mode):  # keys.lock and the like
                 continue
-            stored = json.loads(_read_guarded(keys / name / "binding.json").decode("utf-8")).get("realpath")
+            stored = _binding_realpath(keys / name / "binding.json")
         except FileNotFoundError:  # no binding.json: bound to nothing
             continue
         except (ValueError, AttributeError):  # garbage JSON: bound to nothing
@@ -669,6 +697,7 @@ def human_key(root: Path, create: bool = True) -> bytes:
                 raise Refused("There is no human key here yet.") from None
             hexkey = secrets.token_hex(32)
             _write_private(f, hexkey + "\n")
+            record_cutover_ensure(root)  # protection begins here: the runs that exist now are the legacy ones
     try:
         key = bytes.fromhex(hexkey)
     except ValueError as e:
@@ -790,6 +819,51 @@ def record_cutover_read(root: Path) -> set[str] | None | bool:
     return runs if state else state
 
 
+def record_reset_note(root: Path) -> None:
+    """Remember, MACed with the NEW record key, when a protection reset changed the key: the only age
+    retention may use for runs of the old key. Never raises."""
+    from orch import record_auth
+
+    try:
+        rec = record_key(root)
+        if rec is None:
+            return
+        body = {
+            "schema": "orch.record-reset/1",
+            "kid": rec[1],
+            "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        body["cm"] = record_auth.cutover_mac(rec[2], rec[0], body)
+        _write_private(
+            key_dir(root, create=False) / "record-reset.json",
+            json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n",
+        )
+    except (Refused, OSError, ValueError):
+        return
+
+
+def record_reset_at(root: Path) -> str | None:
+    """When the current record key was made by a protection reset (MACed), or None."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return None
+    try:
+        body = json.loads(_read_guarded(key_dir(root, create=False) / "record-reset.json"))
+        ok = (
+            body.get("schema") == "orch.record-reset/1"
+            and body.get("kid") == rec[1]
+            and isinstance(body.get("at"), str)
+            and hmac.compare_digest(
+                record_auth.cutover_mac(rec[2], rec[0], body).encode(), body["cm"].encode()
+            )
+        )
+    except (FileNotFoundError, Refused, OSError, ValueError, TypeError, AttributeError, KeyError):
+        return None
+    return body["at"] if ok else None
+
+
 def record_cutover_ensure(root: Path) -> None:
     """Write the cutover list once, when the record key is first used for writing: the unsigned run files in
     the workspace's record folder at that moment. Never changed afterwards (a later run is never legacy).
@@ -884,6 +958,37 @@ def record_reject_names(root: Path) -> list[str]:
     except (Refused, OSError, ValueError):
         return []
     return sorted(n[:-4] for n in names if n.endswith(".rej") and _RUN_NAME.fullmatch(n[:-4]))
+
+
+def record_head_carry(root: Path, run: str) -> dict:
+    """What a new chain segment may take over from the run's head of the OLD key (after a protection reset):
+    its key id (wording only: lines of it read as old key), the number of rejected spool entries and the
+    drained names, each re-checked for shape. The old head cannot be verified with the new key, so nothing
+    that decides trust is taken (no legacy prefix, no tombstone). {} when there is none."""
+    try:
+        raw = json.loads(_read_guarded(_head_path(root, run, False)))
+        out = {}
+        if (
+            isinstance(raw, dict)
+            and raw.get("run") == run
+            and re.fullmatch(r"[0-9a-f]{8}", str(raw.get("kid")))
+        ):
+            out["old_kid"] = raw["kid"]
+            if type(raw.get("rejected")) is int and 0 <= raw["rejected"] < 10**6:
+                out["rejected"] = raw["rejected"]
+            names = raw.get("drained")
+            if isinstance(names, list):
+                out["drained"] = [
+                    n
+                    for n in names
+                    if isinstance(n, str) and re.fullmatch(r"[0-9]{20}_[0-9a-f]{32}\.json", n)
+                ][-512:]
+            floor = raw.get("drained_floor")
+            if isinstance(floor, str) and re.fullmatch(r"[0-9]{20}", floor):
+                out["drained_floor"] = floor
+        return out
+    except (FileNotFoundError, Refused, OSError, ValueError, TypeError, RecursionError):
+        return {}
 
 
 def record_head_state(root: Path, run: str) -> str:
@@ -1420,6 +1525,7 @@ def reset_protection(root: Path, reason: str) -> None:
     with _key_lock(d):
         _RESETS += 1
         _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
+        record_reset_note(root)  # when the record key changed (orch's own time; old-key runs age from it)
         for name in _SECRET_FILES:
             with contextlib.suppress(OSError):
                 (d / name).unlink()

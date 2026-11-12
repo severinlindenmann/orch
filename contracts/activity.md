@@ -568,8 +568,12 @@ only a legacy run reads a detail with no hash.
   name; a folder is renamed once into `.orch/record/quarantine/<run>/` (only orch writes there). Nothing under `pending/`
   is ever sized or deleted recursively, and nothing deeper than 8 levels is walked anywhere.
 - *Runs are listed from the files and the heads* (non-pruned): a run file or `runs/` deleted shows as `removed`.
-- *Retention.* A run orch cannot check (legacy, unverified) is pruned once its file is older than `keep_days` and its
-  size never counts toward `max_mb`. The tombstone is written before the run file is deleted. A recorded legacy prefix
+- *Retention.* A true legacy run (on the cutover list) is pruned once the recorded cutover time (orch's own, MACed) is
+  older than `keep_days`; a run whose records all predate a protection reset ages from the recorded reset time
+  (`record-reset.json`, MACed); neither counts toward `max_mb`. A tampered, unverified or removed run is NEVER pruned by
+  retention (a file's mtime is the agent's to set and decides nothing). The tombstone is written before the run file is
+  deleted. A planted spool entry never blocks retention (entries whose MAC fails are refused under the run lock).
+  The cutover list is made when the key is made. A recorded legacy prefix
   that is gone from the file counts as `removed`.
 - *Trust markers.* `record.is_sealed` / `record.is_checked` are the only definitions (events, details, counts, run
   model, retention, caps). Only a checked line can count a call as `ok`; a hook line's `ok` is `unknown`. Add-ons

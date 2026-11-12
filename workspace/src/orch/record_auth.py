@@ -262,8 +262,10 @@ def scan(
     return state
 
 
-def finish(state: State, kid: str, head: dict | None = None) -> Verified:
-    """The result for the walk so far (does not change `state`, so a cache can go on from it)."""
+def finish(state: State, kid: str, head: dict | None = None, *, foreign_head: bool = True) -> Verified:
+    """The result for the walk so far (does not change `state`, so a cache can go on from it). `foreign_head`:
+    the run has a chain head of another key id (a protection reset happened to it); without one, lines with
+    another key id are planted (made-up key id, a run copied from another workspace), not history."""
     s = state.copy()
     out = s.out
     n_bad, n_oldkey = s.n_bad, 0
@@ -276,7 +278,7 @@ def finish(state: State, kid: str, head: dict | None = None) -> Verified:
             rotation = out.events[0]["seq"] == s.base + 1
         else:
             rotation = not has_head
-        if rotation:
+        if rotation and foreign_head:
             n_oldkey = s.pending
         else:
             n_bad += s.pending
@@ -393,7 +395,7 @@ def spool_ok(rk: bytes, ws: str, run: str, name: str, entry: dict, sm) -> bool:
 def drain_ok(rk: bytes, ws: str, run: str, name: str, entry: dict, sm, drained, floor: str) -> bool:
     """True iff a spool entry may be drained: its `sm` fits, its name was not drained before and is not older
     than the head's `drained_floor` (a replayed genuine entry). Names are `<020d time_ns>_<32 hex>.json`."""
-    if not isinstance(name, str) or not re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", name):
+    if not isinstance(name, str) or not re.fullmatch(r"[0-9]{20}_[0-9a-f]{32}\.json", name):
         return False
     if name in drained or name[:20] < floor:
         return False
