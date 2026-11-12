@@ -1007,6 +1007,7 @@ def test_sigterm_ends_the_command_and_everything_it_started(store, ws):
     assert signal.getsignal(signal.SIGTERM) is before  # handlers restored
 
 
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")  # #579 regression
 @pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
 def test_a_second_signal_during_cleanup_is_ignored(store, ws):
     import signal
