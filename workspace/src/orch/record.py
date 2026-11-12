@@ -722,11 +722,15 @@ def _dedupe(events, run):
 
 def _parse(fd, run):
     events, skipped = [], 0
-    for line in _read_bytes(fd).splitlines():
+    for lineno, line in enumerate(_read_bytes(fd).splitlines(), 1):
         try:
             event = json.loads(line)
             _validate(event)
             if event["run"] != run:
+                raise RecordInvalid()
+            # the writer guarantees seq == the 1-based physical line number; a line that disagrees was planted
+            # (a huge or repeated seq would freeze a tail cursor or break paging), so it is skipped and counted
+            if event["seq"] != lineno or isinstance(event["seq"], bool):
                 raise RecordInvalid()
             events.append(event)
         except (ValueError, TypeError, UnicodeError, RecursionError, RecordInvalid):
