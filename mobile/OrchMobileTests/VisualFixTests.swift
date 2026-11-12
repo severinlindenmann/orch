@@ -38,7 +38,7 @@ final class VisualFixTests: XCTestCase {
     private func question(_ id: String, from ws: String, ticket: String?, at: String, review: Bool = false) -> Question {
         Question(message: QuestionMessage(schema: "orch.msg/1", id: id, from: ws, to: "phones", type: "question",
             createdAt: at, ticket: ticket, body: QuestionBody(questionId: id, title: nil, text: "OK?",
-                options: ["Yes", "No"], recommended: nil, review: review ? true : nil)), workspaceName: ws)
+                options: review ? ["accept", "changes"] : ["Yes", "No"], recommended: nil, review: review ? true : nil)), workspaceName: ws)
     }
 
     func testChatListCountsHaveOneMeaningEach() {
