@@ -64,7 +64,7 @@ def test_schedule_listed_and_old_blocks_gone(ws):
     (rep,) = blocks(v, "list", "Schedules")
     assert rep["title"] == "Schedules · 1 on"
     assert [(i["title"], i["subtitle"]) for i in rep["items"]] == [
-        ("Weekly breport/b", "Mondays at 07:00 UTC · next in 4 d")
+        ("Weekly breport/b", "Mondays at 07:00 · next in 4 d")
     ]
 
 
@@ -148,7 +148,7 @@ def test_notice_says_next_run_when_running(ws, monkeypatch):
         ("0 8 * * 1-5", "Weekdays at 08:00"),
         ("0 8 * * 6,0", "Weekends at 08:00"),
         ("0 9 1 * *", "Every month on day 1 at 09:00"),
-        ("0 9 1 1 *", "On a custom plan (0 9 1 1 *, UTC)"),
+        ("0 9 1 1 *", "On a custom plan (0 9 1 1 *)"),
     ],
 )
 def test_cron_in_plain_words(cron, words):
@@ -156,16 +156,44 @@ def test_cron_in_plain_words(cron, words):
 
     from orch_automation.view import cron_human
 
-    assert cron_human(cron, ZoneInfo("UTC")) == words.replace(", UTC)", ")")
+    assert cron_human(cron, ZoneInfo("UTC")) == words
 
 
-def test_cron_words_say_utc_only_when_no_zone():
+def test_cron_words_are_in_the_local_zone_never_utc():
     from zoneinfo import ZoneInfo
 
     from orch_automation.view import cron_human
 
-    assert cron_human("0 7 * * *") == "Every day at 07:00 UTC"
-    assert cron_human("0 7 * * *", ZoneInfo("Europe/Zurich")) == "Every day at 07:00"
+    zh, ny = ZoneInfo("Europe/Zurich"), ZoneInfo("America/New_York")
+    assert cron_human("0 7 * * *", None, T(8), zh) == "Every day at 08:00"
+    assert cron_human("0 7 * * *", zh, T(8), zh) == "Every day at 07:00"
+    assert cron_human("0 2 * * 1", None, T(8), ny) == "Sundays at 21:00"  # the day moves with the time
+
+
+def test_schedule_time_is_shown_once_in_local_time(ws, monkeypatch):
+    """D15: a cron without a zone (read in UTC) must not read '07:00 UTC' next to a local '08:00'."""
+    import time
+
+    monkeypatch.setenv("TZ", "Europe/Zurich")
+    time.tzset()
+    add_ticket(ws, "t_utc00001", title="Report", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
+    add_ticket(
+        ws,
+        "t_zh000001",
+        title="Zurich",
+        ext={"automation": {"recurring": True, "cron": "30 9 * * *", "tz": "Europe/Zurich"}},
+    )
+    v = build(ws, T(8))
+    check(v)
+    (sch,) = blocks(v, "list", "Schedules")
+    rows = {r["title"]: r for r in sch["items"]}
+    utc, zh = rows["Report"], rows["Zurich"]
+    assert "UTC" not in utc["subtitle"] and utc["subtitle"].startswith("Mondays at 08:00 · ")
+    nxt = next(d["value"] for d in utc["detail"] if d["label"] == "Next run")
+    assert nxt.endswith("08:00")  # the next run and the words agree
+    assert next(d["value"] for d in utc["detail"] if d["label"] == "Time zone") == "UTC"
+    assert zh["subtitle"].startswith("Every day at 09:30 · ")
+    assert "Time zone" not in {d["label"] for d in zh["detail"]}  # same as this computer: not shown
 
 
 def test_repeats_are_one_row_each_sorted_and_monthly_stays(ws):
@@ -185,7 +213,7 @@ def test_repeats_are_one_row_each_sorted_and_monthly_stays(ws):
     check(v)
     (rep,) = blocks(v, "list", "Schedules")
     assert [i["tickets"][0]["id"] for i in rep["items"]] == ["t_day00001", "t_mon00001"]
-    assert rep["items"][1]["subtitle"] == "Every month on day 1 at 09:00 · next in 27 d"
+    assert rep["items"][1]["subtitle"] == "Every month on day 1 at 08:00 · next in 27 d"  # 09:00 Zurich
 
 
 def test_listen_section_shows_state_and_arrivals(ws):

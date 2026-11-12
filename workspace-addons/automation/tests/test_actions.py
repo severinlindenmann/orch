@@ -92,12 +92,22 @@ def test_list_shows_a_paused_repeat_as_off(ws, capsys):
     assert "off" in capsys.readouterr().out
 
 
-def test_list_says_the_repeat_in_plain_words_with_local_time_and_zone(ws, capsys):
-    add_ticket(
-        ws, "t_rec00002", ext={"automation": {"recurring": True, "cron": "0 8 * * 1", "tz": "Europe/Zurich"}}
-    )
-    assert main(["--dir", str(ws), "list"]) == 0
-    out = capsys.readouterr().out
+def test_list_says_the_repeat_in_plain_words_with_local_time_and_zone(ws, capsys, monkeypatch):
+    import time
+
+    monkeypatch.setenv("TZ", "Europe/Zurich")
+    time.tzset()
+    try:
+        add_ticket(
+            ws,
+            "t_rec00002",
+            ext={"automation": {"recurring": True, "cron": "0 8 * * 1", "tz": "Europe/Zurich"}},
+        )
+        assert main(["--dir", str(ws), "list"]) == 0
+        out = capsys.readouterr().out
+    finally:
+        monkeypatch.undo()
+        time.tzset()
     assert "Mondays at 08:00, next " in out and "* *" not in out and "Z " not in out
     assert out.split("next ")[1].split("  ")[0].split()[-1].isalpha()  # a zone name, not a UTC stamp
 
