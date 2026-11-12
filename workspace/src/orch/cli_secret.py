@@ -98,6 +98,45 @@ def _file_bytes(path):
         raise Refused("Refused: could not read the key file.") from None
 
 
+def _candidate_paths(arg: str) -> list[str]:
+    """Where a command-line argument may name a file: the whole argument, the part after = or @, or after a
+    two-character option (-f/path)."""
+    out = [arg]
+    for sep in ("=", "@"):
+        if sep in arg:
+            out.append(arg.split(sep, 1)[1])
+    if arg.startswith("-") and not arg.startswith("--") and len(arg) > 2:
+        out.append(arg[2:])
+    return out
+
+
+def _pin_arguments(arguments) -> dict:
+    """The files named in the profile's command, with their hashes (checked and copied at every start).
+    A file must be its own argument and a regular file; a folder the user can write to, a path inside an
+    option, a relative path or an absolute path that does not exist yet is refused."""
+    pins = {}
+    for arg in arguments:
+        for cand in _candidate_paths(arg):
+            if not cand or "\0" in cand or not (os.path.isabs(cand) or os.path.exists(cand)):
+                continue
+            if not os.path.exists(cand):
+                raise Refused("Refused: a file named in the command does not exist yet. Create it first.")
+            if cand != arg:
+                raise Refused("Refused: give a file as a separate argument, not inside an option.")
+            if not os.path.isabs(cand):
+                raise Refused("Refused: name files in the command with their full path.")
+            if os.path.isdir(cand):
+                if os.access(cand, os.W_OK):
+                    raise Refused(
+                        "Refused: a folder in the command can be changed by you, and so by an agent."
+                    )
+            elif os.path.isfile(cand):
+                pins[arg] = hashlib.sha256(secretrun._read_regular(cand)).hexdigest()
+            else:
+                raise Refused("Refused: a file named in the command must be a regular file.")
+    return pins
+
+
 def _change_profile(root, args, who):
     """Returns the extra fields for the answer (the resolved command, warnings)."""
     name, action = args.name, args.profile_action
@@ -125,13 +164,7 @@ def _change_profile(root, args, who):
                     with open(path, "rb") as f:
                         profile["run_sha256"] = hashlib.sha256(f.read()).hexdigest()
                     warnings = [*warnings, secretrun.PIN_TEXT]
-                pins = {}
-                for arg in args.run[1:]:
-                    if os.path.isfile(arg):
-                        if not os.path.isabs(arg):
-                            raise Refused("Refused: name files in the command with their full path.")
-                        with open(arg, "rb") as f:
-                            pins[arg] = hashlib.sha256(f.read()).hexdigest()
+                pins = _pin_arguments(args.run[1:])
                 if pins:
                     profile["run_pins"] = pins
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}

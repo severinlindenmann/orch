@@ -2132,3 +2132,113 @@ def test_h2_a_pinned_argument_copy_is_never_executable(store, run, ws, monkeypat
     monkeypatch.setattr(secretrun, "_pinned_copy", spy)
     assert run("secret", "exec", "mine")[0] == 0
     assert tried and modes["~program"] == 0o700 and modes["~arg0"] == 0o600
+
+
+# --------------------------------------------------------------------------- Opus review of #568
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Xcode shims are a macOS thing")
+def test_xcode_shims_are_checked_where_they_really_run(ws, monkeypatch, tmp_path):
+    dev = tmp_path / "Developer"
+    (dev / "usr" / "bin").mkdir(parents=True)
+    (dev / "usr" / "bin" / "true").write_bytes(Path("/usr/bin/true").read_bytes())
+    (dev / "usr" / "bin" / "true").chmod(0o755)
+    link = tmp_path / "xcode_select_link"
+    link.symlink_to(dev)
+    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
+    with pytest.raises(Refused, match="belongs to your own user"):
+        secretrun.approve_program(ws, "/usr/bin/true")
+    with pytest.raises(Refused, match="belongs to your own user"):  # the pin cannot cover the real tool
+        secretrun.approve_program(ws, "/usr/bin/true", allow_user_owned=True)
+    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(tmp_path / "missing"))
+    assert secretrun.approve_program(ws, "/usr/bin/true")[0]
+
+
+def test_a_system_folder_the_user_can_write_through_a_group_counts_as_user_owned(ws, monkeypatch):
+    real = secretrun._user_can_write
+    monkeypatch.setattr(secretrun, "_user_can_write", lambda p: p == "/usr/bin" or real(p))
+    with pytest.raises(Refused, match="belongs to your own user"):
+        secretrun.approve_program(ws, "/usr/bin/true")
+    assert secretrun.approve_program(ws, "/usr/bin/true", allow_user_owned=True)[0]
+
+
+def test_nothing_that_starts_programs_runs_on_windows(store, run, ws, monkeypatch):
+    monkeypatch.setattr(secretrun, "_windows", lambda: True)
+    code, out, err = run("secret", "env", "plain", "--", PY, "-c", "pass")
+    assert code == 2 and "not available on Windows" in err
+    with pytest.raises(Refused, match="not available on Windows"):
+        secretrun.approve_program(ws, "/usr/bin/true")
+
+
+@pytest.mark.parametrize(
+    "arg,message",
+    [
+        ("--conf=/etc/hosts", "separate argument"),
+        ("@/etc/hosts", "separate argument"),
+        ("-f/etc/hosts", "separate argument"),
+        ("/nonexistent/place/file.txt", "does not exist yet"),
+    ],
+)
+def test_file_paths_inside_an_argument_are_not_accepted(store, run, ws, monkeypatch, arg, message):
+    code, out, err = _set(run, monkeypatch, ws, "pathy", "--run", "/usr/bin/true", f"--run={arg}")
+    assert code == 2 and message in err and "pathy" not in keystore.read_profiles(ws)
+
+
+def test_a_user_writable_folder_argument_is_refused_and_a_system_file_is_pinned(
+    store, run, ws, monkeypatch, tmp_path
+):
+    code, out, err = _set(run, monkeypatch, ws, "dirs", "--run", "/usr/bin/true", "--run", str(tmp_path))
+    assert code == 2 and "folder in the command" in err
+    code, out, err = _set(run, monkeypatch, ws, "dirs", "--run", "/usr/bin/true", "--run", "/etc/hosts")
+    assert code == 0, out + err
+    assert "/etc/hosts" in keystore.read_profiles(ws)["dirs"]["run_pins"]
+
+
+def test_an_agent_level_get_is_refused_even_with_allow_get_on(store, run, ws, in_run, monkeypatch, events):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    from orch import keystore as ks
+
+    prof = ks.read_profiles(ws)
+    prof["plain"]["allow_get"] = True
+    seed_profiles(ws, prof)
+    hp.record_set(ws, "secret.allow_get.plain", True, "human:pat")
+    code, out, err = run("secret", "get", "plain", "other-token", unproven=True)
+    assert code == 2 and TOKEN2 not in out + err and {e["refused"] for e in events} == {"get_agent"}
+
+
+def test_a_program_that_starts_with_a_shebang_needs_a_system_interpreter(ws, tmp_path):
+    def script(head):
+        f = tmp_path / "s"
+        f.write_bytes(head)
+        return str(f)
+
+    for bad in (b"#!/usr/bin/env awk\n", b"#!awk\n", b"#!" + str(tmp_path / "own").encode() + b"\n"):
+        with pytest.raises(Refused):
+            secretrun._check_shebang(ws, script(bad), 0)
+    secretrun._check_shebang(ws, script(b"#!/bin/sh\n"), 0)  # a system interpreter
+    secretrun._check_shebang(ws, script(b"not a script"), 0)
+
+
+def test_pinned_files_must_be_regular_and_of_a_usual_size(tmp_path, monkeypatch):
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+    with pytest.raises(Refused, match="regular file"):
+        secretrun._read_regular(str(fifo))  # does not block
+    big = tmp_path / "big"
+    big.write_bytes(b"x" * 10)
+    monkeypatch.setattr(secretrun, "MAX_PROGRAM", 5)
+    with pytest.raises(Refused, match="regular file"):
+        secretrun._read_regular(str(big))
+
+
+def test_the_strict_pin_rules_are_on_by_default():
+    import subprocess
+
+    out = subprocess.run(
+        [PY, "-I", "-c", "from orch import secretrun; print(secretrun.PIN_STRICT)"],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env={"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+    )
+    assert out.stdout.strip() == "True", out.stderr[-300:]
