@@ -18,6 +18,8 @@ from orch import humanproof as hp
 from orch import record_auth as ra
 from orch.errors import Refused
 
+pytestmark = pytest.mark.no_record_key  # this module builds its own guarded test homes (fixture tws)
+
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 VEC = json.loads((CONTRACTS / "vectors/activity-v1.json").read_text())["record_auth"]
 HK = bytes.fromhex(VEC["human_key"])
@@ -447,9 +449,9 @@ def test_unsigned_current_shape_records_still_validate():
     assert body.is_valid(unsigned) and not sealed.is_valid(unsigned)
 
 
-def test_runtime_does_not_use_the_record_mac_yet():
+def test_only_the_record_store_and_the_key_helpers_use_the_record_mac():
     src = Path(__file__).resolve().parents[1] / "src/orch"
     users = [
         p.name for p in src.glob("*.py") if p.name != "record_auth.py" and "record_auth" in p.read_text()
     ]
-    assert users == ["humanproof.py"]  # S2 wires record.py; S1 changes no behaviour
+    assert sorted(users) == ["humanproof.py", "record.py"]  # the one writer (_commit) and the one reader

@@ -625,17 +625,23 @@ def _head_path(root: Path, run: str, create: bool) -> Path:
     return d / "record-heads" / f"{run}.json"
 
 
-def record_head_exists(root: Path, run: str) -> bool:
-    """Whether the guarded home has a chain head file for this run (no key needed, nothing is checked): a run
-    that has one is never a legacy run, even when its key is gone. No guarded home or key folder: no head. True
-    when a head folder cannot be read (fail closed)."""
+def record_head_state(root: Path, run: str) -> str:
+    """Whether a run has a chain head in the guarded home: "present", "absent" or "unknown". "absent" only
+    when the guarded home, the workspace id and this workspace's key folder all resolve cleanly AND the head
+    file is truly not there. Anything else (a missing or forged local id, a key folder that is missing,
+    linked, loose or unreadable, a head folder that cannot be read) is "unknown": the caller must fail
+    closed (a run that may have a chain is never read as a legacy run). No key is needed, nothing is checked."""
     try:
-        _head_path(root, run, False).lstat()
-        return True
-    except (FileNotFoundError, Refused):  # no home, no local id, no key folder, no head: nothing was sealed
-        return False
-    except (OSError, ValueError):
-        return True
+        if not isinstance(run, str) or not _RUN_NAME.fullmatch(run):
+            return "unknown"
+        d = key_dir(root, create=False)
+        head = d / "record-heads" / f"{run}.json"
+        head.lstat()
+        return "present"
+    except FileNotFoundError:
+        return "absent"  # key_dir resolved (a missing folder is a Refused there); only the head is missing
+    except (Refused, OSError, ValueError):
+        return "unknown"
 
 
 def record_head_read(root: Path, run: str) -> tuple[dict | None, bool | str]:
@@ -686,6 +692,16 @@ def record_head_write(root: Path, run: str, head: dict) -> None:
     _write_private(
         _head_path(root, run, True), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n"
     )
+
+
+def record_head_try_write(root: Path, run: str, head: dict) -> bool:
+    """record_head_write that never raises: False when the head could not be written (no key, a bad home, a
+    full disk). The caller reports it; the line it follows is stored and verifies without the head."""
+    try:
+        record_head_write(root, run, head)
+        return True
+    except (Refused, OSError, ValueError):
+        return False
 
 
 # ------------------------------------------------------------------------------------------- hp1 proofs

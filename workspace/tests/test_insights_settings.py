@@ -1667,7 +1667,9 @@ def test_detail_names_differ_per_ticket_in_one_run(ws, rec):
     assert (mine["id"], mine["kind"]) == (theirs["id"], theirs["kind"]) and theirs["ticket"] == b
     assert mine["detail"] and theirs["detail"] and mine["detail"] != theirs["detail"]
     for line, ticket, output in ((mine, a, "a's own"), (theirs, b, "x" * 2000)):
-        got = record.read_detail(ws, RUN_C, Path(line["detail"]).stem, ticket=ticket).unwrap()
+        got = record.read_detail(
+            ws, RUN_C, Path(line["detail"]).stem, line_id=line["id"], ticket=ticket
+        ).unwrap()
         assert (got["ticket"], got["output"]) == (ticket, output)
 
 
@@ -1703,7 +1705,7 @@ def test_planted_line_of_another_ticket_does_not_block_delete(ws, rec, run, monk
 
     for n in (1, 2):  # B's own detail is untouched and still readable through B's own lines
         line = _own_line(ws, RUN_C, n)
-        got = record.read_detail(ws, RUN_C, Path(line["detail"]).stem, ticket=b).unwrap()
+        got = record.read_detail(ws, RUN_C, Path(line["detail"]).stem, line_id=line["id"], ticket=b).unwrap()
         assert (got["ticket"], got["output"]) == (b, "x" * 2000)
     code, out, _ = run("record", "query", "--run", RUN_C, "--detail", f"toolu_{RUN_C[2:]}2", "--json")
     assert code == 0 and json.loads(out)["output"] == "x" * 2000

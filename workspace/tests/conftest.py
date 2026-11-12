@@ -406,7 +406,9 @@ def _record_keys(request, monkeypatch, tmp_path_factory):
     back to a test folder and the record key is made on first use. This is this test package's fixture only:
     no product code has a switch for it. A test of the missing key (or of a real guarded home) opts out with
     `@pytest.mark.no_record_key`."""
-    if request.node.get_closest_marker("no_record_key") or not _RECORD_MODULES.search(request.module.__name__):
+    if request.node.get_closest_marker("no_record_key") or not _RECORD_MODULES.search(
+        request.module.__name__
+    ):
         yield
         return
     from orch import humanproof as hp
@@ -420,6 +422,17 @@ def _record_keys(request, monkeypatch, tmp_path_factory):
         except hp.HomeRefused:
             return fallback
 
+    orig_id = addons.workspace_id
+
+    def local_id(root, create=False):
+        """The key helpers get a stable id derived from the folder when it has none (nothing is written into
+        the folder under test: the symlink tests count what lands there); everything else sees the real one."""
+        found = orig_id(root, create=False)
+        if found is not None or sys._getframe(1).f_globals.get("__name__") != "orch.humanproof":
+            return orig_id(root, create=create) if found is None else found
+        return hashlib.sha256(os.path.realpath(root).encode()).hexdigest()[:32]
+
+    monkeypatch.setattr(addons, "workspace_id", local_id)
     monkeypatch.setattr(hp, "guarded_home", home)
     monkeypatch.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
     yield
