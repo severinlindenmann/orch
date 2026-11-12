@@ -1574,6 +1574,11 @@ FILTERS_OFF_CALLS = [
     ["branch", "-d", "--", "nothere"],
 ]
 FILTERS_OFF_REFUSED = [
+    ["worktree", "add", "--lock", "--reason", "--no-checkout", "-b", "probe", "../p", "HEAD"],  # a value
+    ["worktree", "add", "-b", "x", "--no-checkout", "../x", "HEAD"],  # --no-checkout not first
+    ["worktree", "add", "--no-checkout", "--checkout", "../x", "HEAD"],
+    ["worktree", "add", "--no-checkout", "-b", "x", "--force", "../x", "HEAD"],
+    ["worktree", "add", "--no-checkout", "-b", "../x"],  # -b eats the folder: no positional left
     ["rm", "--cached", "-f", "-q", "--", "a.txt"],
     ["add", "-A"],
     ["status", "--porcelain"],

@@ -699,6 +699,20 @@ FILTERS_OFF_OK = {
 }
 
 
+def _worktree_add_no_checkout(words: list[str]) -> bool:
+    """The only `worktree add` shapes allowed with filters off, parsed with exact arity (an option VALUE can
+    never pass for `--no-checkout`, e.g. `--lock --reason --no-checkout`): `--no-checkout` first, then an
+    optional `-b <branch>`, then one or two plain words (the folder, a commit or branch). Nothing else."""
+    if not words or words[0] != "--no-checkout":
+        return False
+    rest = words[1:]
+    if rest[:1] == ["-b"]:
+        if len(rest) < 2 or rest[1].startswith("-"):
+            return False
+        rest = rest[2:]
+    return 1 <= len(rest) <= 2 and not any(w.startswith("-") for w in rest)
+
+
 def filters_off_refusal(args: list[str]) -> str | None:
     """Why filters=False is not allowed for this git call (None = fine): only FILTERS_OFF_OK subcommands,
     with their flags checked, may skip the filter-driver check. Everything else runs with filters=True."""
@@ -714,11 +728,8 @@ def filters_off_refusal(args: list[str]) -> str | None:
         sub = rest[0] if rest else ""
         if sub in ("prune", "list"):
             return None
-        if sub == "add" and "--no-checkout" in flags:
-            # git takes the LAST of --checkout / --no-checkout (and any abbreviation of --checkout)
-            after = flags[len(flags) - flags[::-1].index("--no-checkout") :]
-            if not any(len(a) >= 3 and a.startswith("--") and "--checkout".startswith(a) for a in after):
-                return None
+        if sub == "add" and _worktree_add_no_checkout(rest[1:]):
+            return None
         return why
     ok = FILTERS_OFF_OK[cmd]
     if ok is not None and not {a for a in flags if a.startswith("-")} <= ok:  # (names are not options)
