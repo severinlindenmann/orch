@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 _HARNESS = re.compile(r"[a-z][a-z0-9-]{0,31}")
-_HELPER = re.compile(r"h_(\d+)")
+_HELPER = re.compile(r"h_([0-9]{1,4})")  # the schema's agent pattern: nothing longer is ever ours
 LOCK_WAIT = 10.0  # seconds: a run lock held longer skips the turn's numbering read (a trace, never a hang)
 
 

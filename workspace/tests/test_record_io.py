@@ -1519,3 +1519,27 @@ def test_a_planted_line_with_another_id_cannot_decide_about_a_detail_file(store)
     )
     assert finished["detail"] == started["detail"]
     assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()
+
+
+def test_planted_helper_names_do_not_crash_or_skew_the_collector(store):
+    from orch import run_record
+
+    ws, writer = store
+    writer.append(event(id="first"))
+    with runfile(ws).open("a") as f:
+        for n, agent in enumerate(("h_3", "h_" + "9" * 5000, "h_99999999", "h_" + "٣" * 3), 2):
+            f.write(json.dumps(dict(event(id=f"p{n}"), run=RUN, seq=n, via="log", agent=agent)) + "\n")
+    assert run_record._so_far(ws, RUN)[1] == 3
+
+
+def test_a_planted_line_of_another_ticket_cannot_decide_about_a_detail_file(store):
+    ws, writer = store
+    started = writer.append(event(id="toolu_d"), detail=DETAIL)
+    planted = dict(started, ticket="t_other1", via="core", seq=2, outcome=dict(ok=True, error=None, ms=1))
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    writer.append(
+        event(id="toolu_d", outcome=dict(ok=True, error=None, ms=2)),
+        detail={"input": "new-input", "output": "new-output"},
+    )
+    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()

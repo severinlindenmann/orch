@@ -1165,7 +1165,8 @@ def _store_detail(ws, event, payload, previous):
                 return _Detail(reason="collision")
             finished = any(
                 old.get("detail") == event["detail"]
-                and old.get("id") == event["id"]  # the detail name derives from the id
+                # the detail name derives from these four
+                and all(old.get(k) == event[k] for k in ("run", "kind", "id", "ticket"))
                 and old.get("outcome") is not None
                 and not (old.get("via") == "hook" and event["via"] == "log")
                 for old in previous
@@ -1392,7 +1393,8 @@ class RecordWriter:
                 and event["detail"] is None
                 and any(old.get("detail") == f"detail/{run}/{file}" for old in replaced)
                 and not any(
-                    old.get("detail") == f"detail/{run}/{file}" and old.get("id") == event["id"]
+                    old.get("detail") == f"detail/{run}/{file}"
+                    and all(old.get(k) == event[k] for k in ("run", "kind", "id", "ticket"))
                     for old in _shown([*previous, event])
                 )
             ):
