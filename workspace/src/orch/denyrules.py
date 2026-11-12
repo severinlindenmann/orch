@@ -109,7 +109,11 @@ def _candidates(root: Path) -> list[str]:
         add(Path(acct) / ".orch-tool")
     if os.environ.get("ORCH_HOME"):
         add(os.environ["ORCH_HOME"])
-    for get in (lambda: humanproof.guarded_home(root), lambda: addons.home(root), addons.home_candidates):
+    for get in (
+        lambda: humanproof.guarded_home(root),
+        lambda: addons.home(root),
+        lambda: addons.home_candidates(include_real=True),
+    ):
         try:
             got = get()
         except (Refused, OSError):

@@ -90,7 +90,7 @@ def _find_root() -> Path:
         _noted = True
         here = _walk_up()
         if here != env and not any(
-            (h / "worktrees") in (here, *here.parents) for h in addons.home_candidates()
+            (h / "worktrees") in (here, *here.parents) for h in addons.home_candidates(include_real=True)
         ):
             print(f"Note: ORCH_ROOT sends this to {env}, not to {here}.", file=sys.stderr)
     return env
@@ -643,7 +643,7 @@ def _init_guard(cwd: Path) -> None:
             f"ORCH_ROOT is set to {env}. Run orch init there, "
             "or unset ORCH_ROOT to start a new workspace here."
         )
-    if any((h / "worktrees") in (here, *here.parents) for h in addons.home_candidates()):
+    if any((h / "worktrees") in (here, *here.parents) for h in addons.home_candidates(include_real=True)):
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
 
 

@@ -358,11 +358,17 @@ def _trace_fallback(real: Path, reason: str) -> None:
         pass
 
 
-def home_candidates() -> list[Path]:
+def home_candidates(include_real: bool = False) -> list[Path]:
     """Every place the user's orch folder can be, resolved, without the trust rules or any fallback trace:
-    ORCH_HOME when set (as home() reads it), then ~/.orch-tool. For "is this path inside it" questions."""
+    ORCH_HOME when set (as home() reads it), then ~/.orch-tool. For "is this path inside it" questions.
+    With ORCH_HOME set and ORCH_HOME_STRICT, only ORCH_HOME (as orch_entry.home_candidates): the real folder
+    is not a candidate. include_real=True keeps it anyway, for guards that must also avoid it."""
     env = os.environ.get("ORCH_HOME")
-    return [*([Path(env).resolve()] if env else []), (real_home() / ".orch-tool").resolve()]
+    real = (real_home() / ".orch-tool").resolve()
+    strict = os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
+    if env and strict and not include_real:
+        return [Path(env).resolve()]
+    return [*([Path(env).resolve()] if env else []), real]
 
 
 def home(root: Path | None = None) -> Path:
