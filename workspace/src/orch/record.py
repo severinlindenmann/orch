@@ -645,6 +645,11 @@ def _hidden_line(hider, obj) -> bytes:
     return line.encode("utf-8")
 
 
+def alert_content(workspace, run):
+    """Leave one integrity alert for a run file whose content disagrees with what the writer guarantees."""
+    return _alert(workspace, target="run", run=run, reason="content", seen_by="writer")
+
+
 def _validate(event, *, detail=False):
     if not (_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid(event):
         raise RecordInvalid()
@@ -747,22 +752,28 @@ def _parse(fd, run):
     return events, skipped
 
 
-def _read_run_strict(ws, run, fd):
+def _read_run_strict(ws, run, fd, only=None):
     _check_fd(fd)
     raw = _read_bytes(fd)
     previous = []
-    for line in raw.splitlines():
+    for lineno, line in enumerate(raw.splitlines(), 1):
         try:
             event = json.loads(line)
-            if isinstance(event, dict) and event.get("run") == run:
-                outcome = event.get("outcome")
-                if outcome is not None and not (
-                    isinstance(outcome, dict) and {"ok", "error"} <= outcome.keys()
-                ):
-                    continue
-                _key(event)
-                previous.append(event)
-        except (ValueError, TypeError, KeyError, RecursionError):
+            if not isinstance(event, dict) or event.get("run") != run:
+                continue
+            if event.get("seq") != lineno or isinstance(event.get("seq"), bool):
+                continue
+            outcome = event.get("outcome")
+            if outcome is not None and not (isinstance(outcome, dict) and {"ok", "error"} <= outcome.keys()):
+                continue
+            _key(event)
+            if only is None or only(event.get("id")):
+                # exactly what the reader (_parse) keeps: a line it skips must not suppress a real one. The
+                # full schema check costs ~0.2 ms a line, so a hook's write checks the lines of its own
+                # call only (dedupe looks at nothing else); the collector's read (only=None) checks all.
+                _validate(event)
+            previous.append(event)
+        except (ValueError, TypeError, KeyError, RecursionError, RecordInvalid):
             continue
     return previous, len(raw.splitlines()), bool(raw and not raw.endswith(b"\n"))
 
@@ -980,7 +991,10 @@ def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
                 event, replace_last, result = decide(events, len(raw))
                 if event is None:
                     return result
-                data = _hidden_line(hider, event) + b"\n"
+                try:
+                    data = _hidden_line(hider, event) + b"\n"
+                except (ValueError, TypeError, RecursionError, UnicodeError):
+                    raise RecordInvalid() from None
                 if len(data) > 16384:
                     raise RecordInvalid("The job entry is too large.")
                 if len(raw) + len(data) > JOB_BYTES or (
@@ -1306,7 +1320,15 @@ class RecordWriter:
         fd = _open(self.workspace, ("runs", run + ".jsonl"), "read_append", create_dirs=True)
         try:
             check_lock()
-            previous, count, torn = _read_run_strict(self.workspace, run, fd)
+            previous, count, torn = _read_run_strict(
+                self.workspace,
+                run,
+                fd,
+                only=lambda i: (
+                    i == event.get("id")
+                    or (default_id and isinstance(i, str) and run + ":" in i[: len(run) + 3])
+                ),
+            )
             event = dict(event, seq=count + 1)
             if default_id:
                 # a hook's default id has its own namespace: <run>:<seq> belongs to the collectors, so a hook

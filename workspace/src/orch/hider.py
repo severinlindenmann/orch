@@ -90,17 +90,22 @@ def _forms_one(value: str) -> set[str]:
 
 def _nested_forms(value: str) -> set[str]:
     """Forms a layer of escaping adds that the single JSON escape above does not cover: JSON inside JSON
-    (a payload carrying a serialized document, up to three levels), a backslash before the shell-special
-    characters, a backslash before every non-alphanumeric character, and the shell single-quote form."""
+    (a payload carrying a serialized document, up to three levels, in both ensure_ascii modes and with
+    the `/` -> `\\/` variant at every level), a backslash before the shell-special characters, a backslash
+    before every non-alphanumeric character, and the shell single-quote and double-quote forms."""
     forms: set[str] = set()
-    level = value
+    levels = {value}
     for _ in range(3):
-        for ascii_only in (False, True):
-            forms.add(json.dumps(level, ensure_ascii=ascii_only)[1:-1])
-        level = json.dumps(level, ensure_ascii=False)[1:-1]
-        forms.add(level)
+        step = set()
+        for level in levels:
+            for ascii_only in (False, True):
+                escaped = json.dumps(level, ensure_ascii=ascii_only)[1:-1]
+                step.update((escaped, escaped.replace("/", "\\/")))
+        forms |= step
+        levels = step
     forms.add(value.replace("\\", "\\\\").replace('"', '\\"'))
     forms.add(re.sub(r"([^A-Za-z0-9_\n])", r"\\\1", value))
+    forms.add(re.sub(r'([$`"\\])', r"\\\1", value))
     forms.add(value.replace("'", "'\\''"))
     return forms
 

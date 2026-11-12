@@ -1451,3 +1451,42 @@ def test_retention_checks_lock_immediately_before_deletion(store, monkeypatch, t
     assert jobs.exists() and runfile(ws).exists()
     if target == "detail":
         assert (record.record_dir(ws) / "detail" / RUN).exists()
+
+
+# --- G1 M1: the writer's view of the run file is the reader's view ---
+def test_a_planted_invalid_log_line_does_not_make_the_writer_drop_the_real_line(store):
+    ws, writer = store
+    writer.append(event(id="first"))
+    # schema-invalid (no `text`, `at`, ...) but with the right seq and the id of the next real line
+    planted = {"run": RUN, "seq": 2, "id": "toolu_next", "kind": "step", "outcome": None, "via": "log"}
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    stored = writer.append(event(id="toolu_next", via="log"))
+    assert stored is not None and stored["seq"] == 3
+    assert [e["id"] for e in record.read_run(ws, RUN).unwrap()] == ["first", "toolu_next"]
+
+
+def test_a_planted_wrong_seq_line_is_not_trusted_by_the_writer(store):
+    ws, writer = store
+    writer.append(event(id="first"))
+    planted = dict(event(id="toolu_next", via="log"), run=RUN, seq=10**18)
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    stored = writer.append(event(id="toolu_next", via="log"))
+    assert stored is not None and stored["seq"] == 3
+
+
+def test_a_planted_huge_id_does_not_move_the_collectors_seq_start(store):
+    from orch import run_record
+
+    ws, writer = store
+    writer.append(event(id="first"))
+    writer.append(
+        event(id=f"{RUN}:999999999999999999", via="log")
+    )  # a line that passes every check but its id
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(dict(event(id="x"), run=RUN, seq=10**18)) + "\n")
+    seq, _ = run_record._so_far(ws, RUN)
+    assert seq < 100
+    alerts = "".join(p.read_text() for p in (record.record_dir(ws) / "alerts").glob("*.jsonl"))
+    assert '"reason":"content"' in alerts

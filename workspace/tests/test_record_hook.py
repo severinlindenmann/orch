@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -1762,6 +1763,11 @@ def _variants(value):
         enc = base64.b64encode(b"\0" * pad + raw).decode().rstrip("=")
         forms.add(enc[(8 * pad + 5) // 6 : 8 * (pad + len(raw)) // 6])
     forms.add(raw.hex())
+    # twice escaped: non-ASCII as \\u00e4, and a "/" written \/ at the first level and escaped again
+    forms.add(json.dumps(json.dumps({"p": value}))[1:-1].split('\\"p\\": \\"', 1)[1].rsplit('\\"}', 1)[0])
+    forms.add(json.dumps(json.dumps(value, ensure_ascii=False), ensure_ascii=False)[1:-1][1:-1])
+    forms.add(json.dumps(json.dumps(value).replace("/", "\\/"))[1:-1][1:-1])
+    forms.add(re.sub(r'([$`"\\])', r"\\\1", value))  # shell double quotes
     return {f for f in forms if len(f) >= 8}
 
 
@@ -1795,7 +1801,10 @@ def _record_strings(root):
     return found
 
 
-@pytest.mark.parametrize("secret", [_QUOTED, _PEM], ids=["quote-backslash", "pem"])
+_UNICODE = 'pä/ss"w0rd\\é+/ZZ-9$`'
+
+
+@pytest.mark.parametrize("secret", [_QUOTED, _PEM, _UNICODE], ids=["quote-backslash", "pem", "unicode-slash"])
 def test_escaped_and_encoded_forms_never_reach_the_record_folder(proj, monkeypatch, secret):
     t = tickets.create(proj, "Hook me", "human:t")
     rec = runs.claim(proj, t["id"], "agent:x", "claude", pid=os.getpid())
@@ -1825,3 +1834,20 @@ def test_escaped_and_encoded_forms_never_reach_the_record_folder(proj, monkeypat
         assert form.encode() not in blob, form
         assert json.dumps(form)[1:-1].encode() not in blob, form  # as the file spells a string holding it
         assert not any(form in s for s in strings), form
+
+
+def test_the_decoded_value_check_catches_what_the_serialized_check_misses():
+    """Removing Hider.leaks from the writer's backstop must fail this: a hider whose scan of the serialized
+    line sees nothing (as when an escape form was not derived) still cannot get a key into a line."""
+
+    class Blind(hider.Hider):
+        def hide_text(self, s):
+            return s if s.startswith("{") else super().hide_text(s)
+
+    blind = Blind({"deploy-key": SECRET})
+    obj = {"text": f"x {SECRET}", "data": {SECRET: 1}}
+    line = record._json(obj)
+    assert blind.hide_text(line) == line  # the serialized check alone passes it
+    with pytest.raises(record.RecordInvalid):
+        record._hidden_line(blind, obj)
+    assert record._hidden_line(blind, {"text": "clean"}) == b'{"text":"clean"}'
