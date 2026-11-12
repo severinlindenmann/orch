@@ -1,6 +1,5 @@
 import hashlib
 import itertools
-import json
 import re
 import subprocess
 from pathlib import Path
@@ -347,11 +346,14 @@ def test_normal_install_refuses_local_remotes_everywhere(ready, tmp_path, form, 
 
 
 def test_normal_install_step_reports_a_stored_local_remote(root, tmp_path, monkeypatch):
-    from orch_sync import cli, step
+    from test_step import set_remote
+
+    from orch_sync import step
 
     monkeypatch.setenv('ORCH_SYNC_REMOTE_PREVIEW', '1')
     bare, canary = hostile_config_remote(tmp_path)
-    assert cli.main(['--dir', str(root), 'set', '--mode', 'remote', '--remote', str(bare)]) == 0  # test install
+
+    assert set_remote(root, bare) == 0  # test install
     monkeypatch.setattr(repo.humanproof, 'install_kind', lambda: 'normal')  # then a real install reads it
     calls = recorded(monkeypatch, fake_network=False)
     state = step.run_once(root, 'test')
@@ -484,7 +486,6 @@ def test_pack_flags_only_for_local_remotes(ready, tmp_path, monkeypatch):
 
 
 REMOTE = 'https://127.0.0.1:9/owner/private.git'  # nothing listens on port 9: refused at once
-REMOTE_SETTINGS = json.dumps({'mode': 'remote', 'remote': REMOTE, 'kind': 'private', 'interval': 15})
 
 
 def recorded(monkeypatch, fake_network=True):
@@ -558,12 +559,12 @@ def test_a_global_helper_that_is_not_gits_own_gives_no_login(ready, helper):
 
 
 def test_repository_credential_helper_stops_sync_before_any_network(root, monkeypatch):
-    from orch_sync import cli, step
+    from test_step import set_remote
+
+    from orch_sync import step
 
     monkeypatch.setenv('ORCH_SYNC_REMOTE_PREVIEW', '1')
-    assert cli.main(['--dir', str(root), 'set', '--mode', 'local']) == 0
-    repo.set_remote(root, REMOTE)
-    (root / '.orch/run/sync/settings.json').write_text(REMOTE_SETTINGS)
+    assert set_remote(root, REMOTE) == 0  # the person's signed choice of this address
     canary = root / 'canary'
     with (root / '.orch/.git/config').open('a') as f:
         f.write(f'[credential]\n\thelper = !touch {canary}\n')
@@ -574,11 +575,12 @@ def test_repository_credential_helper_stops_sync_before_any_network(root, monkey
 
 
 def test_no_helper_https_fetch_is_offline_without_a_prompt(root, monkeypatch):
-    from orch_sync import cli, step
+    from test_step import set_remote
+
+    from orch_sync import step
 
     monkeypatch.setenv('ORCH_SYNC_REMOTE_PREVIEW', '1')
-    assert cli.main(['--dir', str(root), 'set', '--mode', 'local']) == 0
-    (root / '.orch/run/sync/settings.json').write_text(REMOTE_SETTINGS)
+    assert set_remote(root, REMOTE) == 0  # the person's signed choice of this address
     (root / '.orch/tickets').mkdir(parents=True, exist_ok=True)
     assert repo.credential_helpers(root) == []
     calls = recorded(monkeypatch, fake_network=False)

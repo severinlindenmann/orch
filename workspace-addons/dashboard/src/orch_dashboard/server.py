@@ -539,6 +539,11 @@ class Handler(BaseHTTPRequestHandler):
             and isinstance(extra.get("changes"), list)
         ):  # refresh
             state["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
+        if body.get("op") == "addon.act" and isinstance(extra, dict):
+            # the add-on's own answer to this click (a Sync card's status, a check): shown as plain text only
+            answer = json.dumps(extra)
+            if len(answer) <= 32_768:
+                state["act_answer"] = {"addon": str((body.get("args") or {}).get("addon"))[:32], "answer": extra}
         if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
             att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
             state["attached"] = {

@@ -1,6 +1,8 @@
+import io
 import json
 
 import pytest
+from orch import humanproof
 
 from orch_sync import cli, repo, step
 
@@ -21,9 +23,25 @@ def save(root, path=TICKET, value=None):
     return p
 
 
+def proof(root, target, monkeypatch):
+    """A person's proof for `target` (op addon.act) on stdin, as the dashboard passes it with --proof-stdin."""
+    key = humanproof.human_key(root)
+    token = humanproof.mint(key, humanproof.new_payload('addon.act', target, 'human:Pat'))
+    monkeypatch.setattr('sys.stdin', io.StringIO(token + '\n'))
+
+
+def set_remote(root, remote, *args):
+    """`orch sync set --mode remote --remote <remote>` with the person's set-remote proof (choosing the address)."""
+    with pytest.MonkeyPatch.context() as m:
+        proof(root, cli.remote_target(str(remote)), m)
+        return cli.main(['--dir', str(root), 'set', '--mode', 'remote', '--remote', str(remote), '--proof-stdin', *args])
+
+
 def configure(root, remote=None):
-    args = ['--dir', str(root), 'set', '--mode', 'remote' if remote else 'local']
-    assert cli.main(args + (['--remote', str(remote)] if remote else [])) == 0
+    if remote:
+        assert set_remote(root, remote) == 0
+        return
+    assert cli.main(['--dir', str(root), 'set', '--mode', 'local']) == 0
 
 
 def run(root):

@@ -378,6 +378,35 @@ The sync add-on's records (`orch_sync.records`, each `{..., kind, target, id, ma
 | `allow-delete.json` `[<ticket>]` | `delete` | `<ticket>` | once (spent when the removal is staged) |
 | `ignored.json` `[<ticket>][<add-on>]` | `ignore` | `<ticket>:<add-on>:<value sha256>` | while that value waits |
 | `approved.json` `[<ticket>][<add-on>]` | `allow` | `<ticket>:<add-on>:<value sha256>` | once: approve writes the value and spends the id at once; no merge ever reads it, so an approval is never replayed (#540) |
+| `left-out.json` `[<path>]` (path, sha256) | `left-out` | `<path>:<sha256 of the bytes left out>` | each stage of exactly those bytes at that path (an artifact of this computer stays local; changed bytes ask again) |
+
+The dashboard reaches these choices through its one generic op (`orch sync act <verb> -- <target>`, a person's
+proof with `--proof-stdin`): `keep-mine` / `keep-theirs` (= `resolve`), `leave-out` (target
+`sync:leave-out:<sha256 of path NUL bytes>`), `allow` / `ignore` (= `approve`), `leave-deleted` (= `deleted`) and
+`use-public` (target `sync:use-public:<sha256 of the address>`: the person's signed choice to sync to an address the
+visibility probe found public; until then that address waits in `pending-public.json`, a local1 record (kind
+`sync-pending-public`) only `act set` writes after the person's set-remote proof; an unverified one counts as absent,
+and use-public reads it once, under the step lock) and `set` with an address (target
+`sync:set-remote:<sha256 of the address>`). Choosing or changing the remote address is always a person's signed
+choice, checked in `cli.apply_set` for every path (`orch sync set --remote`, turning remote on with the stored
+address, `act set`, `use-public`): the visibility is probed every time (the `visibility.json` cache only words a
+notice), a public address needs `sync:use-public:` (plain `set`: `--public`), any other `sync:set-remote:`. Mode
+off, mode local and the interval need no proof. The address such a choice applies is recorded in
+`run/sync/address.json` (`{sha256: <sha256 of the exact address>, mac}`, a local1 record of kind
+`sync-remote-address` only `cli.apply_set` writes, after the proof). `settings.json` is plain JSON any process can
+write, so it is checked at the point of use: the sync step and every remote-mode network path (fetch, ls-remote,
+push; the history pause's own look; the pause choices) use the remote only when `settings.json`'s address is the one
+a verified record names. Else no network call at all: `last_error` is "Sync address not confirmed: choose it again
+in Settings" and a `sync:address` Needs row shows (fail closed; the dashboard's same-address shortcut, only how
+often, does not apply to an unconfirmed address, so choosing it again is signed).
+`orch sync act <verb> --proof-target -- <target>` answers `{target, review}`, changing nothing: the target the proof
+must name (or null) and what the sign step shows (`title`, `body`, `here`, `there`, `value`: the address without a
+login, the held value as clipped plain text with its byte count, every differing ticket key, the file name and
+size, the deleted ticket's title and id), both from the same read of the same bytes. The page shows that review
+(never the row's text), then sends the signed click with the target it showed (`seen`); the page server mints only
+`addon.act` proofs whose target starts with the add-on's own name AND equals `seen`, and the verb checks the
+target again when it runs. A core op in a Needs row (`private.move`, sync rows only) always uses the dashboard's own
+wording.
 
 **Local records.** A local integrity record no person signs carries the core's local1 MAC: HMAC-SHA256(`human.key`,
 canonical JSON of `["local1", workspace id, kind, record]`) (`humanproof.local_sign` / `local_ok`), a domain that can

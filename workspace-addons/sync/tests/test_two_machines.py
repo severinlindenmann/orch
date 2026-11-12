@@ -856,6 +856,8 @@ def test_remote_human_history_needs_a_new_verified_decision_naming_its_author(
             assert humanproof.wont_verifier(a)(doc["checklist"][0], "t_abc123")
         else:
             assert humanproof.verdict_ok(a, doc)
+    for root in (a, b):  # the fixture moved the authority: the person confirms the address again under it
+        configure(root, machines[2])
     success(b)
 
     sync_apply = tickets.sync_apply
