@@ -145,7 +145,7 @@ function sync(target, source) {
     if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
   }
   reconcile(target, source);
-  if (target.matches('[data-settings-agent],[data-settings-permissions]')) target.checked = source.checked;
+  if (target.matches('[data-settings-agent],[data-settings-permissions],[data-sync-where]')) target.checked = source.checked;
   if (target.matches('[data-settings-field]')) {
     if (target.type === 'checkbox') target.checked = source.checked;
     else if (target.value !== source.value) target.value = source.value;

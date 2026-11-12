@@ -220,6 +220,7 @@ def stage(root, head, index, state, now):
         names.update((Path(parent) / f).relative_to(work).as_posix() for f in files)
     names.add("ticket-counter.json")
     generals, preserved = set(), set()
+    left = cli.read(root, "left-out")  # Leave it out (pause.leave_out): checked per path against its bytes
     for path in sorted(names):
         if any(path.startswith(f"tickets/{tid}/") for tid in preserved):
             continue  # The index already contains HEAD's artifacts.
@@ -252,6 +253,8 @@ def stage(root, head, index, state, now):
                     if doc.get("general") is True:
                         (preserved if path in old else generals).add(Path(path).stem)
                         continue
+                if path in left and pause.left_out(root, path, p.read_bytes()):
+                    continue  # a person left exactly these bytes out: they stay here (the index keeps HEAD's)
                 repo.git(root, "add", "-f", "--", ":(literal)" + path, index=index)
             except FileNotFoundError:
                 if paths.TICKET.fullmatch(path):
@@ -711,7 +714,7 @@ def _remote_moved(root, paused, remote_allowed):
         settings = cli.DEFAULTS | cli.read(root, "settings")
         if settings["mode"] != "remote" or not remote_allowed or not settings.get("remote"):
             return False
-        repo.set_remote(root, settings["remote"])
+        repo.set_remote(root, cli.confirmed_remote(root, settings))
         repo.fetch(root)
         return oid(root, "refs/remotes/origin/orch-state") != paused.get("remote_sha")
     except Exception:  # noqa: BLE001 - offline or refused: the pause stays
@@ -738,6 +741,8 @@ def _run(root, reason, now, remote_allowed):
         network = settings["mode"] == "remote"
         if network and not remote_allowed:
             raise repo.Refused("Remote sync is preview-only")
+        if network:
+            cli.confirmed_remote(root, settings)  # settings.json is agent-writable: only the address a person chose
         repo.ensure(root)
         repo.recover(root)
         for attempt in range(2):
