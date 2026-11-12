@@ -419,3 +419,13 @@ OneDrive placeholders are allowed. Secrets shorter than the hider's minimum
 are not hidden. In-place edits by the same user are not detected: trust is based
 on file identity, not content authentication. Tests compare the bundled schema
 with this contract to detect drift.
+
+### Known limit: record content is not authenticated yet (Gate G1, issue #563)
+
+The checks above stop planted special files, links and foreign owners. They do not
+authenticate the CONTENT of a record line. Anything that runs as the same user can
+append a schema-valid line to `runs/<run>.jsonl` or put one in `pending/<run>/`,
+including a line with `via: "log"` or `via: "core"`. Until the per-line MAC and
+hash chain land (planned next, keyed from a subkey of the guarded key), readers
+must not derive permissions, retention or shared counts from record content, and
+screens show what an agent reported and what orch checked as two different things.
