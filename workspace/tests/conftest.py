@@ -388,3 +388,56 @@ def seed_profiles(root, profiles):
         n for n, p in profiles.items() if n not in old or hp.profile_body(old[n]) != hp.profile_body(p)
     )
     keystore.write_profiles(root, profiles, sign=changed)
+
+
+# ---------------------------------------------------------------------------------------------- record MAC
+
+_RECORD_MODULES = re.compile(
+    r"tests\.test_(record|cli_record|cli_job|collect_|insights_settings|cli_secret|run_wrap|run_live|phone_|"
+    r"run_record|jobs)|test_(record|cli_record|cli_job|collect_|insights_settings|cli_secret|run_wrap|"
+    r"run_live|phone_|run_record|jobs)"
+)
+
+
+@pytest.fixture(autouse=True)
+def _record_keys(request, monkeypatch, tmp_path_factory):
+    """The record writer is fail closed: no human key, no recording (record_auth, activity.md). The record
+    test modules write in plain tmp folders that are no guarded workspace, so for them the guarded home falls
+    back to a test folder and the record key is made on first use. This is this test package's fixture only:
+    no product code has a switch for it. A test of the missing key (or of a real guarded home) opts out with
+    `@pytest.mark.no_record_key`."""
+    if request.node.get_closest_marker("no_record_key") or not _RECORD_MODULES.search(request.module.__name__):
+        yield
+        return
+    from orch import humanproof as hp
+
+    orig_home, orig_key = hp.guarded_home, hp.record_key
+    fallback = tmp_path_factory.mktemp("recordhome")
+
+    def home(root):
+        try:
+            return orig_home(root)
+        except hp.HomeRefused:
+            return fallback
+
+    monkeypatch.setattr(hp, "guarded_home", home)
+    monkeypatch.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
+    yield
+
+
+def seal_lines(root, run, events, *, start=1, link=None):
+    """Raw bytes of sealed lines for `events` (the writer's own seal, for tests that write run files by hand):
+    seq `start`.. in order, chained from `link` (genesis for seq 1). The events are used as given (write
+    them as the writer would: compact JSON, no `auth`)."""
+    from orch import humanproof as hp
+    from orch import record_auth as ra
+
+    ws, kid, rk = hp.record_key(root)
+    prev = link or ra.genesis(rk, ws, run)
+    out = b""
+    for n, ev in enumerate(events, start):
+        body = json.dumps(dict(ev, seq=n), separators=(",", ":"), ensure_ascii=False).encode()
+        line = ra.seal(rk, kid, ws, run, n, prev, body)
+        out += line
+        prev = ra.split(line)[3]
+    return out

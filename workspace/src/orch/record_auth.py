@@ -172,35 +172,54 @@ class Verified:
     reason: str | None = None  # content | removed | unverified | old_key | None
 
 
-def verify_run(
-    raw: bytes, run: str, ws: str, rk: bytes, kid: str, head: dict | None = None, *, job: str | None = None
-) -> Verified:
-    """Decide which lines of a run file (or, with `job`, of a job stream) count. `head` is the guarded home's
-    {kid, seq, mac} for the file, already checked by the caller (None = no head). Verified lines are never
-    moved,
-    rewritten or dropped; every other line is `changed`. See activity.md for the table of cases."""
-    domain, scope = (_D_JOB, (run, job)) if job is not None else (_D_LINE, (run,))
-    start = job_genesis(rk, ws, run, job) if job is not None else genesis(rk, ws, run)
-    out = Verified()
-    n_bad = n_noauth = n_oldkey = 0
-    gaps: list[
-        tuple[int, int]
-    ] = []  # [lo, hi] seq ranges skipped by a resync, to un-count a line that only moved
+@dataclass
+class State:
+    """The walk of `verify_run` so far (what a per-process cache keeps for a verified prefix)."""
+
+    out: Verified = field(default_factory=Verified)
+    n_bad: int = 0
+    n_noauth: int = 0
+    pending: int = 0  # lines of a foreign key id before the first verified line: old segment or planted?
+    gaps: list = field(default_factory=list)  # [lo, hi] seq ranges skipped by a resync
+
+    def copy(self) -> "State":
+        o = self.out
+        return State(
+            Verified(list(o.events), o.last_seq, o.last_mac, o.changed, o.removed, o.reason),
+            self.n_bad,
+            self.n_noauth,
+            self.pending,
+            list(self.gaps),
+        )
+
+
+def _origin(job, run, ws, rk):
+    if job is not None:
+        return _D_JOB, (run, job), job_genesis(rk, ws, run, job)
+    return _D_LINE, (run,), genesis(rk, ws, run)
+
+
+def scan(
+    state: State, raw: bytes, run: str, ws: str, rk: bytes, kid: str, *, job: str | None = None
+) -> State:
+    """Walk `raw` (whole lines) on from `state` (mutated and returned)."""
+    domain, scope, start = _origin(job, run, ws, rk)
+    out = state.out
     for line in raw.split(b"\n"):
         if not line:
             continue
         parts = split(line)
         if parts is None:
-            n_noauth += 1
+            state.n_noauth += 1
             continue
         body, k, prev, mac = parts
         if not hmac.compare_digest(k.encode(), kid.encode()):
-            # another key id: the old segment of a rotation, which always comes first. After the first line of
-            # the current key verified, a foreign key id is a planted line, not history.
+            # another key id: the old segment of a rotation (it comes first) or a planted line. Held until
+            # the first line of the current key is known (finish): the rotation shape decides.
             if out.last_seq:
-                n_bad += 1
+                state.n_bad += 1
             else:
-                n_oldkey += 1
+                state.pending += 1
             continue
         obj = _parse(body)
         seq = obj.get("seq") if obj is not None else None
@@ -213,35 +232,65 @@ def verify_run(
             or isinstance(seq, bool)
             or seq < 1
         ):
-            n_bad += 1
+            state.n_bad += 1
             continue
         want = _mac(rk, _line_msg(domain, ws, scope, seq, prev, body))
         if not hmac.compare_digest(want.encode(), mac.encode()):
-            n_bad += 1
+            state.n_bad += 1
             continue
         # a genuine line (only the key makes one); now the chain
         if seq <= out.last_seq:
             # a replayed or duplicated line, an older copy, or a line that was moved behind its successor
-            n_bad += 1
-            if _unskip(gaps, seq):
+            state.n_bad += 1
+            if _unskip(state.gaps, seq):
                 out.removed -= 1  # it was counted as removed when its successor resynced: it only moved
             continue
         if seq == out.last_seq + 1:
             if not hmac.compare_digest(prev.encode(), (out.last_mac or start).encode()):
-                n_bad += 1  # right place, wrong link: spliced from another copy of this run
+                state.n_bad += 1  # right place, wrong link: spliced from another copy of this run
                 continue
         else:
             gap = seq - out.last_seq - 1
             if gap:
                 out.removed += gap
-                gaps.append((out.last_seq + 1, out.last_seq + gap))
+                state.gaps.append((out.last_seq + 1, out.last_seq + gap))
         out.events.append(obj)
         out.last_seq, out.last_mac = seq, mac
+    return state
+
+
+def finish(state: State, kid: str, head: dict | None = None) -> Verified:
+    """The result for the walk so far (does not change `state`, so a cache can go on from it)."""
+    s = state.copy()
+    out = s.out
+    n_bad, n_oldkey = s.n_bad, 0
+    if s.pending:
+        # the genuine rotation shape: the first verified line of the current key starts at seq 1 (its `p` is the
+        # genesis then), or nothing of the current key exists and no head of it says there were lines. Anything
+        # else (a gap, a missing chain) means the foreign lines are planted, not history.
+        has_head = bool(head and head.get("kid") == kid and type(head.get("seq")) is int and head["seq"] >= 1)
+        if out.events:
+            rotation = out.events[0]["seq"] == 1
+        else:
+            rotation = not has_head
+        if rotation:
+            n_oldkey = s.pending
+        else:
+            n_bad += s.pending
     if head and head.get("kid") == kid and type(head.get("seq")) is int:
         out.removed += max(0, head["seq"] - out.last_seq)
-    out.changed = n_bad + n_noauth + n_oldkey
-    out.reason = _reason(out, n_bad, n_noauth, n_oldkey)
+    out.changed = n_bad + s.n_noauth + n_oldkey
+    out.reason = _reason(out, n_bad, s.n_noauth, n_oldkey)
     return out
+
+
+def verify_run(
+    raw: bytes, run: str, ws: str, rk: bytes, kid: str, head: dict | None = None, *, job: str | None = None
+) -> Verified:
+    """Decide which lines of a run file (or, with `job`, of a job stream) count. `head` is the guarded home's
+    {kid, seq, mac} for the file, already checked by the caller (None = no head). Verified lines are never
+    moved, rewritten or dropped; every other line is `changed`. See activity.md for the table of cases."""
+    return finish(scan(State(), raw, run, ws, rk, kid, job=job), kid, head)
 
 
 def _unskip(gaps: list, seq: int) -> bool:
@@ -258,6 +307,33 @@ def _reason(v: Verified, n_bad: int, n_noauth: int, n_oldkey: int) -> str | None
             return "content"  # lines are shown, so the plain "changed outside orch" marker
         return "unverified" if n_noauth else "old_key"
     return "removed" if v.removed else None
+
+
+# ------------------------------ legacy runs (made before the MAC)
+
+
+def legacy_split(raw: bytes, head_exists: bool) -> tuple[str, bytes, int]:
+    """(mode, raw to verify, unchecked prefix lines). A run file with no sealed line and no chain head is a
+    legacy run (made before orch sealed lines): mode "legacy", every line unchecked, nothing to verify. Any
+    other file is "sealed": its unsigned lines that all come before the first sealed line are a legacy
+    prefix (counted as unchecked, not verified); every later unsigned line stays in the raw to verify, so it
+    is `changed`. A run that has a head or a sealed line never goes back to "legacy": stripping `auth` is a
+    downgrade that does not work."""
+    lines = [x for x in raw.split(b"\n") if x]
+    first = next((n for n, x in enumerate(lines) if split(x) is not None), None)
+    if first is None:
+        if head_exists:
+            return "sealed", raw, 0
+        return "legacy", b"", len(lines)
+    if first == 0:
+        return "sealed", raw, 0
+    cut, seen = 0, 0
+    while seen < first:  # the byte offset of the first sealed line
+        end = raw.find(b"\n", cut)
+        end = len(raw) if end < 0 else end
+        seen += end > cut
+        cut = end + 1
+    return "sealed", raw[cut:], first
 
 
 # ------------------------------ spool, head, detail

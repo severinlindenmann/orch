@@ -625,6 +625,19 @@ def _head_path(root: Path, run: str, create: bool) -> Path:
     return d / "record-heads" / f"{run}.json"
 
 
+def record_head_exists(root: Path, run: str) -> bool:
+    """Whether the guarded home has a chain head file for this run (no key needed, nothing is checked): a run
+    that has one is never a legacy run, even when its key is gone. No guarded home or key folder: no head. True
+    when a head folder cannot be read (fail closed)."""
+    try:
+        _head_path(root, run, False).lstat()
+        return True
+    except (FileNotFoundError, Refused):  # no home, no local id, no key folder, no head: nothing was sealed
+        return False
+    except (OSError, ValueError):
+        return True
+
+
 def record_head_read(root: Path, run: str) -> tuple[dict | None, bool | str]:
     """(head, state) of a run's chain head in the guarded home. (head, True) = a head of this key and run;
     (None, True) = there is none; (None, "old_key") = a head of another key id (a protection reset): no alert,

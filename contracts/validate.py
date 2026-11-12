@@ -489,7 +489,7 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
             if shown:
                 bad += 1
             else:
-                oldkey += 1
+                oldkey += 1  # held: becomes `bad` at the end unless the rotation shape holds (below)
             continue
         try:
             o = json.loads(body.decode(), object_pairs_hook=_ra_nodup)
@@ -520,6 +520,12 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
                 gaps.append((last_seq + 1, last_seq + gap))
         shown.append(seq)
         last_seq, last_mac = seq, mac
+    if oldkey:
+        # rotation shape: the current key's first line is seq 1, or nothing of it exists and no head of it says so
+        has_head = bool(head and head.get("kid") == kid and type(head.get("seq")) is int and head["seq"] >= 1)
+        if not (shown[0] == 1 if shown else not has_head):
+            bad += oldkey
+            oldkey = 0
     if head and head.get("kid") == kid and type(head.get("seq")) is int:
         removed += max(0, head["seq"] - last_seq)
     changed = bad + noauth + oldkey
