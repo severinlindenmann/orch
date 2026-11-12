@@ -92,11 +92,12 @@ function revealSearch(){searchShown=true;$('.search')?.classList.add('revealed')
 function presence(c,now=new Date()){
  const stored=state.workspaces?.[c]?.lastSeenAt;
  const seen=stored?new Date(stored):state.computerOn?now:new Date(now.getFullYear(),now.getMonth(),now.getDate(),14,2);
- if(now-seen>=0&&now-seen<=5*60*1000)return {label:'online',online:true};
+ if(state.offline)return {label:'Offline, no connection',online:false};
+ if(now-seen>=0&&now-seen<=5*60*1000)return {label:'Online',online:true};
  const day=new Date(now.getFullYear(),now.getMonth(),now.getDate()),yesterday=new Date(day);yesterday.setDate(day.getDate()-1);
  const clock=seen.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
  const label=seen>=day?clock:seen>=yesterday?'yesterday '+clock:seen.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
- return {label:'last seen '+label,online:false};
+ return {label:'Computer not reachable, last seen '+label,online:false};
 }
 function presenceHTML(c){const p=presence(c);return `${p.online?'<span class="presence-dot" aria-hidden="true"></span>':''}${esc(p.label)}`;}
 function chatPresence(){return `${parent[chat]?esc(names[workspace(chat)])+' · ':''}${presenceHTML(workspace(chat))}`;}
