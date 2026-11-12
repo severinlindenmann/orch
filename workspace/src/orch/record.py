@@ -636,6 +636,20 @@ def _json(obj):
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
+def _hidden_line(hider, obj) -> bytes:
+    """The compact JSON of `obj`, refused when a form of a hidden value is in the serialized text or in any
+    decoded string or key (a reader json-decodes, so escaped bytes alone prove nothing)."""
+    line = _json(obj)
+    if hider.hide_text(line) != line or hider.leaks(obj):
+        raise RecordInvalid("This record cannot be hidden safely.")
+    return line.encode("utf-8")
+
+
+def alert_content(workspace, run):
+    """Leave one integrity alert for a run file whose content disagrees with what the writer guarantees."""
+    return _alert(workspace, target="run", run=run, reason="content", seen_by="writer")
+
+
 def _validate(event, *, detail=False):
     if not (_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid(event):
         raise RecordInvalid()
@@ -724,11 +738,15 @@ def _dedupe(events, run):
 
 def _parse(fd, run):
     events, skipped = [], 0
-    for line in _read_bytes(fd).splitlines():
+    for lineno, line in enumerate(_read_bytes(fd).splitlines(), 1):
         try:
             event = json.loads(line)
             _validate(event)
             if event["run"] != run:
+                raise RecordInvalid()
+            # the writer guarantees seq == the 1-based physical line number; a line that disagrees was
+            # planted (a huge or repeated seq freezes a tail cursor or breaks paging): skipped and counted
+            if event["seq"] != lineno or isinstance(event["seq"], bool):
                 raise RecordInvalid()
             events.append(event)
         except (ValueError, TypeError, UnicodeError, RecursionError, RecordInvalid):
@@ -736,22 +754,28 @@ def _parse(fd, run):
     return events, skipped
 
 
-def _read_run_strict(ws, run, fd):
+def _read_run_strict(ws, run, fd, only=None):
     _check_fd(fd)
     raw = _read_bytes(fd)
     previous = []
-    for line in raw.splitlines():
+    for lineno, line in enumerate(raw.splitlines(), 1):
         try:
             event = json.loads(line)
-            if isinstance(event, dict) and event.get("run") == run:
-                outcome = event.get("outcome")
-                if outcome is not None and not (
-                    isinstance(outcome, dict) and {"ok", "error"} <= outcome.keys()
-                ):
-                    continue
-                _key(event)
-                previous.append(event)
-        except (ValueError, TypeError, KeyError, RecursionError):
+            if not isinstance(event, dict) or event.get("run") != run:
+                continue
+            if event.get("seq") != lineno or isinstance(event.get("seq"), bool):
+                continue
+            outcome = event.get("outcome")
+            if outcome is not None and not (isinstance(outcome, dict) and {"ok", "error"} <= outcome.keys()):
+                continue
+            _key(event)
+            if only is None or only(event.get("id")):
+                # exactly what the reader (_parse) keeps: a line it skips must not suppress a real one. The
+                # full schema check costs ~0.2 ms a line, so a hook's write checks the lines of its own
+                # call only (dedupe looks at nothing else); the collector reads with only=lambda i: False.
+                _validate(event)
+            previous.append(event)
+        except (ValueError, TypeError, KeyError, RecursionError, RecordInvalid):
             continue
     return previous, len(raw.splitlines()), bool(raw and not raw.endswith(b"\n"))
 
@@ -926,14 +950,20 @@ def list_jobs(workspace, run=None, *, seen_by="reader") -> ReadResult[list[tuple
         return _report(workspace, error, "folder", run, seen_by)
 
 
-def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
+def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
     """Append one line to a job stream under the run's lock (one writer per job). `decide(events, size)` runs
     inside the lock on the strictly read stream and returns (line_dict | None, replace_last, result); the line
     is stored only after the caller's own checks passed (every string already hidden). A cut-off last line (a
     crash) is dropped under the lock. Caps are checked here, under the lock: the stream, the run's streams,
-    and (at the first line) the number of jobs of the run. Returns result."""
+    and (at the first line) the number of jobs of the run. `hider` is required: the line passes the same
+    fail-closed backstop as a run line (RecordInvalid when a form of a hidden value is still in it). Returns
+    result."""
     _name(run, _RUN)
     _name(job, _JOB)
+    try:
+        hiding._check(hider)
+    except (ValueError, TypeError):
+        raise RecordOff(_OFF) from None
     rel = ("jobs", run, job + ".jsonl")
     try:
         with _lock(workspace, run) as check_lock:
@@ -963,7 +993,10 @@ def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
                 event, replace_last, result = decide(events, len(raw))
                 if event is None:
                     return result
-                data = (_json(event) + "\n").encode()
+                try:
+                    data = _hidden_line(hider, event) + b"\n"
+                except (ValueError, TypeError, RecursionError, UnicodeError):
+                    raise RecordInvalid() from None
                 if len(data) > 16384:
                     raise RecordInvalid("The job entry is too large.")
                 if len(raw) + len(data) > JOB_BYTES or (
@@ -1004,7 +1037,7 @@ def _pending_count(workspace, run):
         raise
 
 
-def run_lines(workspace, run, *, lock_wait=None, drain=None) -> list[dict]:
+def run_lines(workspace, run, *, lock_wait=None, drain=None, only=None) -> list[dict]:
     """The run file's lines AS WRITTEN (no dedupe, no reader view), read under the run lock: for a writer-side
     caller that must see every line (a collector numbering its id-less lines `<run>:<n>` past every seq and
     every such id already used). `drain`: a writer's drain (RecordWriter.drain); the spooled lines of the run
@@ -1024,7 +1057,7 @@ def run_lines(workspace, run, *, lock_wait=None, drain=None) -> list[dict]:
                     return []
                 raise
             try:
-                return _read_run_strict(workspace, run, fd)[0]
+                return _read_run_strict(workspace, run, fd, only)[0]
             finally:
                 _close(fd)
     except (RecordTampered, RecordUnavailable) as error:
@@ -1134,6 +1167,8 @@ def _store_detail(ws, event, payload, previous):
                 return _Detail(reason="collision")
             finished = any(
                 old.get("detail") == event["detail"]
+                # the detail name derives from these four
+                and all(old.get(k) == event[k] for k in ("run", "kind", "id", "ticket"))
                 and old.get("outcome") is not None
                 and not (old.get("via") == "hook" and event["via"] == "log")
                 for old in previous
@@ -1156,10 +1191,7 @@ class RecordWriter:
         self.workspace, self.hider = Path(workspace), hider
 
     def _serialized(self, obj):
-        line = _json(obj)
-        if self.hider.hide_text(line) != line:
-            raise RecordInvalid("This record cannot be hidden safely.")
-        return line.encode("utf-8")
+        return _hidden_line(self.hider, obj)
 
     def _prepare_detail(self, event, detail, hidden=0):
         if detail is None or not event.get("ticket"):
@@ -1292,7 +1324,15 @@ class RecordWriter:
         fd = _open(self.workspace, ("runs", run + ".jsonl"), "read_append", create_dirs=True)
         try:
             check_lock()
-            previous, count, torn = _read_run_strict(self.workspace, run, fd)
+            previous, count, torn = _read_run_strict(
+                self.workspace,
+                run,
+                fd,
+                only=lambda i: (
+                    i == event.get("id")
+                    or (default_id and isinstance(i, str) and run + ":" in i[: len(run) + 3])
+                ),
+            )
             event = dict(event, seq=count + 1)
             if default_id:
                 # a hook's default id has its own namespace: <run>:<seq> belongs to the collectors, so a hook
@@ -1354,7 +1394,11 @@ class RecordWriter:
                 name is not None
                 and event["detail"] is None
                 and any(old.get("detail") == f"detail/{run}/{file}" for old in replaced)
-                and not any(old.get("detail") == f"detail/{run}/{file}" for old in _shown([*previous, event]))
+                and not any(
+                    old.get("detail") == f"detail/{run}/{file}"
+                    and all(old.get(k) == event[k] for k in ("run", "kind", "id", "ticket"))
+                    for old in _shown([*previous, event])
+                )
             ):
                 try:
                     _unlink(self.workspace, ("detail", run, file))
@@ -1872,543 +1916,649 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
 
 # Bundled contract: installed packages do not have the repository's contracts directory.
 _SCHEMA = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://orch.severin.io/contracts/activity.schema.json",
-    "title": "orch activity event v1 (orch.activity/1, one line of .orch/record/runs/<run>.jsonl)",
-    "description": "One thing an agent run did, the same for every agent tool. See activity.md. "
-    "Written only by the core record writer, which hides exact key values first (fail "
-    "closed). Readers skip unknown kinds and keep unknown fields. text and every "
-    "string are plain text (shown with textContent).",
-    "type": "object",
-    "required": [
-        "v",
-        "id",
-        "seq",
-        "run",
-        "session",
-        "agent",
-        "parent",
-        "at",
-        "ticket",
-        "harness",
-        "via",
-        "kind",
-        "text",
-        "used",
-        "outcome",
-        "detail",
-        "coverage",
-    ],
-    "properties": {
-        "v": {"const": 1},
-        "id": {
-            "$ref": "#/$defs/event_id",
-            "description": "The agent tool's own tool-call id when the source has one, "
-            "else '<run>:<seq>' (activity.md, Ids).",
-        },
-        "seq": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Position in this run file, +1 per written line, set by the single writer.",
-        },
-        "run": {"$ref": "#/$defs/run"},
-        "session": {
-            "oneOf": [
-                {"type": "null"},
-                {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:-]+$"},
-            ],
-            "description": "The agent tool's session id, or null.",
-        },
-        "agent": {"$ref": "#/$defs/agent"},
-        "parent": {
-            "oneOf": [{"type": "null"}, {"$ref": "#/$defs/agent"}],
-            "description": "Who started this agent: null for main, else main or another helper.",
-        },
-        "at": {"$ref": "#/$defs/time"},
-        "ticket": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"},
-        "harness": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{0,31}$",
-            "description": "Adapter name of the run (agent-adapter.schema.json key "
-            "or [agents.<name>] entry); 'generic' for a user entry; "
-            "'none' for a job run without an agent.",
-        },
-        "via": {
-            "enum": ["hook", "log", "broker", "job", "core"],
-            "description": "Who wrote it: hook = the tool's own hook (instant), log = "
-            "a collector reading the tool's log or stream, broker = "
-            "orch secret, job = orch job / $ORCH_EVENTS, core = orch "
-            "itself (ticket changes, run state, take-over).",
-        },
-        "kind": {"$ref": "#/$defs/kind"},
-        "text": {
-            "type": "string",
-            "maxLength": 500,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
-            "description": "Short display line, one line, key values hidden.",
-        },
-        "used": {
-            "oneOf": [
-                {"type": "null"},
-                {
-                    "type": "object",
-                    "required": ["kind", "name", "action", "source", "version"],
-                    "additionalProperties": False,
-                    "properties": {
-                        "kind": {
-                            "enum": ["skill", "tool", "mcp", "key", "helper"],
-                            "description": "Shown as Skill, Tool, "
-                            "Connection, Key, "
-                            "Helper (wording: 'MCP' "
-                            "only under Details).",
-                        },
-                        "name": {"$ref": "#/$defs/name"},
-                        "action": {
-                            "oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}],
-                            "description": "Tool of a connection "
-                            "(read_file), key "
-                            "delivery (env, file, "
-                            "exec, get), or "
-                            "null.",
-                        },
-                        "source": {
-                            "enum": ["harness", "admin", "workspace", "builtin", "marketplace"],
-                            "description": "harness = the agent "
-                            "tool's own settings, "
-                            "admin = shared by "
-                            "the admin, workspace "
-                            "= this workspace, "
-                            "builtin = part of "
-                            "orch or of the agent "
-                            "tool, marketplace = "
-                            "an installed "
-                            "add-on.",
-                        },
-                        "version": {
-                            "oneOf": [{"type": "null"}, {"$ref": "#/$defs/version"}],
-                            "description": "Content hash of the "
-                            "skill or connection "
-                            "config at the time "
-                            "of use "
-                            "(inventory.md).",
-                        },
-                    },
-                },
-            ]
-        },
-        "outcome": {
-            "oneOf": [
-                {"type": "null"},
-                {
-                    "type": "object",
-                    "required": ["ok", "error", "ms"],
-                    "additionalProperties": False,
-                    "properties": {
-                        "ok": {
-                            "type": ["boolean", "null"],
-                            "description": "null = finished, result unknown to the source.",
-                        },
-                        "error": {
-                            "oneOf": [
-                                {"type": "null"},
-                                {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 300,
-                                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
-                                },
-                            ]
-                        },
-                        "ms": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]},
-                    },
-                },
-            ],
-            "description": "null = started, not finished yet. A later line with "
-            "the same id and kind carries the outcome (activity.md, "
-            "Dedupe).",
-        },
-        "detail": {
-            "oneOf": [
-                {"type": "null"},
-                {"type": "string", "pattern": "^detail/r_[a-z0-9_]{6,32}/[0-9a-f]{32}\\.json$"},
-            ],
-            "description": "Full payload file, relative to .orch/record/; null = details not available.",
-        },
-        "coverage": {
-            "enum": ["full", "partial"],
-            "description": "full = the source saw everything of this step; "
-            "partial = something is missing (no chat text, cut "
-            "output, no helper).",
-        },
-        "data": {
-            "type": "object",
-            "description": "Per-kind fields (activity.md, Kinds). Unknown fields are kept.",
-        },
-        "detail_lost": {
-            "type": "boolean",
-            "description": "true = a full payload existed but could not be "
-            "stored (name collision with another event's file, "
-            "write problem, too large); the line is kept with "
-            "detail null (activity.md, Detail files).",
-        },
-        "conflict": {
-            "type": "boolean",
-            "description": "The hook and log lines of one call disagree; both are kept, this (log) line is "
-            "the one to believe.",
-        },
-        "files": {"$ref": "#/$defs/files"},
-    },
-    "allOf": [
-        {
-            "if": {"properties": {"agent": {"const": "main"}}},
-            "then": {"properties": {"parent": {"type": "null"}}},
-            "else": {"properties": {"parent": {"$ref": "#/$defs/agent"}}},
-        },
-        {
-            "if": {"properties": {"kind": {"const": "step"}}},
-            "then": {
-                "properties": {
-                    "via": {"enum": ["hook", "log"]},
-                    "used": {"type": "object", "properties": {"kind": {"enum": ["skill", "tool", "mcp"]}}},
-                }
-            },
-            "else": {"not": {"required": ["files"]}},
-        },
-        {
-            "if": {"properties": {"kind": {"enum": ["task.start", "task.done"]}}},
-            "then": {
-                "required": ["data"],
-                "properties": {
-                    "via": {"const": "core"},
-                    "data": {
-                        "anyOf": [
-                            {
-                                "required": ["check"],
-                                "properties": {"check": {"type": "string", "pattern": "^c[0-9]{1,4}$"}},
-                            },
-                            {
-                                "type": "object",
-                                "required": ["cut"],
-                                "additionalProperties": False,
-                                "properties": {"cut": {"const": True}},
-                            },
-                        ]
-                    },
-                },
-            },
-        },
-        {
-            "if": {"properties": {"kind": {"const": "ask"}}},
-            "then": {
-                "required": ["data"],
-                "properties": {
-                    "via": {"const": "core"},
-                    "data": {
-                        "anyOf": [
-                            {
-                                "required": ["q"],
-                                "properties": {"q": {"type": "string", "pattern": "^q[0-9]{1,4}$"}},
-                            },
-                            {
-                                "type": "object",
-                                "required": ["cut"],
-                                "additionalProperties": False,
-                                "properties": {"cut": {"const": True}},
-                            },
-                        ]
-                    },
-                },
-            },
-        },
-        {
-            "if": {"properties": {"kind": {"const": "denial"}}},
-            "then": {"properties": {"outcome": {"type": "object", "properties": {"ok": {"const": False}}}}},
-        },
-        {
-            "if": {"properties": {"kind": {"enum": ["helper.start", "helper.end"]}}},
-            "then": {
-                "properties": {
-                    "agent": {"pattern": "^h_[0-9]{1,4}$"},
-                    "used": {"type": "object", "properties": {"kind": {"const": "helper"}}},
-                }
-            },
-        },
-        {
-            "if": {"properties": {"kind": {"const": "run.state"}}},
-            "then": {
-                "required": ["data"],
-                "properties": {
-                    "data": {
-                        "anyOf": [
-                            {
-                                "required": ["state"],
-                                "properties": {
-                                    "state": {
-                                        "enum": [
-                                            "starting",
-                                            "working",
-                                            "waiting_you",
-                                            "idle",
-                                            "done",
-                                            "failed",
-                                            "stopped",
-                                        ]
-                                    }
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["cut"],
-                                "additionalProperties": False,
-                                "properties": {"cut": {"const": True}},
-                            },
-                        ]
-                    }
-                },
-            },
-        },
-        {
-            "if": {"properties": {"kind": {"const": "usage"}}},
-            "then": {
-                "required": ["data"],
-                "properties": {
-                    "data": {
-                        "anyOf": [
-                            {
-                                "anyOf": [{"required": ["used"]}, {"required": ["tokens_in"]}],
-                                "properties": {
-                                    "used": {"type": "number", "minimum": 0, "maximum": 1},
-                                    "window": {"type": "string", "maxLength": 32},
-                                    "status": {"enum": ["ok", "warning", "limited"]},
-                                    "tokens_in": {"type": "integer", "minimum": 0},
-                                    "tokens_out": {"type": "integer", "minimum": 0},
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["cut"],
-                                "additionalProperties": False,
-                                "properties": {"cut": {"const": True}},
-                            },
-                        ]
-                    }
-                },
-            },
-        },
-        {
-            "if": {"properties": {"kind": {"const": "key.use"}}},
-            "then": {
-                "required": ["data"],
-                "properties": {
-                    "via": {"const": "broker"},
-                    "detail": {"type": "null"},
-                    "used": {
-                        "type": "object",
-                        "required": ["kind"],
-                        "properties": {
-                            "kind": {"const": "key"},
-                            "action": {"enum": ["env", "file", "exec", "get"]},
-                            "source": {"enum": ["workspace", "admin"]},
-                        },
-                    },
-                    "outcome": {"type": "object"},
-                    "data": {
-                        "anyOf": [
-                            {
-                                "required": ["profile", "command"],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "profile": {"$ref": "#/$defs/name"},
-                                    "command": {
-                                        "oneOf": [
-                                            {"type": "null"},
-                                            {"type": "string", "pattern": "^[A-Za-z0-9_.+-]{1,64}$"},
-                                        ],
-                                        "description": "Base "
-                                        "name "
-                                        "of "
-                                        "the "
-                                        "program "
-                                        "the "
-                                        "key "
-                                        "was "
-                                        "handed "
-                                        "to; "
-                                        "never "
-                                        "its "
-                                        "arguments.",
-                                    },
-                                    "skill": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}]},
-                                    "refused": {
-                                        "enum": [
-                                            "not_in_profile",
-                                            "get_off",
-                                            "get_to_terminal",
-                                            "missing",
-                                            "too_short",
-                                            "switched_off",
-                                            "agent_command",
-                                        ]
-                                    },
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["cut"],
-                                "additionalProperties": False,
-                                "properties": {"cut": {"const": True}},
-                            },
-                        ]
-                    },
-                },
-            },
-        },
-        {
-            "if": {"properties": {"kind": {"const": "secret.change"}}},
-            "then": {
-                "required": ["data"],
-                "properties": {
-                    "via": {"const": "broker"},
-                    "detail": {"type": "null"},
-                    "used": {"type": "null"},
-                    "data": {
-                        "anyOf": [
-                            {
-                                "required": ["action", "profile", "by"],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "action": {
-                                        "enum": [
-                                            "profile.set",
-                                            "profile.remove",
-                                            "profile.get_enable",
-                                            "profile.get_disable",
-                                            "profile.agents_enable",
-                                            "profile.agents_disable",
-                                        ]
-                                    },
-                                    "profile": {"$ref": "#/$defs/name"},
-                                    "by": {
-                                        "type": "string",
-                                        "pattern": "^(human:.+|reset)$",
-                                        "maxLength": 64,
-                                        "description": "human:<name> from the proof, or reset (no proof).",
-                                    },
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["cut"],
-                                "additionalProperties": False,
-                                "properties": {"cut": {"const": True}},
-                            },
-                        ]
-                    },
-                },
-            },
-        },
-        {
-            "if": {"properties": {"kind": {"const": "job"}}},
-            "then": {
-                "required": ["data"],
-                "properties": {
-                    "via": {"const": "job"},
-                    "data": {
-                        "anyOf": [
-                            {
-                                "required": ["job", "type", "state"],
-                                "properties": {
-                                    "job": {"type": "string", "pattern": "^j_[a-z0-9]{6,32}$"},
-                                    "type": {
-                                        "enum": [
-                                            "start",
-                                            "step",
-                                            "progress",
-                                            "artifact",
-                                            "metric",
-                                            "table",
-                                            "link",
-                                            "log",
-                                            "end",
-                                            "lost",
-                                        ]
-                                    },
-                                    "state": {"enum": ["running", "ok", "failed", "cancelled", "lost"]},
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["cut"],
-                                "additionalProperties": False,
-                                "properties": {"cut": {"const": True}},
-                            },
-                        ]
-                    },
-                },
-            },
-        },
-        {
-            "if": {"properties": {"kind": {"const": "session.input"}}},
-            "then": {
-                "required": ["data"],
-                "properties": {
-                    "via": {"const": "core"},
-                    "used": {"type": "null"},
-                    "detail": {"type": "null"},
-                    "data": {
-                        "anyOf": [
-                            {
-                                "required": ["by", "from", "since", "ended", "reason", "keys"],
-                                "additionalProperties": False,
-                                "properties": {
-                                    "by": {
-                                        "type": "string",
-                                        "pattern": "^human:[^\\u0000-\\u001f]{1,58}$",
-                                        "description": "Only a person can take over.",
-                                    },
-                                    "from": {"const": "local-page"},
-                                    "since": {"$ref": "#/$defs/time"},
-                                    "ended": {"$ref": "#/$defs/time"},
-                                    "reason": {
-                                        "enum": [
-                                            "released",
-                                            "idle",
-                                            "run-ended",
-                                            "switched-off",
-                                            "locked-by-admin",
-                                        ]
-                                    },
-                                    "keys": {
-                                        "type": "integer",
-                                        "minimum": 0,
-                                        "description": "How "
-                                        "many "
-                                        "key "
-                                        "presses "
-                                        "were "
-                                        "sent. "
-                                        "The "
-                                        "typed "
-                                        "text "
-                                        "is "
-                                        "never "
-                                        "stored.",
-                                    },
-                                },
-                            },
-                            {
-                                "type": "object",
-                                "required": ["cut"],
-                                "additionalProperties": False,
-                                "properties": {"cut": {"const": True}},
-                            },
-                        ]
-                    },
-                },
-            },
-        },
-    ],
+    "$schema": ("https://json-schema.org/draft/2020-12/schema"),
+    "$id": ("https://orch.severin.io/contracts/activity.schema.json"),
+    "title": ("orch activity event v1 (orch.activity/1, one line of .orch/record/runs/<run>.jsonl)"),
+    "description": (
+        "One thing an agent run did, the same "
+        "for every agent tool. See activity.md. "
+        "Written only by the core record writer, "
+        "which hides exact key values first "
+        "(fail closed). Readers skip unknown "
+        "kinds and keep unknown fields. text and "
+        "every string are plain text (shown with "
+        "textContent)."
+    ),
+    "$ref": "#/$defs/event",
     "$defs": {
+        "event": {
+            "type": "object",
+            "required": [
+                "v",
+                "id",
+                "seq",
+                "run",
+                "session",
+                "agent",
+                "parent",
+                "at",
+                "ticket",
+                "harness",
+                "via",
+                "kind",
+                "text",
+                "used",
+                "outcome",
+                "detail",
+                "coverage",
+            ],
+            "properties": {
+                "v": {"const": 1},
+                "id": {
+                    "$ref": "#/$defs/event_id",
+                    "description": (
+                        "The agent tool's own tool-call id when "
+                        "the source has one, else '<run>:<seq>' "
+                        "(activity.md, Ids)."
+                    ),
+                },
+                "seq": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Position in this run file, +1 per written line, set by the single writer."
+                    ),
+                },
+                "run": {"$ref": "#/$defs/run"},
+                "session": {
+                    "oneOf": [
+                        {"type": "null"},
+                        {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:-]+$"},
+                    ],
+                    "description": "The agent tool's session id, or null.",
+                },
+                "agent": {"$ref": "#/$defs/agent"},
+                "parent": {
+                    "oneOf": [{"type": "null"}, {"$ref": "#/$defs/agent"}],
+                    "description": ("Who started this agent: null for main, else main or another helper."),
+                },
+                "at": {"$ref": "#/$defs/time"},
+                "ticket": {"type": "string", "pattern": "^t_[a-z0-9]{6,16}$"},
+                "harness": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,31}$",
+                    "description": (
+                        "Adapter name of the run "
+                        "(agent-adapter.schema.json key or "
+                        "[agents.<name>] entry); 'generic' for a "
+                        "user entry; 'none' for a job run "
+                        "without an agent."
+                    ),
+                },
+                "via": {
+                    "enum": ["hook", "log", "broker", "job", "core"],
+                    "description": (
+                        "Who wrote it: hook = the tool's own "
+                        "hook (instant), log = a collector "
+                        "reading the tool's log or stream, "
+                        "broker = orch secret, job = orch job / "
+                        "$ORCH_EVENTS, core = orch itself "
+                        "(ticket changes, run state, take-over)."
+                    ),
+                },
+                "kind": {"$ref": "#/$defs/kind"},
+                "text": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": ("Short display line, one line, key values hidden."),
+                },
+                "used": {
+                    "oneOf": [
+                        {"type": "null"},
+                        {
+                            "type": "object",
+                            "required": ["kind", "name", "action", "source", "version"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "kind": {
+                                    "enum": ["skill", "tool", "mcp", "key", "helper"],
+                                    "description": (
+                                        "Shown as Skill, Tool, Connection, Key, "
+                                        "Helper (wording: 'MCP' only under "
+                                        "Details)."
+                                    ),
+                                },
+                                "name": {"$ref": "#/$defs/name"},
+                                "action": {
+                                    "oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}],
+                                    "description": (
+                                        "Tool of a connection (read_file), key "
+                                        "delivery (env, file, exec, get), or "
+                                        "null."
+                                    ),
+                                },
+                                "source": {
+                                    "enum": ["harness", "admin", "workspace", "builtin", "marketplace"],
+                                    "description": (
+                                        "harness = the agent tool's own "
+                                        "settings, admin = shared by the admin, "
+                                        "workspace = this workspace, builtin = "
+                                        "part of orch or of the agent tool, "
+                                        "marketplace = an installed add-on."
+                                    ),
+                                },
+                                "version": {
+                                    "oneOf": [{"type": "null"}, {"$ref": "#/$defs/version"}],
+                                    "description": (
+                                        "Content hash of the skill or connection "
+                                        "config at the time of use "
+                                        "(inventory.md)."
+                                    ),
+                                },
+                            },
+                        },
+                    ]
+                },
+                "outcome": {
+                    "oneOf": [
+                        {"type": "null"},
+                        {
+                            "type": "object",
+                            "required": ["ok", "error", "ms"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "ok": {
+                                    "type": ["boolean", "null"],
+                                    "description": ("null = finished, result unknown to the source."),
+                                },
+                                "error": {
+                                    "oneOf": [
+                                        {"type": "null"},
+                                        {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 300,
+                                            "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                                        },
+                                    ]
+                                },
+                                "ms": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]},
+                            },
+                        },
+                    ],
+                    "description": (
+                        "null = started, not finished yet. A "
+                        "later line with the same id and kind "
+                        "carries the outcome (activity.md, "
+                        "Dedupe)."
+                    ),
+                },
+                "detail": {
+                    "oneOf": [
+                        {"type": "null"},
+                        {"type": "string", "pattern": ("^detail/r_[a-z0-9_]{6,32}/[0-9a-f]{32}\\.json$")},
+                    ],
+                    "description": (
+                        "Full payload file, relative to .orch/record/; null = details not available."
+                    ),
+                },
+                "coverage": {
+                    "enum": ["full", "partial"],
+                    "description": (
+                        "full = the source saw everything of "
+                        "this step; partial = something is "
+                        "missing (no chat text, cut output, no "
+                        "helper)."
+                    ),
+                },
+                "data": {
+                    "type": "object",
+                    "description": ("Per-kind fields (activity.md, Kinds). Unknown fields are kept."),
+                },
+                "conflict": {
+                    "type": "boolean",
+                    "description": (
+                        "The hook and log lines of one call "
+                        "disagree; both are kept, this (log) "
+                        "line is the one to believe."
+                    ),
+                },
+                "detail_lost": {
+                    "type": "boolean",
+                    "description": (
+                        "true = a full payload existed but could "
+                        "not be stored (name collision with "
+                        "another event's file, write problem, "
+                        "too large); the line is kept with "
+                        "detail null (activity.md, Detail files)."
+                    ),
+                },
+                "files": {"$ref": "#/$defs/files"},
+                "detail_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{32}$",
+                    "description": (
+                        "First 16 bytes of sha256 of the detail "
+                        "file's exact bytes, lowercase hex; "
+                        "present iff detail is non-null "
+                        "(activity.md, Authenticated record). "
+                        "Inside the MAC."
+                    ),
+                },
+                "auth": {
+                    "$ref": "#/$defs/auth",
+                    "description": (
+                        "The record MAC suffix of a sealed line "
+                        "(activity.md, Authenticated record). "
+                        "The event body that is MACed never "
+                        "contains it; use $defs/sealed_event to "
+                        "require it."
+                    ),
+                },
+            },
+            "allOf": [
+                {
+                    "if": {"properties": {"detail": {"type": "null"}}, "required": ["detail"]},
+                    "then": {"not": {"required": ["detail_hash"]}},
+                },
+                {
+                    "if": {"properties": {"agent": {"const": "main"}}},
+                    "then": {"properties": {"parent": {"type": "null"}}},
+                    "else": {"properties": {"parent": {"$ref": "#/$defs/agent"}}},
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "step"}}},
+                    "then": {
+                        "properties": {
+                            "via": {"enum": ["hook", "log"]},
+                            "used": {
+                                "type": "object",
+                                "properties": {"kind": {"enum": ["skill", "tool", "mcp"]}},
+                            },
+                        }
+                    },
+                    "else": {"not": {"required": ["files"]}},
+                },
+                {
+                    "if": {"properties": {"kind": {"enum": ["task.start", "task.done"]}}},
+                    "then": {
+                        "required": ["data"],
+                        "properties": {
+                            "via": {"const": "core"},
+                            "data": {
+                                "anyOf": [
+                                    {
+                                        "required": ["check"],
+                                        "properties": {
+                                            "check": {"type": "string", "pattern": "^c[0-9]{1,4}$"}
+                                        },
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": ["cut"],
+                                        "additionalProperties": False,
+                                        "properties": {"cut": {"const": True}},
+                                    },
+                                ]
+                            },
+                        },
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "ask"}}},
+                    "then": {
+                        "required": ["data"],
+                        "properties": {
+                            "via": {"const": "core"},
+                            "data": {
+                                "anyOf": [
+                                    {
+                                        "required": ["q"],
+                                        "properties": {"q": {"type": "string", "pattern": "^q[0-9]{1,4}$"}},
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": ["cut"],
+                                        "additionalProperties": False,
+                                        "properties": {"cut": {"const": True}},
+                                    },
+                                ]
+                            },
+                        },
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "denial"}}},
+                    "then": {
+                        "properties": {"outcome": {"type": "object", "properties": {"ok": {"const": False}}}}
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"enum": ["helper.start", "helper.end"]}}},
+                    "then": {
+                        "properties": {
+                            "agent": {"pattern": "^h_[0-9]{1,4}$"},
+                            "used": {"type": "object", "properties": {"kind": {"const": "helper"}}},
+                        }
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "run.state"}}},
+                    "then": {
+                        "required": ["data"],
+                        "properties": {
+                            "data": {
+                                "anyOf": [
+                                    {
+                                        "required": ["state"],
+                                        "properties": {
+                                            "state": {
+                                                "enum": [
+                                                    "starting",
+                                                    "working",
+                                                    "waiting_you",
+                                                    "idle",
+                                                    "done",
+                                                    "failed",
+                                                    "stopped",
+                                                ]
+                                            }
+                                        },
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": ["cut"],
+                                        "additionalProperties": False,
+                                        "properties": {"cut": {"const": True}},
+                                    },
+                                ]
+                            }
+                        },
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "usage"}}},
+                    "then": {
+                        "required": ["data"],
+                        "properties": {
+                            "data": {
+                                "anyOf": [
+                                    {
+                                        "anyOf": [{"required": ["used"]}, {"required": ["tokens_in"]}],
+                                        "properties": {
+                                            "used": {"type": "number", "minimum": 0, "maximum": 1},
+                                            "window": {"type": "string", "maxLength": 32},
+                                            "status": {"enum": ["ok", "warning", "limited"]},
+                                            "tokens_in": {"type": "integer", "minimum": 0},
+                                            "tokens_out": {"type": "integer", "minimum": 0},
+                                        },
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": ["cut"],
+                                        "additionalProperties": False,
+                                        "properties": {"cut": {"const": True}},
+                                    },
+                                ]
+                            }
+                        },
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "key.use"}}},
+                    "then": {
+                        "required": ["data"],
+                        "properties": {
+                            "via": {"const": "broker"},
+                            "detail": {"type": "null"},
+                            "used": {
+                                "type": "object",
+                                "required": ["kind"],
+                                "properties": {
+                                    "kind": {"const": "key"},
+                                    "action": {"enum": ["env", "file", "exec", "get"]},
+                                    "source": {"enum": ["workspace", "admin"]},
+                                },
+                            },
+                            "outcome": {"type": "object"},
+                            "data": {
+                                "anyOf": [
+                                    {
+                                        "required": ["profile", "command"],
+                                        "additionalProperties": False,
+                                        "properties": {
+                                            "profile": {"$ref": "#/$defs/name"},
+                                            "command": {
+                                                "oneOf": [
+                                                    {"type": "null"},
+                                                    {"type": "string", "pattern": "^[A-Za-z0-9_.+-]{1,64}$"},
+                                                ],
+                                                "description": (
+                                                    "Base name of the program the key was "
+                                                    "handed to; never its arguments."
+                                                ),
+                                            },
+                                            "skill": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/name"}]},
+                                            "refused": {
+                                                "enum": [
+                                                    "not_in_profile",
+                                                    "get_off",
+                                                    "get_to_terminal",
+                                                    "missing",
+                                                    "too_short",
+                                                    "switched_off",
+                                                    "agent_command",
+                                                ]
+                                            },
+                                        },
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": ["cut"],
+                                        "additionalProperties": False,
+                                        "properties": {"cut": {"const": True}},
+                                    },
+                                ]
+                            },
+                        },
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "secret.change"}}},
+                    "then": {
+                        "required": ["data"],
+                        "properties": {
+                            "via": {"const": "broker"},
+                            "detail": {"type": "null"},
+                            "used": {"type": "null"},
+                            "data": {
+                                "anyOf": [
+                                    {
+                                        "required": ["action", "profile", "by"],
+                                        "additionalProperties": False,
+                                        "properties": {
+                                            "action": {
+                                                "enum": [
+                                                    "profile.set",
+                                                    "profile.remove",
+                                                    "profile.get_enable",
+                                                    "profile.get_disable",
+                                                    "profile.agents_enable",
+                                                    "profile.agents_disable",
+                                                ]
+                                            },
+                                            "profile": {"$ref": "#/$defs/name"},
+                                            "by": {
+                                                "type": "string",
+                                                "pattern": "^(human:.+|reset)$",
+                                                "maxLength": 64,
+                                                "description": (
+                                                    "human:<name> from the proof, or reset (no proof)."
+                                                ),
+                                            },
+                                        },
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": ["cut"],
+                                        "additionalProperties": False,
+                                        "properties": {"cut": {"const": True}},
+                                    },
+                                ]
+                            },
+                        },
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "job"}}},
+                    "then": {
+                        "required": ["data"],
+                        "properties": {
+                            "via": {"const": "job"},
+                            "data": {
+                                "anyOf": [
+                                    {
+                                        "required": ["job", "type", "state"],
+                                        "properties": {
+                                            "job": {"type": "string", "pattern": "^j_[a-z0-9]{6,32}$"},
+                                            "type": {
+                                                "enum": [
+                                                    "start",
+                                                    "step",
+                                                    "progress",
+                                                    "artifact",
+                                                    "metric",
+                                                    "table",
+                                                    "link",
+                                                    "log",
+                                                    "end",
+                                                    "lost",
+                                                ]
+                                            },
+                                            "state": {
+                                                "enum": ["running", "ok", "failed", "cancelled", "lost"]
+                                            },
+                                        },
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": ["cut"],
+                                        "additionalProperties": False,
+                                        "properties": {"cut": {"const": True}},
+                                    },
+                                ]
+                            },
+                        },
+                    },
+                },
+                {
+                    "if": {"properties": {"kind": {"const": "session.input"}}},
+                    "then": {
+                        "required": ["data"],
+                        "properties": {
+                            "via": {"const": "core"},
+                            "used": {"type": "null"},
+                            "detail": {"type": "null"},
+                            "data": {
+                                "anyOf": [
+                                    {
+                                        "required": ["by", "from", "since", "ended", "reason", "keys"],
+                                        "additionalProperties": False,
+                                        "properties": {
+                                            "by": {
+                                                "type": "string",
+                                                "pattern": "^human:[^\\u0000-\\u001f]{1,58}$",
+                                                "description": "Only a person can take over.",
+                                            },
+                                            "from": {"const": "local-page"},
+                                            "since": {"$ref": "#/$defs/time"},
+                                            "ended": {"$ref": "#/$defs/time"},
+                                            "reason": {
+                                                "enum": [
+                                                    "released",
+                                                    "idle",
+                                                    "run-ended",
+                                                    "switched-off",
+                                                    "locked-by-admin",
+                                                ]
+                                            },
+                                            "keys": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "description": (
+                                                    "How many key presses were sent. The "
+                                                    "typed text is never stored."
+                                                ),
+                                            },
+                                        },
+                                    },
+                                    {
+                                        "type": "object",
+                                        "required": ["cut"],
+                                        "additionalProperties": False,
+                                        "properties": {"cut": {"const": True}},
+                                    },
+                                ]
+                            },
+                        },
+                    },
+                },
+            ],
+        },
+        "auth": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["k", "p", "m"],
+            "properties": {
+                "k": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}$",
+                    "description": "Key id of the record subkey.",
+                },
+                "p": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$",
+                    "description": ("MAC of the previous line of the chain (the genesis MAC for the first)."),
+                },
+                "m": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$",
+                    "description": ("HMAC-SHA256 over the line's exact body bytes, run, seq and p."),
+                },
+            },
+        },
+        "event_body": {
+            "allOf": [
+                {"$ref": "#/$defs/event"},
+                {"not": {"required": ["auth"]}},
+                {
+                    "if": {"properties": {"detail": {"type": "string"}}, "required": ["detail"]},
+                    "then": {"required": ["detail_hash"]},
+                },
+            ],
+            "description": (
+                "What the writer validates and MACs: the "
+                "event as it is written, without auth. "
+                "detail_hash is required iff detail is "
+                "non-null."
+            ),
+        },
+        "sealed_event": {
+            "allOf": [
+                {"$ref": "#/$defs/event"},
+                {"required": ["auth"]},
+                {
+                    "if": {"properties": {"detail": {"type": "string"}}, "required": ["detail"]},
+                    "then": {"required": ["detail_hash"]},
+                },
+            ],
+            "description": (
+                "One line of runs/<run>.jsonl as stored "
+                "once sealed. A reader checks the MAC "
+                "before it trusts any field."
+            ),
+        },
         "time": {"type": "string", "format": "date-time", "pattern": "Z$"},
         "kind": {
             "enum": [
@@ -2441,25 +2591,52 @@ _SCHEMA = {
             "type": "array",
             "maxItems": 8,
             "items": {"$ref": "#/$defs/file_path"},
-            "description": "Only on kind step: the workspace files or folders the step named, display "
-            "only, never used for access decisions (activity.md, Files).",
+            "description": (
+                "Only on kind step: the workspace files "
+                "or folders the step named, display "
+                "only, never used for access decisions "
+                "(activity.md, Files)."
+            ),
         },
         "file_path": {
             "type": "string",
             "minLength": 1,
             "maxLength": 260,
-            "pattern": "^(?![A-Za-z]:)(?![A-Za-z][A-Za-z0-9+.-]*:)(?![~$])(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u0600-\\u0605\\u061c\\u06dd\\u070f\\u0890-\\u0891\\u08e2\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb\\\\]+$",  # noqa: E501
-            "description": "Workspace-relative POSIX path: no leading /, no .. segment, no backslash, no start with ~ $ or a scheme or drive letter (file: C:), no Unicode control or format character (Cc Cf Zl Zp: bidi overrides, zero-width), NFC. The writer enforces the full rule (record_files.file_ok); this pattern lists the BMP characters.",  # noqa: E501
+            "pattern": (
+                "^(?![A-Za-z]:)(?![A-Za-z][A-Za-z0-9+.-]*"
+                ":)(?![~$])(?!/)(?!(?:.*/)?\\.\\.(?:/|$))[^"
+                "\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u0600-\\"
+                "u0605\\u061c\\u06dd\\u070f\\u0890-\\u0891\\u08"
+                "e2\\u180e\\u200b-\\u200f\\u2028-\\u202e\\u2060"
+                "-\\u2064\\u2066-\\u206f\\ufeff\\ufff9-\\ufffb\\"
+                "\\]+$"
+            ),
+            "description": (
+                "Workspace-relative POSIX path: no "
+                "leading /, no .. segment, no backslash, "
+                "no start with ~ $ or a scheme or drive "
+                "letter (file: C:), no Unicode control "
+                "or format character (Cc Cf Zl Zp: bidi "
+                "overrides, zero-width), NFC. The writer "
+                "enforces the full rule "
+                "(record_files.file_ok); this pattern "
+                "lists the BMP characters."
+            ),
         },
         "detail_file": {
             "type": "object",
             "required": ["v", "id", "run", "kind", "ticket", "input", "output", "truncated", "hidden"],
             "additionalProperties": False,
-            "description": "One file .orch/record/detail/<run>/<file name>.json: "
-            "the full payload of one event, key values hidden. The "
-            "file name is lowercase hex only (activity.md, Detail "
-            "files); id, kind and ticket are stored here so a reader can "
-            "verify the file belongs to the event.",
+            "description": (
+                "One file "
+                ".orch/record/detail/<run>/<file "
+                "name>.json: the full payload of one "
+                "event, key values hidden. The file name "
+                "is lowercase hex only (activity.md, "
+                "Detail files); id, kind and ticket are "
+                "stored here so a reader can verify the "
+                "file belongs to the event."
+            ),
             "properties": {
                 "v": {"const": 1},
                 "id": {"$ref": "#/$defs/event_id"},
@@ -2468,15 +2645,15 @@ _SCHEMA = {
                 "ticket": {
                     "type": "string",
                     "pattern": "^t_[a-z0-9]{6,16}$",
-                    "description": "The ticket of the event; part of the file name (activity.md, I4).",
+                    "description": ("The ticket of the event; part of the file name (activity.md, I4)."),
                 },
-                "input": {"description": "What went in (tool input, prompt, command), any JSON."},
-                "output": {"description": "What came out (tool result, chat text), any JSON."},
+                "input": {"description": ("What went in (tool input, prompt, command), any JSON.")},
+                "output": {"description": ("What came out (tool result, chat text), any JSON.")},
                 "truncated": {"type": "boolean", "description": "true = cut at the 1 MB per-file cap."},
                 "hidden": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "How many key values were hidden in this file.",
+                    "description": ("How many key values were hidden in this file."),
                 },
             },
         },
@@ -2499,22 +2676,32 @@ _SCHEMA = {
                         "not_regular",
                         "not_dir",
                         "swapped",
+                        "content",
+                        "removed",
+                        "unverified",
+                        "old_key",
                     ]
                 },
                 "seen_by": {"enum": ["writer", "reader", "retention", "cli"]},
                 "message": {
-                    "const": "Some records of this run were "
-                    "changed outside orch. To be safe, "
-                    "orch does not show them. Nothing "
-                    "was deleted."
+                    "const": (
+                        "Some records of this run were changed "
+                        "outside orch. To be safe, orch does not "
+                        "show them. Nothing was deleted."
+                    )
                 },
             },
         },
         "record_change": {
             "type": "object",
             "additionalProperties": False,
-            "description": "One audit line in alerts/<YYYY-MM-DD>.jsonl for a person's proven change to the "
-            "record (activity.md, Delete detail). No path, no record content.",
+            "description": (
+                "One audit line in "
+                "alerts/<YYYY-MM-DD>.jsonl for a "
+                "person's proven change to the record "
+                "(activity.md, Delete detail). No path, "
+                "no record content."
+            ),
             "required": ["v", "schema", "at", "change", "by", "ticket", "deleted"],
             "properties": {
                 "v": {"const": 1},
@@ -2547,6 +2734,10 @@ _SCHEMA = {
                         "not_regular",
                         "not_dir",
                         "swapped",
+                        "content",
+                        "removed",
+                        "unverified",
+                        "old_key",
                     ]
                 },
                 "message": {"type": "string", "maxLength": 500},

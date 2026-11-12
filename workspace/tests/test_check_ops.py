@@ -47,6 +47,7 @@ def test_remove_keeps_text_and_proof_in_history(proj, run, validate, new_ticket)
         lambda t: t["checklist"][0]["evidence"].append(
             {"type": "file", "ref": "out/q3.csv", "text": "12 rows"}
         ),
+        by=tickets.SYSTEM,
     )
     code, out, _ = run("check", "remove", tid, "c1")
     assert code == 0 and "c1 removed" in out
@@ -105,7 +106,7 @@ def _doing(proj, tid, at):
     def op(t):
         t["checklist"][0].update({"state": "doing", "by": "agent:claude-code", "at": at})
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
 
 
 def _iso(secs_ago):
@@ -723,7 +724,7 @@ def test_generic_writes_by_an_agent_cannot_change_wont_do(proj, run, new_ticket,
         lambda t: t["checklist"].pop(0),
     ):
         with pytest.raises(tickets.Refused):
-            tickets.apply_op(proj, tid, change)
+            tickets.apply_op(proj, tid, change, by=tickets.SYSTEM)
     # patch / edit cannot reach the checklist at all
     assert run("ticket", "patch", tid, "--if-revision", "99", '{"checklist": []}')[0] == 2
     assert run("ticket", "edit", tid, "--title", "New title")[0] == 0
@@ -731,7 +732,9 @@ def test_generic_writes_by_an_agent_cannot_change_wont_do(proj, run, new_ticket,
     assert t["checklist"][0]["wont_do"] is True and t["checklist"][0]["reason"] == "Not needed"
     assert "wont_do" not in t["checklist"][1]
     # an unrelated agent write still works
-    assert tickets.apply_op(proj, tid, lambda t: t["checklist"][1].update(text="renamed"))[0]
+    assert tickets.apply_op(proj, tid, lambda t: t["checklist"][1].update(text="renamed"), by=tickets.SYSTEM)[
+        0
+    ]
 
 
 def test_progress_says_done_and_wont_do_apart(proj, run, new_ticket):
@@ -752,7 +755,7 @@ def test_prompt_names_declined_steps_and_cli_strips_control_chars(proj, run, new
     tid = with_checks(proj, run, new_ticket, n=2)
     run("check", "wont-do", tid, "c1", "--by", "human:tester")
     tickets.apply_op(  # a synced or hand-edited reason can carry control characters
-        proj, tid, lambda t: t["checklist"][0].update(reason="Skip \x1b[31mred\x07")
+        proj, tid, lambda t: t["checklist"][0].update(reason="Skip \x1b[31mred\x07"), by=tickets.SYSTEM
     )
     text = runs.fresh_prompt(tickets.load(proj, tid), [], proj)
     assert "Declined by a person" in text and "c1 (" in text and "c1: step 1" not in text

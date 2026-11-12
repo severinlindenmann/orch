@@ -991,7 +991,9 @@ def run(args: argparse.Namespace) -> None:
             shorthand[0] = json.dumps({**json.loads(shorthand[0]), "summary": args.summary})
         if args.file:
             tickets.check_exists(root, args.id, args.check)  # no orphan copy for a wrong id
-            attached = tickets.attach_file(root, args.id, args.file, args.title, args.role, args.summary)
+            attached = tickets.attach_file(
+                root, args.id, args.file, args.title, args.role, args.summary, by=by()
+            )
             shorthand.append(json.dumps(attached))
         t, c = tickets.check_done(root, args.id, args.check, args.evidence + shorthand, by())
         ev = c["evidence"][-1]

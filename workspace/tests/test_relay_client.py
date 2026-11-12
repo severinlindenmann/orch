@@ -637,6 +637,55 @@ def test_done_crash_before_seen_makes_no_second_ticket(proj, run, rel, monkeypat
     assert r["ticket"] == _tickets(run)[0]["id"] and len(_tickets(run)) == 1
 
 
+def test_done_survives_a_refused_ticket_write_and_does_not_retry(proj, run, rel, monkeypatch):
+    """A relay message whose ticket write is refused (the closed-ticket agent guard) is dropped: `done` still
+    marks it seen (no retry storm), reports no ticket, and the next message works."""
+    from orch import relay, tickets
+
+    connect(run, rel)
+    for i in (1, 2):
+        rel.inbox.append(msg(f"m_deleg0000000000{i}", "delegate", {"title": f"T{i}", "text": "x"}))
+    run("relay", "inbox")
+    for i in (1, 2):
+        run("relay", "allow", f"m_deleg0000000000{i}", "--once")
+    real = relay._ticket_for
+    calls = []
+
+    def refuse_first(root, m):
+        calls.append(m["id"])
+        if len(calls) == 1:
+            raise tickets.ClosedRefused("This ticket is closed, so the agent can't change it.")
+        return real(root, m)
+
+    monkeypatch.setattr(relay, "_ticket_for", refuse_first)
+    first = relay.done(proj, "m_deleg00000000001")
+    assert first["ticket"] is None and "m_deleg00000000001" in relay.seen(proj)
+    again = relay.done(proj, "m_deleg00000000001")
+    assert again["new"] is False and calls == ["m_deleg00000000001"]  # not retried
+    second = relay.done(proj, "m_deleg00000000002")
+    assert second["ticket"]  # the next message still gets its ticket
+
+
+def test_done_does_not_swallow_a_busy_refusal(proj, run, rel, monkeypatch):
+    """Only the closed-ticket guard drops a message: a busy lock or a sync wait is retried later."""
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "T", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000001", "--once")
+
+    def busy(root, m):
+        raise Refused("Ticket t_x is busy (retried for 5 s). Try again.")
+
+    monkeypatch.setattr(relay, "_ticket_for", busy)
+    with pytest.raises(Refused):
+        relay.done(proj, "m_deleg00000000001")
+    assert "m_deleg00000000001" not in relay.seen(proj)
+    assert not any(g.get("used") for g in relay.allows(proj)["given"])
+
+
 def test_done_holds_the_lock_and_refuses_when_busy(proj, run, rel):
     from orch import relay
 

@@ -64,7 +64,8 @@ _ENV_DENY_UP = frozenset(
     {
         *(v.upper() for v in ENV_DENY),
         "SHELLOPTS", "PS4", "PATHEXT", "COMSPEC", "PROMPT_COMMAND", "VISUAL", "MANPAGER", "LOCPATH",
-        "TMPDIR", "TEMP", "TMP", "NPM_TOKEN", "LESS", "LESSOPEN", "LESSCLOSE", "LESSKEY", "LESSHISTFILE",
+        "TMPDIR", "TEMP", "TMP", "NPM_TOKEN", "DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS",
+        "LESS", "LESSOPEN", "LESSCLOSE", "LESSKEY", "LESSHISTFILE",
         "LESSKEYIN", "LESSKEYIN_SYSTEM", "LESSKEY_SYSTEM", "LESSKEY_CONTENT", "LESSEDIT", "LESSSECURE",
     }
 )  # fmt: skip
@@ -565,7 +566,20 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
     for pn, p in profiles.items():
         if not isinstance(pn, str) or not PROFILE_RE.match(pn) or not isinstance(p, dict):
             raise Refused("A profile name uses lower-case letters, digits and dashes.")
-        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "agents_may_env", "skills", "extra"}):
+        if not (
+            p.keys()
+            <= {
+                "env",
+                "files",
+                "set",
+                "run",
+                "allow_get",
+                "agents_may_env",
+                "skills",
+                "extra",
+                "real_home",
+            }
+        ):
             raise Refused(f"The profile {pn} has a setting orch does not know.")
         if not (p.get("env") or p.get("files")):
             raise Refused(f"The profile {pn} needs at least one key.")
@@ -618,7 +632,7 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             or not all(isinstance(x, str) and 1 <= len(x) <= 300 for x in run)
         ):
             raise Refused(f"The profile {pn} has a bad command.")
-        for flag in ("allow_get", "agents_may_env"):
+        for flag in ("allow_get", "agents_may_env", "real_home"):
             if flag in p and not isinstance(p[flag], bool):
                 raise Refused(f"The profile {pn} has a bad {flag.replace('_', ' ')} setting.")
         sk = p.get("skills", [])
@@ -648,7 +662,7 @@ def _toml(profiles: dict) -> str:
             out.append("run = [" + ", ".join(_q(x) for x in p["run"]) + "]")
         if p.get("skills"):
             out.append("skills = [" + ", ".join(_q(x) for x in p["skills"]) + "]")
-        for flag in ("allow_get", "agents_may_env"):
+        for flag in ("allow_get", "agents_may_env", "real_home"):
             if p.get(flag):
                 out.append(f"{flag} = true")
         out.append("")

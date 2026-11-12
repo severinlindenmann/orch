@@ -386,7 +386,7 @@ def test_phone_chat_hides_settings_notes_without_trusting_raw_phone_label(proj, 
         tickets.add_history(t, f"agent:relay from {PHONE}", "Removed ext.relay", "cli")
         tickets.add_history(t, f"agent:relay from {PHONE}", "From My iPhone: Make the Q3 chart", "phone")
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     hist = phone_view.build(proj, tickets.load(proj, tid), [])["history_tail"]
     shown = [h for h in hist if "Make the Q3 chart" in h["text"]]
     assert [(h["who"], h["role"]) for h in shown] == [("orch", "agent")]
@@ -486,8 +486,10 @@ def test_light_update_for_a_listed_ticket_on_status_change(proj, run, new_ticket
         proj, lambda st: st.setdefault("synced", {}).setdefault(PHONE, []).append(tid)
     )  # listed earlier
     assert phone_view.sync_light(proj, now=1000) == [], "first look: only the baseline"
-    tickets.apply_op(proj, tid, lambda t: t.update(status="waiting", summary="Needs your answer"))
-    tickets.apply_op(proj, other, lambda t: t.update(status="waiting"))
+    tickets.apply_op(
+        proj, tid, lambda t: t.update(status="waiting", summary="Needs your answer"), by=tickets.SYSTEM
+    )
+    tickets.apply_op(proj, other, lambda t: t.update(status="waiting"), by=tickets.SYSTEM)
     assert phone_view.sync_light(proj, now=1001) == [], "debounced"
     assert phone_view.sync_light(proj, now=1100) == [(PHONE, tid)]
     m = conn.sent[-1]
@@ -513,7 +515,7 @@ def _list(proj, tid, ph=PHONE):
 
 
 def _bump(proj, tid, **kw):
-    tickets.apply_op(proj, tid, lambda t: t.update(**kw))
+    tickets.apply_op(proj, tid, lambda t: t.update(**kw), by=tickets.SYSTEM)
 
 
 def test_light_title_is_redacted(proj, run, new_ticket, conn):

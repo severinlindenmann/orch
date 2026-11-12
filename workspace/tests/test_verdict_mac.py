@@ -128,7 +128,7 @@ def test_the_persons_looks_good_signs_the_done_and_it_lists_as_done(ws, run, mon
 
 def test_the_phone_accept_signs_through_the_relay_channel(ws, run):
     tid = _new(run)
-    tickets.apply_op(ws, tid, lambda t: t.update(status="review"))
+    tickets.apply_op(ws, tid, lambda t: t.update(status="review"), by=tickets.SYSTEM)
     hp.human_key(ws)
     with pytest.raises(Refused):
         tickets.accept_review(ws, tid, "human:phone")  # not proven: nothing becomes Done
@@ -192,7 +192,9 @@ def test_a_direct_write_of_a_new_done_without_a_verifying_entry_is_refused(ws, r
             ws, {**t, "status": "done", "verdicts": [{"kind": "person", "nonce": "0" * 16, "mac": "A" * 43}]}
         )
     with pytest.raises(Refused, match="Done needs your OK"):
-        tickets.apply_op(ws, tid, lambda x: x.update(status="done"))  # no op makes a ticket Done unsigned
+        tickets.apply_op(
+            ws, tid, lambda x: x.update(status="done"), by=tickets.SYSTEM
+        )  # no op makes a ticket Done unsigned
     assert _raw(ws, tid)["status"] != "done"
 
 
@@ -214,6 +216,9 @@ def test_reopen_tombstones_and_the_old_file_content_is_review(ws, run, monkeypat
     old = _raw(ws, tid)
     assert tickets.load(ws, tid)["status"] == "done"
     code, out, err = run("ticket", "status", tid, "active", "--by", "agent:x", "--json")
+    assert code == 2 and "ticket is closed" in out + err  # an agent never re-opens a Done ticket (#542)
+    assert hp.verdict_ledger(ws)[tid] is not None
+    code, out, err = run("ticket", "status", tid, "active", "--by", "human:x", "--json")
     assert code == 0, out + err
     assert hp.verdict_ledger(ws)[tid] is None  # tombstone, written by the core's own write
     tickets.ticket_path(ws, tid).write_text(json.dumps(old))  # the old Done content comes back
@@ -252,7 +257,8 @@ def test_a_newer_verdict_supersedes_an_older_one(ws, run, monkeypatch):
     tid = _finished(ws, run)
     _verdict(ws, run, monkeypatch, tid)
     first = _raw(ws, tid)
-    run("ticket", "status", tid, "active", "--by", "agent:x", "--json")
+    code, out, err = run("ticket", "status", tid, "active", "--by", "human:x", "--json")  # a person re-opens
+    assert code == 0, out + err
     _verdict(ws, run, monkeypatch, tid)
     assert tickets.load(ws, tid)["status"] == "done"
     tickets.ticket_path(ws, tid).write_text(json.dumps(first))  # the older valid MAC replayed
@@ -298,7 +304,7 @@ def test_an_unrelated_op_keeps_the_raw_done_of_an_unsigned_ticket(ws, run):
     tid = _finished(ws, run)
     _edit(ws, tid, status="done")
     code, out, err = run("ticket", "set", tid, "note", "a note", "--by", "human:pat", "--json")
-    tickets.apply_op(ws, tid, lambda t: tickets.add_history(t, "human:pat", "a line"))
+    tickets.apply_op(ws, tid, lambda t: tickets.add_history(t, "human:pat", "a line"), by=tickets.SYSTEM)
     assert _raw(ws, tid)["status"] == "done"
     assert tickets.load(ws, tid)["status"] == "review"
 
@@ -306,7 +312,7 @@ def test_an_unrelated_op_keeps_the_raw_done_of_an_unsigned_ticket(ws, run):
 def test_the_person_can_still_click_looks_good_after_unrelated_ops(ws, run, monkeypatch):
     tid = _finished(ws, run)
     _edit(ws, tid, status="done")
-    tickets.apply_op(ws, tid, lambda t: tickets.add_history(t, "human:pat", "a line"))
+    tickets.apply_op(ws, tid, lambda t: tickets.add_history(t, "human:pat", "a line"), by=tickets.SYSTEM)
     _verdict(ws, run, monkeypatch, tid)
     assert tickets.load(ws, tid)["status"] == "done"
 
@@ -568,6 +574,9 @@ def test_a_step_reopened_and_redone_does_not_bring_the_old_done_back(ws, run, mo
     _verdict(ws, run, monkeypatch, tid)
     assert tickets.load(ws, tid)["status"] == "done"
     code, out, err = run("check", "reopen", tid, "c1", "--by", "agent:x")
+    assert code == 2 and "ticket is closed" in out + err  # an agent changes no check of a Done ticket (#542)
+    assert hp.verdict_ledger(ws)[tid] is not None
+    code, out, err = run("check", "reopen", tid, "c1", "--by", "human:x")
     assert code == 0, out + err
     assert hp.verdict_ledger(ws)[tid] is None
     code, out, err = run("check", "done", tid, "c1", "--note", "other", "--by", "agent:x", "--json")
@@ -583,7 +592,7 @@ def test_a_done_write_that_stopped_verifying_tombstones_the_entry(ws, run, monke
     t = _raw(ws, tid)
     t["checklist"][0]["text"] = "reworded"  # the file still says done and still holds the entry
     tickets.ticket_path(ws, tid).write_text(json.dumps(t))
-    tickets.apply_op(ws, tid, lambda x: tickets.add_history(x, "human:pat", "a line"))
+    tickets.apply_op(ws, tid, lambda x: tickets.add_history(x, "human:pat", "a line"), by=tickets.SYSTEM)
     assert hp.verdict_ledger(ws)[tid] is None  # the old state can never come back by editing the file back
 
 

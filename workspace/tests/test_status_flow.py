@@ -110,8 +110,10 @@ def test_mark_missing(proj):
 def test_patch_without_status_keeps_done(proj, new_ticket):
     tid = new_ticket()
     t = tickets.set_status(proj, tid, "done", "human:tester")
-    t = tickets.patch(proj, tid, t["revision"], '{"title":"New"}', "agent:generic")
-    assert t["status"] == "done"
+    with pytest.raises(Refused, match="ticket is closed"):  # an agent changes nothing in a Done ticket (#542)
+        tickets.patch(proj, tid, t["revision"], '{"title":"New"}', "agent:generic")
+    t = tickets.patch(proj, tid, t["revision"], '{"title":"New"}', "human:tester")
+    assert t["status"] == "done" and t["title"] == "New"
 
 
 @pytest.mark.parametrize("patch", [False, True])

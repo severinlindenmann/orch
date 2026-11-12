@@ -799,8 +799,14 @@ def test_clean_pdfs_are_shared_and_only_a_real_match_says_password(proj, run, re
     text = _pdf(b"BT /F1 12 Tf 72 712 Td (Lunch menu: soup and bread) Tj ET")
     assert cg.check_file(text, "menu.pdf") == "application/pdf"
     assert cg.check_file(_pdf(), "empty.pdf") == "application/pdf"  # no text at all: nothing to hide
-    img = _pdf(b"\xff\xd8\xff\xe0" + b"\x00" * 40, b"/DCTDecode")  # a picture stream: not a text filter
+    # a picture (an /Image XObject with a DCT stream): not a text filter. #333: the same filter on a stream
+    # that is not an image could be anything, so the strict scan can't vouch for it
+    not_img = _pdf(b"\xff\xd8\xff\xe0" + b"\x00" * 40, b"/DCTDecode")
+    img = not_img.replace(b"/Filter /DCTDecode", b"/Type /XObject /Subtype /Image /Filter /DCTDecode")
     assert cg.check_file(img, "scan.pdf") == "application/pdf"
+    with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+        cg.check_file(not_img, "scan.pdf")
+    assert cg.check_file(not_img, "scan.pdf", allow_unchecked=True) == "application/pdf"
     with pytest.raises(cg.Refused, match="looks like it holds a password"):
         cg.check_file(_pdf(b"BT (password = hunter2hunter2) Tj ET"), "x.pdf")
     for bad in (_pdf(b'<~87cURD]i,"Ebo80~>', b"/ASCII85Decode"), _pdf(b"not zlib at all", b"[/FlateDecode]")):
@@ -858,6 +864,423 @@ def test_clean_pdfs_are_shared_and_only_a_real_match_says_password(proj, run, re
         "relay", "group", "share", host, str(away / "plain" / "id_rsa"), "--click", "--unchecked-ok"
     )
     assert code != 0 and "looks like it holds a password" in err
+
+
+def _pdf_raw(*objs: bytes) -> bytes:
+    """A PDF from raw object bytes (headers, dictionaries and streams written by the test, quirks
+    included)."""
+    head = b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+    head += b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+    return head + b"".join(objs) + b"trailer << /Root 1 0 R >>\n%%EOF\n"
+
+
+def test_pdf_scan_fails_closed_when_a_stream_is_not_read_exactly():
+    """#333: a stream the strict scan can't tie to its OWN dictionary, or whose filter it can't read, is
+    Unchecked (never skipped); with the person's OK (allow_unchecked) the scan stays best effort and
+    shares."""
+    import base64
+    import zlib
+
+    a85 = base64.a85encode(b"BT (Lunch menu: soup) Tj ET", adobe=True)
+    text = b"<< /Length %d /Filter /ASCII85Decode >>\nstream\n%s\nendstream\nendobj\n" % (len(a85), a85)
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 8
+    pic = b"3 0 obj << /Subtype /Image /Filter /DCTDecode /Length 12 >>\nstream\n%s\nendstream\nendobj\n"
+    pic %= jpeg
+    plain = b"3 0 obj << /Length 11 >>\nstream\nplain wordsendstream\nendobj\n"  # no newline before endstream
+    by_ref = text.replace(b"/Filter /ASCII85Decode", b"/Filter 5 0 R")
+    long_dict = text.replace(b">>\nstream", b"/Pad (" + b"x" * 5000 + b") >>\nstream")
+    cases = {
+        # 1. a fake `stream` start in a comment: the next object's text stream was blamed on the page dict
+        "fake start": _pdf_raw(b"3 0 obj << /Type /Page >> endobj\n% upstream\n", b"4 0 obj " + text),
+        # 2. a filter the scan can't read: by reference, behind a dictionary past 4096 bytes (round 3: read
+        # forward in full, so the A85 filter is what refuses it), behind a `N 0\nobj` header
+        "filter by ref": _pdf_raw(b"5 0 obj [/ASCII85Decode] endobj\n", b"4 0 obj " + by_ref),
+        "long dict": _pdf_raw(b"4 0 obj " + long_dict),
+        "split header": _pdf_raw(pic, b"4 0\nobj " + text),
+        # 3. no newline before endstream: the span ran into the next stream, never inflated on its own
+        "no newline": _pdf_raw(plain, b"4 0 obj " + text),
+    }
+    for why, data in cases.items():
+        with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+            cg.check_file(data, "x.pdf")
+        assert cg.check_file(data, "x.pdf", allow_unchecked=True) == "application/pdf", why
+    # the stream behind a missing newline is inflated on its own: a real secret there says "password"
+    secret = zlib.compress(b"BT (password = hunter2hunter2) Tj ET")
+    flate = b"4 0 obj << /Length %d /Filter /FlateDecode >>\nstream\n%s\nendstream\nendobj\n"
+    flate %= (len(secret), secret)
+    for ok in (False, True):
+        with pytest.raises(cg.Refused, match="looks like it holds a password"):
+            cg.check_file(_pdf_raw(plain, flate), "x.pdf", allow_unchecked=ok)
+    # still shared: a picture or filterless stream whose own dictionary reads exactly, even split
+    for data in (_pdf_raw(pic), _pdf_raw(pic.replace(b"3 0 obj", b"3 0\nobj")), _pdf_raw(plain)):
+        assert cg.check_file(data, "x.pdf") == "application/pdf"
+
+
+def _pdf_obj(dict_body: bytes, data: bytes, gap: bytes = b"\n", eol: bytes = b"\n") -> bytes:
+    """`4 0 obj << dict_body >>` + gap + `stream` + eol + data + `endstream`, in a _pdf_raw PDF."""
+    obj = b"4 0 obj << /Length %d %s >>%sstream%s%s\nendstream\nendobj\n" % (
+        len(data),
+        dict_body,
+        gap,
+        eol,
+        data,
+    )
+    return _pdf_raw(obj)
+
+
+def test_pdf_strict_scan_reads_a_stream_only_by_its_own_exact_dictionary():
+    """#333 round 2 (delta333-1): in strict mode a stream passes only with its own dictionary parsed exactly
+    and no filter, exactly [/FlateDecode] (no predictor) inflated to the end, or one picture filter (DCT/JPX)
+    on an /Image XObject. Each bypass below is Unchecked; with the person's OK it shares (best effort)."""
+    import zlib
+
+    secret = b"BT (password = hunter2hunter2) Tj ET"
+    hexed = secret.hex().encode() + b">"
+    # RunLength data that starts with a complete zlib stream: 0x78 = "copy the next 121 bytes" (zlib's own
+    # header byte), so zlib reaches its end and the declared filter used to be ignored
+    lead = zlib.compress(b"")
+    rle = lead + b"x" * (121 - len(lead) + 1) + b"\x80"
+    # PNG Sub predictor rows: every byte is a difference, the inflated text is unreadable
+    rows = (
+        b"\x01"
+        + bytes([secret[0]])
+        + bytes((secret[i] - secret[i - 1]) & 0xFF for i in range(1, len(secret)))
+    )
+    cases = {
+        # H1. a chain (the scan sees one layer only) and a predictor whose /Columns do not fit the rows
+        # (round 4: a fitting predictor is undone and scanned, test_pdf_flate_predictors_are_undone...)
+        "flate+hex": _pdf_obj(b"/Filter [/FlateDecode /ASCIIHexDecode]", zlib.compress(hexed)),
+        "flate+flate": _pdf_obj(b"/Filter [/FlateDecode /FlateDecode]", zlib.compress(zlib.compress(secret))),
+        "predictor rows misfit": _pdf_obj(
+            b"/Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns %d >>" % (len(secret) + 1),
+            zlib.compress(rows),
+        ),
+        # H2. a complete zlib stream up front hides a non-Flate filter
+        "zlib prefix": _pdf_obj(b"/Filter /RunLengthDecode", rle),
+        # H3. a fake `N G obj <<` inside the real dictionary, in a comment or a string
+        "fake obj comment": _pdf_raw(
+            b"4 0 obj << /Filter /ASCIIHexDecode %% 9 0 obj <<\n>>\nstream\n%s\nendstream\nendobj\n" % hexed
+        ),
+        "fake obj string": _pdf_raw(
+            b"4 0 obj << /Filter /ASCIIHexDecode /X (9 0 obj << %%)\n>>\nstream\n%s\nendstream\nendobj\n"
+            % hexed
+        ),
+        # H4. NUL (or another odd whitespace) before `stream`, or inside a name
+        "nul gap": _pdf_obj(b"/Filter /ASCIIHexDecode", hexed, gap=b"\x00"),
+        "form feed gap": _pdf_obj(b"/Filter /ASCIIHexDecode", hexed, gap=b"\x0c"),
+        "nul in dict": _pdf_obj(b"/Filter\x00/ASCIIHexDecode", hexed),
+        # M1. a lossless "image" filter carries any bytes; a picture filter off an /Image XObject
+        "ccitt": _pdf_obj(
+            b"/Type /EmbeddedFile /Filter /CCITTFaxDecode /DecodeParms << /K -1 /Columns 8 >>", b"\x00" * 8
+        ),
+        "jbig2 image": _pdf_obj(b"/Subtype /Image /Filter /JBIG2Decode", b"\x00" * 8),
+        "dct not image": _pdf_obj(
+            b"/Type /EmbeddedFile /Filter /DCTDecode", b"\xff\xd8\xff\xe0" + b"\x00" * 8
+        ),
+        # M2. spaces between `stream` and the end of line
+        "stream space": _pdf_obj(b"/Filter /FlateDecode", zlib.compress(b"BT (Lunch) Tj ET"), eol=b" \n"),
+        # the filter key spelled the way readers also take it (/F, /DP), or a locked file spelled with #xx
+        "abbrev F": _pdf_obj(b"/F /ASCIIHexDecode", hexed),
+        "encrypt #xx": _pdf_raw(b"9 0 obj << /Encr#79pt 5 0 R >> endobj\n"),
+    }
+    for why, data in cases.items():
+        with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+            cg.check_file(data, "x.pdf")
+        assert cg.check_file(data, "x.pdf", allow_unchecked=True) == "application/pdf", why
+    # best effort still reads what it can: the M2 stream's text is inflated, so a secret there is found
+    leak = _pdf_obj(b"/Filter /FlateDecode", zlib.compress(secret), eol=b" \n")
+    with pytest.raises(cg.Refused, match="looks like it holds a password"):
+        cg.check_file(leak, "x.pdf", allow_unchecked=True)
+    # still shared: plain Flate (with or without a no-op DecodeParms), filterless, and DCT/JPX pictures
+    text = zlib.compress(b"BT (Lunch menu: soup) Tj ET")
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 8
+    for data in (
+        _pdf_obj(b"/Filter /FlateDecode", text),
+        _pdf_obj(b"/Filter [/FlateDecode] /DecodeParms << /Predictor 1 >>", text),
+        _pdf_obj(b"/Filter /FlateDecode", text, gap=b" ", eol=b"\r\n"),
+        _pdf_obj(b"", b"BT (Lunch) Tj ET"),
+        _pdf_obj(b"/Type /XObject /Subtype /Image /Filter /DCTDecode", jpeg),
+        _pdf_obj(b"/Subtype /Image /Filter [/JPXDecode]", jpeg),
+    ):
+        assert cg.check_file(data, "x.pdf") == "application/pdf"
+
+
+def test_pdf_strict_scan_takes_the_dictionary_a_forward_read_gives_each_stream():
+    """#333 round 3 (delta333-2 N1): a stream's dictionary is the one that ends right before its own
+    `stream` keyword in a forward read of the whole file, never one picked from regex candidates. Before,
+    each lever below knocked the real dictionary out of the candidates, so a fake `9 0 obj <<` in a string
+    was the only one left (no filter: passed) while readers decoded /ASCIIHexDecode. All four are now
+    Unchecked; with the person's OK they share (best effort)."""
+    import zlib
+
+    hexed = b"4254202870617373776f7264203d2068756e7465723268756e746572322920546a204554>"
+    tail = b"/X (9 0 obj << % )\n>>\nstream\n" + hexed + b"\nendstream\nendobj\n"
+    ahx = b"<< /Filter /ASCIIHexDecode "
+    cases = {
+        # 1. a repeated key (readers take it: first or last wins)
+        "duplicate key": _pdf_raw(b"4 0 obj " + ahx + b"/Q 1 /Q 1 " + tail),
+        # 2. the header far before the `<<` (past the old 256-byte window)
+        "far header": _pdf_raw(b"4 0 obj %" + b"p" * 300 + b"\n" + ahx + tail),
+        # 3. a header the regex missed but readers take: a comment between its tokens, no gap after endobj
+        "comment in header": _pdf_raw(b"4 %c\n0 obj " + ahx + tail),
+        "endobj4": _pdf_raw(b"3 0 obj << /Type /Page >> endobj4 0 obj " + ahx + tail),
+        # 4. nesting deeper than the old limit of 32
+        "deep nesting": _pdf_raw(b"4 0 obj " + ahx + b"/Z " + b"[" * 33 + b"]" * 33 + b" " + tail),
+    }
+    for why, data in cases.items():
+        with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+            cg.check_file(data, "x.pdf")
+        assert cg.check_file(data, "x.pdf", allow_unchecked=True) == "application/pdf", why
+    # the same levers with no fake at all: the forward read still reaches the real dictionary, so a clean
+    # Flate stream shares and the hex filter is caught by the rule itself
+    text = zlib.compress(b"BT (Lunch menu: soup) Tj ET")
+    body = b"/Length %d >>\nstream\n%s\nendstream\nendobj\n"
+    levers = {
+        "duplicate key": (b"4 0 obj << /Q 1 /Q 2 ", b""),
+        "far header": (b"4 0 obj %" + b"p" * 300 + b"\n<< ", b""),
+        "comment in header": (b"4 %c\n0 obj << ", b""),
+        "endobj4": (b"4 0 obj << ", b"3 0 obj << /Type /Page >> endobj"),
+        "deep nesting": (b"4 0 obj << /Z " + b"[" * 60 + b"]" * 60 + b" ", b""),
+    }
+    for why, (head, before) in levers.items():
+        flate = before + head + b"/Filter /FlateDecode " + body % (len(text), text)
+        assert cg.check_file(_pdf_raw(flate), "x.pdf") == "application/pdf", why
+        hexy = before + head + b"/Filter /ASCIIHexDecode " + body % (len(hexed), hexed)
+        with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+            cg.check_file(_pdf_raw(hexy), "x.pdf")
+    # never resolved: a repeated filter or type key, nesting past 64, a header a reader may be sent to that
+    # sits inside a string or inside stream data (that reader reads the object this parse does not)
+    plain = b"<< /Length %d >>\nstream\n%s\nendstream\nendobj\n" % (len(hexed), hexed)
+    fake = b"5 0 obj << /Filter /ASCIIHexDecode /K %"
+    content = b"BT (Lunch) Tj ET\n" + fake + b"\n"
+    unresolved = {
+        "repeated filter": _pdf_raw(
+            b"4 0 obj << /Filter /FlateDecode /Filter /FlateDecode " + body % (len(text), text)
+        ),
+        "repeated subtype": _pdf_raw(
+            b"4 0 obj << /Subtype /Image /Sub#74ype /Image /Filter /DCTDecode "
+            + body % (4, b"\xff\xd8\xff\xe0")
+        ),
+        "nesting past 64": _pdf_raw(b"9 0 obj [" + b"[" * 65 + b"]" * 65 + b"] endobj\n"),
+        "header in a string": _pdf_raw(b"9 0 obj (" + fake + b" )\nendobj\n", b"4 0 obj " + plain),
+        "header in stream data": _pdf_raw(
+            b"3 0 obj << /Length %d >>\nstream\n%s\nendstream\nendobj\n" % (len(content), content),
+            b"4 0 obj " + plain,
+        ),
+    }
+    for why, data in unresolved.items():
+        with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+            cg.check_file(data, "x.pdf")
+        assert cg.check_file(data, "x.pdf", allow_unchecked=True) == "application/pdf", why
+
+
+def _png_filter(rows: list[bytes], kinds: list[int], bpp: int) -> bytes:
+    """PNG predictor rows as a writer makes them: each row = its filter byte + the differences."""
+
+    def paeth(a: int, b: int, c: int) -> int:
+        p = a + b - c
+        pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+        return a if pa <= pb and pa <= pc else b if pb <= pc else c
+
+    out, prev = b"", bytes(len(rows[0]))
+    for row, k in zip(rows, kinds, strict=True):
+        enc = bytearray([k])
+        for i, x in enumerate(row):
+            a, b, c = (row[i - bpp], prev[i], prev[i - bpp]) if i >= bpp else (0, prev[i], 0)
+            enc.append((x - (0, a, b, (a + b) // 2, paeth(a, b, c))[k]) & 0xFF)
+        out, prev = out + bytes(enc), row
+    return out
+
+
+def _tiff_filter(rows: list[list[int]], colors: int, bpc: int, row_bytes: int) -> bytes:
+    """TIFF predictor 2 rows: each component minus the one `colors` to its left, packed big-endian."""
+    out = b""
+    for comps in rows:
+        left = [0] * colors + comps[:-colors]
+        diff = [(v - lv) % (1 << bpc) for v, lv in zip(comps, left, strict=True)]
+        n = 0
+        for v in diff:
+            n = n << bpc | v
+        out += (n << (row_bytes * 8 - bpc * len(diff))).to_bytes(row_bytes, "big")
+    return out
+
+
+def test_pdf_flate_predictors_are_undone_and_scanned():
+    """#333 round 4 (delta333-3): strict refused every Flate stream with /Predictor != 1, so the xref
+    streams and PNG-style images of everyday PDFs were Unchecked. A predictor is now undone (PNG 10-15
+    with each row's own filter byte, TIFF 2) and the result scanned; odd parameters stay Unchecked. No
+    /Type or /Subtype exempts a stream."""
+    import random
+    import zlib
+
+    rnd = random.Random(333)
+    # the decoder itself: every PNG filter kind, and TIFF at every bit depth, round-trip
+    for bpp, width in ((1, 7), (3, 5), (4, 1), (2, 9)):
+        rows = [bytes(rnd.randrange(256) for _ in range(width * bpp)) for _ in range(10)]
+        kinds = [0, 1, 2, 3, 4, 4, 3, 2, 1, 0]
+        assert cg._pdf_unpredict(_png_filter(rows, kinds, bpp), 15, bpp, 8, width) == b"".join(rows)
+    for colors, bpc, columns in ((3, 8, 4), (2, 16, 3), (1, 4, 5), (3, 1, 3), (2, 2, 7)):
+        comps = [[rnd.randrange(1 << bpc) for _ in range(colors * columns)] for _ in range(4)]
+        size = (colors * bpc * columns + 7) // 8
+        packed = [sum(v << (size * 8 - bpc * (i + 1)) for i, v in enumerate(r)) for r in comps]
+        raw = b"".join(n.to_bytes(size, "big") for n in packed)
+        predicted = _tiff_filter(comps, colors, bpc, size)
+        assert cg._pdf_unpredict(predicted, 2, colors, bpc, columns) == raw, (colors, bpc)
+
+    # a clean PDF with an xref stream (PNG Up, /Predictor 12, as writers make them) shares in strict mode
+    entries = [bytes([1]) + (15 + 60 * n).to_bytes(2, "big") + b"\x00" for n in range(6)]
+    xref = zlib.compress(_png_filter(entries, [2] * 6, 1))
+    xobj = (
+        b"5 0 obj << /Type /XRef /Size 6 /W [1 2 1] /Root 1 0 R /Filter /FlateDecode"
+        b" /DecodeParms << /Columns 4 /Predictor 12 >> /Length %d >>\nstream\n%s\nendstream\nendobj\n"
+    ) % (len(xref), xref)
+    assert cg.check_file(_pdf_raw(xobj), "x.pdf") == "application/pdf"
+    # a Flate RGB image with /Predictor 15 (mixed row filters) shares
+    pixels = [bytes(rnd.randrange(256) for _ in range(3 * 16)) for _ in range(16)]
+    img = zlib.compress(_png_filter(pixels, [n % 5 for n in range(16)], 3))
+    img_dict = b"/Type /XObject /Subtype /Image /Width 16 /Height 16 /ColorSpace /DeviceRGB"
+    img_dict += b" /BitsPerComponent 8 /Filter /FlateDecode"
+    img_dict += b" /DecodeParms << /Predictor 15 /Colors 3 /Columns 16 >>"
+    assert cg.check_file(_pdf_obj(img_dict, img), "x.pdf") == "application/pdf"
+    # the same parameters every way a reader takes them: null as absent, a one-entry array, defaults
+    text = b"BT (Lunch menu: soup) Tj ET"
+    for parms, data in (
+        (b"[null]", text),
+        (b"null", text),
+        (b"[<< /Predictor 12 /Columns %d >>]" % len(text), _png_filter([text], [2], 1)),
+        (b"[<< /Predictor 12 /Columns %d /Colors null >>]" % len(text), _png_filter([text], [1], 1)),
+        (b"<< /Predictor null >>", text),
+        (b"<< /Predictor 2 /Columns %d >>" % len(text), _tiff_filter([list(text)], 1, 8, len(text))),
+    ):
+        body = b"/Filter [/FlateDecode] /DecodeParms " + parms
+        assert cg.check_file(_pdf_obj(body, zlib.compress(data)), "x.pdf") == "application/pdf", parms
+
+    # a password hidden behind PNG Up rows (the inflated bytes are differences) is found, OK or not
+    rows = [b"Lunch menu: soup and bread, and tea.", b"BT (password = hunter2hunter2) Tj ET"]
+    assert len(rows[0]) == len(rows[1]) == 36
+    hidden = _png_filter(rows, [0, 2], 1)
+    assert b"hunter2" not in hidden
+    up = b"/Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns 36 >>"
+    secret = _pdf_obj(up, zlib.compress(hidden))
+    for ok in (False, True):
+        with pytest.raises(cg.Refused, match="looks like it holds a password"):
+            cg.check_file(secret, "x.pdf", allow_unchecked=ok)
+    # an /XRef or /Image stream is decoded and scanned like any other
+    for kind in (b"/Type /XRef", b"/Type /XObject /Subtype /Image"):
+        body = kind + b" /Filter /FlateDecode /DecodeParms << /Predictor 15 /Columns 36 >>"
+        with pytest.raises(cg.Refused, match="looks like it holds a password"):
+            cg.check_file(_pdf_obj(body, zlib.compress(hidden)), "x.pdf")
+
+    # odd parameters, or data that does not fit them: Unchecked; with the person's OK, best effort shares
+    rows8 = zlib.compress(_png_filter([b"abcdefgh"] * 2, [2, 2], 1))
+    odd = {
+        "predictor 3": (b"<< /Predictor 3 /Columns 8 >>", rows8),
+        "predictor 16": (b"<< /Predictor 16 /Columns 8 >>", rows8),
+        "real number": (b"<< /Predictor 12 /Columns 8.0 >>", rows8),
+        "negative": (b"<< /Predictor 12 /Columns -8 >>", rows8),
+        "by reference": (b"<< /Predictor 12 /Columns 5 0 R >>", rows8),
+        "columns 0": (b"<< /Predictor 12 /Columns 0 >>", rows8),
+        "columns huge": (b"<< /Predictor 12 /Columns 99999999999 >>", rows8),
+        "columns past bound": (b"<< /Predictor 12 /Columns 16777217 >>", rows8),
+        "colors huge": (b"<< /Predictor 12 /Columns 1 /Colors 64 >>", rows8),
+        "bpc 3": (b"<< /Predictor 12 /Columns 8 /BitsPerComponent 3 >>", rows8),
+        "rows misfit": (b"<< /Predictor 12 /Columns 7 >>", rows8),
+        "tiff misfit": (b"<< /Predictor 2 /Columns 5 >>", rows8),
+        "png filter 5": (b"<< /Predictor 12 /Columns 8 >>", zlib.compress(b"\x05abcdefgh")),
+        "parms by reference": (b"5 0 R", rows8),
+        "two parms": (b"[null null]", rows8),
+        "parms not a dict": (b"/Predictor", rows8),
+    }
+    for why, (parms, data) in odd.items():
+        pdf = _pdf_obj(b"/Filter /FlateDecode /DecodeParms " + parms, data)
+        with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+            cg.check_file(pdf, "x.pdf")
+        assert cg.check_file(pdf, "x.pdf", allow_unchecked=True) == "application/pdf", why
+    # a null filter is not "no filter" (Low)
+    with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+        cg.check_file(_pdf_obj(b"/Filter null", b"BT (Lunch) Tj ET"), "x.pdf")
+
+
+def test_pdf_predictor_work_is_capped_across_the_file():
+    """A big stream with a costly predictor (TIFF at 1 bit per component) is not decoded past PREDICT_MAX:
+    strict says Unchecked, the person's OK scans the raw inflated bytes (and never raises Unchecked)."""
+    import zlib
+
+    big = zlib.compress(bytes(40 * 1024 * 1024))
+    parms = b"/Filter /FlateDecode /DecodeParms << /Predictor 2 /BitsPerComponent 1 /Columns 8 >>"
+    pdf = _pdf_obj(parms, big)
+    with pytest.raises(cg.Unchecked):
+        cg.check_file(pdf, "x.pdf")
+    assert cg.check_file(pdf, "x.pdf", allow_unchecked=True) == "application/pdf"
+    # several streams add up: each under the cap alone, together over it
+    parms8 = b"/Filter /FlateDecode /DecodeParms << /Predictor 2 /BitsPerComponent 8 /Columns 8 >>"
+    one = zlib.compress(bytes(5 * 1024 * 1024))
+    two = _pdf_obj(parms8, one) + _pdf_obj(parms8, one)
+    with pytest.raises(cg.Unchecked):
+        cg.check_file(two, "x.pdf")
+    assert cg.check_file(_pdf_obj(parms8, one), "x.pdf") == "application/pdf"
+
+
+def test_pdf_predictor_cap_charges_work_not_input():
+    """Sub-byte TIFF predictor streams cost 8/bpc per byte: 2 MB at 1 bit is Unchecked in strict mode (and
+    scanned raw with the person's OK), a small one still shares; PNG Paeth rows cost x4."""
+    import zlib
+
+    parms = b"/Filter /FlateDecode /DecodeParms << /Predictor 2 /BitsPerComponent 1 /Columns 8 >>"
+    pdf = _pdf_obj(parms, zlib.compress(bytes(2 * 1024 * 1024)))
+    with pytest.raises(cg.Unchecked):
+        cg.check_file(pdf, "x.pdf")
+    assert cg.check_file(pdf, "x.pdf", allow_unchecked=True) == "application/pdf"
+    small = _pdf_obj(parms, zlib.compress(bytes(300)))
+    assert cg.check_file(small, "x.pdf") == "application/pdf"
+    paeth = (b"\x04" + bytes(7)) * (3 * 1024 * 1024 // 8)  # 3 MB x4 = 12 MB of work
+    assert cg._pdf_predict_work(paeth, 14, 1, 8, 7) == 4 * len(paeth)
+    up = (b"\x02" + bytes(7)) * 8
+    assert cg._pdf_predict_work(up, 12, 1, 8, 7) == len(up)
+
+
+def test_pdf_repeated_predictor_keys_are_unchecked():
+    """A repeated /Predictor (readers differ on first or last) hides nothing: strict says Unchecked."""
+    import zlib
+
+    rows = [b"Lunch menu: soup and bread, and tea.", b"BT (password = hunter2hunter2) Tj ET"]
+    hidden = _png_filter(rows, [0, 2], 1)
+    body = b"/Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns 36 /Predictor 1 >>"
+    pdf = _pdf_obj(body, zlib.compress(hidden))
+    with pytest.raises(cg.Unchecked):
+        cg.check_file(pdf, "x.pdf")
+    try:
+        cg.check_file(pdf, "x.pdf", allow_unchecked=True)
+    except cg.Unchecked:
+        pytest.fail("allow_unchecked must not raise Unchecked")
+    except cg.Refused:
+        pass  # a password found is fine here
+
+
+def test_pdf_failed_inflations_count_toward_the_cap(monkeypatch):
+    """#333 round 3 (delta333-2 N3): a stream that inflates far and then breaks (a bad check value at the
+    very end) is charged to the cap like one that ends well, and is not inflated a second time."""
+    import zlib
+
+    # 3 MB each, inflated in 1 MB steps: the first two steps count, the last one breaks on the check value
+    monkeypatch.setattr(cg, "INFLATE_MAX", 4_500_000)
+    broken = bytearray(zlib.compress(b"\0" * 3_000_000))
+    broken[-1] ^= 0xFF
+    obj = b"%d 0 obj << /Length %d /Filter /FlateDecode >>\nstream\n%s\nendstream\nendobj\n"
+    data = _pdf_raw(*(obj % (n, len(broken), bytes(broken)) for n in (4, 5, 6)))
+    with pytest.raises(cg.Refused, match="too large once it is opened"):  # best effort reads them all
+        cg.check_file(data, "x.pdf", allow_unchecked=True)
+    with pytest.raises(cg.Unchecked, match="couldn't check this file"):  # strict stops at the first
+        cg.check_file(data, "x.pdf")
+    # one such stream fits: inflated once (it broke before `endstream`, a shorter try breaks the same),
+    # Unchecked in strict mode (never read to its end), shared with the OK
+    real, calls = cg._pdf_inflate, []
+    monkeypatch.setattr(cg, "_pdf_inflate", lambda *a: calls.append(1) or real(*a))
+    one = _pdf_raw(obj % (4, len(broken), bytes(broken)))
+    assert cg.check_file(one, "x.pdf", allow_unchecked=True) == "application/pdf"
+    assert len(calls) == 1
+    with pytest.raises(cg.Unchecked, match="couldn't check this file"):
+        cg.check_file(one, "x.pdf")
 
 
 def test_image_needs_a_click_and_size_and_count_limits(proj, run, rel, host):

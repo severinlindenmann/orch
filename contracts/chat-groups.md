@@ -243,7 +243,29 @@ person clicks "Share with group" on an artifact. Nothing is shared automatically
   `.env`/token file name) says "password": a file in a hidden or `secrets` folder (in the workspace or anywhere else,
   also through a link) is refused with "Files in hidden or secrets folders are not shared". A locked PDF or a PDF
   stream that can't be read (a text filter other than FlateDecode, or broken) is "We couldn't check this file ..." —
-  the person may share it anyway after the human confirm (its content is still scanned), an agent never.
+  the person may share it anyway after the human confirm (its content is still scanned), an agent never. **The PDF
+  scan is a best-effort text match** on the raw bytes plus the inflated streams. It is strict only about which
+  streams it can inflate. The file is read forward from its first byte, so each stream gets the dictionary that
+  ends right before its own `stream` keyword. A stream passes only when that dictionary is read exactly and its
+  filter list is one of these:
+  - empty;
+  - exactly `[/FlateDecode]`, and the data inflates fully to the scanned text. A predictor in `/DecodeParms`
+    (PNG 10-15 or TIFF 2, as in xref streams and Flate images) is undone first and the result is scanned; no
+    `/Type /XRef` or `/Subtype /Image` skips this. A `null` (or `[null]`) `/DecodeParms` or value counts as absent;
+    other parameters (a non-integer, `BitsPerComponent` not 1, 2, 4, 8 or 16, a huge `Colors` or `Columns`, data that
+    is not a whole number of rows, a PNG row filter past 4) are "We couldn't check this file ...";
+  - exactly one picture filter, **DCTDecode or JPXDecode, on an `/Subtype /Image` XObject. Such picture streams
+    are accepted unscanned** (the final set; CCITTFax and JBIG2 can carry any bytes and are not in it).
+
+  Anything else is "We couldn't check this file ...". That covers another filter (also `/Filter null`), a chain,
+  odd predictor parameters, `/F` or `/DP` keys, a repeated `/Filter` `/DecodeParms` `/F` `/DP` `/Type` or `/Subtype` key,
+  nesting deeper than 64, and a file that can't be read forward exactly. It also covers an `N G obj` header inside
+  a string, a comment or stream data, and NUL or odd whitespace before `stream`. Junk outside the PDF (before
+  `%PDF` or after `%%EOF`) is read forward too, so bytes there that don't read as PDF make the file Unchecked.
+  **Not detected:** text that is
+  obfuscated in the PDF syntax (hex strings, octal escapes, TJ arrays split by kerning, UTF-16 or CID-font text)
+  and anything inside pictures (pixels, JPEG 2000 or lossless JPEG payloads, inline images). Passing the scan
+  does not mean the PDF holds no secret.
   **Images are not scanned**: an image is shared only after a person's click.
 
 **Members never get write access to the host ticket.** No message type changes it from outside: a member can only
