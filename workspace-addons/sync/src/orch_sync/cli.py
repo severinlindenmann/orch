@@ -1,4 +1,4 @@
-"""Local settings and one-shot sync. Consent flows are not shipped yet."""
+"""`orch sync`: local settings, one-shot sync, the background loop (start/stop/status/now) and the person's choices."""
 
 import argparse
 import json
@@ -28,17 +28,63 @@ def read(root, name):
     return data
 
 
+def safe_address(url):
+    address = urlsplit(url)
+    return urlunsplit(address._replace(netloc=address.netloc.rsplit("@", 1)[-1]))
+
+
+def consent(settings):
+    """What turning sync on means, in plain words: what, where, how often, and that it can be turned off."""
+    from .loop import minutes
+
+    if settings["mode"] == "local":
+        where, often = "on this computer only; nothing leaves it", "every 5 minutes at most, when something changed"
+    else:
+        where = f"on this computer and at {safe_address(settings.get('remote') or '')}"
+        often = f"every {minutes(settings)} minutes"
+    return (
+        "Sync keeps a copy of your tickets and their files in .orch. It never copies secrets or private files "
+        f"(settings, chat, keys and passwords stay here). Where: {where}. How often: {often}. "
+        "You can turn it off any time: orch sync set --mode off"
+    )
+
+
+def status_line(s):
+    if s["mode"] == "off":
+        return "Sync is off."
+    run = f"running, next {s['next_run']}" if s["running"] else "not running (orch sync start)"
+    return (f"Sync: {s['mode']}, every {s['interval']} minutes, {run}. Last synced: {s['last_ok'] or 'never'}. "
+            f"Paused: {'yes' if s['paused'] else 'no'}." + (f" Problem: {s['last_error']}" if s["last_error"] else ""))
+
+
+def _run_loop(root):
+    """`orch sync run`: the loop in the foreground; `start` runs it in the background."""
+    import signal
+
+    from . import loop, service
+
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    nonce = service.announce(root)  # background run: record pid + start time in .orch/run/sync/
+    try:
+        loop.Loop(root).run_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        service.forget(root, nonce)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="orch sync")
     ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("set", "status", "now", "start", "stop", "needs"):
+    for name in ("set", "status", "now", "start", "stop", "needs", "run"):
         p = sub.add_parser(name)
         p.add_argument("--json", action="store_true")
         if name == "set":
-            p.add_argument("--mode", choices=("off", "local", "remote"), required=True)
+            p.add_argument("--mode", choices=("off", "local", "remote"))
             p.add_argument("--remote")
-            p.add_argument("--interval", type=int, choices=(5, 15, 60))
+            p.add_argument("--interval", type=int, help="minutes between remote syncs: 5, 15 or 60")
             p.add_argument("--kind", choices=("private", "team"), default="private")
     p = sub.add_parser("resolve")
     p.add_argument("path")
@@ -80,7 +126,14 @@ def main(argv=None):
         if root is None:
             raise repo.Refused("No orch workspace here")
         settings = DEFAULTS | read(root, "settings")
+        if args.cmd == "run":
+            return _run_loop(root)
         if args.cmd == "set":
+            if args.mode is None and args.interval is None:
+                raise repo.Refused("Say what to change: --mode off|local|remote or --interval 5|15|60")
+            if args.interval is not None and args.interval not in (5, 15, 60):
+                raise repo.Refused("Sync can run every 5, 15 or 60 minutes")
+            asked, args.mode = args.mode, args.mode or settings["mode"]
             if args.kind != "private":
                 raise repo.Refused("Team sync is not available yet")
             if (args.mode == "remote" or args.remote is not None) and not remote_allowed():
@@ -98,8 +151,7 @@ def main(argv=None):
                 settings["remote"] = args.remote
                 from .visibility import remote_visibility
 
-                address = urlsplit(args.remote)
-                safe_url = urlunsplit(address._replace(netloc=address.netloc.rsplit("@", 1)[-1]))
+                safe_url = safe_address(args.remote)
                 notices = read(root, "visibility")
                 if safe_url not in notices:
                     visibility = remote_visibility(args.remote)
@@ -123,22 +175,54 @@ def main(argv=None):
                 os.replace(f.name, target)
             finally:
                 Path(f.name).unlink(missing_ok=True)
+            from . import loop, service
+
+            if service.running_pid(root):
+                loop.wake_up(root)  # the loop reads the new settings now (and ends when set to off)
             result = settings
+            if asked in ("local", "remote"):
+                text = consent(settings)
+                if args.json:
+                    result = {**settings, "consent": text}
+                else:
+                    print(text, file=sys.stderr)
         elif args.cmd == "now":
+            import time
+
+            from . import loop, service
             from .step import run_once
 
+            if service.running_pid(root):
+                loop.wake_up(root)
+                result = {"woken": True}
+                print(json.dumps(result) if args.json else "Sync runs now in the background.")
+                return 0
+            loop.note(root, last_try=loop.iso(time.time()))
             result = run_once(root, "manual")
             print(json.dumps(result) if args.json else str(result))
             return 2 if result.get("last_error") else 0
         elif args.cmd == "status":
+            from . import loop, service
+            from .pause import verified_pause
+
             state = read(root, "state")
+            info = service.read(root, loop.INFO)
+            pid = service.running_pid(root)
             result = {
                 "state": state,
                 **settings,
-                "running": False,
+                "interval": loop.minutes(settings),
+                "running": bool(pid),
                 "remote_allowed": remote_allowed(),
-                **{k: state.get(k) for k in ("last_ok", "last_error", "ahead", "behind")},
+                **{k: state.get(k) for k in ("last_ok", "ahead", "behind")},
+                "last_try": info.get("last_try"),
+                "last_error": info.get("last_error") or state.get("last_error"),
+                "paused": verified_pause(root, state) is not None,
+                "next_run": info.get("next_run") if pid else None,
             }
+            if not args.json:
+                print(status_line(result))
+                return 0
         elif args.cmd == "resolve":
             from .pause import resolve, resolve_case
 
@@ -198,15 +282,29 @@ def main(argv=None):
                 write(root, "run/sync/state.json", encoded(state))
             result = {"acknowledged": args.ticket}
         elif args.cmd == "start":
-            raise repo.Refused("The sync loop is not available yet")
-        else:
-            result = [] if args.cmd == "needs" else {"stopped": False}
+            from . import orchcli, service
+
+            if settings["mode"] == "off":  # a normal state (orch start starts every add-on): quiet, not an error
+                result = {"running": False, "off": True, "message": "Sync is off here: nothing to start."}
+            elif orchcli.is_active(root) is not True:
+                raise repo.Refused("The sync add-on is not on here. A person turns it on: orch addon add sync")
+            else:
+                result = {"running": True, "pid": service.start(root)}
+        elif args.cmd == "stop":
+            from . import service
+
+            res = service.stop(root)
+            result = {"stopped": res == "stopped"}
+            if res == "not verified":
+                result["note"] = "A file in .orch/run/sync/ names a process that is not the sync loop; nothing was stopped."
         if args.cmd == "set" and not args.json:
+            from .loop import minutes
+
             message = (
                 "Sync is off"
                 if settings["mode"] == "off"
                 else (
-                    f"Sync: {settings['mode']}, every {settings['interval']} minutes"
+                    f"Sync: {settings['mode']}, every {minutes(settings)} minutes"
                     + (f", to {settings['remote']}" if settings["mode"] == "remote" else "")
                 )
             )
