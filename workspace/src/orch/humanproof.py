@@ -390,44 +390,56 @@ def _private_dir(p: Path, stop: Path) -> None:
         _check_dir(c)
 
 
-def _own_id(root: Path, home: Path, create: bool) -> str | None:
-    """The workspace id to use. A valid .local-id is used as it is. A missing or damaged one (git clean, a
-    re-clone at the same path, a deleted .orch/) is put back from the ONE key folder the trusted home already
-    binds to this real path (its keys and pins still apply). Two or more bound folders refuse. Only when no
-    folder is bound yet is a fresh id made (create=True)."""
+def _decide(home: Path, ws: str | None, bound: list[str]) -> tuple[str | None, bool]:
+    """(id to use, healed) from the .local-id `ws` (valid or None) and the folders bound to this path.
+    A valid id is kept unless it names no existing folder while exactly ONE other folder is bound (then the
+    bound id is put back). Refused: two or more bound folders, or an id naming a DIFFERENT EXISTING folder."""
+    others = [n for n in bound if n != ws]
+    if ws is None:
+        if len(bound) > 1:
+            raise Refused(SECOND_FOLDER)
+        return (bound[0], True) if bound else (None, False)
+    if not others:
+        return ws, False
+    keys = home / "keys" / ws
+    if len(others) == 1 and ws not in bound and not keys.exists() and not keys.is_symlink():
+        return others[0], True
+    raise Refused(SECOND_FOLDER)
+
+
+def _resolve(root: Path, home: Path) -> tuple[str | None, list[str]]:
+    """The workspace id and the bound folders, healing a lost, damaged or stale .local-id from the trusted
+    home. Creates no folder and no fresh id."""
     from orch import addons
 
-    ws = addons.workspace_id(root, create=False)
-    if ws is not None:
-        return ws
     bound = _bound_folders(root, home)
-    if len(bound) > 1:
-        raise Refused(SECOND_FOLDER)
-    if len(bound) == 1:
-        f = root / ".orch" / ".local-id"
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(bound[0] + "\n", encoding="utf-8")
-        return bound[0]
-    return addons.workspace_id(root, create=create)
+    ws, healed = _decide(home, addons.read_local_id(root), bound)
+    if healed:
+        addons.put_local_id(root, ws, replace=True)
+    return ws, bound
 
 
 def key_dir(root: Path, create: bool = True) -> Path:
     """<guarded home>/keys/<workspace local id>/ (0700). A real path has exactly one key folder."""
+    from orch import addons
+
     home = guarded_home(root)
     winacl.no_reparse(home)  # a symlink or junction below the profile folder (Windows)
-    ws = _own_id(root, home, create)
-    if ws is None:
+    ws, bound = _resolve(root, home)
+    if ws is None and not create:
         raise Refused("This folder has no local id yet.")
-    d = home / "keys" / ws
     if create:
         fresh = not home.exists()
         home.mkdir(parents=True, exist_ok=True)
         if fresh:
             winacl.set_private(home, True)
         _check_dir(home)
-        _private_dir(d.parent, home)
-        with _key_lock(d.parent):  # check, mkdir and bind are one step: two first starts cannot both bind
-            _one_folder_per_path(root, home, d.name)  # nothing is created while another folder is bound
+        _private_dir(home / "keys", home)
+        with _key_lock(home / "keys"):  # id, check, mkdir and bind are one step: two first starts cannot
+            ws, bound = _resolve(root, home)  # both bind (read again under the lock)
+            if ws is None:
+                ws = addons.put_local_id(root, secrets.token_hex(16))
+            d = home / "keys" / ws
             try:
                 d.mkdir(mode=0o700)
                 if POSIX:
@@ -437,13 +449,12 @@ def key_dir(root: Path, create: bool = True) -> Path:
                 fresh = False
             _check_dir(d)
             if fresh or not any(d.iterdir()):  # the binding is made only while the folder is new or empty
-                _one_folder_per_path(root, home, d.name)
                 _bind_new(root, d)
     else:
+        d = home / "keys" / ws
         _check_dir(home)
         _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
-    _one_folder_per_path(root, home, d.name)
     _check_binding(root, d)
     return d
 
@@ -456,7 +467,14 @@ SECOND_FOLDER = (
     "Refused: this workspace's id was changed; its keys are in another key folder. "
     "Put back the workspace id, or ask the owner."
 )
-TRY_AGAIN = "orch could not check the key folders just now. Try again."
+TRY_AGAIN = "orch could not check the key folders just now. Try again; if it keeps happening, ask the owner."
+
+
+def _try_again(name: str) -> str:
+    return (
+        f"orch could not read the binding of key folder {name} just now. "
+        "Try again; if it keeps happening, ask the owner."
+    )
 
 
 def _bound_folders(root: Path, home: Path) -> list[str]:
@@ -480,10 +498,8 @@ def _bound_folders(root: Path, home: Path) -> list[str]:
             continue
         except (ValueError, AttributeError):  # garbage JSON: bound to nothing
             continue
-        except (winacl.Unknown, OSError):  # cannot be told: fail closed, never "not bound"
-            raise Refused(TRY_AGAIN) from None
-        except Refused:  # loose rights or an unknown ACL answer on a binding: refuse
-            raise Refused(TRY_AGAIN) from None
+        except (winacl.Unknown, OSError, Refused):  # cannot be told: fail closed, never "not bound"
+            raise Refused(_try_again(name)) from None
         if not isinstance(stored, str):
             continue
         try:
@@ -493,14 +509,6 @@ def _bound_folders(root: Path, home: Path) -> list[str]:
         if same:
             out.append(name)
     return out
-
-
-def _one_folder_per_path(root: Path, home: Path, name: str) -> None:
-    """THE rule: a real path has exactly one key folder. A workspace id is workspace-writable, so a forged or
-    new id must never open a second folder (empty ledgers would read as "never pinned"): any other folder
-    bound to this path refuses, for every create and every read. Nothing is migrated; a person reconnects."""
-    if any(n != name for n in _bound_folders(root, home)):
-        raise Refused(SECOND_FOLDER)
 
 
 def _bind_new(root: Path, d: Path) -> None:

@@ -1067,21 +1067,84 @@ def _write_consents(items: list[dict]) -> None:
 ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
-def workspace_id(root: Path, create: bool = False) -> str | None:
-    """Random id in gitignored .orch/.local-id. Consent is bound to it: a clone or copy has none."""
+def _orch_dir_is_plain(root: Path) -> bool:
+    """.orch/ is a real folder (no symlink or junction): an agent could point it elsewhere."""
+    from orch import winacl
+
+    try:
+        st = (root / ".orch").lstat()
+    except OSError:
+        return True  # not there yet: a write makes it
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    try:
+        winacl.no_reparse(root / ".orch")
+    except Refused:
+        return False
+    return True
+
+
+def read_local_id(root: Path) -> str | None:
+    """The valid id in .orch/.local-id, or None. A link, a special file or a link as .orch/ is damaged: it is
+    never followed (O_NOFOLLOW; Windows: lstat + reparse check)."""
+    if not _orch_dir_is_plain(root):
+        return None
     f = root / ".orch" / ".local-id"
     try:
-        v = f.read_text(encoding="utf-8").strip()
-        if ID_RE.match(v):
-            return v
+        st = f.lstat()
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            return None
+        fd = os.open(f, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     except OSError:
-        pass
-    if not create:
         return None
-    f.parent.mkdir(parents=True, exist_ok=True)
-    v = secrets.token_hex(16)
-    f.write_text(v + "\n", encoding="utf-8")
-    return v
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        v = os.read(fd, 256).decode("utf-8", "replace").strip()
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return v if ID_RE.match(v) else None
+
+
+def put_local_id(root: Path, v: str, *, replace: bool = False) -> str:
+    """Write id `v` to .orch/.local-id through a temp file in .orch/: a link is replaced, never written
+    through. Without `replace` the first writer wins (a valid id already there is returned and kept); a
+    damaged or link file is replaced. A link as .orch/ is refused. Returns the id that is in the file."""
+    if not _orch_dir_is_plain(root):
+        raise Refused("The .orch folder of this workspace is a link. orch does not follow it; ask the owner.")
+    d = root / ".orch"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / ".local-id"
+    tmp = d / f".local-id.{secrets.token_hex(4)}.tmp"
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(v + "\n")
+        if not replace:
+            try:
+                os.link(tmp, f)
+                return v
+            except FileExistsError:
+                cur = read_local_id(root)
+                if cur is not None:
+                    return cur
+            except OSError:
+                pass  # no hard links here: fall through to the replace
+        os.replace(tmp, f)
+        return v
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
+def workspace_id(root: Path, create: bool = False) -> str | None:
+    """Random id in gitignored .orch/.local-id. Consent is bound to it: a clone or copy has none."""
+    v = read_local_id(root)
+    if v is not None or not create:
+        return v
+    return put_local_id(root, secrets.token_hex(16))
 
 
 def folder_hash(folder: Path) -> str:
