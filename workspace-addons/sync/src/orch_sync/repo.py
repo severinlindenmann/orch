@@ -41,8 +41,10 @@ OPTIONS = ('protocol.https.allow=always', 'protocol.ssh.allow=always',
 # the person set one, still wins.
 NETWORK_OPTIONS = ('core.sshCommand=ssh -o BatchMode=yes',)  # never a prompt (no terminal, nobody to answer)
 # An address that was only typed (`orch sync act check`): not the person's own ssh command either, in batch mode,
-# with no credential helper (safegit's empty one; helpers only for the configured origin) and no prompt.
-TYPED_SSH = 'ssh -o BatchMode=yes'
+# with no credential helper (safegit's empty one; helpers only for the configured origin) and no prompt; no ssh
+# config, and none of the person's keys or agent identities offered to a host that was only typed.
+TYPED_SSH = ('ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityFile=/dev/null'
+             ' -o IdentityAgent=none -o PubkeyAuthentication=no')
 NETWORK = ('push', 'fetch', 'ls-remote', 'clone')
 # Options a caller must never pass to a network verb: they name the program run on the remote side.
 _PACK_OPTIONS = ('--receive-pack', '--upload-pack', '--exec', '-u', '--repo', '--config', '-c')

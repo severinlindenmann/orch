@@ -20,7 +20,9 @@ def action(label, verb=None, target=None, *, sign=False, review=None, op=None, l
     if sign:
         out["sign"] = True
     if review:
-        out["review"] = {k: str(v)[:400] for k, v in review.items() if v}
+        from .act import plain
+
+        out["review"] = {k: plain(v, 400) for k, v in review.items() if v}
     if later:
         out["later"] = True
     if view:
@@ -86,16 +88,19 @@ def _unconfirmed(root):
 
 
 def row(kind, key, text, since, command, options, ticket=None, title="Sync needs you", tone="needs-you", actions=None):
+    # peer, file or agent text (titles, names, reasons): one line, nothing hidden (L-2)
+    from .act import plain
+
     out = {
         "id": f"sync:{kind}:{key}",
         "source": "sync",
         "kind": f"sync:{kind}",
         "ticket": ticket,
-        "title": title[:200],
-        "text": text[:500],
+        "title": plain(title),
+        "text": plain(text, 500),
         "tone": tone,
         "since": since,
-        "answer": {"question": "q1", "options": options, "recommended": None},
+        "answer": {"question": "q1", "options": [plain(o) for o in options or ()], "recommended": None},
         "cli": command[:300],
     }
     if options is None:  # nothing to answer: a notice the person sees until it clears
