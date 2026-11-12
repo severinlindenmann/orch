@@ -1509,7 +1509,9 @@ def _drop_member_quietly(root: Path, tid: str, ws: str) -> None:
 def _history(root: Path, tid: str, by: str, text: str, chat: bool = False) -> None:
     """chat=True only for what a person or a member said in the group."""
     with contextlib.suppress(Refused, OSError):
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat))
+        tickets.apply_op(
+            root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat), by=tickets.SYSTEM
+        )
 
 
 def _by_name(g: dict, ws: str) -> str:
@@ -2352,6 +2354,7 @@ def note_answer_kept(root: Path, asked: dict, m: dict) -> None:
             lambda t: tickets.add_history(
                 t, f"agent:{_line(m['from'], 60)}", f"Late answer to {asked['question_id']}: {text}", "relay"
             ),
+            by=tickets.SYSTEM,
         )
 
 

@@ -19,8 +19,11 @@ import time
 from pathlib import Path
 
 _HARNESS = re.compile(r"[a-z][a-z0-9-]{0,31}")
-_HELPER = re.compile(r"h_(\d+)")
+_HELPER = re.compile(r"h_([0-9]{1,4})")  # the schema's agent pattern: nothing longer is ever ours
 LOCK_WAIT = 10.0  # seconds: a run lock held longer skips the turn's numbering read (a trace, never a hang)
+
+
+ID_MARGIN = 1000  # how far a collector id may run ahead of the highest seq (dropped repeats)
 
 
 def _so_far(root: Path, run: str, writer=None) -> tuple[int, int]:
@@ -34,14 +37,24 @@ def _so_far(root: Path, run: str, writer=None) -> tuple[int, int]:
     prefix = re.compile(re.escape(run) + r":(\d{1,18})")
     seq = helpers = 0
     drain = writer.drain if writer is not None else None
-    for e in record.run_lines(root, run, lock_wait=LOCK_WAIT, drain=drain):
+    # the collector's seq counter also counts events dedupe dropped, so ids run ahead of seqs by however many
+    # a turn dropped; one id far past everything before it is planted. The bound moves with the file order:
+    # an id is taken only if it is within ID_MARGIN of the highest seq or accepted id of the lines before it.
+    lines = record.run_lines(root, run, lock_wait=LOCK_WAIT, drain=drain, only=lambda i: False)
+    planted = False
+    for e in lines:
         if type(e.get("seq")) is int:
             seq = max(seq, e["seq"])
         if isinstance(e.get("id"), str) and (m := prefix.fullmatch(e["id"])):
-            seq = max(seq, int(m.group(1)))
+            if int(m.group(1)) > seq + ID_MARGIN:
+                planted = True
+            else:
+                seq = max(seq, int(m.group(1)))
         # only the log numbers helpers (a hook line could say any)
         if e.get("via") == "log" and (m := _HELPER.fullmatch(str(e.get("agent")))):
             helpers = max(helpers, int(m.group(1)))
+    if planted:
+        record.alert_content(root, run)
     return seq, helpers
 
 

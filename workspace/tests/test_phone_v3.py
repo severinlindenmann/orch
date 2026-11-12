@@ -274,7 +274,7 @@ def put_evidence(proj, tid, evs):
     def op(t):
         t["checklist"] = [{"id": "c1", "text": "Do", "done": True, "evidence": evs}]
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
 
 
 def test_feedback_approve_and_pins(proj, run, new_ticket, conn):

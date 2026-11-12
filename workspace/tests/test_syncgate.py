@@ -54,7 +54,9 @@ def _writers(proj, tid):
     """Every writer the gate covers, each a callable."""
     (proj / "f.txt").write_text("x")
     return {
-        "apply_op": lambda: tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "hi")),
+        "apply_op": lambda: tickets.apply_op(
+            proj, tid, lambda t: tickets.add_history(t, "human:t", "hi"), by=tickets.SYSTEM
+        ),
         "save": lambda: tickets.save(proj, tickets.load(proj, tid)),
         "create": lambda: tickets.create(proj, "N", "human:t"),
         "next_key": lambda: tickets.next_key(proj),
@@ -103,7 +105,7 @@ def test_dead_holders_gate_is_ignored(proj, other, how):
     else:  # the pid is alive, but it is another process than the one that took the gate
         _write_gate(proj, other.pid, "2020-01-01T00:00:00Z")
     assert syncgate.live_holder(proj) is None
-    tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "ok"))
+    tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "ok"), by=tickets.SYSTEM)
 
 
 def test_gate_released_while_writer_waits(proj, other):
@@ -115,7 +117,7 @@ def test_gate_released_while_writer_waits(proj, other):
     def writer():
         started.set()
         syncgate.WAIT_SECONDS = 20
-        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "late"))
+        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "late"), by=tickets.SYSTEM)
         done["ok"] = True
 
     th = threading.Thread(target=writer)
@@ -131,7 +133,7 @@ def test_own_process_passes_its_own_gate(proj):
     tid = _ticket(proj)
     with syncgate.hold(proj, "step"):
         assert syncgate.live_holder(proj) is None
-        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "in step"))
+        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "in step"), by=tickets.SYSTEM)
         with pytest.raises(Refused):
             with syncgate.hold(proj, "again"):
                 pass
@@ -164,11 +166,11 @@ def test_gate_held_by_another_process_blocks_subprocess_writer(proj):
     try:
         assert child.stdout.readline().strip() == "held"
         with pytest.raises(Refused, match="syncing"):
-            tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"))
+            tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"), by=tickets.SYSTEM)
         child.stdin.write("\n")
         child.stdin.flush()
         child.wait(10)
-        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "after"))
+        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "after"), by=tickets.SYSTEM)
     finally:
         child.kill()
         child.wait()
@@ -213,7 +215,9 @@ def test_concurrent_writers_all_wait_for_gate_and_land(proj, other):
 
     def w(i):
         try:
-            tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", f"w{i}"))
+            tickets.apply_op(
+                proj, tid, lambda t: tickets.add_history(t, "human:t", f"w{i}"), by=tickets.SYSTEM
+            )
             landed.append(i)
         except Exception as e:  # noqa: BLE001
             errors.append(e)
@@ -283,7 +287,7 @@ def test_fake_gates_are_ignored(proj, other):
         old = time.time() - 60  # an unreadable file that is not fresh: nobody is mid-write
         os.utime(syncgate.gate_path(proj), (old, old))
         assert syncgate.live_holder(proj) is None
-    tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "ok"))
+    tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "ok"), by=tickets.SYSTEM)
     assert syncgate.clear_stale(proj) and not syncgate.gate_path(proj).exists()
 
 
@@ -294,11 +298,13 @@ def test_other_thread_of_the_holder_does_not_pass(proj, monkeypatch):
     seen = {}
     with syncgate.hold(proj, "step"):
         # the sync step's own thread takes the ticket lock for the files it writes
-        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "merge"))
+        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "merge"), by=tickets.SYSTEM)
 
         def other_thread():
             try:
-                tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"))
+                tickets.apply_op(
+                    proj, tid, lambda t: tickets.add_history(t, "human:t", "x"), by=tickets.SYSTEM
+                )
                 seen["wrote"] = True
             except Refused as e:
                 seen["err"] = str(e)
@@ -329,7 +335,7 @@ def test_gate_taken_right_after_the_writers_check_is_refused(proj, other, monkey
     monkeypatch.setattr(syncgate, "wait_clear", check_then_gate)
     before = tickets.ticket_path(proj, tid).read_bytes()
     with pytest.raises(Refused, match="syncing"):
-        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "late"))
+        tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "late"), by=tickets.SYSTEM)
     assert tickets.ticket_path(proj, tid).read_bytes() == before
     assert not (tickets.tickets_dir(proj) / f".lock-{tid}").exists()  # the lock was let go
 
@@ -400,7 +406,7 @@ def test_refused_second_hold_leaves_the_live_step_alone(proj, monkeypatch):
         assert len(steps) == 1
         assert syncgate.live_holder(proj) is not None  # still live
         try:
-            tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"))
+            tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"), by=tickets.SYSTEM)
         except Refused as e:
             errs.append(str(e))
         assert errs and "syncing" in errs[0]
@@ -582,7 +588,7 @@ def test_takeover_never_removes_a_live_gate_published_meanwhile(proj, monkeypatc
         assert "already syncing" in state["x"]
         assert gate.read_text(encoding="utf-8") == state["g2"]  # Y's gate untouched
         with pytest.raises(Refused, match="syncing"):  # a writer still waits for Y
-            tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"))
+            tickets.apply_op(proj, tid, lambda t: tickets.add_history(t, "human:t", "x"), by=tickets.SYSTEM)
     finally:
         stop.set()
         tw.join(10)

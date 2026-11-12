@@ -481,13 +481,26 @@ def _is_person(by: str) -> bool:
     return by.startswith("human:") and not agent_tool()
 
 
+# `by` of a write that is not an agent-callable op: sync apply, relay/chat system lines, run bookkeeping.
+# It is never an agent actor and is never guarded; it behaves exactly like an op without an actor.
+SYSTEM = "system"
+
+
 def apply_op(
-    root: Path, tid: str, fn, *, expect: tuple[str, object] | None = None, if_revision: int | None = None
+    root: Path,
+    tid: str,
+    fn,
+    *,
+    expect: tuple[str, object] | None = None,
+    if_revision: int | None = None,
+    by: str,
 ):
     """The one write path: load, change and write under ONE lock, so concurrent plain ops all land on the
     latest revision. `fn(ticket)` changes the dict (no subprocess, nothing slow) and returns a result.
     Only an edit of something a person saw passes `expect=(path, old value)` or `if_revision`;
-    it is refused (Conflict, exit 2) when that changed. Returns (ticket, result)."""
+    it is refused (Conflict, exit 2) when that changed. `by` is required: the validated actor of an op an
+    agent can call, or SYSTEM for any other write (a new op can never skip naming its actor).
+    Returns (ticket, result)."""
     ticket_path(root, tid)  # id shape check, same friendly refusal
     with _locked(root, tid):
         ticket = _load_raw(root, tid)
@@ -1005,7 +1018,7 @@ def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
 
 def note_history(root: Path, tid: str, by: str, text: str, via: str | None = None) -> None:
     """One history line, nothing else changes (e.g. a phone answer that was too late)."""
-    apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via))
+    apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via), by=by)
 
 
 def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: bool = False) -> dict:
@@ -1027,7 +1040,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: boo
         add_history(ticket, by, "Status review -> done", via)
         _sign_done(root, ticket, by, proven)
 
-    return apply_op(root, tid, op)[0]  # apply_op takes the copy away (worktrees.on_closed)
+    return apply_op(root, tid, op, by=SYSTEM)[0]  # apply_op takes the copy away (worktrees.on_closed)
 
 
 def ask_for_changes(
@@ -1075,7 +1088,7 @@ def ask_for_changes(
         root, tid, by, "message", note, via or _env_via(), pid, phone=phone, proven=proven
     )
     try:
-        return apply_op(root, tid, op)[0]
+        return apply_op(root, tid, op, by=SYSTEM)[0]
     except BaseException:
         runs.pending_discard(root, tid, item["id"])
         raise
@@ -1097,7 +1110,7 @@ def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
         add_history(ticket, by, f"{agent_label} started")
 
     try:
-        apply_op(root, tid, op)
+        apply_op(root, tid, op, by=SYSTEM)
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -1123,7 +1136,7 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
         return True
 
     try:
-        return apply_op(root, tid, op)[1] is True
+        return apply_op(root, tid, op, by=SYSTEM)[1] is True
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -1143,7 +1156,7 @@ def wait_for_start(root: Path, tid: str, reason: str, by: str) -> None:
         add_history(ticket, by, "Waiting: the agent is not up")
 
     try:
-        apply_op(root, tid, op)
+        apply_op(root, tid, op, by=SYSTEM)
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -1160,7 +1173,7 @@ def resume_after_start_wait(root: Path, tid: str, by: str) -> None:
         add_history(ticket, by, "The agent is up")
 
     try:
-        apply_op(root, tid, op)
+        apply_op(root, tid, op, by=SYSTEM)
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -1185,7 +1198,7 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
         if target == "done" and old != "done":
             _sign_done(root, ticket, actor, proven)
 
-    return apply_op(root, tid, op)[0]  # apply_op takes the copy away of a done/closed ticket
+    return apply_op(root, tid, op, by=SYSTEM)[0]  # apply_op takes the copy away of a done/closed ticket
 
 
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
@@ -1257,7 +1270,7 @@ def edit(
         if fields:
             add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
 
-    return apply_op(root, tid, op, if_revision=if_revision)[0]
+    return apply_op(root, tid, op, if_revision=if_revision, by=SYSTEM)[0]
 
 
 LONG_NOTE = (
@@ -1322,7 +1335,7 @@ def set_auto_title(root: Path, tid: str, title: str, by: str, description: str |
                 ticket.pop("note", None)
             add_history(ticket, by, f"Description written by {by[:100]}")
 
-    return apply_op(root, tid, op)[0]
+    return apply_op(root, tid, op, by=SYSTEM)[0]
 
 
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
@@ -1336,13 +1349,13 @@ def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str)
         ticket["plan"] = {"goal": goal, **({"not_included": ni} if ni else {}), "by": by[:100]}
         add_history(ticket, by, "Plan written")
 
-    return apply_op(root, tid, op)[0]
+    return apply_op(root, tid, op, by=SYSTEM)[0]
 
 
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     """No history line: it would double the history on every run."""
     clean_field("summary", text)
-    return apply_op(root, tid, lambda t: _set_field(t, "summary", text))[0]
+    return apply_op(root, tid, lambda t: _set_field(t, "summary", text), by=SYSTEM)[0]
 
 
 # Short plain-text fields on a ticket (outcome parts); the schema maxLength matches.
@@ -1379,7 +1392,7 @@ def set_outcome(root: Path, tid: str, by: str, **parts) -> dict:
         else:
             ticket.pop("outcome", None)
 
-    return apply_op(root, tid, op)[0]
+    return apply_op(root, tid, op, by=SYSTEM)[0]
 
 
 def _next_id(items: list[dict], prefix: str) -> str:
@@ -1436,7 +1449,7 @@ def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = Non
         add_history(ticket, by, f"Added check {item['id']}")
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def parse_evidence(raw: str) -> dict:
@@ -1546,7 +1559,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
         add_history(t, by, f"Check {cid} done")
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 WONT_DO_AGENT = (
@@ -1616,7 +1629,7 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         add_history(t, by, text)
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -1672,7 +1685,7 @@ def check_record(
         )
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def check_exists(root: Path, tid: str, cid: str) -> None:
@@ -1728,7 +1741,7 @@ def check_edit(
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
-    return apply_op(root, tid, op, expect=expect, if_revision=if_revision)
+    return apply_op(root, tid, op, expect=expect, if_revision=if_revision, by=SYSTEM)
 
 
 def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dict, dict]:
@@ -1743,7 +1756,7 @@ def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dic
         add_history(t, by, f"Moved {cid} after {after}")
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
@@ -1765,7 +1778,7 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         )
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
@@ -1793,7 +1806,7 @@ def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         add_history(t, by, f"Reopened {cid}" + (f" (old proof: {proof})" if proof else ""))
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
@@ -1810,7 +1823,7 @@ def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         history.created("steps", item)  # the step-start point: this mark is core's own (like evidence)
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def check_stop(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
@@ -1819,7 +1832,7 @@ def check_stop(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         _clear_doing(item)
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -> bool:
@@ -1849,7 +1862,7 @@ def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -
 def log(root: Path, tid: str, text: str, by: str) -> dict:
     if not text.strip():
         raise Refused("A history entry needs text.")
-    return apply_op(root, tid, lambda t: add_history(t, by, text.strip()))[0]
+    return apply_op(root, tid, lambda t: add_history(t, by, text.strip()), by=by)[0]
 
 
 def ref_add(
@@ -1886,7 +1899,7 @@ def ref_add(
         add_history(ticket, by, f"{verb} {refs.target(result)}")
         return result
 
-    t, _ = apply_op(root, t["id"], op)
+    t, _ = apply_op(root, t["id"], op, by=SYSTEM)
     return t, result, added
 
 
@@ -1935,7 +1948,7 @@ def ref_remove(root: Path, tid: str, target: str, by: str) -> tuple[dict, dict]:
         add_history(ticket, by, f"Removed reference {refs.target(result)}")
         return result
 
-    t, _ = apply_op(root, t["id"], op)
+    t, _ = apply_op(root, t["id"], op, by=SYSTEM)
     return t, result
 
 
@@ -2006,7 +2019,7 @@ def merge_refresh(
             add_history(t, by, f"{addon} refresh: {what} {old} -> {new}")
         return changes
 
-    t, changes = apply_op(root, tid, op)
+    t, changes = apply_op(root, tid, op, by=SYSTEM)
     return t, changes or []
 
 
@@ -2048,7 +2061,7 @@ def ext_set(
         ext[addon] = merged
         add_history(ticket, by, f"Set ext.{addon}")
 
-    return apply_op(root, tid, op, if_revision=if_revision)[0]
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
 def ext_unset(
@@ -2090,7 +2103,7 @@ def ext_unset(
         if not ext:
             del ticket["ext"]
 
-    return apply_op(root, tid, op, if_revision=if_revision)[0]
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
 _SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
@@ -2177,7 +2190,10 @@ def ask(
         if _asks_for_secret(part):
             with contextlib.suppress(Exception):  # the attempt stays visible in the history
                 apply_op(
-                    root, tid, lambda t: add_history(t, by, "A question was refused: it asked for a secret.")
+                    root,
+                    tid,
+                    lambda t: add_history(t, by, "A question was refused: it asked for a secret."),
+                    by=by,
                 )
             raise Refused(
                 "A question must never ask for a password, token, API key or other credential, "
@@ -2213,7 +2229,7 @@ def ask(
         add_history(ticket, by, f"Asked {q['id']}, waiting")
         return q
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tuple[dict, dict]:
@@ -2250,7 +2266,7 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
         return q
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=SYSTEM)
 
 
 def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -> dict:
@@ -2277,7 +2293,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
                 ticket["status"] = "active"
             add_history(ticket, by, "Wait cleared")
 
-        return apply_op(root, tid, op)[0]
+        return apply_op(root, tid, op, by=SYSTEM)[0]
     if bool(until) == bool(on):
         raise Refused("Use exactly one of --until <time> or --on <kind>:<ref>.")
     if until:
@@ -2296,7 +2312,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
         add_history(ticket, by, note)
 
     load(root, tid)
-    return apply_op(root, tid, op2)[0]
+    return apply_op(root, tid, op2, by=SYSTEM)[0]
 
 
 def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bool = False) -> dict:
@@ -2354,7 +2370,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bo
         if status == "done" and old != "done":
             _sign_done(root, ticket, actor, proven)
 
-    return apply_op(root, tid, op, if_revision=if_revision)[0]
+    return apply_op(root, tid, op, if_revision=if_revision, by=SYSTEM)[0]
 
 
 # ---------------------------------------------------------------- agent sessions (used by the run lane)
@@ -2485,7 +2501,7 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                 sessions.sort(key=lambda s: s.get("last_used", ""))
                 del sessions[0 : len(sessions) - 32]
 
-    ticket = apply_op(root, tid, op)[0]
+    ticket = apply_op(root, tid, op, by=SYSTEM)[0]
     _record_own_session(root, tid, agent, sid, host)
     return ticket
 
@@ -2793,9 +2809,10 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
                 if any(h.get("text") == text for h in t.get("history", []))
                 else add_history(t, by, text)
             ),
+            by=by,
         )
     else:
-        apply_op(root, tid, lambda t: add_history(t, by, text))
+        apply_op(root, tid, lambda t: add_history(t, by, text), by=by)
     return res
 
 

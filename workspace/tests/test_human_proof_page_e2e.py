@@ -84,7 +84,7 @@ def new_ticket(run, title="T", review=False, root=None):
     code, out, _ = run("ticket", "new", title, "--json", "--by", "agent:x")
     tid = json.loads(out)["id"]
     if review:
-        tickets.apply_op(root, tid, lambda t: t.update(status="review"))
+        tickets.apply_op(root, tid, lambda t: t.update(status="review"), by=tickets.SYSTEM)
     return tid
 
 

@@ -744,7 +744,7 @@ def _record_on_ticket(root: Path, ticket: str, entry: dict) -> None:
         rec = {"branch": entry["branch"], "base": entry["base"], "sub": entry.get("sub") or "", "host": host}
         work["folders"] = [rec, *folders]
 
-    tickets.apply_op(root, ticket, fn)
+    tickets.apply_op(root, ticket, fn, by=tickets.SYSTEM)
 
 
 # ---------------------------------------------------------------- routing

@@ -636,6 +636,20 @@ def _json(obj):
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
+def _hidden_line(hider, obj) -> bytes:
+    """The compact JSON of `obj`, refused when a form of a hidden value is in the serialized text or in any
+    decoded string or key (a reader json-decodes, so escaped bytes alone prove nothing)."""
+    line = _json(obj)
+    if hider.hide_text(line) != line or hider.leaks(obj):
+        raise RecordInvalid("This record cannot be hidden safely.")
+    return line.encode("utf-8")
+
+
+def alert_content(workspace, run):
+    """Leave one integrity alert for a run file whose content disagrees with what the writer guarantees."""
+    return _alert(workspace, target="run", run=run, reason="content", seen_by="writer")
+
+
 def _validate(event, *, detail=False):
     if not (_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid(event):
         raise RecordInvalid()
@@ -724,11 +738,15 @@ def _dedupe(events, run):
 
 def _parse(fd, run):
     events, skipped = [], 0
-    for line in _read_bytes(fd).splitlines():
+    for lineno, line in enumerate(_read_bytes(fd).splitlines(), 1):
         try:
             event = json.loads(line)
             _validate(event)
             if event["run"] != run:
+                raise RecordInvalid()
+            # the writer guarantees seq == the 1-based physical line number; a line that disagrees was
+            # planted (a huge or repeated seq freezes a tail cursor or breaks paging): skipped and counted
+            if event["seq"] != lineno or isinstance(event["seq"], bool):
                 raise RecordInvalid()
             events.append(event)
         except (ValueError, TypeError, UnicodeError, RecursionError, RecordInvalid):
@@ -736,22 +754,28 @@ def _parse(fd, run):
     return events, skipped
 
 
-def _read_run_strict(ws, run, fd):
+def _read_run_strict(ws, run, fd, only=None):
     _check_fd(fd)
     raw = _read_bytes(fd)
     previous = []
-    for line in raw.splitlines():
+    for lineno, line in enumerate(raw.splitlines(), 1):
         try:
             event = json.loads(line)
-            if isinstance(event, dict) and event.get("run") == run:
-                outcome = event.get("outcome")
-                if outcome is not None and not (
-                    isinstance(outcome, dict) and {"ok", "error"} <= outcome.keys()
-                ):
-                    continue
-                _key(event)
-                previous.append(event)
-        except (ValueError, TypeError, KeyError, RecursionError):
+            if not isinstance(event, dict) or event.get("run") != run:
+                continue
+            if event.get("seq") != lineno or isinstance(event.get("seq"), bool):
+                continue
+            outcome = event.get("outcome")
+            if outcome is not None and not (isinstance(outcome, dict) and {"ok", "error"} <= outcome.keys()):
+                continue
+            _key(event)
+            if only is None or only(event.get("id")):
+                # exactly what the reader (_parse) keeps: a line it skips must not suppress a real one. The
+                # full schema check costs ~0.2 ms a line, so a hook's write checks the lines of its own
+                # call only (dedupe looks at nothing else); the collector reads with only=lambda i: False.
+                _validate(event)
+            previous.append(event)
+        except (ValueError, TypeError, KeyError, RecursionError, RecordInvalid):
             continue
     return previous, len(raw.splitlines()), bool(raw and not raw.endswith(b"\n"))
 
@@ -926,14 +950,20 @@ def list_jobs(workspace, run=None, *, seen_by="reader") -> ReadResult[list[tuple
         return _report(workspace, error, "folder", run, seen_by)
 
 
-def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
+def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
     """Append one line to a job stream under the run's lock (one writer per job). `decide(events, size)` runs
     inside the lock on the strictly read stream and returns (line_dict | None, replace_last, result); the line
     is stored only after the caller's own checks passed (every string already hidden). A cut-off last line (a
     crash) is dropped under the lock. Caps are checked here, under the lock: the stream, the run's streams,
-    and (at the first line) the number of jobs of the run. Returns result."""
+    and (at the first line) the number of jobs of the run. `hider` is required: the line passes the same
+    fail-closed backstop as a run line (RecordInvalid when a form of a hidden value is still in it). Returns
+    result."""
     _name(run, _RUN)
     _name(job, _JOB)
+    try:
+        hiding._check(hider)
+    except (ValueError, TypeError):
+        raise RecordOff(_OFF) from None
     rel = ("jobs", run, job + ".jsonl")
     try:
         with _lock(workspace, run) as check_lock:
@@ -963,7 +993,10 @@ def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
                 event, replace_last, result = decide(events, len(raw))
                 if event is None:
                     return result
-                data = (_json(event) + "\n").encode()
+                try:
+                    data = _hidden_line(hider, event) + b"\n"
+                except (ValueError, TypeError, RecursionError, UnicodeError):
+                    raise RecordInvalid() from None
                 if len(data) > 16384:
                     raise RecordInvalid("The job entry is too large.")
                 if len(raw) + len(data) > JOB_BYTES or (
@@ -1004,7 +1037,7 @@ def _pending_count(workspace, run):
         raise
 
 
-def run_lines(workspace, run, *, lock_wait=None, drain=None) -> list[dict]:
+def run_lines(workspace, run, *, lock_wait=None, drain=None, only=None) -> list[dict]:
     """The run file's lines AS WRITTEN (no dedupe, no reader view), read under the run lock: for a writer-side
     caller that must see every line (a collector numbering its id-less lines `<run>:<n>` past every seq and
     every such id already used). `drain`: a writer's drain (RecordWriter.drain); the spooled lines of the run
@@ -1024,7 +1057,7 @@ def run_lines(workspace, run, *, lock_wait=None, drain=None) -> list[dict]:
                     return []
                 raise
             try:
-                return _read_run_strict(workspace, run, fd)[0]
+                return _read_run_strict(workspace, run, fd, only)[0]
             finally:
                 _close(fd)
     except (RecordTampered, RecordUnavailable) as error:
@@ -1134,6 +1167,8 @@ def _store_detail(ws, event, payload, previous):
                 return _Detail(reason="collision")
             finished = any(
                 old.get("detail") == event["detail"]
+                # the detail name derives from these four
+                and all(old.get(k) == event[k] for k in ("run", "kind", "id", "ticket"))
                 and old.get("outcome") is not None
                 and not (old.get("via") == "hook" and event["via"] == "log")
                 for old in previous
@@ -1156,10 +1191,7 @@ class RecordWriter:
         self.workspace, self.hider = Path(workspace), hider
 
     def _serialized(self, obj):
-        line = _json(obj)
-        if self.hider.hide_text(line) != line:
-            raise RecordInvalid("This record cannot be hidden safely.")
-        return line.encode("utf-8")
+        return _hidden_line(self.hider, obj)
 
     def _prepare_detail(self, event, detail, hidden=0):
         if detail is None or not event.get("ticket"):
@@ -1292,7 +1324,15 @@ class RecordWriter:
         fd = _open(self.workspace, ("runs", run + ".jsonl"), "read_append", create_dirs=True)
         try:
             check_lock()
-            previous, count, torn = _read_run_strict(self.workspace, run, fd)
+            previous, count, torn = _read_run_strict(
+                self.workspace,
+                run,
+                fd,
+                only=lambda i: (
+                    i == event.get("id")
+                    or (default_id and isinstance(i, str) and run + ":" in i[: len(run) + 3])
+                ),
+            )
             event = dict(event, seq=count + 1)
             if default_id:
                 # a hook's default id has its own namespace: <run>:<seq> belongs to the collectors, so a hook
@@ -1354,7 +1394,11 @@ class RecordWriter:
                 name is not None
                 and event["detail"] is None
                 and any(old.get("detail") == f"detail/{run}/{file}" for old in replaced)
-                and not any(old.get("detail") == f"detail/{run}/{file}" for old in _shown([*previous, event]))
+                and not any(
+                    old.get("detail") == f"detail/{run}/{file}"
+                    and all(old.get(k) == event[k] for k in ("run", "kind", "id", "ticket"))
+                    for old in _shown([*previous, event])
+                )
             ):
                 try:
                     _unlink(self.workspace, ("detail", run, file))
