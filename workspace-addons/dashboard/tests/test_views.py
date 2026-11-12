@@ -491,7 +491,10 @@ def test_v1_home_and_ticket_controls():
     home = js[js.index("function changeUnavailable") : js.index("// Chat (former General)")]
     tickets = js[js.index("function filterTickets") : js.index("function ticketNotFound")]
     assert "row.answer.recommended" in home and "' · Suggested'" in home
-    assert "act('answer', {ticket:row.ticket, question:row.answer.question, answer:option})" in home
+    assert (
+        "act('answer', {ticket:row.ticket, question:row.answer.question, digest:row.answer.digest, answer:option})"
+        in home
+    )
     assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home
     assert "function loadingView()" in home and "'data-key':'loading'" in home
     assert "function connectionNotice(connectionEl, hadState)" in home

@@ -37,6 +37,10 @@ def _proof(ws, op, target, by="human:pat", **kw):
     return hp.mint(key, p)
 
 
+def _qd(ws, tid, q):
+    return tickets.question_digest(next(x for x in tickets.load(ws, tid)["questions"] if x["id"] == q))
+
+
 def _cli(run, monkeypatch, proof, *argv):
     monkeypatch.setattr("sys.stdin", io.StringIO((proof + "\n") if proof else ""))
     return run(*argv, "--proof-stdin")
@@ -65,13 +69,24 @@ def test_answer_without_proof_is_refused_and_handed_off(ws, run):
     code, out, err = run("answer", tid, q, "A", "--by", "human:pat", "--json")
     assert code == 2 and "dashboard on this computer" in (out + err)
     assert tickets.load(ws, tid)["questions"][0].get("answer") is None
-    assert any(h["op"] == "ticket.answer" and h["target"] == f"{tid}:{q}" for h in hp.handoffs(ws))
+    assert any(
+        h["op"] == "ticket.answer" and h["target"] == f"{tid}:{q}:{_qd(ws, tid, q)}" for h in hp.handoffs(ws)
+    )
 
 
 def test_answer_with_valid_proof_takes_by_from_proof(ws, run, monkeypatch):
     tid, q = _ask(ws, run)
     code, out, err = _cli(
-        run, monkeypatch, _proof(ws, "ticket.answer", f"{tid}:{q}"), "answer", tid, q, "A", "--json"
+        run,
+        monkeypatch,
+        _proof(ws, "ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}"),
+        "answer",
+        tid,
+        q,
+        "--question-digest",
+        _qd(ws, tid, q),
+        "A",
+        "--json",
     )
     assert code == 0, out + err
     assert tickets.load(ws, tid)["history"][-1]["by"] == "human:pat"
@@ -80,42 +95,106 @@ def test_answer_with_valid_proof_takes_by_from_proof(ws, run, monkeypatch):
 @pytest.mark.parametrize(
     "mk",
     [
-        lambda ws, tid, q: _proof(ws, "ticket.answer", f"{tid}:{q}", now=int(time.time()) - 500),  # expired
-        lambda ws, tid, q: _proof(ws, "ticket.answer", f"{tid}:q9"),  # wrong target
-        lambda ws, tid, q: _proof(ws, "ticket.verdict", f"{tid}:{q}"),  # wrong op
+        lambda ws, tid, q: _proof(
+            ws, "ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}", now=int(time.time()) - 500
+        ),  # expired
+        lambda ws, tid, q: _proof(ws, "ticket.answer", f"{tid}:q9:{_qd(ws, tid, q)}"),  # wrong target
+        lambda ws, tid, q: _proof(ws, "ticket.verdict", f"{tid}:{q}:{_qd(ws, tid, q)}"),  # wrong op
         lambda ws, tid, q: "hp1.e30.AAAA",  # garbage
         lambda ws, tid, q: "",  # missing
     ],
 )
 def test_answer_bad_proofs_refused(ws, run, monkeypatch, mk):
     tid, q = _ask(ws, run)
-    code, out, err = _cli(run, monkeypatch, mk(ws, tid, q), "answer", tid, q, "A", "--json")
+    code, out, err = _cli(
+        run,
+        monkeypatch,
+        mk(ws, tid, q),
+        "answer",
+        tid,
+        q,
+        "--question-digest",
+        _qd(ws, tid, q),
+        "A",
+        "--json",
+    )
     assert code == 2 and "dashboard on this computer" in (out + err)
     assert tickets.load(ws, tid)["questions"][0].get("answer") is None
 
 
+def test_answer_with_proof_but_no_question_digest_is_refused(ws, run, monkeypatch):
+    tid, q = _ask(ws, run)
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}")
+    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--json")
+    assert code == 2 and "can't be checked" in out + err
+    assert tickets.load(ws, tid)["questions"][0].get("answer") is None
+
+
+def test_answer_proof_for_the_question_as_shown_is_refused_once_it_changed(ws, run, monkeypatch):
+    tid, q = _ask(ws, run)
+    shown = _qd(ws, tid, q)
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}:{shown}")
+    path = tickets.ticket_path(ws, tid)
+    t = json.loads(path.read_text())
+    t["questions"][0]["text"] = "Something else?"
+    path.write_text(json.dumps(t))
+    code, out, err = _cli(
+        run, monkeypatch, proof, "answer", tid, q, "--question-digest", shown, "A", "--json"
+    )
+    assert code == 2 and "changed after it was shown" in out + err
+    assert tickets.load(ws, tid)["questions"][0].get("answer") is None
+    # a proof for digest A never passes as the current digest B
+    now = _qd(ws, tid, q)
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}:{shown}")
+    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "--question-digest", now, "A", "--json")
+    assert code == 2 and tickets.load(ws, tid)["questions"][0].get("answer") is None
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}:{now}")
+    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "--question-digest", now, "A", "--json")
+    assert code == 0, out + err
+
+
 def test_answer_forged_by_flag_with_valid_proof_is_refused(ws, run, monkeypatch):
     tid, q = _ask(ws, run)
-    proof = _proof(ws, "ticket.answer", f"{tid}:{q}")
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}")
     code, out, err = _cli(
-        run, monkeypatch, proof, "answer", tid, q, "A", "--by", "human:someone-else", "--json"
+        run,
+        monkeypatch,
+        proof,
+        "answer",
+        tid,
+        q,
+        "--question-digest",
+        _qd(ws, tid, q),
+        "A",
+        "--by",
+        "human:someone-else",
+        "--json",
     )
     assert code == 2 and tickets.load(ws, tid)["questions"][0].get("answer") is None
 
 
 def test_answer_replay_is_refused(ws, run, monkeypatch):
     tid, q = _ask(ws, run)
-    proof = _proof(ws, "ticket.answer", f"{tid}:{q}")
-    assert _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--json")[0] == 0
-    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "B", "--json")
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}")
+    assert (
+        _cli(run, monkeypatch, proof, "answer", tid, q, "--question-digest", _qd(ws, tid, q), "A", "--json")[
+            0
+        ]
+        == 0
+    )
+    code, out, err = _cli(
+        run, monkeypatch, proof, "answer", tid, q, "--question-digest", _qd(ws, tid, q), "B", "--json"
+    )
     assert code == 2
 
 
 def test_agent_in_the_environment_cannot_use_a_valid_proof(ws, run, monkeypatch):
     tid, q = _ask(ws, run)
-    proof = _proof(ws, "ticket.answer", f"{tid}:{q}")
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}")
     monkeypatch.setenv("CLAUDECODE", "1")
-    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--json")
+    code, out, err = _cli(
+        run, monkeypatch, proof, "answer", tid, q, "--question-digest", _qd(ws, tid, q), "A", "--json"
+    )
     assert code == 2 and tickets.load(ws, tid)["questions"][0].get("answer") is None
 
 
@@ -216,12 +295,23 @@ def test_dev_proof_never_works_on_a_real_workspace(ws, run, monkeypatch):
     d = hp.key_dir(ws)
     (d / "dev-human.key").write_text(key + "\n")
     os.chmod(d / "dev-human.key", 0o600)
-    p = hp.new_payload("ticket.answer", f"{tid}:{q}", "human:test-human")
+    p = hp.new_payload("ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}", "human:test-human")
     p["dev"] = True
-    code, out, err = _cli(run, monkeypatch, hp.mint(bytes.fromhex(key), p), "answer", tid, q, "A", "--json")
+    code, out, err = _cli(
+        run,
+        monkeypatch,
+        hp.mint(bytes.fromhex(key), p),
+        "answer",
+        tid,
+        q,
+        "--question-digest",
+        _qd(ws, tid, q),
+        "A",
+        "--json",
+    )
     assert code == 2 and tickets.load(ws, tid)["questions"][0].get("answer") is None
     with pytest.raises(Refused):
-        hp.mint_dev(ws, "ticket.answer", f"{tid}:{q}")
+        hp.mint_dev(ws, "ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}")
     with pytest.raises(Refused):
         hp.dev_mark(ws)  # a workspace that already has a human key cannot become dev
 
@@ -233,8 +323,10 @@ def test_dev_workspace_accepts_the_test_human(ws, run, monkeypatch):
     hp.dev_mark(proj)
     assert hp.dev_workspace(proj)
     tid, q = _ask(proj, run)
-    proof = hp.mint_dev(proj, "ticket.answer", f"{tid}:{q}")
-    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--json")
+    proof = hp.mint_dev(proj, "ticket.answer", f"{tid}:{q}:{_qd(proj, tid, q)}")
+    code, out, err = _cli(
+        run, monkeypatch, proof, "answer", tid, q, "--question-digest", _qd(ws, tid, q), "A", "--json"
+    )
     assert code == 0, out + err
     assert tickets.load(proj, tid)["history"][-1]["by"] == "human:test-human"
     # on a normal install the same record means nothing
@@ -350,17 +442,27 @@ def test_terminal_answer_queues_a_handoff_with_the_command_and_no_token(ws, run)
     text = out + err
     assert "Continue" in text and "launch" not in text and "hp1." not in text
     item = hp.handoffs(ws)[0]
-    assert item["argv"][:3] == ["answer", tid, q] and "--by" not in item["argv"]
+    assert (
+        item["argv"][:5] == ["answer", "--question-digest", _qd(ws, tid, q), tid, q]
+        and "--by" not in item["argv"]
+    )
+    assert item["target"] == f"{tid}:{q}:{_qd(ws, tid, q)}"  # the page resumes with the digest shown here
     assert not list(
         hp.key_dir(ws).glob("launch-*.token")
     )  # a hand-off writes no token for the caller to read
 
 
 def test_handoff_is_not_queued_for_words_the_page_cannot_run(ws):
-    assert hp.request_handoff(ws, "ticket.answer", "t_a:q1", argv=["config", "set", "x", "y"]) is False
+    assert (
+        hp.request_handoff(ws, "ticket.answer", "t_a:q1:" + "a" * 64, argv=["config", "set", "x", "y"])
+        is False
+    )
     assert hp.request_handoff(ws, "no.such.op", "t_a", argv=["answer"]) is False
     assert hp.handoffs(ws) == []
-    assert hp.request_handoff(ws, "ticket.answer", "t_a:q1", argv=["answer", "t_a", "q1", "--", "x"]) is True
+    assert (
+        hp.request_handoff(ws, "ticket.answer", "t_a:q1:" + "a" * 64, argv=["answer", "t_a", "q1", "--", "x"])
+        is True
+    )
     hid = hp.handoffs(ws)[0]["id"]
     assert hp.handoff_take(ws, hid)["argv"][0] == "answer"
     assert hp.handoff_take(ws, hid) is None  # one click, one run
@@ -700,9 +802,11 @@ def test_expired_secret_files_are_removed_on_read(ws, run):
 
 def test_an_unusable_key_folder_refuses_visibly_and_saves_nothing(ws, run, monkeypatch):
     tid, q = _ask(ws, run)
-    proof = _proof(ws, "ticket.answer", f"{tid}:{q}")
+    proof = _proof(ws, "ticket.answer", f"{tid}:{q}:{_qd(ws, tid, q)}")
     monkeypatch.setattr(runs, "_pending_proof", lambda root, tid: None)  # key folder unusable at write time
-    code, out, err = _cli(run, monkeypatch, proof, "answer", tid, q, "A", "--json")
+    code, out, err = _cli(
+        run, monkeypatch, proof, "answer", tid, q, "--question-digest", _qd(ws, tid, q), "A", "--json"
+    )
     assert (
         code == 2
         and "Not saved" in out + err
@@ -731,9 +835,11 @@ def test_dev_proof_command_works_only_in_a_dev_workspace(ws, run, monkeypatch):
     assert code == 2 and "hp1." not in out
     fresh = _demo(ws)
     monkeypatch.chdir(fresh)
-    code, out, err = run("dev-proof", "ticket.answer", "t_a:q1")
+    code, out, err = run("dev-proof", "ticket.answer", "t_a:q1:" + "a" * 64)
     assert code == 0 and out.strip().startswith("hp1.")
-    assert hp.verify_and_consume(fresh, out.strip(), "ticket.answer", "t_a:q1") == "human:test-human"
+    assert (
+        hp.verify_and_consume(fresh, out.strip(), "ticket.answer", "t_a:q1:" + "a" * 64) == "human:test-human"
+    )
 
 
 def test_dev_proof_refuses_a_dev_install_a_normal_install_and_a_real_workspace(ws, run, monkeypatch):

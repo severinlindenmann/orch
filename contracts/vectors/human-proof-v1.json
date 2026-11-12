@@ -270,15 +270,15 @@
    "result": "ok"
   },
   {
-   "name": "ticket answer: proof for another question",
+   "name": "ticket answer: proof for another version of the question",
    "key": "0000000000000000000000000000000011111111111111111111111111111111",
    "op": "ticket.answer",
-   "target": "t_inv7c2:q2",
+   "target": "t_inv7c2:q1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
    "now": 1794300010,
    "by_flag": null,
    "agent_env": false,
    "used_nonces": [],
-   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJ0aWNrZXQuYW5zd2VyIiwidGFyZ2V0IjoidF9pbnY3YzI6cTEifQ.NJWxah12CKrdo--kKRWZSTQWqljVK70LWGDLXMUCHos",
+   "proof": "hp1.eyJieSI6Imh1bWFuOnNldmVyaW4iLCJleHAiOjE3OTQzMDAwNjAsImlhdCI6MTc5NDMwMDAwMCwibm9uY2UiOiJBQUFBQUFBQUFBQUFBQUFBQUFBQUFBIiwib3AiOiJ0aWNrZXQuYW5zd2VyIiwidGFyZ2V0IjoidF9pbnY3YzI6cTE6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9.6G8x5gvGHTr9Yz3YblKD8DclLG55lgW3Dp8y5299frQ",
    "result": "wrong_target"
   },
   {

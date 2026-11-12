@@ -415,7 +415,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
   find(tree, 'Done editing').onclick();
   assert.equal(find(ctx.detail(t), 'Rename'), undefined);
   await find(tree, 'Start work').onclick();
-  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['answer', {ticket:t.id, question:'q1', answer:'Start work'}]));
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['answer', {ticket:t.id, question:'q1', digest:undefined, answer:'Start work'}]));
   for (const [plan, text, status] of [[false,'Plan ready','waiting'], [true,'Other question','waiting'], [true,'Plan ready','done']]) {
     t.plan_first = plan; t.questions[0].text = text; t.status = status;
     tree = ctx.detail(t);

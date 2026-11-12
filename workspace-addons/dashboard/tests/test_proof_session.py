@@ -102,7 +102,7 @@ def test_click_without_a_session_is_watch_only(live, monkeypatch):
     ran = []
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
     st, _, _body = post(
-        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
     )
     assert st == 403 and ran == []
 
@@ -123,13 +123,13 @@ def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
     st, _, _ = post(
         port,
         "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
         {"Cookie": ck},
     )
     assert st == 200, seen
     assert "--proof-stdin" not in seen["argv"] and "x" in seen["argv"]  # run_with_proof adds the flag itself
     payload = json.loads(__import__("base64").urlsafe_b64decode(seen["proof"].split(".")[1] + "=="))
-    assert payload["op"] == "ticket.answer" and payload["target"] == "t_abc123:q1"
+    assert payload["op"] == "ticket.answer" and payload["target"] == "t_abc123:q1:" + "a" * 64
     assert seen["kw"]["orch_bin"] == pageproof.SELF
     assert "ORCH_BIN" not in seen["kw"]["env"]
 
@@ -148,7 +148,7 @@ def test_two_loopback_servers_keep_independent_sessions(live, monkeypatch):
             returncode, stdout, stderr = 0, "{}", ""
 
         monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **kw: ran.append(argv) or R())
-        act = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+        act = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
         ck1 = session(root, port)
         ck2 = session(root, port2)  # signing in to the second server ...
         assert ck1.split("=")[0] == f"orch_page_dashboard_{port}" and ck2.split("=")[0] == f"orch_page_dashboard_{port2}"
@@ -175,7 +175,7 @@ def test_click_with_session_but_forwarded_is_refused(live):
     st, _, _ = post(
         port,
         "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
         {"Cookie": ck, "X-Forwarded-Host": "evil"},
     )
     assert st == 403
@@ -191,7 +191,7 @@ def test_handoff_listing_hides_the_command_and_confirm_runs_it_with_a_proof(live
     hp.request_handoff(
         root,
         "ticket.answer",
-        "t_abc123:q1",
+        "t_abc123:q1:" + "a" * 64,
         "Answer q1",
         "Blue",
         argv=["answer", "t_abc123", "q1", "--", "Blue"],
@@ -229,7 +229,7 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     st, _, body = post(
         port,
         "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
         {"Cookie": ck.split(";")[0]},
     )
     assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer mints
@@ -260,7 +260,7 @@ def test_a_notice_is_read_not_consumed_and_only_the_ack_of_a_session_clears_it(l
 
 def test_dismiss_needs_a_session(live):
     root, port = live
-    hp.request_handoff(root, "ticket.answer", "t_a:q1", "L", "x", argv=["answer", "t_a", "q1", "--", "x"])
+    hp.request_handoff(root, "ticket.answer", "t_a:q1:" + "a" * 64, "L", "x", argv=["answer", "t_a", "q1", "--", "x"])
     hid = hp.handoffs(root)[0]["id"]
     assert post(port, "/api/act", {"op": "handoff.dismiss", "args": {"id": hid}})[0] == 403
     assert hp.handoffs(root)  # still there
@@ -344,7 +344,7 @@ def test_print_launch_url_gives_the_page_a_session_once_and_reuse_revokes(live):
     st, _, _ = post(
         port,
         "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
         {"Cookie": ck.split(";")[0]},
     )
     assert st == 403  # the first session is revoked
@@ -384,7 +384,7 @@ def test_the_listing_sends_structured_parts_and_the_exact_value_never_a_sentence
     hp.request_handoff(
         root,
         "ticket.answer",
-        "t_a:q1",
+        "t_a:q1:" + "a" * 64,
         "",
         "Blue {value}",
         argv=["answer", "t_a", "q1", "--", "Blue {value}"],
@@ -495,7 +495,7 @@ ACT_ARGS = {
     "copies.ask-update": {"ticket": "t_abcdef"},
     "link.extend": {"id": "f_abc", "days": 3},
     "link.stop": {"id": "f_abc"},
-    "answer": {"ticket": TID, "question": "q1", "answer": "x"},
+    "answer": {"ticket": TID, "question": "q1", "digest": "a" * 64, "answer": "x"},
     "ticket.changes": {"ticket": TID, "text": "more"},
     "chat.say": {"text": "hi"},
     "chat.make_ticket": {"id": "m_abcdefghijkl"},
@@ -685,7 +685,7 @@ def test_copy_click_mints_exact_target(live, monkeypatch, op, args, target, head
 
 # ---- #539: the cookie alone is never a session (browsers send it to every loopback port) -------------------------
 
-ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
 
 
 def test_session_answer_hands_over_the_secret_in_the_body_not_in_a_cookie(live):

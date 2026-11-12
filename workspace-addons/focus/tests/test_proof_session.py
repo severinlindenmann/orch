@@ -101,7 +101,7 @@ def test_click_without_a_session_is_watch_only(live, monkeypatch):
     ran = []
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
     st, _, _body = post(
-        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
     )
     assert st == 403 and ran == []
 
@@ -122,13 +122,13 @@ def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
     st, _, _ = post(
         port,
         "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
         {"Cookie": ck},
     )
     assert st == 200, seen
     assert "--proof-stdin" not in seen["argv"] and "x" in seen["argv"]  # run_with_proof adds the flag itself
     payload = json.loads(__import__("base64").urlsafe_b64decode(seen["proof"].split(".")[1] + "=="))
-    assert payload["op"] == "ticket.answer" and payload["target"] == "t_abc123:q1"
+    assert payload["op"] == "ticket.answer" and payload["target"] == "t_abc123:q1:" + "a" * 64
     assert seen["kw"]["orch_bin"] == pageproof.SELF
     assert "ORCH_BIN" not in seen["kw"]["env"]
 
@@ -139,7 +139,7 @@ def test_click_with_session_but_forwarded_is_refused(live):
     st, _, _ = post(
         port,
         "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
         {"Cookie": ck, "X-Forwarded-Host": "evil"},
     )
     assert st == 403
@@ -172,7 +172,7 @@ def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session_proof(live):
 
 # ---- #539: the cookie alone is never a session (browsers send it to every loopback port) -------------------------
 
-ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
 
 
 def test_session_answer_hands_over_the_secret_in_the_body_not_in_a_cookie(live):

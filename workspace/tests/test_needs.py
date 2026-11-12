@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from test_addons import install, make_addon, uv_calls  # noqa: F401  (fixture)
 
-from orch import addons
+from orch import addons, tickets
 from orch.needs import needs as compute
 
 SCHEMA = json.loads(
@@ -56,6 +56,7 @@ def test_open_question_row_and_answered_one_gone(proj, run):
     run("ask", tid, "Send it now?", "--option", "Yes", "--option", "No", "--recommended", "Yes")
     (row,) = _rows(run)
     assert row["id"] == f"core:q:{tid}:q1" and row["kind"] == "question" and row["tone"] == "needs-you"
+    assert row["answer"].pop("digest") == tickets.question_digest(tickets.load(proj, tid)["questions"][0])
     assert row["answer"] == {"question": "q1", "options": ["Yes", "No"], "recommended": "Yes"}
     assert "Needs you (1)" in run("needs")[1]
     run("answer", tid, "q1", "Yes")

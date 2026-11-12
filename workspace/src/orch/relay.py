@@ -1314,6 +1314,9 @@ def _applied_ticket(root: Path, msg: dict) -> str | None:
     )
 
 
+QUESTION_UNCHECKABLE = "This question changed or can't be checked. Ask again."
+
+
 def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
     asked, why = _answer_asked(root, msg)
@@ -1325,6 +1328,9 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         return _apply_proposal_answer(root, msg, asked)
     by, via = _answer_by(msg, asked)
     try:
+        digest = asked.get("question_digest")
+        if not isinstance(digest, str) or not digest:  # no digest of the question as sent: never unchecked
+            raise Refused(QUESTION_UNCHECKABLE)
         t, q = tickets.answer(
             root,
             asked["ticket"],
@@ -1332,7 +1338,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
             clean_untrusted(str(msg.get("body", {}).get("answer")), 2000),
             by,
             via,
-            expected_question_digest=asked.get("question_digest"),  # None: a record from before digests
+            expected_question_digest=digest,
         )
     except Refused as e:
         if _applied_ticket(root, msg):  # a crash after the write, before "seen": same answer, nothing to redo

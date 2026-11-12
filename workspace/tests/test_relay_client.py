@@ -505,7 +505,16 @@ def test_a_phone_answer_to_a_question_changed_after_it_was_sent_is_not_applied(p
     note, applied = relay._apply_answer(proj, ans)
     assert applied is None and "changed after it was shown" in note
     assert tickets.load(proj, tid)["questions"][0]["answer"] is None
-    del rec["question_digest"]  # a record from before digests: answered as before
+    for bad in (None, 7, ""):  # a record without a usable digest (also one from before digests): refused
+        rec["question_digest"] = bad
+        relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+        note, applied = relay._apply_answer(proj, ans)
+        assert applied is None and "This question changed or can't be checked. Ask again." in note
+    del rec["question_digest"]
+    relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+    assert relay._apply_answer(proj, ans)[1] is None
+    assert tickets.load(proj, tid)["questions"][0]["answer"] is None
+    rec["question_digest"] = tickets.question_digest(tickets.load(proj, tid)["questions"][0])  # unchanged
     relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
     assert relay._apply_answer(proj, ans)[1] == tid
     assert tickets.load(proj, tid)["questions"][0]["answer"] == "yes"
@@ -1898,7 +1907,11 @@ def test_relay_answer_reaches_the_agent_that_waits(
         from orch import net
 
         p = net.secrets_dir(proj) / "questions-sent.json"
-        net.write_json(p, {reply: {"ticket": tid, "question_id": "q1", "to": PEER}}, True)
+        from orch import tickets
+
+        q = next(x for x in tickets.load(proj, tid)["questions"] if x["id"] == "q1")
+        rec = {"ticket": tid, "question_id": "q1", "to": PEER, "question_digest": tickets.question_digest(q)}
+        net.write_json(p, {reply: rec}, True)
     monkeypatch.setattr(
         runs, "read", lambda root, t: {"run": "r1", "ticket": t, "mode": "oneshot", "agent": "x"}
     )

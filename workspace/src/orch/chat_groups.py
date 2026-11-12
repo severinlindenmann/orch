@@ -1819,7 +1819,13 @@ def ask(root: Path, tid: str, ws: str, qid: str, by: str = "agent:relay") -> dic
             "The question could not be sent now. It is kept and goes out with the next relay command."
         )
     asked = net.read_json(relay._asked_path(root), {})
-    asked[mid] = {"ticket": tid, "question_id": qid, "to": ws, "group": gid}
+    asked[mid] = {
+        "ticket": tid,
+        "question_id": qid,
+        "to": ws,
+        "group": gid,
+        "question_digest": tickets.question_digest(q),  # the question as it was sent
+    }
     net.write_json(relay._asked_path(root), asked, True)
     _history(root, tid, by, f"Asked {ws} (group): {q['text']}"[:2000])
     return msg
@@ -3003,7 +3009,12 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
         qm = _send(root, "phones", "question", qb, allow_tid)
         if qm:
             asked = net.read_json(relay._asked_path(root), {})
-            asked[qm["id"]] = {"ticket": allow_tid, "question_id": q["id"], "to": "phones"}
+            asked[qm["id"]] = {
+                "ticket": allow_tid,
+                "question_id": q["id"],
+                "to": "phones",
+                "question_digest": tickets.question_digest(q),  # the question as it was sent
+            }
             net.write_json(relay._asked_path(root), asked, True)
         _report(
             root,
