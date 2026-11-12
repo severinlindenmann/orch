@@ -18,10 +18,10 @@
     const at = t.closed_at || [...(t.history || [])].reverse().find(e => /(?:status.*(?:->|→)\s*done|marked done|ticket completed)/i.test(e.text || ''))?.at;
     return at && !isNaN(Date.parse(at)) ? at : null;
   }
-  /* The one "Needs you" rule (picker line and the Needs you group): a ticket that waits or has open questions counts once. */
-  const needsYou = t => t.status !== 'done' && (t.status === 'waiting' || (t.question_count || 0) > 0);
+  /* The one "Needs you" rule (picker line and the Needs you group): each waiting ticket counts once. */
+  const needsYou = t => t.status === 'waiting';
   function attentionText(rows) {
-    const q = rows.filter(needsYou).length, r = rows.filter(t => t.status === 'review' && !needsYou(t)).length;
+    const q = rows.filter(needsYou).length, r = rows.filter(t => t.status === 'review').length;
     if (!q && !r) return 'Nothing needs you right now.';
     const number = n => ['zero', 'one', 'two', 'three', 'four', 'five'][n] || String(n);
     const parts = [];

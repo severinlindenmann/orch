@@ -149,10 +149,15 @@ function needsFold(rows, count) {
   return h('div', {className:'card-row home-need needs-fold', 'data-key':'needs-fold'},
     h('div', {className:'row'}, h('p', {className:'grow'}, h('span', {className:'meta'}, 'Oldest · '), text), button('Show all', 'outline sm', () => { needsOpen = true; render(); })));
 }
+// What needs the person today (Home, the Home badge and the Menu count all use this).
+function needsToday() {
+  const needs = needsList().filter(r => !laterToday(r));
+  const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
+  return {needs, failed, count:window.DashHelpers.needsYouCount(needs, failed)};
+}
 function home() {
-  const needs = needsList().filter(r => !laterToday(r)), groupedNeeds = homeNeeds(needs), all = tickets();
+  const {needs, failed, count:needCount} = needsToday(), groupedNeeds = homeNeeds(needs), all = tickets();
   if (groupedNeeds.length < 3) needsOpen = false;
-  const failed = all.map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   const review = sorted(all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)));
   const used = new Set([...failed.map(([t]) => t.id), ...needs.map(n => n.ticket), ...working.map(t => t.id), ...review.map(t => t.id)]);
@@ -160,7 +165,6 @@ function home() {
     const at = parse(t.done_at || t.completed_at || t.updated_at);
     return at && at.toDateString() === now().toDateString();
   })());
-  const needCount = window.DashHelpers.needsYouCount(needs, failed);
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
   const agent = window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state.settings, state.runs?.[working[0]?.id]?.claim) : capitalise(name(state.runs?.[working[0]?.id]?.claim?.label || state.runs?.[working[0]?.id]?.claim?.agent || array(state.settings?.agents).find(a => a.chosen)?.label || 'Helper'));
   const hour = now().getHours();

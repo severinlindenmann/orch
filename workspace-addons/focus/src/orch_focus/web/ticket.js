@@ -25,7 +25,7 @@
       };
       for (const [status, label, action] of groups) {
         const needsYou = window.FocusHelpers.needsYou;
-        const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status && !needsYou(t));
+        const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status);
         if (!rows.length) continue;
         box.append(h('section', {class: 'fx-pick-group fx-group-' + status}, h('h2', {}, label + ' ', h('span', {class: 'meta', text: '(' + rows.length + ')'})),
           h('div', {class: 'card'}, rows.map(t => rowFor(t, status, action)))));

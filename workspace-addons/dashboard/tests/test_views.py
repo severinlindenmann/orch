@@ -404,7 +404,7 @@ def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
 def test_ticket_details_hide_raw_id_and_home_badge_is_named():
     js = webjs.all_js()
     assert "field('Ticket', h('span', {className:'ed-ro mono'}, t.id))" not in js
-    assert "needsYou(needsList().length)" in js
+    assert "needsYou(needCount)" in js
 
 
 def test_settings_wording_and_one_toast_at_a_time():

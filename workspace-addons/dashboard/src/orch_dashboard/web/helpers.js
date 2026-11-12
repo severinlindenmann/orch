@@ -161,12 +161,12 @@
     return out;
   }
 
-  /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
   /* The one "Needs you" number (greeting, heading, fold): one per ticket (or per row without a ticket) plus failed starts. */
   function needsYouCount(rows, failed) {
     return new Set(arr(rows).filter(Boolean).map(r => r.ticket || r.id)).size + arr(failed).length;
   }
 
+  /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
   function inNeeds(rows, ticketId) {
     return arr(rows).some(r => r && r.ticket === ticketId && r.answer && r.answer.question);
   }
