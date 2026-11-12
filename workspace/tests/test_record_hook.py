@@ -1970,3 +1970,74 @@ def test_the_decoded_value_check_catches_what_the_serialized_check_misses():
     with pytest.raises(record.RecordInvalid):
         record._hidden_line(blind, obj)
     assert record._hidden_line(blind, {"text": "clean"}) == b'{"text":"clean"}'
+
+
+def _shown_reference(events):
+    """The reader's dedupe as it was (a rescan of the kept lines per line): `_shown` gives exactly this."""
+    kept = []
+    for event in events:
+        if record._decision(kept, event):
+            kept = [old for old in kept if not record._replaces(old, event)] + [event]
+    return kept
+
+
+def _random_events(rng, count):
+    events = []
+    for seq in range(1, count + 1):
+        finished = rng.random() < 0.5
+        outcome = None
+        if finished:
+            ok = rng.choice([True, False, None])
+            error = None if ok else rng.choice([None, "boom", "tool_failed", "interrupted"])
+            outcome = {"ok": ok, "error": error}
+        events.append(
+            {
+                "seq": seq,
+                "run": rng.choice(["r1", "r2"]),
+                "id": rng.choice(["a", "b", "c", "h_r1:1"]),
+                "kind": rng.choice(["tool", "message"]),
+                "via": rng.choice(["hook", "log", "log", "core", "claude"]),
+                "outcome": outcome,
+                "used": rng.choice(["Bash", "Read"]),
+                "text": rng.choice(["ls", "ls", "cat x"]),
+                "files": rng.choice([None, [], ["f"]]),
+            }
+        )
+    return events
+
+
+def test_shown_is_the_rescan_on_random_runs():
+    import copy
+    import random
+
+    rng = random.Random(588)
+    for _ in range(800):
+        events = _random_events(rng, rng.randint(0, 60))
+        expected = _shown_reference(copy.deepcopy(events))
+        assert record._shown(copy.deepcopy(events)) == expected
+
+
+def test_shown_is_fast_on_a_long_run():
+    events = []
+    for call in range(2500):  # 10,000 lines: per call a hook and a log line, started and finished
+        for finished in (False, True):
+            for via in ("hook", "log"):
+                events.append(
+                    {
+                        "seq": len(events) + 1,
+                        "run": "r1",
+                        "id": f"c{call}",
+                        "kind": "tool",
+                        "via": via,
+                        "outcome": {"ok": True, "error": None} if finished else None,
+                        "used": "Bash",
+                        "text": "ls" if call % 3 or via == "hook" else "rm",
+                    }
+                )
+    start = time.monotonic()
+    kept = record._shown(events)
+    assert time.monotonic() - start < 2
+    # agreeing calls keep their two log lines; a disagreeing one (every third) also keeps its started hook
+    # line (its finished hook line comes after a log line of the call), and both log lines are marked
+    assert len(kept) == 2 * 2500 + len(range(0, 2500, 3))
+    assert sum(bool(e.get("conflict")) for e in kept) == 2 * len(range(0, 2500, 3))
