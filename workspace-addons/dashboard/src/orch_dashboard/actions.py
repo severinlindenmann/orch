@@ -1085,6 +1085,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         if target != args.get("seen"):  # phase 2: only what the page showed is minted
             raise BadRequest("This changed after you opened it. Nothing was changed; open it again.")
         need = ("addon.act", target) if target else None
+    if need and mint is None:  # a request without the page secret: a plain refusal, never a crash
+        raise NeedsPerson("Open the dashboard from this computer to do this.")
     try:
         if need:
             r = run_with_proof(
