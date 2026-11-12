@@ -1917,21 +1917,33 @@ def test_h3_the_real_home_only_with_the_persons_real_home_setting(store, run, ws
     assert code == 2  # the body no longer matches its MAC
 
 
-@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
 @pytest.mark.real_checks
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode shims are a macOS thing")
-def test_xcode_shims_are_checked_where_they_really_run(ws, monkeypatch, tmp_path):
-    dev = tmp_path / "Developer"
+def test_a_tool_planted_in_the_developer_folder_after_approval_is_refused_at_the_next_start(
+    ws, monkeypatch, tmp_path
+):
+    tmp = Path(os.path.realpath(tmp_path))
+    stubs = tmp / "stubs"
+    stubs.mkdir()
+    (stubs / "git").write_bytes(b"libxcselect")
+    dev = tmp / "Developer"
     (dev / "usr" / "bin").mkdir(parents=True)
-    (dev / "usr" / "bin" / "true").write_bytes(Path("/usr/bin/true").read_bytes())
-    (dev / "usr" / "bin" / "true").chmod(0o755)
-    link = tmp_path / "xcode_select_link"
+    link = tmp / "link"
     link.symlink_to(dev)
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
+    monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(stubs))
+    real = secretrun._user_can_write
+    safe = set(secretrun._chain(str(dev)))  # (pretend the folder itself is safe; only the tool is not)
+    monkeypatch.setattr(secretrun, "_user_can_write", lambda p: False if p in safe else real(p))
+    secretrun._check_xcode(str(stubs / "git"), str(ws))  # nothing there yet: fine
+    (dev / "usr" / "bin" / "git").write_bytes(b"planted")  # the agent plants the tool afterwards
     with pytest.raises(Refused, match=LOCATION):
-        secretrun.approve_program(ws, "/usr/bin/true")
-    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(tmp_path / "missing"))
-    assert secretrun.approve_program(ws, "/usr/bin/true")[0]
+        secretrun._check_xcode(str(stubs / "git"), str(ws))
+    (dev / "usr" / "bin" / "git").unlink()
+    (dev / "Platforms" / "X.platform" / "Developer" / "usr" / "bin").mkdir(parents=True)
+    (dev / "Platforms" / "X.platform" / "Developer" / "usr" / "bin" / "git").write_bytes(b"planted")
+    with pytest.raises(Refused, match=LOCATION):
+        secretrun._check_xcode(str(stubs / "git"), str(ws))
 
 
 def test_a_system_folder_the_user_can_write_through_a_group_counts_as_user_owned(ws, monkeypatch):
@@ -1986,7 +1998,7 @@ def _safe_file():
             except Refused:
                 continue
             return cand
-    pytest.skip("no suitable system file on this machine")
+    pytest.fail("no system file passes the location check: the check is wrong or this machine is unusual")
 
 
 def _user_program(tmp_path):
@@ -2110,13 +2122,42 @@ def test_an_unreadable_script_program_is_refused(ws, tmp_path):
 
 @pytest.mark.real_checks
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
-def test_an_unsafe_developer_folder_blocks_only_programs_that_live_there(ws, monkeypatch, tmp_path):
-    dev = Path(os.path.realpath(tmp_path)) / "Developer"  # owned by the test user, without a `true` inside
+def test_an_unsafe_developer_folder_blocks_xcrun_stubs_but_not_other_system_programs(
+    ws, monkeypatch, tmp_path
+):
+    tmp = Path(os.path.realpath(tmp_path))
+    stubs = tmp / "stubs"
+    stubs.mkdir()
+    (stubs / "git").write_bytes(b"\xcf\xfa binary ... /usr/lib/libxcselect.dylib ...")  # a fake xcrun stub
+    (stubs / "true").write_bytes(b"\xcf\xfa an ordinary program")
+    dev = tmp / "Developer"  # owned by the test user, and without a `git` inside
     dev.mkdir()
-    link = tmp_path / "link"
+    link = tmp / "link"
     link.symlink_to(dev)
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
-    assert secretrun.approve_program(ws, "/usr/bin/true")[0]
+    monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(stubs))
+    with pytest.raises(Refused, match=LOCATION):
+        secretrun._check_xcode(str(stubs / "git"), str(ws))
+    secretrun._check_xcode(str(stubs / "true"), str(ws))  # not a stub: not blocked by the developer folder
+    (stubs / "unreadable").mkdir()  # cannot be read as a file: counts as a stub
+    with pytest.raises(Refused, match=LOCATION):
+        secretrun._check_xcode(str(stubs / "unreadable"), str(ws))
+
+
+@pytest.mark.real_checks
+@pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
+def test_without_the_xcode_link_the_command_line_tools_folder_is_checked(ws, monkeypatch, tmp_path):
+    clt = "/Library/Developer/CommandLineTools"
+    if not os.path.isdir(clt):
+        pytest.skip("no command line tools here")
+    tmp = Path(os.path.realpath(tmp_path))
+    (tmp / "git").write_bytes(b"libxcselect")
+    monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(tmp / "missing"))
+    monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(tmp))
+    seen = []
+    monkeypatch.setattr(secretrun, "_check_chain", lambda real, w: seen.append(real))
+    secretrun._check_xcode(str(tmp / "git"), str(ws))
+    assert os.path.realpath(clt) in seen
 
 
 @pytest.mark.real_checks
@@ -2145,12 +2186,15 @@ def test_nothing_uses_keys_as_root_in_run_or_get(store, ws, monkeypatch):
 
 
 def test_urls_are_not_paths_unless_file_or_unix_or_they_hide_a_path_behind_a_space(ws):
-    secretrun.check_arguments(ws, ["https://example.test/x", "postgres://u@h/db"])
+    secretrun.check_arguments(ws, ["https://example.test/x", "postgres://u@h/db", "git+https://h/r"])
     for bad, why in (
         ("a://b /Users/me/ws/evil", "full path"),
         ("file://relative/x", "full path"),
         ("file:///nonexistent/x", "does not exist"),
         ("unix:///nonexistent/sock", "does not exist"),
+        ("git+file:///nonexistent/r", "does not exist"),
+        ("redis+unix:///nonexistent/s", "does not exist"),
+        ("sqlite:///nonexistent/db", "does not exist"),
     ):
         with pytest.raises(Refused, match=why):
             secretrun.check_arguments(ws, [bad])
@@ -2165,4 +2209,4 @@ def test_a_folder_is_not_accepted_as_a_command_argument(ws):
 
 
 def test_the_developer_variables_are_never_handed_to_a_command():
-    assert keystore.env_denied("DEVELOPER_DIR") and keystore.env_denied("SDKROOT")
+    assert all(keystore.env_denied(v) for v in ("DEVELOPER_DIR", "SDKROOT", "TOOLCHAINS"))

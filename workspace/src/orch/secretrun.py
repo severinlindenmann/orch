@@ -292,26 +292,42 @@ def _developer_dir() -> str:
     return link if os.path.isdir(link) else "/Library/Developer/CommandLineTools"
 
 
+XCRUN_STUB_DIR = "/usr/bin"  # where macOS keeps its xcrun stubs (git, python3, clang ...)
+
+
+def _is_xcrun_stub(path: str) -> bool:
+    """An xcrun stub names libxcselect inside; one that cannot be read counts as a stub (fail closed)."""
+    try:
+        with open(path, "rb") as f:
+            return b"libxcselect" in f.read(4 * 1024 * 1024)
+    except OSError:
+        return True
+
+
 def _check_xcode(path: str, ws: str) -> None:
     """macOS: /usr/bin/git, make, python3, clang ... are stubs that run the real tool from the developer
-    folder. When the program's name exists there, that folder and the tool must be safe."""
-    if sys.platform != "darwin" or os.path.dirname(path) != "/usr/bin":
+    folder (chosen by xcode-select, never by the caller's environment). For such a stub that folder must be
+    safe whether or not a tool of that name is found there, and so must the tool. Other /usr/bin programs
+    do not depend on it."""
+    if sys.platform != "darwin" or os.path.dirname(path) != XCRUN_STUB_DIR or not _is_xcrun_stub(path):
         return
     dev = _developer_dir()
+    if os.path.isdir(dev):
+        _check_chain(dev, ws)
     name = os.path.basename(path)
     candidates = [os.path.join(dev, "usr", "bin", name)]
     toolchains = os.path.join(dev, "Toolchains")
-    try:
-        candidates += [
-            os.path.join(toolchains, t, "usr", "bin", name) for t in sorted(os.listdir(toolchains))
-        ]
-    except OSError:
-        pass
-    found = [c for c in candidates if os.path.isfile(c)]
-    if found and os.path.isdir(dev):  # only a program that really lives there is run from there
-        _check_chain(dev, ws)
-    for c in found:
-        _check_chain(os.path.realpath(c), ws)
+    for base, rest in (
+        (toolchains, ("usr", "bin")),
+        (os.path.join(dev, "Platforms"), ("Developer", "usr", "bin")),
+    ):
+        try:
+            candidates += [os.path.join(base, t, *rest, name) for t in sorted(os.listdir(base))]
+        except OSError:
+            pass
+    for c in candidates:
+        if os.path.isfile(c):
+            _check_chain(os.path.realpath(c), ws)
 
 
 def approve_program(root, name, *, _depth=0):
@@ -371,7 +387,7 @@ def check_arguments(root, arguments) -> None:
     for arg in arguments:
         if _URL.match(arg) and not re.search(r"\s", arg):
             scheme, _, arg = arg.partition("://")
-            if scheme.lower() not in ("file", "unix"):  # a web address is not a path
+            if not set(scheme.lower().split("+")) & {"file", "unix", "sqlite"}:  # a web address is not a path
                 continue
         if "/" not in arg and "\\" not in arg and not (os.altsep and os.altsep in arg):
             continue
