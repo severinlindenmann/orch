@@ -48,6 +48,20 @@ def plain(value, limit=200):
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+REVIEW_MAX = 3000  # characters a sign step shows in full (the dashboard allows 4000 per review)
+TOO_LARGE = ("This change is too large to review here, so it can't be signed in the dashboard. "
+             "See it with: orch sync needs --json, then decide on the command line.")
+
+
+def whole(value):
+    """A signed value shown in FULL (M-C): never clipped, so what the person signs is what they see. Hidden
+    characters are shown as U+FFFD. Too long for a sign step: refused (nothing is offered for signing)."""
+    text = HIDDEN.sub("\ufffd", " ".join(str(value).split()))
+    if len(text) > REVIEW_MAX:
+        raise repo.Refused(TOO_LARGE)
+    return text
+
+
 def _address(remote):
     """A sync address as the sign step shows it: whole, without a login."""
     return plain(cli.safe_address(remote), 600)
@@ -128,9 +142,13 @@ def status(root, settings):
         else "never"
     )
     public = pending_public(root)
+    # an address the person never confirmed (settings.json is agent-writable) is never shown as theirs (no pre-fill)
+    confirmed = bool(settings.get("remote")) and cli.address_confirmed(root, settings["remote"])
     return {
         "mode": settings["mode"],
-        "remote": cli.safe_address(settings["remote"]) if settings.get("remote") else None,
+        "remote": cli.safe_address(settings["remote"]) if confirmed else None,
+        "confirmed": confirmed,
+        "unconfirmed": bool(settings.get("remote")) and not confirmed,
         "interval": result["interval"],
         "shown": shown,
         "last_ok": result["last_ok"],
@@ -285,7 +303,7 @@ def _held_review(root, target, kind):
         if kind == "allow"
         else {"title": f"Ignore this change of {name} on {tid}?", "body": "It is not used here. A different change asks again."}
     )
-    review["value"] = f"{plain(raw.decode('utf-8', 'replace'), 300)} ({len(raw)} bytes)"
+    review["value"] = f"{whole(raw.decode('utf-8', 'replace'))} ({len(raw)} bytes)"
     return f"sync:{kind}:{tid}:{addon}:{hashlib.sha256(raw).hexdigest()}", review
 
 
@@ -293,7 +311,7 @@ def _shown(doc, key):
     if key not in doc:
         return "(none)"
     v = doc[key]
-    return plain(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, sort_keys=True), 60) or "(empty)"
+    return whole(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, sort_keys=True)) or "(empty)"
 
 
 def _side(path, doc, data, gone):
@@ -301,9 +319,9 @@ def _side(path, doc, data, gone):
     if data is None:
         return gone
     if paths.TICKET.fullmatch(path):
-        return "; ".join(f"{plain(k, 60)}: {_shown(doc[0], k)}" for k in doc[1]) or "No other change."
+        return whole("; ".join(f"{whole(k)}: {_shown(doc[0], k)}" for k in doc[1])) or "No other change."
     if path == "ticket-counter.json":
-        return f"{plain(data.decode('utf-8', 'replace'), 120)} ({len(data)} bytes)"
+        return f"{whole(data.decode('utf-8', 'replace'))} ({len(data)} bytes)"
     return f"{plain(Path(path).name, 120)}, {len(data)} bytes"
 
 

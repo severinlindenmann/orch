@@ -46,7 +46,9 @@ def refused(root, monkeypatch, *remotes):
     """A sync step makes no network call, says why in plain words and shows a Needs row."""
     calls = recorded(monkeypatch, fake_network=False)
     state = run(root)
-    assert state["last_error"] == cli.UNCONFIRMED == "Sync address not confirmed: choose it again in Settings"
+    assert state["last_error"] == cli.UNCONFIRMED == (
+        "Sync found an address you did not choose and did not use it. Choose where to sync in Settings."
+    )
     assert not [c for c, _ in calls if NETWORK & set(c)]
     assert not any(has_state(r) for r in remotes)
     assert json.loads((root / ".orch/run/sync/state.json").read_text())["last_error"] == cli.UNCONFIRMED
@@ -80,7 +82,7 @@ def test_a_tampered_record_is_refused(root, tmp_path, monkeypatch, preview, tamp
     save(root)
     p = root / ".orch" / cli.ADDRESS
     record = json.loads(p.read_text())
-    assert set(record) == {"sha256", "mac"}
+    assert set(record) == {"sha256", "counter", "mac"}
     if tamper == "mac":
         record["mac"] = ("A" if record["mac"][0] != "A" else "B") + record["mac"][1:]
     elif tamper == "no-mac":
@@ -160,3 +162,32 @@ def test_leaving_remote_revokes_the_signed_address(root, tmp_path, monkeypatch, 
     if left == "off":
         repo.ensure(root)
     refused(root, monkeypatch, remote)
+
+
+def test_a_restored_older_record_confirms_nothing(root, tmp_path, monkeypatch, preview):
+    """Rollback: the agent copied the signed record for A, the person moved to B (or left remote); putting the old
+    copy back with remote=A is refused (the guarded pin names only the current record)."""
+    a, b = bare(tmp_path, "a.git"), bare(tmp_path, "b.git")
+    assert set_remote(root, a) == 0
+    save(root)
+    old = (root / ".orch" / cli.ADDRESS).read_text()
+    assert set_remote(root, b) == 0
+    (root / ".orch" / cli.ADDRESS).write_text(old)
+    plant(root, mode="remote", remote=str(a))
+    refused(root, monkeypatch, a)
+    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0  # revoked: the same copy still refused
+    (root / ".orch" / cli.ADDRESS).write_text(old)
+    plant(root, mode="remote", remote=str(a))
+    refused(root, monkeypatch, a)
+
+
+def test_an_unconfirmed_address_is_never_shown_as_the_persons(root, tmp_path, preview):
+    """M-B: the card never pre-fills or names a planted address; it says it was not chosen."""
+    remote = bare(tmp_path)
+    configure(root)
+    plant(root, mode="remote", remote=str(remote))
+    st = act.status(root, cli.DEFAULTS | cli.read(root, "settings"))
+    assert st["remote"] is None and st["confirmed"] is False and st["unconfirmed"] is True
+    assert set_remote(root, remote) == 0
+    st = act.status(root, cli.DEFAULTS | cli.read(root, "settings"))
+    assert st["remote"] == cli.safe_address(str(remote)) and st["confirmed"] is True and st["unconfirmed"] is False

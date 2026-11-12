@@ -300,7 +300,7 @@ function syncCard(settings) {
 async function syncSave() {
   const s = syncNow();
   if (syncUi.busy || (s.where === 'remote' && !s.addr.trim())) return;
-  const saved = syncSaved(syncUi.card), sameAddr = s.where === 'remote' && saved.where === 'remote' && s.addr.trim() === saved.addr;
+  const saved = syncSaved(syncUi.card), sameAddr = s.where === 'remote' && saved.where === 'remote' && syncUi.card?.confirmed === true && s.addr.trim() === saved.addr;  // an unconfirmed address is never a 'same address' shortcut
   if (s.where === 'remote' && !sameAddr) {
     // choosing the sync address is the person's signed choice: the sign step shows the address the add-on returns
     await signedAct({addon:SYNC, verb:'set', target:s.addr.trim(), value:s.every}, 'Sync address chosen.', async result => {

@@ -82,7 +82,7 @@ def remote_target(address, public=False):
 
 ADDRESS = "run/sync/address.json"  # the address the person's signed set-remote / use-public choice applied
 ADDRESS_KIND = "sync-remote-address"  # its local1 domain: only apply_set writes (signs) it, after the person's proof
-UNCONFIRMED = "Sync address not confirmed: choose it again in Settings"
+UNCONFIRMED = "Sync found an address you did not choose and did not use it. Choose where to sync in Settings."
 
 
 class Unconfirmed(repo.RemoteRefused):
@@ -97,16 +97,27 @@ def _address_record(address):
 
 
 def approve_address(root, address):
-    """Record (local1-signed) exactly the address a person's signed choice applies. Only apply_set calls it."""
+    """Record exactly the address a person's signed choice applies: pinned in the guarded home (humanproof.pin_next:
+    a counter + the digest of the ONE current body, so an older signed copy of this file never counts again), then
+    local1-signed. Only apply_set calls it."""
     from orch import humanproof
 
     from .step import encoded, write
 
-    body = _address_record(address)
-    mac = humanproof.local_sign(root, ADDRESS_KIND, body)
+    body = humanproof.pin_next(root, ADDRESS_KIND, _address_record(address))
+    mac = humanproof.local_sign(root, ADDRESS_KIND, body) if body else None
     if not mac:
         raise repo.Refused("orch could not sign this choice; nothing was changed")
     write(root, ADDRESS, encoded({**body, "mac": mac}))
+
+
+def revoke_address(root):
+    """The person left remote: pin an empty body (every earlier signed address record is now older than the pin,
+    so a restored copy confirms nothing) and remove the file. Fails closed: without a pin the file still goes."""
+    from orch import humanproof
+
+    humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None})
+    repo.safe(root, ADDRESS).unlink(missing_ok=True)
 
 
 def address_confirmed(root, address):
@@ -123,7 +134,12 @@ def address_confirmed(root, address):
     if not isinstance(data, dict):
         return False
     body = {k: v for k, v in data.items() if k != "mac"}
-    return body == _address_record(address) and humanproof.local_ok(root, ADDRESS_KIND, body, data.get("mac"))
+    return (
+        {k: v for k, v in body.items() if k != "counter"} == _address_record(address)
+        and type(body.get("counter")) is int
+        and humanproof.local_ok(root, ADDRESS_KIND, body, data.get("mac"))
+        and humanproof.pin_ok(root, ADDRESS_KIND, body)  # the current record, never a restored older one
+    )
 
 
 def confirmed_remote(root, settings):
@@ -209,8 +225,10 @@ def apply_set(root, settings, mode=None, remote=None, interval=None, kind="priva
         approve_address(root, chosen)  # the address this signed choice applies (checked at every use)
     elif mode in ("off", "local"):
         # leaving remote revokes the signed address: planting mode=remote in settings.json later can't bring the old
-        # approval back; turning remote on again is a new signed choice
-        repo.safe(root, ADDRESS).unlink(missing_ok=True)
+        # approval back (nor can a restored copy: the pin moved on); turning remote on again is a new signed choice
+        revoke_address(root)
+        if mode == "off":
+            settings.pop("remote", None)
     settings.update(mode=mode, kind=kind, interval=interval or settings["interval"])
     save_settings(root, settings)
     from . import loop, service

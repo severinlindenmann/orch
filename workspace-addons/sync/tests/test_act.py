@@ -356,8 +356,8 @@ def test_use_public_reads_the_waiting_address_once(root, tmp_path, monkeypatch, 
 
 
 def test_allow_review_shows_the_held_value_the_target_hashes(machines):
-    """M2: the sign step of allow / ignore shows the peer's value (clipped plain text with its byte count),
-    computed from the same bytes the target hashes."""
+    """M2 + M-C: the sign step of allow / ignore shows the peer's value IN FULL with its byte count, computed from
+    the same bytes the target hashes; a value too large to show is refused (nothing to sign in the dashboard)."""
     from orch_sync import approval
 
     a, b, _ = both(machines)
@@ -369,10 +369,17 @@ def test_allow_review_shows_the_held_value_the_target_hashes(machines):
     for kind in ("allow", "ignore"):
         target, review = act.proof_target(b, kind, "t_abc123:automation")
         assert target == f"sync:{kind}:t_abc123:automation:{hashlib.sha256(raw).hexdigest()}"
-        assert review["value"].startswith(raw.decode()[:200]) and review["value"].endswith(f"… ({len(raw)} bytes)")
+        assert review["value"] == f"{raw.decode()} ({len(raw)} bytes)"  # whole: the payload after a long prefix shows
         assert "automation" in review["title"] and "t_abc123" in review["title"]
     with pytest.raises(repo.Refused):
         act.proof_target(b, "allow", "t_abc123:other")
+    big = {"aaa": "x" * 4000, "zrun": "payload"}  # a harmless prefix past what a sign step shows
+    edit(a, ext={"automation": big})
+    success(a)
+    success(b)
+    for kind in ("allow", "ignore"):
+        with pytest.raises(repo.Refused, match="too large to review here"):
+            act.proof_target(b, kind, "t_abc123:automation")
 
 
 def test_review_text_never_hides_a_character():

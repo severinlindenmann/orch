@@ -47,7 +47,7 @@ function context({settings = {}, needs = [], answers = {}, reviews = {}} = {}) {
   for (const file of ['home', 'settings']) vm.runInContext(fs.readFileSync(path.join(PAGES, file + '.js'), 'utf8'), c);
   return {c, calls, dialogs, toasts, ui:vm.runInContext('syncUi', c)};
 }
-const BASE = {mode:'remote', remote:'https://files.example.org/mia/month-end', interval:15, shown:'synced', last_ok:'2026-11-11T09:15:00Z',
+const BASE = {mode:'remote', remote:'https://files.example.org/mia/month-end', confirmed:true, unconfirmed:false, interval:15, shown:'synced', last_ok:'2026-11-11T09:15:00Z',
   last_try:'2026-11-11T09:15:00Z', last_error:null, paused_needs:0, not_synced:[], public:null, remote_allowed:true, running:true};
 const ON = {addons:[{name:'sync', active:true, consent:'sync 1.0'}]};
 

@@ -31,7 +31,7 @@
     {"label": "Leave it out", "verb": "leave-out", "target": "tickets/t_q3x8k1/artifacts/payroll-access.txt", "sign": true, "review": {"title": "Leave payroll-access.txt out of sync?", "body": "It stays on this computer only.", "done": "Left out. It stays on this computer."}},
     {"label": "View file", "view": {"ticket": "t_q3x8k1", "name": "payroll-access.txt"}}]}
  ],
- "act_answer": {"addon": "sync", "answer": {"mode": "remote", "remote": "https://files.example.org/mia/month-end", "interval": 15, "shown": "synced", "last_ok": "2026-11-11T10:15:00", "last_try": "2026-11-11T10:15:00", "last_error": null, "paused_needs": 0,
+ "act_answer": {"addon": "sync", "answer": {"mode": "remote", "remote": "https://files.example.org/mia/month-end", "confirmed": true, "unconfirmed": false, "interval": 15, "shown": "synced", "last_ok": "2026-11-11T10:15:00", "last_try": "2026-11-11T10:15:00", "last_error": null, "paused_needs": 0,
   "not_synced": [{"name": "scans-march.zip", "why": "too big, stays on this computer"}, {"name": "payroll-access.txt", "why": "may contain a password or access key"}], "public": null, "remote_allowed": true, "running": true}},
  "runs": {},
  "tickets": [
