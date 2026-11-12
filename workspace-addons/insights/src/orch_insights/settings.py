@@ -37,8 +37,8 @@ SHARE_NOTE = "Daily counts only, no text, no chats. This workspace's own names s
 NAMES_NOTE = "Your own skill, connection and key names are sent too."
 LOCKS = {
     "off_by_admin": "Switched off by your admin",
-    "not_connected": "Not connected to an admin",
-    None: "Sharing could not be read.",
+    "not_connected": "Not connected to an admin, so nothing is shared",
+    None: "Not connected to an admin, so nothing is shared",  # no hub (or no answer): nothing leaves this computer
 }
 
 

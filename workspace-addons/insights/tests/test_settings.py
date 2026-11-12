@@ -189,7 +189,7 @@ def test_build_settings_without_person_disables_widening(answer):
     "state,locked,reason",
     [
         ("off_by_admin", True, "Switched off by your admin"),
-        ("not_connected", True, "Not connected to an admin"),
+        ("not_connected", True, "Not connected to an admin, so nothing is shared"),
         ("on", False, None),
         ("off", False, None),
     ],
@@ -205,6 +205,9 @@ def test_admin_lock_states(answer, state, locked, reason):
 def test_unreadable_counts_lock_sharing(answer):
     view = build_settings(SETTINGS, None, TICKETS, True)
     assert view["share_counts"]["locked"] and view["share_counts"]["options"] == []
+    # no hub / no answer reads as plain fact, not as an error
+    assert view["share_counts"]["reason"] == "Not connected to an admin, so nothing is shared"
+    assert "could not" not in view["share_counts"]["reason"]
     assert view["recorded"]["since"] is None
     assert options(view["keep"])["365"]["disabled"] is False
 
