@@ -116,7 +116,7 @@ test('overview file chips preview artifacts and are absent in snapshots or witho
   s.c.window.DashHelpers.plainFileName = x => x.split('/').pop();
   s.c.previewFile = (...args) => previews.push(args);
   const ticket = read('pages/ticket.js');
-  vm.runInContext('const artifactData = new Map();\n' + ticket.slice(ticket.indexOf('function ticketFiles('), ticket.indexOf('async function previewFile(')), s.c);
+  vm.runInContext('const artifactData = new Map();\n' + ticket.slice(ticket.indexOf('// One file = one entry'), ticket.indexOf('function ticketResultCard(')) + ticket.slice(ticket.indexOf('function ticketFiles('), ticket.indexOf('async function previewFile(')), s.c);
   assert.equal(s.c.ticketFiles({id:'t'}), null);
   vm.runInContext("artifactData.set('t', {data:{files:[{name:'folder/note.md',size:20000}]}})", s.c);
   const section = s.c.ticketFiles({id:'t'});

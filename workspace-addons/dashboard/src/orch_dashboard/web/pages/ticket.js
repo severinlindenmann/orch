@@ -372,7 +372,7 @@ function proofChip(ev) {
   const label = proofLabel(ev), mark = window.DashHelpers.proofMark(ev);
   return h('span', {className:'chip proof-chip'}, h('small', {className:'muted'}, mark.mark + ' ' + mark.label), ' ', label, ev.missing === true ? ' · on another computer' : null);
 }
-// ---- Artifacts tab: files (orch ticket artifacts), proof, links. Files are read through /api/file (text and pictures only).
+// ---- Files tab (id 'artifacts'): files (orch ticket artifacts), proof, links. Files are read through /api/file (text and pictures only).
 const artifactData = new Map();
 const PREVIEW_EXT = {text:/\.(txt|md|csv|tsv|json|log|html?|xml|ya?ml|toml|py|js|css|ini)$/i, image:/\.(png|jpe?g|gif|webp)$/i};
 const previewable = fileName => PREVIEW_EXT.text.test(fileName) || PREVIEW_EXT.image.test(fileName);
@@ -393,9 +393,11 @@ const proofRows = t => array(t.checklist).flatMap(task => array(task.evidence).m
   .sort((a, b) => (Date.parse(b.ev.at) || 0) - (Date.parse(a.ev.at) || 0));
 const referenceRows = t => array(t.refs).filter(r => r && (['ticket', 'artifact', 'file'].includes(r.kind) || webLinks(t).includes(r))).slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 const linkRows = t => referenceRows(t);
-const artifactProofs = t => proofRows(t).filter(({ev}) => evidenceFile(t, ev) || (ev.type || ev.kind) === 'note');
-const artifactCount = t => (artifactData.get(t.id)?.data?.files?.length || 0) + artifactProofs(t).length + linkRows(t).length;
-// Artifacts tab: all reference kinds, newest first.
+const artifactProofs = t => uniqueBy(proofRows(t).filter(({ev}) => evidenceFile(t, ev) || (ev.type || ev.kind) === 'note'), ({ev}) => proofKey(t, ev));
+// Files tab rows: artifact files then proofs, merged so a file in both lists shows (and counts) once.
+const artifactEntries = t => uniqueBy([...artifactFiles(t).map(file => ({file})), ...artifactProofs(t)], x => x.file ? x.file.name : proofKey(t, x.ev));
+const artifactCount = t => artifactEntries(t).length + linkRows(t).length;
+// Files tab: all reference kinds, newest first.
 function linkGroups(links) {
   const groups = new Map();
   for (const l of links.slice().sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0))) {
@@ -451,6 +453,11 @@ const evidenceFile = (t, ev) => {
   if (!name || /[\\\0:]/.test(name) || name.startsWith('/') || name.split('/').some(part => ['', '.', '..'].includes(part))) return null;
   return {name, mtime:ev.at};
 };
+// One file = one entry: lists keep the first item per key; items without a key (notes) all stay.
+const uniqueBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
+const proofKey = (t, ev) => evidenceFile(t, ev)?.name ?? (ev.ref ? (ev.type || ev.kind) + ':' + ev.ref : null);
+const artifactFiles = t => uniqueBy(array(artifactData.get(t.id)?.data?.files), f => f.name);
+const reviewFile = t => t.status === 'review' ? artifactFiles(t)[0] : null;
 function ticketResultCard(t, ev, file = null, kind = 'evidence') {
   const helpers = window.DashHelpers;
   const name = file ? file.name.split('/').pop() : '';
@@ -495,15 +502,14 @@ function ticketReviewTile(t, file) {
     snapshot ? null : ticketButton('Open', 'outline', () => previewFile(t.id, 'artifacts', file.name)));
 }
 function artifactsPanel(t) {
-  const files = array(artifactData.get(t.id)?.data?.files), proofs = artifactProofs(t), links = linkRows(t);
-  if (!files.length && !proofs.length && !links.length) return h('div', {className:'card artifacts-empty'}, h('h2', {}, 'Nothing here yet'), h('p', {className:'meta'}, 'Results and references from this ticket show up here.'));
-  return h('div', {className:'stack artifact-stack'}, h('h2', {}, 'Artifacts'),
-    files.map(file => ticketResultCard(t, {}, file, 'artifacts')),
-    proofs.map(({ev}) => ticketResultCard(t, ev, evidenceFile(t, ev))),
+  const entries = artifactEntries(t), links = linkRows(t);
+  if (!entries.length && !links.length) return h('div', {className:'card artifacts-empty'}, h('h2', {}, 'Nothing here yet'), h('p', {className:'meta'}, 'Results and references from this ticket show up here.'));
+  return h('div', {className:'stack artifact-stack'}, h('h2', {}, 'Files'),
+    entries.map(({file, ev}) => file ? ticketResultCard(t, {}, file, 'artifacts') : ticketResultCard(t, ev, evidenceFile(t, ev))),
     links.length ? h('section', {}, h('h2', {}, 'References'), links.map(l => linkRow(t, l, false))) : null);
 }
 function ticketFiles(t) {
-  const files = snapshot ? [] : array(artifactData.get(t.id)?.data?.files);
+  const shown = reviewFile(t)?.name, files = snapshot ? [] : artifactFiles(t).filter(f => f.name !== shown);
   if (!files.length) return null;
   return h('section', {className:'ticket-files', 'data-key':'ticket-files'}, h('h3', {}, 'Files'),
     h('div', {className:'ticket-file-chips'}, ...files.map(file => {
@@ -546,7 +552,7 @@ function focusTicketAnswer() {
 }
 // A small chip per proof worth opening: a file opens its preview, a PR or web address opens in a new tab.
 function taskProofChips(t, task) {
-  const chips = array(task.evidence).map(ev => {
+  const chips = uniqueBy(array(task.evidence), ev => proofKey(t, ev)).map(ev => {
     const kind = ev.type || ev.kind, file = evidenceFile(t, ev), label = proofLabel(ev);
     // a real click handler (h() only sets attributes, so an onclick there would be a dead attribute)
     if (file && !snapshot) return Object.assign(button(clean(ev.title || file.name.split('/').pop()), 'chip proof-chip', () => previewFile(t.id, 'evidence', file.name)), {title:'Open'});
@@ -919,8 +925,8 @@ function detail(t) {
     ? h('details', {className:'card ticket-task-collapse', 'data-key':key}, h('summary', {}, 'Tasks · ' + done + ' of ' + total + ' done'), taskRows(t))
     : card(key, 'Tasks', done + ' of ' + total + ' done', [total ? taskRows(t) : emptyRow('No tasks yet.'), addTaskRow(t, key)]);
   loadArtifacts(t, selected === 'artifacts');
-  const tabs = [['overview', 'Overview'], ['tasks', 'Tasks ' + done + '/' + total], ['questions', 'Questions' + (openQuestions.length ? ' (' + openQuestions.length + ')' : '')], ['artifacts', 'Artifacts' + (artifactCount(t) ? ' ' + artifactCount(t) : '')], ['history', 'History']];
-  const panel = (id, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, capitalise(id)) : null, body);
+  const tabs = [['overview', 'Overview'], ['tasks', 'Tasks ' + done + '/' + total], ['questions', 'Questions' + (openQuestions.length ? ' (' + openQuestions.length + ')' : '')], ['artifacts', 'Files' + (artifactCount(t) ? ' ' + artifactCount(t) : '')], ['history', 'History']];
+  const panel = (id, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, capitalise(id === 'artifacts' ? 'files' : id)) : null, body);
   const answered = array(t.questions).filter(q => q.answer != null).slice().reverse().map(q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
     h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines'}, clean(q.answer)), h('p', {className:'meta'}, ['Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · ')))));
   const fresh = !total && !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
@@ -928,7 +934,7 @@ function detail(t) {
   let next = null;
   if (t.status !== 'done') {
     // Review buttons are there whenever the status is Review, even with an open question: the question comes first.
-    const file = array(artifactData.get(t.id)?.data?.files)[0];
+    const file = reviewFile(t);
     const at = file?.mtime;
     const review = t.status === 'review' ? h('section', {className:'card next-step'},
       h('p', {className:'meta'}, 'Next step · Your review'),
