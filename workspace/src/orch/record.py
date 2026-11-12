@@ -1855,7 +1855,9 @@ class RecordWriter:
             # orch never names an entry so: left, alerted, not counted
             _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
         proven = set(valid)
-        invalid = sorted(n for n in names if _SPOOL_NAME.fullmatch(n) and n not in proven)
+        # every name the marker lists waits for a later drain when this one's budget is used: only unlisted
+        # (or unverifiable) names are refused
+        invalid = sorted(n for n in names if _SPOOL_NAME.fullmatch(n) and n not in proven and n not in listed)
         for name in invalid[:_REJECT_BATCH]:  # a well-shaped name without its proof: refused by name, unread
             check_lock()
             _reject_entry(self.workspace, run, ("pending", run, name))

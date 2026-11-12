@@ -807,22 +807,24 @@ def _old_spool_names(root: Path) -> dict:
     out, total = {}, 0
     base = root / ".orch" / "record" / "pending"
     try:
-        for run in sorted(os.listdir(base)):
-            if not _RUN_NAME.fullmatch(run):
-                continue
+        runs = sorted(os.listdir(base))
+    except OSError:
+        return {}
+    for run in runs:
+        if not _RUN_NAME.fullmatch(run):
+            continue
+        try:  # a run folder that cannot be listed is skipped: the other runs' names are still recorded
             names = [
                 n
                 for n in sorted(os.listdir(base / run))
                 if re.fullmatch(r"[0-9]{20}_[0-9a-f]{32}\.json", n)
                 and stat.S_ISREG(os.lstat(base / run / n).st_mode)
             ][: max(0, 2000 - total)]
-            if names:
-                out[run] = names
-                total += len(names)
-    except (FileNotFoundError, NotADirectoryError):
-        return {}
-    except OSError:
-        return {}
+        except OSError:
+            continue
+        if names:
+            out[run] = names
+            total += len(names)
     return out
 
 

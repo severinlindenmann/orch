@@ -374,3 +374,42 @@ def test_a_flood_of_planted_old_format_names_is_refused_in_batches_and_never_lef
     for _ in range(5):
         w.append(example(id=f"toolu_x{_}", at="2026-11-16T09:00:06Z"))
     assert list(d.iterdir()) == []  # all refused (moved aside) within a few calls, none left behind
+
+
+def test_more_listed_old_entries_than_one_batch_all_survive_and_are_committed(tmp_path):
+    from orch import record_auth as ra
+
+    ws = tmp_path / "up"
+    ws.mkdir()
+    _pre_upgrade_key(ws)
+    rec = hp.record_key(ws)
+    pend = record_dir(ws) / "pending" / RUN
+    pend.mkdir(parents=True)
+    for n in range(130):
+        name = _old_name(n + 1)
+        ev = example(id=f"toolu_o{n}", at="2026-11-16T09:00:04Z")
+        entry = {"event": ev, "payload": None, "default_id": False}
+        entry["sm"] = ra.spool_mac(rec[2], rec[0], RUN, name, dict(entry))
+        (pend / name).write_text(json.dumps(entry))
+    assert hp.ensure_record_key(ws) and len(hp.record_upgrade_old(ws, RUN)) == 130
+    w = RecordWriter(ws, hider=hider.Hider({"k": "KEYVALUE-abc123XYZ-secret"}))
+    for k in range(4):  # 50 per drain: three drains are enough
+        w.append(example(id=f"toolu_n{k}", at="2026-11-16T09:00:05Z"))
+    got = {e["id"] for e in read_run(ws, RUN).unwrap()}
+    assert all(f"toolu_o{n}" in got for n in range(130))  # none refused, all committed
+    assert list(pend.iterdir()) == []
+
+
+def test_an_unlistable_run_folder_does_not_drop_the_other_runs_old_names(tmp_path):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    _pre_upgrade_key(ws)
+    _old_entry(ws, _old_name(1), run="r_other001")
+    bad = record_dir(ws) / "pending" / "r_bad00001"
+    bad.mkdir(parents=True)
+    bad.chmod(0)
+    try:
+        assert hp.ensure_record_key(ws)
+    finally:
+        bad.chmod(0o700)
+    assert hp.record_upgrade_old(ws, "r_other001") == {_old_name(1)}
