@@ -264,7 +264,7 @@ USER_OWNED = (
 
 RISKY_PROGRAMS = re.compile(
     r"^(sh|bash|zsh|dash|ksh|fish|csh|tcsh|env|xargs|python[0-9.]*|node|npx|npm|pip[0-9.]*|perl|ruby|php|lua|"
-    r"java|git|osascript|pwsh|powershell|cmd|ssh|curl|wget|psql|mysql|sqlite3|redis-cli|mongosh)(\.exe)?$",
+    r"java|git|osascript|pwsh|powershell|cmd|ssh|scp|sftp|rsync|curl|wget|psql|mysql|sqlite3|redis-cli|mongosh)(\.exe)?$",
     re.IGNORECASE,
 )
 
@@ -452,19 +452,130 @@ def _is_plain_address(value: str) -> bool:
     )
 
 
-_OPTION_TAKERS = {"ssh", "scp", "sftp", "git", "rsync"}  # programs that run a command given with -o
+# The program kinds orch knows a safe form for, decided from the real file (program_kind). One table: words
+# that must come first, the options (exact words, each at most once, before the operands; None = no value,
+# else the slot type of the next word) and the operand slots. Nothing glued (-p22, -av, --opt=x), no
+# abbreviation, nothing after the last operand. "copy" operands: exactly one is remote (host:path).
+# No sftp: it reads commands from stdin (!cmd runs a local shell, put/lls/get reach any local file), so any
+# sftp is "any command" and needs the person's --any-command.
+TEMPLATES = {
+    "ssh": ((), {"-p": "port", "-l": "user", "-i": "key"}, ("host",)),
+    "scp": ((), {"-P": "port", "-i": "key"}, ("copy", "copy")),
+    "rsync": ((), dict.fromkeys(["-a", "-r", "-t", "-v", "-z", "-n", "--delete"]), ("copy", "copy")),
+    "git": (("ls-remote",), dict.fromkeys(["--heads", "--tags"]), ("url",)),
+}
+KINDS = (*TEMPLATES, "other")
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+_USERHOST = rf"(?:[A-Za-z0-9_][A-Za-z0-9._-]{{0,31}}@)?{_LABEL}(?:\.{_LABEL})*"
+_REMOTE = rf"{_USERHOST}:(?:[A-Za-z0-9._~+/][A-Za-z0-9._~/+-]{{0,255}})?"  # no ::module, no //, no -path
+_SLOTS = {
+    "port": r"[1-9][0-9]{0,4}",
+    "user": r"[A-Za-z0-9_][A-Za-z0-9._-]{0,31}",
+    "host": _USERHOST,
+}
+SET_AGAIN = "Refused: this profile was saved by an older orch or its program changed. Set the profile again."
+NOT_A_FORM = (
+    "Refused: orch runs ssh, scp, rsync and git ls-remote only in a few fixed forms, and this command "
+    "is not one of them. To allow any command, the person sets the profile with --any-command."
+)
+REAL_HOME_ANY = (
+    "Refused: with your real home folder this program reads settings an agent could change. To allow it, "
+    "the person sets the profile with --any-command."
+)
 
 
-def check_arguments(root, arguments, program=None) -> None:
-    """One fail-closed rule for the arguments of a profile's command and for its `set` values: one with a path
-    separator must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative path), must not
-    go through a link, and neither it nor any parent may be inside the workspace or changeable by you (an
-    agent running as you could change it). Only plain http, https, ssh and git addresses are not paths."""
+def program_kind(real: str, names=TEMPLATES) -> str:
+    """What a program really is, from the real file and never from the name it was given: one of `names`
+    only when it is the same file (device and inode) as the system program of that name; else "other"."""
+    for name in names:
+        for d in safe_path_dirs(None):
+            try:
+                if os.path.samefile(os.path.join(d, name), real):
+                    return name
+            except OSError:
+                pass
+    return "other"
+
+
+def command_template(profile) -> str | None:
+    """The template a profile's command must match, None when it has no command or the person allowed any
+    command. A command saved without a kind, a program orch has no form for, or a form with the real home
+    folder needs the person's --any-command."""
+    if not profile.get("run"):
+        return None
+    if profile.get("kind") not in KINDS:
+        raise Refused(SET_AGAIN)
+    if profile.get("any_command") is True:
+        return None
+    if profile["kind"] == "other":
+        raise Refused(NOT_A_FORM)
+    if profile.get("real_home") is True:
+        raise Refused(REAL_HOME_ANY)
+    return profile["kind"]
+
+
+def _slot(slot: str, value: str, files) -> list[str] | None:
+    """The paths in one slot value (checked by the path rules after), or None when it does not fit."""
+    if slot in _SLOTS:
+        return [] if re.fullmatch(_SLOTS[slot], value) else None
+    if slot == "key":  # orch's own key file, or a full path
+        m = re.fullmatch(r"\{file:([A-Za-z_][A-Za-z0-9_]*)\}", value)
+        if m:
+            return [] if m[1] in files else None
+        return [value] if value.startswith("/") else None
+    if slot == "local":
+        return [value] if value.startswith("/") and ":" not in value else None
+    if slot == "remote":
+        return [] if re.fullmatch(_REMOTE, value) and "//" not in value else None
+    if slot == "url":
+        return [] if _is_plain_address(value) or re.fullmatch(_REMOTE, value) else None
+    return None
+
+
+def _match_template(kind: str, args: list[str], files) -> list[str]:
+    """The arguments must fit the template of `kind` exactly (fail closed). Returns the path values."""
+    if kind not in TEMPLATES:
+        raise Refused(NOT_A_FORM)
+    first, options, operands = TEMPLATES[kind]
+    if args[: len(first)] != list(first):
+        raise Refused(NOT_A_FORM)
+    i, seen, paths = len(first), set(), []
+    while i < len(args) and args[i] in options and args[i] not in seen:
+        seen.add(args[i])
+        if options[args[i]] is not None:
+            got = _slot(options[args[i]], args[i + 1], files) if i + 1 < len(args) else None
+            if got is None:
+                raise Refused(NOT_A_FORM)
+            paths += got
+            i += 1
+        i += 1
+    rest = args[i:]
+    if len(rest) != len(operands):
+        raise Refused(NOT_A_FORM)
+    remote = 0
+    for slot, value in zip(operands, rest, strict=True):
+        if slot == "copy":
+            is_remote = _slot("remote", value, files) is not None
+            remote += is_remote
+            slot = "remote" if is_remote else "local"
+        got = _slot(slot, value, files)
+        if got is None:
+            raise Refused(NOT_A_FORM)
+        paths += got
+    if "copy" in operands and remote != 1:
+        raise Refused(NOT_A_FORM)
+    return paths
+
+
+def check_arguments(root, arguments, kind=None, files=()) -> None:
+    """One fail-closed rule for the arguments of a profile's command and for its `set` values. With a `kind`
+    the arguments must fit that program's template (_match_template) and only its path slots go on. A value
+    with a path separator must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative
+    path), must not go through a link, and neither it nor any parent may be inside the workspace or
+    changeable by you (an agent running as you could change it). Only plain http, https, ssh and git
+    addresses are not paths."""
     ws = os.path.realpath(root)
-    takes_options = os.path.basename(program or "").lower().removesuffix(".exe") in _OPTION_TAKERS
-    for arg in arguments:
-        if takes_options and arg.startswith("-o"):
-            raise Refused("Refused: an -o option can run a command through this program and is not allowed.")
+    for arg in arguments if kind is None else _match_template(kind, list(arguments), files):
         if re.match(r"^[^\s/]*@-", arg) or re.match(r"^[^\s/:]+:-", arg):
             raise Refused("Refused: an argument looks like an option hidden in an address.")
         if _is_plain_address(arg):
@@ -537,6 +648,53 @@ def _environment(dirs, private, real_home=False):
         env["TEMP"] = env["TMP"] = str(private)
     env["TMPDIR"] = str(private)  # never the caller's (key-bearing temp files land only in our folder)
     return env
+
+
+def neutral_ssh(command, env, dirs, h, private=None):
+    """Every ssh orch starts reads no ssh or git config an agent could write (OpenSSH reads ~/.ssh/config
+    from the account's home, not $HOME): ssh, scp and sftp get -F none, rsync gets its ssh from orch (-e),
+    git gets GIT_SSH_COMMAND and no system, global or repository config. The kind comes from the real file."""
+    kind = program_kind(os.path.realpath(command[0]), (*TEMPLATES, "sftp"))
+    if kind in ("ssh", "scp", "sftp"):
+        return [command[0], "-F", "none", *command[1:]]
+    if kind not in ("rsync", "git"):
+        return command
+    ssh = _program("ssh", dirs, h) + " -F none"
+    if kind == "rsync":
+        return [command[0], "-e", ssh, *command[1:]]
+    if private is None:
+        raise Refused("Refused: could not run the command.")
+    private = os.path.abspath(str(private))
+    for k in [k for k in env if k.upper().startswith("GIT_") or "ASKPASS" in k.upper()]:
+        del env[k]  # nothing inherited or from the profile steers git: only what is set below
+    # No repository discovery: a .git an agent planted in a parent folder of the private cwd (with
+    # core.sshCommand, credential.helper, url.*.insteadOf, hooks ...) is never read. GIT_DIR names a folder
+    # that does not exist; the ceiling stops any upward search at the private folder's parent.
+    config = {
+        "credential.helper": "",
+        "core.sshCommand": ssh,
+        "core.fsmonitor": "false",
+        "core.hooksPath": os.devnull,
+        "core.askPass": "",
+        "protocol.allow": "never",
+        "protocol.https.allow": "always",
+        "protocol.http.allow": "always",
+        "protocol.ssh.allow": "always",
+    }
+    env.update(
+        GIT_DIR=os.path.join(private, "no-git-dir"),
+        GIT_CEILING_DIRECTORIES=os.path.dirname(private),
+        GIT_SSH_COMMAND=ssh,
+        GIT_SSH_VARIANT="ssh",
+        GIT_CONFIG_NOSYSTEM="1",
+        GIT_CONFIG_GLOBAL=os.devnull,
+        GIT_ALLOW_PROTOCOL="https:http:ssh",
+        GIT_TERMINAL_PROMPT="0",
+        GIT_CONFIG_COUNT=str(len(config)),
+    )
+    for i, (k, v) in enumerate(config.items()):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
+    return command
 
 
 def _program(name, dirs, h):
@@ -766,7 +924,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         profile = _profile(root, profile_name)
         if agent and profile.get("real_home") is True:  # the real HOME undoes the containment: person only
             raise Refused("Refused: this profile uses your real home folder, so only you can run it.")
-        check_arguments(root, profile.get("set", {}).values(), (profile.get("run") or [None])[0])
+        check_arguments(root, profile.get("set", {}).values())
         if mode not in ("env", "file", "exec"):
             raise Refused("Refused: unknown secret command.")
         sweep_tmp(root)
@@ -788,8 +946,16 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                 raise Refused(
                     "Refused: this profile's command is not a full path. Ask the person to set it again."
                 )
-            approve_program(root, run0)  # still a safe, existing program now
-            check_arguments(root, profile["run"][1:], run0)
+            template = command_template(profile)
+            real, _ = approve_program(root, run0)  # still a safe, existing program now
+            if program_kind(real) != profile["kind"]:
+                raise Refused(SET_AGAIN)
+            if template:  # the whole command as it will run, extra words included
+                check_arguments(root, command[1:], template, profile.get("files", {}))
+            else:
+                check_arguments(root, profile["run"][1:])
+        elif run0 is not None:
+            command_template(profile)  # an old profile, or one not in a fixed form, runs nothing
         if mode == "env" and not profile.get("env") and profile.get("files"):
             raise Refused("Refused: this profile needs files. Use orch secret file.")
         needles = keystore.all_needles(root)
@@ -812,6 +978,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         private = candidate / "~home"  # empty: the child's cwd and HOME (a key name can never be "~home")
         env = _environment(dirs, private, profile.get("real_home") is True)
         env.update(profile.get("set", {}))
+        command = neutral_ssh(command, env, dirs, h, private)
         types = {row["name"]: row["type"] for row in keystore.list_keys(root) if row["state"] != "shadowed"}
         for var, name in profile.get("env", {}).items():
             value = values[name]
