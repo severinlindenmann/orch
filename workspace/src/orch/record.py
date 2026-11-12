@@ -841,12 +841,44 @@ def _decision(previous, event):
 
 
 def _shown(events):
-    """The lines a reader keeps, in file order."""
-    kept = []
-    for event in events:
-        if _decision(kept, event):
-            kept = [old for old in kept if not _replaces(old, event)] + [event]
-    return kept
+    """The lines a reader keeps, in file order: `_decision` against the lines kept so far, a kept log line
+    replacing the hook lines it `_replaces`. Indexed by key and by call (each holds a few lines: one per
+    origin), so a long run is not rescanned for every line; the result is the one of that rescan."""
+    try:
+        return _shown_indexed(events)
+    except TypeError:  # an unhashable key part: the plain rescan decides
+        kept = []
+        for event in events:
+            if _decision(kept, event):
+                kept = [old for old in kept if not _replaces(old, event)] + [event]
+        return kept
+
+
+def _shown_indexed(events):
+    order = {}  # insertion number -> line, the kept lines in file order (a replacement goes to the end)
+    by_key = {}  # _key -> [(number, line)] kept
+    by_call = {}  # (run, id, kind) -> [(number, line)] kept hook and log lines
+    for number, event in enumerate(events):
+        key = _key(event)
+        matching = by_key[key] if key in by_key else []
+        if any(old["via"] == event["via"] for _, old in matching):
+            continue
+        call_id = (event["run"], event["id"], event["kind"])
+        call = by_call[call_id] if call_id in by_call else []
+        if event["via"] == "hook" and any(old["via"] == "log" for _, old in call):
+            continue
+        if event["via"] == "log" and any(old["via"] == "hook" and not _agree(old, event) for _, old in call):
+            event["conflict"] = True
+        gone = {n for n, old in matching if _replaces(old, event)}
+        for n in gone:
+            del order[n]
+        order[number] = event
+        by_key[key] = [*(entry for entry in matching if entry[0] not in gone), (number, event)]
+        if event["via"] in ("hook", "log"):
+            by_call[call_id] = [*(entry for entry in call if entry[0] not in gone), (number, event)]
+        elif gone:
+            by_call[call_id] = [entry for entry in call if entry[0] not in gone]
+    return [order[n] for n in order]
 
 
 def _dedupe(events, run):
