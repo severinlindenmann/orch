@@ -243,18 +243,33 @@ def _run_file(ws, run, mtime_ns=None):
     return f
 
 
-def test_the_upgrade_runs_once_and_writes_its_marker(tmp_path):
+def test_the_upgrade_runs_once_builds_the_list_only_without_any_head_and_ignores_mtimes(tmp_path):
     ws = tmp_path / "up"
     ws.mkdir()
     d = _pre_upgrade_key(ws)
     _run_file(ws, RUN)
-    future = _run_file(ws, "r_future01", time.time_ns() + 10**12)  # an mtime set into the future
+    _run_file(ws, "r_future01", time.time_ns() + 10**12)  # an mtime set into the future changes nothing
     assert hp.ensure_record_key(ws)
-    assert hp.record_upgrade_at(ws) and hp.record_cutover_read(ws) == {RUN}
-    assert read_run(ws, RUN).legacy is True and read_run(ws, future.stem).legacy is not True
+    assert hp.record_upgrade_at(ws) and hp.record_cutover_read(ws) == {
+        RUN,
+        "r_future01",
+    }  # no mtime is trusted
     before = {n: (d / n).read_bytes() for n in ("record-upgrade.json", "record-cutover.json")}
     assert hp.ensure_record_key(ws)
     assert before == {n: (d / n).read_bytes() for n in before}  # never rewritten
+
+
+def test_the_upgrade_with_any_head_writes_the_marker_but_no_list(tmp_path):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    d = _pre_upgrade_key(ws)
+    heads = d / "record-heads"
+    heads.mkdir(exist_ok=True)
+    hp.record_head_write(ws, RUN, {"run": RUN, "seq": 1, "mac": "M" * 43})  # a run was sealed before
+    _run_file(ws, "r_planted1")
+    assert hp.ensure_record_key(ws)
+    assert hp.record_upgrade_at(ws) and hp.record_cutover_read(ws) is None  # fail closed: nothing legacy
+    assert read_run(ws, "r_planted1").legacy is not True
 
 
 def test_a_deleted_list_after_the_upgrade_never_adopts_a_planted_run(tmp_path):
@@ -284,27 +299,78 @@ def test_a_reset_keeps_legacy_runs_and_the_upgrade_marker(tmp_path):
     assert read_run(ws, RUN).legacy is True
 
 
-def _old_entry(ws, t_ns, good=True):
+def _old_entry(ws, name, run=RUN, good=True):
     from orch import record_auth as ra
 
     rec = hp.record_key(ws)
-    name = f"{t_ns:020d}_{'5' * 32}.json"
     event = example(id="toolu_old", at="2026-11-16T09:00:04Z")
     entry = {"event": event, "payload": None, "default_id": False}
-    entry["sm"] = ra.spool_mac(rec[2], rec[0], RUN, name, dict(entry)) if good else "x" * 43
-    (spool(ws) / name).write_text(json.dumps(entry))
-    return spool(ws) / name
+    entry["sm"] = ra.spool_mac(rec[2], rec[0], run, name, dict(entry)) if good else "x" * 43
+    d = record_dir(ws) / "pending" / run
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(json.dumps(entry))
+    return d / name
 
 
-@pytest.mark.parametrize("case", ["ok", "bad_sm", "newer", "no_marker"])
-def test_old_format_spool_entries_drain_only_when_older_than_the_upgrade(store, case):
-    ws, w = store
-    up = hp.record_upgrade_ns(ws)
-    assert up is not None
-    if case == "no_marker":
-        (hp.key_dir(ws, create=False) / "record-upgrade.json").unlink()
-    f = _old_entry(ws, up + 10**9 if case == "newer" else up - 10**9, good=case != "bad_sm")
+def _old_name(n):
+    return f"{n:020d}_{'5' * 32}.json"
+
+
+def _upgrade_with_old_entry(ws, name):
+    """A pre-upgrade install with one old-format spool entry, then the real upgrade."""
+    d = _pre_upgrade_key(ws)
+    _old_entry(ws, name)
+    assert hp.ensure_record_key(ws)
+    return d
+
+
+def test_old_format_entries_listed_in_the_marker_are_drained(tmp_path):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    _upgrade_with_old_entry(ws, _old_name(1))
+    assert hp.record_upgrade_old(ws, RUN) == {_old_name(1)}
+    w = RecordWriter(ws, hider=hider.Hider({"k": "KEYVALUE-abc123XYZ-secret"}))
     w.append(example(id="toolu_5", at="2026-11-16T09:00:05Z"))
-    ids = [e["id"] for e in read_run(ws, RUN).unwrap()]
-    assert ("toolu_old" in ids) is (case == "ok")
-    assert not f.exists()  # drained or refused, never left
+    assert "toolu_old" in [e["id"] for e in read_run(ws, RUN).unwrap()]
+    assert not (record_dir(ws) / "pending" / RUN / _old_name(1)).exists()
+
+
+@pytest.mark.parametrize("case", ["not_listed", "bad_sm", "fresh_key"])
+def test_other_old_format_entries_are_refused(tmp_path, case):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    if case == "fresh_key":
+        assert hp.ensure_record_key(ws)  # a key made now: no real upgrade, no old names accepted
+        f = _old_entry(ws, _old_name(1))
+    else:
+        _upgrade_with_old_entry(ws, _old_name(1))
+        f = None
+        if case == "not_listed":
+            (record_dir(ws) / "pending" / RUN / _old_name(1)).unlink()  # only a planted one is left
+            f = _old_entry(ws, _old_name(2))
+        if case == "bad_sm":
+            f = record_dir(ws) / "pending" / RUN / _old_name(1)
+            f.write_text(
+                json.dumps(
+                    {"event": example(id="toolu_old"), "payload": None, "default_id": False, "sm": "x" * 43}
+                )
+            )
+    w = RecordWriter(ws, hider=hider.Hider({"k": "KEYVALUE-abc123XYZ-secret"}))
+    w.append(example(id="toolu_5", at="2026-11-16T09:00:05Z"))
+    assert "toolu_old" not in [e["id"] for e in read_run(ws, RUN).unwrap()]
+    assert not f.exists()
+
+
+def test_a_flood_of_planted_old_format_names_is_refused_in_batches_and_never_left(tmp_path):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    _upgrade_with_old_entry(ws, _old_name(1))
+    d = record_dir(ws) / "pending" / RUN
+    for n in range(2, 202):  # 200 planted ones, not in the marker
+        (d / _old_name(n)).write_text("{}")
+    w = RecordWriter(ws, hider=hider.Hider({"k": "KEYVALUE-abc123XYZ-secret"}))
+    w.append(example(id="toolu_5", at="2026-11-16T09:00:05Z"))
+    assert "toolu_old" in [e["id"] for e in read_run(ws, RUN).unwrap()]  # the listed one is drained at once
+    for _ in range(5):
+        w.append(example(id=f"toolu_x{_}", at="2026-11-16T09:00:06Z"))
+    assert list(d.iterdir()) == []  # all refused (moved aside) within a few calls, none left behind

@@ -1003,7 +1003,7 @@ def _legacy_view(raw, run):
 
 _SPOOL_MAX_BYTES = 3 * 1024**2  # one line (8 KB), its detail (1 MB) and the escaping of both
 _SPOOL_NAME = re.compile(r"[0-9]{20}_[0-9a-f]{32}\.json")
-_OLD_BATCH = 200  # entries of the format before name proofs read per drain
+_OLD_BATCH = 50  # entries of the format before name proofs read per drain
 _SPOOL_LIST_MAX = 5000  # names looked at per drain: a flood is told once and cannot make a write endless
 _REJECT_BATCH = (
     50  # planted entries refused per drain: the rest on the next one (a flood cannot stall a write)
@@ -1842,20 +1842,20 @@ class RecordWriter:
         # a name proves itself (record_auth.spool_name): only proven names are ever read, and first
         valid = sorted(n for n in names if record_auth.spool_name_ok(rec[2], rec[0], run, n))
         # entries made before the upgrade (no name proof yet): read only when older than the MACed marker
-        upgrade_ns = humanproof.record_upgrade_ns(self.workspace)
+        head, _ = humanproof.record_head_read(self.workspace, run)
+        gone = set((head or {}).get("drained", []))
+        listed = (
+            humanproof.record_upgrade_old(self.workspace, run) - gone
+        )  # recorded at a real upgrade, MACed
         proven = set(valid)
-        old = [n for n in names if n not in proven and record_auth.spool_old_ok(n, upgrade_ns)]
+        old = [n for n in names if n not in proven and n in listed]
         valid = sorted(valid + sorted(old)[:_OLD_BATCH])
         self._drain_valid(run, rec, valid, check_lock)
         if any(not _SPOOL_NAME.fullmatch(n) for n in names):
             # orch never names an entry so: left, alerted, not counted
             _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
         proven = set(valid)
-        invalid = sorted(
-            n
-            for n in names
-            if _SPOOL_NAME.fullmatch(n) and n not in proven and not record_auth.spool_old_ok(n, upgrade_ns)
-        )
+        invalid = sorted(n for n in names if _SPOOL_NAME.fullmatch(n) and n not in proven)
         for name in invalid[:_REJECT_BATCH]:  # a well-shaped name without its proof: refused by name, unread
             check_lock()
             _reject_entry(self.workspace, run, ("pending", run, name))
@@ -1944,7 +1944,7 @@ def _reject_bad_spool(workspace, run, check_lock):
     head, _ = humanproof.record_head_read(workspace, run)
     drained = (head or {}).get("drained", [])
     floor = (head or {}).get("drained_floor", "0" * 20)
-    upgrade_ns = humanproof.record_upgrade_ns(workspace)
+    listed = humanproof.record_upgrade_old(workspace, run) - set(drained)
     refused = 0
     for name in sorted(names):
         if refused >= _REJECT_BATCH:
@@ -1953,9 +1953,7 @@ def _reject_bad_spool(workspace, run, check_lock):
         if not _SPOOL_NAME.fullmatch(name):
             continue  # never counted; a writer's drain tells it
         rel = ("pending", run, name)
-        if not record_auth.spool_name_ok(rec[2], rec[0], run, name) and not record_auth.spool_old_ok(
-            name, upgrade_ns
-        ):
+        if not record_auth.spool_name_ok(rec[2], rec[0], run, name) and name not in listed:
             refused += 1  # a name without its proof: refused by name, never read
             _reject_entry(workspace, run, rel)
             continue

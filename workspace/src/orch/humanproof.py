@@ -782,9 +782,10 @@ def ensure_record_key(root: Path) -> bool:
 
 def _cutover_upgrade(root: Path) -> None:
     """The record upgrade, exactly once per workspace: a key made before the upgrade marker existed. The MACed
-    marker (record-upgrade.json) is written FIRST; then, only when the cutover list is missing, the list is
-    made from the run files whose mtime is not newer than the marker time. A present marker (valid or not)
-    means done: a list missing afterwards means no run is legacy. Never raises."""
+    marker (record-upgrade.json, `upgrade: true`) is written FIRST and holds the old-format spool names that
+    existed now. The cutover list is built ONLY when no chain head exists at all (a genuine pre-protection
+    install: no run was ever sealed); if any head exists the list stays missing (nothing is legacy). No file
+    time is used anywhere. A present marker (valid or not) means done. Never raises."""
     try:
         d = key_dir(root, create=False)
         with _key_lock(d):
@@ -792,11 +793,37 @@ def _cutover_upgrade(root: Path) -> None:
             if path.exists() or path.is_symlink():
                 return
             now_ns = time.time_ns()
-            if not _upgrade_mark(root, now_ns):
+            if not _upgrade_mark(root, now_ns, real=True, old=_old_spool_names(root)):
                 return
-            _cutover_write(root, _iso_s(now_ns), now_ns)
+            if not record_head_names(root) and not record_reject_names(root):
+                _cutover_write(root, _iso_s(now_ns))
     except (Refused, OSError, ValueError):
         return
+
+
+def _old_spool_names(root: Path) -> dict:
+    """{run: [names]} of the spool entries that exist now (the old format: they cannot be told from planted
+    ones by name, so they are recorded once, MACed, at the upgrade). At most 2000 names."""
+    out, total = {}, 0
+    base = root / ".orch" / "record" / "pending"
+    try:
+        for run in sorted(os.listdir(base)):
+            if not _RUN_NAME.fullmatch(run):
+                continue
+            names = [
+                n
+                for n in sorted(os.listdir(base / run))
+                if re.fullmatch(r"[0-9]{20}_[0-9a-f]{32}\.json", n)
+                and stat.S_ISREG(os.lstat(base / run / n).st_mode)
+            ][: max(0, 2000 - total)]
+            if names:
+                out[run] = names
+                total += len(names)
+    except (FileNotFoundError, NotADirectoryError):
+        return {}
+    except OSError:
+        return {}
+    return out
 
 
 def _iso_s(ns: int) -> str:
@@ -812,14 +839,23 @@ def _upgrade_path(root: Path) -> Path:
     return key_dir(root, create=False) / "record-upgrade.json"
 
 
-def _upgrade_mark(root: Path, now_ns: int, at: str | None = None) -> bool:
-    """Write the upgrade marker (MACed with the current record key). True when written."""
+def _upgrade_mark(
+    root: Path, now_ns: int, at: str | None = None, *, real: bool = False, old: dict | None = None
+) -> bool:
+    """Write the upgrade marker (MACed with the current record key). `real`: from a genuine upgrade
+    (an install that had recorded before); `old`: the old-format spool names of that moment."""
     from orch import record_auth
 
     rec = record_key(root)
     if rec is None:
         return False
-    body = {"schema": "orch.record-upgrade/1", "kid": rec[1], "at": at or _iso_ns(now_ns)}
+    body = {
+        "schema": "orch.record-upgrade/1",
+        "kid": rec[1],
+        "at": at or _iso_ns(now_ns),
+        "upgrade": bool(real),
+        "old": old or {},
+    }
     body["cm"] = record_auth.upgrade_mac(rec[2], rec[0], body)
     try:
         _write_private(_upgrade_path(root), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
@@ -828,8 +864,8 @@ def _upgrade_mark(root: Path, now_ns: int, at: str | None = None) -> bool:
     return True
 
 
-def _upgrade_load(root: Path) -> str | None:
-    """The upgrade marker's time when it verifies under the current record key, else None."""
+def _upgrade_load(root: Path) -> dict | None:
+    """The upgrade marker's body when it verifies under the current record key, else None."""
     from orch import record_auth
 
     rec = record_key(root)
@@ -842,6 +878,8 @@ def _upgrade_load(root: Path) -> str | None:
             and body.get("schema") == "orch.record-upgrade/1"
             and body.get("kid") == rec[1]
             and isinstance(body.get("at"), str)
+            and isinstance(body.get("upgrade"), bool)
+            and isinstance(body.get("old"), dict)
             and isinstance(body.get("cm"), str)
             and hmac.compare_digest(
                 record_auth.upgrade_mac(rec[2], rec[0], body).encode(), body["cm"].encode()
@@ -849,24 +887,23 @@ def _upgrade_load(root: Path) -> str | None:
         )
     except (FileNotFoundError, Refused, OSError, ValueError, TypeError, UnicodeError, RecursionError):
         return None
-    return body["at"] if ok else None
+    return body if ok else None
 
 
 def record_upgrade_at(root: Path) -> str | None:
     """When the record upgrade ran (orch's own time, MACed in record-upgrade.json), or None."""
-    return _upgrade_load(root)
+    body = _upgrade_load(root)
+    return body["at"] if body else None
 
 
-def record_upgrade_ns(root: Path) -> int | None:
-    """record_upgrade_at in ns since the epoch, or None."""
-    at = _upgrade_load(root)
-    if at is None:
-        return None
-    try:
-        t = datetime.strptime(at, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
-    except ValueError:
-        return None
-    return (int(t.timestamp()) * 1_000_000 + t.microsecond) * 1000
+def record_upgrade_old(root: Path, run: str) -> set[str]:
+    """The old-format spool names of `run` that existed at a REAL upgrade (MACed in the marker): the only
+    old-format names a drain may read. Empty for a fresh key, an unverified marker or any other run."""
+    body = _upgrade_load(root)
+    if not body or not body["upgrade"]:
+        return set()
+    names = body["old"].get(run)
+    return {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
 
 
 def _cutover_path(root: Path) -> Path:
@@ -981,11 +1018,12 @@ def _cutover_reseal(root: Path, listed) -> None:
         return
 
 
-def _upgrade_reseal(root: Path, at: str | None) -> None:
-    """After a key rotation: the same marker time, MACed with the NEW record key, when the old marker verified
-    under the old key. One that did not verify is left as it is (present: the upgrade never runs again)."""
-    if at is not None:
-        _upgrade_mark(root, 0, at)
+def _upgrade_reseal(root: Path, body: dict | None) -> None:
+    """After a key rotation: the same marker (time, upgrade flag, old names), MACed with the NEW record key,
+    when the old marker verified under the old key. One that did not verify is left as it is (present: the
+    upgrade never runs again)."""
+    if body is not None:
+        _upgrade_mark(root, 0, body["at"], real=body["upgrade"], old=body["old"])
 
 
 def record_cutover_ensure(root: Path) -> None:
@@ -1000,12 +1038,12 @@ def record_cutover_ensure(root: Path) -> None:
             _upgrade_mark(root, now_ns)  # the key is new: there is nothing to upgrade, ever
     except (Refused, OSError, ValueError):
         pass
-    _cutover_write(root, _iso_s(now_ns), None)
+    _cutover_write(root, _iso_s(now_ns))
 
 
-def _cutover_write(root: Path, at: str, max_mtime_ns: int | None) -> None:
-    """Write the cutover list when it is missing: the unsigned run files in the record folder now (with
-    max_mtime_ns: only those whose mtime is not newer than it). Never raises."""
+def _cutover_write(root: Path, at: str) -> None:
+    """Write the cutover list when it is missing: the unsigned run files in the record folder now (no file
+    time is looked at). Never raises."""
     from orch import record_auth
 
     rec = record_key(root)
@@ -1017,11 +1055,7 @@ def _cutover_write(root: Path, at: str, max_mtime_ns: int | None) -> None:
             return
         runs = root / ".orch" / "record" / "runs"
         names = sorted(
-            n[:-6]
-            for n in os.listdir(runs)
-            if _RUN_NAME.fullmatch(n[:-6])
-            and n.endswith(".jsonl")
-            and (max_mtime_ns is None or os.lstat(runs / n).st_mtime_ns <= max_mtime_ns)
+            n[:-6] for n in os.listdir(runs) if _RUN_NAME.fullmatch(n[:-6]) and n.endswith(".jsonl")
         )
     except FileNotFoundError:
         names = []

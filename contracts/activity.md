@@ -592,19 +592,20 @@ only a legacy run reads a detail with no hash.
   in front of the chain; any other foreign key id is `changed`, reason `content` (vectors `record_auth.verify`,
   `old_kids`). The cutover list is made only when the human key is made; a list missing while a key exists means no
   run is legacy, with one exception, the record upgrade, which happens exactly once per workspace. Its marker
-  `<guarded home>/keys/<ws>/record-upgrade.json` `{"schema": "orch.record-upgrade/1", "kid", "at", "cm"}` (`cm` = MAC
-  with the record key, domain `orch.record.upgrade/1`; `at` is orch's own time, microseconds) is written when the key
-  is made, or, for a key made before the upgrade, by `ensure_record_key` at the first orch call after the update,
-  before any agent action: the marker FIRST, then, only when the list is missing, the list from the run files whose
-  mtime is not newer than the marker time (a future mtime is not adopted; none established: `runs: []`). A present
-  marker (valid or not) means the upgrade is done: it never runs again, and a list missing afterwards means no run is
-  legacy, whatever heads exist (the writer never makes it). A protection reset re-seals the marker under the new key
-  when it verified under the old, sound key. Stated limit (Level 1): an agent that planted a run with an old mtime
-  before that first call after the update has it adopted as legacy.
+  `<guarded home>/keys/<ws>/record-upgrade.json` `{"schema": "orch.record-upgrade/1", "kid", "at", "upgrade", "old",
+  "cm"}` (`cm` = MAC with the record key, domain `orch.record.upgrade/1`; `at` is orch's own time) is written when the
+  key is made (`upgrade: false`), or, for a key made before the upgrade, by `ensure_record_key` at the first orch call
+  after the update, before any agent action (`upgrade: true`, `old` = the old-format spool names of that moment per
+  run): the marker FIRST, then the cutover list from the run files, but ONLY when no chain head and no rejects counter
+  exists at all (a genuine pre-protection install). If any head exists the list stays missing: nothing is legacy. No
+  file time (mtime) is looked at anywhere in the upgrade. A present marker (valid or not) means the upgrade is done: it
+  never runs again, and a list missing afterwards means no run is legacy (the writer never makes it). A protection
+  reset re-seals the marker under the new key when it verified under the old, sound key. Stated limit (Level 1): a
+  run planted before that first call after the update, on an install that never sealed a run, is adopted as legacy.
   *Old-format spool names.* An entry named `<20 digits>_<32 hex>.json` without its name proof (made before name proofs)
-  is read only when the marker verifies and the name's time is older than the marker time; its `sm` (which binds the
-  name) must then verify as for any entry; at most 200 such entries per drain. Every other unproven name is refused
-  unread; without a verified marker no old-format name is read (`record_auth.spool_old_ok`). Files planted before the very first key exists are adopted as legacy (listed)
+  is read only when its name is in the marker's `old` set for that run (a real upgrade, MACed) and not already drained;
+  its `sm` (which binds the name) must then verify as for any entry; at most 50 such entries per drain, the rest on the
+  next call. Every other unproven name is refused unread; a fresh key (`upgrade: false`) accepts none. Files planted before the very first key exists are adopted as legacy (listed)
   and shown as not checked. The drain lists at most 5000 names per call (more: alerted once, reason `content`),
   processes names that carry their proof first, in sorted order, then refuses at most 50 well-shaped names without
   their proof per call by their exact name, never reading them (invalid names never consume the valid-name work);

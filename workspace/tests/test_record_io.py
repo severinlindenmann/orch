@@ -252,6 +252,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "os.stat",
     "out.add",
     "source.get",
+    "humanproof.record_upgrade_old",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
