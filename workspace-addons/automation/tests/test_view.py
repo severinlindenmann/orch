@@ -40,12 +40,15 @@ def test_empty_view_is_valid(ws):
     (sch,) = blocks(v, "list", "Schedules")
     assert (
         sch["title"] == "Schedules · 0 on"
-        and 'orch automation repeat ticket "daily 07:30"' in sch["items"][0]["subtitle"]
+        and sch["items"][0]["subtitle"] == "Ask your helper to repeat a ticket."
     )
-    assert "stopped" in v["notice"]
+    assert "stopped" in v["notice"] and "Start" in v["notice"]
 
 
-def test_schedule_listed_and_old_blocks_gone(ws):
+def test_schedule_listed_and_old_blocks_gone(ws, monkeypatch):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
     add_ticket(
         ws,
         "t_rec00001",
@@ -58,7 +61,7 @@ def test_schedule_listed_and_old_blocks_gone(ws):
     (rep,) = blocks(v, "list", "Schedules")
     assert rep["title"] == "Schedules · 1 on"
     assert [(i["title"], i["subtitle"]) for i in rep["items"]] == [
-        ("Weekly breport/b", "Mondays at 07:00 · next in 4 d")
+        ("Weekly breport/b", "Mondays at 07:00 · next in 4 days")
     ]
 
 
@@ -105,7 +108,10 @@ def test_view_is_read_only_and_cli_prints_json(ws, capsys):
     assert before == sorted(p.name for p in (ws / ".orch").rglob("*") if p.is_file())
 
 
-def test_frequent_repeat_is_one_row(ws):
+def test_frequent_repeat_is_one_row(ws, monkeypatch):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
     add_ticket(
         ws,
         "t_five0001",
@@ -188,7 +194,10 @@ def test_schedule_time_is_shown_once_in_local_time(ws, set_tz):
     assert "Time zone" not in {d["label"] for d in zh["detail"]}  # same as this computer: not shown
 
 
-def test_repeats_are_one_row_each_sorted_and_monthly_stays(ws):
+def test_repeats_are_one_row_each_sorted_and_monthly_stays(ws, monkeypatch):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
     add_ticket(
         ws,
         "t_mon00001",
@@ -205,7 +214,7 @@ def test_repeats_are_one_row_each_sorted_and_monthly_stays(ws):
     check(v)
     (rep,) = blocks(v, "list", "Schedules")
     assert [i["tickets"][0]["id"] for i in rep["items"]] == ["t_day00001", "t_mon00001"]
-    assert rep["items"][1]["subtitle"] == "Every month on day 1 at 08:00 · next in 27 d"  # 09:00 Zurich
+    assert rep["items"][1]["subtitle"] == "Every month on day 1 at 08:00 · next in 27 days"  # 09:00 Zurich
 
 
 def test_listen_section_shows_state_and_arrivals(ws):
@@ -341,3 +350,24 @@ def test_what_it_does_is_a_plain_sentence_without_commands(ws):
     rows = _schedules([t], T(10, 0))
     text = next(d["value"] for d in rows[0]["detail"] if d["label"] == "What it does")
     assert "--" not in text and "orch " not in text and text.startswith("Starts an agent on this ticket")
+
+
+def test_stopped_scheduler_shows_paused_not_a_countdown(ws):
+    add_ticket(ws, "t_rec00003", title="Weekly", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
+    v = build(ws, T(8))  # no running service
+    check(v)
+    (rep,) = blocks(v, "list", "Schedules")
+    assert rep["items"][0]["subtitle"] == "Mondays at 07:00 · Paused"
+    nxt = next(d["value"] for d in rep["items"][0]["detail"] if d["label"] == "Next run")
+    assert nxt.startswith("Paused · would run ")
+
+
+def test_countdown_words_are_written_in_full():
+    from datetime import timedelta
+
+    from orch_automation.view import _in
+
+    assert _in(timedelta(days=3)) == "in 3 days"
+    assert _in(timedelta(days=1, hours=2)) == "in 1 day"
+    assert _in(timedelta(hours=5)) == "in 5 hours"
+    assert _in(timedelta(minutes=1)) == "in 1 minute"
