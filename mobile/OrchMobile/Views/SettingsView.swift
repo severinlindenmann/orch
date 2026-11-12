@@ -1,4 +1,34 @@
 import SwiftUI
+import UserNotifications
+
+/// What the Notifications row shows, from the system permission.
+enum NotificationAccess: Equatable {
+    case allowed, denied, notAsked
+    static func from(_ status: UNAuthorizationStatus) -> NotificationAccess {
+        switch status {
+        case .denied: .denied
+        case .notDetermined: .notAsked
+        default: .allowed
+        }
+    }
+}
+
+enum SignOutWording {
+    static let base = "Disconnect this phone? You will need a new invitation to connect again."
+    /// Items not yet stored by the relay are lost on sign-out.
+    static func text(for items: [OutboxItem]) -> String {
+        let waiting = items.filter { $0.sentMessageId == nil }
+        return text(messages: waiting.filter { $0.kind == .send }.count, answers: waiting.filter { $0.kind == .answer }.count)
+    }
+    static func text(messages: Int, answers: Int) -> String {
+        var parts: [String] = []
+        if messages > 0 { parts.append("\(messages) \(messages == 1 ? "message" : "messages")") }
+        if answers > 0 { parts.append("\(answers) \(answers == 1 ? "answer" : "answers")") }
+        guard !parts.isEmpty else { return base }
+        let verb = messages + answers == 1 ? "is" : "are"
+        return base + " " + parts.joined(separator: " and ") + " \(verb) still waiting to be sent and will be lost."
+    }
+}
 
 enum WorkspaceAlias {
     static func name(for ws: Workspace) -> String {
@@ -22,6 +52,8 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var signingOut = false
     @State private var requestingPermission = false
+    @State private var access: NotificationAccess = .allowed
+    @Environment(\.scenePhase) private var scenePhase
     private var statusText: String {
         switch model.connection {
         case .ok: "Connected · " + (model.lastUpdatedText?.lowercased() ?? "last updated just now")
@@ -71,11 +103,20 @@ struct SettingsView: View {
                     }
                     section("PREFERENCES") {
                         VStack(spacing: 0) {
+                            if access == .denied {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Notifications").themeFont(17)
+                                    Text("Notifications are off for orch in iPhone Settings.").themeFont(13).foregroundStyle(Theme.muted)
+                                    Button("Open Settings") {
+                                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                                    }.themeFont(17).foregroundStyle(Theme.brand).frame(minHeight: 44).accessibilityIdentifier("open-ios-settings")
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                            } else {
                             Toggle(isOn: Binding(get: { model.notificationsEnabled }, set: { enabled in
                                 model.notificationsEnabled = enabled
                                 if enabled {
                                     requestingPermission = true
-                                    Task { model.notificationsEnabled = await PushPermission.request(); requestingPermission = false }
+                                    Task { model.notificationsEnabled = await PushPermission.request(); requestingPermission = false; await readAccess() }
                                 }
                             })) {
                                 VStack(alignment: .leading, spacing: 6) {
@@ -83,6 +124,7 @@ struct SettingsView: View {
                                     Text("Questions and finished work").themeFont(13).foregroundStyle(Theme.muted)
                                 }
                             }.tint(Theme.brand).padding(16).disabled(requestingPermission)
+                            }
                             ShellDivider()
                             NavigationLink { VoiceSettingsView() } label: {
                                 HStack(spacing: 12) {
@@ -122,7 +164,7 @@ struct SettingsView: View {
                     }.buttonStyle(PressStyle()).accessibilityLabel("Sign out")
                     if confirmSignOut {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Disconnect this phone? You will need a new invitation to connect again.").themeFont(13)
+                            Text(SignOutWording.text(for: model.outbox.items)).themeFont(13).fixedSize(horizontal: false, vertical: true)
                             Button {
                                 signingOut = true
                                 Task { await model.signOut(); signingOut = false }
@@ -146,6 +188,11 @@ struct SettingsView: View {
         }.background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
             .sheet(isPresented: $addWorkspace) { AddWorkspaceView().presentationDetents([.medium, .large]) }
+            .task { await readAccess() }
+            .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await readAccess() } } }
+    }
+    private func readAccess() async {
+        access = NotificationAccess.from(await UNUserNotificationCenter.current().notificationSettings().authorizationStatus)
     }
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
