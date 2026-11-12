@@ -174,8 +174,8 @@ final class AppModel {
     func workspace(_ id: String) -> Workspace? { workspaces.first { $0.id == id } }
     func ticket(_ ws: String, _ t: String) -> Ticket? { tickets.first { $0.workspace == ws && $0.ticket == t } }
 
-    func markRead(_ chat: String, items: [ChatItem]) {
-        guard let last = items.filter(\.incoming).map(\.at).max() else { return }
+    func markRead(_ chat: String, items: [ChatItem], atBottom: Bool = true, lastVisibleId: String? = nil) {
+        guard let last = ReadRules.readUpTo(items.map { ($0.id, $0.at, $0.incoming) }, atBottom: atBottom, lastVisibleId: lastVisibleId) else { return }
         var r = readState; r.markRead(chat, upTo: last)
         guard r != readState else { return }
         readState = r
@@ -364,13 +364,18 @@ final class AppModel {
     /// Messages per page (tests make it small).
     var pageSize = 100
 
-    /// Scrolling up: the next older page. No-op when everything is loaded.
+    /// An older page is being fetched / the last try failed (the list then offers "Try again").
+    private(set) var loadingOlder = false
+    private(set) var olderFailed = false
+    /// Scrolling up: the next older page. No-op when everything is loaded or a page is already on its way.
     func loadOlderMessages() async {
-        guard let cursor = messagesNext else { return }
+        guard let cursor = messagesNext, !loadingOlder else { return }
+        loadingOlder = true; olderFailed = false
+        defer { loadingOlder = false }
         do {
             let page = try await client.messages(after: cursor, limit: pageSize)
             merge(page.items); messagesNext = page.next
-        } catch RelayError.unauthorized { handle(RelayError.unauthorized) } catch {}
+        } catch RelayError.unauthorized { handle(RelayError.unauthorized) } catch { olderFailed = true }
     }
     var hasOlderMessages: Bool { messagesNext != nil }
 
@@ -507,10 +512,11 @@ final class AppModel {
     func split(_ summary: WorkspaceSummary) -> (topics: [TopicSummary], general: Bool, archived: [ArchivedChat]) { archive.split(summary) }
     var archivedCount: Int { workspaceSummaries.reduce(0) { $0 + archive.split($1).archived.count } }
 
-    /// Opening a conversation (or a new message arriving in the open one) marks it read. Phone-local.
-    func markRead(_ id: ConversationID) {
+    /// Opening a conversation (or a new message arriving in the open one) marks it read, but only what was seen:
+    /// while scrolled up, new messages stay unread. Phone-local.
+    func markRead(_ id: ConversationID, atBottom: Bool = true) {
         let items = conversationItems(id)
-        guard let last = items.filter(\.incoming).map(\.at).max() else { return }
+        guard let last = ReadRules.readUpTo(items.map { ($0.id, $0.at, $0.incoming) }, atBottom: atBottom) else { return }
         var r = readState; r.markRead(ReadState.key(id), upTo: last)
         guard r != readState else { return }
         readState = r
@@ -679,7 +685,7 @@ final class AppModel {
         defaults.removeObject(forKey: "pairedPhoneId")
         for t in undoTimers.values { t.cancel() }
         undoTimers = [:]; pendingAnswers = [:]; sendingAnswers = []
-        outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil
+        outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil; olderFailed = false
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)

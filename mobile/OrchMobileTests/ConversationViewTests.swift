@@ -278,8 +278,62 @@ final class ConversationModelTests: XCTestCase {
         await m.mock!.deliverText(from: MockRelay.pilatus, text: "new while open")
         await m.refresh()
         XCTAssertEqual(m.unread(id), 1, "arrives unread")
-        m.markRead(id)   // what the open screen does on every new item
+        m.markRead(id, atBottom: false)   // scrolled up: the new message was not seen
+        XCTAssertEqual(m.unread(id), 1, "stays unread while scrolled up")
+        m.markRead(id)   // reaching the bottom
         XCTAssertEqual(m.unread(id), 0)
+    }
+
+    func testReadGoesOnlyUpToWhatWasShown() {
+        let items: [ReadRules.Line] = [("a", "2026-11-05T10:00:00Z", true), ("b", "2026-11-05T10:01:00Z", false),
+                                       ("c", "2026-11-05T10:02:00Z", true), ("d", "2026-11-05T10:03:00Z", true)]
+        XCTAssertEqual(ReadRules.readUpTo(items, atBottom: true), "2026-11-05T10:03:00Z")
+        XCTAssertEqual(ReadRules.readUpTo(items, atBottom: false, lastVisibleId: "c"), "2026-11-05T10:02:00Z")
+        XCTAssertEqual(ReadRules.readUpTo(items, atBottom: false, lastVisibleId: "b"), "2026-11-05T10:00:00Z")
+        XCTAssertNil(ReadRules.readUpTo(items, atBottom: false), "scrolled up with nothing known on screen: nothing new is read")
+        XCTAssertNil(ReadRules.readUpTo(items, atBottom: false, lastVisibleId: "gone"))
+    }
+
+    func testGroupReadStopsAtLastVisibleMessage() async {
+        let m = await paired()
+        let items = [ChatItem(id: "g1", at: "2026-11-05T10:00:00Z", kind: .theirs("one", label: nil)),
+                     ChatItem(id: "g2", at: "2026-11-05T10:01:00Z", kind: .theirs("two", label: nil))]
+        m.markRead("group:x", items: items, atBottom: false, lastVisibleId: "g1")
+        XCTAssertEqual(m.readState.unread("group:x", in: items), 1)
+        m.markRead("group:x", items: items, atBottom: true)
+        XCTAssertEqual(m.readState.unread("group:x", in: items), 0)
+    }
+
+    func testOlderPagesLoadOneAtATimeAndStopAtTheEnd() async throws {
+        let m = await paired(); m.pageSize = 2
+        await m.reloadMessages()
+        let first = try XCTUnwrap(m.messagesNext, "more than one page in the sample")
+        let running = Task { await m.loadOlderMessages() }
+        await Task.yield()
+        XCTAssertTrue(m.loadingOlder)
+        await m.loadOlderMessages()   // a second request while one runs does nothing
+        XCTAssertEqual(m.messagesNext, first)
+        await running.value
+        XCTAssertFalse(m.loadingOlder)
+        XCTAssertNotEqual(m.messagesNext, first, "the cursor moved on")
+        var guardRail = 0
+        while m.hasOlderMessages && guardRail < 100 { await m.loadOlderMessages(); guardRail += 1 }
+        XCTAssertNil(m.messagesNext, "stops at the end")
+        let all = m.messages.count
+        await m.loadOlderMessages()
+        XCTAssertEqual(m.messages.count, all)
+    }
+
+    func testOlderPageFailureOffersRetry() async throws {
+        let m = await paired(); m.pageSize = 2
+        await m.reloadMessages()
+        let cursor = try XCTUnwrap(m.messagesNext)
+        await m.mock!.setOffline(true)
+        await m.loadOlderMessages()
+        XCTAssertTrue(m.olderFailed); XCTAssertEqual(m.messagesNext, cursor, "keeps its place for the retry")
+        await m.mock!.setOffline(false)
+        await m.loadOlderMessages()
+        XCTAssertFalse(m.olderFailed); XCTAssertNotEqual(m.messagesNext, cursor)
     }
 
     func testColdStartLandsOnTheChatsList() async throws {

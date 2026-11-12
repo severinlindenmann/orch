@@ -358,6 +358,7 @@ struct ConversationView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
+                    if historyDay == nil && model.hasOlderMessages { olderRow }
                     if let topicSummary, !ConversationRules.summaryRepeatsResult(topicSummary, in: items) {
                         NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
                             Text(topicSummary).themeFont(15).foregroundStyle(Theme.muted).lineLimit(3)
@@ -402,7 +403,7 @@ struct ConversationView: View {
                 }
                 .onChange(of: items.last?.rowID) { _, _ in
                     if atBottom || items.last?.side == .me { scroll(proxy, to: "conversation-bottom", anchor: .bottom) }
-                    rememberRead(bottomSeen: atBottom)   // the open conversation is read, also while scrolled up
+                    rememberRead(bottomSeen: atBottom)   // while scrolled up, new messages stay unread
                 }
                 .onChange(of: model.focusedQuestion) { _, focus in focusQuestion(focus, proxy: proxy) }
                 .task(id: items.count) {
@@ -481,12 +482,24 @@ struct ConversationView: View {
             }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
         }
     }
-    /// The open conversation is read: new incoming messages are marked read while it is on screen, even when scrolled up
-    /// (only the jump button's own count waits until the bottom was seen).
+    /// Only what was seen is read: new messages that arrive while scrolled up stay unread (the jump button counts them)
+    /// until the bottom is reached.
     private func rememberRead(bottomSeen: Bool = true) {
-        guard historyDay == nil else { return }
-        if bottomSeen { seenIncoming = Set(items.filter(\.incoming).map(\.id)) }
-        model.markRead(resolved)
+        guard historyDay == nil, bottomSeen else { return }
+        seenIncoming = Set(items.filter(\.incoming).map(\.id))
+        model.markRead(resolved, atBottom: true)
+    }
+    /// At the top of the loaded messages: fetch the next older page, or offer to try again.
+    @ViewBuilder private var olderRow: some View {
+        Group {
+            if model.olderFailed {
+                Button("Couldn't load earlier messages. Try again") { Task { await model.loadOlderMessages() } }.themeFont(13)
+            } else {
+                HStack(spacing: 6) { ProgressView(); Text("Loading earlier messages…").themeFont(13) }
+                    .foregroundStyle(Theme.muted)
+                    .task(id: model.messagesNext) { await model.loadOlderMessages() }
+            }
+        }.frame(maxWidth: .infinity).padding(.vertical, 8).accessibilityIdentifier("older-messages")
     }
     private func focusQuestion(_ focus: String?, proxy: ScrollViewProxy) {
         guard let focus, items.contains(where: { $0.id == focus }) else { return }
