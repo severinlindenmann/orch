@@ -1633,7 +1633,7 @@ def test_fsck_runs_only_in_its_checking_form_and_a_symlinked_git_folder_is_refus
 
 
 def test_every_fsck_format_id_can_really_be_ignored(tmp_path):
-    """git refuses to demote some ids ('Cannot demote ... to ignore'): the allowlist holds only ones it accepts."""
+    """git refuses to demote some ids ("Cannot demote ... to ignore"): only accepted ids are listed."""
     r = tmp_path / "r"
     r.mkdir()
     plain_git(r, "init", "-q")
