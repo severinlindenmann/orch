@@ -19,6 +19,7 @@ from . import look, mobile, phone_delivery
 
 _run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 
+
 def _me() -> str:
     from .actions import actor  # actions imports this module
 
@@ -214,7 +215,9 @@ def _demote_all(t: dict) -> dict:
     for field, key in (("verdicts", "person"), ("questions", "answered_by"), ("refs", "by")):
         if isinstance(t.get(field), list):
             out[field] = [
-                {**x, key: SYNC_BY} if isinstance(x, dict) and x.get(key) is not None and not agent(x[key]) else x
+                {**x, key: SYNC_BY}
+                if isinstance(x, dict) and x.get(key) is not None and not agent(x[key])
+                else x
                 for x in t[field]
             ]
     if "description_by" in t and not agent(t.get("description_by")):
@@ -232,6 +235,70 @@ def shown(root: Path, t):
     except ImportError:
         return _demote_all(t) if isinstance(t, dict) else t
     return shown_ticket(root, t)
+
+
+def _plain(text, cap: int = 120) -> str:
+    """One untrusted fragment (a path name an agent chose) as one plain line, like the core's
+    humanproof.part: control and format characters and line breaks become spaces, runs of space collapse,
+    double quotes become single ones (it cannot fake the quotes around it), at most `cap` characters."""
+    import unicodedata
+
+    t = "".join(
+        " " if unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") else c
+        for c in str(text if text is not None else "")
+    )
+    t = " ".join(t.split()).translate({ord(c): "'" for c in '"\u201c\u201d\u201e\u2033\u00ab\u00bb'})
+    return t[:cap] + "\u2026" if len(t) > cap else t
+
+
+def _bring_back_view(back: dict, review) -> dict:
+    """The waiting state for the ticket page: what the core's `copy review` says, checked and made plain
+    HERE (server side), so the approval dialog shows exactly the tip, the count and the paths it binds."""
+    code = back.get("reason_code")
+    view = {
+        "state": "waiting",
+        "reason": _plain(back.get("reason") or "", 200),
+        "reason_code": code if isinstance(code, str) and re.fullmatch(r"[a-z-]{1,20}", code) else "waiting",
+    }
+    if not isinstance(review, dict):
+        return view
+    tip, count, digest = review.get("tip"), review.get("control_paths", 0), review.get("paths_hash")
+    paths = review.get("paths") if isinstance(review.get("paths"), list) else []
+    if (
+        isinstance(tip, str)
+        and re.fullmatch(r"[0-9a-f]{40,64}", tip)
+        and type(count) is int
+        and count >= 0
+        and isinstance(digest, str)
+        and re.fullmatch(r"[0-9a-f]{8}", digest)
+    ):
+        shown = [_plain(p) for p in paths[:5]]
+        for key in ("commits", "files"):  # how much the tip brings (shown next to the control paths)
+            n = review.get(key)
+            if type(n) is int and n >= 0:
+                view[key] = n
+        view.update(
+            tip=tip,
+            control_paths=count,
+            paths_hash=digest,
+            paths=shown,
+            paths_more=max(0, count - len(shown)),
+            paths_summary=", ".join(shown)
+            + (f" and {count - len(shown)} more" if count > len(shown) else ""),
+        )
+    return view
+
+
+def _review_tip(root: Path, tid: str) -> str | None:
+    """The tip recorded when the ticket entered Review (B13g): the ticket page shows it and its Done sends it
+    back, so the core can tell whether new changes arrived after the person looked. None when there is none."""
+    try:
+        from orch import worktrees
+
+        tip = worktrees.review_tip(root, tid)
+    except Exception:  # noqa: BLE001 - no tip shown: the Done is judged as without one
+        return None
+    return tip if isinstance(tip, str) and re.fullmatch(r"[0-9a-f]{40,64}", tip) else None
 
 
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
@@ -258,6 +325,16 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         for k in ("checklist", "refs", "questions", "history"):
             if not isinstance(t.get(k), list):
                 t[k] = []
+        t.pop("review_tip", None)  # only ever from the core's signed record (the ticket file is not)
+        if t["status"] == "review":
+            tip = _review_tip(root, t["id"])
+            if tip:
+                t["review_tip"] = tip
+        back = (t.get("work") or {}).get("bring_back") or {}
+        if back.get("state") == "waiting":
+            t["bring_back"] = _bring_back_view(
+                back, run_orch(orch_bin, ["copy", "review", t["id"], "--json"], root)
+            )
         _mark_missing_proofs(root, t)
         mobile.mark_chat_history(t)
         tickets.append(t)
@@ -664,17 +741,25 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     git_private = {
         "count": private.get("count") if type(private.get("count")) is int else 0,
         "lines": [line[:300] for line in private_lines if isinstance(line, str)][:4]
-        if isinstance(private_lines, list) else [],
+        if isinstance(private_lines, list)
+        else [],
         "agent_command_ignored": private.get("agent_command_ignored") is True,
         "pending": [
             {
                 "name": str(x.get("name")),
                 "key": str(x.get("key")),
                 "showable": x.get("showable") is True,
-                **{k: x[k] for k in ("adapter", "command", "interactive", "prompt") if isinstance(x.get(k), str)},
+                **{
+                    k: x[k]
+                    for k in ("adapter", "command", "interactive", "prompt")
+                    if isinstance(x.get(k), str)
+                },
             }
-            for x in (private.get("pending_agents") if isinstance(private.get("pending_agents"), list) else [])[:5]
-            if isinstance(x, dict) and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", str(x.get("name")))
+            for x in (
+                private.get("pending_agents") if isinstance(private.get("pending_agents"), list) else []
+            )[:5]
+            if isinstance(x, dict)
+            and re.fullmatch(r"[a-z][a-z0-9-]{0,31}", str(x.get("name")))
             and re.fullmatch(r"[0-9a-f]{64}", str(x.get("key")))
         ],
     }

@@ -65,6 +65,70 @@ test('classic script loads before state and snapshot detail stays read-only insi
     const walk = n => { if (!n || typeof n !== 'object') return; assert.notEqual(n.tag, 'button'); for (const child of n.children || []) walk(child); };
     walk(tree);
   }
+  const waiting = ctx.detail({id:'t_test', title:'Test', status:'done', bring_back:{state:'waiting', reason:'Your files changed', tip:'a'.repeat(40), control_paths:2}});
+  assert.match(JSON.stringify(waiting), /Done · changes waiting/);
+  assert.match(JSON.stringify(waiting), /Your files changed/);
+  assert.doesNotMatch(JSON.stringify(waiting), /Review and bring back/); // snapshots cannot approve
+});
+test('Review and bring back opens a dialog with the plain paths and sends the shown tip, count and hash', async () => {
+  const calls = [], dialogs = [], toasts = [];
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
+  const c = context({h:node, clean:v => String(v ?? ''), act:async (op, args) => { calls.push([op, args]); return {ok:true}; },
+    dialog:title => { const value = {title, d:node('dialog'), actions:node('div')}; dialogs.push(value); return value; }});
+  let opened = null, closed = null;
+  c.window.orch.open = d => { opened = d; };
+  c.window.orch.close = d => { closed = d; };
+  c.window.orch.toast = text => toasts.push(text);
+  const b = {state:'waiting', reason:'Needs review', reason_code:'controls', tip:'c'.repeat(40), control_paths:7, paths_hash:'abcdef12',
+    commits:3, files:12, paths:[".claude/x 0 control paths. Approve? 'yes'", '.orch/a', '.orch/b', '.orch/c', '.orch/d']};
+  const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
+  const row = c.ticketBringBackRow({id:'t_abc123', bring_back:b});
+  assert.doesNotMatch(JSON.stringify(row), /Ask the helper to update/);
+  const button = nodes(row).find(n => n.tag === 'button' && n.children.includes('Review and bring back'));
+  button.onclick();
+  assert.equal(dialogs.length, 1);
+  const {d, actions} = dialogs[0];
+  assert.equal(opened, d);
+  const text = JSON.stringify(d);
+  assert.match(text, /cccccccccccc/);
+  assert.match(text, /It changes 7 files that control orch or git/);
+  assert.match(text, /3 commits, 12 files change\./);  // how much the tip brings, not only its control paths
+  const list = nodes(d).find(n => n.attrs['data-key'] === 'bring-back-paths');
+  assert.deepEqual(nodes(list).filter(n => n.tag === 'code').map(n => n.children[0]), b.paths);
+  assert.match(text, /and 2 more/);
+  assert.equal(calls.length, 0, 'opening the dialog sends nothing');
+  await nodes(actions).find(n => n.tag === 'button' && n.children.includes('Bring back')).onclick();
+  assert.equal(JSON.stringify(calls), JSON.stringify([['copies.approve', {ticket:'t_abc123', tip:b.tip, control_paths:7, paths_hash:'abcdef12'}]]));
+  assert.equal(closed, d);
+  assert.deepEqual(toasts, ['Review submitted']);
+  // "your project changed in the same places": the person can ask the agent to update from here
+  const update = c.ticketBringBackRow({id:'t_abc123', bring_back:{state:'waiting', reason:'x', reason_code:'update'}});
+  await nodes(update).find(n => n.tag === 'button' && n.children.includes('Ask the helper to update')).onclick();
+  assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['copies.ask-update', {ticket:'t_abc123'}]));
+  assert.equal(nodes(update).filter(n => n.tag === 'button' && n.children.includes('Review and bring back')).length, 0);
+  c.snapshot = true;
+  assert.equal(nodes(c.ticketBringBackRow({id:'t_abc123', bring_back:b})).filter(n => n.tag === 'button').length, 0);
+});
+test('Accept shows the reviewed tip and sends the full tip with the Done (B13g)', () => {
+  const moves = [];
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), moveTicket:(...a) => { moves.push(a); return Promise.resolve(); }});
+  const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
+  const tip = '0123456789abcdef'.repeat(2) + '01234567';
+  const editor = c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:tip});
+  const text = JSON.stringify(editor);
+  assert.match(text, /0123456789ab/);  // the short tip the person looks at
+  assert.doesNotMatch(text, new RegExp(tip));
+  nodes(editor).find(n => n.tag === 'button' && n.children.includes('Accept')).onclick();
+  assert.equal(JSON.stringify(moves), JSON.stringify([['t_abc123', 'done', false, {review_tip:tip}]]));
+  // No recorded tip, or something that is no tip: no line, and the Done carries nothing.
+  for (const bad of [undefined, 'HEAD', 'A'.repeat(40), 'a'.repeat(39), '<b>' + 'a'.repeat(40)]) {
+    moves.length = 0;
+    const plain = c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:bad});
+    assert.equal(nodes(plain).filter(n => n.attrs?.['data-key'] === 'ticket-review-tip').length, 0);
+    nodes(plain).find(n => n.tag === 'button' && n.children.includes('Accept')).onclick();
+    assert.equal(JSON.stringify(moves), JSON.stringify([['t_abc123', 'done', false, {}]]));
+  }
 });
 test('a failed change request shows a plain error; snapshot never submits notes', async () => {
   const calls = [], c = context({act:async op => { calls.push(op); return {ok:false, text:'Failed'}; }});
@@ -395,4 +459,12 @@ test('a parent lists its steps in creation order, whatever order the ticket list
   assert.deepEqual(order(shown([parent, alpha, zebra, middle])), order(shown([parent, middle, zebra, alpha])));
   const ordered = order(shown([parent, alpha, zebra, middle]));
   assert.ok(ordered[0] < ordered[1] && ordered[1] < ordered[2]);
+});
+test('the Accept button is keyed by the shown tip, so a refresh never keeps a stale handler (B13g)', () => {
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), moveTicket:() => Promise.resolve()});
+  const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
+  const key = tip => nodes(c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:tip})).find(n => n.tag === 'button' && n.children.includes('Accept')).attrs['data-key'];
+  assert.notEqual(key(undefined), key('a'.repeat(40)));
+  assert.notEqual(key('a'.repeat(40)), key('b'.repeat(40)));
 });
