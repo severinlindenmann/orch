@@ -799,7 +799,7 @@ def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs
         root,
         gid,
         lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True),
-        by=tickets.SYSTEM,
+        by=tickets.current_actor(),
     )
     chat.record(root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs)
 
@@ -1918,7 +1918,7 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     if mid not in _v3_state(root)["described"]:
         # also the retry of a message whose files could not be fetched the first time (Transient)
         text = _describe(root, tid, mid, who, body, final)
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=tickets.SYSTEM)
+        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=by)
         _mark_described(root, mid)
         _working_add(root, mid, frm, tid, False, "run")
     _ack_once(root, mid, frm, tid, False, f"Got it: {tickets.load(root, tid)['title']}"[:300])
@@ -1943,7 +1943,7 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
             tid = t["id"]
             text = _describe(root, tid, mid, who, body, True)
             tickets.apply_op(
-                root, tid, lambda tk, text=text: tickets.add_history(tk, by, text, "phone"), by=tickets.SYSTEM
+                root, tid, lambda tk, text=text: tickets.add_history(tk, by, text, "phone"), by=by
             )
             _mark_described(root, mid)
             st = _v3_state(root)
@@ -1958,7 +1958,7 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
     tid = t["id"]
     tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
     text = _describe(root, tid, mid, who, body, True)
-    tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=tickets.SYSTEM)
+    tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=by)
     _mark_described(root, mid)
     st = _v3_state(root)
     st["acked"].append(mid)  # this ack names the ticket; the General "Got it" is not sent again
@@ -2171,7 +2171,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                     tickets.add_history(tk, by, label, "relay")
                     tk["status"], tk["waiting_on"] = status, None
 
-            tickets.apply_op(root, t["id"], op, by=tickets.SYSTEM)
+            tickets.apply_op(root, t["id"], op, by=by)
             notes.append(label)
     for mid in denied:  # outside relay.lock
         _group_denied(root, mid)
@@ -2477,8 +2477,13 @@ def done(root: Path, mid: str) -> dict:
         if msg.get("type") in ("delegate", "start"):
             tid = _ticket_by_message(root, mid)
             if tid is None and allowed(root, msg):
-                tid = _ticket_for(root, msg)
-                _use_once(root, msg)
+                try:
+                    tid = _ticket_for(root, msg)
+                    _use_once(root, msg)
+                except tickets.ClosedRefused:  # its allow ticket was closed meanwhile: drop this message
+                    tid = None  # (seen below: no retry storm), the rest of the inbox goes on
+                    with contextlib.suppress(Refused, OSError):
+                        _use_once(root, msg)  # a once-allow is spent: the message is not offered again
             res["ticket"] = tid
         _mark_seen(root, mid)
         return res
@@ -2524,9 +2529,7 @@ def _ticket_for(root: Path, msg: dict) -> str:
         first = {"allow_message": msg["id"], "from": msg["from"]}
         tickets.ext_set(root, tid, "relay", json.dumps(first), by)
         if line := _allow_history(root, msg):
-            tickets.apply_op(
-                root, tid, lambda tk: tickets.add_history(tk, by, line, "relay"), by=tickets.SYSTEM
-            )
+            tickets.apply_op(root, tid, lambda tk: tickets.add_history(tk, by, line, "relay"), by=by)
     if not tickets.load(root, tid)["checklist"]:
         for item in b.get("checklist", []) if msg["type"] == "delegate" else []:
             said = " ".join(clean_untrusted(str(item), 200).split()) or "(empty)"
@@ -2551,7 +2554,7 @@ def _merge_allow(root: Path, atid: str, into: str, by: str) -> None:
             tk["status"], tk["waiting_on"] = "dropped", None
             tickets.add_history(tk, by, f"Joined {into}", "relay")
 
-    tickets.apply_op(root, atid, op, by=tickets.SYSTEM)
+    tickets.apply_op(root, atid, op, by=tickets.SYSTEM)  # bookkeeping on a ticket that may be closed
 
 
 _WIN_RESERVED = re.compile(

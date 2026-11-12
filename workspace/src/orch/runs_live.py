@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import unicodedata
@@ -1047,10 +1048,92 @@ def _close(root: Path, rec: dict, interrupt: bool) -> None:
     (runs.run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
 
 
-def stop(root: Path, tid: str) -> bool:
+def _held_path(root: Path, tid: str) -> Path:
+    tickets.ticket_path(root, tid)  # id shape check
+    return runs.run_dir(root) / "stop-held" / f"{tid}.json"
+
+
+HELD_MAX = 64 * 1024  # a hold file larger than this is no hold
+AUTOMATION_BY = "agent:automation"  # the automation host's own starts (orch_automation.orchcli.BY)
+
+
+def _held_dir_ok(path: Path) -> bool:
+    """The stop-held folder is a real folder, never a link (a link = no hold, nothing written)."""
+    try:
+        return stat.S_ISDIR(os.lstat(path.parent).st_mode)
+    except OSError:
+        return False
+
+
+def stop_held(root: Path, tid: str, pending: list[str]) -> list[str]:
+    """Ids of a person's input that waited when a person stopped the run (`orch run stop`): the automation
+    host does not restart the ticket for them. Only ids still pending count; new input is never held. Read
+    only (status never rewrites it): a link, a non-regular or oversized file, or ids that are not a list of
+    strings = no hold."""
+    path = _held_path(root, tid)
+    if not _held_dir_ok(path):
+        return []
+    flags = (
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    )
+    try:
+        if stat.S_ISLNK(os.lstat(path).st_mode):  # no O_NOFOLLOW on Windows
+            return []
+        fd = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return []
+            raw = os.read(fd, HELD_MAX + 1)
+        finally:
+            os.close(fd)
+    except OSError:
+        return []
+    if len(raw) > HELD_MAX:
+        return []
+    try:
+        held = json.loads(raw).get("ids")
+    except Exception:  # bad JSON, a nesting too deep (RecursionError), not an object: no hold
+        return []
+    if not isinstance(held, list) or not all(isinstance(i, str) for i in held):
+        return []
+    return [i for i in held if i in pending]
+
+
+def _write_held(root: Path, tid: str, ids: list[str]) -> None:
+    """Hold these ids (none: remove the hold). Best effort: a hold that can not be written never breaks a
+    stop. Called under the ticket's run lock."""
+    path = _held_path(root, tid)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not _held_dir_ok(path):
+            return
+        if ids:
+            runs._atomic(path, json.dumps({"ids": ids}) + "\n")
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def clear_held(root: Path, tid: str) -> None:
+    """An explicit start (a person, Focus, the CLI; not the automation's own start) ends the hold."""
+    path = _held_path(root, tid)
+    if _held_dir_ok(path) and os.path.lexists(path):
+        with contextlib.suppress(OSError), runs.locked(root, tid):
+            path.unlink(missing_ok=True)
+
+
+def stop(root: Path, tid: str, hold: bool = False) -> bool:
+    """Stop the run on `tid`. `hold`: a person stopped it (`orch run stop`, also `--by focus`): the person's
+    input waiting now does not restart the ticket by itself (stop_held). Every other stop holds nothing."""
     with runs.locked(root, tid):  # the run we stop is the one that holds the claim now
         rec = runs.read(root, tid)
         if rec:
+            if hold:
+                try:
+                    _write_held(root, tid, [i["id"] for i in runs.human_waiting(root, tid)])
+                except Exception:  # a corrupt queue never stops the stop
+                    pass
             rec["stop_requested"] = tickets.now()
             runs._write(root, rec)
     if not rec:
@@ -1061,6 +1144,43 @@ def stop(root: Path, tid: str) -> bool:
     _close(root, rec, interrupt=True)
     start_waiting(root)
     return True
+
+
+def _inside_run(rec: dict) -> bool:
+    """This process runs inside the run's own process tree: the run's wrapper or agent pid (the identity
+    stop() checks before it kills anything) is one of its ancestors. Unknown ancestry: False (ORCH_TICKET
+    still keeps a run from stopping itself)."""
+    from orch import record_hook  # the same ancestry the record hook proves a caller with
+
+    mine = record_hook._ancestors()
+    return mine is not None and any(
+        isinstance(rec.get(k), int) and rec[k] in mine for k in ("pid", "agent_pid")
+    )
+
+
+def stop_closed(root: Path, tid: str, by: str | None) -> bool:
+    """A person closed a ticket (done/dropped, tickets.apply_op): its live session stops now, so its agent
+    writes nothing more into it (#542). Only for a person (`by` human:* outside an agent): an agent closing
+    one ticket never stops another ticket's run, and an unknown closer stops nothing. The ticket is read
+    again and must STILL be closed (a reopen in between wins). A one-shot run ends by itself (its copy waits
+    for it); the run this command runs inside (ORCH_TICKET, or its process tree) is never stopped from within.
+    stop() is the identity-checked path: it ends the run only while the claim is still the same run, kills a
+    pid only when its recorded start time matches, and writes the run record, never the ticket's status (its
+    settle only moves a Working ticket, a closed one stays). Never raises."""
+    try:
+        if not by or not by.startswith("human:") or tickets.agent_tool():
+            return False
+        if tickets.load(root, tid).get("status") not in tickets.CLOSED:
+            return False
+        rec = runs.read(root, tid)
+        if not rec or rec.get("mode") != "live" or os.environ.get("ORCH_TICKET") == tid:
+            return False
+        if _inside_run(rec):
+            return False
+        return stop(root, tid)
+    except Exception:  # noqa: BLE001
+        pass
+    return False
 
 
 def cleanup(root: Path) -> list[str]:

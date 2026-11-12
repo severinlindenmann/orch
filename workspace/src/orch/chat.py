@@ -389,9 +389,7 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False, proven:
     gid = tickets.ensure_general(root, who)
     mid = relay.new_id()
     entry = record(root, mid, "you", "dashboard", text, convo_start=new)
-    tickets.apply_op(
-        root, gid, lambda t: tickets.add_history(t, who, text, "dashboard", chat=True), by=tickets.SYSTEM
-    )
+    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, "dashboard", chat=True), by=who)
     runs.pending_add(root, gid, who, "message", text, "dashboard", "p_" + mid[2:], proven=proven)
     sent = None
     with contextlib.suppress(Refused, OSError):

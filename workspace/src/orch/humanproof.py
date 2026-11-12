@@ -578,6 +578,103 @@ def human_key(root: Path, create: bool = True) -> bytes:
     return key
 
 
+# ---------------------------------------------------------------------- record MAC key and heads
+
+_RECORD_KEYS: dict = {}  # (ws id, st_dev, st_ino, st_mtime_ns of human.key) -> (kid, rk): only rk is cached
+_RUN_NAME = re.compile(r"r_[a-z0-9_]{6,32}")
+
+
+def record_key(root: Path, create: bool = False) -> tuple[str, str, bytes] | None:
+    """(workspace id, kid, record subkey rk) or None (no usable key or id: nothing verifies, nothing is
+    sealed). rk is derived from human.key (record_auth.derive) so human.key itself is never used for a MAC.
+    Cached
+    per process by the key file's identity and mtime, so a reset_protection rotation is picked up at once."""
+    from orch import addons, record_auth
+
+    try:
+        ws = addons.workspace_id(root, create=create)
+        if not ws:
+            return None
+        f = key_dir(root, create=create) / "human.key"
+        try:
+            st = f.lstat()
+        except FileNotFoundError:
+            if not create:
+                return None
+            human_key(root, create=True)
+            st = f.lstat()
+        # every attribute whose change must end the cache: a loose or swapped key is derived again
+        ident = (ws, st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_mode, st.st_uid, st.st_nlink)
+        hit = _RECORD_KEYS.get(ident)
+        if hit is None:
+            rk, kid = record_auth.derive(human_key(root, create=False), ws)
+            if len(_RECORD_KEYS) > 16:
+                _RECORD_KEYS.clear()
+            hit = _RECORD_KEYS[ident] = (kid, rk)
+        return ws, hit[0], hit[1]
+    except (Refused, OSError, ValueError):
+        return None
+
+
+def _head_path(root: Path, run: str, create: bool) -> Path:
+    if not isinstance(run, str) or not _RUN_NAME.fullmatch(run):
+        raise Refused("That run name is not valid.")
+    d = key_dir(root, create=create)
+    if create:
+        _private_dir(d / "record-heads", d)
+    return d / "record-heads" / f"{run}.json"
+
+
+def record_head_read(root: Path, run: str) -> tuple[dict | None, bool | str]:
+    """(head, state) of a run's chain head in the guarded home. (head, True) = a head of this key and run;
+    (None, True) = there is none; (None, "old_key") = a head of another key id (a protection reset): no alert,
+    the writer starts a new segment at seq 1; (None, False) = damaged, of another run or failing its MAC (the
+    caller treats it as missing and alerts). Never raises for a bad file."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return None, False
+    try:
+        raw = _read_guarded(_head_path(root, run, False))
+    except FileNotFoundError:
+        return None, True
+    except (Refused, OSError, ValueError):
+        return None, False
+    try:
+        head = json.loads(raw)
+    except ValueError:
+        return None, False
+    if not (
+        isinstance(head, dict)
+        and head.get("schema") == "orch.record-head/1"
+        and head.get("run") == run
+        and isinstance(head.get("kid"), str)
+        and type(head.get("seq")) is int
+    ):
+        return None, False
+    if head["kid"] != rec[1]:
+        return None, "old_key"
+    return (head, True) if record_auth.head_ok(rec[2], rec[0], head) else (None, False)
+
+
+def record_head_write(root: Path, run: str, head: dict) -> None:
+    """Write a run's chain head (0600, temp + rename; the caller holds the run lock). Sets schema, kid, hm."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        raise Refused("Recording is off until orch's protection is ready.")
+    body = {k: v for k, v in head.items() if k != "hm"}
+    body.update(
+        schema="orch.record-head/1", kid=rec[1], run=run
+    )  # bound to its run: no copy over another run
+    body["hm"] = record_auth.head_mac(rec[2], rec[0], body)
+    _write_private(
+        _head_path(root, run, True), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n"
+    )
+
+
 # ------------------------------------------------------------------------------------------- hp1 proofs
 
 

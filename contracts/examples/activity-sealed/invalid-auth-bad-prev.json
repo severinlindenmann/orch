@@ -1,0 +1,35 @@
+{
+ "v": 1,
+ "seq": 3,
+ "run": "r_8k2m01",
+ "session": null,
+ "agent": "main",
+ "parent": null,
+ "at": "2026-11-16T09:12:05Z",
+ "ticket": "t_inv7c2",
+ "harness": "claude",
+ "coverage": "full",
+ "id": "toolu_01Gd78",
+ "via": "log",
+ "kind": "step",
+ "text": "Read: notes.md",
+ "used": {
+  "kind": "tool",
+  "name": "Read",
+  "action": null,
+  "source": "builtin",
+  "version": null
+ },
+ "outcome": {
+  "ok": true,
+  "error": null,
+  "ms": 5
+ },
+ "detail": "detail/r_8k2m01/0123456789abcdef0123456789abcdef.json",
+ "detail_hash": "0123456789abcdef0123456789abcdef",
+ "auth": {
+  "k": "0a1b2c3d",
+  "p": "short",
+  "m": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+ }
+}
