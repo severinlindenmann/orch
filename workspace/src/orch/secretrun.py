@@ -223,16 +223,20 @@ class Recorder:
                 raise Refused("Refused: this use could not be recorded.") from None
 
 
+PERSON_PROGRAM_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin")
+
+
 def resolve_program(root, name):
-    """The absolute path of a program, searched once and only in the safe folders (never cwd or the caller's
-    unsafe PATH entries); an absolute name must be an executable file. Used when a person saves a profile."""
+    """The absolute path of a program, searched once and only in the safe folders plus the usual Homebrew and
+    ~/.local/bin folders (never cwd or the caller's PATH); an absolute name must be an executable file. Used
+    when a person saves a profile."""
     if os.path.isabs(name):
         path = name
     else:
-        path = next(
-            (os.path.join(d, name) for d in safe_path_dirs(root) if os.path.isfile(os.path.join(d, name))),
-            None,
-        )
+        dirs = list(safe_path_dirs(root))
+        if os.name != "nt":
+            dirs += [os.path.expanduser(d) for d in PERSON_PROGRAM_DIRS]
+        path = next((os.path.join(d, name) for d in dirs if os.path.isfile(os.path.join(d, name))), None)
     if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
         raise Refused(f"Refused: the program {name} was not found.")
     return path
@@ -258,15 +262,11 @@ def record_change(root, action, profile, by):
 
 SHEBANG_REFUSED = (
     "Refused: this program is a script whose interpreter orch cannot approve (env, a relative path, or a "
-    "program in a folder you own). Approve the interpreter itself as the command and give the script as an "
+    "program orch refuses). Approve the interpreter itself as the command and give the script as an "
     "argument."
 )
-USER_OWNED_DEV = (
-    "Refused: this program is a macOS developer-tools stub and the developer folder it runs from is missing."
-)
-USER_OWNED = (
-    "Refused: the program or a folder above it belongs to your own user, so an agent running as you could "
-    "replace it. Choose a program in a system folder, or approve this exact file as the person."
+DEV_MISSING = (
+    "Refused: this program is a macOS developer-tools stub and the developer tools it runs from are missing."
 )
 
 RISKY_PROGRAMS = re.compile(
@@ -296,14 +296,6 @@ def _windows() -> bool:
     return os.name == "nt"
 
 
-def _user_can_write(p: str) -> bool:
-    """The current user (not root) can change this file or folder: owner, group, ACL or admin group."""
-    if os.getuid() == 0:
-        return False
-    st = os.stat(p)
-    return (st.st_uid != 0 and st.st_uid == os.getuid()) or os.access(p, os.W_OK)
-
-
 def _chain(real: str) -> list[str]:
     here, chain = real, []
     while True:
@@ -315,22 +307,26 @@ def _chain(real: str) -> list[str]:
 
 
 def _check_chain(real: str, ws: str) -> None:
-    chain = _chain(real)
-    for p in chain:
+    """Refused: the path or a folder above it inside the workspace, or changeable by other users
+    (world-writable without the sticky bit, or group-writable by a group the current user cannot write as).
+    The current user's own folders (Homebrew, ~/.local/bin, a uv or pyenv python) are fine."""
+    for p in _chain(real):
         if _under(p, ws):
             raise Refused("Refused: the program lies inside this workspace; an agent could change it.")
         st = os.stat(p)
+        sticky_dir = stat.S_ISDIR(st.st_mode) and st.st_mode & stat.S_ISVTX
         group_open = st.st_mode & 0o020 and st.st_gid != 0
-        if st.st_mode & 0o002 or (group_open and (st.st_uid == os.getuid() or not _user_can_write(p))):
+        if (st.st_mode & 0o002 and not sticky_dir) or (group_open and not os.access(p, os.W_OK)):
             raise Refused("Refused: the program or a folder above it can be changed by other users.")
-    if any(_user_can_write(p) for p in chain):
-        raise Refused(USER_OWNED)
+
+
+CLT_DIR = "/Library/Developer/CommandLineTools"
 
 
 def _developer_dir() -> str:
     """Where the macOS command line tools live: what xcode-select points to, else the standard folder."""
     link = os.path.realpath(XCODE_SELECT_LINK)
-    return link if os.path.isdir(link) else "/Library/Developer/CommandLineTools"
+    return link if os.path.isdir(link) else CLT_DIR
 
 
 XCRUN_STUB_DIR = "/usr/bin"  # where macOS keeps its xcrun stubs (git, python3, clang ...)
@@ -354,52 +350,36 @@ def _in_stub_dir(path: str) -> bool:
         return True
 
 
-def _check_xcode(path: str, ws: str) -> None:
+def _check_xcode(path: str) -> None:
     """macOS: /usr/bin/git, make, python3, clang ... are stubs that run the real tool from the developer
-    folder (chosen by xcode-select, never by the caller's environment). For such a stub that folder must be
-    safe whether or not a tool of that name is found there, and so must the tool. Other /usr/bin programs
-    do not depend on it."""
+    folder (chosen by xcode-select, never by the caller's environment). Without that folder there is nothing
+    to approve. Other /usr/bin programs do not depend on it."""
     if sys.platform != "darwin" or not _in_stub_dir(path) or not _is_xcrun_stub(path):
         return
-    dev = _developer_dir()
-    if not os.path.isdir(dev):  # no developer folder to run the real tool from: not a program to approve
-        raise Refused(USER_OWNED_DEV)
-    _check_chain(dev, ws)
-    name = os.path.basename(path)
-    candidates = [os.path.join(dev, "usr", "bin", name)]
-    toolchains = os.path.join(dev, "Toolchains")
-    for base, rest in (
-        (toolchains, ("usr", "bin")),
-        (os.path.join(dev, "Platforms"), ("Developer", "usr", "bin")),
-    ):
-        try:
-            candidates += [os.path.join(base, t, *rest, name) for t in sorted(os.listdir(base))]
-        except OSError:
-            pass
-    for c in candidates:
-        if os.path.isfile(c):
-            _check_chain(os.path.realpath(c), ws)
+    if not os.path.isdir(_developer_dir()):
+        raise Refused(DEV_MISSING)
 
 
 def approve_program(root, name, *, _depth=0):
-    """What a person approves as a profile's `run` program: (real path, warnings). Refused: a relative path;
-    the program or a folder above it inside the workspace, changeable by other users, or changeable by the
-    current user (owner, group such as admin, or ACL: an agent running as that user can rewrite it). On macOS
-    a /usr/bin stub whose real tool lives in a user-writable developer folder is refused too. A program that
-    starts with #! needs a system interpreter (env is refused). Interpreters and tools that run arbitrary code
+    """What a person approves as a profile's `run` program: (real path, warnings). Checked when the profile is
+    set and again at every start. Refused: a relative path; the program or a folder above it inside the
+    workspace or changeable by other users (_check_chain). Programs the current user owns (Homebrew,
+    ~/.local/bin, uv or pyenv pythons) are fine: the person approved them. On macOS a /usr/bin stub whose
+    developer tools are missing is refused. A program that starts with #! needs an interpreter given by a full
+    path that passes the same check (env is refused). Interpreters and tools that run arbitrary code
     (sh, python, node, env, git, npm, curl, and database clients that read commands from stdin or run shell
     escapes: psql, mysql, sqlite3, redis-cli, mongosh) are allowed but warned about: approving one is
     approving anything."""
     if _windows():
         raise Refused(WINDOWS)
-    _refuse_root()  # no root exemption: nothing counts as user-writable under root
+    _refuse_root()
     if not os.path.isabs(name) and (os.sep in name or (os.altsep and os.altsep in name) or "/" in name):
         raise Refused("Refused: give the program as a full path or a plain name, not a relative path.")
     path = resolve_program(root, name)
     real = os.path.realpath(path)
     ws = os.path.realpath(root)
     _check_chain(real, ws)
-    _check_xcode(path, ws)
+    _check_xcode(path)
     _check_shebang(root, real, _depth)
     warnings = []
     if RISKY_PROGRAMS.match(os.path.basename(real)) or RISKY_PROGRAMS.match(os.path.basename(name)):
@@ -411,8 +391,8 @@ def approve_program(root, name, *, _depth=0):
 
 
 def _check_shebang(root, real: str, depth: int) -> None:
-    """A program that starts with #! is run by its interpreter: that must be an approved system program too
-    (env and relative interpreters are refused)."""
+    """A program that starts with #! is run by its interpreter: that must pass approve_program too (env and
+    relative interpreters are refused)."""
     try:
         with open(real, "rb") as f:
             head = f.read(256)
@@ -579,7 +559,7 @@ def check_arguments(root, arguments, kind=None, files=()) -> None:
     the arguments must fit that program's template (_match_template) and only its path slots go on. A value
     with a path separator must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative
     path), must not go through a link, and neither it nor any parent may be inside the workspace or
-    changeable by you (an agent running as you could change it). Only plain http, https, ssh and git
+    changeable by other users (_check_chain). Only plain http, https, ssh and git
     addresses are not paths."""
     ws = os.path.realpath(root)
     for arg in arguments if kind is None else _match_template(kind, list(arguments), files):
