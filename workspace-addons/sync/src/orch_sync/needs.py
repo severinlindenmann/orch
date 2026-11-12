@@ -76,6 +76,15 @@ def _needs_move(root):
         return False
 
 
+def _unconfirmed(root):
+    """Remote mode with an address the person did not confirm (cli.address_confirmed): sync makes no network call."""
+    try:
+        settings = cli.DEFAULTS | cli.read(root, "settings")
+    except Exception:  # noqa: BLE001 - no row rather than a wrong one (the step reports the bad file)
+        return False
+    return settings.get("mode") == "remote" and not cli.address_confirmed(root, settings.get("remote"))
+
+
 def row(kind, key, text, since, command, options, ticket=None, title="Sync needs you", tone="needs-you", actions=None):
     out = {
         "id": f"sync:{kind}:{key}",
@@ -299,6 +308,19 @@ def rows(root):
                         "body": "It is removed on every computer that syncs.", "done": "Left deleted."}),
                     action("OK", "restored", tid),
                 ],
+            )
+        )
+    if _unconfirmed(root):
+        out.append(
+            row(
+                "address",
+                "remote",
+                cli.UNCONFIRMED,
+                datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "orch sync set --mode remote --remote <address> --proof-stdin",
+                None,
+                title="Sync",
+                tone="warn",
             )
         )
     if _needs_move(root):

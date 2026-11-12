@@ -54,17 +54,27 @@ function needRow(row, newest, questionCount = 1) {
 }
 // An add-on row that names its own buttons (needs.schema.json `actions`, e.g. sync): each runs that add-on's verb on
 // the one generic op, a signed one after the person's sign step; "Not now" waits a day, "View file" opens the file.
-// The only core op a row may name is the existing, signed private.move ("Move your orch files out of the team repository?").
-const NEED_OPS = ['private.move'];
+// The only core op a row may name is the existing, signed private.move, and only in a row of the sync add-on. Its button
+// and sign step always use the core's own words below: a row's label and review are never shown for a core op.
+const NEED_OPS = {'private.move':{label:'Move', title:'Move your orch files out of the team repository?',
+  body:'Why: your tickets sit in your team’s repository, so everyone on the team sees each change. Where: they stay in this folder on this computer; the team repository no longer keeps them. Your team’s files are not touched.',
+  done:'Moved your orch files.'}};
+const needOp = (row, a) => row.source === 'sync' && typeof a.op === 'string' && Object.prototype.hasOwnProperty.call(NEED_OPS, a.op) ? NEED_OPS[a.op] : null;
+const needLabel = a => a.core ? a.core.label : a.label;
 const NEED_LATER = 'orch.needs.later';
 function needsLater() {
   try { const v = JSON.parse(localStorage.getItem(NEED_LATER) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (_) { return {}; }
 }
 const laterToday = row => array(row.actions).some(a => a && a.later) && needsLater()[row.id] === today();
-const needActs = row => !snapshot && /^[a-z][a-z0-9-]{1,31}$/.test(String(row.source || '')) && row.source !== 'core' ? array(row.actions).filter(a => a && typeof a.label === 'string' && (a.later || a.view || NEED_OPS.includes(a.op) || /^[a-z][a-z-]{0,20}$/.test(String(a.verb || '')))).slice(0, 4) : [];
+// a core op: only {op, core wording}, always signed; an add-on verb, "Not now" or "View file" as the row names it
+const needAct = (row, a) => {
+  if (!a || typeof a !== 'object') return null;
+  if ('op' in a) { const core = needOp(row, a); return core ? {op:a.op, core, sign:true} : null; }
+  return typeof a.label === 'string' && (a.later || a.view || /^[a-z][a-z-]{0,20}$/.test(String(a.verb || ''))) ? a : null;
+};
+const needActs = row => !snapshot && /^[a-z][a-z0-9-]{1,31}$/.test(String(row.source || '')) && row.source !== 'core' ? array(row.actions).map(a => needAct(row, a)).filter(Boolean).slice(0, 4) : [];
 async function needActRun(row, a) {
-  const args = a.op ? {} : {addon:row.source, verb:a.verb, target:a.target, ...(a.sign ? {sign:true} : {})};
-  const result = await act(a.op || 'addon.act', args);
+  const result = a.op ? await act(a.op, {}) : await act('addon.act', {addon:row.source, verb:a.verb, target:a.target});
   if (!a.sign) window.orch.toast(result.ok ? 'Done.' : changeError(result), result.ok ? 'ok' : 'error');
   return result;
 }
@@ -73,19 +83,20 @@ function needActionsRow(row, key) {
   const source = typeof addonLabel === 'function' && typeof addons === 'function' ? addonLabel(addons().find(a => a.name === row.source) || {name:capitalise(row.source)}) : capitalise(row.source);
   const controls = acts.map(a => {
     const quiet = a.later || a.view;
-    const control = button(a.label, quiet ? 'quiet sm' : 'outline sm', async () => {
+    const control = button(needLabel(a), quiet ? 'quiet sm' : 'outline sm', async () => {
       if (changeUnavailable() || locks.has(key)) return;
       if (a.later) {
         try { localStorage.setItem(NEED_LATER, JSON.stringify({...needsLater(), [row.id]:today()})); } catch (_) { /* fine without storage */ }
         window.orch.toast('Asking again tomorrow.', 'ok'); render(); return;
       }
       if (a.view) { if (typeof previewFile === 'function' && a.view.ticket && a.view.name) previewFile(a.view.ticket, 'artifacts', a.view.name); return; }
-      const review = a.review || {};
-      if (a.sign) { signStep({title:review.title || a.label + '?', body:review.body, here:review.here, there:review.there, done:review.done || '', run:() => needActRun(row, a)}); return; }
+      if (a.core) { signStep({title:a.core.title, body:a.core.body, done:a.core.done, run:() => needActRun(row, a)}); return; }
+      // the sign step shows the add-on's review of exactly what it will sign (signedAct), not the row's text
+      if (a.sign) { signedAct({addon:row.source, verb:a.verb, target:a.target}, String(a.review?.done || '').slice(0, 120)); return; }
       locks.add(key);
       try { await needActRun(row, a); } finally { locks.delete(key); render(); }
     });
-    control.dataset.key = key + '-act-' + a.label;
+    control.dataset.key = key + '-act-' + needLabel(a);
     return control;
   });
   return h('div', {className:'card-row home-need need-acts', 'data-key':key, 'data-need-row':row.id},

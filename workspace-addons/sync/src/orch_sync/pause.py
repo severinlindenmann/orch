@@ -248,7 +248,7 @@ def resolve(root, path, keep, args=None, *, now=None):
         if settings["mode"] == "remote":
             if not cli.remote_allowed():
                 raise repo.Refused("Remote sync is preview-only")
-            repo.check(root)
+            repo.set_remote(root, cli.confirmed_remote(root, settings))  # checks the repository too
             repo.fetch(root)
             current = step.oid(root, "refs/remotes/origin/orch-state")
             if current != remote:
@@ -392,9 +392,10 @@ def resolve(root, path, keep, args=None, *, now=None):
         return step._run(root, "resolved", now, cli.remote_allowed())
 
 
-def resolve_target(root, path, keep):
-    """The proof `resolve(root, path, keep)` will ask for, worked out the same way and without changing anything;
-    None when that choice needs no proof. The dashboard mints exactly this target (a stale one simply fails)."""
+def resolve_sides(root, path):
+    """(paused, remote, mine, theirs) read as resolve reads them, once, for the proof target AND the sign step's
+    review. The saved copy (run/sync/theirs/<path>, agent-writable) counts only when it is exactly the blob of the
+    signed pause's remote commit, as resolve checks it (L3): otherwise nothing is offered for signing."""
     from . import step
 
     state = cli.read(root, "state")
@@ -407,6 +408,16 @@ def resolve_target(root, path, keep):
     mine = live.read_bytes() if live.exists() else head
     saved = repo.safe(root, "run/sync/theirs/" + path)
     theirs = saved.read_bytes() if saved.exists() else None
+    if remote and theirs != step.blob(root, step.entries(root, remote).get(path)):
+        raise repo.Refused("Saved copy does not match the checked version")
+    return paused, remote, mine, theirs
+
+
+def resolve_target(root, path, keep, sides=None):
+    """The proof `resolve(root, path, keep)` will ask for, worked out the same way and without changing anything;
+    None when that choice needs no proof. The dashboard mints exactly this target (a stale one simply fails).
+    `sides`: resolve_sides() already read for the review the person is shown (the same bytes)."""
+    paused, remote, mine, theirs = sides or resolve_sides(root, path)
     data = mine if keep == "mine" else theirs
     data = data if data is not None else mine or theirs
     if data is None:
@@ -421,7 +432,7 @@ def resolve_target(root, path, keep):
     return None
 
 
-def _left_bytes(root, path):
+def left_bytes(root, path):
     """The file on this computer a person may leave out: an artifact only (a ticket is edited instead)."""
     if not paths.ARTIFACT.fullmatch(path):
         raise repo.Refused("Only a file of a ticket can be left out; edit the ticket to take out the password or key")
@@ -431,9 +442,11 @@ def _left_bytes(root, path):
     return live.read_bytes()
 
 
-def leave_out_target(root, path):
-    """The proof target of Leave it out: the path and the exact bytes left out (changed content asks again)."""
-    return "sync:leave-out:" + hashlib.sha256(path.encode() + b"\0" + _left_bytes(root, path)).hexdigest()
+def leave_out_target(root, path, data=None):
+    """The proof target of Leave it out: the path and the exact bytes left out (changed content asks again).
+    `data`: left_bytes() already read for the review the person is shown."""
+    data = left_bytes(root, path) if data is None else data
+    return "sync:leave-out:" + hashlib.sha256(path.encode() + b"\0" + data).hexdigest()
 
 
 def left_out(root, path, data):
@@ -463,7 +476,7 @@ def leave_out(root, path, args, *, now=None):
         paused = state["paused"] = verified_pause(root, state)
         if not paths.allowed(path) or not paused or path not in paused["files"] or "secret" not in paused["reason"]:
             raise repo.Refused("This file is not waiting for a choice")
-        data = _left_bytes(root, path)
+        data = left_bytes(root, path)
         hashed = hashlib.sha256(data).hexdigest()
         by = humanproof.person_by(
             root,
@@ -509,7 +522,7 @@ def take_remote(root, args, *, now=None):
             if not cli.remote_allowed():
                 raise repo.Refused("Remote sync is preview-only")
             repo.check(root)
-            repo.set_remote(root, settings["remote"])
+            repo.set_remote(root, cli.confirmed_remote(root, settings))
             repo.fetch(root)
             if step.oid(root, "refs/remotes/origin/orch-state") != remote:
                 state["paused"] = None
@@ -587,7 +600,7 @@ def resolve_case(root, path, args, *, rename=None, now=None):
         if settings["mode"] == "remote":
             if not cli.remote_allowed():
                 raise repo.Refused("Remote sync is preview-only")
-            repo.check(root)
+            repo.set_remote(root, cli.confirmed_remote(root, settings))  # checks the repository too
             repo.fetch(root)
             if step.oid(root, "refs/remotes/origin/orch-state") != remote:
                 state["paused"] = None
@@ -661,7 +674,7 @@ def keep_key(root, key, tid, args, *, now=None):
         if settings["mode"] == "remote":
             if not cli.remote_allowed():
                 raise repo.Refused("Remote sync is preview-only")
-            repo.check(root)
+            repo.set_remote(root, cli.confirmed_remote(root, settings))  # checks the repository too
             repo.fetch(root)
             if step.oid(root, "refs/remotes/origin/orch-state") != remote:
                 raise repo.Refused("Remote changed; review again before choosing a key")

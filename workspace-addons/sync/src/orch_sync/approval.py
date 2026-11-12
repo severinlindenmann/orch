@@ -25,10 +25,13 @@ def manifests():
     return cached["value"]
 
 
+def canonical(value):
+    """The exact bytes digest() hashes (the sign step of allow / ignore shows these same bytes)."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
 def digest(value):
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    ).hexdigest()
+    return hashlib.sha256(canonical(value)).hexdigest()
 
 
 HELD_KIND = "sync-held"

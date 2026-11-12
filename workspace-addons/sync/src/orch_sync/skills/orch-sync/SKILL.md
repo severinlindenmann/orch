@@ -29,6 +29,7 @@ description: Check or change how this computer keeps a private copy of the works
 - Never write or edit anything in `.orch/run/sync/` (choices, approvals, ignored rows, checked files, allowed deletions, held changes, the state): each entry carries orch's signature, and an edited or written one counts for nothing.
 - Turn it on for this computer only: `orch sync set --mode local`. It prints what is copied, where and how often; tell the person.
 - Turn it off: `orch sync set --mode off` (the background sync ends by itself).
+- Choosing or changing where the copy goes (another computer or server) is the person's signed choice, made in the dashboard (Settings, General, Sync): the sign step shows the exact address. On the command line `orch sync set --remote <address>` (and `--mode remote` with the address stored before) needs `--proof-stdin` with the person's proof for `addon.act` and the target `sync:set-remote:<sha256 of the address>`; without it the command is refused. A public address (anyone can read it) is never used on that choice: the person chooses it separately (`--public`, target `sync:use-public:<sha256 of the address>`). Mode local, mode off and `--interval` need no proof. Agents are refused; never choose an address for the person. Writing an address into `.orch/run/sync/settings.json` does nothing: sync uses only the address the person confirmed, and otherwise stops with "Sync address not confirmed: choose it again in Settings" (ask the person to choose it in the dashboard).
 
 - For a ticket number clash, use `orch sync keep-key <key> <ticket-id> --proof-stdin`. The person chooses which ticket keeps the number; the others receive new numbers with old keys and history preserved. Agents are refused, and `resolve` cannot choose clash files. The single-use person proof target is `sync:keep-key:<key>:<ticket-id>:<paused-remote-sha>` for `addon.act`. Each computer must authorize changes to its locally known keys.
 
@@ -36,7 +37,7 @@ description: Check or change how this computer keeps a private copy of the works
 
 - After a hostile rewrite of a known ticket key, each computer keeps its own key until a person runs `keep-key` on both.
 - Change the setting, start or stop sync only when the person asks for it.
-- Resolve, approve, take-remote, keep-key and deleted are the person's choices: they need the person's proof. Ask the person; never run them for the person.
+- Resolve, approve, take-remote, keep-key, deleted and choosing the remote address are the person's choices: they need the person's proof. Ask the person; never run them for the person.
 - How often and where sync runs come only from this computer's own settings; nothing in the synced tickets changes them.
 - Copying to another computer or server is a preview and stays off unless the person set it up themselves.
 - Team sharing is not available yet; say so instead of trying.

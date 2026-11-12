@@ -27,6 +27,14 @@ function fixture() {
   return state;
 }
 
+// `orch sync act <verb> --proof-target`: what each signed click signs, as the add-on answers it
+const REVIEWS = {
+  'use-public': sync => ({target: 'sync:use-public:' + 'd'.repeat(64), review: {title: 'Use a public location?', body: 'Anyone who knows the address can read your tickets.', value: sync.public}}),
+  'set': (sync, args) => ({target: 'sync:set-remote:' + 'c'.repeat(64), review: {title: 'Sync to this address?', body: `Your tickets and their files are copied there every ${args.value} minutes.`, value: args.target}}),
+  'keep-theirs': () => ({target: 'sync:keep-theirs:' + 'e'.repeat(64), review: {title: 'Keep the other computer’s version of “Close March books”?', body: 'The change made here is set aside.',
+    here: 'due: 2026-03-31; note: (none); updated_at: 2026-11-11T10:02:00Z', there: 'due: (none); note: Include the bank fees from the March statement; updated_at: 2026-11-11T10:09:00Z'}}),
+};
+
 // The sync add-on as the dashboard sees it: one in-memory status, changed only by the person's clicks.
 function fakeSync(start) {
   const sync = {mode: 'off', remote: null, interval: 15, shown: 'off', last_ok: null, last_try: null, last_error: null, paused_needs: 0,
@@ -36,6 +44,8 @@ function fakeSync(start) {
     calls.push({op, args});
     if (op === 'addon.set') { state.settings.addons.find(a => a.name === args.name).active = args.on; return null; }
     if (op !== 'addon.act' || args.addon !== 'sync') return null;
+    // the review phase of a signed click: the add-on's {target, review}; nothing changes
+    if (args.review) return REVIEWS[args.verb] ? REVIEWS[args.verb](sync, args) : null;
     if (args.verb === 'status') return {...sync};
     if (args.verb === 'check') return {ok: /^https:\/\/files\./.test(args.target)};
     if (args.verb === 'set') {
@@ -145,7 +155,8 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
         const dialog = page.locator('dialog.sign-step');
         await dialog.waitFor();
         await page.waitForTimeout(300);  // the 200 ms open animation (kit/motion.css) has ended
-        assert.match(await dialog.textContent(), /Use a public location\?.*Anyone who knows the address can read your tickets\..*You sign this as me\./);
+        assert.match(await dialog.textContent(), /Use a public location\?.*https:\/\/github\.com\/mia\/orch.*Anyone who knows the address can read your tickets\..*You sign this as me\./);
+        assert.equal((await dialog.locator('[data-key="sign-value"]').textContent()).trim(), 'https://github.com/mia/orch');
         await page.screenshot({path: path.join(OUT, `sign-public-${width}.png`)});
         await page.keyboard.press('Escape');
         assert.equal(await noSideways(page), true, `paused-${width}: no sideways scroll`);
@@ -186,7 +197,9 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
       await page.screenshot({path: path.join(OUT, `sign-keep-theirs-${width}.png`)});
       await dialog.getByRole('button', {name: 'Sign'}).click();
       await page.waitForFunction(() => !document.querySelector('dialog.sign-step'));
-      assert.deepEqual(fake.calls.at(-1), {op: 'addon.act', args: {addon: 'sync', verb: 'keep-theirs', target: 'tickets/t_q3x8k1.json', sign: true}});
+      assert.deepEqual(fake.calls.slice(-2), [
+        {op: 'addon.act', args: {addon: 'sync', verb: 'keep-theirs', target: 'tickets/t_q3x8k1.json', review: true}},
+        {op: 'addon.act', args: {addon: 'sync', verb: 'keep-theirs', target: 'tickets/t_q3x8k1.json', sign: true, seen: 'sync:keep-theirs:' + 'e'.repeat(64)}}]);
       assert.equal(await noSideways(page), true, `needs-${width}: no sideways scroll`);
       assert.deepEqual(errors, []);
       await context.close();

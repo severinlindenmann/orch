@@ -280,8 +280,7 @@ function syncCard(settings) {
       return save;
     })())) : null;
   const warn = card?.public ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-public'}, h('p', {}, SYNC_PUBLIC),
-    h('div', {className:'row'}, button('Use public location', '', () => signStep({title:'Use a public location?', body:'Anyone who knows the address can read your tickets.', done:'Using the public location.',
-      run:async () => { const r = await syncAct('use-public', 'pending', {sign:true}); await syncLoad(); return r; }})),
+    h('div', {className:'row'}, button('Use public location', '', () => signedAct({addon:SYNC, verb:'use-public', target:'pending'}, 'Using the public location.', syncLoad)),
     button('Keep on this computer', '', async () => {
       syncUi.busy = true; render();
       const r = await syncAct('set', 'local');
@@ -301,8 +300,17 @@ function syncCard(settings) {
 async function syncSave() {
   const s = syncNow();
   if (syncUi.busy || (s.where === 'remote' && !s.addr.trim())) return;
+  const saved = syncSaved(syncUi.card), sameAddr = s.where === 'remote' && saved.where === 'remote' && s.addr.trim() === saved.addr;
+  if (s.where === 'remote' && !sameAddr) {
+    // choosing the sync address is the person's signed choice: the sign step shows the address the add-on returns
+    await signedAct({addon:SYNC, verb:'set', target:s.addr.trim(), value:s.every}, 'Sync address chosen.', async result => {
+      if (result.ok) { syncUi.draft = null; syncUi.note = ''; }
+      await syncLoad();
+    });
+    return;
+  }
   syncUi.busy = true; render();
-  const result = s.where === 'remote' ? await syncAct('set', s.addr.trim(), {value:s.every}) : await syncAct('set', s.where);
+  const result = sameAddr ? await syncAct('set', s.addr.trim(), {value:s.every}) : await syncAct('set', s.where);  // how often: unsigned
   syncUi.busy = false;
   if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); render(); return; }
   syncUi.draft = null; syncUi.note = '';
@@ -319,11 +327,29 @@ async function syncNowClick() {
   else if (result.answer?.still_paused || result.answer?.choose_first) syncUi.note = String(result.answer.text || '');
   await syncLoad();
 }
-// The person's sign step (the draft's modal): what will happen, both versions when there are two, "You sign this as
-// <name>", then Sign. The server mints the proof for exactly what the add-on names; no typed word.
-function signStep({title, body, here, there, done, run}) {
-  const {d, actions} = dialog(title, 'dialog sign-step');
+// A signed add-on click in two phases: the add-on says what it signs ({target, review}, worked out from the same bytes
+// the target hashes), the sign step shows exactly that review (never the row's or the page's own text), and Sign
+// echoes the target it showed (`seen`): the server mints only while the add-on still names that same target.
+async function signedAct(args, done, after) {
+  const asked = await act('addon.act', {...args, review:true});
+  const got = asked.ok && asked.state?.act_answer?.addon === args.addon ? asked.state.act_answer.answer : null;
+  if (!got || !got.review || typeof got.review.title !== 'string') {
+    window.orch.toast(asked.text || 'This can’t be signed right now. Nothing was changed.', 'error');
+    return null;
+  }
+  const {title, body, here, there, value} = got.review;
+  return signStep({title, body, here, there, value, done, run:async () => {
+    const result = await act('addon.act', {...args, sign:true, seen:typeof got.target === 'string' ? got.target : null});
+    if (after) await after(result);
+    return result;
+  }});
+}
+// The person's sign step (the draft's modal): what will happen, the exact value signed (an address, a file, a peer's
+// value), both versions when there are two, "You sign this as <name>", then Sign. No typed word.
+function signStep({title, body, here, there, value, done, run}) {
+  const {d, actions} = dialog(String(title || ''), 'dialog sign-step');
   const sides = here || there ? h('ul', {className:'sign-sides'}, h('li', {}, h('b', {}, 'Here:'), ' ', String(here || '')), h('li', {}, h('b', {}, 'Other computer:'), ' ', String(there || ''))) : null;
+  const shown = value ? settingsText('p', {className:'mono sign-value', 'data-key':'sign-value'}, String(value)) : null;
   const who = name(state?.who) || 'you';
   const sign = h('button', {type:'button', className:'btn primary', 'data-key':'sign-ok'}, iconEl('shield'), 'Sign');
   let pending = false;
@@ -337,7 +363,7 @@ function signStep({title, body, here, there, done, run}) {
     window.orch.toast(result?.ok ? 'Signed. ' + (done || '') : result?.text || 'That did not work.', result?.ok ? 'ok' : 'error');
   });
   actions.append(sign);
-  d.append(...[sides, body ? settingsText('p', {className:'meta'}, body) : null, settingsText('p', {className:'meta'}, 'You sign this as ' + who + '.'), actions].filter(Boolean));
+  d.append(...[shown, sides, body ? settingsText('p', {className:'meta'}, body) : null, settingsText('p', {className:'meta'}, 'You sign this as ' + who + '.'), actions].filter(Boolean));
   window.orch.open(d);
   return d;
 }

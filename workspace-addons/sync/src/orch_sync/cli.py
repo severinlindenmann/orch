@@ -1,6 +1,7 @@
 """`orch sync`: local settings, one-shot sync, the background loop (start/stop/status/now) and the person's choices."""
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -69,9 +70,105 @@ def save_settings(root, settings):
         Path(f.name).unlink(missing_ok=True)
 
 
-def apply_set(root, settings, mode=None, remote=None, interval=None, kind="private"):
-    """`orch sync set` (also `orch sync act set`): check, save and wake the loop. Returns (settings, notice): the
-    notice is the visibility line for a remote address seen for the first time, else None."""
+REMOTE_TARGET = "sync:set-remote:"
+PUBLIC_TARGET = "sync:use-public:"
+
+
+def remote_target(address, public=False):
+    """The proof target of choosing exactly this sync address (the whole address as it is used): use-public for a
+    public address the person chose anyway, set-remote for any other."""
+    return (PUBLIC_TARGET if public else REMOTE_TARGET) + hashlib.sha256(address.encode()).hexdigest()
+
+
+ADDRESS = "run/sync/address.json"  # the address the person's signed set-remote / use-public choice applied
+ADDRESS_KIND = "sync-remote-address"  # its local1 domain: only apply_set writes (signs) it, after the person's proof
+UNCONFIRMED = "Sync address not confirmed: choose it again in Settings"
+
+
+class Unconfirmed(repo.RemoteRefused):
+    """settings.json names a remote the person never chose with a signed choice (it is agent-writable): no network."""
+
+    def __init__(self):
+        super().__init__(UNCONFIRMED)
+
+
+def _address_record(address):
+    return {"sha256": hashlib.sha256(address.encode()).hexdigest()}
+
+
+def approve_address(root, address):
+    """Record (local1-signed) exactly the address a person's signed choice applies. Only apply_set calls it."""
+    from orch import humanproof
+
+    from .step import encoded, write
+
+    body = _address_record(address)
+    mac = humanproof.local_sign(root, ADDRESS_KIND, body)
+    if not mac:
+        raise repo.Refused("orch could not sign this choice; nothing was changed")
+    write(root, ADDRESS, encoded({**body, "mac": mac}))
+
+
+def address_confirmed(root, address):
+    """True only when `address` is exactly the one the record names and the record is as this core signed it. A
+    missing, planted, edited or unreadable record confirms nothing."""
+    from orch import humanproof
+
+    if not isinstance(address, str) or not address:
+        return False
+    try:
+        data = json.loads(repo.safe(root, ADDRESS).read_text())
+    except (ValueError, OSError, RecursionError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    body = {k: v for k, v in data.items() if k != "mac"}
+    return body == _address_record(address) and humanproof.local_ok(root, ADDRESS_KIND, body, data.get("mac"))
+
+
+def confirmed_remote(root, settings):
+    """The remote of remote mode, only when the person confirmed exactly it (address_confirmed); else refused before
+    any network call. Every remote-mode path (step, pause choices) asks this first."""
+    url = settings.get("remote")
+    if not url:
+        raise repo.Refused("A remote address is required")
+    if not address_confirmed(root, url):
+        raise Unconfirmed()
+    return url
+
+
+class PublicAddress(repo.Refused):
+    """A public address on a plain choice: never used then (the person's use-public choice is a separate one)."""
+
+    def __init__(self, address):
+        super().__init__("This sync address is public. Anyone can read your tickets. Choose it in the dashboard "
+                         "(Settings, General, Sync), or add --public with a person's proof")
+        self.address = address
+
+
+def _remote_gate(root, address, args, public):
+    """Every path that sets a remote passes here (gate parity): the address's visibility is probed every time (a
+    cached answer is agent-writable, M1), a public address is only ever used on the person's use-public choice,
+    and the choice itself is a person's proof bound to that exact address (M4). Returns the probed visibility."""
+    from orch import config, humanproof
+
+    from .visibility import remote_visibility
+
+    visibility = remote_visibility(address)
+    if visibility == "public" and not public:
+        raise PublicAddress(address)
+    by = humanproof.person_by(root, args, "addon.act", remote_target(address, public),
+                              no_handoff="Choosing where sync keeps a copy needs a person's proof over stdin.")
+    config.require_person(by, "choose where sync keeps a copy")
+    return visibility
+
+
+def apply_set(root, settings, mode=None, remote=None, interval=None, kind="private", *, args=None, public=False):
+    """`orch sync set` (also `orch sync act set` and `use-public`): check, save and wake the loop. Returns
+    (settings, notice): the notice is the visibility line for a remote address seen for the first time, else None.
+    Choosing or changing the remote address (`remote`, or turning remote on with the stored one) is a person's
+    signed choice (_remote_gate); `public` = the caller is the person's use-public choice. Mode off, mode local
+    and the interval need no proof."""
     if mode is None and interval is None:
         raise repo.Refused("Say what to change: --mode off|local|remote or --interval 5|15|60")
     if interval is not None and interval not in (5, 15, 60):
@@ -89,23 +186,27 @@ def apply_set(root, settings, mode=None, remote=None, interval=None, kind="priva
         raise repo.Refused("Set a remote in local or remote mode")
     if mode == "remote" and not (remote or settings.get("remote")):
         raise repo.Refused("A remote address is required")
+    # turning remote on uses the stored address: that is choosing it too (settings.json is agent-writable)
+    chosen = remote or (settings.get("remote") if mode == "remote" and settings["mode"] != "remote" else None)
+    visibility = None
+    if chosen:
+        visibility = _remote_gate(root, chosen, args, public)  # everything that can refuse ran before the proof
     if mode != "off":
         repo.ensure(root)
     notice = None
     if remote:
         repo.set_remote(root, remote)
         settings["remote"] = remote
-        from .visibility import remote_visibility
-
         safe_url = safe_address(remote)
-        notices = read(root, "visibility")
+        notices = read(root, "visibility")  # only words the notice once; never decides anything (M1)
         if safe_url not in notices:
-            visibility = remote_visibility(remote)
             notices[safe_url] = visibility
             from .step import encoded, write
 
             write(root, "run/sync/visibility.json", encoded(notices))
             notice = "Anyone can read this repository" if visibility == "public" else "Make sure this repository is private"
+    if chosen:
+        approve_address(root, chosen)  # the address this signed choice applies (checked at every use)
     settings.update(mode=mode, kind=kind, interval=interval or settings["interval"])
     save_settings(root, settings)
     from . import loop, service
@@ -216,6 +317,11 @@ def main(argv=None):
             p.add_argument("--remote")
             p.add_argument("--interval", type=int, help="minutes between remote syncs: 5, 15 or 60")
             p.add_argument("--kind", choices=("private", "team"), default="private")
+            # choosing the remote address is a person's signed choice (sync:set-remote:<sha256(address)>; a public
+            # address: --public and sync:use-public:<sha256(address)>)
+            p.add_argument("--public", action="store_true")
+            p.add_argument("--proof-stdin", action="store_true")
+            p.add_argument("--by")
     p = sub.add_parser("resolve")
     p.add_argument("path")
     choice = p.add_mutually_exclusive_group(required=True)
@@ -275,7 +381,8 @@ def main(argv=None):
             return 0
         if args.cmd == "set":
             asked = args.mode
-            settings, notice = apply_set(root, settings, args.mode, args.remote, args.interval, args.kind)
+            settings, notice = apply_set(root, settings, args.mode, args.remote, args.interval, args.kind, args=args,
+                                         public=args.public)
             if notice:
                 print(notice, file=sys.stderr)
             result = settings

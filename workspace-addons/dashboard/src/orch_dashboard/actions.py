@@ -613,10 +613,15 @@ def _addon_start(a):
     return ["start"], ["--no-open"], []
 
 
+# Never in an add-on target: C0/C1 controls, line separators, bidi overrides, isolates and marks, zero-width
+# characters. They can disguise a path or an address in an error or a sign step's review.
+HIDDEN_CHARS = re.compile("[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
+
+
 def _act_target(v) -> str:
     """What an add-on verb acts on: a ticket id, or one plain value the add-on checks itself (a sync address, a file
-    of a ticket, `<ticket>:<add-on>`): one line, no control character, never starting with "-". It always goes
-    after `--`, so it can never be read as an option."""
+    of a ticket, `<ticket>:<add-on>`): one line, no control, bidi or zero-width character, never starting with "-".
+    It always goes after `--`, so it can never be read as an option."""
     if isinstance(v, str) and TID.fullmatch(v):
         return v
     if (
@@ -625,7 +630,7 @@ def _act_target(v) -> str:
         or len(v) > 500
         or v.startswith("-")
         or v != v.strip()
-        or any(ord(c) < 32 or ord(c) == 127 or c in "\u2028\u2029" for c in v)
+        or HIDDEN_CHARS.search(v)
     ):
         raise BadRequest("That is not something this action can work on.")
     return _text(v, "target", limit=500)
@@ -634,9 +639,10 @@ def _act_target(v) -> str:
 def _addon_act(a):
     """ONE generic op for an add-on's own verbs: `orch <addon> act <verb> -- <target>`. The add-on name is checked
     against `orch addon list` in run_op (it must be on here); the dashboard code never names one. `sign` = the
-    person signed this click on the page: run_op asks the add-on which proof target the verb needs and passes a
-    proof minted for exactly that (see addon_proof_target)."""
-    _only(a, ("addon", "verb", "target", "value", "sign"))
+    person signed this click on the page. Two phases (see addon_proof_target): `review: true` only asks the add-on
+    for {target, review} (nothing runs) and the page shows that review; the signed click echoes the target it
+    showed (`seen`), and run_op mints a proof only when the add-on still names exactly that target."""
+    _only(a, ("addon", "verb", "target", "value", "sign", "review", "seen"))
     addon, verb = a.get("addon"), a.get("verb")
     if not (isinstance(addon, str) and ADDON.fullmatch(addon) and addon not in RESERVED):
         raise BadRequest("That is not an add-on.")
@@ -644,6 +650,12 @@ def _addon_act(a):
         raise BadRequest("That action is not available.")
     if "sign" in a and a["sign"] is not True:
         raise BadRequest("A signed click says sign: true.")
+    if "review" in a and (a["review"] is not True or "sign" in a):
+        raise BadRequest("A review asks review: true and signs nothing.")
+    if "sign" in a and "seen" not in a:
+        raise BadRequest("Sign what you saw: open it again.")
+    if "seen" in a and ("sign" not in a or not (a["seen"] is None or isinstance(a["seen"], str))):
+        raise BadRequest("Sign what you saw: open it again.")
     flags = []
     if "value" in a:
         if verb == "set":  # a setting's value: a whole number (sync: every 5, 15 or 60 minutes)
@@ -661,11 +673,23 @@ def _addon_act(a):
 PROOF_TARGET = re.compile(r"[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:@/+=-]{1,400}")
 
 
-def addon_proof_target(root: Path, orch_bin: str, argv: list[str], addon: str) -> str | None:
-    """Which proof a signed add-on click needs: `orch <addon> act <verb> --proof-target ... -- <target>` answers
-    {"target": "<addon>:..."} or {"target": null} and changes nothing. Only a target under the add-on's own name is
-    minted, and only for the core op `addon.act` (a proof that only that add-on's own CLI checks); anything else is
-    refused before a proof exists."""
+REVIEW_KEYS = ("title", "body", "here", "there", "value")
+
+
+def _review(v) -> dict | None:
+    """The add-on's review of a signed click (what the person signs), as plain text lines only."""
+    if not isinstance(v, dict):
+        return None
+    out = {k: v[k][:4000] for k in REVIEW_KEYS if isinstance(v.get(k), str) and v[k]}
+    return out if out.get("title") else None
+
+
+def addon_proof_target(root: Path, orch_bin: str, argv: list[str], addon: str) -> tuple[str | None, dict | None]:
+    """Which proof a signed add-on click needs and what the person is shown: `orch <addon> act <verb> --proof-target
+    ... -- <target>` answers {"target": "<addon>:..." | null, "review": {title, body, here, there, value}}, both from
+    the same bytes, and changes nothing. Only a target under the add-on's own name is minted, and only for the core
+    op `addon.act` (a proof that only that add-on's own CLI checks); anything else is refused before a proof
+    exists."""
     i = argv.index("--") if "--" in argv else len(argv)
     try:
         r = _run(
@@ -686,12 +710,12 @@ def addon_proof_target(root: Path, orch_bin: str, argv: list[str], addon: str) -
     if not isinstance(out, dict) or r.returncode != 0 or "target" not in out:
         err = out.get("error") if isinstance(out, dict) else None
         raise BadRequest(str(err or "This can't be signed right now. Nothing was changed.")[:300])
-    target = out["target"]
+    target, review = out["target"], _review(out.get("review"))
     if target is None:
-        return None
+        return None, review
     if not (isinstance(target, str) and PROOF_TARGET.fullmatch(target) and target.startswith(addon + ":")):
         raise BadRequest("This can't be signed right now. Nothing was changed.")
-    return target
+    return target, review
 
 
 def _agent_name(v) -> str:
@@ -998,8 +1022,16 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
         )
+    if op == "addon.act" and args.get("review") is True:
+        # phase 1: what the person will sign; nothing runs (with any orch, a test fake too)
+        target, review = addon_proof_target(root, orch_bin, argv, args["addon"])
+        if review is None:
+            raise BadRequest("This can't be signed right now. Nothing was changed.")
+        return 200, "", {"target": target, "review": review}
     if op == "addon.act" and args.get("sign") is True and orch_bin == SELF:
-        target = addon_proof_target(root, orch_bin, argv, args["addon"])  # a click with a session only (above)
+        target, _ = addon_proof_target(root, orch_bin, argv, args["addon"])  # a click with a session only (above)
+        if target != args.get("seen"):  # phase 2: only what the page showed is minted
+            raise BadRequest("This changed after you opened it. Nothing was changed; open it again.")
         need = ("addon.act", target) if target else None
     try:
         if need:

@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from orch import humanproof
 from orch.errors import Refused
-from test_step import ART, NOW, TICKET, run, save, success, ticket, tracked
+from test_step import ART, NOW, TICKET, configure, run, save, success, ticket, tracked
 from test_two_machines import both, edit, hostile, load, machines, remote_sha
 
 from orch_sync import approval, cli, needs, pause, records, repo, step
@@ -306,6 +306,8 @@ def test_keep_theirs_keeps_a_remote_wont_do_this_core_verifies(machines, monkeyp
     (a / ".orch/.local-id").write_bytes((b / ".orch/.local-id").read_bytes())
     humanproof.human_key(a)
     shutil.copy2(humanproof.key_dir(b) / "human.key", humanproof.key_dir(a) / "human.key")
+    for root in (a, b):  # the fixture moved the authority: the person confirms the address again under it
+        configure(root, machines[2])
     edit(b, checklist=[{"id": "c1", "text": "Pay the invoice", "done": False, "evidence": []}])
     success(b)
     success(a)
@@ -450,9 +452,12 @@ def test_public_visibility_warns_once(root, monkeypatch, capsys):
 
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
     monkeypatch.setattr(visibility, "remote_visibility", lambda url: "public")
-    args = ["--dir", str(root), "set", "--mode", "remote", "--remote", "https://github.com/owner/repository"]
+    address = "https://github.com/owner/repository"
+    args = ["--dir", str(root), "set", "--mode", "remote", "--remote", address, "--public", "--proof-stdin"]
+    proof(root, cli.remote_target(address, public=True), monkeypatch)  # a public address: the person's own choice
     assert cli.main(args) == 0
     assert "Anyone can read" in capsys.readouterr().err
+    proof(root, cli.remote_target(address, public=True), monkeypatch)
     assert cli.main(args) == 0
     assert "Anyone can read" not in capsys.readouterr().err
     assert cli.main(args + ["--kind", "team"]) == 2
@@ -662,7 +667,8 @@ def test_visibility_never_persists_userinfo(root, monkeypatch):
     monkeypatch.setattr(repo, "validate_url", lambda url: None)
     monkeypatch.setattr(repo, "set_remote", lambda *a: None)
     monkeypatch.setattr(visibility, "remote_visibility", lambda url: "unknown")
-    assert cli.main(args) == 0
+    proof(root, cli.remote_target(address), monkeypatch)
+    assert cli.main([*args, "--proof-stdin"]) == 0
     assert cli.read(root, "visibility") == {"https://example.com/owner/repo": "unknown"}
 
 

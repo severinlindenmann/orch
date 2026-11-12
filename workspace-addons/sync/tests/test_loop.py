@@ -326,9 +326,11 @@ def test_a_foreground_run_blocks_a_second_loop(root, core_unknown, spawned, tmp_
         started, still = service.start(root), service.running_pid(root)
     finally:
         stopped = service.stop(root, wait=30)
-        if fg.poll() is None:
+        try:  # stop() returns once the loop let go of its lock; the process exits right after
+            fg.wait(15)
+        except subprocess.TimeoutExpired:
             fg.kill()
-        fg.wait(10)
+            fg.wait(10)
     assert pid and second == 0
     assert printed.splitlines() == ["sync: another sync loop already runs for this folder; this one ends."]
     assert started == still == pid and spawned == []  # start finds the foreground loop: no second one

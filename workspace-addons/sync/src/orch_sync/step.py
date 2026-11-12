@@ -714,7 +714,7 @@ def _remote_moved(root, paused, remote_allowed):
         settings = cli.DEFAULTS | cli.read(root, "settings")
         if settings["mode"] != "remote" or not remote_allowed or not settings.get("remote"):
             return False
-        repo.set_remote(root, settings["remote"])
+        repo.set_remote(root, cli.confirmed_remote(root, settings))
         repo.fetch(root)
         return oid(root, "refs/remotes/origin/orch-state") != paused.get("remote_sha")
     except Exception:  # noqa: BLE001 - offline or refused: the pause stays
@@ -741,6 +741,8 @@ def _run(root, reason, now, remote_allowed):
         network = settings["mode"] == "remote"
         if network and not remote_allowed:
             raise repo.Refused("Remote sync is preview-only")
+        if network:
+            cli.confirmed_remote(root, settings)  # settings.json is agent-writable: only the address a person chose
         repo.ensure(root)
         repo.recover(root)
         for attempt in range(2):
