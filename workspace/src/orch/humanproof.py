@@ -597,13 +597,14 @@ def record_key(root: Path, create: bool = False) -> tuple[str, str, bytes] | Non
             return None
         f = key_dir(root, create=create) / "human.key"
         try:
-            st = f.stat()
+            st = f.lstat()
         except FileNotFoundError:
             if not create:
                 return None
             human_key(root, create=True)
-            st = f.stat()
-        ident = (ws, st.st_dev, st.st_ino, st.st_mtime_ns)
+            st = f.lstat()
+        # every attribute whose change must end the cache: a loose or swapped key is derived again
+        ident = (ws, st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_mode, st.st_uid, st.st_nlink)
         hit = _RECORD_KEYS.get(ident)
         if hit is None:
             rk, kid = record_auth.derive(human_key(root, create=False), ws)
@@ -624,10 +625,11 @@ def _head_path(root: Path, run: str, create: bool) -> Path:
     return d / "record-heads" / f"{run}.json"
 
 
-def record_head_read(root: Path, run: str) -> tuple[dict | None, bool]:
-    """(head, ok) of a run's chain head in the guarded home. (None, True) = there is none; (None, False) = one
-    is there but is damaged, from another key or fails its MAC (the caller treats it as missing and alerts).
-    Never raises for a bad file."""
+def record_head_read(root: Path, run: str) -> tuple[dict | None, bool | str]:
+    """(head, state) of a run's chain head in the guarded home. (head, True) = a head of this key and run;
+    (None, True) = there is none; (None, "old_key") = a head of another key id (a protection reset): no alert,
+    the writer starts a new segment at seq 1; (None, False) = damaged, of another run or failing its MAC (the
+    caller treats it as missing and alerts). Never raises for a bad file."""
     from orch import record_auth
 
     rec = record_key(root)
@@ -643,15 +645,17 @@ def record_head_read(root: Path, run: str) -> tuple[dict | None, bool]:
         head = json.loads(raw)
     except ValueError:
         return None, False
-    ok = (
+    if not (
         isinstance(head, dict)
         and head.get("schema") == "orch.record-head/1"
-        and head.get("kid") == rec[1]
-        and isinstance(head.get("seq"), int)
-        and not isinstance(head.get("seq"), bool)
-        and record_auth.head_ok(rec[2], rec[0], head)
-    )
-    return (head, True) if ok else (None, False)
+        and head.get("run") == run
+        and isinstance(head.get("kid"), str)
+        and type(head.get("seq")) is int
+    ):
+        return None, False
+    if head["kid"] != rec[1]:
+        return None, "old_key"
+    return (head, True) if record_auth.head_ok(rec[2], rec[0], head) else (None, False)
 
 
 def record_head_write(root: Path, run: str, head: dict) -> None:
@@ -662,7 +666,9 @@ def record_head_write(root: Path, run: str, head: dict) -> None:
     if rec is None:
         raise Refused("Recording is off until orch's protection is ready.")
     body = {k: v for k, v in head.items() if k != "hm"}
-    body.update(schema="orch.record-head/1", kid=rec[1])
+    body.update(
+        schema="orch.record-head/1", kid=rec[1], run=run
+    )  # bound to its run: no copy over another run
     body["hm"] = record_auth.head_mac(rec[2], rec[0], body)
     _write_private(
         _head_path(root, run, True), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n"

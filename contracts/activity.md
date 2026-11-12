@@ -461,8 +461,10 @@ number, so a planted junk line cannot shift later lines. The head (authority for
 `{"schema": "orch.record-head/1", "run", "kid", "seq", "mac", "jobs": {"<job>": {"seq", "mac"}}, "rejected", "drained",
 "drained_floor", "pruned", "hm"}` where `hm = b64u(HMAC(rk, "orch.record.head/1\0" + ws + 0 + canonical JSON of the head
 without hm))` (sorted keys, compact). A crash between line and head leaves verified lines beyond the head; readers
-accept them and the next commit moves the head. A head whose `hm` or `kid` is wrong is treated as missing (and alerted
-by the writer).
+accept them and the next commit moves the head. The head is bound to its run (`run` is inside `hm` and a reader requires
+it to equal the run it reads, so one run's head copied over another's never verifies). A head with a wrong `hm`, `run`
+or shape is treated as missing and alerted by the writer; a head of another `kid` (after a reset) is `old_key`: treated
+as missing, no alert (`record_head_read` returns `(None, "old_key")`).
 
 `verify_run` walks the lines. A line failing the suffix, key id, parse or MAC is `changed`. A genuine line must have
 `seq == last_seq + 1` and `p == last_mac` (genesis for seq 1); a genuine line with `seq > last_seq + 1` resyncs there
@@ -483,7 +485,9 @@ counted `removed` is un-counted). At the end `removed += max(0, head.seq - last_
 
 Result and reasons: `reason` is `content` when lines are shown and some line is changed, `removed` when only genuine
 lines are gone, `unverified` when no line verifies and some have no `auth`, `old_key` when the only changed lines carry
-another key id (see rotation). A run with verified lines plus problems stays readable; one with none is `tampered`.
+another key id (see rotation). A line with another key id counts as `old_key` only while no line with the current key
+id has verified yet (the old segment of a rotation always comes first and its MAC cannot be checked); after that it is a
+planted line: `changed`, reason `content`. A run with verified lines plus problems stays readable; one with none is `tampered`.
 Messages: content: "Some records of this run were changed outside orch. To be safe, orch does not show them. Nothing was
 deleted."; removed: "Some records of this run were removed outside orch."; unverified: "orch cannot check these
 records, so it does not show them."; old_key: "These records were made before orch's protection was reset. orch cannot
@@ -491,16 +495,18 @@ check them any more, so it does not show them."
 
 **Key absent, rotation.** No `human.key`: the writer records nothing (`RecordOff`, fail closed, no degraded mode); readers
 report `unverified`. A `reset_protection` rotation changes the `kid`: the next commit starts a new chain segment at
-`head.seq + 1` with `p` = genesis of the new key and rewrites the head; the old lines are `old_key`, not `removed`.
-Lines without `auth` are `changed`, reason `unverified`. No migration (pre-release).
+seq 1 with `p` = the genesis of the new key and rewrites the head (the old head has another key id: not an alert); the
+old lines stay in the file before it and are `old_key`, never `removed`. Lines without `auth` are `changed`. No migration (pre-release).
 
 **Spool and drain.** A spool entry `pending/<run>/<time_uuid>.json` carries `sm = b64u(HMAC(rk, "orch.record.spool/1\0" +
 ws + 0 + run + 0 + name + 0 + canonical JSON of {event, payload, default_id}))`; the file name is bound. It is sealed
 into the chain only when drained under the lock. An entry with a missing or wrong `sm`, a name already drained, or a
 name older than `drained_floor` is never committed: it is deleted by exact path, counted in `head.rejected` and alerted.
+The MACed object is exactly `{event, payload, default_id}`: an entry with any other key (`sm` aside) is refused.
 
 **Job streams** (`jobs/<run>/<job>.jsonl`) use the same seal with domain `orch.record.job/1\0`, scope run + job, genesis
-`orch.record.job.genesis/1` and the head entry `jobs.<job>`; `replace_last` re-seals the new last line with the same seq.
+`orch.record.job.genesis/1` and the head entry `jobs.<job>`; `replace_last` re-seals the new last line with the same seq. A job line carries its `job` inside the MACed body (the
+reader checks it equals the stream's job), as it carries `run`.
 
 ### Known limit (Level 1)
 
@@ -511,6 +517,8 @@ The MAC turns "append a line" into "run code that loads orch's key". It does not
   generic), can seal anything. Records from such helpers show a plain marker ("Records from this helper can't be fully
   checked.").
 - **Level 2** is the key held by a separate process or OS user that seals on request. Not built.
+- **Head deleted.** The head lives in the guarded home; deleting it (or leaving one of another key id) means "no
+  head": a tail truncation of the run file is then not detected (the chain still verifies from genesis).
 - Input injection into the collector (on Linux an agent can write into the harness's stdout pipe); such lines arrive
   through orch's real collector and are sealed as `log`.
 - Alerts and counts files get their own per-file MAC in a later slice; `meta.json` stays unauthenticated (display only).

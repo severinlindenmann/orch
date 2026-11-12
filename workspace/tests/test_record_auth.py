@@ -163,6 +163,12 @@ def test_truncated_tail_is_seen_through_the_head():
     )  # without a head nothing is known
 
 
+def test_head_seq_must_be_a_real_integer():
+    lines = b"".join(_chain(2))
+    for seq in (True, 9.0, "9"):
+        assert ra.verify_run(lines, RUN, WS, RK, KID, {"kid": KID, "seq": seq}).removed == 0
+
+
 def test_deleted_file_with_head_is_removed_not_empty_ok():
     v = ra.verify_run(b"", RUN, WS, RK, KID, {"kid": KID, "seq": 3})
     assert (v.events, v.removed, v.reason) == ([], 3, "removed")
@@ -212,6 +218,19 @@ def test_junk_line_does_not_shift_later_seq():
     assert [e["seq"] for e in v.events] == [1, 2, 3] and v.changed == 1 and v.removed == 0
 
 
+def test_planted_unknown_kid_is_changed_once_the_current_key_verified():
+    a, b = _chain(2)
+    planted = _body(1, via="core")[:-1] + b',"auth":{"k":"00000000","p":"%s","m":"%s"}}\n' % (
+        b"A" * 43,
+        b"B" * 43,
+    )
+    v = ra.verify_run(a + planted + b, RUN, WS, RK, KID)
+    assert [e["seq"] for e in v.events] == [1, 2] and (v.changed, v.reason) == (1, "content")
+    # before any verified line it can only be the old segment of a rotation
+    v = ra.verify_run(planted + a, RUN, WS, RK, KID)
+    assert (v.changed, v.reason) == (1, "old_key") and [e["seq"] for e in v.events] == [1]
+
+
 def test_key_missing_or_wrong_verifies_nothing():
     lines = b"".join(_chain(3))
     other_rk, other_kid = ra.derive(b"\x07" * 32, WS)
@@ -228,6 +247,8 @@ def test_seal_refuses_bad_input_without_leaking_the_key():
         (RK, KID, WS, RUN, 1, "short", _body(1)),
         (RK, "xx", WS, RUN, 1, p, _body(1)),
         (RK, KID, WS, RUN, 1, p, b'{"a":1'),
+        (RK, KID, WS, RUN, 1, p, b"{}"),
+        (RK, KID, WS, RUN, 1, p, b'["a"]'),
         (RK, KID, WS, RUN, 1, p, b'{"a":"x\n"}'),
     ):
         with pytest.raises(ra.SealError) as e:
@@ -270,6 +291,12 @@ def test_spool_entry_is_bound_to_run_name_and_content():
     assert not ra.spool_ok(RK, WS, RUN, name.replace("a", "b", 1), entry, sm)
     assert not ra.spool_ok(RK, WS, RUN, name, dict(entry, default_id="x:2"), sm)
     assert not ra.spool_ok(RK, WS, RUN, name, entry, None)
+    assert not ra.spool_ok(
+        RK, WS, RUN, name, dict(entry, sm=sm), sm
+    )  # no key outside {event, payload, default_id}
+    assert not ra.spool_ok(
+        RK, WS, RUN, name, dict(entry, extra=1), ra.spool_mac(RK, WS, RUN, name, dict(entry, extra=1))
+    )
     assert not ra.drain_ok(RK, WS, RUN, "../../evil.json", entry, sm, [], "0" * 20)
 
 
@@ -349,6 +376,41 @@ def test_record_head_roundtrip_and_tamper(tws):
     assert hp.record_head_read(tws, "r_abcdef") == (None, False)
     path.write_text("not json")
     assert hp.record_head_read(tws, "r_abcdef") == (None, False)
+
+
+def test_record_head_of_one_run_does_not_verify_for_another(tws):
+    addons.workspace_id(tws, create=True)
+    hp.human_key(tws)
+    hp.record_head_write(tws, "r_aaaaaa", {"seq": 9, "mac": "M" * 43})
+    hp.record_head_write(tws, "r_bbbbbb", {"seq": 1, "mac": "M" * 43})
+    heads = hp.key_dir(tws, create=False) / "record-heads"
+    head, ok = hp.record_head_read(tws, "r_aaaaaa")
+    assert ok is True and head["run"] == "r_aaaaaa"
+    (heads / "r_bbbbbb.json").write_text((heads / "r_aaaaaa.json").read_text())  # copy A over B
+    assert hp.record_head_read(tws, "r_bbbbbb") == (None, False)
+    hp.record_head_write(tws, "r_cccccc", {"run": "r_aaaaaa", "seq": 2})  # a caller cannot name another run
+    assert hp.record_head_read(tws, "r_cccccc")[0]["run"] == "r_cccccc"
+
+
+def test_record_head_after_a_key_rotation_is_old_key_not_damaged(tws):
+    addons.workspace_id(tws, create=True)
+    hp.human_key(tws)
+    hp.record_head_write(tws, "r_abcdef", {"seq": 4, "mac": "M" * 43})
+    f = hp.key_dir(tws, create=False) / "human.key"
+    f.write_text("22" * 32 + "\n")
+    st = f.stat()
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 7_000_000_000))
+    assert hp.record_head_read(tws, "r_abcdef") == (None, "old_key")
+
+
+def test_record_key_cache_does_not_survive_a_loose_key(tws):
+    addons.workspace_id(tws, create=True)
+    hp.human_key(tws)
+    first = hp.record_key(tws)
+    f = hp.key_dir(tws, create=False) / "human.key"
+    f.chmod(0o644)  # same inode, same mtime: only mode and ctime change
+    second = hp.record_key(tws)
+    assert second != first  # derived again: the loose key was rotated (human_key), never kept in use
 
 
 def test_record_head_run_name_cannot_leave_the_folder(tws):

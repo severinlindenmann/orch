@@ -474,7 +474,7 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
     """Reference of record_auth.verify_run: {shown, changed, removed, reason}."""
     start = ra_genesis(rk, ws, run, job)
     shown, last_seq, last_mac = [], 0, None
-    removed = bad = noauth = oldkey = pend = 0
+    removed = bad = noauth = oldkey = 0
     gaps = []
     for line in raw.split(b"\n"):
         if not line:
@@ -486,8 +486,10 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
         k, prev, mac = (g.decode() for g in m.groups())
         body = line[: m.start()] + b"}"
         if k != kid:
-            oldkey += 1
-            pend += 1
+            if shown:
+                bad += 1
+            else:
+                oldkey += 1
             continue
         try:
             o = json.loads(body.decode(), object_pairs_hook=_ra_nodup)
@@ -513,15 +515,12 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
                 continue
         else:
             gap = seq - last_seq - 1
-            if prev == start:
-                gap = max(0, gap - pend)
             if gap:
                 removed += gap
                 gaps.append((last_seq + 1, last_seq + gap))
-        pend = 0
         shown.append(seq)
         last_seq, last_mac = seq, mac
-    if head and head.get("kid") == kid:
+    if head and head.get("kid") == kid and type(head.get("seq")) is int:
         removed += max(0, head["seq"] - last_seq)
     changed = bad + noauth + oldkey
     if changed:
@@ -553,7 +552,7 @@ def ra_check(vec):
         _expect(f"activity record_auth job {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], c["job"]), c["expect"])
     for c in r["spool"]:
         entry = c["entry"]
-        ok = (c["sm"] is not None and re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", c["file"]) is not None
+        ok = (c["sm"] is not None and set(entry) <= {"event", "payload", "default_id"} and re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", c["file"]) is not None
               and c["file"] not in c["drained"] and c["file"][:20] >= c["floor"]
               and _hmac.compare_digest(_ra_hm(rk, b"orch.record.spool/1\0", ws.encode(), b"\0", run.encode(), b"\0",
                                               c["file"].encode(), b"\0", json.dumps(entry, sort_keys=True, separators=(",", ":"),

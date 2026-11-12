@@ -77,7 +77,7 @@ def derive(human_key: bytes, ws: str) -> tuple[bytes, str]:
 
 
 def genesis(rk: bytes, ws: str, run: str) -> str:
-    """The `p` of seq 1 of a run (and of the first line of a new key segment)."""
+    """The `p` of seq 1 of a run (a key rotation restarts at seq 1 with the new genesis)."""
     return _mac(rk, _D_GENESIS + _enc(ws) + b"\0" + _enc(run))
 
 
@@ -97,7 +97,13 @@ def _line_msg(domain: bytes, ws: str, scope: tuple[str, ...], seq: int, prev: st
 
 
 def _seal(rk, kid, domain, ws, scope, seq, prev, body) -> bytes:
-    if not isinstance(body, bytes) or not body.endswith(b"}") or b"\n" in body:
+    if (
+        not isinstance(body, bytes)
+        or len(body) <= 2
+        or body[:1] != b"{"
+        or body[-1:] != b"}"
+        or b"\n" in body
+    ):
         raise SealError("bad body")
     if not isinstance(seq, int) or isinstance(seq, bool) or seq < 1:
         raise SealError("bad seq")
@@ -177,7 +183,6 @@ def verify_run(
     start = job_genesis(rk, ws, run, job) if job is not None else genesis(rk, ws, run)
     out = Verified()
     n_bad = n_noauth = n_oldkey = 0
-    old_pending = 0  # old-key lines seen since the last verified line (a key rotation inserts a new segment)
     gaps: list[
         tuple[int, int]
     ] = []  # [lo, hi] seq ranges skipped by a resync, to un-count a line that only moved
@@ -190,8 +195,12 @@ def verify_run(
             continue
         body, k, prev, mac = parts
         if not hmac.compare_digest(k.encode(), kid.encode()):
-            n_oldkey += 1
-            old_pending += 1
+            # another key id: the old segment of a rotation, which always comes first. After the first line of
+            # the current key verified, a foreign key id is a planted line, not history.
+            if out.last_seq:
+                n_bad += 1
+            else:
+                n_oldkey += 1
             continue
         obj = _parse(body)
         seq = obj.get("seq") if obj is not None else None
@@ -223,17 +232,12 @@ def verify_run(
                 continue
         else:
             gap = seq - out.last_seq - 1
-            if hmac.compare_digest(
-                prev.encode(), start.encode()
-            ):  # a new key segment: the old lines before it are old_key, not removed
-                gap = max(0, gap - old_pending)
             if gap:
                 out.removed += gap
                 gaps.append((out.last_seq + 1, out.last_seq + gap))
-        old_pending = 0
         out.events.append(obj)
         out.last_seq, out.last_mac = seq, mac
-    if head and head.get("kid") == kid and isinstance(head.get("seq"), int):
+    if head and head.get("kid") == kid and type(head.get("seq")) is int:
         out.removed += max(0, head["seq"] - out.last_seq)
     out.changed = n_bad + n_noauth + n_oldkey
     out.reason = _reason(out, n_bad, n_noauth, n_oldkey)
@@ -266,8 +270,12 @@ def spool_mac(rk: bytes, ws: str, run: str, name: str, entry: dict) -> str:
 
 
 def spool_ok(rk: bytes, ws: str, run: str, name: str, entry: dict, sm) -> bool:
-    if not isinstance(sm, str):
-        return False
+    if (
+        not isinstance(sm, str)
+        or not isinstance(entry, dict)
+        or set(entry) - {"event", "payload", "default_id"}
+    ):
+        return False  # the MACed shape is exactly {event, payload, default_id}; sm itself is never inside
     try:
         return hmac.compare_digest(spool_mac(rk, ws, run, name, entry).encode(), sm.encode())
     except (ValueError, TypeError, UnicodeError, RecursionError):
@@ -276,8 +284,7 @@ def spool_ok(rk: bytes, ws: str, run: str, name: str, entry: dict, sm) -> bool:
 
 def drain_ok(rk: bytes, ws: str, run: str, name: str, entry: dict, sm, drained, floor: str) -> bool:
     """True iff a spool entry may be drained: its `sm` fits, its name was not drained before and is not older
-    than the
-    head's `drained_floor` (a replayed genuine entry). Names are `<020d time_ns>_<32 hex>.json`."""
+    than the head's `drained_floor` (a replayed genuine entry). Names are `<020d time_ns>_<32 hex>.json`."""
     if not isinstance(name, str) or not re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", name):
         return False
     if name in drained or name[:20] < floor:
