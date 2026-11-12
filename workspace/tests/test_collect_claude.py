@@ -187,7 +187,7 @@ def test_unsafe_id_dedupes_with_a_hook_line_through_the_writer(store):
     collect([use(unsafe), result(unsafe)], writer, CTX)
     done = [e for e in mapper().events([use(unsafe), result(unsafe)]) if e["outcome"]][0]
     hook = dict(done, via="hook", detail=None)
-    writer.append(hook)  # hooks win: appended, and readers dedupe on (run, id, kind, finished, via class)
+    assert writer.append(hook) is None  # after the log's line: dropped (the log wins, same hashed id)
     finished = [e for e in read_run(ws, CTX["run"]).unwrap() if e["kind"] == "step" and e["outcome"]]
     assert len(finished) == 1
     assert finished[0]["id"] == "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]

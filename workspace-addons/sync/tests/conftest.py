@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from orch_sync import repo
@@ -12,6 +14,9 @@ def isolated_git(tmp_path, monkeypatch):
     # The suite runs as a TEST install (the same core check the guarded home uses): local bare remotes are
     # allowed there, inspected before every push/fetch. Tests of a normal install use `normal_install`.
     monkeypatch.setattr(humanproof, 'install_kind', lambda: 'test')
+    # Turning sync on records it (and signs this machine's own person fields) in the guarded orch home: the
+    # tests' workspaces live in the temp folder, so a private home next to them, never a real one.
+    monkeypatch.setattr(humanproof, 'guarded_home', lambda root: Path(root).parent / 'proof-home')
     monkeypatch.setattr(addons, "real_home", lambda: home)
     monkeypatch.setattr(addons, "discover", dict)
     for key, value in [('HOME', home), ('XDG_CONFIG_HOME', home / 'xdg'),

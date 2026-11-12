@@ -167,7 +167,15 @@ def credential_helpers(root):
     values = os.fsdecode(r.stdout).split('\0')[:-1]
     if any(len(v) > 4096 or '\n' in v for v in values):
         return []  # not a helper line git itself would take: no login rather than a wrong one
+    # ~/.gitconfig is writable by any process of the same user (an agent too): only git's own helpers by bare
+    # name; never `!command`, a path to a program (Opus hard3 #8) or any option (`store --file=…` or
+    # `cache --socket=…` would point git at a file an agent chose). Anything else: no login.
+    if not all(v == '' or v in HELPERS for v in values):
+        return []
     return values
+
+
+HELPERS = ('osxkeychain', 'manager', 'manager-core', 'libsecret', 'cache', 'store', 'wincred')  # exact values only
 
 
 def git(root, *args, input=None, timeout=60, index=None, allowed_codes=(0,), commit_date=None, max_output=None):
@@ -285,7 +293,34 @@ def state(root):
 
 
 
+# Any trace of the sync add-on's local state means "synced before" (never adopt). The whole run/sync folder
+# counts too (an agent deleting single files must not get adoption). The first `orch sync set` (local or
+# remote) calls _history_on before it writes anything there; a step only reaches it once `set` has run.
+EARLIER = ('run/sync/state.json', 'run/sync/pending.json', 'run/sync/choices.json', 'run/sync/held',
+           'run/sync/settings.json', 'run/sync')
+
+
+def _history_on(root):
+    """Sync is on here from now on: core's one rule for person fields applies (orch.history). Recorded in the
+    guarded orch home (keyed by real path and workspace id) FIRST, whatever state the repository is in and
+    before anything can refuse, so removing .git or run/sync never makes the workspace trust every line again.
+    Only a workspace that never synced (no state repository, no earlier step's state) adopts the lines already
+    in its tickets as this machine's own; core never adopts when a ticket shows sync's traces."""
+    from orch import history
+
+    fresh = not os.path.lexists(safe(root, '.git')) and not any(os.path.lexists(safe(root, p)) for p in EARLIER)
+    try:
+        adopted = history.enable_sync(Path(root), adopt=fresh)
+    except Exception as e:  # noqa: BLE001 - the guarded home refused: sync does not start
+        raise Refused(f'Sync could not be turned on here: {e}') from None
+    if adopted:  # once per workspace: the signed record of this machine's own add-on values starts empty
+        from .approval import start_local_ext
+
+        start_local_ext(root)
+
+
 def ensure(root):
+    _history_on(root)  # before state(): a missing marker or a damaged repository still records it
     current = state(root)
     if current in ('new', 'ready'):
         from orch import tickets  # adopt this machine's own sessions BEFORE any remote ticket can arrive
