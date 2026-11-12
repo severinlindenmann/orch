@@ -403,12 +403,14 @@ def resolve_sides(root, path):
     if not paths.allowed(path) or not paused or path not in paused["files"]:
         raise repo.Refused("This file is not waiting for a choice")
     remote = paused["remote_sha"]
+    if not isinstance(remote, str) or not remote:  # no checked version: no saved copy can be offered (L-3)
+        raise repo.Refused("Saved copy does not match the checked version")
     live = repo.safe(root, path)
     head = step.blob(root, step.entries(root, "HEAD").get(path))
     mine = live.read_bytes() if live.exists() else head
     saved = repo.safe(root, "run/sync/theirs/" + path)
     theirs = saved.read_bytes() if saved.exists() else None
-    if remote and theirs != step.blob(root, step.entries(root, remote).get(path)):
+    if theirs != step.blob(root, step.entries(root, remote).get(path)):
         raise repo.Refused("Saved copy does not match the checked version")
     return paused, remote, mine, theirs
 

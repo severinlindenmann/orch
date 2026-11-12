@@ -116,14 +116,19 @@ def revoke_address(root):
     so a restored copy confirms nothing) and remove the file. Fails closed: without a pin the file still goes."""
     from orch import humanproof
 
-    repo.safe(root, ADDRESS).unlink(missing_ok=True)  # stops sync now either way (address_confirmed is false)
+    try:
+        repo.safe(root, ADDRESS).unlink(missing_ok=True)  # stops sync now either way (address_confirmed is false)
+        failed = None
+    except (OSError, repo.Refused) as e:  # a planted folder or link: the pin still moves, the person sees the error
+        failed = e
     pin = humanproof.record_pin(root, ADDRESS_KIND)
-    if pin == {}:
-        return  # no pin was ever made: no address record can ever pass pin_ok
     # unreadable (None: e.g. a damaged .orch/.local-id, which an agent can write) or a pin that can't move: the old
-    # pin may still name the old record, and a restored copy would count again once the pin reads again (N-1)
-    if pin is None or not humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None}):
+    # pin may still name the old record, and a restored copy would count again once the pin reads again (N-1).
+    # {}: no pin was ever made, so no address record can ever pass pin_ok
+    if pin is None or (pin != {} and not humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None})):
         raise repo.Refused("orch could not record that sync left this address. Sync is stopped; try again.")
+    if failed:
+        raise failed
 
 
 def address_confirmed(root, address):

@@ -29,8 +29,10 @@ SECRET_WHY = "may contain a password or access key"
 PUBLIC = "pending-public"  # run/sync/pending-public.json: a public address waiting for the person's signed choice
 PUBLIC_KIND = "sync-pending-public"  # its local1 domain: only set_where writes (signs) it
 NO_ADDRESS = "Sync can't use this address: https or ssh, without a password"
-# what a sign step never shows as such: controls (C0, C1), bidi overrides and marks, zero-width characters
-HIDDEN = re.compile("[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+# what a sign step never shows as such: controls (C0, C1), bidi overrides and marks, zero-width characters, the soft
+# hyphen, the Mongolian vowel separator, variation selectors and tag characters
+HIDDEN = re.compile("[\x00-\x1f\x7f-\x9f\xad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufe00-\ufe0f"
+                    "\ufeff\U000e0000-\U000e007f]")
 
 
 def _person(what):
