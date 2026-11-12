@@ -845,7 +845,7 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
         ["merge-tree", "--trivial-merge", "a", "b", "c"],
         ["rev-list", "--output=/tmp/x", "HEAD"],
         ["rev-list", "--exec=x", "HEAD"],
-        ["rev-list", "--count", "--objects", "HEAD"],
+        ["rev-list", "--count", "--objects", "--filter=blob:none", "HEAD"],
         ["check-attr", "--source", "x", "filter", "--", "f"],
         ["check-attr", "--all", "--", "f"],
         ["check-attr", "-z", "--stdin", "filter"],

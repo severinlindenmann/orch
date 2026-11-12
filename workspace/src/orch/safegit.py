@@ -594,6 +594,7 @@ _WORKTREE_OK = {"add", "remove", "prune", "list"}
 # rev-list and check-attr only read: exact flag sets (no --output=<file>, no abbreviations, no bundles)
 _REV_LIST_OK = {
     "--count", "--parents", "--first-parent", "--no-merges", "--merges", "--reverse", "-q", "--quiet", "-n",
+    "--objects",
 }  # fmt: skip
 _CHECK_ATTR_OK = {"-z", "--cached"}
 _FSCK_OK = {"--strict", "--no-dangling", "--no-reflogs", "--no-progress"}  # re-hashes what it reads
