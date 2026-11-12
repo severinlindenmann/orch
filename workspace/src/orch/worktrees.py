@@ -1850,7 +1850,7 @@ def _done_round(root: Path, ticket: str) -> int:
         return -1
 
 
-def _still_approved(root: Path, ticket: str, tip: str, round_: int) -> bool:
+def _still_approved(root: Path, ticket: str, tip: str, round_: int, control: bool = False) -> bool:
     """The ticket is Done, in the SAME Done as when the merge started (no reopen in between, also when it is
     Done again by now), and the person's approval of `tip` is still the current signed one."""
     try:
@@ -1859,6 +1859,7 @@ def _still_approved(root: Path, ticket: str, tip: str, round_: int) -> bool:
             and _done_round(root, ticket) == round_
             and tickets.load(root, ticket).get("status") == "done"
             and _copy_authority(root, ticket).get("reviewed_tip") == tip
+            and (not control or _copy_authority(root, ticket).get("controls_tip") == tip)
         )
     except (OSError, ValueError, KeyError, Refused):
         return False
@@ -2256,7 +2257,8 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             # one line: a title cannot add trailers (Co-authored-by: ...) to a commit on the person's branch
             "message": " ".join(f"orch: {ticket} {t.get('title', '')}".split())[:200],
         }
-        round_at_start = _done_round(root, ticket)  # this Done's identity, taken with the approval just read
+        # this Done's identity comes from the SAME signed snapshot as the approval (reviewed_tip/controls_tip)
+        round_at_start = int(authority.get("done_round") or 0)
         _set_journal(root, ticket, journal)
         journal_written = True
         if _bb_snapshot(top) != pre:
@@ -2311,7 +2313,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         # Recorded in the signed journal BEFORE the check (it can take minutes and orch may be stopped in it):
         # ancestry alone never certifies this merge; _recover re-runs the check for "pending" and keeps "bad".
         _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": parents[0]})
-        if not _still_approved(root, ticket, tip, done_round):
+        if not _still_approved(root, ticket, tip, done_round, bool(control)):
             # reopened while the merge ran (the reopen waits for this lock only briefly): the Done that
             # approved it is withdrawn, orch's own fresh merge goes back
             if _roll_back(top, prep, touched, pre, parents[0], written) == "verified":
@@ -2319,7 +2321,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 return None
             return wait(UNVERIFIED)
         problem = _after_merge(top, touched, parents[0])
-        if not problem and not _still_approved(root, ticket, tip, done_round):
+        if not problem and not _still_approved(root, ticket, tip, done_round, bool(control)):
             problem = "reopened"  # the check takes minutes: a reopen during it withdraws the Done as well
         if problem == "bad":
             _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": parents[0]})

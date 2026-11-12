@@ -3101,3 +3101,23 @@ def test_b13y_done_reopen_done_by_the_person_during_the_merge_is_a_different_don
     # the in-flight merge belonged to the first Done: rolled back, nothing certified for it
     assert git(root, "rev-parse", "HEAD") == head
     assert not worktrees._copy_authority(root, tid).get("merged")
+
+
+def test_b13y_the_round_comes_from_the_same_snapshot_as_the_approval(done_copy, monkeypatch):
+    """A bounce between reading the approval and taking the round must not pair a new round with the old
+    approval: the round is read from the authority snapshot the approval came from."""
+    import inspect
+
+    src = inspect.getsource(worktrees._bring_back_locked)
+    assert 'round_at_start = int(authority.get("done_round") or 0)' in src
+    assert "_done_round(root, ticket)" not in src.split("round_at_start")[1].split("written =")[0]
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    tip = git(copy, "rev-parse", "HEAD")
+    worktrees._copy_authority(root, tid, lambda r: r.update(controls_tip=None, done_round=0))
+    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    assert worktrees._still_approved(root, tid, tip, 0) is True
+    assert (
+        worktrees._still_approved(root, tid, tip, 0, control=True) is False
+    )  # no controls_tip: not approved
+    assert worktrees._still_approved(root, tid, tip, 1) is False  # another Done
