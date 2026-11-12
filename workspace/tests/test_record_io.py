@@ -48,6 +48,7 @@ CORE = {
     "_write_new",
     "_size",
     "_rmtree",
+    "_rmdir_empty",
     "_lock",
 }
 
@@ -84,13 +85,22 @@ def plant(ws, kind):
 
 # Exact call expressions keep arbitrary Path receivers out of the allowlist.
 SAFE_ATTRIBUTE_CALLS = {
+    "raw.rfind",
+    "b''.join",
+    "r.get",
+    "rows.append",
+    "(_json(note) + '\\n').encode",
+    "now.isoformat",
+    "now.isoformat().replace",
     "' '.join",
     "(_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid",
     "(_json(alert) + '\\n').encode",
+    "(_json(line) + '\\n').encode",
     "(_json(dict(event, detail=None, detail_lost=True)) + '\\n').encode",
     "(_json(event) + '\\n').encode",
     "ReadResult.from_error",
     "_ALERTED.add",
+    "_CHANGE_VALIDATOR.is_valid",
     "_DETAIL_VALIDATOR.is_valid",
     "_META_VALIDATOR.is_valid",
     "_json(detail).count",
@@ -98,6 +108,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "_json(dict(schema='orch.record/1', since=event['at'], keep_days=90, max_mb=2048)).encode",
     "_json(event).count",
     "_json(event['data']).encode",
+    "_json(f).encode",
     "_json(payload).count",
     "_json(wrapped).encode",
     "_read_bytes(fd).splitlines",
@@ -113,6 +124,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "event['detail'].split",
     "event['outcome'].get",
     "events.append",
+    "found.append",
     "hashlib.sha256",
     "hashlib.sha256(b'orch.id.hook/1\\x00' + eid.encode()).hexdigest",
     "hiding._check",
@@ -159,6 +171,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "stored.get",
     "super().__init__",
     "time.time_ns",
+    "unreadable.append",
     "uuid.uuid4",
 }
 SAFE_ATTRIBUTE_VALUES = {
@@ -186,7 +199,10 @@ SAFE_ATTRIBUTE_VALUES = {
 }
 ERROR_BOUNDARIES = {
     "_alert",
+    "note_lost",
+    "_note",
     "read_run",
+    "run_lines",
     "_pending_count",
     "apply_retention",
     "read_detail",
@@ -197,8 +213,16 @@ ERROR_BOUNDARIES = {
     "_read_json",
     "_store_detail",
     "delete_detail",
+    "_detail_parts",
+    "find_detail_files",
+    "ticket_detail_files",
+    "delete_detail_files",
+    "record_sizes",
     "list_runs",
     "_spool",
+    "read_job",
+    "list_jobs",
+    "append_job",
 }
 
 
@@ -222,7 +246,8 @@ from orch import hider as hiding
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
-from orch.phone_view import redact""".splitlines()
+from orch.phone_view import redact
+from orch.record_files import MAX_INPUT, file_ok""".splitlines()
 )
 SAFE_EXCEPTIONS = {
     "ValueError",
@@ -556,7 +581,7 @@ def test_06_fifo_no_hang(store, where):
         def read():
             return record.read_meta(ws)
     else:
-        name = record.detail_name(RUN, "step", event()["id"])
+        name = record.detail_name(RUN, "step", event()["id"], event()["ticket"])
         target = root / "detail" / RUN / (name + ".json")
         target.parent.mkdir(parents=True)
         os.mkfifo(target)
@@ -726,6 +751,39 @@ def test_14_retention_skips_only_bad_run(store):
     assert runfile(ws).read_bytes() == before
 
 
+@pytest.mark.parametrize("how", ["fifo", "link", "hardlink"])
+def test_retention_is_not_vetoed_by_a_planted_detail_file(store, how):
+    """R1: a planted FIFO, link or hardlink in an ended run's detail folder does not make retention refuse
+    that run (its real detail would outlive retention): the real detail and the run's lines go, the planted
+    file stays (nothing outside changes) and is reported."""
+    if how == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("requires FIFO")
+    ws, writer = store
+    line = writer.append(event(), detail=DETAIL)
+    ended(writer)
+    planted = record.record_dir(ws) / "detail" / RUN / ("f" * 32 + ".json")
+    (ws / "outside").write_text("unchanged")
+    if how == "fifo":
+        os.mkfifo(planted, 0o600)
+    elif how == "link":
+        planted.symlink_to(ws / "outside")
+    else:
+        os.link(ws / "outside", planted)
+    folds = []
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda run, events: folds.append(run))
+    assert folds == [RUN] and result["delete_detail"] == [RUN] and result["delete_run"] == [RUN]
+    assert not (record.record_dir(ws) / line["detail"]).exists() and not runfile(ws).exists()
+    assert planted.is_symlink() or planted.exists()
+    assert (ws / "outside").read_text() == "unchanged"
+    alerts = [
+        json.loads(x)
+        for day in (record.record_dir(ws) / "alerts").glob("*.jsonl")
+        for x in day.read_text().splitlines()
+    ]
+    reason = {"fifo": "not_regular", "link": "link", "hardlink": "hardlink"}[how]
+    assert (reason, RUN, "retention") in {(x.get("reason"), x.get("run"), x.get("seen_by")) for x in alerts}
+
+
 def test_15_listing_keeps_symlinks(store):
     ws, _ = store
     plant(ws, "link")
@@ -766,9 +824,11 @@ def test_18_random_detail_names():
     seen = set()
     for i in range(5000):
         eid = str(i) + "".join(rng.choice("Ab/\\..é中 CON:NUL") for _ in range(20))
-        name = record.detail_name(RUN, rng.choice(["step", "usage"]), eid)
+        kind = rng.choice(["step", "usage"])
+        name = record.detail_name(RUN, kind, eid, rng.choice(["t_aaaaaa", "t_bbbbbb"]))
         assert re.fullmatch(r"[0-9a-f]{32}", name) and name not in seen
         seen.add(name)
+        assert record.detail_name(RUN, kind, eid, None) is None  # no ticket: no detail file (I4)
 
 
 def test_19_case_distinct_details(store):
@@ -783,15 +843,32 @@ def test_19_case_distinct_details(store):
     assert len(paths) == 4
 
 
+def test_19b_detail_name_binds_the_ticket(store):
+    """I4: the file name covers the ticket. A file whose stored ticket was changed no longer matches its name,
+    and a read for a line of another ticket is refused: both swapped."""
+    ws, writer = store
+    stored = writer.append(event(id="t1"), detail=DETAIL)
+    name = Path(stored["detail"]).stem
+    assert name == record.detail_name(RUN, "step", "t1", event()["ticket"])
+    assert name != record.detail_name(RUN, "step", "t1", "t_other9")
+    assert record.read_detail(ws, RUN, name, ticket=event()["ticket"]).unwrap()["ticket"] == event()["ticket"]
+    other = record.read_detail(ws, RUN, name, ticket="t_other9")
+    assert (other.status, other.reason) == ("tampered", "swapped")
+    target = record.record_dir(ws) / stored["detail"]
+    target.write_text(json.dumps(dict(json.loads(target.read_text()), ticket="t_other9")))
+    changed = record.read_detail(ws, RUN, name)
+    assert (changed.status, changed.reason) == ("tampered", "swapped")
+
+
 @pytest.mark.parametrize("problem", ["collision", "link", "oversize", "io"])
 def test_20_detail_failure_keeps_line(store, monkeypatch, problem):
     ws, writer = store
     payload = DETAIL
-    name = record.detail_name(RUN, "step", event()["id"])
+    name = record.detail_name(RUN, "step", event()["id"], event()["ticket"])
     target = record.record_dir(ws) / "detail" / RUN / (name + ".json")
     if problem == "collision":
         target.parent.mkdir(parents=True)
-        target.write_text(json.dumps(dict(run=RUN, kind="usage", id="other")))
+        target.write_text(json.dumps(dict(run=RUN, kind="usage", id="other", ticket=event()["ticket"])))
     elif problem == "link":
         target.parent.parent.mkdir(parents=True)
         target.parent.symlink_to(ws, target_is_directory=True)
@@ -842,6 +919,12 @@ def test_23_hook_namespace_and_conflict(store):
     assert writer.append(event(id="same", via="log", outcome=dict(ok=False, error="failed", ms=1))) is None
     assert writer.append(event(id="same", via="hook", outcome=dict(ok=True, error=None, ms=1))) is None
     assert len(record.read_run(ws, RUN).unwrap()) == 4
+    # agreeing lines of one call: the log line replaces the hook line, a later hook line is dropped
+    writer.append(event(id="agree", via="hook"))
+    replacing = writer.append(event(id="agree", via="log"))
+    assert replacing["replaced_hook"] is True and "conflict" not in replacing
+    assert writer.append(event(id="agree", via="hook", text="Something else")) is None
+    assert [e["via"] for e in record.read_run(ws, RUN).unwrap() if e["id"] == "agree"] == ["log"]
 
 
 @pytest.mark.parametrize("kind", ["denial", "usage"])
@@ -931,11 +1014,11 @@ def test_27_retention_rechecks_under_lock(store, monkeypatch):
     thread = threading.Thread(target=append_late)
 
     @contextmanager
-    def late(workspace, run):
+    def late(workspace, run, wait=None):
         if threading.current_thread() is not thread:
             barrier.wait(timeout=2)
             assert done.wait(timeout=2)
-        with real(workspace, run) as check_lock:
+        with real(workspace, run, wait) as check_lock:
             yield check_lock
 
     monkeypatch.setattr(record, "_lock", late)
@@ -1015,15 +1098,50 @@ def test_actual_unreadable_directory(store):
         directory.chmod(0o700)
 
 
-def test_detail_delete_preflights_all_runs(store):
+def test_detail_delete_preflights_all_run_folders(store):
+    """A run's detail FOLDER that is a link refuses before anything is deleted, also another run's detail."""
     ws, writer = store
     a = writer.append(event(), detail=DETAIL)
     b = writer.append(event(run="r_other1"), detail=DETAIL)
-    target = record.record_dir(ws) / b["detail"]
-    os.link(target, ws / "outside")
+    folder = record.record_dir(ws) / "detail" / "r_other1"
+    folder.rename(ws / "moved")
+    folder.symlink_to(ws / "moved", target_is_directory=True)
     with pytest.raises(record.RecordTampered):
         record.delete_detail(ws, [RUN, "r_other1"])
-    assert (record.record_dir(ws) / a["detail"]).exists() and target.exists()
+    assert (record.record_dir(ws) / a["detail"]).exists()
+    assert (ws / "moved" / Path(b["detail"]).name).exists() and folder.is_symlink()
+
+
+@pytest.mark.parametrize("how", ["hardlink", "link", "fifo"])
+def test_detail_delete_skips_only_the_unsafe_file(store, how):
+    """R1: a single detail FILE that is not safe (planted hardlink, link or FIFO) is reported and stays; the
+    run's other detail and the other runs' detail go (no veto of retention), and nothing outside changes."""
+    if how == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("requires FIFO")
+    ws, writer = store
+    a = writer.append(event(), detail=DETAIL)
+    a2 = writer.append(event(id="second"), detail=DETAIL)
+    writer.append(event(run="r_other1"), detail=DETAIL)
+    target = record.record_dir(ws) / a["detail"]
+    if how == "hardlink":
+        os.link(target, ws / "outside")
+    else:
+        target.unlink()
+        (ws / "outside").write_text("unchanged")
+        target.symlink_to(ws / "outside") if how == "link" else os.mkfifo(target, 0o600)
+    before = (ws / "outside").read_bytes()
+    record.delete_detail(ws, [RUN, "r_other1"], seen_by="retention")
+    assert target.exists() or target.is_symlink()  # the unsafe file stays
+    assert not (record.record_dir(ws) / a2["detail"]).exists()
+    assert not (record.record_dir(ws) / "detail" / "r_other1").exists()
+    assert (ws / "outside").read_bytes() == before
+    alerts = [
+        json.loads(line)
+        for day in (record.record_dir(ws) / "alerts").glob("*.jsonl")
+        for line in day.read_text().splitlines()
+    ]
+    reason = {"hardlink": "hardlink", "link": "link", "fifo": "not_regular"}[how]
+    assert {(x["reason"], x["run"], x["seen_by"]) for x in alerts} == {(reason, RUN, "retention")}
 
 
 def test_live_aged_lock_never_allows_second_writer(store, monkeypatch):
@@ -1119,8 +1237,10 @@ def test_spool_receipt_has_no_placeholder_default_id(store):
 @pytest.mark.parametrize("seen_by", [None, "retention", "writer"])
 def test_delete_detail_alert_uses_callers_role(store, seen_by):
     ws, writer = store
-    line = writer.append(event(), detail=DETAIL)
-    os.link(record.record_dir(ws) / line["detail"], ws / "outside")
+    writer.append(event(), detail=DETAIL)
+    folder = record.record_dir(ws) / "detail" / RUN  # a linked run folder refuses (a single file is skipped)
+    folder.rename(ws / "moved")
+    folder.symlink_to(ws / "moved", target_is_directory=True)
     with pytest.raises(record.RecordTampered) as caught:
         record.delete_detail(ws, [RUN], **({"seen_by": seen_by} if seen_by else {}))
     assert caught.value.alert["seen_by"] == (seen_by or "cli")

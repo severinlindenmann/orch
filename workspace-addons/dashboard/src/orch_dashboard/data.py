@@ -9,6 +9,7 @@ import re
 import subprocess
 import threading
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -167,6 +168,72 @@ def _mark_missing_proofs(root: Path, t: dict) -> None:
                 ev["missing"] = not _file_here(root, str(t["id"]), ev["ref"])
 
 
+SYNC_BY = "agent:sync"  # orch.history.SYNC_BY (the dashboard needs it when the core cannot be imported)
+SYNCED_UNVERIFIED = "(synced, not verified here) "
+
+
+def _demote_all(t: dict) -> dict:
+    """Without the core nothing can be proven: every person field is the sync role (fail closed)."""
+
+    def agent(by) -> bool:  # orch.history.is_agent_history_author, the same rule
+        if not isinstance(by, str) or not by.isascii() or by != unicodedata.normalize("NFKC", by):
+            return False
+        label = by.casefold()
+        return bool(re.fullmatch(r"agent:[a-z0-9._-]{1,40}", label)) and not label[6:].startswith(
+            mobile.NOT_PLAIN_AGENTS
+        )
+
+    out = dict(t)
+    if isinstance(t.get("history"), list):
+        out["history"] = [
+            {**h, "by": SYNC_BY, "text": SYNCED_UNVERIFIED + str(h.get("text", ""))}
+            if isinstance(h, dict) and not agent(h.get("by"))
+            else h
+            for h in t["history"]
+        ]
+    if isinstance(t.get("checklist"), list):
+        out["checklist"] = [
+            {
+                **c,
+                **{f: SYNC_BY for f in ("by", "wont_by") if f in c and not agent(c.get(f))},
+                **(
+                    {
+                        "evidence": [
+                            {**e, "by": SYNC_BY} if isinstance(e, dict) else e  # any author: none is proven
+                            for e in c["evidence"]
+                        ]
+                    }
+                    if isinstance(c.get("evidence"), list)
+                    else {}
+                ),
+            }
+            if isinstance(c, dict)
+            else c
+            for c in t["checklist"]
+        ]
+    for field, key in (("verdicts", "person"), ("questions", "answered_by"), ("refs", "by")):
+        if isinstance(t.get(field), list):
+            out[field] = [
+                {**x, key: SYNC_BY} if isinstance(x, dict) and x.get(key) is not None and not agent(x[key]) else x
+                for x in t[field]
+            ]
+    if "description_by" in t and not agent(t.get("description_by")):
+        out["description_by"] = SYNC_BY
+    if isinstance(t.get("plan"), dict) and "by" in t["plan"] and not agent(t["plan"].get("by")):
+        out["plan"] = {**t["plan"], "by": SYNC_BY}
+    return out
+
+
+def shown(root: Path, t):
+    """The ticket as this machine can prove its person fields (orch.history.shown_ticket, the one rule).
+    Without the core (ImportError): every person field demoted, never shown as the person (fail closed)."""
+    try:
+        from orch.history import shown_ticket
+    except ImportError:
+        return _demote_all(t) if isinstance(t, dict) else t
+    return shown_ticket(root, t)
+
+
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
     """Valid-looking tickets (schema orch.ticket/1, id, title, status). Returns (tickets, skipped).
     Read through `$ORCH_BIN ticket list --all --json` (without --all, done and dropped tickets would vanish); without the orch command (standalone use) from .orch/tickets."""
@@ -187,6 +254,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         if not _valid_ticket(t, stem):
             skipped += 1
             continue
+        t = shown(root, t)  # the CLI listing is shown already; the file fallback is not (idempotent)
         for k in ("checklist", "refs", "questions", "history"):
             if not isinstance(t.get(k), list):
                 t[k] = []
@@ -263,11 +331,9 @@ def load_general(root: Path) -> dict | None:
             and isinstance(t.get("id"), str)
             and t["id"] == f.stem
         ):
-            hist = (
-                [h for h in t.get("history") if isinstance(h, dict) and isinstance(h.get("text"), str)]
-                if isinstance(t.get("history"), list)
-                else []
-            )
+            t = shown(root, t)
+            raw = t.get("history") if isinstance(t.get("history"), list) else []
+            hist = [h for h in raw if isinstance(h, dict) and isinstance(h.get("text"), str)]
             hist = [h for h in hist if mobile.is_chat_entry(h)]  # messages only
             return {"id": t["id"], "history": hist[-200:]}
     return None
@@ -549,19 +615,25 @@ def _disk_count(root: Path, key: str) -> None:
         from orch import worktrees
 
         val = worktrees.usage(root, seconds=3.0)
-    except Exception:  # noqa: BLE001 - the line just stays at "..."
-        val = None
+    except Exception:  # noqa: BLE001 - nothing could be measured: show an honest "none", never a stuck "..."
+        val = {"copies": 0, "bytes": 0, "partial": False, "orphaned": [], "changed": 0, "stuck": []}
     with _DISK_LOCK:
         _DISK[key] = {"at": time.monotonic(), "val": val, "busy": False}
 
 
 def copies_disk(root: Path) -> dict | None:
-    """{copies, bytes, partial} for the settings line "Copies on this computer", or None while it is being
-    counted (the page shows "..."). The walk runs on a thread (capped by core), never on the request."""
+    """{copies, bytes, partial} for the settings line "Copies on this computer", or None only while the first
+    count runs (the page shows "Counting…"); a count that fails reads as none. The walk runs on a thread
+    (capped by core), never on the request."""
     from orch import worktrees
 
     def current(val):
-        return {**val, "copies": worktrees.count(root)} if val is not None else None
+        if val is None:
+            return None
+        try:
+            return {**val, "copies": worktrees.count(root)}
+        except Exception:  # noqa: BLE001 - keep the last measured count
+            return val
 
     key = str(root)
     with _DISK_LOCK:

@@ -23,12 +23,33 @@ def test_settings_navigation_and_cards():
         "a?.dashboard?.label",
     ):
         assert text in src
-    assert "className:'settings-details'" not in src  # fb11: the folder is shown directly
+    assert "className:'settings-details'" not in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
+    # owner fb11 (11 Nov): the folder path is on the row without a click; plain words + full path under Details
+    folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:700]
+    assert folder.index("middleShort(settings.folder)") < folder.index("h('summary', {}, 'Details')")
+    assert folder.index("h('summary', {}, 'Details')") < folder.index("'Stored on this computer'")
+    assert "['agent', 'Helper']" in src and "['agent', 'Agent']" not in src
     css = (webjs.WEB / "pages/settings.css").read_text()
     assert "@media(max-width:760px)" in css
     assert "overflow-x:auto" in css
     assert "min-height:44px" in css
+
+
+def test_switch_rows_choices_and_closed_details_owner_pass():
+    look = (webjs.WEB / "look.js").read_text(encoding="utf-8")
+    css = (webjs.WEB / "pages/settings.css").read_text(encoding="utf-8")
+    # Shared pages: like every other switch row (no label line above, so nothing wraps at 390 px)
+    row = look[look.index("'data-key': 'lk-shared-row'") :][:500]
+    assert "set-label" not in row and "className: 'switch'" in row
+    # "When": the unselected choice is outlined like the hours choice; full width when stacked
+    assert ".settings .copies-choices .btn.ghost{border-color:var(--border-strong);color:var(--text)}" in css
+    narrow = css[css.index("@media(max-width:720px)") :]
+    stacked = ".settings .copies-choices{justify-self:stretch;flex-direction:column;align-items:stretch}"
+    assert stacked in narrow
+    # a closed Details has no empty band under it
+    assert ".settings .copies-details{padding:0 16px;" in css
+    assert ".settings .copies-details[open]{padding-bottom:8px}" in css
 
 
 def test_repeat_uses_only_presets_and_open_tickets():

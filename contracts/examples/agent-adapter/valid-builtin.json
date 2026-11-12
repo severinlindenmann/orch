@@ -41,6 +41,7 @@
       },
       "hooks": { "SessionStart": "orch run event --kind session", "Stop": "orch run event --kind idle", "Notification": "orch run event --kind attention", "UserPromptSubmit": "orch run event --kind working" },
       "reminder_hooks": { "SessionStart": "orch work-check --hook claude", "UserPromptSubmit": "orch work-check --hook claude" },
+      "record_hooks": { "PreToolUse": "orch record hook", "PostToolUse": "orch record hook", "PostToolUseFailure": "orch record hook" },
       "reminder": { "settings_file": ".claude/settings.local.json", "skip": [".claude", ".agents", "CLAUDE.local.md"], "input": { "event": "hook_event_name", "cwd": "cwd", "default_event": "UserPromptSubmit" }, "output": { "hookSpecificOutput": { "hookEventName": "{event}", "additionalContext": "{line}" } } },
       "session": { "id": "chosen-by-orch", "hand_started": "hook:SessionStart", "missing": "No conversation found with session ID", "transcript": { "dir_env": "CLAUDE_CONFIG_DIR", "home": ".claude", "path": ["projects", "{folder}", "{session}.jsonl"] } },
       "mcp_settings": [
@@ -49,6 +50,7 @@
         { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] }
       ],
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true, "activity": "live" },
+      "deny": {"format": "patterns/1"},
       "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }
     },
     "codex": {
@@ -72,6 +74,7 @@
         { "file": "{home}/.codex/config.toml", "format": "toml", "path": ["mcp_servers"] }
       ],
       "capabilities": { "resume": true, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
+      "deny": {"format": "none", "note": "codex cannot be told a deny list; its workspace-write sandbox keeps writes inside the workspace. Reads of orch's own folder and writes of .orch/record are not enforced."},
       "files": { "instructions": "AGENTS.md" }
     },
     "generic": {
@@ -83,6 +86,7 @@
       "hooks": null,
       "session": { "id": "none" },
       "capabilities": { "resume": false, "choose_session_id": false, "interactive_tmux": false, "hooks": false, "stream": false, "permission_retry": false, "subagents": false, "usage": false },
+      "deny": {"format": "none", "note": "A command orch does not know cannot be told a deny list."},
       "files": { "instructions": "AGENTS.md" }
     }
   }

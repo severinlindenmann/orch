@@ -75,7 +75,7 @@ def test_launch_token_bootstraps_the_cookie_once(live):
     root, port = live
     tok = hp.write_launch_token(root, "focus")
     st, ck, _ = post(port, "/session", {"token": tok})
-    assert st == 204 and "HttpOnly" in ck and "SameSite=Strict" in ck and ck.startswith("orch_page=")
+    assert st == 204 and "HttpOnly" in ck and "SameSite=Strict" in ck and ck.startswith(f"orch_page_focus_{port}=")
     assert post(port, "/session", {"token": tok})[0] == 403  # single use
     assert post(port, "/session", {"token": "x" * 30})[0] == 403
 

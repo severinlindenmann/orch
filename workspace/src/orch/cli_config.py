@@ -15,7 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, humanproof, tickets
+from orch import adapters, config, history, humanproof, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -27,7 +27,9 @@ KEYS = (
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
+    *config.INSIGHTS_KEYS,
 )
+GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
 TEST_PROMPT = "Reply with the word ok"
 TEST_TIMEOUT = 60  # seconds
 
@@ -44,10 +46,13 @@ def add_parsers(sub, common) -> None:
     pv.add_argument("--key", help="allow: the key shown by orch private (binds the yes to what you saw)")
     c = sub.add_parser("config", help=argparse.SUPPRESS).add_subparsers(dest="sub", required=True)
     g = c.add_parser("get", parents=[common])
-    g.add_argument("key", nargs="?", choices=KEYS)
+    g.add_argument("key", nargs="?", choices=(*KEYS, *GET_ALIASES))
     s = c.add_parser("set", parents=[common])
     s.add_argument("key", choices=KEYS)
     s.add_argument("value")
+    s.add_argument(
+        "--if-current", dest="if_current", metavar="OLD", help="insights.*: refuse unless it is OLD"
+    )
     a = c.add_parser("agent", parents=[common])
     a.add_argument("name_or_add", metavar="add|NAME")
     a.add_argument("name", nargs="?")
@@ -72,6 +77,8 @@ def _person(args, root: Path, op: str, target: str, **kw) -> str:
 
 
 def _out(args, data, text: str) -> None:
+    if args.json:
+        data = history.shown_json(history.args_root(args), data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -216,30 +223,95 @@ def _test(args, root: Path) -> int:
     return 0 if r["ok"] else 1
 
 
+_Coded = config.InsightsRefused  # a refusal with a contract error code (`{"error", "code"}`, exit 2)
+
+INSIGHTS_SAVED = {
+    "insights.share_counts": "Counts leave this computer only when the hub is connected.",
+    "insights.share_names": "Counts leave this computer only when the hub is connected.",
+    "insights.keep_days": "It applies at the next pruning; nothing is deleted now.",
+    "insights.max_mb": "It applies at the next pruning; nothing is deleted now.",
+}
+
+
+def _insights_set(args, root: Path) -> None:
+    """The core decides (config.change_insights, one lock): widening (a share switch on, a larger keep_days /
+    max_mb than the CURRENT effective value) is a person's decision: op `insights.settings`, target
+    `key=value`, the proof verified and spent in the same critical section as the record write. An agent is
+    refused before any proof is read. Narrowing is open to anyone and writes the off / lower record (no person
+    named); the same value writes nothing and needs no proof. `--if-current` refuses a stale caller
+    (`changed`)."""
+    key = args.key
+    if key in ("insights.share_counts", "insights.share_names"):
+        if args.value not in ("on", "off"):
+            raise _Coded("Choose on or off.", "invalid")
+        value: bool | int = args.value == "on"
+    else:
+        allowed = humanproof.RETENTION_ALLOWED[key]
+        if not (args.value.isascii() and args.value.isdigit()) or int(args.value) not in allowed:
+            raise _Coded("Choose one of: " + ", ".join(str(v) for v in allowed) + ".", "invalid")
+        value = int(args.value)
+    agent = AGENT_ASKS.format(what=f"change {key}") if _actor(args).startswith("agent:") else None
+    # The proof line is read from stdin HERE, before change_insights takes keys.lock: a caller whose stdin
+    # never closes must not hold the lock. Only verify-and-consume runs inside it. An agent's stdin is never
+    # read. With --proof-stdin the line is ALWAYS passed on (empty when not read), so person_by never reads
+    # stdin again inside the lock.
+    proof_stdin = getattr(args, "proof_stdin", False)
+    proof = humanproof.read_proof_line() if agent is None and proof_stdin else None
+    extra = {"proof": proof or ""} if proof_stdin else {}
+    res = config.change_insights(
+        root,
+        key,
+        value,
+        agent=agent,
+        person=lambda target: _person(
+            args,
+            root,
+            "insights.settings",
+            target,
+            # no_handoff = the refusal words instead of a hand-off card (HANDOFF: "Do this in the dashboard on
+            # this computer."): page only, as a hand-off would wait for a click holding keys.lock
+            no_handoff=humanproof.HANDOFF,
+            parts={"setting": key, "value": config.insights_text(value)},
+            **extra,
+        ),
+        if_current=args.if_current,
+    )
+    now = config.insights_text(res[key])
+    text = f"Saved: {key} = {now}. {INSIGHTS_SAVED[key]}" if res["changed"] else f"Already {key} = {now}."
+    _out(args, res, text)
+
+
 def _config(args, root: Path) -> None:
     if args.sub == "get":
-        cur = {
-            "workspace.agent": config.agent_name(root),
-            "workspace.code": config.workspace_code(root),
-            "workspace.permissions": config.permissions(root),
-            "workspace.live_idle_minutes": config.live_idle_minutes(root),
-            "workflow.agents_may_finish": config.agents_may_finish(root),
-            "workflow.copies": config.copies_mode(root),
-            "workflow.copies_max": config.copies_max(root),
-            "workflow.copy_setup": config.copy_setup(root),
+        getters = {
+            "workspace.agent": lambda: config.agent_name(root),
+            "workspace.code": lambda: config.workspace_code(root),
+            "workspace.permissions": lambda: config.permissions(root),
+            "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
+            "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
+            "workflow.copies": lambda: config.copies_mode(root),
+            "workflow.copies_max": lambda: config.copies_max(root),
+            "workflow.copy_setup": lambda: config.copy_setup(root),
+            "insights.share_counts": lambda: config.insights_share_counts(root),
+            "insights.share_names": lambda: config.insights_share_names(root),
+            "insights.keep_days": lambda: config.record_keep_days(root),
+            "insights.max_mb": lambda: config.record_max_mb(root),
         }
         if args.key:
-            _out(
-                args,
-                {args.key: cur[args.key]},
-                str(cur[args.key]) if cur[args.key] is not None else "(not set)",
-            )
+            key = args.key
+            value = getters[GET_ALIASES.get(key, key)]()
+            _out(args, {key: value}, str(value) if value is not None else "(not set)")
         else:
+            cur = {k: get() for k, get in getters.items()}
             _out(
                 args,
                 cur,
                 "\n".join(f"{k} = {v}" for k, v in cur.items() if v is not None) or "Nothing is set.",
             )
+    elif args.sub == "set" and args.key in config.INSIGHTS_KEYS:
+        _insights_set(args, root)
+    elif args.sub == "set" and args.if_current is not None:
+        raise Refused("--if-current is only for the insights.* settings.")
     elif args.sub == "set" and args.key == "workflow.agents_may_finish":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")

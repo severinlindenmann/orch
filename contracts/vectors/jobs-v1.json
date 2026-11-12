@@ -312,9 +312,9 @@
     "ok",
     "ok",
     "cap",
-    "cap"
+    "ok"
    ],
-   "state": "running"
+   "state": "ok"
   }
  ],
  "lost": [

@@ -76,6 +76,19 @@ sends one copy per other member (`to: ws_…`) and one to `phones`, all as the s
   Every other copy (helper-to-helper talk, joins, queued/working) carries `body.update.kind: note` (quiet; the relay
   never pushes it). `validate.py` checks this.
 - The host never forwards a message back to its sender.
+- **`body.own_seq: true`** (**NEW**, optional, host → member only): the sender's own message still takes a group `seq`,
+  so the host sends the sending member (only a `ws_` member; never to `phones`, never for its own or a phone's text) a
+  **stub**: a `text` to `to = origin.from` with the same `group` (+ `seq`), `origin`, `by`, the text, `update.kind:
+  note` (quiet) and `id` = the fan-out id of (host, origin.id, that member). The member steps over that `seq` in its
+  order and never shows the stub (it sent the message itself). An older member that does not know the field keeps it as
+  an ordinary group text by itself (its own name, quiet) and stays in order. This holds because an older member checks
+  incoming group messages only with its built-in rules (`receive_errors`), which ignore unknown body fields and do
+  not reject `origin.from` = the receiver. It runs no JSON Schema on incoming messages. In the old
+  `chat-groups.schema.json` too, `body` has no `additionalProperties: false`. A receiver that does validate bodies
+  against a closed schema would drop the stub, and its view would wait as before: it shows nothing, but it is no
+  worse than without the stub. Phones never get it. `own_seq` anywhere else (another `to`, no `seq`, from a member) is
+  invalid. Once a member has received one stub from a host, it relies on stubs for that host and never guesses
+  (§5, rule "own messages").
 
 **Phones in a group: explicit opt-in** (rule G8). A phone cannot set `body.group` (the relay builds phone texts from a
 fixed field list) and cannot send receipts. So: **a phone text is a group message only when it goes to the host with
@@ -285,6 +298,20 @@ untrusted data for the host helper (clean_untrusted), never instructions.
   - **Buffer full, or 10 minutes passed since the receiver received the earliest-received message still in the buffer** (receiver clock; the timer is recomputed after a partial flush; quiet groups): **skip the gap**, apply the
     contiguous run, set `applied_seq` to its last `seq`. A `seq` **≤ `applied_seq`** is **old**.
   - **Late texts are shown** (they are real messages) but **change no state** (task status, closed, membership).
+  - **Own messages are never waited on** (a member's own text, file, task report or answer takes a `seq`, but the host
+    never sends it back): (1) an `own_seq` stub (§2) marks its `seq` as the member's own: the order steps over it,
+    nothing is shown. (2) **Last resort, only for a host that has never sent this member a stub** (in any group; kept
+    per group and per host), and **only when the 10-minute gap timeout above fires** (never when a message arrives).
+    The member keeps the ids of its own group messages the host has not numbered for it yet (at most 20 minutes, at
+    most 50). If the missing `seq`s before the oldest buffered one are **no more** than those, and each was sent
+    **before** that higher `seq` was received, they are taken as its own (oldest send = lowest `seq`). They are
+    remembered as guesses and stepped over without "a message is missing". More missing than that means someone
+    else's message is missing, so it is a plain gap skip. A send the host never numbers (a losing answer, a refusal)
+    can make the guess wrong. So when a guessed `seq` arrives late from someone else (`origin.from` ≠ the member), it
+    is shown as late, and a `closed` or a `member_left` of this member **still applies**. Both are final and come
+    from the host; a leave applies only if the member was not added back at a higher `seq`. Tasks, answers and other
+    membership news keep no member state beyond the log, so they are shown only. A guessed `seq` that turns out to be
+    the member's own changes nothing.
   - **The host MUST persist `seq` monotonically before sending** (write the new value, then send), so a restart never
     reuses or resets numbers. (Chosen over an `(epoch, seq)` pair: one number, no extra field.)
 - **Group caps**: a receiver accepts at most **20 open groups per host** and **5 group creations an hour per host, counted by the receiver's receive time** (never `created_at`);
@@ -361,6 +388,7 @@ last-minute counts). `expect.group_text` = whether a phone text joins the group 
 | `invalid-group-event-from-member`, `invalid-group-id-not-host-ticket`, `invalid-member-fans-out` | G3, G1, G2 |
 | `invalid-question-without-kind` | G10 (F9) |
 | `invalid-targeted-with-seq` | seq rules (F10) |
+| `valid-own-seq-stub-to-sender`, `invalid-own-seq-to-other-member`, `invalid-member-sends-own-seq` | `own_seq` stub: only host → the origin's own workspace (§2) |
 | `invalid-left-member-text`, `invalid-too-many-members` | F12, limits |
 | `invalid-phones-copy-loud` | push set |
 

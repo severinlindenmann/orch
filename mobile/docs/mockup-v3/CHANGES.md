@@ -30,3 +30,9 @@
 - Extended the header surface through the status bar / Dynamic Island area and added top breathing room. The composer floats with an 8 px inset and 26 px corners at the bottom of the chat, above the native keyboard when opened on a phone.
 - Standardized app CSS radii: small 8, medium 14, large 22, extra-large 26, pill 999 px, and avatars at 30%. Cards/inputs use medium, bubbles large, sheets extra-large top corners; inset segmented controls subtract their padding from the outer radius. Device-frame and illustration geometry is unchanged.
 - Validation: opened index.html directly with a headless browser; Voice navigation, Default/L/XL tabs at 375/393 px, share/location actions and header/composer geometry passed with no JavaScript errors. Native keyboard appearance still requires an on-device check.
+
+## 11 Nov visual challenge
+
+Added Chats Groups, open / sent / read-only group rooms and Done groups. Redrew PIL-12 info to the shipped layout, with collapsible agent / job Results, one dated label per card, fitted previews, counted text tabs and right-aligned numeric cells. Replaced the publishing question demo with a Result artifact and Accept / Ask for changes bar; finished work without a question keeps Ready for review and no bar. Standardized tasks and References. All new states have right-panel jumps and connected in-phone navigation; existing question kinds remain available.
+
+11 Nov: helper wording

@@ -4,6 +4,8 @@ import Charts
 struct BlocksView: View {
     let result: BlocksResult
     var fromLabel: String? = nil
+    var showsSourceLabel = true
+    var showsTitle = true
     var fileAttachment: ((String) -> TicketSnapshot.Attachment?)? = nil
     var onOpenAttachment: ((TicketSnapshot.Attachment) -> Void)? = nil
 
@@ -18,8 +20,8 @@ struct BlocksView: View {
                     } label: { Text(verbatim: "Details") }
                 }
             case .shown(let doc):
-                Text(verbatim: fromLabel ?? doc.fromLabel).themeFont(11).foregroundStyle(Theme.muted)
-                if let title = doc.title { Text(verbatim: title).themeFont(20, .semibold) }
+                if showsSourceLabel { Text(verbatim: fromLabel ?? doc.fromLabel).themeFont(11).foregroundStyle(Theme.muted) }
+                if showsTitle, let title = doc.title { Text(verbatim: title).themeFont(20, .semibold) }
                 ForEach(doc.rows.indices, id: \.self) { index in row(doc.rows[index]) }
             }
         }
@@ -27,6 +29,13 @@ struct BlocksView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("blocks-view")
+    }
+
+    /// At most `n` axis values, evenly strided from the first (one mark per distinct value could mean 800 labels).
+    nonisolated static func ticks<T>(_ v: [T], max n: Int = 6) -> [T] {
+        guard n > 0, v.count > n else { return n > 0 ? v : [] }
+        let step = (v.count + n - 1) / n
+        return Swift.stride(from: 0, to: v.count, by: step).map { v[$0] }
     }
 
     private func tone(_ name: String?) -> Color {
@@ -101,6 +110,9 @@ struct BlocksView: View {
         case .link(let b):
             if let url = SafeLink.url(b.text("url")), url.scheme == "https", url.user == nil, url.password == nil {
                 Link(destination: url) { Text(verbatim: b.text("label") ?? "") }.foregroundStyle(Theme.brand)
+            } else {
+                // A link SafeLink refuses still shows its label, muted and not tappable.
+                Text(verbatim: b.text("label") ?? "").foregroundStyle(Theme.muted)
             }
         case .log(let b):
             VStack(alignment: .leading, spacing: 6) {
@@ -129,6 +141,12 @@ struct BlocksView: View {
         }
     }
 
+    private func numericColumn(_ column: BlockFields, rows: [BlockFields]) -> Bool {
+        if ["number", "duration"].contains(column.text("kind") ?? "") { return true }
+        let key = column.text("key") ?? ""
+        return rows.contains { $0.values[key]?.number != nil }
+    }
+
     private func table(_ b: BlockFields) -> some View {
         let columns = b.objects("columns"), rows = b.objects("rows")
         return VStack(alignment: .leading, spacing: 8) {
@@ -138,6 +156,7 @@ struct BlocksView: View {
                     GridRow {
                         ForEach(columns.indices, id: \.self) { i in
                             Text(verbatim: columns[i].text("label") ?? "").themeFont(13, .semibold)
+                                .gridColumnAlignment(numericColumn(columns[i], rows: rows) ? .trailing : .leading)
                         }
                     }
                     ForEach(rows.indices, id: \.self) { r in
@@ -146,6 +165,7 @@ struct BlocksView: View {
                                 let value = rows[r].values[columns[c].text("key") ?? ""]
                                 Text(verbatim: BlocksFormat.cell(value, kind: columns[c].text("kind")))
                                     .foregroundStyle(columns[c].text("kind") == "tone" ? tone(value?.string) : Theme.text)
+                                    .gridCellAnchor(numericColumn(columns[c], rows: rows) || value?.number != nil ? .trailing : .leading)
                             }
                         }
                     }
@@ -207,19 +227,19 @@ private struct BlocksChart: View {
             .chartLegend(.hidden)
             .chartXAxis {
                 if numericX {
-                    AxisMarks(values: xNumbers) { value in
+                    AxisMarks(values: BlocksView.ticks(xNumbers)) { value in
                         AxisGridLine()
                         AxisValueLabel { Text(verbatim: value.as(Double.self).map(BlocksFormat.number) ?? "") }
                     }
                 } else {
-                    AxisMarks(values: xStrings) { value in
+                    AxisMarks(values: BlocksView.ticks(xStrings)) { value in
                         AxisGridLine()
                         AxisValueLabel { Text(verbatim: value.as(String.self) ?? "") }
                     }
                 }
             }
             .chartYAxis {
-                AxisMarks(values: yNumbers) { value in
+                AxisMarks(values: BlocksView.ticks(yNumbers)) { value in
                     AxisGridLine()
                     AxisValueLabel { Text(verbatim: value.as(Double.self).map(BlocksFormat.number) ?? "") }
                 }

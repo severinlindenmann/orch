@@ -26,7 +26,9 @@ from orch import (
     cli_secret,
     cli_status,
     fields,
+    history,
     humanproof,
+    is_record_hook,
     mobile_mode,
     net,
     refs,
@@ -94,6 +96,8 @@ def _find_root() -> Path:
 
 
 def _out(args, data, text: str) -> None:
+    if args.json:
+        data = history.shown_json(history.args_root(args), data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -143,11 +147,8 @@ def _chip(root: Path | None, ev: dict) -> str:
 
 
 def _who_added(t: dict, c: dict, ev: dict) -> str:
-    by = ev.get("by")
-    if not by:
-        line = next((h for h in reversed(t["history"]) if h["text"] == f"Check {c['id']} done"), None)
-        by = line["by"] if line else ""
-    return "● You" if by.startswith("human:") else "○ Agent says"
+    """`t` is a SHOWN ticket (history.shown_ticket): unproven synced evidence is the sync role there."""
+    return "● You" if history.evidence_author(t, c, ev) == "person" else "○ Agent says"
 
 
 def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> list[str]:
@@ -182,7 +183,8 @@ def _lookup(root: Path | None, tid: str) -> dict | None:
         return None
 
 
-def _show(t: dict, root: Path | None = None) -> str:
+def _show(t: dict, root: Path) -> str:
+    t = history.shown_ticket(root, t)  # every person field as this machine can prove it (idempotent)
     open_q = [q for q in t["questions"] if q["answer"] is None]
     head = (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  [{t['id']}]"
     out = [head]
@@ -257,11 +259,11 @@ def _show(t: dict, root: Path | None = None) -> str:
             d = refs.describe(ln, kinds, root)
             st = f" ({d['status']})" if d["status"] else ""
             out.append(f"  {n}  {d['type']}: {d['title']}{st}  {refs.one_line(refs.target(ln), 300)}")
-    if t["history"]:
+    if shown_lines := history.lines(root, t):
         out.append("\nRecent:")
         out += [
             f"  {net.when(h['at'])}  {h['by']}: {tickets.history_line(h['text'], t['checklist'])}"
-            for h in t["history"][-3:]
+            for h in shown_lines[-3:]
         ]
     return "\n".join(out)
 
@@ -703,9 +705,10 @@ def run(args: argparse.Namespace) -> None:
     from orch import chat
 
     chat.guard(root, args)  # the Chat helper's role is enforced here (every command, init too)
+    args.orch_root = root  # (after the guard: not an option) JSON output shows tickets as provable here
 
     if cmd == "init":
-        root = Path.cwd()
+        root = args.orch_root = Path.cwd()
         _init_guard(root)
         asking = term.is_terminal(sys.stdin) and not args.json
         agent = init_mod.choose_agent(root, args.yes, asking)
@@ -919,6 +922,7 @@ def run(args: argparse.Namespace) -> None:
         )
     elif cmd == "check" and sub == "add":
         t, c = tickets.check_add(root, args.id, args.text, by(), args.covers)
+        c = history.shown_item(root, t, "checklist", c)
         _out(args, c, f"Added to the checklist: {c['text']}  [{c['id']}]")
     elif cmd == "check" and sub == "wont-do":
         who = humanproof.person_by(
@@ -930,9 +934,11 @@ def run(args: argparse.Namespace) -> None:
             parts=humanproof.step_parts(root, args.id, args.check),
         )
         t, c = tickets.check_wont_do(root, args.id, args.check, who, args.reason)
+        c = history.shown_item(root, t, "checklist", c)
         _out(args, c, f"{c['id']}: Won't do. Open it again: orch check reopen {args.id} {c['id']}")
     elif cmd == "check" and sub == "record":
         t, c = tickets.check_record(root, args.id, args.check, args.ran, args.exit_code, args.output, by())
+        c = history.shown_item(root, t, "checklist", c)
         _out(args, c, f"Recorded for {c['id']}: {c['evidence'][-1]['ref']}")
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
@@ -975,7 +981,7 @@ def run(args: argparse.Namespace) -> None:
         else:
             t, c = tickets.check_stop(root, args.id, args.check, who)
             msg = f"{c['id']}: no longer marked as being worked on."
-        _out(args, c, msg)
+        _out(args, history.shown_item(root, t, "checklist", c), msg)
     elif cmd == "check":
         extra = {k: getattr(args, k) for k in ("title", "role") if getattr(args, k)}
         # the summary says what came out of the step: it goes on ONE proof (the file, else the first one)
@@ -992,13 +998,13 @@ def run(args: argparse.Namespace) -> None:
         copied = args.file and tickets.proof_present(root, ev)
         _out(
             args,
-            c,
+            history.shown_item(root, t, "checklist", c),
             f"Done: {c['text']} (proof: {ev['ref']})"
             + (f"\nProof copied: {ev['ref']} ({ev['text']})" if copied else ""),
         )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
-        h = t["history"][-1]
+        h = history.lines(root, t)[-1]
         _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):
@@ -1043,7 +1049,11 @@ def run(args: argparse.Namespace) -> None:
         ):  # the answer is saved; a busy run only delays it reaching the agent
             runs_live.pass_answer(root, t["id"], q, who, proven=who.startswith("human:"))
         note = _addon_note(root, q)
-        _out(args, q, f"Answered: {q['answer']}" + (f"\n{note}" if note else ""))
+        _out(
+            args,
+            history.shown_item(root, t, "questions", q),
+            f"Answered: {q['answer']}" + (f"\n{note}" if note else ""),
+        )
     elif cmd == "ref":
         _ref(args, root, by)
     elif cmd == "publish":
@@ -1079,9 +1089,9 @@ def _ref(args, root: Path, by) -> None:
             if added
             else f"{key} already has this reference: {refs.target(ref)}"
         )
-        _out(args, ref, message)
+        _out(args, history.shown_item(root, t, "refs", ref), message)
     elif args.sub == "list":
-        t = tickets.load(root, args.id)
+        t = history.shown_ticket(root, tickets.load(root, args.id))  # the rows carry each ref's `by`
         rows = refs.all_refs(root, t)
         if args.json:
             _out(args, [{"n": n, **ref, "view": refs.describe(ref, kinds, root)} for n, ref in rows], "")
@@ -1096,7 +1106,11 @@ def _ref(args, root: Path, by) -> None:
                 print(f"  {n}  {d['type']}  {value}{suffix}" + (f"  {d['status']}" if d["status"] else ""))
     else:
         t, ref = tickets.ref_remove(root, args.id, args.target, by())
-        _out(args, ref, f"Removed reference {args.target} from {t.get('key') or t['id']}")
+        _out(
+            args,
+            history.shown_item(root, t, "refs", ref),
+            f"Removed reference {args.target} from {t.get('key') or t['id']}",
+        )
 
 
 def _ticket_set(args, root: Path, by) -> None:
@@ -1166,10 +1180,12 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
 
 
 def main(argv: list[str] | None = None, watchdog=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if is_record_hook(argv):  # a tool's hook: exit 0 whatever happens (only --strict refuses), no parser
+        return cli_record.hook_main(argv, watchdog)
     for s_ in (sys.stdout, sys.stderr):
         if hasattr(s_, "reconfigure"):
             s_.reconfigure(encoding="utf-8")
-    argv = sys.argv[1:] if argv is None else list(argv)
     if argv[:1] == ["work-check"] and "--hook" in argv:  # a tool's hook: no parser, no error may reach it
         return workcheck.hook_main(argv, watchdog)
     humanproof.CURRENT_ARGV = list(argv)  # what a hand-off to the dashboard will run (H1)

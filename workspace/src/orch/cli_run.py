@@ -11,7 +11,7 @@ import sys
 import threading
 from pathlib import Path
 
-from orch import adapters, cli_screen, humanproof, net, runs, runs_live, sharedfolder, term, tickets
+from orch import adapters, cli_screen, history, humanproof, net, runs, runs_live, sharedfolder, term, tickets
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
@@ -78,6 +78,8 @@ def add_parsers(sub, common) -> None:
 
 
 def _out(args, data, text: str) -> None:
+    if args.json:
+        data = history.shown_json(history.args_root(args), data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -420,8 +422,10 @@ def dispatch(args, root: Path) -> bool:
 
 def after_command(args, root: Path, stdout_is_json: bool) -> None:
     """Runs after every command inside an agent run: the footer, on stderr only (stdout stays as it was)."""
-    if getattr(args, "cmd", None) == "run":
-        return
+    if getattr(args, "cmd", None) == "run" or (
+        getattr(args, "cmd", None) == "record" and getattr(args, "sub", None) == "hook"
+    ):
+        return  # the hook entry runs before every tool call and stays silent
     try:
         line = runs.footer(root, getattr(args, "by", None), getattr(args, "id", None))
     except Exception:  # a footer must never break the command it follows

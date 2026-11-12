@@ -41,7 +41,13 @@ class TicketWatcher:
         first = not self._primed
         for c in ticket.get("checklist", []):
             cid = c["id"]
-            now = "wont" if c.get("wont_do") else "done" if c.get("done") else ("doing" if c.get("state") == "doing" else "todo")
+            now = (
+                "wont"
+                if c.get("wont_do")
+                else "done"
+                if c.get("done")
+                else ("doing" if c.get("state") == "doing" else "todo")
+            )
             old = self._state.get(cid, "todo")
             self._state[cid] = now
             if first and prime:
@@ -82,9 +88,17 @@ class Board:
         self.open_calls: dict[str, dict] = {}  # tool/helper id -> start event
         self.helpers: dict[str, dict] = {}
         self.usage: dict | None = None
-        self.context: dict | None = None  # how much of the saved conversation was reused: {reused: 0..100, at}
+        self.context: dict | None = (
+            None  # how much of the saved conversation was reused: {reused: 0..100, at}
+        )
         self.denials: list[dict] = []
         self.last_step = ""
+        self.used: dict[tuple, dict] = {}  # (kind, name, source) -> {count, actions}: the Used tab
+        self.files: dict[str, dict] = {}  # path -> {how, at}: the Files tab (display only, never opened)
+        self.agent_now: dict[
+            str, str
+        ] = {}  # agent ('main', 'h_1') -> its latest step line: the tree's status line
+        self.counted: set[str] = set()  # step ids already counted (a start and its end are one use)
 
     def apply(self, e: dict) -> None:
         """Fold one event. An event that lacks a key it needs is skipped, never an error."""
@@ -120,6 +134,10 @@ class Board:
                 "open": True,
             }
         elif k in ("tool.start", "helper.start"):
+            self._count(d)
+            self._files(e, d)
+            if k == "tool.start" and len(self.agent_now) < 60:
+                self.agent_now[str(e.get("agent") or "main")] = e["text"]
             self.open_calls[d["id"]] = e
             self.last_step = e["text"]
             if k == "helper.start":
@@ -129,8 +147,12 @@ class Board:
                     "text": e["text"],
                     "open": True,
                     "at": e["at"],
+                    "parent": d.get("parent") if isinstance(d.get("parent"), str) else "main",
                 }
         elif k in ("tool.end", "helper.end"):
+            if k == "tool.end":
+                self._count(d)
+                self._files(e, d)
             self.open_calls.pop(d["id"], None)
             if k == "helper.end" and d["id"] in self.helpers:
                 self.helpers[d["id"]].update(open=False, ok=d.get("ok", True), result=e["text"])
@@ -143,6 +165,49 @@ class Board:
             }
         elif k == "denial":
             self.denials.append({"tool": d["tool"], "text": e["text"], "at": e["at"]})
+
+    CHANGERS = frozenset({"edit", "write", "multiedit", "notebookedit", "apply patch", "file change"})
+    READERS = frozenset({"read", "glob", "grep", "notebookread"})
+
+    def _files(self, e: dict, d: dict) -> None:
+        """Remember which files a step touched: read, changed (wins over read) or touched (any other tool)."""
+        files = d.get("files")
+        if not isinstance(files, list):
+            return
+        name = str((d.get("used") or {}).get("name") or "").lower()
+        how = "changed" if name in self.CHANGERS else "read" if name in self.READERS else "touched"
+        for p in files:
+            if not isinstance(p, str):
+                continue
+            old = self.files.get(p)
+            if old is None and len(self.files) >= 200:
+                continue
+            if (
+                old is None
+                or (how == "changed" and old["how"] != "changed")
+                or (old["how"] == "touched" and how == "read")
+            ):
+                self.files[p] = {"how": how, "at": e.get("at")}
+            else:
+                old["at"] = e.get("at") or old["at"]
+
+    def _count(self, d: dict) -> None:
+        u, sid = d.get("used"), d.get("id")
+        if (
+            not isinstance(u, dict)
+            or not isinstance(sid, str)
+            or sid in self.counted
+            or len(self.counted) > 5000
+        ):
+            return
+        self.counted.add(sid)
+        row = self.used.setdefault(
+            (u["kind"], u["name"], u.get("source", "harness")), {"count": 0, "actions": []}
+        )
+        row["count"] += 1
+        a = u.get("action")
+        if isinstance(a, str) and a not in row["actions"] and len(row["actions"]) < 8:
+            row["actions"].append(a)
 
     def resolve_asks(self, ticket: dict) -> None:
         """Questions answered on the ticket stop being open."""
@@ -167,10 +232,17 @@ class Board:
             "tasks": list(self.tasks.values()),
             "asks": [a for a in self.asks.values() if a["open"]],
             "helpers": [h for h in self.helpers.values() if h["open"]],
+            "agent_now": dict(self.agent_now),
+            "helper_tree": list(self.helpers.values())[-50:],  # every helper, open or finished, with its parent
             "jobs": jobs,
             "usage": usage,
             "context": self.context,
             "denials": list(self.denials),
+            "files": [{"path": p, **v} for p, v in sorted(self.files.items(), key=lambda x: str(x[1]["at"]), reverse=True)],
+            "used": [
+                {"kind": k, "name": n, "source": src, "count": r["count"], "actions": r["actions"]}
+                for (k, n, src), r in sorted(self.used.items(), key=lambda x: (-x[1]["count"], x[0]))
+            ][:100],
             "step": self.last_step if self.open_calls else "",
         }  # fmt: skip
 

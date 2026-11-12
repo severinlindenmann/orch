@@ -6,15 +6,29 @@ through `orch record … --json` (add-ons never read the files).
 
 Schema: `activity.schema.json` (one event, plus `$defs/detail_file`). Examples: `examples/activity/`, `examples/activity-detail/`.
 Vectors: `vectors/activity-v1.json` (ids, detail file names, dedupe, retention, fail closed, the Codex mapping on real
-captures). T0: `uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py activity`.
+captures, `files` shapes and normalisation). T0: `uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py activity`.
 The core names no agent tool here: tool-specific mapping lives in the collectors and in agents.json (agent-adapter.schema.json).
 
 ## Where (owner decision R2)
 
 ```
 .orch/record/                         LOCAL, in .orch/.gitignore ("record/") and the .git/info/exclude block. Never committed
-  alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1)
-  pending/<run>/<time_uuid>.json     prepared writes waiting for the run lock
+  alerts/<YYYY-MM-DD>.jsonl          integrity alerts (orch.record-alert/1) and a person's changes (orch.record-change/1)
+  alerts/hook-lost-<YYYY-MM-DD>.jsonl  hook entries of a proven caller that could not be written: {v, schema
+                                      "orch.record-lost/1", at, run, reason: hider_off | invalid | too_large | other_run};
+                                      the run's own wrapper adds collector_error (its collector failed on a turn, or the
+                                      run file could not be read to number it; the run goes on; optional `error` = the
+                                      exception's type name, never its message), hooks_off (the tool's settings in the
+                                      agent's folder or the person's own switch its hooks off) and hooks_missing (a
+                                      turn's log has tool calls, no hook line saying the same arrived); `orch job` adds
+                                      job_activity (a job line was stored, its activity line was not);
+                                      no content; 1 per run and reason per minute, 50 lines per run, then one "trimmed"
+                                      line (run set), and a global "trimmed" line (run null) when the file passes 1 MB
+  alerts/hook-lost-unattributed-<YYYY-MM-DD>.jsonl  the same for a caller NOT proven to be in the run (not_active |
+                                      other_run | not_provable): run is null, never a run id the caller named; 1 per reason per minute
+  pending/<run>/<time_uuid>.json     prepared writes waiting for the run lock; committed first under the lock. One
+                                      that cannot be read, checked or committed is left in place with an alert
+                                      (target folder) and skipped, never raised: it never stops the run's record
   meta.json                           {"schema": "orch.record/1", "since": "<time>", "keep_days": 90, "max_mb": 2048}
   runs/<run>.jsonl                    one file per run, one orch.activity/1 event per line
   detail/<run>/<file name>.json       full payload of one event ($defs/detail_file), at most 1 MB, key values hidden
@@ -39,26 +53,62 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   replaced by `x_` + the first 32 hex of its sha256, the same for hook and collector, so dedupe still works (vectors `ids`).
 - `seq` = position in the run file, 1, 2, 3 …, assigned by the writer. Never reused, never reordered.
 - `run`, `session`, `agent` (`main` or `h_<n>`), `parent` (null for main) bind the event; `ticket` is the run's ticket.
-- **Detail file name** (invariant): always 32 lowercase hex characters, `sha256(b"orch.detail/1\0" + run + b"\0" + kind +
-  b"\0" + id)[:32]` (UTF-8, vectors `detail_names`); no raw id ever becomes a file name, so case-insensitive file systems,
-  separators and reserved names cannot make two events share a file. The path is `detail/<run>/<file name>.json`. The file
-  stores `id` and `kind`; a writer never overwrites a file whose stored `(kind, id)` differs.
+- **Detail file name** (invariant I4): always 32 lowercase hex characters, `sha256(b"orch.detail/2\0" + run + b"\0" + kind +
+  b"\0" + id + b"\0" + ticket)[:32]` (UTF-8; vectors `detail_names`). **An event with no ticket gets no detail file**: its
+  `detail` stays null, it is not `detail_lost`, the line keeps its other fields (the detail schema requires `ticket`). No raw id ever
+  becomes a file name, so case-insensitive file systems, separators and reserved names cannot make two events share a file.
+  The ticket is part of the name, so two tickets never share a detail file, even with the same run, kind and id: a line of
+  ticket B can only name a file made for B. The path is `detail/<run>/<file name>.json`. The file stores `id`, `kind` and
+  `ticket`; a writer never overwrites a file whose stored `(run, kind, id, ticket)` differs. A reader recomputes the name
+  from the stored `(run, kind, id, ticket)` and refuses a file whose name does not match (`swapped`); `--detail` also
+  refuses (`tampered`) a file whose stored `ticket` or `id` is not the one of the line pointing at it (always compared: a
+  line with no ticket never matches a stored `t_…`).
+  Detail files made before the ticket-bound name (`orch.detail/1`) are not read (a read reports them `swapped`) and not
+  migrated or deleted by delete-detail: the record store was not released before this rule (pre-release, no legacy rule).
 - **Detail lost.** When a payload exists but cannot be stored (the file name is taken by another event, a write fails, or it
   exceeds the 1 MB limit), the line is still written with `detail: null` and `detail_lost: true`. A detail problem
-  never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file.
+  never drops the audit line. A finished step's detail is written once: a later line with the same key keeps the first file,
+  except a log line after a hook line of that call (the log wins, Precedence and dedupe), which writes its own.
 
 ## Writing (one writer per run file)
 
 - The run's own orch process (the oneshot wrapper or the live run's watcher) is the only writer of `runs/<run>.jsonl`.
-  Hooks, collectors, the broker, `orch job` and the core hand their events to it (hook entry: a short-lived `orch run event`
+  Hooks, collectors, the broker, `orch job` and the core hand their events to it (hook entry: a short-lived `orch record hook`
   call that appends under the per-run lock `runs/<run>.lock`, named with O_EXCL and
   held with a kernel lock, released in a `finally`). Each event is one line, one
   `write()` of at most 8 KB (text is cut, never the line split), so lines never mix.
-- **The hook entry is narrow.** `orch run event` (the only out-of-process way in) accepts only `step`, `denial`,
-  `helper.start`, `helper.end` and `usage`, and always writes `via: hook` whatever the caller sent. `task.*`, `ask`,
-  `run.state`, `key.use`, `job` and `session.input` are written only in-process by the core, the broker and `orch job`
-  (vectors `hook_entry`). *Implementing slice 1.7 must* also bind the call to the run (`ORCH_RUN` plus the run's per-run hook
-  file token) and drop lines for another run.
+- **The hook entry is narrow.** `orch record hook` (the only out-of-process way in) accepts only `step`,
+  `helper.start` and `helper.end` (the kinds whose line can be provisional, Precedence and dedupe), and always writes
+  `via: hook` whatever the caller sent. `denial` (it says how a call ended) and `usage` (numbers no log line checks)
+  come only from the log and the core; `task.*`, `ask`, `run.state`, `key.use`, `job` and `session.input` are written
+  only in-process by the core, the broker and `orch job` (vectors `hook_entry`). No other CLI path writes `via: hook`. The call is bound to the run: `ORCH_RUN` and `ORCH_TICKET` must name a live claim that belong
+  together **and the calling process must be a descendant of the claim's process** (its wrapper pid or agent pid, start
+  time checked), so a process outside the run cannot write into it by setting the same variables; a line naming another
+  run is dropped; the caller's `at` and `harness` are never kept (time of the call; the tool this process runs under).
+  Where the process tree cannot be read (**Windows today: the hook records nothing**, reason `not_provable`, until the
+  token below or a Windows process-tree proof exists) nothing is written. Nested runs: the check accepts the claim's own
+  pids anywhere among the caller's ancestors, so a call from a child run's tree can still name its parent run; telling
+  them apart needs the token below. `orch record hook` always exits 0 with nothing on stdout and at most one stderr
+  line (a tool's hook exit 2 would block the tool call) unless `--strict` (then 2): any `orch record [flags] hook
+  [anything]` is taken before the parser, the Chat guard and the notices. The `orch` console script's own entry
+  (`orch_entry:main`, stdlib only) checks this first, before orch is imported and before the update check: its
+  watchdog starts before the import, and anything that still fails (an update in progress, an import of a broken
+  install that raises or hangs, a SystemExit) ends with the same exit; `python -m orch` does the same. Only `--by`
+  is known as a flag that takes a value: a global flag before `record` (`orch --json record hook`) or another flag
+  with a value before `hook` is not this form and goes to the parser (which can exit 2). The hook wiring calls
+  exactly `orch record hook` (optionally `--strict`): the root comes from `ORCH_ROOT` or the working folder only;
+  other flags are ignored. The hook's watchdog (exit 0 after 4 s) is cancelled before the first write, so it
+  never ends the process inside a write. *Follow-up:* the per-run hook file token
+  (made at claim time) would replace the ancestry rule; it needs the claim code (runs.py).
+  The event `id` is the agent tool's own tool-call id (Claude: `tool_use_id`, `toolu_…`) put there by the caller
+  (the hook wiring of slice 1.8 must pass it; a hook line and the collector line with that id merge) (this entry takes
+  event-shaped lines, not raw tool payloads); the writer hashes an unsafe one once, the same for hook and collector.
+  A payload over 8 MB is not read further: a minimal `step` with `detail_lost: true` is written, never no line.
+- **Reserved ids.** `<run>:<seq>` is the default id of collector lines (and of other origins); a hook line without an id
+  gets `h_<run>:<seq>` instead, so a hook line can never take the id of a collector line still to come (dedupe would
+  drop it; vectors `hook_default_id`). A hook-sent id in either namespace (`<run>:…`, `h_<run>:…`) is replaced by `x_` +
+  32 hex (vectors `hook_namespace`); any other origin's `h_<run>:…` is replaced by `x_` + the first 32 hex of its
+  sha256 (vectors `reserved_ids`), so only the writer's own default can be in that namespace.
 - **Fail closed.** The writer takes a value hider as a required argument; there is no default and no pass-through. A hider is
   "registered" only when it was built from this workspace's key store in its **guarded orch home** (secrets.md, Where: a real
   workspace only with the account's default home, a test workspace only with a test home; any other pairing refuses). An empty or pass-through hider refuses; a store
@@ -78,10 +128,38 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
 
 - Dedupe key: `(run, id, kind, finished, via_class)`, where `finished` means a non-null outcome.
   `via_class` is `hl` only for hook and log; every other origin has its own key.
-- **Hooks win when outcomes agree.** The hook replaces the meaning of a log line by appending a line;
-  readers retain the hook. Repeated lines from the same origin keep the first written.
-- When hook and log finished outcomes disagree in `ok` or `error`, both lines are kept. The later line
-  carries `conflict: true`; repeated delivery of either origin is still deduped.
+  Repeated lines from the same origin keep the first written.
+- **Hook lines are inside the agent's trust boundary.** The hook runs as a child of the agent, and the agent can run
+  the same command itself with any payload and read its own tool-call ids (the process-tree proof only shows it
+  comes from inside the run). So a hook line is the agent's word:
+  - **The hook entry never says a call ended well.** On every path (the tool's payload or an event-shaped line) it
+    writes a line with an outcome as **provisional**: `outcome` `{ok: null, error: null, ms: null}`, whatever the
+    caller sent (a claimed `ok: true` included). Only a claimed **failure** is kept, since it only narrows trust:
+    `{ok: false, error: <fixed code>, ms: null}`, the code `interrupted` or `tool_failed` (any other error the
+    caller sent becomes `tool_failed`); the tool's own error text is never in the line, only in the detail file
+    (hidden and cut like any output). Claude's `PostToolUseFailure` hook (`is_interrupt: true` → `interrupted`)
+    is such a failure; its `PostToolUse` is provisional. Without a log (a live run) a successful call stays
+    "finished, result unknown" and a failed one is recorded as failed (vectors `hook_entry`).
+  - **The log line wins, started and finished alike.** For a key that a log line also has, the log line replaces the
+    hook line (it is written, with its own detail file over the hook's, and readers keep it), and a hook line after
+    any log line of that call (run, id, kind; started or finished) is dropped (vectors `dedupe`).
+  - **Disagreement is kept, never hidden.** When a hook line of the call says something else than the log line
+    (`used`, `text`, `files`, whether either is finished; or, both finished and the hook's not provisional, `ok` or
+    `error`, where a hook's fixed failure code is never compared with the log's error text: a hook failure and the
+    log's failure agree), both lines are kept and the log line carries `conflict: true`; the log line is the one to believe:
+    counts take its line of the call, even a started one over a hook end (result unknown). A kept hook line and its
+    `conflict` log line share one detail file name: when the log line has a detail, the file is the log's.
+  - The writer removes the hook's detail file when the log line that replaced it has none of its own (lost or none),
+    so the agent's payload never stays behind without a line pointing to it. Writing over a detail file is atomic
+    (a temporary file in the same folder, then a rename): a reader sees the old file or the new one; a failed
+    rename leaves the old file and marks the line `detail_lost`.
+  The hook's detail keeps the tool's input with every text cut at 32 K characters (lists at 100 entries) and only an
+  allow-list of plain result fields, each text cut the same way (never the tool's internal copies such as
+  `originalFile` or `structuredPatch`). The agent can also switch the tool's hooks off (its folder's or the person's
+  own tool settings); the oneshot wrapper then leaves a `hooks_off` or `hooks_missing` trace (Where), and the log still
+  records every call. Both traces are hints: hooks the agent adds itself, a settings file changed and changed back
+  between turns, or a started hook line forged to match the log are not detected; calls of a turn spooled behind a
+  busy lock are not counted for `hooks_missing`.
 - A finished line without a started line is fine. Readers apply the same idempotent rule (vectors `dedupe`).
 
 ## Kinds
@@ -91,10 +169,10 @@ Sources: **hooks** (instant, full payload), **log collectors** (read the tool's 
 | `step` | hook, log | skill · tool · mcp | – | one tool call; `text` = "Read report-2025-11.pdf" |
 | `task.start`, `task.done` | core | null | `check` (`c<n>`) | from the ticket |
 | `ask` | core | null | `q` (`q<n>`) | a question on the ticket |
-| `denial` | hook, log, core | tool · mcp | – | `outcome.ok: false`, `error` = "Not allowed by this workspace" |
+| `denial` | log, core | tool · mcp | – | `outcome.ok: false`, `error` = "Not allowed by this workspace" |
 | `helper.start`, `helper.end` | hook, log | helper | – | `agent` = the helper `h_<n>`, `parent` = who started it |
 | `run.state` | core | null | `state` | starting · working · waiting_you · idle · done · failed · stopped |
-| `usage` | hook, log | null | `used` 0..1, `window`, `status`, `tokens_in/out` | plan or token use |
+| `usage` | log | null | `used` 0..1, `window`, `status`, `tokens_in/out` | plan or token use |
 | `key.use` | broker | key (`action` = env · file · exec · get) | `profile`, `command`, `skill`, `refused`? | one per key per broker call, never the value (secrets.md) |
 | `secret.change` | broker | null | `action` (`profile.set` · `profile.remove` · `profile.get_enable` · `profile.get_disable` · `profile.agents_enable` · `profile.agents_disable`), `profile`, `by` (`human:<name>` or `reset`) | a change of a key profile or its switches (secrets.md); never a value. Written best effort: a failing writer never blocks turning a switch off |
 | `job` | job | null | `job`, `type`, `state` | one line per job event that changes what people see (job-events.md); the full stream is in `jobs/` |
@@ -110,22 +188,56 @@ Readers skip unknown `kind`s (they are never shown as steps or counted).
 text, output was cut, helpers are not visible). Capability flags per adapter (agents.json) say what a source can see;
 `orch record counts` turns them into "unknown / not seen" (counts.md).
 
+## Files
+
+A `step` (any via) may carry `files`: an array of 0..8 strings, the workspace files or folders the step named. Every entry
+is a **workspace-relative POSIX path** (`src/app.py`): 1..260 characters, NFC, no leading `/`, no `..` segment, no
+backslash, drive letter, scheme (`file:`) or UNC form, no start with `~` or `$`, no Unicode control or format character
+(categories Cc, Cf, Zl, Zp: NUL, C1, bidi overrides and isolates, zero-width, line/paragraph separators: they spoof what a
+person reads). The schema `$defs/file_path` lists the BMP characters; the writer's check (`record_files.file_ok`, the one
+shared check) is the full rule and also checks NFC. Any other kind never carries `files` (the schema refuses it there). Vectors `files` (shape, what the writer
+keeps) and `files_normalise` (producer normalisation).
+
+- **Who fills it.** Collectors: the stream-json collector from the file-tool inputs (`file_path`, `notebook_path`,
+  `path` of the read, edit, write, notebook-edit, find-files and search tools); the `item.*` collector from the paths
+  of a `file_change` item. The hook entry takes `files` from the caller's line (the hook filter keeps it). Producers
+  make every path relative to the run's workspace root (`.` segments and inner `..` resolved, NFC); a path outside the
+  workspace, the root itself, or one without a root to compare an absolute path with is **dropped**, never recorded.
+  Repeats are dropped, at most 8 are kept, and only the first 64 entries of a producer's list are looked at. A root
+  that is `/` is refused (it would make every absolute path a workspace path). The caller of a collector passes the
+  workspace as `ctx["workspace"]`, one root or a list (the root and its resolved form); this module does no I/O.
+  Size budget: the writer keeps entries in order while each is at most 512 serialized bytes and all together at most
+  2048; the rest are dropped. A line that is still over the 8192-byte cap loses `files`, then `data` (replaced by
+  `{"cut": true}`), so the audit line is never dropped for its optional parts.
+- **The writer re-checks.** After the value hider the writer checks every entry again: an entry with a bad shape is
+  dropped, and so is an entry the hider (or the plain-text cleaner) would change (a path containing a stored key value is
+  never stored, not even hidden). Drops are not counted or flagged; the audit line is never dropped for a bad entry. Only
+  the first 8 valid entries are kept; `files` on another kind, or not an array, is removed. A path the plain-text
+  cleaner changes (a name that looks like a key or token) is lost silently: acceptable, `files` is display only.
+- **Display only.** `files` is never used for an access decision; an agent can name any workspace-relative path
+  (Level 1, like `text`). Readers (`orch record tail | query --json`) return it as stored; the detail file is unchanged.
+
 ## Retention (owner decision R5)
 
-`[record] keep_days = 90` (30 · 90 · 365) and `[record] max_mb = 2048`. Pruning runs when a run ends and once a day:
+`[record] keep_days = 90` (30 · 90 · 365) and `[record] max_mb = 2048` (512 · 1024 · 2048 · 4096). Pruning uses the
+**effective** values (`config.record_keep_days` / `record_max_mb`): the lower of the file value and the person's settings
+record (default record 90 / 2048; human-proof.md, Settings), so a file value alone never keeps more; a file value is
+snapped down to the list with a floor of 30 / 512, so a file edit alone never makes pruning delete nearly everything. Raising either needs an
+`insights.settings` proof bound to the new value (target `insights.keep_days=365`); lowering does not, and deletes nothing at once (the next pruning applies it).
+Pruning runs when a run ends and once a day:
 1. Before anything is deleted, the run is folded into `counts/<day>.json` (counts never depend on detail).
    Fold must be idempotent per run: retention may fold again after a run was skipped.
 2. Runs that ended more than `keep_days` ago lose their detail folder and their run file (and `jobs/<run>/`).
 3. While the record is over `max_mb`: delete the detail folder of the oldest ended run, then (when no detail is left) the
    oldest ended run file. A running run is never pruned.
 4. Counts are kept until "Delete all records". "Delete detail for this ticket" (`orch record delete-detail <ticket>`, a
-   person only: `record.delete_detail` proof, invariant H1) deletes the detail folders of that ticket's runs and sets nothing else; events then show "details not available".
+   person only: `record.delete_detail` proof, invariant H1) deletes the detail files that ticket's own lines point at and sets nothing else; events then show "details not available".
 A run that is not ok or has pending lines is skipped; other runs proceed.
 Pending runs report `status: unavailable, reason: pending` to retention. Under the run lock, read again
 and verify the run still ended. The result retains the first non-ok status, reason, message and alert.
 Vectors `retention` fix the order.
 
-## Reading: `orch record tail | query | counts | delete-detail`
+## Reading: `orch record tail | query | counts | settings | delete-detail`
 
 - `orch record tail [--ticket T | --run R] [--since <cursor>] [--follow] --json` → NDJSON on stdout, one object per line:
   `{"type": "event", "cursor": "<c>", "event": {…}}`, `{"type": "ping", "cursor": "<c>", "at"}` every 15 s while following,
@@ -147,9 +259,41 @@ Vectors `retention` fix the order.
 - `orch record query [--ticket T] [--run R] [--kind K]… [--from <time>] [--to <time>] [--limit N] [--after <cursor>] --json`
   → a page `{"items": [event…], "next": "<cursor>" | null, "unavailable": [{run, status, reason, message}]}` (cli-answer.schema.json `page`), newest first, limit 1–500
   (default 100). `--detail <id> --run R` → one detail file.
-- `orch record counts --json` → counts.md. `orch record propose` → proposal.md (check-up runs only). `orch record delete-detail <ticket> --json` → `{"deleted": n}` (person only).
-- Refused (exit 2, `{"error", "code"}`) for `delete-detail` without a valid proof (human-proof.md), for a ticket that does not exist, and when the
-  record folder is unsafe (symlink).
+- `orch record counts --json` → counts.md. `orch record propose` → proposal.md (check-up runs only).
+- `orch record settings --json` (no proof; it writes nothing but a lower retention record, human-proof.md) → `{"keep_days": 90, "max_mb": 2048, "share_counts": true,
+  "share_names": false, "record_mb": <int>, "detail_mb": <int>, "runs": <int>}`: the effective settings (human-proof.md,
+  Settings), the size of `.orch/record/` and of `detail/` in MB (rounded up) and the number of run files, read through the
+  hardened helpers (no record yet: 0). When the record cannot be read, the sizes and `runs` are `null` and the answer
+  carries the read marker `status` (`unavailable` | `tampered`), `reason`, `message` (exit 0).
+- **Delete detail.** `orch record delete-detail <ticket> --proof-stdin --json` → `{"deleted": n, "ticket": "t_…", "kept":
+  k, "unreadable": u, "skipped": s}` (a person only: op `record.delete_detail`, target = the ticket id). The detail files the ticket's
+  OWN lines point at go (`detail/<run>/<file name>.json` of a line with that `ticket` whose file name is the I4 name of
+  that line's run, kind, id and ticket), and so do this ticket's own files that no line points at (orphans, e.g. a crash
+  between the detail write and its line): a file in `detail/<run>/` whose stored `ticket` is this ticket and whose stored
+  `(run, kind, id, ticket)` gives its own name. Lines of other tickets never veto it: by I4 their own files have other
+  names, so a run shared with other tickets keeps their detail and a line planted elsewhere cannot block the deletion. A
+  line of this ticket that points at a file whose name is not this ticket's own (planted or changed) is not followed:
+  that file stays and is counted in `k` (never skipped silently). What is not safe is skipped at its own level, never a
+  veto (anything with file access can plant a line and a file): a run that cannot be read (its run file, or its detail
+  folder or lock a link, not a folder, unreadable) is skipped: its detail is not deleted, it is counted in `u`, and the
+  CLI (stderr) and the page say so plainly ("N runs could not be read; their detail was not deleted"); a single file
+  that is not safe (a link, FIFO or hardlink at its name, also one swapped in after it was found) stays, counted in `s`
+  ("N detail files were changed outside orch; they were not deleted"), and the run's other files go. The files of one
+  run are deleted under that run's lock; its detail folder goes only when `rmdir` finds it empty (a file written in
+  between, or a skipped one, stays). `n` = the runs that lost detail in this call. Run files, lines and counts stay; the
+  events then show "Details not available" (`--detail` answers `not_found`). Before anything is deleted the core appends
+  one `orch.record-change/1` line (`$defs/record_change`: `{v, schema, at, change: "record.delete_detail", by: <the
+  proven person>, ticket, deleted}`, no path, no content) to `alerts/<day>.jsonl`, so the deletion itself stays
+  auditable; if that line cannot be written nothing is deleted (`not_available`). The line is not authenticated (an
+  agent can append look-alike lines): it is a note, not evidence. Its `deleted` is what was going to go (the runs); the
+  answer's `n` is what went (lower when a run was pruned or a file swapped in between). A failure in the middle (the
+  run's lock busy, an I/O error) answers `not_available` ("Some details could not be deleted"), the rest goes with a
+  new proof (and a new line).
+- Refused (exit 2, `{"error", "code"}`), in this order, for `delete-detail`: an agent caller (agent tool in the
+  environment, `--by agent:…`) before anything else, `needs_person`; a ticket that does not exist, `not_found` (accepted:
+  the detail of a ticket deleted from disk goes with retention); no or an invalid proof (missing, expired, other
+  target, other op, replayed, a `--by` other than the proof's), `needs_person`; the record or its `detail` folder itself
+  unsafe (e.g. a symlink), `not_available` | `tampered`, with nothing deleted.
 
 ## Mapping from a JSON event stream (one-shot collectors)
 
@@ -219,6 +363,8 @@ Integrity alerts (`orch.record-alert/1`) live at
 `.orch/record/alerts/<YYYY-MM-DD>.jsonl`. They contain no paths, user ids, or
 record contents. Each process emits one per day, target, run, and reason. If
 alert storage fails, the alert remains attached to the result or exception.
+The same daily file also holds `orch.record-change/1` lines (a person's proven
+change, e.g. Delete detail); readers tell the two apart by `schema`.
 
 Writing validates and hides the event and both detail outcomes before taking
 the run lock. A strict read of the run fd precedes meta, detail, and line writes;
@@ -231,14 +377,19 @@ is separated by a newline; sequence numbers count all physical lines.
 Only hook and log origins share dedupe keys. All other origins have separate
 `(run, id, kind, finished, via)` keys. Hook ids in the writer/collector namespace
 `r_[a-z0-9_]{6,32}:.*` become `x_` plus 32 lowercase hex characters of
-SHA-256 of `b"orch.id.hook/1\0" + hidden_id.encode("utf-8")`. When hook and log
-finished outcomes disagree in `ok` or `error`, both lines remain and the later
-line has `conflict: true`.
+SHA-256 of `b"orch.id.hook/1\0" + hidden_id.encode("utf-8")`. For one hook/log
+key the log line replaces the hook line and a later hook line is dropped; when
+they disagree (`used`, `text`, `files`, or a non-provisional `ok`/`error`), both
+lines remain and the log line has `conflict: true`. A provisional hook end
+(`ok: null`) never disagrees on its outcome; a hook end with a fixed failure code
+(`tool_failed`, `interrupted`) is compared on `ok` only (vectors `dedupe`).
 
 Lock waits cover the 30-second stale window. A timed-out write is spooled in
 `pending/<run>/` and drained in name-time order by the next append, under the
 same run lock. The spool receipt has `pending: true` and `seq: null`; a default
-id is omitted until the line is committed. `read_run` reports `status: ok`,
+id is omitted until the line is committed. A collector that numbers its own
+`<run>:<n>` ids commits the spool first (under the lock) and then reads the run
+file, so a turn written to the spool never shares an id with the next turn. `read_run` reports `status: ok`,
 `reason: pending`, and `pending: n` while prepared writes remain. Readers show
 this status alongside committed events.
 
@@ -250,7 +401,10 @@ lock identity again before deleting. Retention preflights `pending/<run>` under
 the lock and skips runs with pending files without folding or deleting them.
 
 Retention skips a run that is unavailable, tampered, or has pending lines: it folds and deletes
-nothing for that run and keeps the alert; other runs proceed. The result carries
+nothing for that run and keeps the alert; other runs proceed. Inside `detail/<run>/` only the
+run's folder itself can make the run tampered: a single entry that is not safe (a planted link,
+FIFO or hardlink) is alerted and stays, the rest of the run's detail and its lines go, so a
+planted file never keeps a run's detail past retention. The result carries
 the first non-ok status, reason, and message. Under each run lock, retention
 reads again and checks the run still ended before folding or deleting.
 
@@ -265,3 +419,13 @@ OneDrive placeholders are allowed. Secrets shorter than the hider's minimum
 are not hidden. In-place edits by the same user are not detected: trust is based
 on file identity, not content authentication. Tests compare the bundled schema
 with this contract to detect drift.
+
+### Known limit: record content is not authenticated yet (Gate G1, issue #563)
+
+The checks above stop planted special files, links and foreign owners. They do not
+authenticate the CONTENT of a record line. Anything that runs as the same user can
+append a schema-valid line to `runs/<run>.jsonl` or put one in `pending/<run>/`,
+including a line with `via: "log"` or `via: "core"`. Until the per-line MAC and
+hash chain land (planned next, keyed from a subkey of the guarded key), readers
+must not derive permissions, retention or shared counts from record content, and
+screens show what an agent reported and what orch checked as two different things.

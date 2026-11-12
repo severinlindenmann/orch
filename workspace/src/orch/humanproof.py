@@ -24,6 +24,8 @@ import stat
 import sys
 import threading
 import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from orch import saferead, term, winacl, winfinish
@@ -82,7 +84,15 @@ SETTING_DEFAULTS = {
     "conn.allow": False,
     "workflow.agents_may_finish": False,
 }
-_TARGET_RE = re.compile(r"[A-Za-z0-9_.:@-]+")
+# Retention widening settings (Insights > Settings, `insights.settings`): a number, not a switch. The record
+# holds the highest value a person approved; the effective value is the LOWER of the file value and the record
+# (or the default record when none exists): a file value alone never keeps records longer or larger.
+RETENTION_DEFAULTS = {"insights.keep_days": 90, "insights.max_mb": 2048}
+RETENTION_ALLOWED = {"insights.keep_days": (30, 90, 365), "insights.max_mb": (512, 1024, 2048, 4096)}
+# The lowest retention that can ever count (file or record): 30 days / 512 MB. Lowering is open to anyone, but
+# an edit of config.toml (keep_days = 1) must never make pruning delete nearly the whole record.
+RETENTION_FLOOR = {setting: min(allowed) for setting, allowed in RETENTION_ALLOWED.items()}
+_TARGET_RE = re.compile(r"[A-Za-z0-9_.:@=-]+")  # `=`: the value-bound insights.settings target key=value
 _BY_RE = re.compile(r"human:[^\x00-\x1f]{1,58}")
 _NONCE_RE = re.compile(r"[A-Za-z0-9_-]{22}")
 PENDING_MAC_KINDS = ("answer", "message", "text")
@@ -102,8 +112,6 @@ def account_home() -> Path:
 
     if _is_windows():  # the profile folder from the process token (winacl), never the environment
         try:
-            from orch import winacl
-
             return Path(winacl.profile_dir())
         except (ImportError, AttributeError, OSError, Refused):
             pass
@@ -289,6 +297,7 @@ _SECRET_FILES = (
     "handoffs.json",
     "wont.json",
     "verdict.json",
+    "profile.json",
 )  # the ledgers go with the key they were signed with
 
 
@@ -771,11 +780,17 @@ def _settings_load(root: Path, path: Path):
     return data
 
 
-def _settings_write(root: Path, setting: str, value, by: str) -> None:
+def _settings_write(root: Path, setting: str, value, by: str, check=None) -> None:
+    """`check(current record value or None)` runs under the lock, before the write: it may refuse (raise), or
+    answer True when the record already says this (nothing is written)."""
     path, wkey = _settings_path(root)
     d = key_dir(root)  # creates the home; the lock lives in the workspace's key folder
     with _key_lock(d):
         data = _settings_load(root, path) or {"schema": "orch.human-settings/1", "workspaces": {}}
+        if check is not None:
+            rec = (data["workspaces"].get(wkey) or {}).get(setting)
+            if check(rec.get("value") if isinstance(rec, dict) else None) is True:
+                return
         data["workspaces"].setdefault(wkey, {})[setting] = {
             "value": value,
             "by": by,
@@ -807,6 +822,9 @@ def record_set(root: Path, setting: str, value, by: str) -> None:
     but False) needs a person (`by` = the verified human:...); every lowering writes the False tombstone, so
     an old "on" record can never come back. The caller writes this BEFORE the config file, so there is no
     moment where the file says on and the record is stale."""
+    if setting in RETENTION_DEFAULTS:
+        _retention_set(root, setting, value, by)
+        return
     if setting not in SETTING_DEFAULTS and not is_conn_grant_key(setting) and not is_secret_get_key(setting):
         raise Refused("That is not a setting a person has to allow.")
     if value is not False and not str(by).startswith("human:"):
@@ -835,26 +853,139 @@ def conn_grants(root: Path) -> dict:
     return out
 
 
-def effective(root: Path, setting: str, file_value: bool) -> bool:
+def _setting_record(root: Path, setting: str):
+    path, wkey = _settings_path(root)
+    data = _settings_load(root, path)
+    rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
+    return rec.get("value") if isinstance(rec, dict) else None
+
+
+def effective(
+    root: Path, setting: str, file_value: bool | None, file_now: Callable[[], bool | None] | None = None
+) -> bool:
     """Effective value of a widening switch: file AND (record, or the owner default when no record ever
-    existed). A False in the file writes the tombstone at once. An unreadable home or record = off (N12)."""
+    existed). An unreadable home or record = off (N12).
+
+    A parsed False in the file writes the False tombstone (`by: file`) at once, so a person's off from the
+    file stays off when an agent edits the file back to on. Like retention(), it is decided under keys.lock
+    with the record and (through `file_now`, when given) the file read AGAIN there: a person's grant writes
+    the record and then the file under the same lock, so a reader that saw the old off file in between never
+    writes its tombstone over the new grant. A file value that is not a bool (None: config.toml could not be
+    read, e.g. mid-write or not valid) is off and writes nothing: only a parsed false is the person's off."""
     default = SETTING_DEFAULTS.get(setting, False)
+    if not isinstance(file_value, bool):
+        return False
     try:
-        path, wkey = _settings_path(root)
-        data = _settings_load(root, path)
-        rec = ((data or {}).get("workspaces", {}).get(wkey) or {}).get(setting)
-        rec_val = rec.get("value") if isinstance(rec, dict) else None
+        rec_val = _setting_record(root, setting)
         if file_value is False and rec_val is not False:
-            _settings_write(root, setting, False, "file")
-            rec_val = False
+            with _key_lock(key_dir(root)):  # re-entrant: _settings_write below takes it again
+                if file_now is not None:
+                    now = file_now()
+                    file_value = now if isinstance(now, bool) else None
+                rec_val = _setting_record(root, setting)
+                if file_value is False and rec_val is not False:
+                    _settings_write(root, setting, False, "file", lambda current: current is False)
+                    rec_val = False
     except (Refused, OSError):
         return False
     return bool(file_value and (rec_val if rec_val is not None else default))
 
 
+def _retention_ok(setting: str, value) -> bool:
+    """A retention record value that can count: a whole number from the floor (30 / 512) up to the largest
+    allowed value. Anything else (a planted 99999 or 1, true, "*") counts as no record (the default
+    record)."""
+    return type(value) is int and RETENTION_FLOOR[setting] <= value <= max(RETENTION_ALLOWED[setting])
+
+
+def retention_snap(setting: str, value: int) -> int:
+    """A FILE retention number as it can count: snapped DOWN to the allowed list (keep_days 100 -> 90,
+    99999 -> 365) and never below the floor (keep_days 1, 0 or -5 -> 30, max_mb 1 -> 512: a whole number
+    <= 0 reads as "as little as possible"). Anything but a whole number (true, a float, a string) is the
+    default record, whatever the caller checked before."""
+    if type(value) is not int:
+        return RETENTION_DEFAULTS[setting]
+    if value <= 0:
+        return RETENTION_FLOOR[setting]
+    allowed = RETENTION_ALLOWED[setting]
+    return max((v for v in allowed if v <= value), default=RETENTION_FLOOR[setting])
+
+
+def _retention_set(root: Path, setting: str, value, by: str) -> None:
+    """record_set for a retention number. Raising it above the current record (or the default record when
+    there is none) needs a person (`by` = the verified human:...); anyone may lower it (the record then names
+    no person), so a lowered value only rises again with a proof. Decided under the settings lock."""
+    allowed = RETENTION_ALLOWED[setting]
+    if type(value) is not int or value not in allowed:
+        raise Refused("Choose one of: " + ", ".join(str(v) for v in allowed) + ".")
+    person = str(by).startswith("human:")
+
+    def check(current) -> bool:
+        floor = current if _retention_ok(setting, current) else RETENTION_DEFAULTS[setting]
+        if value > floor and not person:
+            raise Refused(AGENT_REFUSED)
+        return not person and value == current  # the same value again keeps who approved it
+
+    _settings_write(root, setting, value, by if person else "reset", check)
+
+
+def _retention_record(root: Path, setting: str) -> int:
+    """The retention record value that counts (the default record when none / unreadable / not valid)."""
+    rec_val = _setting_record(root, setting)
+    return rec_val if _retention_ok(setting, rec_val) else RETENTION_DEFAULTS[setting]
+
+
+def retention(root: Path, setting: str, file_value: int) -> int:
+    """Effective retention value: the LOWER of the file value and the record (the default record when none
+    exists, or when the record is not a valid number). A file value below the record lowers the record at once
+    (like a tombstone), so editing the file back up later changes nothing without a proof. `file_value` is
+    already snapped to the allowed list with its floor (config.file_value). An UNREADABLE settings record
+    falls back to the lower of the file value and the default record (90 / 2048): never wider than the
+    default, but possibly wider than a lowered record that can no longer be read (documented, human-proof.md).
+
+    So a READ may write: the lowering record (`by: file`). It is decided under keys.lock with the file and the
+    record read AGAIN there (a person's widening writes the record and then the file under the same lock, so a
+    reader that saw the old file in between never writes the old value over the new record)."""
+    from orch import config
+
+    default = RETENTION_DEFAULTS[setting]
+    try:
+        rec_val = _retention_record(root, setting)
+        if file_value < rec_val:
+            with _key_lock(key_dir(root)):  # re-entrant: _settings_write below takes it again
+                file_value = config.file_value(root, *config.INSIGHTS_KEYS[setting])
+                rec_val = _retention_record(root, setting)
+                if file_value < rec_val:
+                    lower = file_value
+
+                    def check(current) -> bool:  # the record as it is now, under the lock
+                        floor = current if _retention_ok(setting, current) else default
+                        return not lower < floor
+
+                    _settings_write(root, setting, lower, "file", check)
+                    rec_val = lower
+    except (Refused, OSError):
+        rec_val = default
+    return min(file_value, rec_val)
+
+
 # ------------------------------------------------------------------------------------------- launch token
 
-LAUNCH_SERVERS = ("focus", "dashboard")
+LAUNCH_SERVERS = ("focus", "dashboard", "insights")
+_ALWAYS_SHIPPED = ("focus", "dashboard")  # every other launch server needs its add-on shipped by this orch
+
+
+def launch_server_ok(server) -> bool:
+    """A launch server orch can start a page session for: focus and dashboard as before; any other one
+    (Insights) only once this orch ships its add-on (addons.SHIPPED_ADDONS: a shipped manifest), never on the
+    name alone."""
+    if server not in LAUNCH_SERVERS:
+        return False
+    if server in _ALWAYS_SHIPPED:
+        return True
+    from orch import addons
+
+    return server in addons.SHIPPED_ADDONS
 
 
 def is_test_workspace(root: Path) -> bool:
@@ -933,8 +1064,16 @@ def reset_protection(root: Path, reason: str) -> None:
                 _write_private(nf, json.dumps(notes))
 
 
+def _lowering(setting, value) -> bool:
+    """A record a reset keeps: a tombstone (False), or a retention number at or below its default."""
+    if setting in RETENTION_DEFAULTS:
+        return _retention_ok(setting, value) and value <= RETENTION_DEFAULTS[setting]
+    return value is False
+
+
 def _reset_settings(root: Path, home: Path) -> None:
-    """A reset only ever LOWERS: every record whose value is False (a tombstone, in any workspace) is kept
+    """A reset only ever LOWERS: every record whose value is False (a tombstone, in any workspace; a lowered
+    retention number too) is kept
     whatever the file's rights, anything else is dropped, and the opening settings are written False. A
     record file that exists but cannot be read also closes live_session and share_counts (unreadable=off)."""
     path, wkey = _settings_path(root)
@@ -960,7 +1099,7 @@ def _reset_settings(root: Path, home: Path) -> None:
     out: dict = {}
     for wk, recs in prior.items():
         if isinstance(recs, dict):
-            keep = {k: v for k, v in recs.items() if isinstance(v, dict) and v.get("value") is False}
+            keep = {k: v for k, v in recs.items() if isinstance(v, dict) and _lowering(k, v.get("value"))}
             if keep:
                 out[wk] = keep
     mine = out.setdefault(wkey, {})
@@ -1147,7 +1286,9 @@ def wontdo_is_human(
 # The step fields the signed decision record is built from. ONE source of truth: wont_decision() reads exactly
 # these, and the sync merge pins exactly these (+ the MAC itself) while a verified decision is held
 # (orch_sync.merge._SIGNED; a test fails if the two drift apart).
-SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce")
+# wont_by / wont_at (NEW decisions only, optional): who decided and when, so a synced history line can be tied
+# to the decision; legacy decisions lack them and authorise no history line.
+SIGNED_STEP_FIELDS = ("wont_do", "reason", "text", "covers", "wont_nonce", "wont_by", "wont_at", "wont_line")
 
 
 def wont_decision(step: dict) -> dict:
@@ -1163,6 +1304,9 @@ def wont_decision(step: dict) -> dict:
         "text": (step.get("text") if on else None),
         "covers": (step.get("covers") if on else None),
         "nonce": step.get("wont_nonce"),
+        **({"person": step["wont_by"]} if on and "wont_by" in step else {}),
+        **({"at": step["wont_at"]} if on and "wont_at" in step else {}),
+        **({"line": step["wont_line"]} if on and "wont_line" in step else {}),
     }
 
 
@@ -1215,8 +1359,305 @@ def _ledger_read(root: Path) -> dict | None:
     return _ledger_load(root, LEDGER)
 
 
+# The relay ALLOW BINDING (guarded home): keys/<ws>/relay-allow.json holds, per "<ticket>:<question>", the
+# allow_message id this core asked about when it made the relay:allow question HERE, and whether that answer
+# was applied. The ticket's ext.relay (allow_message, allow_applied) is synced, so a peer can swap the message
+# or reset "applied"; only this binding decides which message a proven answer allows, and only once.
+RELAY_ALLOW = "relay-allow.json"
+
+
+def relay_allow_get(root: Path, ticket: str, question: str) -> dict | None:
+    """{"message", "applied"} recorded here for this question, or None (none, or it cannot be told)."""
+    ent = _ledger_load(root, RELAY_ALLOW)
+    e = ent.get(f"{ticket}:{question}") if ent is not None else None
+    if not isinstance(e, dict) or not isinstance(e.get("message"), str):
+        return None
+    return e if isinstance(e.get("applied"), bool) else None
+
+
+def relay_allow_set(root: Path, ticket: str, question: str, message: str, applied: bool = False) -> bool:
+    """Record the question's message (when asked) or mark it applied. A recorded message is never replaced by
+    another one and "applied" never goes back. False when it could not be written."""
+    if not all(isinstance(x, str) and x for x in (ticket, question, message)):
+        return False
+    try:
+        d = key_dir(root)
+        with _key_lock(d):
+            ent = _ledger_load(root, RELAY_ALLOW)
+            if ent is None:
+                return False
+            key = f"{ticket}:{question}"
+            old = ent.get(key)
+            if isinstance(old, dict):
+                if old.get("message") != message:
+                    return False
+                applied = applied or old.get("applied") is True
+            ent[key] = {"message": message, "applied": applied}
+            _write_private(d / RELAY_ALLOW, json.dumps({"schema": "orch.relay-allow/1", "entries": ent}))
+        return True
+    except (Refused, OSError):
+        return False
+
+
 def _ledger_set(root: Path, ticket: str, check: str, mac: str | None) -> bool:
     return _ledger_put(root, LEDGER, "orch.wont-ledger/1", f"{ticket}:{check}", mac)
+
+
+# ------------------------------------------------------------------------------------------- action records
+
+# A record an add-on keeps in the (agent-writable) workspace about a PERSON's decision (the sync add-on's
+# choices, approvals, ignored rows, checked files, allowed deletions): it carries this core's action1 MAC over
+# the proof target the person's verified proof was for AND the record itself, made right after person_by
+# verified the person, and checked again (action_is_human) each time the record is used. Agents can write the
+# record but not the key, so a planted or edited record verifies for nobody (contracts/human-proof.md
+# "Action records").
+
+
+def _canon_strict(obj) -> str:
+    """Canonical JSON (no NaN/Infinity: a value that cannot be written canonically raises ValueError)."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+
+def action_mac(key: bytes, workspace: str, target: str, record: dict) -> str:
+    """action1 over the canonical JSON array [domain, workspace, target, record]: no delimiter a target or a
+    record could forge."""
+    msg = _canon_strict(["action1", workspace, target, record])
+    return _b64u(hmac.new(key, msg.encode(), hashlib.sha256).digest())
+
+
+def action_sign(root: Path, target: str, record: dict) -> str | None:
+    """This core's MAC binding `record` to a person's verified action on `target`. Call only after person_by
+    returned a person for exactly `target`. None when there is no usable key or workspace id."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        if not ws or not isinstance(target, str) or not isinstance(record, dict):
+            return None
+        return action_mac(human_key(root, create=False), ws, target, record)
+    except (Refused, OSError, TypeError, ValueError, RecursionError):
+        return None
+
+
+def action_is_human(root: Path, target, record, mac) -> bool:
+    """True only when `mac` is this core's action1 MAC for `target` and `record`. Fails closed: no key, no
+    workspace id, a damaged record or any other shape = nobody."""
+    from orch import addons
+
+    if not isinstance(mac, str) or not mac or not isinstance(target, str) or not isinstance(record, dict):
+        return False
+    try:
+        ws = addons.workspace_id(root, create=False)
+        if not ws:
+            return False
+        return hmac.compare_digest(mac, action_mac(human_key(root, create=False), ws, target, record))
+    except (Refused, OSError, TypeError, ValueError, RecursionError):
+        return False
+
+
+# One-time use of a signed action record: each record carries a random `id`; once the decision has been
+# applied, its id is spent here (guarded home, next to human.key) and a record with a spent id never counts
+# again, even when it is planted back. An unreadable store counts every id as spent (fail closed).
+ACTIONS_USED = "actions-used.json"
+ACTIONS_USED_MAX = 5000
+
+
+def new_action_id() -> str:
+    return _b64u(secrets.token_bytes(16))
+
+
+def action_spent(root: Path, rid) -> bool:
+    """True when `rid` was used up (or cannot be told: no key folder, a damaged store, a bad id)."""
+    if not isinstance(rid, str) or not _NONCE_RE.fullmatch(rid):
+        return True
+    used = _ledger_load(root, ACTIONS_USED)
+    return used is None or rid in used
+
+
+def action_spend(root: Path, ids) -> bool:
+    """Record these action ids as used (the newest ACTIONS_USED_MAX are kept). False when it could not be
+    written (the caller must not apply the decision then)."""
+    ids = [i for i in dict.fromkeys(ids) if isinstance(i, str) and _NONCE_RE.fullmatch(i)]
+    if not ids:
+        return True
+    try:
+        d = key_dir(root)
+        with _key_lock(d):
+            used = _ledger_load(root, ACTIONS_USED)
+            if used is None:
+                return False
+            stamp = time.time_ns()
+            used.update({i: stamp + n for n, i in enumerate(ids)})
+            ordered = sorted(used.items(), key=lambda kv: kv[1] if isinstance(kv[1], int) else 0)
+            keep = dict(ordered[-ACTIONS_USED_MAX:])
+            _write_private(d / ACTIONS_USED, json.dumps({"schema": "orch.actions-used/1", "entries": keep}))
+        return True
+    except (Refused, OSError):
+        return False
+
+
+# ------------------------------------------------------------------------------------------- local records
+
+# A local integrity record that no person signs (core's own-history-lines store, the sync-enabled record, the
+# sync add-on's held add-on blocks): any process of the same user can write the file, so it carries this
+# core's local1 MAC (a domain of its own: it can never pass as a person's action1 record) and a record whose
+# MAC fails counts for nothing.
+
+
+def local_mac(key: bytes, workspace: str, kind: str, record) -> str:
+    msg = _canon_strict(["local1", workspace, kind, record])
+    return _b64u(hmac.new(key, msg.encode(), hashlib.sha256).digest())
+
+
+def local_key(root: Path) -> tuple[str, bytes] | None:
+    """(workspace id, human key) for local records, or None (no usable key or id: nothing verifies)."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        return (ws, human_key(root, create=False)) if ws else None
+    except (Refused, OSError, ValueError):
+        return None
+
+
+def local_sign(root: Path, kind: str, record, ctx=None) -> str | None:
+    ctx = ctx or local_key(root)
+    if ctx is None or not isinstance(kind, str):
+        return None
+    try:
+        return local_mac(ctx[1], ctx[0], kind, record)
+    except (TypeError, ValueError, RecursionError):
+        return None
+
+
+def local_ok(root: Path, kind: str, record, mac, ctx=None) -> bool:
+    if not isinstance(mac, str) or not mac:
+        return False
+    want = local_sign(root, kind, record, ctx)
+    return want is not None and hmac.compare_digest(want, mac)
+
+
+# A local1 record in the workspace proves only that this core wrote it ONCE: an older signed copy verifies
+# too. A record whose older copy must never count again (the sync add-on's local-ext.json, automation's
+# local-blocks.json) is PINNED: the guarded home (keys/<ws>/record-pins.json, next to human.key and the
+# sync-enabled record's key) keeps per record kind a monotonic counter and the digest of the one current body,
+# and the body carries that counter. A body whose counter or digest is not the pinned one does not count
+# (a rolled back copy, a crash between the two writes, a missing pin): fail closed.
+RECORD_PINS = "record-pins.json"
+
+
+def _pin_digest(body) -> str | None:
+    try:
+        return hashlib.sha256(_canon_strict(["pin1", body]).encode()).hexdigest()
+    except (TypeError, ValueError, RecursionError):
+        return None
+
+
+def record_pin(root: Path, kind: str) -> dict | None:
+    """The current pin {"counter", "digest"} of record kind `kind`; {} when none was ever made; None when it
+    cannot be told (no key folder, a loose or damaged ledger)."""
+    pins = _ledger_load(root, RECORD_PINS)
+    if pins is None:
+        return None
+    pin = pins.get(kind)
+    if pin is None:
+        return {}
+    ok = (
+        isinstance(pin, dict)
+        and type(pin.get("counter")) is int
+        and pin["counter"] > 0
+        and isinstance(pin.get("digest"), str)
+    )
+    return pin if ok else None
+
+
+def pin_next(root: Path, kind: str, body: dict) -> dict | None:
+    """`body` with the next counter, made the pinned current body of `kind` (counter + 1, never back). Write
+    the record AFTER this; None (nothing pinned, write nothing) when the pin cannot be read or written."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            pins = _ledger_load(root, RECORD_PINS)
+            pin = record_pin(root, kind)
+            if pins is None or pin is None:
+                return None
+            out = {**body, "counter": pin.get("counter", 0) + 1}
+            digest = _pin_digest(out)
+            if digest is None:
+                return None
+            pins[kind] = {"counter": out["counter"], "digest": digest}
+            _write_private(d / RECORD_PINS, json.dumps({"schema": "orch.record-pins/1", "entries": pins}))
+        return out
+    except (Refused, OSError):
+        return None
+
+
+def pin_ok(root: Path, kind: str, body) -> bool:
+    """`body` (without its MAC) is the pinned current body of `kind`."""
+    pin = record_pin(root, kind)
+    if not pin or not isinstance(body, dict) or body.get("counter") != pin["counter"]:
+        return False
+    digest = _pin_digest(body)
+    return digest is not None and hmac.compare_digest(digest, pin["digest"])
+
+
+# The secret-profile BODY ledger (guarded home): keys/<ws>/profile.json holds, per profile name, the CURRENT
+# profile1 MAC of its body {env, files, set, run, extra} (null = tombstone, the profile was removed). The file
+# itself is editable by anything running as the user, so it vouches for nothing: secretrun/keystore verify the
+# body against this ledger and fail closed on a missing or different MAC.
+PROFILE_LEDGER = "profile.json"
+PROFILE_CHANGED = "this key profile was changed outside orch; set it up again"
+
+
+def profile_body(profile: dict) -> dict:
+    """The part of a profile the MAC covers: what runs and what it receives (the switches have their own
+    settings records)."""
+    return {
+        "env": dict(profile.get("env") or {}),
+        "files": dict(profile.get("files") or {}),
+        "set": dict(profile.get("set") or {}),
+        "run": list(profile["run"]) if profile.get("run") else None,
+        "extra": sorted(profile.get("extra") or []),
+    }
+
+
+def profile_mac(key: bytes, workspace: str, name: str, body: dict) -> str:
+    """profile1.<workspace id>.<profile name>.<canonical body {env, files, set, run, extra}>: binds WHERE it
+    belongs (another profile or workspace) and WHAT was approved."""
+    return _b64u(
+        hmac.new(
+            key, f"profile1.{workspace}.{name}.{_canon(profile_body(body))}".encode(), hashlib.sha256
+        ).digest()
+    )
+
+
+def profile_sign(root: Path, name: str, body: dict | None) -> None:
+    """Record the current MAC of profile `name` (None: tombstone). Raises Refused when it cannot be recorded
+    (the caller must not write the profile then)."""
+    from orch import addons
+
+    mac = None
+    if body is not None:
+        ws = addons.workspace_id(root, create=True)
+        mac = profile_mac(human_key(root), ws, name, body)
+    if not _ledger_put(root, PROFILE_LEDGER, "orch.profile-ledger/1", name, mac):
+        raise Refused("orch could not record this key profile. Nothing was changed.")
+
+
+def profile_verified(root: Path, name: str, body: dict) -> bool:
+    """True only when the body's MAC (this key, this workspace, this name) is the current ledger entry.
+    Never raises; no key, no workspace id or no readable ledger = False (fail closed)."""
+    from orch import addons
+
+    try:
+        ws = addons.workspace_id(root, create=False)
+        ent = _ledger_load(root, PROFILE_LEDGER)
+        cur = ent.get(name) if ent else None
+        if not ws or not isinstance(cur, str):
+            return False
+        return hmac.compare_digest(cur, profile_mac(human_key(root, create=False), ws, name, body))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
@@ -1294,6 +1735,36 @@ VERDICT_LEDGER = "verdict.json"
 VERDICT_MAX = 8  # verdict entries kept on one ticket
 # What a stored entry holds. ONE source of truth: the sync merge imports it (a test fails if it keeps a copy).
 VERDICT_FIELDS = ("kind", "nonce", "mac")
+# Optional, MAC-bound when present (new person verdicts): who signed and when. Legacy entries lack them and
+# cannot authorise a synced person history line (contracts/human-proof.md "Person history lines over sync").
+VERDICT_OPTIONAL = ("person", "at", "line")
+# The actor label a decision may bind (the sync merge keeps a copy, drift-tested): human:<name>, <= 64 chars.
+ACTOR_PATTERN = r"human:[A-Za-z0-9_.@ -]{1,58}"
+
+
+def history_digest(text, via) -> str:
+    """sha256 hex of the exact history line a decision's writer adds ({text, via}); bound into the MAC so only
+    THAT line can be attributed to the person over sync (the sync merge keeps a copy, drift-tested)."""
+    return hashlib.sha256(_canon({"text": text, "via": via}).encode()).hexdigest()
+
+
+def _fresh_line(line, person) -> bool:
+    """The history line the signing operation just wrote: by the signer, a text, made within seconds."""
+    try:
+        at = datetime.fromisoformat(line["at"]).timestamp()
+    except (TypeError, KeyError, ValueError):
+        return False
+    return (
+        line.get("by") == person
+        and isinstance(line.get("text"), str)
+        and abs(datetime.now(UTC).timestamp() - at) <= 5
+    )
+
+
+def bindable_actor(by) -> bool:
+    return isinstance(by, str) and re.fullmatch(ACTOR_PATTERN, by) is not None
+
+
 VERDICT_KINDS = ("person", "agent")
 
 VERDICT_LEDGER_DAMAGED = (
@@ -1322,6 +1793,7 @@ def verdict_record(ticket: dict, entry: dict) -> dict:
         "kind": entry.get("kind"),
         "checks": verdict_checks(ticket),
         "nonce": entry.get("nonce"),
+        **{k: entry[k] for k in VERDICT_OPTIONAL if k in entry},
     }
 
 
@@ -1366,7 +1838,9 @@ def _verdict_ledger_put(root: Path, tid: str, mac: str | None) -> bool:
     return _ledger_put(root, VERDICT_LEDGER, "orch.verdict-ledger/1", tid, mac)
 
 
-def verdict_sign(root: Path, ticket: dict, kind: str) -> dict:
+def verdict_sign(
+    root: Path, ticket: dict, kind: str, person: str | None = None, line: dict | None = None
+) -> dict:
     """A fresh verdict entry for the ticket as it is NOW (its checklist must be final), recorded as the
     CURRENT ledger entry. No key, no workspace id or a damaged ledger = Refused: never a half-signed Done."""
     from orch import addons
@@ -1382,6 +1856,10 @@ def verdict_sign(root: Path, ticket: dict, kind: str) -> dict:
     if not ws or not isinstance(tid, str):
         raise Refused(VERDICT_LEDGER_DAMAGED)
     entry = {"kind": kind, "nonce": secrets.token_hex(8)}
+    if kind == "person" and bindable_actor(person) and _fresh_line(line, person):
+        entry["person"] = person
+        entry["at"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        entry["line"] = history_digest(line["text"], line.get("via"))
     entry["mac"] = verdict_mac(key, ws, tid, verdict_record(ticket, entry))
     if not _verdict_ledger_put(root, tid, entry["mac"]):
         raise Refused(VERDICT_LEDGER_DAMAGED)
@@ -1985,13 +2463,20 @@ def person_by(
     no_handoff=None,
     parts=None,
     exact=None,
+    proof: str | None = None,
 ) -> str:
     """Who acts for a human-only op (invariant H1). With --proof-stdin: the person in a verified proof (`by`
     comes from the proof, --by must agree). An agent (agent tool in the environment, or --by agent:...) keeps
     its own, unprivileged, identity. Anything claiming to be a person without a proof is refused and handed
-    off to the page."""
+    off to the page. `proof`: the proof line the caller already read from stdin (read_proof_line) BEFORE it
+    took keys.lock, so a stdin that never closes cannot hold the lock; only verify-and-consume runs here.
+
+    `no_handoff`: the words of the refusal when this command cannot be approved on the page as typed: no
+    hand-off card is queued (humanproof.HANDOFF = "Do this in the dashboard on this computer.": the person
+    does it on the page itself, which sends a proof)."""
     if getattr(args, "proof_stdin", False):
-        return verify_and_consume(root, read_proof_line(), op, target, getattr(args, "by", None))
+        line = read_proof_line() if proof is None else proof
+        return verify_and_consume(root, line, op, target, getattr(args, "by", None))
     tool = None
     from orch import tickets
 
@@ -2019,7 +2504,7 @@ def write_launch_token(root: Path, server: str) -> str | None:
     """The one-time token that bootstraps a page session: <key folder>/launch-<server>.token (0600, once,
     30 s). Returned ONLY to the code that opens the browser at `#launch=<token>` (a URL fragment); never
     printed or logged."""
-    if server not in LAUNCH_SERVERS:
+    if not launch_server_ok(server):
         raise Refused("Unknown page server.")  # a local or marketplace add-on never gets a launch token
     try:
         d = key_dir(root)
@@ -2032,6 +2517,8 @@ def write_launch_token(root: Path, server: str) -> str | None:
 
 def consume_launch_token(root: Path, server: str, token: str) -> bool:
     """Compare with the file and delete it (single use), whatever the outcome of the comparison."""
+    if not launch_server_ok(server):
+        return False
     try:
         d = key_dir(root, create=False)
         f = d / f"launch-{server}.token"

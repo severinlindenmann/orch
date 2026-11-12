@@ -86,16 +86,32 @@ def test_ids(store, case):
     value.pop("id")
     if case["tool_call_id"] is not None:
         value["id"] = case["tool_call_id"]
+    else:
+        value["via"] = (
+            "log"  # <run>:<seq> is the default id of a collector line; a hook line gets h_<run>:<seq>
+        )
     assert writer.append(value)["id"] == case["id"]
 
 
-@pytest.mark.parametrize("case", [c for c in VECTORS["detail_names"] if c["kind"] == "step"])
+@pytest.mark.parametrize("case", VECTORS["hook_default_id"])
+def test_hook_default_id_is_not_the_collector_id(store, case):
+    _, writer = store
+    for n in range(1, case["seq"]):
+        writer.append(event(run=case["run"], id=f"prefix{n}"))
+    value = event(run=case["run"])
+    value.pop("id")
+    assert writer.append(value)["id"] == case["hook"] != case["collector"]
+
+
+@pytest.mark.parametrize("case", [c for c in VECTORS["detail_names"] if c["kind"] == "step" and c["ticket"]])
 def test_detail_names(store, case):
     ws, writer = store
     raw = (
         "call/../x y" if case["id"].startswith("x_") else case["id"]
     )  # the writer hashes unsafe raw ids first
-    stored = writer.append(event(id=raw, run=case["run"]), detail={"input": {}, "output": "ok"})
+    stored = writer.append(
+        event(id=raw, run=case["run"], ticket=case["ticket"]), detail={"input": {}, "output": "ok"}
+    )
     assert stored["id"] == case["id"]
     assert stored["detail"] == f"detail/{case['run']}/{case['file']}.json"
     assert read_detail(ws, case["run"], case["file"]).unwrap()["output"] == "ok"
@@ -394,9 +410,11 @@ def test_detail_name_property():
     for run in ("r_8k2m01", "r_8k2m02"):
         for kind in ("step", "helper.start", "run.state"):
             for eid in ids:
-                name = detail_name(run, kind, eid)
-                assert re.fullmatch("[0-9a-f]{32}", name)
-                assert seen.setdefault(name, (run, kind, eid)) == (run, kind, eid)
+                assert detail_name(run, kind, eid, None) is None  # no ticket: no detail file (I4)
+                for ticket in ("t_aaaaaa", "t_bbbbbb", "t_cccccc"):
+                    name = detail_name(run, kind, eid, ticket)
+                    assert re.fullmatch("[0-9a-f]{32}", name)
+                    assert seen.setdefault(name, (run, kind, eid, ticket)) == (run, kind, eid, ticket)
     assert len({n.lower() for n in seen}) == len(seen)
 
 
@@ -415,6 +433,7 @@ def test_case_variants_and_collisions_never_drop_the_line(store):
                 "id": "someone",
                 "run": "r_8k2m01",
                 "kind": "step",
+                "ticket": "t_inv7c2",
                 "input": "p",
                 "output": "p",
                 "truncated": False,
@@ -438,7 +457,7 @@ def test_case_variants_and_collisions_never_drop_the_line(store):
 def writer_detail_path(ws, eid):
     from orch.collect_execjson import detail_name
 
-    return f"detail/r_8k2m01/{detail_name('r_8k2m01', 'step', eid)}.json"
+    return f"detail/r_8k2m01/{detail_name('r_8k2m01', 'step', eid, event()['ticket'])}.json"
 
 
 def test_fifo_planted_as_run_file_does_not_hang(store):
@@ -465,10 +484,14 @@ def test_finished_detail_is_write_once(store):
         event(id="w1", via="log", outcome=done), detail={"input": "a", "output": "collector"}
     )
     hook = writer.append(event(id="w1", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
-    assert hook is not None  # the hook line is kept (higher precedence) ...
+    assert hook is None  # a hook line after the log's is dropped (the log wins) ...
     assert (
         json.loads((record_dir(ws) / first["detail"]).read_text())["output"] == "collector"
-    )  # ... its detail is not
+    )  # ... and so is its detail
+    # the other order: the log line writes its own detail over the hook's
+    writer.append(event(id="w3", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
+    log = writer.append(event(id="w3", via="log", outcome=done), detail={"input": "a", "output": "collector"})
+    assert json.loads((record_dir(ws) / log["detail"]).read_text())["output"] == "collector"
     started = writer.append(event(id="w2"), detail={"input": "a", "output": "early"})
     writer.append(event(id="w2", outcome=done), detail={"input": "a", "output": "final"})
     assert json.loads((record_dir(ws) / started["detail"]).read_text())["output"] == "final"
@@ -532,11 +555,22 @@ def test_store_detail_with_untrusted_existing_target_is_lost(store, tmp_path, mo
     ws, writer = store
     from orch.collect_execjson import detail_name
 
-    target = record_dir(ws) / f"detail/r_8k2m02/{detail_name('r_8k2m02', 'step', 'q1')}.json"
+    tid = event()["ticket"]
+    target = record_dir(ws) / f"detail/r_8k2m02/{detail_name('r_8k2m02', 'step', 'q1', tid)}.json"
     target.parent.mkdir(parents=True)
     target.write_text(
         json.dumps(
-            dict(v=1, id="q1", run="r_8k2m02", kind="step", input="a", output="b", truncated=False, hidden=0)
+            dict(
+                v=1,
+                id="q1",
+                run="r_8k2m02",
+                kind="step",
+                ticket=tid,
+                input="a",
+                output="b",
+                truncated=False,
+                hidden=0,
+            )
         )
     )
     if how == "hardlink":
@@ -545,3 +579,10 @@ def test_store_detail_with_untrusted_existing_target_is_lost(store, tmp_path, mo
         _foreign_owner(monkeypatch)
     kept = writer.append(event(id="q1", run="r_8k2m02"), detail={"input": "x", "output": "y"})
     assert kept is not None and kept["detail"] is None and kept["detail_lost"] is True
+
+
+@pytest.mark.parametrize("case", VECTORS["reserved_ids"])
+def test_reserved_ids(store, case):
+    _, writer = store
+    value = event(id=case["id"], via=case["via"], run="r_abcdef")
+    assert writer.append(value)["id"] == case["stored"]

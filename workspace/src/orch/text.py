@@ -45,11 +45,17 @@ def _drop(ch: str) -> bool:
 
 def clean_untrusted(text: str, limit: int = 2000) -> str:
     """NFC; U+2028/2029 become a newline; control, format, unassigned and invisible characters go; HTML
-    comments (also nested by cleaning) go, an unterminated one with everything after it; cut to `limit`."""
-    text = unicodedata.normalize("NFC", str(text)).replace(" ", "\n").replace(" ", "\n")
-    text = "".join(ch for ch in text if not _drop(ch))
+    comments (also nested by cleaning) go, an unterminated one with everything after it; cut to `limit`.
+    Fast on long text (a whole file): each distinct character is judged once, and a comment is only looked
+    for up to the last `-->` (no comment can end after it), so a tail of unterminated `<!--` costs nothing."""
+    text = unicodedata.normalize("NFC", str(text)).replace("\u2028", "\n").replace("\u2029", "\n")
+    drop = {ord(ch): None for ch in set(text) if _drop(ch)}
+    if drop:
+        text = text.translate(drop)
     while True:
-        new = _COMMENT.sub("", text)
+        end = text.rfind("-->")
+        end = end + 3 if end != -1 else 0
+        new = _COMMENT.sub("", text[:end]) + text[end:]
         if new == text:
             break
         text = new

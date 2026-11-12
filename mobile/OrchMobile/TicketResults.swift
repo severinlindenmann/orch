@@ -8,12 +8,18 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
     let at: String
     let checked: Bool
     let rawDoc: Data
-    var doc: BlocksResult { BlocksResult.decode(rawDoc) }
+    /// Decoded once (a view body pass must not re-parse and re-validate the document); rawDoc stays for encoding.
+    let doc: BlocksResult
 
+    static func == (a: TicketResult, b: TicketResult) -> Bool {
+        a.id == b.id && a.from == b.from && a.title == b.title && a.at == b.at && a.checked == b.checked && a.rawDoc == b.rawDoc
+    }
+
+    // contracts/blocks.md keeps agent source labels; the phone displays helper wording only.
     var label: String {
         switch from {
         case "job": "Reported by the job"
-        case "agent": checked ? "Checked by the agent" : "From the agent"
+        case "agent": checked ? "Checked by the helper" : "From the helper"
         default: "Worked out by orch"
         }
     }
@@ -36,6 +42,7 @@ struct TicketResult: Codable, Sendable, Equatable, Identifiable {
         title = fields["title"]?.string.flatMap { Self.displaySafe($0) ? $0 : nil }; checked = fields["checked"] == .bool(true)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         rawDoc = try encoder.encode(document)
+        doc = BlocksResult.decode(rawDoc)
     }
 
     func encode(to encoder: Encoder) throws {

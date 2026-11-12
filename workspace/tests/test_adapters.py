@@ -11,7 +11,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import adapters, agentsdata, config, reminder_settings
+from orch import adapters, agentsdata, config, denyrules, reminder_settings
 from orch.errors import Refused
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -58,25 +58,44 @@ DENY = adapters.permission_args("claude", None, "ask")
 assert DENY[0] == "--disallowedTools" and "orch private" in DENY[1] and "agent-approvals" in DENY[1]
 # the reminder hooks go in inline for a one-shot run (`orch work-check --hook claude`, never blocks)
 _REMINDER_CMD = reminder_settings.hook_command("claude")  # absolute, quoted, never errors
+# ... and in the SAME blob the record hooks (`orch record hook`, before and after every tool call, a failed
+# one too, W2b 1.7)
+_RECORD_CMD = reminder_settings.record_hook_command()
+_RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
 _REMINDER = {
-    e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
-    for e in ("SessionStart", "UserPromptSubmit")
+    **{
+        e: [{"hooks": [{"type": "command", "command": _REMINDER_CMD, "timeout": 5}]}]
+        for e in ("SessionStart", "UserPromptSubmit")
+    },
+    **{
+        e: [{"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}]
+        for e in _RECORD_EVENTS
+    },
 }
 SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":"))]
-CLAUDE_FRESH = ["claude", "-p", "--session-id", NEW, *ORCH_OK, *DENY, *SETTINGS, "--", "Do it"]
-CLAUDE_RESUME = ["claude", "-p", "--resume", OLD, *ORCH_OK, *DENY, *SETTINGS, "--", "Do it"]
 
 
-def test_claude_snapshots():
+def _claude_argvs(root):
+    """The snapshots: the permission flags plus the deny rules for this workspace (slice 1.4)."""
+    deny = denyrules.merge_flag(DENY, denyrules.tool_patterns(denyrules.rules(root)))
+    return (
+        ["claude", "-p", "--session-id", NEW, *ORCH_OK, *SETTINGS, *deny, "--", "Do it"],
+        ["claude", "-p", "--resume", OLD, *ORCH_OK, *SETTINGS, *deny, "--", "Do it"],
+        deny,
+    )
+
+
+def test_claude_snapshots(proj):
+    fresh, resume, deny = _claude_argvs(proj)
     v = {"prompt": "Do it", "new_session": NEW, "session": OLD, "permissions": "ask"}
-    assert adapters.render("claude", "fresh", "oneshot", v) == CLAUDE_FRESH
-    assert adapters.render("claude", "resume", "oneshot", v) == CLAUDE_RESUME
+    assert adapters.render("claude", "fresh", "oneshot", v, proj) == fresh
+    assert adapters.render("claude", "resume", "oneshot", v, proj) == resume
     v["orch_hooks_file"] = ".orch/run/hooks-r_1.json"
-    assert adapters.render("claude", "fresh", "live", v) == [
+    assert adapters.render("claude", "fresh", "live", v, proj) == [
         "claude", "--session-id", NEW, *ORCH_OK,
-        "--settings", ".orch/run/hooks-r_1.json", *DENY,
+        "--settings", ".orch/run/hooks-r_1.json", *deny,
     ]  # fmt: skip
-    assert adapters.render("claude", "resume", "live", v)[:3] == ["claude", "--resume", OLD]
+    assert adapters.render("claude", "resume", "live", v, proj)[:3] == ["claude", "--resume", OLD]
 
 
 @pytest.fixture
@@ -107,11 +126,11 @@ class FakeHelp:
 
 
 @pytest.mark.parametrize("mode", ["oneshot", "live"])
-def test_permission_modes_for_claude(claude_help, mode):
+def test_permission_modes_for_claude(claude_help, mode, proj):
     v = {"prompt": "p", "new_session": NEW, "orch_hooks_file": "h.json"}
 
     def flags(perm):
-        argv = adapters.render("claude", "fresh", mode, {**v, "permissions": perm})
+        argv = adapters.render("claude", "fresh", mode, {**v, "permissions": perm}, proj)
         assert "--allowedTools" in argv  # the orch list stays in every mode
         if mode == "oneshot":
             assert argv[-2:] == ["--", "p"]  # the prompt stays last
@@ -447,13 +466,13 @@ def test_permission_line_names_the_mode(proj):
     assert adapters.permission_line(proj).startswith("Permissions ask:")
 
 
-def test_no_blanket_orch_permission_in_any_argv():
+def test_no_blanket_orch_permission_in_any_argv(proj):
     v = {"prompt": "p", "new_session": NEW, "session": OLD, "orch_hooks_file": "h.json", "stream": True}
     for name in adapters.builtin_names():
         for mode in ("oneshot", "live"):
             for kind in ("fresh", "resume"):
                 try:
-                    argv = adapters.render(name, kind, mode, v) or []
+                    argv = adapters.render(name, kind, mode, v, proj) or []
                 except Refused:
                     continue
                 for at, item in enumerate(argv):
@@ -480,8 +499,10 @@ def test_codex_snapshots():
     assert adapters.render("codex", "fresh", "live", v) is None  # no live mode
 
 
-def test_prompt_starting_with_dash_is_not_an_option():
-    argv = adapters.render("claude", "fresh", "oneshot", {"prompt": "--dangerously-x", "new_session": NEW})
+def test_prompt_starting_with_dash_is_not_an_option(proj):
+    argv = adapters.render(
+        "claude", "fresh", "oneshot", {"prompt": "--dangerously-x", "new_session": NEW}, proj
+    )
     assert argv[-2:] == ["--", "--dangerously-x"]
 
 
@@ -534,7 +555,7 @@ def test_user_entry_picks_a_builtin_adapter(proj):
 
 def test_allow_goes_in_only_where_the_adapter_can_retry(proj):
     v = {"prompt": "p", "new_session": NEW, "allow": ["Bash(git push:*)", "Edit"]}
-    argv = adapters.render("claude", "fresh", "oneshot", v)
+    argv = adapters.render("claude", "fresh", "oneshot", v, proj)
     i = len(argv) - 1 - argv[::-1].index("--allowedTools")  # the run's own, after the built-in orch one
     assert argv[i + 1] == "Bash(git push:*),Edit" and i < argv.index("--")
     assert "--allowedTools" not in (adapters.render("codex", "fresh", "oneshot", v) or [])
@@ -542,14 +563,19 @@ def test_allow_goes_in_only_where_the_adapter_can_retry(proj):
     assert adapters.render("gen", "fresh", "oneshot", v, proj) == ["gen", "p"]
     assert adapters.permission_retry("claude") and not adapters.permission_retry("codex")
     with pytest.raises(Refused):
-        adapters.render("claude", "fresh", "oneshot", {**v, "allow": ["--dangerous"]})
+        adapters.render("claude", "fresh", "oneshot", {**v, "allow": ["--dangerous"]}, proj)
 
 
 def test_hooks_doc_comes_from_data():
     d = adapters.hooks_doc("claude", "r_8k2m")
     cmds = {k: v[0]["hooks"][0]["command"] for k, v in d["hooks"].items()}
     assert cmds["Stop"] == "orch run event --run r_8k2m --kind idle"
-    assert set(cmds) == {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    run_events = {"SessionStart", "Stop", "Notification", "UserPromptSubmit"}
+    assert set(cmds) == run_events | set(_RECORD_EVENTS)
+    for event in _RECORD_EVENTS:  # the record hook: the only group there, every tool
+        assert d["hooks"][event] == [
+            {"matcher": "*", "hooks": [{"type": "command", "command": _RECORD_CMD, "timeout": 5}]}
+        ]
     for event in ("SessionStart", "UserPromptSubmit"):  # the reminder: a second command, with a timeout
         group = d["hooks"][event][1]  # its own group: the run-event group's matcher does not apply
         assert group == {
@@ -560,6 +586,84 @@ def test_hooks_doc_comes_from_data():
         assert "matcher" not in group and len(d["hooks"][event][0]["hooks"]) == 1
     assert len(d["hooks"]["Stop"]) == 1
     assert adapters.hooks_doc("codex", "r_1") is None
+
+
+def _orch_groups(doc, event):
+    return [h["command"] for g in doc["hooks"].get(event, []) for h in g["hooks"]]
+
+
+def test_one_settings_blob_holds_the_work_check_and_the_record_hooks(proj):
+    """W2b 1.7: the record hook is in the SAME generated settings as the work-check reminder: one --settings
+    in the final argv of a oneshot and of a live run (two configs could override each other)."""
+    argv = reminder_settings.record_hook_argv()
+    exe = sys.executable.replace("\\", "/")
+    assert argv == [exe, "-I", "-P", "-m", "orch", "record", "hook"]  # exactly `orch record hook`, never PATH
+    assert os.path.isabs(argv[0]) and _RECORD_CMD == f'"{exe}" -I -P -m orch record hook'
+    if os.name != "nt":
+        import shlex
+
+        assert shlex.split(_RECORD_CMD) == argv  # the line the tool's shell runs is that very argv
+
+    def both(doc):
+        for event in ("SessionStart", "UserPromptSubmit"):
+            assert _REMINDER_CMD in _orch_groups(doc, event)
+        for event in _RECORD_EVENTS:
+            assert _orch_groups(doc, event) == [_RECORD_CMD]
+        assert not any(_RECORD_CMD in _orch_groups(doc, e) for e in ("SessionStart", "UserPromptSubmit"))
+
+    v = {"prompt": "p", "new_session": NEW, "session": OLD, "permissions": "ask", "stream": True}
+    for kind in ("fresh", "resume"):
+        one = adapters.render("claude", kind, "oneshot", v, proj)
+        assert one.count("--settings") == 1
+        both(json.loads(one[one.index("--settings") + 1]))
+    # live: the per-run hooks file (hooks_doc) is the one --settings; the same blob is merged into it
+    live = adapters.render("claude", "fresh", "live", {**v, "orch_hooks_file": "h.json"}, proj)
+    assert live.count("--settings") == 1 and live[live.index("--settings") + 1] == "h.json"
+    doc = adapters.hooks_doc("claude", "r_8k2m", proj)
+    both(doc)
+    # the run's own hooks stay
+    assert _orch_groups(doc, "Stop") == ["orch run event --run r_8k2m --kind idle"]
+    assert "orch run event --run r_8k2m --kind working" in _orch_groups(doc, "UserPromptSubmit")
+    # a tool without record or reminder hooks gets none
+    assert adapters.reminder_doc("codex") is None
+
+
+@pytest.mark.parametrize(
+    "exe, want",
+    [
+        ("C:\\Program Files\\Python312\\python.exe", '"C:/Program Files/Python312/python.exe"'),
+        ("C:\\Users\\Ann Lee\\AppData\\Local\\uv\\py.exe", '"C:/Users/Ann Lee/AppData/Local/uv/py.exe"'),
+        ("\\\\server\\share\\py\\python.exe", '"//server/share/py/python.exe"'),
+    ],
+)
+def test_record_hook_command_for_a_windows_interpreter(monkeypatch, exe, want):
+    """The Windows interpreter forms reminder_settings handles: forward slashes, double-quoted, one line that
+    Git Bash (Claude's hook shell on Windows) and cmd both split back into the same argv.
+    TODO(W2b 1.7, VM): prove on the Windows VM that the hook process is found in the claim's process tree
+    (record_hook._parents has no Windows reader yet: a Windows hook records nothing, reason not_provable)."""
+    import shlex
+
+    monkeypatch.setattr(sys, "executable", exe)
+    cmd = reminder_settings.record_hook_command()
+    assert cmd == f"{want} -I -P -m orch record hook" and "\\" not in cmd
+    argv = reminder_settings.record_hook_argv()
+    assert shlex.split(cmd) == argv  # bash (Git Bash)
+    cmd_words = [t[1:-1] if t[:1] == t[-1:] == '"' else t for t in shlex.split(cmd, posix=False)]
+    assert cmd_words == argv  # cmd: the quoted path is one word (adapters._split's rule)
+    monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)  # no such interpreter here
+    doc = adapters.reminder_doc("claude")
+    assert all(_orch_groups(doc, e) == [cmd] for e in _RECORD_EVENTS)
+    assert _orch_groups(doc, "SessionStart") == [f"{want} -I -P -m orch work-check --hook claude"]
+
+
+@pytest.mark.parametrize("bad", ["C:\\x%PATH%\\python.exe", 'C:\\a"b\\python.exe', "C:\\a!b\\python.exe"])
+def test_an_unsafe_windows_interpreter_path_gets_no_orch_hooks_at_all(monkeypatch, proj, bad):
+    monkeypatch.setattr(sys, "executable", bad)
+    with pytest.raises(ValueError):
+        reminder_settings.record_hook_command()
+    assert adapters.reminder_doc("claude") is None  # neither set: the run goes on without them
+    v = {"prompt": "p", "new_session": NEW}
+    assert "--settings" not in adapters.render("claude", "fresh", "oneshot", v, proj)
 
 
 def test_session_from_output_for_codex():

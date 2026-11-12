@@ -1,16 +1,16 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Phone archive and delete</title><link rel="stylesheet" href="archive.css"></head><body><div class="page"><div class="top"><a href="index.html">&larr; Phone app v3</a></div>
-<h1>2. Phone: archive and delete chats</h1><p class="muted">Drawn on the v3 messenger look (workspace screen with one chat per ticket plus General). Archive hides; Delete only removes this phone's copy; the ticket is never deleted from the phone.</p>
+<h1>2. Phone: archive and delete chats</h1><p class="muted">Drawn on the v3 messenger look (workspace screen with one chat per ticket plus Your helper). Archive hides; Delete only removes this phone's copy; the ticket is never deleted from the phone.</p>
 <div class="grid g4">
 <div><p class="cap"><b>A</b> Swipe left on a ticket chat that is Done</p><div class="phone"><div class="p-nav"><h4>Acme</h4></div><div class="p-body">
 <div class="hdr">Open</div><div class="row"><div class="av g">M</div><div class="m"><b>Month-end close</b><small>Which account?</small></div><span class="badge-n">1</span></div>
 <div class="hdr">Done</div>
 <div class="swipe"><div class="row"><div class="av">I</div><div class="m"><b>Invoice CSV export</b><small>Done · 9 days ago</small></div></div><div class="acts"><span class="a-del">Delete</span><span class="a-arch">Archive</span></div></div>
 <div class="row"><div class="av">R</div><div class="m"><b>Rename customers</b><small>Done · 2 days ago</small></div></div>
-<div class="row"><div class="av g">G</div><div class="m"><b>General</b><small>Pinned</small></div></div></div></div>
+<div class="row"><div class="av g">G</div><div class="m"><b>Your helper</b><small>Pinned</small></div></div></div></div>
 <p class="muted" style="margin-top:8px;font-size:12px">A chat of an open ticket only shows Archive (Delete is not offered). Archive is the outer button, so a full swipe archives (iOS habit).</p></div>
 
 <div><p class="cap"><b>B</b> Delete asks, in plain words</p><div class="phone"><div class="p-nav"><h4>Acme</h4></div><div class="p-body"><div class="row"><div class="av">I</div><div class="m"><b>Invoice CSV export</b><small>Done · 9 days ago</small></div></div></div>
-<div class="sheet"><b>Delete this chat from your phone?</b><p class="muted" style="margin-top:6px;font-size:12px">The messages leave this phone. The ticket and its history stay in your workspace and on the dashboard. (For General: "This erases General on this phone. It cannot be undone.")</p><button class="btn danger">Delete chat</button><button class="btn outline">Cancel</button></div></div></div>
+<div class="sheet"><b>Delete this chat from your phone?</b><p class="muted" style="margin-top:6px;font-size:12px">The messages leave this phone. The ticket and its history stay in your workspace and on the dashboard. (For Your helper: "This erases Your helper on this phone. It cannot be undone.")</p><button class="btn danger">Delete chat</button><button class="btn outline">Cancel</button></div></div></div>
 
 <div><p class="cap"><b>C</b> Archive: row slides away, with Undo; "Archived" row at the top after a pull-down (like WhatsApp), also reachable at the list end</p><div class="phone"><div class="p-nav"><h4>Acme</h4></div><div class="p-body">
 <div class="hdr">Open</div><div class="row"><div class="av g">M</div><div class="m"><b>Month-end close</b><small>Which account?</small></div><span class="badge-n">1</span></div>
@@ -25,12 +25,12 @@
 </div>
 
 <h2>Settings: auto-archive</h2>
-<div class="grid g3"><div><div class="phone"><div class="p-nav"><h4>Settings</h4></div><div class="p-body"><div class="hdr">Chats</div><div class="set"><span>Archive old chats automatically</span><span class="tog on" style="padding:3px 6px 3px 4px"><i class="sw"></i></span></div><div class="set"><span>After</span><span>7 days &rsaquo;</span></div><p class="muted" style="padding:6px 14px;font-size:11.5px">Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and General never do. A new message brings a chat back.</p><div class="hdr">Read aloud</div><div class="set"><span>Speak messages</span><span>Auto &rsaquo;</span></div></div></div></div>
+<div class="grid g3"><div><div class="phone"><div class="p-nav"><h4>Settings</h4></div><div class="p-body"><div class="hdr">Chats</div><div class="set"><span>Archive old chats automatically</span><span class="tog on" style="padding:3px 6px 3px 4px"><i class="sw"></i></span></div><div class="set"><span>After</span><span>7 days &rsaquo;</span></div><p class="muted" style="padding:6px 14px;font-size:11.5px">Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and Your helper never do. A new message brings a chat back.</p><div class="hdr">Read aloud</div><div class="set"><span>Speak messages</span><span>Auto &rsaquo;</span></div></div></div></div>
 <div><div class="phone"><div class="p-nav"><h4>&lsaquo; After</h4></div><div class="p-body"><div class="set"><span>3 days</span><span></span></div><div class="set"><span>7 days</span><span style="color:var(--brand)">&#10003;</span></div><div class="set"><span>14 days</span><span></span></div><div class="set"><span>30 days</span><span></span></div></div></div></div>
 <div><table class="t"><tr><th>Chat</th><th>Archive</th><th>Delete</th><th>Back when</th></tr>
 <tr><td>Ticket chat, open</td><td>yes</td><td>not offered</td><td>new message or you move it back</td></tr>
 <tr><td>Ticket chat, Done</td><td>yes</td><td>this phone's messages only</td><td>new message (ticket reopened) or move back</td></tr>
-<tr><td>General (pinned)</td><td>by hand only, never automatic</td><td>erases it on this phone, cannot be undone</td><td>new message</td></tr>
+<tr><td>Your helper (pinned)</td><td>by hand only, never automatic</td><td>erases it on this phone, cannot be undone</td><td>new message</td></tr>
 <tr><td>Workspace (existing)</td><td>(its chats)</td><td>Remove = existing</td><td>-</td></tr></table>
 <div class="note">A delete cannot reach the workspace. A deleted Done chat comes back empty if the ticket gets a new message.</div></div></div>
 </div></body></html>

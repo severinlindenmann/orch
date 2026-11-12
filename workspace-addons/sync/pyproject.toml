@@ -31,3 +31,5 @@ line-length = 110
 "../../contracts/ticket.schema.json" = "orch_sync/schemas/ticket.schema.json"
 "../../contracts/addons/automation/ext.schema.json" = "orch_sync/schemas/addons/automation/ext.schema.json"
 "../../contracts/addons/focus/ext.schema.json" = "orch_sync/schemas/addons/focus/ext.schema.json"
+
+"../../contracts/addons/sync/ext.schema.json" = "orch_sync/schemas/addons/sync/ext.schema.json"
