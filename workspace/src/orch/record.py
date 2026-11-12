@@ -495,7 +495,12 @@ def _write_new(ws, rel, payload, *, expected=None):
     return True
 
 
+_MAX_DEPTH = 8  # no folder tree of orch's own is deeper; a planted deeper one is refused, never walked
+
+
 def _size(ws, rel):
+    if len(rel) > _MAX_DEPTH:
+        raise RecordTampered("not_dir")
     try:
         try:
             fd = _open(ws, rel, "read")
@@ -521,7 +526,8 @@ def _size(ws, rel):
 
 
 def _rmtree(ws, rel):
-    # Preflight the entire tree before deleting anything; directory links refuse.
+    # Preflight the entire tree before deleting anything; directory links refuse. Never used on pending/
+    # (spool entries are flat files: see RecordWriter._reject).
     _size(ws, rel)
     try:
         names = _entries(ws, rel)
@@ -538,6 +544,19 @@ def _rmtree(ws, rel):
         _rmtree(ws, (*rel, name))
     with _walk(ws, rel[:-1]) as directory:
         os.rmdir(rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {}))
+
+
+def _rename_aside(ws, rel):
+    """Rename one entry (of any kind, a link is not followed) to a hidden name in its own folder, atomically,
+    so that nothing reads or walks it again. No recursion, nothing is deleted."""
+    _parts(rel)
+    aside = ".quarantine_" + uuid.uuid4().hex
+    with _walk(ws, rel[:-1]) as directory:
+        kw = {"src_dir_fd": directory.fd, "dst_dir_fd": directory.fd} if _FD else {}
+        src = rel[-1] if _FD else directory.path / rel[-1]
+        dst = aside if _FD else directory.path / aside
+        with _io():
+            os.rename(src, dst, **kw)
 
 
 def _rmdir_empty(ws, rel):
@@ -877,7 +896,9 @@ def _verified(workspace, run, raw) -> _View:
         view.changed += view.rejected
         return view
     old, _skipped = _legacy_parse_prefix(pre, run)
-    rejected = int((head or {}).get("rejected") or 0)
+    # two counters, never folded or deleted (so nothing can be lost or counted twice): the head's, and the
+    # guarded one a run keeps from before its first head
+    rejected = int((head or {}).get("rejected") or 0) + humanproof.record_rejects_read(workspace, run)
     if not verified.events and not old and (verified.changed or verified.removed):
         raise RecordTampered(verified.reason)
     return _View(
@@ -1160,6 +1181,12 @@ def _pending_count(workspace, run):
         if error.reason == "missing":
             return 0
         raise
+
+
+def _pending_preflight(workspace, run):
+    """Retention's look at pending/<run>/ before it deletes anything: a flat listing only, never a size or a
+    walk of what is inside (a planted tree must not be able to stop it or exhaust it)."""
+    return _pending_count(workspace, run)
 
 
 def run_lines(workspace, run, *, lock_wait=None, drain=None, only=None) -> list[dict]:
@@ -1724,13 +1751,18 @@ class RecordWriter:
         """A spool entry orch did not prepare (planted, renamed, replayed, not valid): one alert, deleted by
         its exact path, counted in the head (`rejected`). Never committed, never left in place."""
         alert_content(self.workspace, run)
+        # Spool entries are flat regular files. Anything else is never walked and never deleted recursively:
+        # a non-directory (a link, fifo, odd file) is removed by its exact name (a link is not followed); a
+        # directory is renamed aside once (atomic), where nothing reads it.
         try:
             with _io():
-                _unlink(self.workspace, rel)  # by its exact name: a link is removed, never followed
-        except (RecordTampered, RecordUnavailable):
+                _unlink(self.workspace, rel)
+        except (RecordTampered, RecordUnavailable, RecursionError):
             try:
-                _rmtree(self.workspace, rel)  # a planted folder (a link or special file inside refuses)
-            except (RecordTampered, RecordUnavailable) as error:
+                _rename_aside(self.workspace, rel)
+            except (RecordTampered, RecordUnavailable, RecursionError) as error:
+                if isinstance(error, RecursionError):
+                    return
                 _report(self.workspace, error, "folder", run, "writer")
                 return
         head, _ = humanproof.record_head_read(self.workspace, run)
@@ -1777,6 +1809,8 @@ class RecordWriter:
         for name in sorted(names):
             check_lock()
             rel = ("pending", run, name)
+            if name.startswith(".quarantine_"):
+                continue  # renamed aside by _reject: nothing reads it
             if not _SPOOL_NAME.fullmatch(name):  # orch never names an entry so: left, alerted, not counted
                 _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
                 continue
@@ -2251,7 +2285,9 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 # run's folder can refuse; a planted file in it is skipped (delete_detail), never a veto.
                 check_lock()
                 _detail_parts(workspace, run, "retention")
-                for rel in (("pending", run), ("jobs", run), ("runs", run + ".jsonl")):
+                check_lock()
+                _pending_preflight(workspace, run)
+                for rel in (("jobs", run), ("runs", run + ".jsonl")):
                     check_lock()
                     _size(workspace, rel)
                 check_lock()

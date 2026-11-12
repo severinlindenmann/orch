@@ -49,6 +49,7 @@ CORE = {
     "_write_new",
     "_size",
     "_rmtree",
+    "_rename_aside",
     "_rmdir_empty",
     "_lock",
 }
@@ -233,6 +234,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "humanproof.record_reject_names",
     "humanproof.record_rejects_bump",
     "humanproof.record_rejects_read",
+    "name.startswith",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
@@ -1413,14 +1415,13 @@ def test_retention_rechecks_lock_identity_after_fold(store, monkeypatch):
 def test_retention_rechecks_pending_after_preflight(store, monkeypatch):
     ws, writer = store
     ended(writer)
-    original = record._size
+    original = record._pending_preflight
 
-    def size(workspace, rel):
-        if rel == ("pending", RUN):
-            writer._spool(event(id="late"), None, False)
-        return original(workspace, rel)
+    def preflight(workspace, run):
+        writer._spool(event(id="late"), None, False)
+        return original(workspace, run)
 
-    monkeypatch.setattr(record, "_size", size)
+    monkeypatch.setattr(record, "_pending_preflight", preflight)
     folds = []
     result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda r, es: folds.append(r))
     assert (result["status"], result["reason"]) == ("unavailable", "pending")

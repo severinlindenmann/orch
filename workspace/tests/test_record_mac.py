@@ -503,7 +503,7 @@ def test_protected_comes_only_from_a_checked_collector_line(store, proj_cli):
         events, _ = cli_record._events(ws, [run], None)
         models[run] = cli_record.run_model(run, events[run], root=ws)
     assert models[RUN]["protected"] is True and models[OTHER]["protected"] is False  # codex: no deny rules
-    # a forged hook line claiming `claude` in a codex run does not remove the marker; no collector line = unknown
+    # a forged hook line claiming claude in a codex run does not remove the marker; no collector line: unknown
     only_hook = [dict(example(via="hook", harness="claude"), checked=False)]
     assert cli_record.run_model("r_x", only_hook)["protected"] is False
     legacy = dict(example(via="log", harness="claude"), before_protection=True, checked=False)
@@ -564,7 +564,7 @@ def test_checked_markers_of_events_details_and_run_model(store, proj_cli, capsys
     assert code == 0 and log["checked"] is True  # a verified, non-hook sealed line
     code, lines = cli_lines(capsys, "tail", "--run", RUN)
     assert {ln["event"]["id"]: ln["event"]["checked"] for ln in lines} == {"toolu_h": False, "toolu_l": True}
-    # run_model: only a checked collector line tells the tool; a hook line and a before-protection line never do
+    # run_model: only a checked collector line tells the tool; a hook line or an old line never does
     line = dict(example(via="log", harness="claude"), checked=True)
     assert cli_record.run_model("r_x", [line])["protected"] is True
     assert cli_record.run_model("r_x", [dict(line, via="hook")])["protected"] is False
@@ -684,6 +684,65 @@ def test_content_and_unchecked_are_both_told(store, proj_cli, capsys):
     write3(writer)
     writer.append(example(run=OTHER, id="toolu_n", via="log", at=at(9)))  # the upgrade of the legacy run
     with runfile(ws, OTHER).open("a") as f:
-        f.write(json.dumps(dict(planted(via="core", run=OTHER), seq=5)) + "\n")  # a plant behind the lines
+        f.write(json.dumps(dict(planted(via="core", run=OTHER), seq=5)) + "\n")  # a plant behind
     code, lines = cli_lines(capsys, "tail", "--run", OTHER)
     assert sorted(ln["reason"] for ln in lines if ln["type"] == "unavailable") == ["content", "unchecked"]
+
+
+def test_a_deep_or_linking_planted_folder_in_pending_is_reported_never_walked_or_deleted(store):
+    ws, writer = store
+    write3(writer)
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    outside = ws / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    deep = d / ("0" * 19 + "1_" + "a" * 32 + ".json")
+    deep.mkdir()
+    cur = deep
+    for _ in range(300):  # deep enough to break any recursion over it, within the path length limit
+        cur = cur / "d"
+        cur.mkdir()
+    linking = d / ("0" * 19 + "2_" + "b" * 32 + ".json")
+    linking.mkdir()
+    (linking / "to_dir").symlink_to(outside, target_is_directory=True)
+    (linking / "to_file").symlink_to(outside / "keep.txt")
+    writer.append(example(id="toolu_4", at=at(4)))  # no crash
+    assert (outside / "keep.txt").read_text() == "keep"  # nothing outside was touched
+    assert [p.name for p in d.iterdir() if p.name.startswith("0")] == []  # renamed aside, not in the spool
+    assert record._pending_count(ws, RUN) == 0  # so retention is not blocked
+    assert read_run(ws, RUN).changed == 2  # told: counted as changed outside orch
+    assert len([p for p in d.iterdir() if p.name.startswith(".quarantine_")]) == 2
+
+
+def test_nothing_recursive_ever_touches_pending():
+    import ast
+
+    text = Path(record.__file__).read_text()
+    found = {
+        n.name: ast.get_source_segment(text, n)
+        for n in ast.walk(ast.parse(text))
+        if isinstance(n, ast.FunctionDef)
+    }
+    for name in ("_reject", "_drain", "_spool", "_pending_count", "_rename_aside"):
+        assert "_rmtree(" not in found[name] and "_size(" not in found[name], name
+
+
+def test_a_reject_before_the_first_sealed_line_survives_sealing(store, proj_cli, capsys):
+    ws, writer = store
+    d = record_dir(ws) / "pending" / RUN
+    d.mkdir(parents=True)
+    (d / ("0" * 19 + "1_" + "c" * 32 + ".json")).write_text("{}")
+    writer.drain(RUN, check_lock=lambda: None)  # no file, no head: the guarded counter keeps it
+    assert hp.record_rejects_read(ws, RUN) == 1
+    write3(writer)  # the first head is made now
+    assert hp.record_head_read(ws, RUN)[0]["rejected"] == 0
+    r = read_run(ws, RUN)
+    assert (r.changed, r.reason) == (1, "content")  # counted once, from the guarded counter
+    (d / ("0" * 19 + "2_" + "d" * 32 + ".json")).write_text("{}")
+    writer.append(example(id="toolu_4", at=at(4)))  # a later reject is counted in the head
+    assert read_run(ws, RUN).changed == 2
+    code, lines = cli_lines(capsys, "tail", "--run", RUN)
+    assert [ln["changed"] for ln in lines if ln["type"] == "unavailable"] == [2]
+    code, (counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
+    assert counts["complete"] is False
