@@ -417,3 +417,9 @@ body.mobile-mode-on .mm-phone::after{content:'';position:absolute;bottom:3px;lef
 .proof-mark.proof-ok{background:var(--success);color:#06210f;border:0}
 .proof-mark.proof-warn{background:var(--warning);color:#2a1d00;border:0}
 .proof-mark.proof-bad{background:var(--danger);color:#2b0707;border:0}
+/* Long words in titles wrap instead of breaking the layout. */
+h1,h2,h3,.ticket-title a,.result-link{overflow-wrap:break-word;word-break:normal;min-width:0}
+/* The footer line shows only when there is something to say (e.g. the connection is lost). */
+.side-foot:has(#workspace-mode:empty){display:none}
+/* Phone mode: while it is on, the banner (with Turn off) is the one control; the sidebar switch hides. */
+body.mobile-mode-on .sidebar>.mm-toggle{display:none}
