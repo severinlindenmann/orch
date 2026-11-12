@@ -46,7 +46,7 @@ for t in TICKETS:
 def event(run, tid, i, text, at, used, files=(), kind="step", agent="main", parent=None):
     kind_, name, action, source = used
     return {"v": 1, "id": f"toolu_{run}{i}", "seq": i, "run": run, "agent": agent, "parent": parent, "at": at,
-            "ticket": tid, "via": "log", "kind": kind, "text": text,
+            "ticket": tid, "via": "log", "checked": True, "kind": kind, "text": text,
             "used": {"kind": kind_, "name": name, "action": action, "source": source, "version": None},
             "files": list(files), "outcome": None}  # fmt: skip
 
