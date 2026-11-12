@@ -38,7 +38,7 @@ NAMES_NOTE = "Your own skill, connection and key names are sent too."
 LOCKS = {
     "off_by_admin": "Switched off by your admin",
     "not_connected": "Not connected to an admin, so nothing is shared",
-    None: "Not connected to an admin, so nothing is shared",  # no hub (or no answer): nothing leaves this computer
+    None: "Sharing status isn't available right now.",  # unknown or unreadable: no claim about what is shared
 }
 
 

@@ -205,9 +205,12 @@ def test_admin_lock_states(answer, state, locked, reason):
 def test_unreadable_counts_lock_sharing(answer):
     view = build_settings(SETTINGS, None, TICKETS, True)
     assert view["share_counts"]["locked"] and view["share_counts"]["options"] == []
-    # no hub / no answer reads as plain fact, not as an error
-    assert view["share_counts"]["reason"] == "Not connected to an admin, so nothing is shared"
-    assert "could not" not in view["share_counts"]["reason"]
+    # unknown / unreadable: a neutral line that claims nothing about what is shared (not "nothing is shared")
+    assert view["share_counts"]["reason"] == "Sharing status isn't available right now."
+    assert (
+        "nothing is shared" not in view["share_counts"]["reason"]
+        and "could not" not in view["share_counts"]["reason"]
+    )
     assert view["recorded"]["since"] is None
     assert options(view["keep"])["365"]["disabled"] is False
 
