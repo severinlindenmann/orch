@@ -539,8 +539,8 @@ def check_arguments(root, arguments, kind=None, files=()) -> None:
             continue
         if not os.path.isabs(arg) or "\0" in arg or "\\" in arg:
             raise Refused(
-                "Refused: an argument with a path must be a full path on its own, "
-                "not inside an option and not relative."
+                "Refused: a value with a slash or a colon, like user:pass or a path, is only allowed "
+                "as the full path of a file, on its own: not inside an option and not relative."
             )
         real = os.path.realpath(arg)
         if real != os.path.normpath(arg):

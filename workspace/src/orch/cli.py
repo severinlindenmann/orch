@@ -1233,7 +1233,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
 
     def refuse(e: Refused) -> int:
         # a confirmation that could not be asked (no terminal) is a question: no "Refused:" in front
-        print(f"{e}" if getattr(e, "confirm", False) else f"Refused: {e}", file=sys.stderr)
+        plain = getattr(e, "confirm", False) or str(e).startswith("Refused:")  # many messages carry their own
+        print(f"{e}" if plain else f"Refused: {e}", file=sys.stderr)
         if want_json:
             print(json.dumps({"error": str(e), **getattr(e, "extra", {})}, ensure_ascii=False))
         return 2
