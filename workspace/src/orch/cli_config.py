@@ -486,8 +486,9 @@ def private_lines(root: Path) -> list[str]:
 
 
 def _private(args, root: Path) -> None:
-    """`orch private [status|move]`: personal files that the team repo already tracks. `move` is a person's
-    action (git rm --cached; nothing is committed, the files stay)."""
+    """`orch private [status|move]`: orch files the team repo already tracks that are not shared with the
+    team (shared: .orch/.gitignore, workspace.toml). `move` is a person's action (git rm --cached on them;
+    nothing is committed, the files stay)."""
     from orch import harness
 
     if args.state == "allow":
@@ -534,7 +535,7 @@ def _private(args, root: Path) -> None:
         "agent_command_ignored": bool(config.pending_agents(root)),
         "lines": private_lines(root),
     }
-    _out(args, data, "\n".join(data["lines"]) or "Nothing personal is committed in the team repo.")
+    _out(args, data, "\n".join(data["lines"]) or "No private orch files are committed in the team repo.")
 
 
 def dispatch(args, root: Path) -> bool:

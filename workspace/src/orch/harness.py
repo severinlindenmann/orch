@@ -456,45 +456,61 @@ PRIVATE_FILES = (
     (".orch/addons.json", "addons.json"),
 )
 
+# The .orch files a team repository may track (lowercase). Every other tracked file under .orch is private.
+TEAM_FILES = (
+    ".orch/.gitignore",  # a committed one is the team's: protect_local reads it and then uses .git/info/exclude
+    ".orch/workspace.toml",  # team mode: the workspace settings the team shares
+)
+
+
+def is_team_file(rel: str) -> bool:
+    """A project-relative path that a team repo may track (not something `orch private move` takes out)."""
+    return rel.replace("\\", "/").lower() in TEAM_FILES
+
 
 def tracked_private(root: Path) -> list[str]:
     return _tracked_private(root) or []
 
 
 def _tracked_private(root: Path, icase: bool = True) -> list[str] | None:
-    """The personal orch files that git already tracks in this folder's repo (project-relative, sorted, at most
-    2000). [] outside a git repo or when git cannot say (the warning is advice; the trust check is `_tracked`)."""
+    """The orch files that git already tracks in this folder's repo and that are not shared with the team
+    (shared: TEAM_FILES, .orch/.gitignore and workspace.toml): the personal files and any other file under .orch
+    (project-relative, sorted, at most 2000). [] outside a git repo; None when git cannot say (the warning is
+    advice; the trust check is `_tracked`)."""
     try:
         if not _in_git_repo(root):
             return []
     except Refused:
         return None
     rc, raw, _ = _safegit().run_bytes(
-        [
-            "ls-files",
-            "-z",
-            "--",
-            *[f":({'icase,' if icase else ''}literal){rel}" for rel, _ in PRIVATE_FILES],
-        ],
+        ["ls-files", "-z", "--", f":({'icase,' if icase else ''}literal).orch"],
         root,
         20,
     )
     if rc != 0:
         return None
     names = sorted({os.fsdecode(n) for n in raw.split(b"\0") if n})
-    return names[:2000]
+    return [n for n in names if not is_team_file(n)][:2000]
+
+
+def private_tracked(root: Path) -> list[str] | None:
+    """Public for add-ons: the tracked orch files not shared with the team, or None when git cannot say."""
+    return _tracked_private(root)
 
 
 def private_summary(root: Path) -> dict:
-    """{"files": [...], "counts": {"tickets": 3, "config.toml": 1}, "config_tracked": bool}: what the team repo holds."""
+    """{"files": [...], "counts": {"tickets": 3, "config.toml": 1, "other": 2}, "config_tracked": bool}: the orch
+    files the team repo holds that are not shared with the team ("other" counts the private files outside the four
+    personal paths; .orch/.gitignore and workspace.toml are the team's and not counted)."""
     files = tracked_private(root)
     counts: dict[str, int] = {}
     for f in files:
         low = f.lower()
-        for rel, label in PRIVATE_FILES:
-            if low == rel or low.startswith(rel + "/"):
-                counts[label] = counts.get(label, 0) + 1
-                break
+        label = next(
+            (lb for rel, lb in PRIVATE_FILES if low == rel or low.startswith(rel + "/")),
+            "other",
+        )
+        counts[label] = counts.get(label, 0) + 1
     return {"files": files, "counts": counts, "config_tracked": _tracked(root, ".orch/config.toml")}
 
 
@@ -502,13 +518,19 @@ def private_words(summary: dict) -> str:
     """One plain line: what is committed."""
     parts = []
     for label, n in summary["counts"].items():
-        parts.append(f"{n} ticket file{'s' if n != 1 else ''}" if label == "tickets" else label)
+        if label == "tickets":
+            parts.append(f"{n} ticket file{'s' if n != 1 else ''}")
+        elif label == "other":
+            parts.append(f"{n} other orch file{'s' if n != 1 else ''}")
+        else:
+            parts.append(label)
     return "Committed in your team repo: " + ", ".join(parts) + "."
 
 
 def move_to_private(root: Path, by: str | None = None) -> list[str]:
-    """A person's click: `git rm --cached` for the tracked personal files. The files stay on disk; nothing is
-    committed (the removal is the person's to commit); older commits keep their copies. Returns the paths.
+    """A person's click: `git rm --cached` for the orch files the team repo tracks that are not shared with the
+    team (shared: .orch/.gitignore, workspace.toml; those stay tracked). The files stay on disk; nothing is committed (the removal is the person's to
+    commit); older commits keep their copies. Returns the paths.
     An agent (`by` = agent:...) is refused here too, behind the CLI's proof check."""
     from orch import config
 

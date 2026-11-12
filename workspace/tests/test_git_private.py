@@ -42,6 +42,16 @@ def make_files(proj, run):
     (d / "config.toml").write_text('[workspace]\ncode = "DM1"\n')
 
 
+def _other_private(proj):
+    """Tracked .orch files outside the four personal paths and not team-owned (orch init writes some)."""
+    personal = tuple(rel for rel, _ in harness.PRIVATE_FILES)
+    tracked = git(proj, "ls-files", "--", ".orch").stdout.split()
+    return [
+        f for f in tracked
+        if not any(f == r or f.startswith(r + "/") for r in personal) and not harness.is_team_file(f)
+    ]
+
+
 # ---- 1. ignored by default
 
 
@@ -95,10 +105,12 @@ def test_warning_lists_tracked_files_and_status_says_the_next_step(proj, run):
     git(proj, "add", "-f", ".orch")
     git(proj, "commit", "-qm", "oops")
     s = harness.private_summary(proj)
-    assert s["counts"] == {"tickets": 2, "ticket-counter.json": 1, "config.toml": 1, "addons.json": 1}
+    other = len(_other_private(proj))
+    want = {"tickets": 2, "ticket-counter.json": 1, "config.toml": 1, "addons.json": 1}
+    assert s["counts"] == (want | {"other": other} if other else want)
     code, out, _ = run("private", "--json")
     d = json.loads(out)
-    assert code == 0 and d["count"] == 5 and d["committed"]["tickets"] == 2
+    assert code == 0 and d["count"] == 5 + other and d["committed"]["tickets"] == 2
     assert "Move to private" in "\n".join(d["lines"])
     code, out, _ = run("status")
     assert "Committed in your team repo" in out and "Move to private" in out
@@ -110,8 +122,9 @@ def test_move_to_private_untracks_and_keeps_files_and_commits_nothing(proj, run)
     git(proj, "add", "-f", ".orch")
     git(proj, "commit", "-qm", "oops")
     head = git(proj, "rev-parse", "HEAD").stdout
+    n = 5 + len(_other_private(proj))
     code, out, _ = run("private", "move")
-    assert code == 0 and "Moved 5 files" in out
+    assert code == 0 and f"Moved {n} files" in out
     assert harness.tracked_private(proj) == []
     assert (proj / ".orch" / "config.toml").is_file() and (
         proj / ".orch" / "tickets" / "DM1-1.json"
@@ -126,11 +139,47 @@ def test_move_to_private_untracks_and_keeps_files_and_commits_nothing(proj, run)
     )  # now ignored
 
 
+def test_move_untracks_private_orch_files_and_keeps_team_files(proj, run):
+    """#591: Move untracks every tracked .orch file that is not team-owned (TEAM_FILES); .orch/.gitignore and
+    .orch/workspace.toml stay tracked. Files stay on disk, nothing is committed, team files are untouched."""
+    repo(proj)
+    make_files(proj, run)
+    harness.protect_local(proj)
+    (proj / ".orch" / "workspace.toml").write_text("[team]\n")
+    (proj / ".orch" / "unknown").write_text("x")
+    (proj / "team.txt").write_text("team")
+    git(proj, "add", "-f", ".orch", "team.txt")
+    git(proj, "commit", "-qm", "oops")
+    tracked = [t for t in git(proj, "ls-files", "-z", "--", ".orch").stdout.split("\0") if t]
+    team = {".orch/.gitignore", ".orch/workspace.toml"}
+    assert team <= set(tracked) and ".orch/unknown" in tracked
+    private = sorted(set(tracked) - team)
+    assert harness.private_tracked(proj) == private
+    s = harness.private_summary(proj)
+    other = len(_other_private(proj))  # .orch/unknown plus what orch init writes
+    assert ".orch/unknown" in _other_private(proj)
+    assert s["files"] == private and s["counts"]["other"] == other
+    assert f"{other} other orch file{'s' if other != 1 else ''}" in harness.private_words(s)
+    head = git(proj, "rev-parse", "HEAD").stdout
+    code, out, _ = run("private", "move")
+    assert code == 0 and f"Moved {len(private)} files" in out
+    left = set(git(proj, "ls-files", "-z", "--", ".orch").stdout.split("\0")) - {""}
+    assert left == team
+    for rel in tracked:
+        assert (proj / rel).is_file(), rel
+    assert git(proj, "rev-parse", "HEAD").stdout == head
+    assert git(proj, "ls-files", "--", "team.txt").stdout.strip() == "team.txt"
+    assert harness.tracked_private(proj) == []
+    code, out, _ = run("private", "move")
+    assert code == 0 and "Nothing to move" in out
+
+
 def test_move_runs_no_clean_filter_an_agent_planted(proj, run, tmp_path):
     """HIGH finding: `git rm --cached` re-hashes stat-dirty files, which runs the repo's clean filter. The
     person's signed Move click must never run a program the repository's config names."""
     repo(proj)
     make_files(proj, run)
+    (proj / ".orch" / "unknown").write_text("x")
     canary = tmp_path / "CANARY"
     prog = tmp_path / "clean.sh"
     prog.write_text(f"#!/bin/sh\ntouch {canary}\ncat\n")
@@ -138,12 +187,14 @@ def test_move_runs_no_clean_filter_an_agent_planted(proj, run, tmp_path):
     git(proj, "add", "-f", ".orch")
     git(proj, "commit", "-qm", "oops")
     git(proj, "config", "filter.x.clean", str(prog))
-    (proj / ".git" / "info" / "attributes").write_text(".orch/** filter=x\n")
+    (proj / ".git" / "info" / "attributes").write_text(".orch/** filter=x\n.orch/unknown filter=x\n")
     os.utime(proj / ".orch" / "tickets" / "DM1-1.json", (1, 1))  # stat-dirty: git must re-hash it
+    os.utime(proj / ".orch" / "unknown", (1, 1))
     code, out, err = run("private", "move")
     assert code == 0, out + err
     assert not canary.exists()
     assert harness.tracked_private(proj) == []
+    assert git(proj, "ls-files", "--", ".orch/unknown").stdout == ""
 
 
 def test_move_is_for_a_person_not_an_agent(proj, run, monkeypatch):

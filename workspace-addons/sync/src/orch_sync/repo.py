@@ -293,8 +293,16 @@ def state(root):
         return 'ready' if safe(root, '.git/orch-state').is_file() else 'needs-adoption'
     # Read-only discovery from .orch before init; no command ever changes the outer repo.
     if any((p / '.git').exists() for p in (Path(root), *Path(root).parents)):
-        tracked = git(root, 'ls-files', '-z', '--', '.').stdout
-        return 'needs-move' if tracked else 'new'
+        # Paths come relative to .orch; the team's own files (core's TEAM_FILES) do not count. Fails closed:
+        # when git cannot tell, it stays needs-move.
+        from orch import harness
+
+        try:
+            tracked = [n for n in git(root, 'ls-files', '-z', '--', '.').stdout.split(b'\0') if n]
+        except Refused:
+            return 'needs-move'
+        private = [n for n in tracked if not harness.is_team_file('.orch/' + os.fsdecode(n))]
+        return 'needs-move' if private else 'new'
     return 'new'
 
 
