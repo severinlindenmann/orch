@@ -787,9 +787,11 @@ def _cutover_upgrade(root: Path) -> None:
     install: no run was ever sealed); if any head exists the list stays missing (nothing is legacy). No file
     time is used anywhere. A present marker (valid or not) means done. Never raises."""
     try:
+        path = _upgrade_path(root)
+        if path.exists() or path.is_symlink():  # cheap: done already, keys.lock is not taken
+            return
         d = key_dir(root, create=False)
         with _key_lock(d):
-            path = _upgrade_path(root)
             if path.exists() or path.is_symlink():
                 return
             now_ns = time.time_ns()
@@ -1021,11 +1023,12 @@ def _cutover_reseal(root: Path, listed) -> None:
 
 
 def _upgrade_reseal(root: Path, body: dict | None) -> None:
-    """After a key rotation: the same marker (time, upgrade flag, old names), MACed with the NEW record key,
-    when the old marker verified under the old key. One that did not verify is left as it is (present: the
-    upgrade never runs again)."""
+    """After a key rotation: the same marker (time, upgrade flag), MACed with the NEW record key, when the old
+    marker verified under the old key. Its old names are dropped: their entries were MACed with the old key
+    and can no longer verify. One that did not verify is left as it is (present: the upgrade never runs
+    again)."""
     if body is not None:
-        _upgrade_mark(root, 0, body["at"], real=body["upgrade"], old=body["old"])
+        _upgrade_mark(root, 0, body["at"], real=body["upgrade"], old={})
 
 
 def record_cutover_ensure(root: Path) -> None:

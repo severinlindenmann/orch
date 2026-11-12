@@ -413,3 +413,32 @@ def test_an_unlistable_run_folder_does_not_drop_the_other_runs_old_names(tmp_pat
     finally:
         bad.chmod(0o700)
     assert hp.record_upgrade_old(ws, "r_other001") == {_old_name(1)}
+
+
+def test_newer_proven_entries_never_lift_the_floor_past_a_listed_old_one(tmp_path):
+    from orch import record_auth as ra
+
+    ws = tmp_path / "up"
+    ws.mkdir()
+    _pre_upgrade_key(ws)
+    rec = hp.record_key(ws)
+    pend = record_dir(ws) / "pending" / RUN
+    pend.mkdir(parents=True)
+
+    def put(name, eid):
+        entry = {"event": example(id=eid, at="2026-11-16T09:00:04Z"), "payload": None, "default_id": False}
+        entry["sm"] = ra.spool_mac(rec[2], rec[0], RUN, name, dict(entry))
+        (pend / name).write_text(json.dumps(entry))
+
+    for n in range(130):
+        put(_old_name(n + 1), f"toolu_o{n}")
+    assert hp.ensure_record_key(ws) and len(hp.record_upgrade_old(ws, RUN)) == 130
+    t = time.time_ns()
+    for n in range(513):  # more than the head keeps: the oldest proven name leaves the drained list
+        put(ra.spool_name(rec[2], rec[0], RUN, t + n), f"toolu_p{n}")
+    w = RecordWriter(ws, hider=hider.Hider({"k": "KEYVALUE-abc123XYZ-secret"}))
+    for k in range(4):
+        w.append(example(id=f"toolu_n{k}", at="2026-11-16T09:00:05Z"))
+    got = {e["id"] for e in read_run(ws, RUN).unwrap()}
+    assert all(f"toolu_o{n}" in got for n in range(130)) and all(f"toolu_p{n}" in got for n in range(513))
+    assert list(pend.iterdir()) == []

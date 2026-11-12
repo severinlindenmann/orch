@@ -151,13 +151,13 @@ def _write_record(root, ev):
         # anything else that is not a clean read counts as the cap reached (fail closed)
         # what orch's own chain head says was written counts too: cutting or deleting the file cannot reset it
         head, _ = hp.record_head_read(root, line["run"])
-        seen = max(len(own), int(head["seq"]) if head else 0)
+        seen = max(len(own), _head_lines(head))
         if (read.status != "ok" and not fresh and not junk) or seen >= OUTSIDE_DAY_CAP:
             raise Refused(_TOO_MANY)
 
         def admit(lines, head):  # checked again under the run lock, where the line is written: atomic
             own = [e for e in lines if record.is_sealed(e)]
-            if max(len(own), int(head["seq"]) if head else 0) >= OUTSIDE_DAY_CAP:
+            if max(len(own), _head_lines(head)) >= OUTSIDE_DAY_CAP:
                 raise Refused(_TOO_MANY)
             return True
 
@@ -170,6 +170,13 @@ def _write_record(root, ev):
 
 
 _TOO_MANY = "Refused: too many key uses outside a run today."
+
+
+def _head_lines(head):
+    """Lines orch's chain head says it sealed: its seq without the lines it found there before (legacy)."""
+    if not head:
+        return 0
+    return max(0, int(head["seq"]) - int(head.get("legacy_lines") or 0))
 
 
 def record_writer(root):

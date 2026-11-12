@@ -606,8 +606,8 @@ only a legacy run reads a detail with no hash.
   is read only when its name is in the marker's `old` set for that run (a real upgrade, MACed) and not already drained;
   its `sm` (which binds the name) must then verify as for any entry; at most 50 such entries per drain, the rest on the
   next call. Every other unproven name is refused unread; a fresh key (`upgrade: false`) accepts none. Files planted before the very first key exists are adopted as legacy (listed)
-  and shown as not checked. The drain lists at most 5000 names per call (more: alerted once, reason `content`),
-  processes names that carry their proof first, in sorted order, then refuses at most 50 well-shaped names without
+  and shown as not checked. The drain lists at most 50000 names per call (more: alerted once, reason `content`),
+  checks every listed name's proof (by name, unread) before anything is cut, processes names that carry their proof first, in sorted order, then refuses at most 50 well-shaped names without
   their proof per call by their exact name, never reading them (invalid names never consume the valid-name work);
   names that are not spool-shaped are alerted (`swapped`). Retention's spool check uses the same name check first.
   Record and detail sizes count at most 10000 spool/quarantine entries.

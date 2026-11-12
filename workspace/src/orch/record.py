@@ -129,6 +129,7 @@ class ReadResult(Generic[T]):
     changed: int = 0  # lines of the run that are not genuine (planted, edited, replayed, no auth)
     removed: int = 0  # genuine lines that are gone
     unchecked: int = 0  # lines made before orch checked them (never counted as orch-checked)
+    rejected: int = 0  # of `changed`: spool entries refused (they never keep a finished run from retention)
     legacy: bool = False  # the whole run is such (no sealed line, no chain head)
     pending: int = 0
     alert: dict | None = None
@@ -407,6 +408,20 @@ def _read_bytes(fd):
         while chunk := os.read(fd, 65536):
             chunks.append(chunk)
         return b"".join(chunks)
+
+
+def _read_capped(fd, limit):
+    """The bytes of an open regular file, or None when it is larger than `limit`: the size is taken from the
+    SAME fd, before anything is read, and no more than limit + 1 bytes are ever read."""
+    with _io():
+        if os.fstat(fd).st_size > limit:
+            return None
+        os.lseek(fd, 0, os.SEEK_SET)
+        chunks, total = [], 0
+        while total <= limit and (chunk := os.read(fd, min(65536, limit + 1 - total))):
+            chunks.append(chunk)
+            total += len(chunk)
+        return None if total > limit else b"".join(chunks)
 
 
 def _write(fd, payload):
@@ -1001,10 +1016,11 @@ def _legacy_view(raw, run):
     )
 
 
+_DETAIL_MAX = 1024**2 + 4096  # the most a detail file orch writes can hold (the writer's cap and a margin)
 _SPOOL_MAX_BYTES = 3 * 1024**2  # one line (8 KB), its detail (1 MB) and the escaping of both
 _SPOOL_NAME = re.compile(r"[0-9]{20}_[0-9a-f]{32}\.json")
 _OLD_BATCH = 50  # entries of the format before name proofs read per drain
-_SPOOL_LIST_MAX = 5000  # names looked at per drain: a flood is told once and cannot make a write endless
+_SPOOL_LIST_MAX = 50000  # names checked per drain (by name, unread): a flood is told once and cut
 _REJECT_BATCH = (
     50  # planted entries refused per drain: the rest on the next one (a flood cannot stall a write)
 )
@@ -1339,6 +1355,7 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
             "ok",
             [*view.before, *_dedupe(view.events, run)],
             changed=view.changed,
+            rejected=view.rejected,
             removed=view.removed,
             unchecked=view.unchecked,
             legacy=view.legacy,
@@ -1373,10 +1390,16 @@ def _read_json(ws, rel):
     return _json_of(_read_file(ws, rel))
 
 
-def _read_file(ws, rel):
+def _read_file(ws, rel, limit=None):
+    """The file's bytes; with `limit`, a file larger than it is refused (RecordTampered "content") unread."""
     fd = _open(ws, rel, "read")
     try:
-        return _read_bytes(fd)
+        if limit is None:
+            return _read_bytes(fd)
+        raw = _read_capped(fd, limit)
+        if raw is None:
+            raise RecordTampered("content")
+        return raw
     finally:
         _close(fd)
 
@@ -1411,7 +1434,7 @@ def read_detail(workspace, run, file_id, *, line_id, ticket=None):
             want = lines[-1].get("detail_hash")
             if not isinstance(want, str):
                 raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
-        raw = _read_file(workspace, ("detail", run, file_id + ".json"))
+        raw = _read_file(workspace, ("detail", run, file_id + ".json"), _DETAIL_MAX)
         if want is not None and record_auth.detail_hash(raw) != want:
             raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
         value = _json_of(raw)
@@ -1801,12 +1824,17 @@ class RecordWriter:
         rec = humanproof.record_key(self.workspace)
         if rec is None:
             raise RecordOff(_OFF_KEY)
-        name = record_auth.spool_name(rec[2], rec[0], event["run"], time.time_ns())
-        rel = ("pending", event["run"], name)
-        entry = dict(event=event, payload=payload.decode() if payload else None, default_id=default_id)
-        entry["sm"] = record_auth.spool_mac(rec[2], rec[0], event["run"], name, dict(entry))
+        base = dict(event=event, payload=payload.decode() if payload else None, default_id=default_id)
+        start = time.time_ns()
         try:
-            fd = _open(self.workspace, rel, "create_excl", create_dirs=True)
+            for step in range(6):  # a name taken (same time) is retried with the next nanoseconds
+                name = record_auth.spool_name(rec[2], rec[0], event["run"], start + step)
+                rel = ("pending", event["run"], name)
+                entry = dict(base)
+                entry["sm"] = record_auth.spool_mac(rec[2], rec[0], event["run"], name, dict(base))
+                fd = _open(self.workspace, rel, "create_excl", create_dirs=True)
+                if fd is not None:
+                    break
             if fd is None:
                 raise RecordUnavailable("io")
             try:
@@ -1839,7 +1867,8 @@ class RecordWriter:
         if len(names) > _SPOOL_LIST_MAX:
             _alert(self.workspace, target="folder", run=run, reason="content", seen_by="writer")
         names = names[:_SPOOL_LIST_MAX]
-        # a name proves itself (record_auth.spool_name): only proven names are ever read, and first
+        # a name proves itself (record_auth.spool_name, no read): every listed name is checked BEFORE any cut,
+        # so planted names cannot crowd a genuine entry out; only proven names are ever read, and first
         valid = sorted(n for n in names if record_auth.spool_name_ok(rec[2], rec[0], run, n))
         # entries made before the upgrade (no name proof yet): read only when older than the MACed marker
         head, _ = humanproof.record_head_read(self.workspace, run)
@@ -1876,10 +1905,8 @@ class RecordWriter:
             check_lock()
             rel = ("pending", run, name)
             try:
-                if _file_size(self.workspace, rel) > _SPOOL_MAX_BYTES:
-                    refused += refuse(rel)  # never more than a line and its detail
-                    continue
-                pending = _read_json(self.workspace, rel)
+                # never more than a line and its detail: an oversized entry is refused unread (one fd)
+                pending = _json_of(_read_file(self.workspace, rel, _SPOOL_MAX_BYTES))
             except (RecordTampered, RecordUnavailable) as error:
                 _report(self.workspace, error, "folder", run, "writer")
                 if isinstance(error, RecordTampered):
@@ -1960,14 +1987,11 @@ def _reject_bad_spool(workspace, run, check_lock):
             _reject_entry(workspace, run, rel)
             continue
         try:
-            if _file_size(workspace, rel) > _SPOOL_MAX_BYTES:
-                bad = True
-            else:
-                pending = _read_json(workspace, rel)
-                entry = {k: v for k, v in pending.items() if k != "sm"} if isinstance(pending, dict) else None
-                bad = entry is None or not record_auth.drain_ok(
-                    rec[2], rec[0], run, name, entry, pending.get("sm"), drained, floor
-                )
+            pending = _json_of(_read_file(workspace, rel, _SPOOL_MAX_BYTES))  # oversized: refused unread
+            entry = {k: v for k, v in pending.items() if k != "sm"} if isinstance(pending, dict) else None
+            bad = entry is None or not record_auth.drain_ok(
+                rec[2], rec[0], run, name, entry, pending.get("sm"), drained, floor
+            )
         except RecordTampered:
             bad = True
         except RecordUnavailable:
@@ -2033,6 +2057,9 @@ def _sealed_tail(workspace, run):
     return verified.last_seq, verified.last_mac
 
 
+_DRAINED_MAX = 2048  # names a head keeps (besides its time horizon and the last 512)
+
+
 def _move_head(workspace, run, head, seq, mac, *, drained=None, rejected=0, legacy=None, carry=None):
     """Write the chain head after the line (a failure is reported, never raised: the line is stored and
     verifies without it; the next commit moves the head)."""
@@ -2049,10 +2076,20 @@ def _move_head(workspace, run, head, seq, mac, *, drained=None, rejected=0, lega
     if drained:
         names = [*body["drained"], drained]
         horizon = f"{time.time_ns() - 24 * 3600 * 10**9:020d}"
-        keep = [n for n in names if n[:20] >= horizon][-512:]
+        keep = [n for n in names if n[:20] >= horizon][-512:][-_DRAINED_MAX:]
         dropped = [n for n in names if n not in keep]
         if dropped:
-            body["drained_floor"] = max(body["drained_floor"], f"{int(max(dropped)[:20]) + 1:020d}")
+            floor = f"{int(max(dropped)[:20]) + 1:020d}"
+            # never past a name the upgrade marker lists that is still waiting: it must stay drainable
+            waiting = humanproof.record_upgrade_old(workspace, run) - set(names)
+            if waiting:
+                try:  # only those still in the spool (a drained one that left the list is not waiting)
+                    waiting &= set(_entries(workspace, ("pending", run)))
+                except (RecordTampered, RecordUnavailable):
+                    pass
+            if waiting:
+                floor = min(floor, f"{int(min(waiting)[:20]):020d}")
+            body["drained_floor"] = max(body["drained_floor"], floor)
         body["drained"] = keep
     if not humanproof.record_head_try_write(workspace, run, body):
         alert_content(workspace, run)
@@ -2450,9 +2487,10 @@ def _retention_end(workspace, run, read, now):
 
 
 def _counted_mb(workspace, run, read, counted):
-    """What of a run counts toward max_mb: only bytes a verified line vouches for (the run file of a verified
-    run and the detail files its sealed lines point at). Anything else under detail/<run> or jobs/<run> can be
-    planted: it is removed with the run, never counted (it must not push genuine runs out early)."""
+    """What of a run counts toward max_mb: only bytes a verified line vouches for (the run file's verified
+    lines and the detail files its sealed lines point at, each at most _DETAIL_MAX). Anything else under
+    detail/<run> or jobs/<run> can be planted: it is removed with the run, never counted (it must not push
+    genuine runs out early)."""
     if not counted:
         return dict(detail_mb=0, file_mb=0)
     names = {
@@ -2465,12 +2503,14 @@ def _counted_mb(workspace, run, read, counted):
         parts = point.split("/")
         if len(parts) != 3 or parts[:2] != ["detail", run] or not re.fullmatch(_PART, parts[2]):
             continue
-        try:
-            detail += _file_size(workspace, tuple(parts))
+        try:  # an inflated file counts no more than the most orch ever writes there
+            detail += min(_file_size(workspace, tuple(parts)), _DETAIL_MAX)
         except RecordUnavailable as error:
             if error.reason != "missing":
                 raise
-    return dict(detail_mb=detail / 1024**2, file_mb=_size(workspace, ("runs", run + ".jsonl")) / 1024**2)
+    # the run file counts only its verified lines: junk appended to it is never counted
+    lines = sum(len(_json(e)) + 1 for e in read.value if is_sealed(e))
+    return dict(detail_mb=detail / 1024**2, file_mb=lines / 1024**2)
 
 
 def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list[dict]], Any]):
@@ -2480,6 +2520,9 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
     )
 
     def failed(read):
+        if read.status == "ok":  # read, but changed outside orch: kept and reported
+            reason = read.reason if read.reason in ("content", "removed", "old_key") else "content"
+            read = ReadResult("tampered", reason=reason, message=_MESSAGES[reason])
         if result["status"] == "ok":
             result.update(status=read.status, reason=read.reason, message=read.message, alert=read.alert)
 
@@ -2495,7 +2538,9 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
         except (RecordTampered, RecordUnavailable) as error:
             failed(_report(workspace, error, "folder", run, "retention"))
             continue
-        if end is None:
+        if (
+            end is None or read.changed - read.rejected > 0 or read.removed
+        ):  # changed outside orch: never pruned, stays reported
             failed(read)
             continue
         try:
@@ -2517,7 +2562,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 _reject_bad_spool(workspace, run, check_lock)  # only entries orch made can block a run
                 read = read_run(workspace, run, seen_by="retention")
                 end = _retention_end(workspace, run, read, now)
-                if end is None:
+                if end is None or read.changed - read.rejected > 0 or read.removed:
                     failed(read)
                     continue
                 if read.pending:

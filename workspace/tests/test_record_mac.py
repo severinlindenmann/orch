@@ -1211,7 +1211,8 @@ def test_j_without_the_autouse_key_the_writer_is_off_and_readers_are_unverified(
     with pytest.raises(record.RecordOff):
         w.append(example(id="toolu_1"))
     assert not (record_dir(ws) / "runs").exists()  # nothing written
-    assert read_run(ws, RUN).status in ("tampered", "unavailable")
+    r = read_run(ws, RUN)
+    assert (r.status, r.reason) == ("tampered", "unverified")  # no local id: the head state is unknown
 
 
 def test_foreign_key_lines_are_old_history_only_for_the_exact_recorded_old_kid(store):
@@ -1310,3 +1311,127 @@ def test_delta_low8_a_run_through_two_resets_keeps_its_first_key_lines_as_histor
     r = read_run(ws, RUN)
     assert r.status == "ok" and r.reason == "old_key" and [e["id"] for e in r.unwrap()] == ["toolu_c"]
     assert r.changed == 4  # 3 lines of the first key and 1 of the second: all history, none planted
+
+
+_DONE = dict(kind="run.state", via="core", used=None, data={"state": "done"})
+
+
+def _busy(ws, monkeypatch):
+    lock = record_dir(ws) / "runs" / f"{RUN}.lock"
+    lock.touch()
+    monkeypatch.setattr(record, "_LOCK_WAIT", 0.01)
+    return lock
+
+
+def test_junk_appended_to_a_run_or_an_inflated_detail_never_push_a_genuine_run_out(store):
+    ws, writer = store
+    junk, inflated = "r_junk0001", OTHER
+    writer.append(example(run=junk, id="r_end", at=at(1), **_DONE))
+    stored = writer.append(
+        example(run=inflated, id="toolu_d", at=at(2)), detail={"input": "a", "output": "b"}
+    )
+    writer.append(example(run=inflated, id="r_end", at=at(3), **_DONE))
+    writer.append(example(run=RUN, id="r_end", at=at(5), **_DONE))
+    with runfile(ws, junk).open("r+b") as f:
+        f.truncate(runfile(ws, junk).stat().st_size + 300 * 1024**2)  # sparse junk
+    with (record_dir(ws) / stored["detail"]).open("r+b") as f:
+        f.truncate(300 * 1024**2)
+    res = record.apply_retention(ws, "2026-11-17T00:00:00Z", 90, 1, lambda r, es: None)
+    assert res["delete_run"] == [] and runfile(ws).exists()
+
+
+def test_a_changed_run_is_never_pruned_by_retention(store):
+    ws, writer = store
+    writer.append(example(run=OTHER, id="r_end", at=at(1), **_DONE))
+    with runfile(ws, OTHER).open("a") as f:
+        f.write(json.dumps(planted(run=OTHER)) + "\n")
+    assert read_run(ws, OTHER).changed > 0
+    res = record.apply_retention(ws, "2027-12-01T00:00:00Z", 90, 2048, lambda r, es: None)
+    assert OTHER not in res["delete_run"] and runfile(ws, OTHER).exists()
+    assert res["status"] != "ok"
+
+
+def test_legacy_lines_of_the_outside_run_do_not_count_toward_its_day_cap(store, monkeypatch):
+    from orch import secretrun
+    from orch.errors import Refused
+
+    ws, writer = store
+    run = "r_outside_20261116"
+    runfile(ws, run).parent.mkdir(parents=True, exist_ok=True)
+    runfile(ws, run).write_text(
+        "".join(
+            json.dumps(dict(example(run=run, id=f"toolu_l{n}", at=at(1)), seq=n)) + "\n" for n in range(1, 11)
+        )
+    )
+    _relist(ws)
+    monkeypatch.setattr(secretrun, "_run_ids", lambda: None)
+    monkeypatch.setattr(secretrun, "require_run", lambda *a: None)
+    count = iter(range(100))
+    monkeypatch.setattr(secretrun, "_record_event", lambda root, ev: example(run=run, id=f"u{next(count)}"))
+    monkeypatch.setattr(secretrun, "OUTSIDE_DAY_CAP", 3)  # fewer than the 10 legacy lines
+    monkeypatch.setattr(secretrun, "record_writer", lambda root: writer)
+    for _ in range(3):
+        secretrun._write_record(ws, {})
+    assert hp.record_head_read(ws, run)[0]["legacy_lines"] == 10
+    with pytest.raises(Refused, match="too many key uses"):
+        secretrun._write_record(ws, {})
+
+
+def test_thousands_of_odd_names_never_cut_a_genuine_entry_from_the_listing(store, monkeypatch):
+    ws, writer = store
+    write3(writer)
+    lock = _busy(ws, monkeypatch)
+    writer.append(example(id="toolu_g", at=at(8)))  # spooled
+    lock.unlink()
+    d = _spool_dir(ws)
+    for n in range(6000):  # sort before the genuine one
+        (d / f".a{n:05d}").write_bytes(b"")
+    writer.append(example(id="toolu_4", at=at(4)))
+    assert "toolu_g" in ids(ws)
+
+
+def _count_reads(monkeypatch):
+    read, got = os.read, [0]
+
+    def counted(fd, n):
+        data = read(fd, n)
+        got[0] += len(data)
+        return data
+
+    monkeypatch.setattr(os, "read", counted)
+    return got
+
+
+def test_an_oversized_detail_is_refused_unread(store, monkeypatch):
+    ws, writer = store
+    stored = writer.append(example(id="toolu_d"), detail={"input": "a", "output": "b"})
+    with (record_dir(ws) / stored["detail"]).open("r+b") as f:
+        f.truncate(50 * 1024**2)
+    got = _count_reads(monkeypatch)
+    file_id = stored["detail"].split("/")[-1].removesuffix(".json")
+    r = record.read_detail(ws, RUN, file_id, line_id="toolu_d")
+    assert r.status == "tampered" and got[0] < 2 * 1024**2
+
+
+def test_an_oversized_spool_entry_is_refused_unread(store, monkeypatch):
+    ws, writer = store
+    write3(writer)
+    lock = _busy(ws, monkeypatch)
+    writer.append(example(id="toolu_g", at=at(8)))
+    lock.unlink()
+    (entry,) = _spool_dir(ws).iterdir()
+    with entry.open("r+b") as f:
+        f.truncate(50 * 1024**2)
+    got = _count_reads(monkeypatch)
+    writer.append(example(id="toolu_4", at=at(4)))
+    assert not entry.exists() and "toolu_g" not in ids(ws) and got[0] < 8 * 1024**2
+
+
+def test_two_spools_in_the_same_nanosecond_both_keep_their_entry(store, monkeypatch):
+    ws, writer = store
+    write3(writer)
+    _busy(ws, monkeypatch)
+    monkeypatch.setattr(time, "time_ns", lambda: 1_800_000_000_000_000_000)
+    writer.append(example(id="toolu_a", at=at(8)))
+    writer.append(example(id="toolu_b", at=at(9)))
+    assert len(list(_spool_dir(ws).iterdir())) == 2

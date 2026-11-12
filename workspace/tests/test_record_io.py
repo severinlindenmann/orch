@@ -43,6 +43,7 @@ CORE = {
     "_open",
     "_close",
     "_read_bytes",
+    "_read_capped",
     "_write",
     "_entries",
     "_unlink",
@@ -301,6 +302,9 @@ SAFE_ATTRIBUTE_VALUES = {
     "problem.status",
     "view.rejected",
     "directory.fd",
+    "read.changed",
+    "read.removed",
+    "read.rejected",
 }
 ERROR_BOUNDARIES = {
     "_alert",
@@ -335,6 +339,7 @@ ERROR_BOUNDARIES = {
     "_reject_entry",
     "_flat_size",
     "_counted_mb",
+    "_move_head",
 }
 
 
