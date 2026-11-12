@@ -770,6 +770,26 @@ def test_insights_launch_token_refused_without_a_shipped_manifest(ws, monkeypatc
         assert token and hp.consume_launch_token(ws, server, token)
 
 
+def test_insights_never_resumes_a_page_session(ws):
+    assert hp.write_resume_cookie(ws, "insights", "c" * 40, "s" * 40) is False
+    assert not (hp.key_dir(ws) / "resume-insights.cookie").exists()
+    planted = f"{'c' * 40}\n{'s' * 40}\n{int(time.time()) + 60}\n"
+    hp._write_private(hp.key_dir(ws) / "resume-insights.cookie", planted)
+    assert hp.take_resume_session(ws, "insights") is None  # a planted file is never adopted
+
+
+def test_registry_drops_an_unshipped_builtin_insights(ws, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "SHIPPED_ADDONS", tuple(n for n in addons.SHIPPED_ADDONS if n != "insights"))
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    path = addons.registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entries = [{"name": "insights", "source": "built-in"}, {"name": "dashboard", "source": "built-in"}]
+    path.write_text(json.dumps(entries))
+    assert [e["name"] for e in addons.registry()] == ["dashboard"]
+
+
 def _ops():
     schema = json.loads((CONTRACTS / "human-proof.schema.json").read_text())
     return schema["$defs"]["op"]["enum"]
