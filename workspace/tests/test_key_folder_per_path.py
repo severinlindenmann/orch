@@ -52,7 +52,7 @@ def test_normal_life(proj, tmp_path):
 @pytest.mark.parametrize(
     "call",
     [
-        lambda r: keystore.add(r, "K", "token", "v"),
+        lambda r: keystore.add(r, "K", "token", "value-12345"),
         lambda r: config.change_insights(r, "insights.share_names", False),
         lambda r: secretrun._switch_on(r, "p", "allow_get"),
         lambda r: hp.human_key(r),
@@ -79,19 +79,85 @@ def test_forged_id_refused_no_new_folder(proj, call):
     assert hp.key_dir(proj, create=False) == d
 
 
-@pytest.mark.parametrize("garbage", ["not an id", "", "../../x"])
-def test_damaged_id_makes_no_second_folder(proj, garbage):
+def _id(root):
+    return (root / ".orch" / ".local-id").read_text().strip()
+
+
+@pytest.mark.parametrize("garbage", ["not an id", "", "../../x", None])
+def test_missing_or_damaged_id_heals(proj, garbage):
     d = hp.key_dir(proj)
-    _forge(proj, garbage)
+    body = hp.pin_next(proj, "sync.address", {"x": 1})
+    if garbage is None:
+        (proj / ".orch" / ".local-id").unlink()
+    else:
+        _forge(proj, garbage)
+    assert hp.key_dir(proj) == d  # healed to the bound folder's id, no second folder
+    assert _id(proj) == d.name
+    assert _keys(proj) == [d.name]
+    assert hp.pin_ok(proj, "sync.address", body)
+
+
+def test_deleted_id_heals_on_read_and_keystore(proj):
+    d = hp.key_dir(proj)
+    (proj / ".orch" / ".local-id").unlink()
+    assert hp.key_dir(proj, create=False) == d and _id(proj) == d.name
+    (proj / ".orch" / ".local-id").unlink()
+    keystore.add(proj, "K", "token", "value-12345")
+    assert _keys(proj) == [d.name]
+
+
+def test_forged_valid_id_message(proj):
+    hp.key_dir(proj)
+    _forge(proj)
+    with pytest.raises(Refused, match="id was changed"):
+        hp.key_dir(proj)
+
+
+def test_empty_existing_folder_refused_before_binding(proj):
+    d = hp.key_dir(proj)
+    empty = hp.guarded_home(proj) / "keys" / secrets.token_hex(16)
+    empty.mkdir(mode=0o700)
+    _forge(proj, empty.name)
     with pytest.raises(Refused):
         hp.key_dir(proj)
+    assert not (empty / "binding.json").exists()
+    assert _keys(proj) == sorted([d.name, empty.name])
+
+
+@pytest.mark.parametrize(
+    "exc", [hp.winacl.Unknown("x"), Refused("unknown"), hp.LooseFile("binding.json:mode")]
+)
+def test_unreadable_other_binding_refuses(proj, monkeypatch, exc):
+    d = hp.key_dir(proj)
+    other = hp.guarded_home(proj) / "keys" / secrets.token_hex(16)
+    other.mkdir(mode=0o700)
+    (other / "binding.json").write_text("{}")
+    real = hp._read_guarded
+
+    def fake(path):
+        if path.parent == other:
+            raise exc
+        return real(path)
+
+    monkeypatch.setattr(hp, "_read_guarded", fake)
+    _forge(proj)
+    with pytest.raises(Refused):
+        hp.key_dir(proj)
+    assert _keys(proj) == sorted([d.name, other.name])
+
+
+def test_reset_protection_makes_no_second_folder(proj):
+    d = hp.key_dir(proj)
+    _forge(proj)
+    with pytest.raises(Refused):
+        hp.reset_protection(proj, "test")
     assert _keys(proj) == [d.name]
 
 
 def test_two_folders_refuse_everything(proj):
     d, other = _second_folder(proj)
     for create in (True, False):
-        with pytest.raises(Refused, match="reconnect the workspace"):
+        with pytest.raises(Refused, match="id was changed"):
             hp.key_dir(proj, create=create)
     _forge(proj, other.name)
     for create in (True, False):
