@@ -957,7 +957,12 @@ def send_question(
         **question_extras(q, previews, scope),
     }
     msg = _message(root, "phones", "question", body, ticket["id"])
-    rec = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
+    rec = {
+        "ticket": ticket["id"],
+        "question_id": q["id"],
+        "to": "phones",
+        "question_digest": tickets.question_digest(q),  # the question as the phones were shown it
+    }
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
@@ -1327,6 +1332,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
             clean_untrusted(str(msg.get("body", {}).get("answer")), 2000),
             by,
             via,
+            expected_question_digest=asked.get("question_digest"),  # None: a record from before digests
         )
     except Refused as e:
         if _applied_ticket(root, msg):  # a crash after the write, before "seen": same answer, nothing to redo

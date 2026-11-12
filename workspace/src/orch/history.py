@@ -770,6 +770,31 @@ def answer_proven(root: Path, ticket, question) -> bool:
         return False
 
 
+def proven_step_parts(root: Path, ticket, step) -> tuple[list, bool]:
+    """The person's evidence pieces of `step` and its person "doing" mark that verify here NOW (as the step is
+    written), for tickets.check_edit to register again under the new text/covers. Nothing that does not verify
+    now is ever returned. Never raises (an error proves nothing)."""
+    try:
+        if not isinstance(ticket, dict) or not isinstance(step, dict) or not sync_enabled(_need_root(root)):
+            return [], False
+        own = _own(Path(root), ticket.get("id"), _ctx_key(Path(root))) or {}
+        evs = [
+            e
+            for e in (step.get("evidence") if isinstance(step.get("evidence"), list) else [])
+            if isinstance(e, dict)
+            and is_person_line(e)
+            and _digest("evidence", bound_evidence(e, step)) in own.get("evidence", ())
+        ]
+        doing = (
+            step.get("state") == "doing"
+            and is_person_line(step)
+            and _digest("steps", step) in own.get("steps", ())
+        )
+        return evs, bool(doing)
+    except Exception:  # noqa: BLE001 - fail closed
+        return [], False
+
+
 def _need_root(root) -> Path:
     if root is None:
         raise TypeError("orch.history needs the workspace root (look it up; never None)")

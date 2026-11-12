@@ -1065,7 +1065,13 @@ def run(args: argparse.Namespace) -> None:
             "is now waiting for an answer.",
         )
     elif cmd == "answer":
-        # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says
+        # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says.
+        # The question is read BEFORE it is shown for the proof: if it changes after that, the answer refuses.
+        shown_q = next(
+            (x for x in tickets.load(root, args.id).get("questions") or [] if x.get("id") == args.question),
+            None,
+        )
+        shown_digest = tickets.question_digest(shown_q) if shown_q is not None else None
         who = humanproof.person_by(
             root,
             args,
@@ -1081,7 +1087,9 @@ def run(args: argparse.Namespace) -> None:
             raise Refused("This question was sent to the phones. Only a human answers it.")
         if who.startswith("human:"):
             runs.require_signing(root)  # a person's answer that could not be signed is refused, not half done
-        t, q = tickets.answer(root, args.id, args.question, args.answer, who, args.via)
+        t, q = tickets.answer(
+            root, args.id, args.question, args.answer, who, args.via, expected_question_digest=shown_digest
+        )
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent

@@ -382,6 +382,36 @@ def test_evidence_is_bound_to_the_step_content(synced):
     assert ev["by"] == history.SYNC_BY
 
 
+def test_a_persons_rename_keeps_only_what_was_proven_theirs(synced):
+    root, tid = synced
+    tickets.check_done(root, tid, "c1", ['{"type":"note","ref":"done by me"}'], "human:tester")
+    tickets.check_add(root, tid, "Step two", "agent:claude")
+    tickets.check_start(root, tid, "c2", "human:tester")
+    forged = {"type": "note", "ref": "forged", "by": "human:tester", "at": "2026-11-09T09:00:00Z"}
+    _plant(root, tid, lambda t: t["checklist"][0]["evidence"].append(forged))
+    tickets.check_edit(root, tid, "c1", "Step one, renamed", "human:tester")
+    tickets.check_edit(root, tid, "c2", "Step two, renamed", "human:tester")
+    c1, c2 = history.shown_ticket(root, _raw(root, tid))["checklist"]
+    assert [e["by"] for e in c1["evidence"]] == ["human:tester", history.SYNC_BY]  # unproven stays unproven
+    assert c2["by"] == "human:tester"
+    tickets.check_edit(root, tid, "c2", "Step two, by an agent", "agent:claude")
+    tickets.check_edit(root, tid, "c1", "Step one, by an agent", "agent:claude")
+    c1, c2 = history.shown_ticket(root, _raw(root, tid))["checklist"]
+    assert c2["by"] == history.SYNC_BY and c1["evidence"][0]["by"] == history.SYNC_BY
+
+
+def test_an_answer_to_a_rewritten_question_is_refused(synced):
+    root, tid = synced
+    tickets.ask(root, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
+    shown = tickets.question_digest(tickets.load(root, tid)["questions"][0])
+    _plant(root, tid, lambda d: d["questions"][0].update({"text": "Deploy to production?"}))
+    with pytest.raises(Refused, match="changed after it was shown"):
+        tickets.answer(root, tid, "q1", "yes", "human:tester", "cli", expected_question_digest=shown)
+    assert _raw(root, tid)["questions"][0]["answer"] is None
+    now = tickets.question_digest(_raw(root, tid)["questions"][0])
+    tickets.answer(root, tid, "q1", "no", "human:tester", "cli", expected_question_digest=now)
+
+
 def test_adoption_covers_answers_steps_and_evidence(proj):
     ensure_signing(proj)
     t = tickets.create(proj, "Before sync", "human:tester")
