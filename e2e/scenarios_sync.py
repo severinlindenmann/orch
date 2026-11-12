@@ -103,7 +103,15 @@ def git_sync(e):
     ENV.clear()
     ENV.update(PREVIEW, ORCH_HOME=str(base / "home"))
     e.cleanup.append(lambda: shutil.rmtree(base, ignore_errors=True))
-    # the install record of a TEST install, as the installer writes it (it decides what the test human may do)
+    # the install record of a TEST install, as the installer writes it (it decides what the test human may do).
+    # Only ever into this run's own tool environment under the run's temp folder, and removed afterwards, so
+    # later scenarios of the same run and every real install keep their own record.
+    rc, out, err = e.sh([py, "-c", "import os, sys; print(os.path.realpath(sys.prefix))"], env=ENV)
+    prefix = Path(out.strip())
+    check(rc == 0 and prefix.is_relative_to(Path(e.tmp).resolve()), f"tool env is not this run's: {prefix}")
+    record = prefix / "orch-install.json"
+    old_record = record.read_bytes() if record.exists() else None
+    e.cleanup.append(lambda: record.write_bytes(old_record) if old_record is not None else record.unlink(missing_ok=True))
     rc, out, err = e.sh([py, "-c", ("import sys; from pathlib import Path; from orch import humanproof as h; "
                          "h.write_install_record(Path(sys.prefix), 'test')")], env=ENV)
     check(rc == 0, f"install record: {(err or out)[-200:]}")
