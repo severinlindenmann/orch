@@ -242,6 +242,38 @@ def test_git_reads_no_repository_an_agent_planted_above_the_private_folder(tmp_p
         assert done.returncode != 0 and not marker.exists()
 
 
+def test_the_planted_repository_does_run_without_the_protections(tmp_path):
+    """Positive control for the test above: the same planted repository, a plain git with no orch environment:
+    the marker DOES run. So its absence under orch's environment means something."""
+    git = shutil.which("git", path="/usr/bin")
+    if not git:
+        pytest.skip("no /usr/bin/git")
+    marker = tmp_path / "marker"
+    script = tmp_path / "pwn.sh"
+    script.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    script.chmod(0o755)
+    planted = tmp_path / "keys" / "tmp"
+    subprocess.run([git, "init", "-q", str(planted)], check=True, capture_output=True)
+    (planted / ".git" / "config").write_text(f"[core]\n\tsshCommand = {script}\n")
+    private = planted / "1-ab" / "~home"
+    private.mkdir(parents=True)
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(private),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+    }
+    subprocess.run(
+        [git, "ls-remote", "ssh://127.0.0.1:1/r"],
+        env=env,
+        cwd=private,
+        capture_output=True,
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
+    assert marker.exists()
+
+
 def test_rsync_settings_and_the_copy_programs_are_guarded():
     assert keystore.env_denied("RSYNC_RSH") and keystore.env_denied("RSYNC_CONNECT_PROG")
     assert all(secretrun.RISKY_PROGRAMS.search(p) for p in ("scp", "sftp", "rsync"))
