@@ -168,12 +168,17 @@ def start(root, wait=15.0):
     with _log(root) as out:
         proc = orchcli.spawn(["--dir", str(root), "run"], out, env)
     end = time.monotonic() + wait
+    died = None
     while time.monotonic() < end:
         rec = read(root, RECORD)
         if rec.get("nonce") == nonce and _verified(root, rec):
             return rec["pid"]
-        if proc.poll() is not None and (pid := running_pid(root)):
-            return pid  # our child found the lock taken: another start (or a foreground run) won
+        if proc.poll() is not None:
+            if pid := running_pid(root):
+                return pid  # our child found the lock taken: another start (or a foreground run) won
+            died = died or time.monotonic()
+            if time.monotonic() - died > 3.0:  # gone, and no other loop showed up in time: don't wait the rest
+                break
         time.sleep(0.1)
     if proc.poll() is None:
         proc.terminate()  # our own child (never a pid read from a file)

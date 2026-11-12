@@ -69,7 +69,9 @@ def _run_loop(root):
         return 0
     lp, code, why = loop.Loop(root), 0, "interrupted"
     if threading.current_thread() is threading.main_thread():
-        signal.signal(signal.SIGTERM, lambda *_: lp.stop())  # finish the current pass, then end
+        # finish the current pass, then end. Only a flag here: Event.set() inside a signal handler can block on the
+        # lock its own thread holds in wake.wait(); sleep() polls stop_asked() every POLL seconds.
+        signal.signal(signal.SIGTERM, lambda *_: setattr(lp, "stopping", True))
     try:
         why = lp.run_forever()
     except KeyboardInterrupt:
