@@ -55,6 +55,7 @@ REGISTRY = Path(".orch") / "run" / "worktrees.json"
 LOCK_ID = "_copies"  # runs.locked(root, LOCK_ID): the workspace-level "decide + create + claim" lock
 LOCK_WAIT = 150.0  # a worktree of a big repo can take a while; the lock timeout must outlast GIT_ADD_TIMEOUT
 GIT_TIMEOUT = 20
+FSCK_TIMEOUT = 900  # the object check before a merge reads the whole history of both sides
 GIT_ADD_TIMEOUT = 60
 CREATE_BUDGET = 100.0  # all git time of one _create; LOCK_WAIT must stay above it
 SETUP_TIMEOUT = 600
@@ -1927,11 +1928,15 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         # Git does not re-hash objects while it merges, and the copy shares the project's object folder: check
         # that what the merge reads is what its ids say, in this same locked section, right before it.
         # (Residual: a process the agent left running after its run ended is not covered by _alive_here.)
+        # (No --strict: old imported history with odd dates or names is not an attack. A timeout is "later".)
         rc, _, _ = _git(
-            ["fsck", "--strict", "--no-dangling", "--no-reflogs", "--no-progress", tip, pre["head"]],
+            ["fsck", "--no-dangling", "--no-reflogs", "--no-progress", tip, pre["head"]],
             top,
+            timeout=FSCK_TIMEOUT,
             read_only=True,
         )
+        if rc == 124:
+            return wait("checking the stored history needs more time; the next sweep will try again")
         if rc:
             return wait(OBJECTS_BAD)
         merge_started = True
