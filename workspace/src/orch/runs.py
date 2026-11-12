@@ -403,8 +403,8 @@ def _pending_proof(root: Path, tid: str):
     from orch import humanproof
 
     try:
-        ws = addons.workspace_id(root, create=True)
-        return (humanproof.human_key(root), ws) if ws else None
+        ws = humanproof._healed_id(root, True)  # sign and verify (_ws_id) with the healed id
+        return humanproof.human_key(root), ws
     except (Refused, OSError):
         return None
 
@@ -481,7 +481,9 @@ def human_waiting(root: Path, tid: str) -> list[dict]:
 
 
 def _ws_id(root: Path):
-    return addons.workspace_id(root, create=False)
+    from orch import humanproof
+
+    return humanproof._healed_id(root, False)
 
 
 def _drop_start_prompts_locked(root: Path, tid: str) -> None:

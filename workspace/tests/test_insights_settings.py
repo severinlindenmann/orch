@@ -745,21 +745,19 @@ def test_settings_record_stays_schema_valid(ws, run, monkeypatch):
     )
 
 
-def test_insights_is_a_page_server(ws, monkeypatch):
-    from orch import addons
-
+def test_insights_is_a_page_server(ws):
     assert "insights" in hp.LAUNCH_SERVERS and "insights" in pageproof.SERVERS
     pageproof.PageSession(ws, "insights")  # accepted as a page server
-    monkeypatch.setattr(addons, "SHIPPED_ADDONS", (*addons.SHIPPED_ADDONS, "insights"))
-    token = hp.write_launch_token(ws, "insights")  # once orch ships the add-on (its manifest)
+    token = hp.write_launch_token(ws, "insights")  # orch ships the add-on (its manifest)
     assert token and hp.consume_launch_token(ws, "insights", token)
 
 
-def test_insights_launch_token_refused_without_a_shipped_manifest(ws):
-    """Insights in LAUNCH_SERVERS is not enough: this orch does not ship workspace-addons/insights yet, so no
-    launch token is written for it and none is accepted (focus and dashboard keep theirs)."""
+def test_insights_launch_token_refused_without_a_shipped_manifest(ws, monkeypatch):
+    """Insights in LAUNCH_SERVERS is not enough: the launch token needs the add-on in SHIPPED_ADDONS. With it
+    unshipped (an older orch) no token is written and none is accepted; focus and dashboard keep theirs."""
     from orch import addons
 
+    monkeypatch.setattr(addons, "SHIPPED_ADDONS", tuple(n for n in addons.SHIPPED_ADDONS if n != "insights"))
     assert "insights" not in addons.SHIPPED_ADDONS
     assert not hp.launch_server_ok("insights")
     with pytest.raises(hp.Refused):
@@ -771,6 +769,26 @@ def test_insights_launch_token_refused_without_a_shipped_manifest(ws):
     for server in ("focus", "dashboard"):
         token = hp.write_launch_token(ws, server)
         assert token and hp.consume_launch_token(ws, server, token)
+
+
+def test_insights_never_resumes_a_page_session(ws):
+    assert hp.write_resume_cookie(ws, "insights", "c" * 40, "s" * 40) is False
+    assert not (hp.key_dir(ws) / "resume-insights.cookie").exists()
+    planted = f"{'c' * 40}\n{'s' * 40}\n{int(time.time()) + 60}\n"
+    hp._write_private(hp.key_dir(ws) / "resume-insights.cookie", planted)
+    assert hp.take_resume_session(ws, "insights") is None  # a planted file is never adopted
+
+
+def test_registry_drops_an_unshipped_builtin_insights(ws, monkeypatch):
+    from orch import addons
+
+    monkeypatch.setattr(addons, "SHIPPED_ADDONS", tuple(n for n in addons.SHIPPED_ADDONS if n != "insights"))
+    monkeypatch.setattr(hp, "install_kind", lambda: "normal")
+    path = addons.registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    entries = [{"name": "insights", "source": "built-in"}, {"name": "dashboard", "source": "built-in"}]
+    path.write_text(json.dumps(entries))
+    assert [e["name"] for e in addons.registry()] == ["dashboard"]
 
 
 def _ops():

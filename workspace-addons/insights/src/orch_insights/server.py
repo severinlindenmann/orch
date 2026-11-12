@@ -168,14 +168,21 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = do_TRACE = do_CONNECT = _refuse
 
+    def _site_refusal(self):
+        """The one Sec-Fetch-Site rule of every POST: same-origin or none; an absent header is refused too."""
+        if self.headers.get("Sec-Fetch-Site") not in ("same-origin", "none"):
+            return "This request came from another website and was refused."
+        return None
+
     def _session_refusal(self):
         """Why POST /session is refused: the action fence, plus Sec-Fetch-Site same-origin/none (absent is
         refused too) and a JSON body (M5), loopback Host and no proxy headers."""
         why = self._fence("POST", True)
         if why:
             return why
-        if self.headers.get("Sec-Fetch-Site") not in ("same-origin", "none"):
-            return "This request came from another website and was refused."
+        why = self._site_refusal()
+        if why:
+            return why
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return "forbidden"
         from orch.pageproof import forwarded, host_ok
@@ -228,8 +235,9 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence("POST", True)
         if why:
             return 403, why
-        if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
-            return 403, "This request came from another website and was refused."
+        why = self._site_refusal()
+        if why:
+            return 403, why
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return 415, "send JSON"
         return None

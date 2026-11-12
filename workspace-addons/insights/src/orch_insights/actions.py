@@ -250,7 +250,9 @@ def _set(root, orch_bin, args, argv, mint, read, deadline):
         raise NeedsPerson(PERSON)  # an unreadable current value counts as widening (M6)
     allowed = KEYS[key][1]
     guard = [f"--if-current={observed}"] if isinstance(observed, str) and observed in allowed else []
-    need = ("insights.settings", f"{key}={value}")
+    from orch.config import insights_target
+
+    need = ("insights.settings", insights_target(key, value))
     return _with_person(root, orch_bin, [*argv, *guard, "--json"], mint, need, SET_TIMEOUT, deadline)
 
 

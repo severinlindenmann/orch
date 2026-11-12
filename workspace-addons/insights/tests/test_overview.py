@@ -324,6 +324,33 @@ def test_read_only(server, method):
     assert request(server, method=method, headers={"Host": "evil.example:8431"})[0] == 403
 
 
+@pytest.mark.parametrize(
+    "host",
+    [
+        "evil.example",
+        "evil.example:{port}",
+        "evil.example:80",
+        "127.0.0.1.evil.example:{port}",
+        "localhost.evil.example:{port}",
+        "[::1]:{port}",
+        "0.0.0.0:{port}",
+        "127.0.0.2:{port}",
+        "localhost.:{port}",
+        "127.0.0.1",
+        "127.0.0.1:{port}@evil.example",
+        "evil.example:{port}, 127.0.0.1:{port}",
+        "",
+    ],
+)
+def test_rebinding_host_refused_on_read_routes(server, fake_orch, host):
+    """The read routes have no session (the page loads them before any exists): the Host check is the fence."""
+    port = server.server_address[1]
+    for path in ("/api/overview", "/api/list/skills", "/api/settings"):
+        code, _, body = request(server, path, headers={"Host": host.format(port=port)})
+        assert code == 403 and b"not allowed" in body
+    assert not (fake_orch.parent / "calls.jsonl").exists()  # nothing was read
+
+
 def test_fence_and_unknown_paths(server):
     assert request(server, headers={"Host": "evil.example:8431"})[0] == 403
     assert request(server, headers={"Sec-Fetch-Site": "cross-site"})[0] == 403
