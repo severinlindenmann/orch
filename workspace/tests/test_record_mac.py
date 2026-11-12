@@ -788,7 +788,7 @@ def test_a_hook_line_that_says_ok_is_never_counted_as_ok(store):
 
 def test_add_ons_that_read_record_lines_use_the_computed_checked_marker():
     """Source walk over the add-ons: a module that decides anything from a record line's `via` must also read
-    `checked` (computed by orch, record.is_checked); none re-derives `before_protection`."""
+    `checked` (computed by orch, record.is_checked); only Focus reads `before_protection`, for a label."""
     import re
 
     root = Path(__file__).resolve().parents[2] / "workspace-addons"
@@ -797,7 +797,13 @@ def test_add_ons_that_read_record_lines_use_the_computed_checked_marker():
         if ".venv" in p.parts:
             continue
         text = p.read_text()
-        assert "before_protection" not in text, p
+        # only a DISPLAY flag may read it ("made before orch checked records", Focus S3): never a decision
+        if "before_protection" in text:
+            assert p.name == "record.py" and p.parent.name == "orch_focus", p
+            assert (
+                'e.get("before_protection")' in text
+                and "checked" in text.split("before_protection")[0][-400:]
+            ), p
         if re.search(r'e(?:vent)?\.get\("via"\)|\["via"\]', text) and "record" in p.name:
             seen += 1
             assert 'get("checked")' in text, p
