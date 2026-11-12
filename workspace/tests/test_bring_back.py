@@ -2633,7 +2633,11 @@ def test_b13o_blob_swapped_between_the_check_and_the_merge_is_never_counted_merg
     back = tickets.load(root, tid)["work"]["bring_back"]
     # git's --keep refuses over the swapped bytes: nothing is thrown away, the ticket never counts as merged
     # and a person looks (the journal stays)
-    assert back["state"] == "waiting" and back["reason"] in (worktrees.CHANGED, worktrees.UNVERIFIED, worktrees.VERIFY_TIME), back
+    assert back["state"] == "waiting" and back["reason"] in (
+        worktrees.CHANGED,
+        worktrees.UNVERIFIED,
+        worktrees.VERIFY_TIME,
+    ), back
     assert not worktrees._copy_authority(root, tid).get("merged")
     assert head
 
@@ -2651,7 +2655,11 @@ def test_b13o_a_person_edit_between_merge_and_rollback_is_kept(done_copy, monkey
     monkeypatch.setattr(worktrees, "_after_merge", fail_after_edit)
     done_and_sweep(root, tid)
     back = tickets.load(root, tid)["work"]["bring_back"]
-    assert back["state"] == "waiting" and back["reason"] in (worktrees.CHANGED, worktrees.UNVERIFIED, worktrees.VERIFY_TIME), back
+    assert back["state"] == "waiting" and back["reason"] in (
+        worktrees.CHANGED,
+        worktrees.UNVERIFIED,
+        worktrees.VERIFY_TIME,
+    ), back
     assert (root / "code.py").read_text() == "my own edit\n"
 
 
@@ -2679,14 +2687,22 @@ def test_b13q_a_merge_whose_post_check_failed_is_never_counted_merged_later(done
         done_and_sweep(root, tid)
         worktrees.sweep(root)
         back = tickets.load(root, tid)["work"]["bring_back"]
-        assert back["state"] == "waiting" and back["reason"] in (worktrees.CHANGED, worktrees.UNVERIFIED, worktrees.VERIFY_TIME), back
+        assert back["state"] == "waiting" and back["reason"] in (
+            worktrees.CHANGED,
+            worktrees.UNVERIFIED,
+            worktrees.VERIFY_TIME,
+        ), back
         assert not worktrees._copy_authority(root, tid).get("merged")
     worktrees.sweep(root)  # the check passes now
     back = tickets.load(root, tid)["work"]["bring_back"]
     if problem == "later":  # re-checked and passed: the merge counts
         assert back["state"] == "merged", back
     else:  # a failed check stays until a person has looked, even when the next check would pass
-        assert back["state"] == "waiting" and back["reason"] in (worktrees.CHANGED, worktrees.UNVERIFIED, worktrees.VERIFY_TIME), back
+        assert back["state"] == "waiting" and back["reason"] in (
+            worktrees.CHANGED,
+            worktrees.UNVERIFIED,
+            worktrees.VERIFY_TIME,
+        ), back
         assert not worktrees._copy_authority(root, tid).get("merged")
 
 
@@ -2708,14 +2724,22 @@ def test_b13q_a_commit_on_top_of_an_unchecked_merge_certifies_nothing(done_copy,
         m.setattr(worktrees, "_after_merge", lambda *a: problem)
         worktrees.sweep(root)
     back = tickets.load(root, tid)["work"]["bring_back"]
-    assert back["state"] == "waiting" and back["reason"] in (worktrees.CHANGED, worktrees.UNVERIFIED, worktrees.VERIFY_TIME), back
+    assert back["state"] == "waiting" and back["reason"] in (
+        worktrees.CHANGED,
+        worktrees.UNVERIFIED,
+        worktrees.VERIFY_TIME,
+    ), back
     assert not worktrees._copy_authority(root, tid).get("merged")
     worktrees.sweep(root)  # the real check runs on the merge commit now
     back = tickets.load(root, tid)["work"]["bring_back"]
     if problem == "later":
         assert back["state"] == "merged", back
     else:
-        assert back["state"] == "waiting" and back["reason"] in (worktrees.CHANGED, worktrees.UNVERIFIED, worktrees.VERIFY_TIME), back
+        assert back["state"] == "waiting" and back["reason"] in (
+            worktrees.CHANGED,
+            worktrees.UNVERIFIED,
+            worktrees.VERIFY_TIME,
+        ), back
 
 
 def test_b13q_a_failed_recheck_is_written_as_bad_and_a_later_pass_does_not_certify(done_copy, monkeypatch):
@@ -2732,7 +2756,11 @@ def test_b13q_a_failed_recheck_is_written_as_bad_and_a_later_pass_does_not_certi
     assert worktrees._copy_authority(root, tid)["journal"]["post_check"] == "bad"
     worktrees.sweep(root)  # the real check would pass now
     back = tickets.load(root, tid)["work"]["bring_back"]
-    assert back["state"] == "waiting" and back["reason"] in (worktrees.CHANGED, worktrees.UNVERIFIED, worktrees.VERIFY_TIME), back
+    assert back["state"] == "waiting" and back["reason"] in (
+        worktrees.CHANGED,
+        worktrees.UNVERIFIED,
+        worktrees.VERIFY_TIME,
+    ), back
     assert not worktrees._copy_authority(root, tid).get("merged")
 
 
@@ -2759,7 +2787,11 @@ def test_b13r_orch_stopped_inside_the_check_then_a_commit_on_top_is_checked_not_
         worktrees.sweep(root)
     assert calls  # the check ran on the merge commit; ancestry did not certify it
     back = tickets.load(root, tid)["work"]["bring_back"]
-    assert back["state"] == "waiting" and back["reason"] in (worktrees.CHANGED, worktrees.UNVERIFIED, worktrees.VERIFY_TIME), back
+    assert back["state"] == "waiting" and back["reason"] in (
+        worktrees.CHANGED,
+        worktrees.UNVERIFIED,
+        worktrees.VERIFY_TIME,
+    ), back
     assert not worktrees._copy_authority(root, tid).get("merged")
 
 
@@ -2849,3 +2881,21 @@ def test_b13v_bind_shown_never_blocks_the_done(done_copy, monkeypatch):
         worktrees, "_copy_authority", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
     )
     assert worktrees.bind_shown(root, tid, "a" * 40) is True
+
+
+def test_b13v_a_plain_git_reset_back_to_the_pre_merge_commit_is_an_exit(done_copy, monkeypatch):
+    """The exit named in the message: the person moves the project back to the commit before the merge with a
+    plain `git reset` (files stay modified). The journal is cleared; the ordinary checks take over."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    pre = git(root, "rev-parse", "HEAD")
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: "bad")
+        m.setattr(worktrees, "_bb_status", lambda top: "?? person-file\0")
+        done_and_sweep(root, tid)
+    assert worktrees._copy_authority(root, tid)["journal"]["post_check"] == "bad"
+    git(root, "reset", "-q", pre)  # mixed: the merged files stay modified in the folder
+    worktrees.sweep(root)
+    assert "journal" not in worktrees._copy_authority(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["reason"] != worktrees.INTERRUPTED_BB, back

@@ -1880,6 +1880,12 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
             _copy_authority(root, ticket, lambda r: r.update(merged=mine))
         _set_journal(root, ticket, None)  # orch's merge finished, or the person moved on: checks run again
         return None
+    if journal.get("post_check"):
+        # orch's merge was committed and its check did not pass, and the project is back at the commit before
+        # it (the person moved it back): nothing is left to undo. The ordinary checks (overlap, index) judge
+        # the files that may still be modified in the folder.
+        _set_journal(root, ticket, None)
+        return None
     if journal.get("touched"):
         _ctx.snapshot_touched = _prep(_touched(top, journal["tip"]))
     if _bb_snapshot(top)["hash"] == journal.get("pre_hash"):
