@@ -16,7 +16,7 @@
       "type": "object", "required": ["error"], "additionalProperties": false,
       "properties": {
         "error": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Plain words for people, key values hidden." },
-        "code": { "enum": ["refused", "invalid", "not_found", "not_allowed", "switched_off", "locked_by_admin", "conflict", "gone", "too_large", "busy", "not_available", "tampered"], "description": "Optional, for programs. Old commands answer without it." }
+        "code": { "enum": ["refused", "invalid", "not_found", "not_allowed", "switched_off", "locked_by_admin", "conflict", "gone", "too_large", "busy", "not_available", "tampered", "needs_person", "changed"], "description": "Optional, for programs. Old commands answer without it. needs_person = a person's own decision (human-proof.md): an agent caller, or no valid proof. changed = the value is no longer the one the caller showed (`--if-current`): nothing was written." }
       }
     },
     "stream_line": {
@@ -24,7 +24,7 @@
       "properties": { "type": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" } },
       "allOf": [
         { "if": { "properties": { "type": { "const": "error" } } }, "then": { "required": ["error"], "properties": { "error": { "$ref": "#/$defs/error/properties/error" }, "code": { "$ref": "#/$defs/error/properties/code" } } } },
-        {"if": {"properties": {"type": {"const": "unavailable"}}}, "then": {"required": ["cursor", "run", "status", "reason", "message"], "properties": {"status": {"enum": ["ok", "unavailable", "tampered"]}, "reason": {"enum": ["missing", "io", "skipped", "pending", "recovered", "rewound", "trimmed", "link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"]}, "message": {"type": "string"}, "run": {"type": "string"}, "cursor": {"type": "string"}}}}
+        {"if": {"properties": {"type": {"const": "unavailable"}}}, "then": {"required": ["cursor", "run", "status", "reason", "message"], "properties": {"status": {"enum": ["ok", "unavailable", "tampered"]}, "reason": {"enum": ["missing", "io", "skipped", "pending", "recovered", "rewound", "trimmed", "link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped", "content", "removed", "unverified", "old_key", "unchecked"]}, "message": {"type": "string"}, "run": {"type": "string"}, "cursor": {"type": "string"}, "changed": {"type": "integer", "minimum": 0}, "removed": {"type": "integer", "minimum": 0}}}}
       ],
       "description": "One line of a --follow stream. Readers skip types they do not know. A line of type error is the last line; the command then exits 2."
     }

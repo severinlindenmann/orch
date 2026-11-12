@@ -118,8 +118,18 @@ async fn pushes_unreachable_back_ended_and_mute() {
     let other = t.add_ws("B").await;
     let p = t.pair_phone(&[&a]).await; // paired with A only
     let q = t.pair_phone(&[&a, &other]).await; // will mute A
-    register_push(&t, &p, "abcdef0001").await;
-    register_push(&t, &q, "abcdef0002").await;
+    register_push(
+        &t,
+        &p,
+        "abcdef0001000000000000000000000000000000000000000000000000000000",
+    )
+    .await;
+    register_push(
+        &t,
+        &q,
+        "abcdef0002000000000000000000000000000000000000000000000000000000",
+    )
+    .await;
     let (s, _) = t
         .phone(
             &q,
@@ -141,7 +151,10 @@ async fn pushes_unreachable_back_ended_and_mute() {
     orch_relay::mobile::sweep(&t.app, later + 60).await;
     assert_eq!(
         sent_kinds(&t),
-        vec![("abcdef0001".into(), "mobile_mode_unreachable".into())]
+        vec![(
+            "abcdef0001000000000000000000000000000000000000000000000000000000".into(),
+            "mobile_mode_unreachable".into()
+        )]
     );
     {
         let sent = t.push.sent.lock().unwrap();
@@ -177,9 +190,18 @@ async fn pushes_unreachable_back_ended_and_mute() {
     assert_eq!(
         sent_kinds(&t),
         vec![
-            ("abcdef0001".into(), "mobile_mode_unreachable".into()),
-            ("abcdef0001".into(), "mobile_mode_back".into()),
-            ("abcdef0001".into(), "mobile_mode_ended".into()),
+            (
+                "abcdef0001000000000000000000000000000000000000000000000000000000".into(),
+                "mobile_mode_unreachable".into()
+            ),
+            (
+                "abcdef0001000000000000000000000000000000000000000000000000000000".into(),
+                "mobile_mode_back".into()
+            ),
+            (
+                "abcdef0001000000000000000000000000000000000000000000000000000000".into(),
+                "mobile_mode_ended".into()
+            ),
         ]
     );
     let sent = t.push.sent.lock().unwrap();
@@ -194,7 +216,12 @@ async fn silent_workspace_that_is_off_is_not_announced() {
     let t = start().await;
     let a = t.add_ws("A").await;
     let p = t.pair_phone(&[&a]).await;
-    register_push(&t, &p, "abcdef0001").await;
+    register_push(
+        &t,
+        &p,
+        "abcdef0001000000000000000000000000000000000000000000000000000000",
+    )
+    .await;
     t.push.sent.lock().unwrap().clear();
     orch_relay::mobile::sweep(&t.app, orch_relay::util::now() + 10_000).await;
     assert!(sent_kinds(&t).is_empty());
@@ -370,7 +397,12 @@ async fn ended_cooldown_stores_off_and_is_per_workspace() {
     let a = t.add_ws("A").await;
     let b = t.add_ws("B").await;
     let p = t.pair_phone(&[&a, &b]).await;
-    register_push(&t, &p, "abcdef0001").await;
+    register_push(
+        &t,
+        &p,
+        "abcdef0001000000000000000000000000000000000000000000000000000000",
+    )
+    .await;
     t.push.sent.lock().unwrap().clear();
     for w in [&a, &a, &b] {
         assert_eq!(t.call(w, "POST", "/v1/heartbeat", Some(on())).await.0, 200);
@@ -408,7 +440,13 @@ async fn ended_cooldown_stores_off_and_is_per_workspace() {
     .await;
     assert_eq!(
         sent_kinds(&t),
-        vec![("abcdef0001".into(), "mobile_mode_ended".into()); 3]
+        vec![
+            (
+                "abcdef0001000000000000000000000000000000000000000000000000000000".into(),
+                "mobile_mode_ended".into()
+            );
+            3
+        ]
     );
 }
 
@@ -417,7 +455,12 @@ async fn expired_lease_is_off_before_sweep_and_pushes_lease_once() {
     let t = start().await;
     let a = t.add_ws("A").await;
     let p = t.pair_phone(&[&a]).await;
-    register_push(&t, &p, "abcdef0001").await;
+    register_push(
+        &t,
+        &p,
+        "abcdef0001000000000000000000000000000000000000000000000000000000",
+    )
+    .await;
     t.push.sent.lock().unwrap().clear();
     t.call(&a, "POST", "/v1/heartbeat", Some(on())).await;
     let at = orch_relay::util::now();
@@ -437,7 +480,10 @@ async fn expired_lease_is_off_before_sweep_and_pushes_lease_once() {
     orch_relay::mobile::sweep(&t.app, at + 60).await;
     assert_eq!(
         sent_kinds(&t),
-        vec![("abcdef0001".into(), "mobile_mode_ended".into())]
+        vec![(
+            "abcdef0001000000000000000000000000000000000000000000000000000000".into(),
+            "mobile_mode_ended".into()
+        )]
     );
     assert_eq!(
         t.push.sent.lock().unwrap()[0].2["aps"]["alert"]["body"],

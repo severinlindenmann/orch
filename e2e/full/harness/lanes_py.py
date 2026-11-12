@@ -119,15 +119,16 @@ def lane_b(env, out: Path, real_agents: bool, runs: int = 3) -> Lane:
             if n is None:
                 raise RuntimeError("the question never reached 'Needs you'")
             samples["ask_to_needs"].append(time.time() - t0 - (a or 0))
-            qid = None
+            qid = digest = None
             for x in state(dash).get("needs", []):
                 if tid in json.dumps(x):
                     st["needs_item"] = x
                     qid = (x.get("answer") or {}).get("question") or x.get("question")
+                    digest = (x.get("answer") or {}).get("digest")
             for q in _ticket(state(dash), tid).get("questions", []):
                 if q.get("answer") is None and not q.get("answered_at"):
-                    qid = q.get("id")
-            ra = act(dash, "answer", {"ticket": tid, "question": qid, "answer": "Hi"}) if qid else None
+                    qid, digest = q.get("id"), q.get("digest")
+            ra = act(dash, "answer", {"ticket": tid, "question": qid, "digest": digest, "answer": "Hi"}) if qid else None
             if ra is None or ra.status != 200:
                 st["note"] = f"answer op: {ra.status if ra else 'no question id'} {(ra.text[:120] if ra else '')}"
                 e.sh(["orch", "answer", tid, qid or "q1", "Hi"], cwd=w)

@@ -40,12 +40,30 @@ def add_parsers(sub, common) -> None:
                 if action == "set":
                     for option in ("env", "files", "set", "run", "skill", "extra"):
                         q.add_argument("--" + option, action="append", default=[])
+                    q.add_argument(
+                        "--real-home", action="store_true"
+                    )  # person: the command may see your home
+                    q.add_argument("--any-command", action="store_true")  # person: no fixed form needed
 
 
-def _agent(args) -> bool:
-    """An agent tool in the environment, or --by agent:... (an agent that hides its identity looks like a
-    script: Level 1)."""
-    return bool(tickets.agent_tool()) or str(getattr(args, "by", None) or "").startswith("agent:")
+def _agent(root, args, profile, mode, words) -> bool:
+    """True unless a PERSON proves otherwise (H1). Nothing the caller controls (an environment variable, a
+    flag, being a script) lowers it: a caller is a person only with a valid single-use hp1 proof on the first
+    line of stdin (`orch secret env --proof-stdin <profile> ...`) for `secret.profile`, bound to this exact
+    call (target `<profile>:use:<sha256 of mode and command words>`), minted by the person's key.
+    tickets.agent_tool() and --by agent:... only ever add a reason to refuse."""
+    if tickets.agent_tool() or str(getattr(args, "by", None) or "").startswith("agent:"):
+        return True
+    if not getattr(args, "proof_stdin", False):
+        return True
+    who = hp.verify_and_consume(
+        root,
+        hp.read_proof_line(),
+        "secret.profile",
+        secretrun.use_target(profile, mode, words),
+        getattr(args, "by", None),
+    )
+    return not who.startswith("human:")
 
 
 def _person(root, args, op, target):
@@ -100,9 +118,17 @@ def _change_profile(root, args, who):
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
+            secretrun.check_arguments(root, profile["set"].values())
+            if args.real_home:
+                profile["real_home"] = True
             if args.run:  # found once, here: stored as the real full path, never searched later
                 path, warnings = secretrun.approve_program(root, args.run[0])
                 profile["run"] = [path, *args.run[1:]]
+                profile["kind"] = secretrun.program_kind(path)  # from the real file, not the name typed
+                if args.any_command:
+                    profile["any_command"] = True
+                template = secretrun.command_template(profile)
+                secretrun.check_arguments(root, args.run[1:], template, profile["files"])
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
             if args.skill:
                 profile["skills"] = args.skill
@@ -146,7 +172,7 @@ def dispatch(args, root: Path) -> bool:
             rest,
             stdout=sys.stdout.buffer,
             stderr=sys.stderr.buffer,
-            agent=_agent(args),
+            agent=_agent(root, args, args.profile, action, rest),
         )
         sys.stdout.flush()
         sys.stderr.flush()
@@ -159,7 +185,7 @@ def dispatch(args, root: Path) -> bool:
             args.key,
             stdout_is_tty=term.is_terminal(sys.stdout),
             out=sys.stdout.buffer,
-            agent=_agent(args),
+            agent=_agent(root, args, args.profile, "get", [args.key]),
         )
     elif action == "list":
         answer = secretrun.list_answer(root)

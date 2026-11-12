@@ -18,9 +18,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import seal_lines
 from jsonschema import Draft202012Validator
 
-from orch import hider, record
+from orch import hider, record, record_auth
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN = "r_8k2m01"
@@ -42,12 +43,17 @@ CORE = {
     "_open",
     "_close",
     "_read_bytes",
+    "_read_capped",
     "_write",
     "_entries",
     "_unlink",
     "_write_new",
     "_size",
+    "_one_size",
+    "_file_size",
     "_rmtree",
+    "_rename_aside",
+    "_rmdir_empty",
     "_lock",
 }
 
@@ -62,6 +68,12 @@ def store(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     return ws, record.RecordWriter(ws, hider=hider.Hider({"key": "a-long-secret-value"}))
+
+
+def record_auth_home(ws):
+    from orch import humanproof
+
+    humanproof.record_key(ws)  # makes the key folder (the fixture creates keys on first use)
 
 
 def runfile(ws):
@@ -94,10 +106,12 @@ SAFE_ATTRIBUTE_CALLS = {
     "' '.join",
     "(_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid",
     "(_json(alert) + '\\n').encode",
+    "(_json(line) + '\\n').encode",
     "(_json(dict(event, detail=None, detail_lost=True)) + '\\n').encode",
     "(_json(event) + '\\n').encode",
     "ReadResult.from_error",
     "_ALERTED.add",
+    "_CHANGE_VALIDATOR.is_valid",
     "_DETAIL_VALIDATOR.is_valid",
     "_META_VALIDATOR.is_valid",
     "_json(detail).count",
@@ -121,6 +135,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "event['detail'].split",
     "event['outcome'].get",
     "events.append",
+    "found.append",
     "hashlib.sha256",
     "hashlib.sha256(b'orch.id.hook/1\\x00' + eid.encode()).hexdigest",
     "hiding._check",
@@ -157,6 +172,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "self._append",
     "self._commit",
     "self._drain",
+    "self._drain_valid",
     "self._line",
     "self._prepare_detail",
     "self._serialized",
@@ -164,10 +180,80 @@ SAFE_ATTRIBUTE_CALLS = {
     "self.hider.hide_cut",
     "self.hider.hide_json",
     "self.hider.hide_text",
+    "hider.hide_text",
+    "hider.leaks",
     "stored.get",
     "super().__init__",
     "time.time_ns",
+    "unreadable.append",
     "uuid.uuid4",
+    "(head or {}).get",
+    "_BODY_VALIDATOR.is_valid",
+    "_MESSAGES.get",
+    "_SPOOL_NAME.fullmatch",
+    "_VERIFIED.clear",
+    "_VERIFIED.get",
+    "_json(entry).encode",
+    "body.setdefault",
+    "body.update",
+    "hashlib.sha256(whole).digest",
+    "hashlib.sha256(whole[:hit[1]]).digest",
+    "head.get",
+    "hit[3].copy",
+    "humanproof.record_head_read",
+    "humanproof.record_head_try_write",
+    "humanproof.record_key",
+    "pending.get",
+    "pending.items",
+    "re.compile",
+    "record_auth.State",
+    "record_auth.Verified",
+    "record_auth.detail_hash",
+    "record_auth.drain_ok",
+    "record_auth.finish",
+    "record_auth.genesis",
+    "record_auth.legacy_split",
+    "record_auth.scan",
+    "record_auth.seal",
+    "record_auth.split",
+    "record_auth.spool_mac",
+    "record_auth.spool_name",
+    "record_auth.spool_name_ok",
+    "record_auth.spool_old_ok",
+    "humanproof.record_upgrade_ns",
+    "sealed.rfind",
+    "self._move_head",
+    "self._reject",
+    "state.copy",
+    "e.get",
+    "humanproof.record_head_state",
+    "lines[-1].get",
+    "hashlib.sha256(whole[:record_auth.prefix_cut(whole, n)]).hexdigest",
+    "raw.strip",
+    "record_auth.legacy_prefix",
+    "record_auth.prefix_cut",
+    "record_auth.start_state",
+    "self._sealed_tail",
+    "whole.split",
+    "gone.append",
+    "humanproof.record_head_names",
+    "humanproof.record_cutover_ensure",
+    "humanproof.record_cutover_read",
+    "humanproof.record_reject_names",
+    "humanproof.record_rejects_bump",
+    "humanproof.record_rejects_read",
+    "name.startswith",
+    "run.get",
+    "raw.split",
+    "humanproof.record_cutover_at",
+    "humanproof.record_head_carry",
+    "humanproof.record_head_old_live",
+    "point.split",
+    "carry.get",
+    "os.stat",
+    "out.add",
+    "source.get",
+    "humanproof.record_upgrade_old",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
@@ -191,27 +277,69 @@ SAFE_ATTRIBUTE_VALUES = {
     "stored.created",
     "stored.reason",
     "uuid.uuid4().hex",
+    "read.legacy",
+    "record_auth.SUFFIX_LEN",
+    "stored.hash",
+    "verified.changed",
+    "verified.events",
+    "verified.last_mac",
+    "verified.last_seq",
+    "verified.reason",
+    "verified.removed",
+    "view.changed",
+    "view.events",
+    "view.last_mac",
+    "view.last_seq",
+    "view.legacy",
+    "view.reason",
+    "view.removed",
+    "view.unchecked",
+    "view.status",
+    "view.value",
+    "self.message",
+    "view.before",
+    "problem.reason",
+    "problem.status",
+    "view.rejected",
+    "directory.fd",
+    "read.changed",
+    "read.removed",
+    "read.rejected",
 }
 ERROR_BOUNDARIES = {
     "_alert",
     "note_lost",
     "_note",
     "read_run",
+    "run_lines",
     "_pending_count",
     "apply_retention",
     "read_detail",
     "_commit",
     "_drain",
+    "_drain_valid",
     "_append",
     "read_meta",
     "_read_json",
     "_store_detail",
     "delete_detail",
+    "_detail_parts",
+    "find_detail_files",
+    "ticket_detail_files",
+    "delete_detail_files",
+    "record_sizes",
     "list_runs",
     "_spool",
     "read_job",
     "list_jobs",
     "append_job",
+    "_reject",
+    "_sealed_tail",
+    "_reject_bad_spool",
+    "_reject_entry",
+    "_flat_size",
+    "_counted_mb",
+    "_move_head",
 }
 
 
@@ -232,6 +360,7 @@ from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 from jsonschema import Draft202012Validator, FormatChecker
 from orch import hider as hiding
+from orch import humanproof, record_auth
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
@@ -497,6 +626,10 @@ def test_03_symlink_each_level(store, part):
     if "/detail/" in part:
         kept = writer.append(event(), detail=DETAIL)
         assert kept["detail"] is None and kept["detail_lost"]
+    elif part == ".orch":
+        # a linked .orch folder holds no local id orch may read: no key, no recording, nothing written
+        with pytest.raises(record.RecordOff):
+            writer.append(event(), detail=DETAIL)
     else:
         with pytest.raises(record.RecordTampered) as caught:
             writer.append(event(), detail=DETAIL)
@@ -504,7 +637,7 @@ def test_03_symlink_each_level(store, part):
         expected = "lock" if part.endswith(".lock") else "meta" if part.endswith("meta.json") else None
         if expected:
             assert caught.value.alert["target"] == expected
-    assert not list(outside.iterdir())
+    assert [p.name for p in outside.iterdir() if p.name != ".local-id"] == []  # only the workspace id
     if "runs" in part and not part.endswith(".lock") or part in (".orch", ".orch/record"):
         assert record.read_run(ws, RUN).reason == "link"
 
@@ -523,7 +656,7 @@ def test_04_hardlinks_and_alert(store):
     stored = writer.append(event(), detail=DETAIL)
     target = record.record_dir(ws) / stored["detail"]
     os.link(target, ws / "detail-copy")
-    assert record.read_detail(ws, RUN, target.stem).reason == "hardlink"
+    assert record.read_detail(ws, RUN, target.stem, line_id=stored["id"]).reason == "hardlink"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX ownership")
@@ -544,13 +677,19 @@ def test_05_foreign_owner(store, monkeypatch, target):
         fields["st_uid"] = real if info.st_ino == chosen_ino else real + 1
         return SimpleNamespace(**fields)
 
-    monkeypatch.setattr(os, "fstat", selected_owner)
-    monkeypatch.setattr(os, "geteuid", lambda: real + 1)
-    result = record.read_run(ws, RUN)
-    assert result.reason == "foreign_owner"
-    assert result.message == record._MESSAGES["tampered"] and result.alert
-    with pytest.raises(record.RecordTampered):
-        writer.append(event(id="new"))
+    from orch import humanproof
+
+    key = humanproof.record_key(ws)  # the key is resolved before the owner is faked (the guarded home
+    # is not what this test is about); an own patcher: the record-key fixture patches the same name
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(humanproof, "record_key", lambda *a, **k: key)
+        monkeypatch.setattr(os, "fstat", selected_owner)
+        monkeypatch.setattr(os, "geteuid", lambda: real + 1)
+        result = record.read_run(ws, RUN)
+        assert result.reason == "foreign_owner"
+        assert result.message == record._MESSAGES["tampered"] and result.alert
+        with pytest.raises(record.RecordTampered):
+            writer.append(event(id="new"))
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires FIFO")
@@ -570,18 +709,20 @@ def test_06_fifo_no_hang(store, where):
         def read():
             return record.read_meta(ws)
     else:
-        name = record.detail_name(RUN, "step", event()["id"])
+        first = writer.append(event(), detail=DETAIL)
+        name = record.detail_name(RUN, "step", event()["id"], event()["ticket"])
         target = root / "detail" / RUN / (name + ".json")
-        target.parent.mkdir(parents=True)
+        target.unlink()
         os.mkfifo(target)
 
         def read():
-            return record.read_detail(ws, RUN, name)
+            return record.read_detail(ws, RUN, name, line_id=first["id"])
 
     start = time.monotonic()
     assert read().reason == "not_regular"
     if where == "detail":
-        assert writer.append(event(), detail=DETAIL)["detail_lost"]
+        done = dict(ok=True, error=None, ms=1)
+        assert writer.append(event(outcome=done), detail=DETAIL)["detail_lost"]
     else:
         with pytest.raises(record.RecordTampered):
             writer.append(event())
@@ -678,6 +819,7 @@ def test_11_line_failure_removes_new_detail(store, monkeypatch):
 @pytest.mark.parametrize("mode", ["missing", "io", "tampered"])
 def test_12_public_read_statuses(store, monkeypatch, mode):
     ws, writer = store
+    record_auth_home(ws)  # a clean guarded home: only then is "no such run" a plain "missing"
     if mode != "missing":
         writer.append(event())
     if mode == "io":
@@ -694,7 +836,7 @@ def test_12_public_read_statuses(store, monkeypatch, mode):
         (ws / ".orch").symlink_to(ws / "parked", target_is_directory=True)
     for result in [
         record.read_run(ws, RUN),
-        record.read_detail(ws, RUN, "0" * 32),
+        record.read_detail(ws, RUN, "0" * 32, line_id="x"),
         record.read_meta(ws),
         record.list_runs(ws),
     ]:
@@ -710,7 +852,7 @@ def test_13_invalid_lines_counted(store):
     with runfile(ws).open("ab") as stream:
         stream.write(b"broken\n")
     read = record.read_run(ws, RUN)
-    assert read.status == "ok" and read.skipped == 1 and len(read.value) == 1
+    assert read.status == "ok" and read.changed == 1 and read.reason == "content" and len(read.value) == 1
 
 
 def ended(writer, run=RUN):
@@ -738,6 +880,39 @@ def test_14_retention_skips_only_bad_run(store):
     assert result["status"] == "tampered" and result["reason"] == "hardlink" and result["alert"]
     assert folds == ["r_other1"] and result["delete_run"] == folds
     assert runfile(ws).read_bytes() == before
+
+
+@pytest.mark.parametrize("how", ["fifo", "link", "hardlink"])
+def test_retention_is_not_vetoed_by_a_planted_detail_file(store, how):
+    """R1: a planted FIFO, link or hardlink in an ended run's detail folder does not make retention refuse
+    that run (its real detail would outlive retention): the real detail and the run's lines go, the planted
+    file stays (nothing outside changes) and is reported."""
+    if how == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("requires FIFO")
+    ws, writer = store
+    line = writer.append(event(), detail=DETAIL)
+    ended(writer)
+    planted = record.record_dir(ws) / "detail" / RUN / ("f" * 32 + ".json")
+    (ws / "outside").write_text("unchanged")
+    if how == "fifo":
+        os.mkfifo(planted, 0o600)
+    elif how == "link":
+        planted.symlink_to(ws / "outside")
+    else:
+        os.link(ws / "outside", planted)
+    folds = []
+    result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda run, events: folds.append(run))
+    assert folds == [RUN] and result["delete_detail"] == [RUN] and result["delete_run"] == [RUN]
+    assert not (record.record_dir(ws) / line["detail"]).exists() and not runfile(ws).exists()
+    assert planted.is_symlink() or planted.exists()
+    assert (ws / "outside").read_text() == "unchanged"
+    alerts = [
+        json.loads(x)
+        for day in (record.record_dir(ws) / "alerts").glob("*.jsonl")
+        for x in day.read_text().splitlines()
+    ]
+    reason = {"fifo": "not_regular", "link": "link", "hardlink": "hardlink"}[how]
+    assert (reason, RUN, "retention") in {(x.get("reason"), x.get("run"), x.get("seen_by")) for x in alerts}
 
 
 def test_15_listing_keeps_symlinks(store):
@@ -780,9 +955,11 @@ def test_18_random_detail_names():
     seen = set()
     for i in range(5000):
         eid = str(i) + "".join(rng.choice("Ab/\\..é中 CON:NUL") for _ in range(20))
-        name = record.detail_name(RUN, rng.choice(["step", "usage"]), eid)
+        kind = rng.choice(["step", "usage"])
+        name = record.detail_name(RUN, kind, eid, rng.choice(["t_aaaaaa", "t_bbbbbb"]))
         assert re.fullmatch(r"[0-9a-f]{32}", name) and name not in seen
         seen.add(name)
+        assert record.detail_name(RUN, kind, eid, None) is None  # no ticket: no detail file (I4)
 
 
 def test_19_case_distinct_details(store):
@@ -792,21 +969,38 @@ def test_19_case_distinct_details(store):
         stored = writer.append(event(id=eid), detail=DETAIL)
         path = Path(stored["detail"])
         paths.add(path)
-        read = record.read_detail(ws, RUN, path.stem).unwrap()
+        read = record.read_detail(ws, RUN, path.stem, line_id=eid).unwrap()
         assert (read["kind"], read["id"]) == ("step", eid)
     assert len(paths) == 4
 
 
-@pytest.mark.parametrize("problem", ["collision", "link", "oversize", "io"])
+def test_19b_detail_name_binds_the_ticket(store):
+    """I4: the file name covers the ticket. A file whose stored ticket was changed no longer matches its name,
+    and a read for a line of another ticket is refused: both swapped."""
+    ws, writer = store
+    stored = writer.append(event(id="t1"), detail=DETAIL)
+    name = Path(stored["detail"]).stem
+    assert name == record.detail_name(RUN, "step", "t1", event()["ticket"])
+    assert name != record.detail_name(RUN, "step", "t1", "t_other9")
+    assert (
+        record.read_detail(ws, RUN, name, line_id="t1", ticket=event()["ticket"]).unwrap()["ticket"]
+        == event()["ticket"]
+    )
+    other = record.read_detail(ws, RUN, name, line_id="t1", ticket="t_other9")
+    assert (other.status, other.reason) == ("tampered", "swapped")
+    target = record.record_dir(ws) / stored["detail"]
+    target.write_text(json.dumps(dict(json.loads(target.read_text()), ticket="t_other9")))
+    changed = record.read_detail(ws, RUN, name, line_id="t1")
+    assert (changed.status, changed.reason) == ("tampered", "swapped")
+
+
+@pytest.mark.parametrize("problem", ["link", "oversize", "io"])
 def test_20_detail_failure_keeps_line(store, monkeypatch, problem):
     ws, writer = store
     payload = DETAIL
-    name = record.detail_name(RUN, "step", event()["id"])
+    name = record.detail_name(RUN, "step", event()["id"], event()["ticket"])
     target = record.record_dir(ws) / "detail" / RUN / (name + ".json")
-    if problem == "collision":
-        target.parent.mkdir(parents=True)
-        target.write_text(json.dumps(dict(run=RUN, kind="usage", id="other")))
-    elif problem == "link":
+    if problem == "link":
         target.parent.parent.mkdir(parents=True)
         target.parent.symlink_to(ws, target_is_directory=True)
     elif problem == "oversize":
@@ -820,6 +1014,19 @@ def test_20_detail_failure_keeps_line(store, monkeypatch, problem):
     kept = writer.append(event(), detail=payload)
     assert kept["detail"] is None and kept["detail_lost"]
     assert record.read_run(ws, RUN).unwrap() == [kept]
+
+
+def test_planted_detail_file_at_the_name_is_replaced_and_hashed(store):
+    """A file at the name no verified line carries the hash of is an orphan or planted: replaced atomically,
+    and the new line authenticates the file that is really there (design 6)."""
+    ws, writer = store
+    name = record.detail_name(RUN, "step", event()["id"], event()["ticket"])
+    target = record.record_dir(ws) / "detail" / RUN / (name + ".json")
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps(dict(run=RUN, kind="usage", id="other", ticket=event()["ticket"])))
+    kept = writer.append(event(), detail=DETAIL)
+    assert kept["detail"] and kept["detail_hash"] == record_auth.detail_hash(target.read_bytes())
+    assert json.loads(target.read_text())["input"] == "hello"
 
 
 def test_21_hider_failure_leaves_nothing(store, monkeypatch):
@@ -856,6 +1063,12 @@ def test_23_hook_namespace_and_conflict(store):
     assert writer.append(event(id="same", via="log", outcome=dict(ok=False, error="failed", ms=1))) is None
     assert writer.append(event(id="same", via="hook", outcome=dict(ok=True, error=None, ms=1))) is None
     assert len(record.read_run(ws, RUN).unwrap()) == 4
+    # agreeing lines of one call: the log line replaces the hook line, a later hook line is dropped
+    writer.append(event(id="agree", via="hook"))
+    replacing = writer.append(event(id="agree", via="log"))
+    assert replacing["replaced_hook"] is True and "conflict" not in replacing
+    assert writer.append(event(id="agree", via="hook", text="Something else")) is None
+    assert [e["via"] for e in record.read_run(ws, RUN).unwrap() if e["id"] == "agree"] == ["log"]
 
 
 @pytest.mark.parametrize("kind", ["denial", "usage"])
@@ -872,9 +1085,7 @@ def test_25_fast_strict_read_and_spool(store, monkeypatch):
     ws, writer = store
     writer.append(event(id="first"))
     sample = event()
-    runfile(ws).write_text(
-        "".join(json.dumps(dict(sample, id=f"id{i}", seq=i + 1)) + "\n" for i in range(3000))
-    )
+    runfile(ws).write_bytes(seal_lines(ws, RUN, [dict(sample, id=f"id{i}") for i in range(3000)]))
     start = time.monotonic()
     assert writer.append(event(id="last"))["seq"] == 3001
     assert time.monotonic() - start < 0.5  # shared CI runners; W2b makes this structural
@@ -982,7 +1193,7 @@ def test_28_empty_hider_stale_identity_and_torn_line(store):
     os.utime(lock, (1, 1))
     with runfile(ws).open("ab") as stream:
         stream.write(b"torn")
-    assert writer.append(event(id="after"))["seq"] == 3
+    assert writer.append(event(id="after"))["seq"] == 2  # the cut-off line is no line of the chain
     assert b"torn\n{" in runfile(ws).read_bytes()
 
 
@@ -996,18 +1207,20 @@ def test_pending_tampering_is_alerted_and_skipped(store, monkeypatch):
     writer.append(event())
     pending = record.record_dir(ws) / "pending" / RUN
     pending.mkdir(parents=True)
-    target = pending / "a.json"
+    target = pending / ("9" * 19 + "1_" + "a" * 32 + ".json")  # newer than the upgrade: never read
     target.symlink_to(ws / "outside")
-    (pending / "b.json").write_text(json.dumps(dict(event=event(id="bad"), payload="{}", default_id=False)))
+    planted = pending / ("9" * 19 + "2_" + "b" * 32 + ".json")  # orch's name, but no MAC: planted
+    planted.write_text(json.dumps(dict(event=event(id="bad"), payload="{}", default_id=False)))
     assert writer.append(event(id="good"))["seq"] == 2
+    assert not planted.exists()  # deleted by its exact path, never committed (M4)
     assert [e["id"] for e in record.read_run(ws, RUN).unwrap()][-1] == "good"
-    assert target.is_symlink()
+    assert not target.is_symlink()  # a planted link at orch's name is removed too (never followed)
     alerts = [
         json.loads(line)
         for p in (record.record_dir(ws) / "alerts").glob("*")
         for line in p.read_text().splitlines()
     ]
-    assert {a["reason"] for a in alerts} == {"link", "swapped"}
+    assert {a["reason"] for a in alerts} == {"content"}  # a name without its proof is refused unread
 
 
 def test_actual_unreadable_directory(store):
@@ -1022,22 +1235,57 @@ def test_actual_unreadable_directory(store):
             record.read_run(ws, RUN),
             record.list_runs(ws),
             record.read_meta(ws),
-            record.read_detail(ws, RUN, "0" * 32),
+            record.read_detail(ws, RUN, "0" * 32, line_id="x"),
         ):
             assert read.status == "unavailable" and read.reason == "io"
     finally:
         directory.chmod(0o700)
 
 
-def test_detail_delete_preflights_all_runs(store):
+def test_detail_delete_preflights_all_run_folders(store):
+    """A run's detail FOLDER that is a link refuses before anything is deleted, also another run's detail."""
     ws, writer = store
     a = writer.append(event(), detail=DETAIL)
     b = writer.append(event(run="r_other1"), detail=DETAIL)
-    target = record.record_dir(ws) / b["detail"]
-    os.link(target, ws / "outside")
+    folder = record.record_dir(ws) / "detail" / "r_other1"
+    folder.rename(ws / "moved")
+    folder.symlink_to(ws / "moved", target_is_directory=True)
     with pytest.raises(record.RecordTampered):
         record.delete_detail(ws, [RUN, "r_other1"])
-    assert (record.record_dir(ws) / a["detail"]).exists() and target.exists()
+    assert (record.record_dir(ws) / a["detail"]).exists()
+    assert (ws / "moved" / Path(b["detail"]).name).exists() and folder.is_symlink()
+
+
+@pytest.mark.parametrize("how", ["hardlink", "link", "fifo"])
+def test_detail_delete_skips_only_the_unsafe_file(store, how):
+    """R1: a single detail FILE that is not safe (planted hardlink, link or FIFO) is reported and stays; the
+    run's other detail and the other runs' detail go (no veto of retention), and nothing outside changes."""
+    if how == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("requires FIFO")
+    ws, writer = store
+    a = writer.append(event(), detail=DETAIL)
+    a2 = writer.append(event(id="second"), detail=DETAIL)
+    writer.append(event(run="r_other1"), detail=DETAIL)
+    target = record.record_dir(ws) / a["detail"]
+    if how == "hardlink":
+        os.link(target, ws / "outside")
+    else:
+        target.unlink()
+        (ws / "outside").write_text("unchanged")
+        target.symlink_to(ws / "outside") if how == "link" else os.mkfifo(target, 0o600)
+    before = (ws / "outside").read_bytes()
+    record.delete_detail(ws, [RUN, "r_other1"], seen_by="retention")
+    assert target.exists() or target.is_symlink()  # the unsafe file stays
+    assert not (record.record_dir(ws) / a2["detail"]).exists()
+    assert not (record.record_dir(ws) / "detail" / "r_other1").exists()
+    assert (ws / "outside").read_bytes() == before
+    alerts = [
+        json.loads(line)
+        for day in (record.record_dir(ws) / "alerts").glob("*.jsonl")
+        for line in day.read_text().splitlines()
+    ]
+    reason = {"hardlink": "hardlink", "link": "link", "fifo": "not_regular"}[how]
+    assert {(x["reason"], x["run"], x["seen_by"]) for x in alerts} == {(reason, RUN, "retention")}
 
 
 def test_live_aged_lock_never_allows_second_writer(store, monkeypatch):
@@ -1112,16 +1360,16 @@ def test_strict_read_skips_garbage_outcome_before_hook_append(store, outcome):
     with runfile(ws).open("a") as stream:
         stream.write(json.dumps(bad) + "\n")
     assert writer.append(event(id="same", via="hook", outcome={"ok": True, "error": None, "ms": None}))
-    assert record.read_run(ws, RUN).skipped == 1
+    assert record.read_run(ws, RUN).changed == 1
 
 
-def test_read_run_counts_foreign_run_as_skipped(store):
+def test_read_run_counts_foreign_run_as_changed(store):
     ws, writer = store
     writer.append(event())
     with runfile(ws).open("a") as stream:
         stream.write(json.dumps(event(run="r_other1")) + "\n")
     read = record.read_run(ws, RUN)
-    assert read.skipped == 1 and len(read.unwrap()) == 1
+    assert read.changed == 1 and len(read.unwrap()) == 1
 
 
 def test_spool_receipt_has_no_placeholder_default_id(store):
@@ -1133,8 +1381,10 @@ def test_spool_receipt_has_no_placeholder_default_id(store):
 @pytest.mark.parametrize("seen_by", [None, "retention", "writer"])
 def test_delete_detail_alert_uses_callers_role(store, seen_by):
     ws, writer = store
-    line = writer.append(event(), detail=DETAIL)
-    os.link(record.record_dir(ws) / line["detail"], ws / "outside")
+    writer.append(event(), detail=DETAIL)
+    folder = record.record_dir(ws) / "detail" / RUN  # a linked run folder refuses (a single file is skipped)
+    folder.rename(ws / "moved")
+    folder.symlink_to(ws / "moved", target_is_directory=True)
     with pytest.raises(record.RecordTampered) as caught:
         record.delete_detail(ws, [RUN], **({"seen_by": seen_by} if seen_by else {}))
     assert caught.value.alert["seen_by"] == (seen_by or "cli")
@@ -1194,14 +1444,13 @@ def test_retention_rechecks_lock_identity_after_fold(store, monkeypatch):
 def test_retention_rechecks_pending_after_preflight(store, monkeypatch):
     ws, writer = store
     ended(writer)
-    original = record._size
+    original = record._pending_preflight
 
-    def size(workspace, rel):
-        if rel == ("pending", RUN):
-            writer._spool(event(id="late"), None, False)
-        return original(workspace, rel)
+    def preflight(workspace, run):
+        writer._spool(event(id="late"), None, False)
+        return original(workspace, run)
 
-    monkeypatch.setattr(record, "_size", size)
+    monkeypatch.setattr(record, "_pending_preflight", preflight)
     folds = []
     result = record.apply_retention(ws, "2030-01-01T00:00:00Z", 1, 1, lambda r, es: folds.append(r))
     assert (result["status"], result["reason"]) == ("unavailable", "pending")
@@ -1343,3 +1592,96 @@ def test_retention_checks_lock_immediately_before_deletion(store, monkeypatch, t
     assert jobs.exists() and runfile(ws).exists()
     if target == "detail":
         assert (record.record_dir(ws) / "detail" / RUN).exists()
+
+
+# --- G1 M1: the writer's view of the run file is the reader's view ---
+def test_a_planted_invalid_log_line_does_not_make_the_writer_drop_the_real_line(store):
+    ws, writer = store
+    writer.append(event(id="first"))
+    # schema-invalid (no `text`, `at`, ...) but with the right seq and the id of the next real line
+    planted = {"run": RUN, "seq": 2, "id": "toolu_next", "kind": "step", "outcome": None, "via": "log"}
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    stored = writer.append(event(id="toolu_next", via="log"))
+    assert stored is not None and stored["seq"] == 2  # the chain's seq: a planted line shifts nothing
+    assert [e["id"] for e in record.read_run(ws, RUN).unwrap()] == ["first", "toolu_next"]
+
+
+def test_a_planted_wrong_seq_line_is_not_trusted_by_the_writer(store):
+    ws, writer = store
+    writer.append(event(id="first"))
+    planted = dict(event(id="toolu_next", via="log"), run=RUN, seq=10**18)
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    stored = writer.append(event(id="toolu_next", via="log"))
+    assert stored is not None and stored["seq"] == 2
+
+
+def test_a_planted_huge_id_does_not_move_the_collectors_seq_start(store):
+    from orch import run_record
+
+    ws, writer = store
+    writer.append(event(id="first"))
+    writer.append(
+        event(id=f"{RUN}:999999999999999999", via="log")
+    )  # a line that passes every check but its id
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(dict(event(id="x"), run=RUN, seq=10**18)) + "\n")
+    seq, _ = run_record._so_far(ws, RUN)
+    assert seq < 100
+    alerts = "".join(p.read_text() for p in (record.record_dir(ws) / "alerts").glob("*.jsonl"))
+    assert '"reason":"content"' in alerts
+
+
+def test_ids_that_ran_ahead_by_dropped_events_stay_numbered_after_many_turns(store):
+    from orch import run_record
+
+    ws, writer = store
+    # three turns that each dropped 600 events: the id counter runs 600 ahead of the seqs every time
+    for n, id_no in enumerate((1, 601, 1201, 1801), 1):
+        assert writer.append(event(id=f"{RUN}:{id_no}", via="log"))["seq"] == n
+    seq, _ = run_record._so_far(ws, RUN)
+    assert seq == 1801  # the next id-less line gets 1802: new, so the writer does not drop it
+    assert not (record.record_dir(ws) / "alerts").exists()
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(dict(event(id=f"{RUN}:{10**18}"), run=RUN, seq=5)) + "\n")
+    assert run_record._so_far(ws, RUN)[0] == 1801
+
+
+def test_a_planted_line_with_another_id_cannot_decide_about_a_detail_file(store):
+    ws, writer = store
+    started = writer.append(event(id="toolu_d"), detail=DETAIL)
+    planted = dict(started, id="toolu_other", seq=2, outcome=dict(ok=True, error=None, ms=1), via="hook")
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    finished = writer.append(
+        event(id="toolu_d", outcome=dict(ok=True, error=None, ms=2)),
+        detail={"input": "new-input", "output": "new-output"},
+    )
+    assert finished["detail"] == started["detail"]
+    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()
+
+
+def test_planted_helper_names_do_not_crash_or_skew_the_collector(store):
+    from orch import run_record
+
+    ws, writer = store
+    writer.append(event(id="first"))
+    writer.append(event(id="p1", via="log", agent="h_3", parent="main"))
+    with runfile(ws).open("a") as f:
+        for n, agent in enumerate(("h_5", "h_" + "9" * 5000, "h_99999999", "h_" + "٣" * 3), 3):
+            f.write(json.dumps(dict(event(id=f"p{n}"), run=RUN, seq=n, via="log", agent=agent)) + "\n")
+    assert run_record._so_far(ws, RUN)[1] == 3
+
+
+def test_a_planted_line_of_another_ticket_cannot_decide_about_a_detail_file(store):
+    ws, writer = store
+    started = writer.append(event(id="toolu_d"), detail=DETAIL)
+    planted = dict(started, ticket="t_other1", via="core", seq=2, outcome=dict(ok=True, error=None, ms=1))
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    writer.append(
+        event(id="toolu_d", outcome=dict(ok=True, error=None, ms=2)),
+        detail={"input": "new-input", "output": "new-output"},
+    )
+    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()

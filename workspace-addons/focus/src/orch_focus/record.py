@@ -13,6 +13,7 @@ import json
 import re
 import subprocess
 import threading
+import unicodedata
 from pathlib import Path
 
 from . import actions, events
@@ -44,18 +45,32 @@ def _label(e: dict) -> dict | None:
 
 
 MAX_FILES = 8
-FILE_PATH = re.compile(r"[^\\\x00-\x1f\x7f:]{1,260}")  # no backslash, no control character, no drive colon
+MAX_PATH = 260
+_HIDDEN = ("Cc", "Cf", "Zl", "Zp")  # control and format characters (unicodedata categories)
+_NOT_PLAIN = re.compile(r"^(?:[~$]|[A-Za-z][A-Za-z0-9+.\-]*:)")  # ~, $, a scheme or a drive letter
+
+
+def file_ok(p) -> bool:
+    """One entry of a step's `files` (contracts/activity.md, Files): 1..260 characters, NFC, workspace-relative POSIX
+    (no leading /, no `..` segment, no backslash, no ~ $ scheme or drive start, no control or format character).
+    The core writer checks the same; Focus checks again because it shows whatever it is handed."""
+    return (
+        isinstance(p, str)
+        and 1 <= len(p) <= MAX_PATH
+        and unicodedata.is_normalized("NFC", p)
+        and not p.startswith("/")
+        and "\\" not in p
+        and not _NOT_PLAIN.match(p)
+        and ".." not in p.split("/")
+        and not any(unicodedata.category(c) in _HIDDEN for c in p)
+    )
 
 
 def clean_files(raw) -> list[str]:
-    """The `files` of a step (contracts: 0..8 workspace-relative POSIX paths). Anything that is not exactly that
-    is dropped. Display only: Focus never opens these paths."""
+    """The `files` of a step: the good entries, at most 8. Display only: Focus never opens these paths."""
     out: list[str] = []
     for p in raw if isinstance(raw, list) else []:
-        if (
-            isinstance(p, str) and FILE_PATH.fullmatch(p) and not p.startswith("/")
-            and ".." not in p.split("/") and "" not in p.split("/") and "." not in p.split("/")
-        ):  # fmt: skip
+        if file_ok(p):
             out.append(p)
         if len(out) == MAX_FILES:
             break
@@ -83,7 +98,12 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
         text, at = str(e.get("text") or ""), e.get("at")
         done = e.get("outcome")
         eid = str(e["id"])
-        source = str(e.get("via") or "log")
+        # `checked` is computed by orch (record.is_checked): true only for a verified line that is not a hook
+        # line. Anything else, an unchecked or old line included, is the agent's word: never drives the board.
+        checked = e.get("checked") is True
+        source = str(e.get("via") or "log") if checked else "hook"
+
+        old = True if not checked and e.get("before_protection") else None  # made before orch checked records
 
         def make(k, **data):
             return events.make(run, ticket, agent, k, text, source, at=at, **data)
@@ -91,27 +111,38 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
         if kind == "step":
             used, files = _label(e), clean_files(e.get("files")) or None
             if done is None:
-                return [make("tool.start", id=eid, used=used, files=files)]
-            return [make("tool.end", id=eid, ok=done.get("ok") is not False, used=used, files=files)]
+                return [make("tool.start", id=eid, used=used, files=files, before=old)]
+            ok = done.get("ok") is not False if checked else done.get("ok")  # a hook's "ok" is only its word
+            return [make("tool.end", id=eid, ok=ok, used=used, files=files, confirmed=checked, before=old)]
+        if kind.startswith("helper.") and not checked:
+            return []  # the agent's word: never opens or closes a helper
         if kind == "helper.start":
             return [make("helper.start", id=eid, parent=e.get("parent"))]
         if kind == "helper.end":
-            return [make("helper.end", id=eid, ok=(done or {}).get("ok") is not False)]
+            return [make("helper.end", id=eid, ok=(done or {}).get("ok") is not False, confirmed=True)]
         if kind == "run.state":
+            if not checked:
+                return []
             state = _data(e).get("state")
             return [make("run.state", state="idle" if state == "waiting_you" else state)] if state else []
         if kind == "usage":
+            if not checked:
+                return []  # numbers no log line checks: only orch's own count
             d = _data(e)
             if not isinstance(d.get("used"), (int, float)) or isinstance(d.get("used"), bool):
                 return []
             return [make("usage", used=d["used"], window=d.get("window"), status=d.get("status", "ok"))]
         if kind == "denial":
-            if e.get("via") not in TRUSTED_DENIAL:
+            if e.get("via") not in TRUSTED_DENIAL or not checked:
                 return []
             return [make("denial", tool=str(_used(e).get("name") or "a tool"))]
     except (KeyError, TypeError, AttributeError, ValueError):
         pass
     return []
+
+
+# news about the stream itself, not a problem with the records
+INFO_REASONS = ("missing", "recovered", "rewound", "trimmed", "pending")
 
 
 class RecordFeed:
@@ -120,6 +151,7 @@ class RecordFeed:
     def __init__(self, root: Path, orch_bin: str | None, run: str, ticket: str):
         self.root, self.orch_bin, self.run, self.ticket = Path(root), orch_bin, run, ticket
         self.cursor: str | None = None
+        self.notes: dict[str, dict] = {}  # the last problem marker of orch for this run (S3 shows its text)
         self.lock = threading.Lock()
         self.queue: list[dict] = []
         self.stopped = threading.Event()
@@ -134,6 +166,18 @@ class RecordFeed:
             self.thread.start()
         with self.lock:
             out, self.queue = self.queue, []
+        return out
+
+    def problems(self) -> list[str]:
+        """orch's own words for what is wrong with this run's records, once each (display only)."""
+        with self.lock:
+            notes = list(self.notes.values())
+        out: list[str] = []
+        for n in notes:
+            msg = n.get("message")
+            text = " ".join(msg.split())[:300] if isinstance(msg, str) else ""
+            if n.get("reason") not in INFO_REASONS and text and text not in out:
+                out.append(text)
         return out
 
     def _argv(self) -> list[str]:
@@ -172,6 +216,11 @@ class RecordFeed:
         if not isinstance(doc, dict):
             return
         cur = doc.get("cursor")
+        if doc.get("type") == "unavailable" and isinstance(doc.get("reason"), str):
+            with self.lock:  # kept, never dropped: changed, removed or unchecked records of this run
+                self.notes[doc["reason"]] = {
+                    k: doc.get(k) for k in ("status", "reason", "message", "changed", "removed")
+                }
         if doc.get("type") == "event" and isinstance(doc.get("event"), dict):
             got = to_events(doc["event"], self.ticket, self.run)
             with self.lock:

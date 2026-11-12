@@ -185,7 +185,7 @@ def _prove(root, ids) -> None:
 
 def _writer(root):
     try:
-        return record_hook._writer(root)
+        return record_hook.record_writer(root)
     except record.RecordOff:
         raise JobError("hider_off") from None
 
@@ -409,7 +409,13 @@ def ingest(root, inp, *, environ=None, job=None, now=None, token=None) -> dict:
             return ev, replace, None
 
         record.append_job(
-            root, run, job_id, decide, valid=_STORED.is_valid, max_jobs=JOBS_PER_RUN if is_start else None
+            root,
+            run,
+            job_id,
+            decide,
+            valid=_STORED.is_valid,
+            hider=writer.hider,
+            max_jobs=JOBS_PER_RUN if is_start else None,
         )
     except record.RecordRefused as e:
         raise JobError(getattr(e, "code", "invalid"), str(e)) from None

@@ -214,31 +214,51 @@ def act_event_id(tool_call_id, run, seq):
     return "x_" + hashlib.sha256(tool_call_id.encode()).hexdigest()[:32]
 
 
-def act_detail_name(run, kind, event_id):
-    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/1\\0" run \\0 kind \\0 id)."""
-    data = b"orch.detail/1\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id))
+def act_detail_name(run, kind, event_id, ticket):
+    """The only detail file name: 32 lowercase hex of sha256(b"orch.detail/2\\0" run \\0 kind \\0 id \\0 ticket).
+    Two tickets never share a detail file. An event with no ticket has NO detail file: None."""
+    if not ticket:
+        return None
+    data = b"orch.detail/2\0" + b"\0".join(x.encode("utf-8") for x in (run, kind, event_id, ticket))
     return hashlib.sha256(data).hexdigest()[:32]
 
 
+def act_detail_path(run, kind, event_id, ticket):
+    name = act_detail_name(run, kind, event_id, ticket)
+    return None if name is None else f"detail/{run}/{name}.json"
+
+
 def act_dedupe(lines):
-    """Only hook/log share an origin; disagreeing finished outcomes both survive."""
+    """Only hook/log share an origin. For one key the log line wins, started and finished alike: it replaces
+    the hook line, and a hook line after any log line of that call (run, id, kind; started or finished) is
+    dropped. When the two disagree (`used`, `text`, `files`, or both finished and the hook's not provisional:
+    `ok`, and `error` unless the hook's is a fixed code) both are kept (the log line carries `conflict`).
+    Repeats of one origin keep the first."""
     kept = []
     def key(line):
         via = line["via"]
         return (line["run"], line["id"], line["kind"], line.get("outcome") is not None,
                 "hl" if via in ("hook", "log") else via)
-    def conflict(a, b):
-        return ({a["via"], b["via"]} == {"hook", "log"} and a.get("outcome") is not None
-                and b.get("outcome") is not None
-                and any(a["outcome"].get(k) != b["outcome"].get(k) for k in ("ok", "error")))
+    def provisional(line):
+        return line["via"] == "hook" and line.get("outcome") is not None and line["outcome"].get("ok") is None
+    def agree(hook, log):
+        if (any(hook.get(k) != log.get(k) for k in ("used", "text"))
+                or (hook.get("files") or []) != (log.get("files") or [])):
+            return False
+        if hook.get("outcome") is None or log.get("outcome") is None or provisional(hook):
+            return True
+        # a hook's fixed failure code is never the log's text: against it only `ok` counts
+        keys = ("ok",) if hook["outcome"].get("error") in HOOK_ERRORS else ("ok", "error")
+        return all(hook["outcome"].get(k) == log["outcome"].get(k) for k in keys)
     for i, line in enumerate(lines):
         matches = [j for j in kept if key(lines[j]) == key(line)]
         if any(lines[j]["via"] == line["via"] for j in matches):
             continue
-        if any(conflict(lines[j], line) for j in matches):
-            kept.append(i)
-        elif not any(lines[j]["via"] == line["via"] or lines[j]["via"] == "hook" for j in matches):
-            kept = [j for j in kept if j not in matches] + [i]
+        if line["via"] == "hook" and any(
+            lines[j]["via"] == "log" and all(lines[j][k] == line[k] for k in ("run", "id", "kind")) for j in kept
+        ):
+            continue
+        kept = [j for j in kept if not (j in matches and line["via"] == "log" and agree(lines[j], line))] + [i]
     return sorted(kept)
 
 
@@ -246,14 +266,25 @@ def _t(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
 
 
-HOOK_KINDS = ("step", "denial", "helper.start", "helper.end", "usage")
+HOOK_KINDS = ("step", "helper.start", "helper.end")  # only kinds whose line can be provisional
+HOOK_ERRORS = ("tool_failed", "interrupted")  # the only `error` of a hook end: a fixed code, never the tool's text
 
 
 def act_hook_accept(line):
-    """What the out-of-process hook entry (orch run event) stores: only hook kinds, always via hook."""
+    """What the out-of-process hook entry (orch record hook) stores: only hook kinds, always via hook. An
+    outcome never says the call ended well: a claimed failure stays `ok: false` with a fixed code (any other
+    error is `tool_failed`), anything else (`ok: true` included) is provisional; `ms` is always null."""
     if line.get("kind") not in HOOK_KINDS:
         return "refused"
-    return {**line, "via": "hook"}
+    stored = {**line, "via": "hook"}
+    outcome = line.get("outcome")
+    if isinstance(outcome, dict):
+        if outcome.get("ok") is False:
+            error = outcome.get("error")
+            stored["outcome"] = {"ok": False, "error": error if error in HOOK_ERRORS else "tool_failed", "ms": None}
+        else:
+            stored["outcome"] = {"ok": None, "error": None, "ms": None}
+    return stored
 
 
 def act_retention(case):
@@ -352,7 +383,7 @@ def act_map_stream(lines, ctx):
 
     def emit(**k):
         ev = {"v": 1, "id": k.pop("id", None), "seq": len(out) + 1, "run": run, "session": session, "agent": "main",
-              "parent": None, "at": ctx["at"], "ticket": ctx["ticket"], "harness": ctx["harness"], "via": "log",
+              "parent": None, "at": ctx["at"], "ticket": ctx.get("ticket"), "harness": ctx["harness"], "via": "log",
               "used": None, "outcome": None, "detail": None, "coverage": "full"}
         ev.update(k)
         if ev["id"] is None:
@@ -379,18 +410,215 @@ def act_map_stream(lines, ctx):
                 first = (item.get("aggregated_output") or "").strip().splitlines()[:1]
                 err = None if ok is not False else _one_line(f"Exit code {code}: {first[0] if first else ''}".strip(), 300)
                 emit(id=eid, kind="step", text=text, used=used, outcome={"ok": ok, "error": err, "ms": None},
-                     detail=f"detail/{run}/{act_detail_name(run, 'step', eid)}.json")
+                     detail=act_detail_path(run, 'step', eid, ctx.get('ticket')))
         elif t == "item.completed" and item.get("type") == "agent_message":
             eid = f"{run}:{turn}:{item['id']}"
             say = _one_line(item.get("text", ""), 200)
             emit(id=eid, kind="run.state", text=say, data={"state": "working", "say": say},
-                 detail=f"detail/{run}/{act_detail_name(run, 'run.state', eid)}.json")
+                 detail=act_detail_path(run, 'run.state', eid, ctx.get('ticket')))
         elif t == "turn.completed":
             u = m.get("usage") or {}
             emit(kind="usage", text=f"Tokens: {u.get('input_tokens', 0)} in, {u.get('output_tokens', 0)} out",
                  data={"tokens_in": u.get("input_tokens", 0), "tokens_out": u.get("output_tokens", 0)})
             emit(kind="run.state", text="Idle", data={"state": "idle"})
     return out
+
+
+# --- activity: record MAC (activity.md, Authenticated record). Stdlib only, independent of orch.record_auth ----------
+import hmac as _hmac
+
+_RA_TAIL = re.compile(rb',"auth":\{"k":"([0-9a-f]{8})","p":"([A-Za-z0-9_-]{43})","m":"([A-Za-z0-9_-]{43})"\}\}$')
+
+
+def _ra_b64(b):
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+
+def _ra_hm(key, *parts):
+    return _ra_b64(_hmac.new(key, b"".join(parts), hashlib.sha256).digest())
+
+
+def ra_derive(human_key, ws):
+    prk = _hmac.new(b"orch.record/1", human_key, hashlib.sha256).digest()
+    rk = _hmac.new(prk, b"orch.record.mac/1\0" + ws.encode() + b"\x01", hashlib.sha256).digest()
+    return rk, hashlib.sha256(b"orch.record.kid/1\0" + rk).hexdigest()[:8]
+
+
+def ra_genesis(rk, ws, run, job=None):
+    if job is None:
+        return _ra_hm(rk, b"orch.record.genesis/1\0", ws.encode(), b"\0", run.encode())
+    return _ra_hm(rk, b"orch.record.job.genesis/1\0", ws.encode(), b"\0", run.encode(), b"\0", job.encode())
+
+
+def ra_mac(rk, ws, run, seq, prev, body, job=None):
+    dom, scope = (b"orch.record.line/1\0", run.encode()) if job is None else (
+        b"orch.record.job/1\0", run.encode() + b"\0" + job.encode())
+    return _ra_hm(rk, dom, ws.encode(), b"\0", scope, b"\0", str(seq).encode(), b"\0", prev.encode(), b"\0", body)
+
+
+def ra_seal(rk, kid, ws, run, seq, prev, body, job=None):
+    return body[:-1] + b',"auth":{"k":"%s","p":"%s","m":"%s"}}\n' % (
+        kid.encode(), prev.encode(), ra_mac(rk, ws, run, seq, prev, body, job).encode())
+
+
+def _ra_nodup(pairs):
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise ValueError(k)
+        d[k] = v
+    return d
+
+
+def ra_verify(raw, run, ws, rk, kid, head=None, job=None, old_kids=None):
+    """Reference of record_auth.verify_run: {shown, changed, removed, reason}."""
+    start = ra_genesis(rk, ws, run, job)
+    shown, last_seq, last_mac = [], 0, None
+    removed = bad = noauth = oldkey = 0
+    gaps = []
+    for line in raw.split(b"\n"):
+        if not line:
+            continue
+        m = _RA_TAIL.search(line) if len(line) > 125 else None
+        if m is None or m.start() != len(line) - 125:
+            noauth += 1
+            continue
+        k, prev, mac = (g.decode() for g in m.groups())
+        body = line[: m.start()] + b"}"
+        if k != kid:
+            if shown:
+                bad += 1
+            elif old_kids is not None and k in old_kids:  # only the recorded old key ids are history
+                oldkey += 1  # held: becomes `bad` at the end unless the rotation shape holds (below)
+            else:
+                bad += 1
+            continue
+        try:
+            o = json.loads(body.decode(), object_pairs_hook=_ra_nodup)
+        except ValueError:
+            o = None
+        seq = o.get("seq") if isinstance(o, dict) else None
+        if (not isinstance(o, dict) or "auth" in o or o.get("run") != run or (job is not None and o.get("job") != job)
+                or type(seq) is not int or seq < 1 or not _hmac.compare_digest(
+                    ra_mac(rk, ws, run, seq, prev, body, job), mac)):
+            bad += 1
+            continue
+        if seq <= last_seq:
+            bad += 1
+            for n, (lo, hi) in enumerate(gaps):
+                if lo <= seq <= hi:
+                    gaps[n:n + 1] = [r for r in ((lo, seq - 1), (seq + 1, hi)) if r[0] <= r[1]]
+                    removed -= 1
+                    break
+            continue
+        if seq == last_seq + 1:
+            if prev != (last_mac or start):
+                bad += 1
+                continue
+        else:
+            gap = seq - last_seq - 1
+            if gap:
+                removed += gap
+                gaps.append((last_seq + 1, last_seq + gap))
+        shown.append(seq)
+        last_seq, last_mac = seq, mac
+    if oldkey:
+        # rotation shape: the current key's first line is seq 1, or nothing of it exists and no head of it says so
+        has_head = bool(head and head.get("kid") == kid and type(head.get("seq")) is int and head["seq"] >= 1)
+        if not (shown[0] == 1 if shown else not has_head):
+            bad += oldkey
+            oldkey = 0
+    if head and head.get("kid") == kid and type(head.get("seq")) is int:
+        removed += max(0, head["seq"] - last_seq)
+    changed = bad + noauth + oldkey
+    if changed:
+        reason = "content" if bad or (noauth and shown) else ("unverified" if noauth else "old_key")
+    else:
+        reason = "removed" if removed else None
+    return {"shown": shown, "changed": changed, "removed": removed, "reason": reason}
+
+
+def ra_legacy(raw, head):
+    """Reference of record_auth.legacy_split + the head state: {mode, unchecked}. "unknown" is never legacy."""
+    if head == "unknown":
+        return {"mode": "unverified", "unchecked": 0}
+    lines = [x for x in raw.split(b"\n") if x]
+    sealed = [x for x in lines if len(x) > 125 and _RA_TAIL.search(x) and _RA_TAIL.search(x).start() == len(x) - 125]
+    if not sealed and head == "absent":
+        return {"mode": "legacy", "unchecked": len(lines)}
+    return {"mode": "sealed", "unchecked": 0}
+
+
+def ra_legacy_prefix(raw, head):
+    """Reference of record_auth.legacy_prefix: {prefix_lines, base}."""
+    n, want = head.get("legacy_lines"), head.get("legacy_hash")
+    if type(n) is not int or n <= 0 or not isinstance(want, str):
+        return {"prefix_lines": 0, "base": 0}
+    cut = seen = 0
+    while seen < n:
+        end = raw.find(b"\n", cut)
+        if end < 0:
+            return {"prefix_lines": 0, "base": n}
+        seen += end > cut
+        cut = end + 1
+    pre = raw[:cut]
+    lines = [x for x in pre.split(b"\n") if x]
+    sealed = [x for x in lines if len(x) > 125 and _RA_TAIL.search(x) and _RA_TAIL.search(x).start() == len(x) - 125]
+    if hashlib.sha256(pre).hexdigest() == want and not sealed:
+        return {"prefix_lines": len(lines), "base": n}
+    return {"prefix_lines": 0, "base": n}
+
+
+def ra_check(vec):
+    """Replay vectors/activity-v1.json record_auth."""
+    r = vec["record_auth"]
+    hk, ws, run = bytes.fromhex(r["human_key"]), r["ws"], r["run"]
+    rk, kid = ra_derive(hk, ws)
+    _expect("activity record_auth rk", rk.hex(), r["rk"])
+    _expect("activity record_auth kid", kid, r["kid"])
+    _expect("activity record_auth genesis", ra_genesis(rk, ws, run), r["genesis"])
+    _expect("activity record_auth job genesis", ra_genesis(rk, ws, run, r["job"]), r["job_genesis"])
+    _expect("activity record_auth kid_old differs", ra_derive(bytes.fromhex(r["human_key_old"]), ws)[1], r["kid_old"])
+    _expect("activity record_auth suffix length", len(_RA_TAIL.search(bytes.fromhex(r["seal"][0]["line_hex"])).group(0)), 125)
+    for c in r["seal"]:
+        body = bytes.fromhex(c["body_hex"])
+        _expect(f"activity record_auth seal {c['seq']}", ra_seal(rk, kid, ws, run, c["seq"], c["prev"], body).hex(), c["line_hex"])
+    for c in r["verify"]:
+        raw = b"".join(bytes.fromhex(x) for x in c["lines"])
+        _expect(f"activity record_auth verify {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], None, c.get("old_kids")), c["expect"])
+    for c in r["legacy"]:
+        raw = b"".join(bytes.fromhex(x) + b"\n" if not bytes.fromhex(x).endswith(b"\n") else bytes.fromhex(x) for x in c["lines"])
+        _expect(f"activity record_auth legacy {c['name']}", ra_legacy(raw, c["head"]), c["expect"])
+    for c in r["legacy_prefix"]:
+        _expect(f"activity record_auth legacy_prefix {c['name']}", ra_legacy_prefix(bytes.fromhex(c["raw_hex"]), c["head"]), c["expect"])
+    for c in r["job_streams"]:
+        raw = b"".join(bytes.fromhex(x) for x in c["lines"])
+        _expect(f"activity record_auth job {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], c["job"]), c["expect"])
+    for c in r["spool"]:
+        if "name_ok" in c:
+            # the name proves itself: <20-digit time>_<first 16 bytes of HMAC(rk, domain ws 0 run 0 time), hex>.json
+            nm = re.fullmatch(r"(\d{20})_([0-9a-f]{32})\.json", c["file"])
+            ok = nm is not None and _hmac.compare_digest(
+                _hmac.new(rk, b"orch.record.spoolname/1\0" + ws.encode() + b"\0" + run.encode() + b"\0"
+                          + nm.group(1).encode(), hashlib.sha256).digest()[:16].hex(), nm.group(2))
+            _expect(f"activity record_auth spool {c['name']}", ok, c["name_ok"])
+            continue
+        entry = c["entry"]
+        ok = (c["sm"] is not None and set(entry) <= {"event", "payload", "default_id"} and re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", c["file"]) is not None
+              and c["file"] not in c["drained"] and c["file"][:20] >= c["floor"]
+              and _hmac.compare_digest(_ra_hm(rk, b"orch.record.spool/1\0", ws.encode(), b"\0", run.encode(), b"\0",
+                                              c["file"].encode(), b"\0", json.dumps(entry, sort_keys=True, separators=(",", ":"),
+                                                                                     ensure_ascii=False).encode()), c["sm"]))
+        _expect(f"activity record_auth spool {c['name']}", ok, c["drain"])
+    for c in r["detail"]:
+        got = "ok" if hashlib.sha256(bytes.fromhex(c["file_hex"])).hexdigest()[:32] == c["detail_hash"] else "swapped"
+        _expect(f"activity record_auth detail {c['name']}", got, c["detail"])
+    for c in r["heads"]:
+        h = dict(c["head"])
+        hm = h.pop("hm")
+        want = _ra_hm(rk, b"orch.record.head/1\0", ws.encode(), b"\0",
+                      json.dumps(h, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode())
+        _expect(f"activity record_auth head {c['name']}", _hmac.compare_digest(want, hm), c["ok"])
 
 
 def kind_activity():
@@ -400,8 +628,26 @@ def kind_activity():
     _examples("activity-detail", lambda d: _msgs(vd, d))
     va = _w("activity", "record_alert")
     _examples("activity-alert", lambda d: _msgs(va, d))
+    vc = _w("activity", "record_change")
+    _examples("activity-change", lambda d: _msgs(vc, d))
     _core_clean("activity")
     vec = _vec("activity-v1.json")
+    ra_check(vec)
+    vs = _w("activity", "sealed_event")
+    _examples("activity-sealed", lambda d: _msgs(vs, d))
+    vb = _w("activity", "event_body")
+    for c in vec["record_auth"]["verify"][:1]:
+        for x in c["lines"]:
+            line = bytes.fromhex(x)
+            doc = json.loads(line)
+            for e in _msgs(vs, doc):
+                fails.append(f"activity sealed_event vector line: {e}")
+            body = dict(doc)
+            body.pop("auth")
+            for e in _msgs(vb, body):
+                fails.append(f"activity event_body vector line: {e}")
+            _expect("activity event_body refuses auth", bool(_msgs(vb, doc)), True)
+            _expect("activity sealed_event needs auth", bool(_msgs(vs, body)), True)
     tamper = {"link", "reparse", "hardlink", "foreign_owner", "not_regular", "not_dir", "swapped"}
     for case in vec["integrity"]:
         fixture = case["fixture"]
@@ -422,7 +668,16 @@ def kind_activity():
     for c in vec["ids"]:
         _expect(f"activity ids {c['name']}", act_event_id(c["tool_call_id"], c["run"], c["seq"]), c["id"])
     for c in vec["detail_names"]:
-        _expect(f"activity detail_names {c['kind']} {c['id']}", act_detail_name(c["run"], c["kind"], c["id"]), c["file"])
+        _expect(f"activity detail_names {c['kind']} {c['id']} {c.get('ticket')}",
+                act_detail_name(c["run"], c["kind"], c["id"], c.get("ticket")), c["file"])
+    shared = {}
+    for c in vec["detail_names"]:
+        if c.get("ticket"):
+            shared.setdefault((c["run"], c["kind"], c["id"]), {})[c["ticket"]] = c["file"]
+    _expect("activity detail_names: two tickets with the same run, kind and id get different names",
+            any(len(set(t.values())) == len(t) > 1 for t in shared.values()), True)
+    _expect("activity detail_names: a ticketless case has no detail file",
+            any(not c.get("ticket") and c["file"] is None for c in vec["detail_names"]), True)
     for c in vec["dedupe"]:
         _expect(f"activity dedupe {c['name']}", act_dedupe(c["lines"]), c["keep"])
     for c in vec["hook_entry"]:

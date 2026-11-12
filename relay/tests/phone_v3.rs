@@ -475,7 +475,7 @@ async fn receipts_delivered_at_client_id_and_general_updates() {
             &p,
             "POST",
             "/v1/phone/push",
-            Some(json!({"apns_token": "ab12", "sandbox": true}))
+            Some(json!({"apns_token": "ab12000000000000000000000000000000000000000000000000000000000000", "sandbox": true}))
         )
         .await
         .0,
@@ -522,6 +522,53 @@ async fn receipts_delivered_at_client_id_and_general_updates() {
     )
     .await;
     assert_eq!(s, 422);
+}
+
+#[tokio::test]
+async fn tts_cap_is_clamped_and_apns_token_length_is_checked() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let p = t.pair_phone(&[&a]).await;
+    let cap = |v: Value| {
+        let (t, p) = (&t, &p);
+        async move {
+            t.phone(
+                p,
+                "PATCH",
+                "/v1/phone/settings",
+                Some(json!({"tts_cap_usd": v})),
+            )
+            .await
+        }
+    };
+    let (s, v) = cap(json!(75)).await;
+    assert_eq!((s, v["tts_cap_usd"].clone()), (200, json!(50)), "clamped");
+    assert_eq!(cap(json!(1e300)).await.0, 422);
+    let (s, v) = cap(json!(0)).await;
+    assert_eq!((s, v["tts_cap_usd"].clone()), (200, json!(0)));
+    for bad in [json!(-1), json!("5"), Value::Null] {
+        assert_eq!(cap(bad.clone()).await.0, 422, "{bad}");
+    }
+    let (_, v) = t.phone(&p, "GET", "/v1/phone/settings", None).await;
+    assert_eq!(v["tts_cap_usd"], json!(0), "a refused cap saves nothing");
+    let push = |tok: String| {
+        let (t, p) = (&t, &p);
+        async move {
+            t.phone(
+                p,
+                "POST",
+                "/v1/phone/push",
+                Some(json!({"apns_token": tok, "sandbox": true})),
+            )
+            .await
+            .0
+        }
+    };
+    assert_eq!(push("a".repeat(63)).await, 422);
+    assert_eq!(push("a".repeat(201)).await, 422);
+    assert_eq!(push(format!("{}g", "a".repeat(63))).await, 422);
+    assert_eq!(push("a".repeat(64)).await, 204);
+    assert_eq!(push("A".repeat(200)).await, 204);
 }
 
 #[tokio::test]
@@ -749,7 +796,7 @@ async fn mute_skips_push_and_remove_drops_the_workspace() {
             &p,
             "POST",
             "/v1/phone/push",
-            Some(json!({"apns_token": "ab12", "sandbox": true}))
+            Some(json!({"apns_token": "ab12000000000000000000000000000000000000000000000000000000000000", "sandbox": true}))
         )
         .await
         .0,

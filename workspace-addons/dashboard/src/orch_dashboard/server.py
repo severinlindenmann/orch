@@ -115,7 +115,8 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.send_header(
-            "Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'"
+            "Content-Security-Policy",
+            csp or "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'",
         )
         self.end_headers()
         self.wfile.write(body)
@@ -230,13 +231,13 @@ class Handler(BaseHTTPRequestHandler):
         ):  # read once, and only by a page with a session (a curl must not consume it)
             from . import handoff
 
-            ok = self.session is not None and self.session.authed(self.headers)
+            ok = self.session is not None and self.session.authed(self.headers, self.server.server_address[1])
             items = handoff.notices(self.root) if ok else []
             return self._send(200, json.dumps(items).encode(), "application/json")
         if path == "/api/update-status":  # only a page with a session (a finished result is read once)
             from . import handoff
 
-            ok = self.session is not None and self.session.authed(self.headers)
+            ok = self.session is not None and self.session.authed(self.headers, self.server.server_address[1])
             st = handoff.update_status(self.root) if ok else None
             return self._send(200, json.dumps(st or {}).encode(), "application/json")
         if path == "/api/handoffs":  # pending requests from a terminal; same-origin only (checked above)
@@ -415,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence()
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
-        from orch.pageproof import COOKIE, forwarded, host_ok
+        from orch.pageproof import forwarded, host_ok
 
         if (
             self.session is None
@@ -431,8 +432,12 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "dashboard"), "text/plain; charset=utf-8")
+        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its sessionStorage
         self._send(
-            204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}={cookie}; HttpOnly; SameSite=Strict; Path=/"}
+            200,
+            json.dumps({"secret": self.session.secret}).encode(),
+            "application/json",
+            {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)},
         )
 
     def do_POST(self):
@@ -539,6 +544,14 @@ class Handler(BaseHTTPRequestHandler):
             and isinstance(extra.get("changes"), list)
         ):  # refresh
             state["act_result"] = {"changes": len(extra["changes"]), "say": str(extra.get("say") or "")[:300]}
+        if body.get("op") == "addon.act" and isinstance(extra, dict):
+            # the add-on's own answer to this click (a Sync card's status, a check): shown as plain text only
+            answer = json.dumps(extra)
+            if len(answer) <= 32_768:
+                state["act_answer"] = {
+                    "addon": str((body.get("args") or {}).get("addon"))[:32],
+                    "answer": extra,
+                }
         if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
             att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
             state["attached"] = {

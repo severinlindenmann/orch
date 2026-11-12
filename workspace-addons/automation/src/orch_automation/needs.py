@@ -1,5 +1,6 @@
 """`orch automation needs --json`: rows for `orch needs` (needs.schema.json). Warnings only, nothing is blocked.
 1. A run that failed and was not asked as a question. 2. "Ran N× today without you" (N >= 10, LS-07 c / SA-16 c)."""
+
 from __future__ import annotations
 
 import json
@@ -43,18 +44,42 @@ def rows(root: Path, now: datetime | None = None) -> list[dict]:
             continue
         if any(q.get("kind") in KINDS for q in t.get("questions") or []):
             continue  # already a question: core shows it
-        out.append({"id": f"automation:failed-{t['id']}-{r['at']}", "source": "automation", "kind": "automation:failed-run",
-                    "ticket": t["id"], "title": t["title"][:200], "text": "The last automatic run did not work.",
-                    "tone": "bad", "since": r["at"], "cli": f"orch run start {t['id']}"})
+        out.append(
+            {
+                "id": f"automation:failed-{t['id']}-{r['at']}",
+                "source": "automation",
+                "kind": "automation:failed-run",
+                "ticket": t["id"],
+                "title": t["title"][:200],
+                "text": "The last automatic run did not work.",
+                "tone": "bad",
+                "since": r["at"],
+                "cli": f"orch run start {t['id']}",
+            }
+        )
     for tid, t in tickets.items():
         if t["status"] not in OPEN:
             continue
-        human = max((h.get("at", "") for h in t.get("history") or [] if str(h.get("by", "")).startswith("human:")),
-                    default="")
-        starts = [s for s in (state.get(tid, {}).get("starts") or []) if isinstance(s, str)
-                  and s[:10] == today and s > human]
+        human = max(
+            (h.get("at", "") for h in t.get("history") or [] if str(h.get("by", "")).startswith("human:")),
+            default="",
+        )
+        starts = [
+            s
+            for s in (state.get(tid, {}).get("starts") or [])
+            if isinstance(s, str) and s[:10] == today and s > human
+        ]
         if len(starts) >= LOOP_WARN:
-            out.append({"id": f"automation:loop-{tid}-{today}", "source": "automation", "kind": "automation:loop",
-                        "ticket": tid, "title": t["title"][:200], "text": f"Ran {len(starts)}× today without you",
-                        "tone": "warn", "since": starts[-1]})
+            out.append(
+                {
+                    "id": f"automation:loop-{tid}-{today}",
+                    "source": "automation",
+                    "kind": "automation:loop",
+                    "ticket": tid,
+                    "title": t["title"][:200],
+                    "text": f"Ran {len(starts)}× today without you",
+                    "tone": "warn",
+                    "since": starts[-1],
+                }
+            )
     return out

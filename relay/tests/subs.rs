@@ -504,6 +504,68 @@ async fn files_metadata_only_unless_downloads_allowed() {
 }
 
 #[tokio::test]
+async fn file_download_follows_the_current_kinds_of_the_referencing_event() {
+    let t = start().await;
+    let a = t.add_ws("A").await;
+    let blob = |n: u8| {
+        let (t, a) = (&t, &a);
+        async move {
+            let r = t
+                .http
+                .post(format!("{}/v1/blobs", t.base))
+                .header("X-Orch-Workspace", &a.id)
+                .header("Authorization", format!("Bearer {}", a.token))
+                .body(vec![n; 3])
+                .send()
+                .await
+                .unwrap();
+            r.json::<Value>().await.unwrap()["blob_id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+    };
+    let (note_blob, result_blob) = (blob(1).await, blob(2).await);
+    let sub = add_sub(
+        &t,
+        json!({"name": "C", "workspaces": [a.id], "kinds": {"updates": false, "results": true, "files": true}, "can_download": true}),
+    )
+    .await;
+    for (kind, bid) in [("note", &note_blob), ("result", &result_blob)] {
+        let view = json!({"title": "T", "status": "done", "running": false, "checklist": [], "done": 0, "total": 0,
+            "history_tail": [], "attachments": [{"kind": "file", "title": "f", "blob_id": bid, "name": "f", "size": 3, "at": "2026-11-06T09:39:00Z"}]});
+        let m = json!({"schema": "orch.msg/1", "id": mid(), "from": a.id, "to": "phones", "type": "text",
+            "created_at": "2026-11-06T09:41:00Z", "ticket": "t_7k3f9q",
+            "body": {"text": "x", "update": {"kind": kind}, "ticket_view": view}});
+        assert_eq!(t.call(&a, "POST", "/v1/messages", Some(m)).await.0, 201);
+    }
+    let dl = |bid: String| {
+        let (t, tok) = (&t, sub.token.clone());
+        async move { get(t, &format!("/v1/sub/{tok}/files/{bid}")).await.0 }
+    };
+    assert_eq!(dl(note_blob.clone()).await, 404, "hidden Updates event");
+    assert_eq!(dl(result_blob.clone()).await, 200, "visible Results event");
+    let set_updates = |on: bool| {
+        let (t, id) = (&t, sub.id.clone());
+        async move {
+            let (s, v) = t
+                .admin_json(
+                    "PATCH",
+                    &format!("/admin/api/subscribers/{id}"),
+                    Some(json!({"kinds": {"updates": on, "results": true, "files": true}})),
+                )
+                .await;
+            assert_eq!(s, 200, "{v}");
+        }
+    };
+    set_updates(true).await;
+    assert_eq!(dl(note_blob.clone()).await, 200, "Updates now on");
+    set_updates(false).await;
+    assert_eq!(dl(note_blob.clone()).await, 404, "Updates off again");
+    assert_eq!(dl(result_blob).await, 200);
+}
+
+#[tokio::test]
 async fn rate_limit_60_a_minute() {
     let t = start().await;
     let a = t.add_ws("A").await;

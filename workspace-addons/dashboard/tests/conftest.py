@@ -247,13 +247,3 @@ def pytest_sessionfinish(session, exitstatus):
     if alive:
         print(f"\nLEAK: orch_dashboard servers started by the tests are still alive: {alive}")
         session.exitstatus = 1
-
-
-@pytest.fixture(autouse=True)
-def _copies_unlocked(request, monkeypatch):
-    """Separate copies are locked Off for this release; the feature's tests run unlocked unless marked."""
-    from orch import config
-
-    if not request.node.get_closest_marker("copies_locked"):
-        monkeypatch.setattr(config, "COPIES_LOCKED", False)
-        monkeypatch.setattr(config, "DEFAULT_COPIES", "together")  # the feature's own default when unlocked

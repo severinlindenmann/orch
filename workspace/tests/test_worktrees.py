@@ -289,10 +289,6 @@ def test_settings_validate_and_live_per_machine_not_in_the_workspace(repo):
     assert config.copy_setup(repo) is None
 
 
-@pytest.mark.skipif(
-    __import__("orch.config", fromlist=["x"]).COPIES_LOCKED,
-    reason="runs orch in a child process, where copies are locked Off; re-enable with the B12 follow-up",
-)
 def test_two_starts_at_the_same_moment_make_exactly_one_copy(repo, subprocess_home):
     """Two orch processes start two tickets together: decide + create + claim run under one workspace lock,
     so the second one sees the first one's claim. (The lock is per process: threads would not show it.)"""
@@ -369,9 +365,12 @@ def test_ticket_data_never_chooses_the_setup_command(repo):
         ("done_when", f"touch {marker}"),
         ("ext", {"copy_setup": "touch x"}),
     ):
-        tickets.apply_op(repo, a, lambda t, k=key, v=val: t.__setitem__(k, v))
+        tickets.apply_op(repo, a, lambda t, k=key, v=val: t.__setitem__(k, v), by=tickets.SYSTEM)
     tickets.apply_op(
-        repo, a, lambda t: t.__setitem__("work", {"copy_setup": f"touch {marker}", "folders": []})
+        repo,
+        a,
+        lambda t: t.__setitem__("work", {"copy_setup": f"touch {marker}", "folders": []}),
+        by=tickets.SYSTEM,
     )
     f, notes = _route(repo, a)
     assert f != repo and notes == [] and not marker.exists()
@@ -709,7 +708,10 @@ def test_a_forged_registry_path_cannot_point_a_ticket_at_another_copy(repo):
 def test_legacy_ticket_work_paths_are_stripped_on_rewrite(repo):
     a, _ = repo.tids
     tickets.apply_op(
-        repo, a, lambda t: t.__setitem__("work", {"folders": [{"path": "/home/x/y", "branch": "orch/old"}]})
+        repo,
+        a,
+        lambda t: t.__setitem__("work", {"folders": [{"path": "/home/x/y", "branch": "orch/old"}]}),
+        by=tickets.SYSTEM,
     )
     config.set_copies_mode(repo, "always")
     _route(repo, a)

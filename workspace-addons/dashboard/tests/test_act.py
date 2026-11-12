@@ -90,6 +90,8 @@ def test_ids_and_text_are_checked(act_server, act_orch):
         ("log", {"ticket": "t_abcdef", "text": "x" * 2001}),
         ("log", {"ticket": "t_abcdef", "text": "  "}),
         ("answer", {"ticket": "t_abcdef", "question": "q1; ls", "answer": "a"}),
+        ("answer", {"ticket": "t_abcdef", "question": "q1", "answer": "a"}),  # no digest: refused
+        ("answer", {"ticket": "t_abcdef", "question": "q1", "digest": "x", "answer": "a"}),
         ("ticket.edit", {"ticket": "t_abcdef", "due": "tomorrow"}),
         ("ticket.edit", {"ticket": "t_abcdef"}),
         ("ticket.patch", {"ticket": "t_abcdef", "data": {"title": "x"}}),
@@ -117,8 +119,22 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["chat", "make-ticket", "m_abcdefghij", *common],
         ),
         (
-            {"op": "answer", "args": {"ticket": "t_abcdef", "question": "q1", "answer": "Yes"}},
-            ["answer", "t_abcdef", "q1", "--via", "dashboard", *common, "--", "Yes"],
+            {
+                "op": "answer",
+                "args": {"ticket": "t_abcdef", "question": "q1", "digest": "a" * 64, "answer": "Yes"},
+            },
+            [
+                "answer",
+                "t_abcdef",
+                "q1",
+                "--via",
+                "dashboard",
+                "--question-digest",
+                "a" * 64,
+                *common,
+                "--",
+                "Yes",
+            ],
         ),
         ({"op": "ticket.new", "args": {"title": "--sneaky"}}, ["ticket", "new", *common, "--", "--sneaky"]),
         (
@@ -217,7 +233,13 @@ def test_argv_snapshot_per_op(act_server, act_orch):
 
 
 def test_actor_is_human_and_answer_via_dashboard(act_server, act_orch):
-    post(act_server, {"op": "answer", "args": {"ticket": "t_abcdef", "question": "q2", "answer": "No"}})
+    post(
+        act_server,
+        {
+            "op": "answer",
+            "args": {"ticket": "t_abcdef", "question": "q2", "digest": "a" * 64, "answer": "No"},
+        },
+    )
     a = acts(act_orch)[-1]
     assert a[a.index("--by") + 1].startswith("human:") and a[a.index("--via") + 1] == "dashboard"
     assert actions.actor().startswith("human:")
@@ -916,9 +938,7 @@ def test_link_actions_are_audited(ws, monkeypatch):
 
     monkeypatch.setattr(actions, "publish_connected", lambda *a: True)
     monkeypatch.setattr(actions, "human_env", lambda *a: {})
-    monkeypatch.setattr(
-        actions, "_run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "{}", "")
-    )
+    monkeypatch.setattr(actions, "_run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "{}", ""))
     for op, args in [("link.extend", {"id": "f_a", "days": 7}), ("link.stop", {"id": "f_a"})]:
         assert actions.run_op(ws, "orch", op, args)[0] == 200
     rows = [json.loads(line) for line in (ws / ".orch/run/dashboard/actions.log").read_text().splitlines()]

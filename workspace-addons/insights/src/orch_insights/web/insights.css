@@ -70,6 +70,23 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--brand)
 .card.warn { background: color-mix(in srgb, var(--warning) 4%, var(--surface)); }
 .card, .row, #message { overflow-wrap: anywhere; }
 .empty { padding: 20px; color: var(--text-muted); }
+.settings-link { margin-top: 12px; margin-left: 8px; }
+.settings h2 { font-size: 18px; margin: 0 0 12px; }
+.settings #settings-body { display: grid; gap: 12px; }
+.set-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+  overflow-wrap: anywhere; }
+.set-card h2 { font-size: 14px; margin: 0 0 6px; }
+.set-card h3 { margin: 10px 0 4px; font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: .06em; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.seg .chip { cursor: pointer; background: none; }
+.seg .chip.active { background: var(--surface-2); border-color: var(--brand); }
+.seg .chip:disabled { cursor: not-allowed; opacity: .5; }
+.locked { color: var(--text-muted); font-style: italic; }
+.set-card .row { grid-template-columns: minmax(0, 1fr) auto; cursor: default; }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
+  max-width: 420px; }
+.confirm-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 @media (max-width: 600px) {
   main { padding: 24px 16px; }
   header { margin-bottom: 24px; }

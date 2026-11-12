@@ -257,11 +257,7 @@ def set_permissions(root: Path, value: str, by: str = "human:owner") -> str:
 # choose it.
 
 COPIES_MODES = ("off", "together", "always")
-DEFAULT_COPIES = "off"
-# Separate copies are locked Off for this release (cleanup bugs found in e2e, see the B12 follow-up issue).
-# copies_mode() always answers "off" and set_copies_mode() refuses anything else; copies made before are still
-# cleaned up by worktrees.py. Flip COPIES_LOCKED to False when the follow-up lands.
-COPIES_LOCKED = True
+DEFAULT_COPIES = "together"
 DEFAULT_COPIES_MAX = 3
 MAX_COPIES_MAX = 20
 MAX_COPY_SETUP = 500
@@ -314,8 +310,6 @@ def _copies_set(root: Path, key: str, value) -> None:
 
 def copies_mode(root: Path | None) -> str:
     """off | together (default: a copy when another agent already works in the folder) | always."""
-    if COPIES_LOCKED:
-        return "off"
     v = _copies_get(root, "copies")
     return v if v in COPIES_MODES else DEFAULT_COPIES
 
@@ -338,8 +332,6 @@ def copy_setup(root: Path | None) -> str | None:
 def set_copies_mode(root: Path, value: str) -> str:
     if value not in COPIES_MODES:
         raise Refused(f"'{value}' is not a choice. Pick one of: {', '.join(COPIES_MODES)}.")
-    if COPIES_LOCKED and value != "off":
-        raise Refused("Separate copies are coming soon. For now every agent works in the project folder.")
     _copies_set(root, "copies", value)
     return value
 
@@ -384,7 +376,9 @@ DEFAULT_INSIGHTS_SHARE_COUNTS = True
 DEFAULT_INSIGHTS_SHARE_NAMES = False
 
 
-def _reserved(root: Path | None, section: str, key: str, default: bool | int) -> bool | int:
+def _reserved(
+    root: Path | None, section: str, key: str, default: bool | int, positive: bool = True
+) -> bool | int:
     if root is None:
         return default
     try:
@@ -394,7 +388,46 @@ def _reserved(root: Path | None, section: str, key: str, default: bool | int) ->
     value = table.get(key) if isinstance(table, dict) else None
     if type(value) is not type(default):
         return default
-    return value if isinstance(value, bool) or value > 0 else default
+    return value if isinstance(value, bool) or not positive or value > 0 else default
+
+
+RESERVED_DEFAULTS = {
+    ("focus", "live_session"): DEFAULT_FOCUS_LIVE_SESSION,
+    ("focus", "session_typing"): DEFAULT_FOCUS_SESSION_TYPING,
+    ("record", "keep_days"): DEFAULT_RECORD_KEEP_DAYS,
+    ("record", "max_mb"): DEFAULT_RECORD_MAX_MB,
+    ("insights", "share_counts"): DEFAULT_INSIGHTS_SHARE_COUNTS,
+    ("insights", "share_names"): DEFAULT_INSIGHTS_SHARE_NAMES,
+}
+
+
+def file_value(root: Path | None, section: str, key: str) -> bool | int:
+    """The value as the FILE says it (a wrong type or a bool for a number is the default). A retention number
+    is snapped DOWN to its allowed list with a floor of 30 days / 512 MB (humanproof.retention_snap:
+    `keep_days = 1`, 0 or -5 counts as 30, "as little as possible"), so an edit of the file can never make
+    pruning delete nearly the whole record; any other number <= 0 is the default. Never a decision on its own:
+    the widening ones count only through their record (insights_*, record_* below)."""
+    from orch import humanproof
+
+    setting = _RETENTION_SETTINGS.get((section, key))
+    value = _reserved(root, section, key, RESERVED_DEFAULTS[(section, key)], positive=setting is None)
+    return value if setting is None else humanproof.retention_snap(setting, value)
+
+
+def file_switch(root: Path, section: str, key: str, default: bool) -> bool | None:
+    """A widening switch as the FILE decides it: the parsed true / false (no key: `default`), or None when the
+    file cannot be read (not valid TOML, mid-write) or the value is not true / false. None counts as off but
+    is never the person's off: humanproof.effective writes the False tombstone only on a parsed false, so a
+    transient unreadable config.toml never ends a person's grant."""
+    try:
+        table = read(root).get(section, {})
+    except (Refused, OSError):
+        return None
+    value = table.get(key, default) if isinstance(table, dict) else None
+    return value if isinstance(value, bool) else None
+
+
+_RETENTION_SETTINGS = {("record", "keep_days"): "insights.keep_days", ("record", "max_mb"): "insights.max_mb"}
 
 
 def focus_live_session(root: Path | None) -> bool:
@@ -406,30 +439,207 @@ def focus_session_typing(root: Path | None) -> bool:
 
 
 def record_keep_days(root: Path | None) -> int:
-    return _reserved(root, "record", "keep_days", DEFAULT_RECORD_KEEP_DAYS)
+    """Effective [record] keep_days: the LOWER of the file value and the person's record
+    (humanproof.retention; default record 90). Pruning uses this, so a file value alone never keeps records
+    longer."""
+    from orch import humanproof
+
+    value = file_value(root, "record", "keep_days")
+    return value if root is None else humanproof.retention(root, "insights.keep_days", value)
 
 
 def record_max_mb(root: Path | None) -> int:
-    return _reserved(root, "record", "max_mb", DEFAULT_RECORD_MAX_MB)
+    """Effective [record] max_mb: the LOWER of the file value and the person's record (default record
+    2048)."""
+    from orch import humanproof
+
+    value = file_value(root, "record", "max_mb")
+    return value if root is None else humanproof.retention(root, "insights.max_mb", value)
 
 
 def insights_share_counts(root: Path | None) -> bool:
-    return _reserved(root, "insights", "share_counts", DEFAULT_INSIGHTS_SHARE_COUNTS)
-
-
-def insights_share_names(root: Path | None) -> bool:
-    return _reserved(root, "insights", "share_names", DEFAULT_INSIGHTS_SHARE_NAMES)
-
-
-def agents_may_finish(root: Path | None) -> bool:
-    """A widening switch (F1): the file value alone grants nothing; a person's proven "on" is recorded in the
-    orch home (humanproof.effective): appending the key to config.toml cannot let an agent finish tickets."""
+    """A widening switch: file value AND the person's record (owner default on while no record ever
+    existed). Off in the file writes the False tombstone (humanproof.effective, under keys.lock with the file
+    read again there), so editing the file back to on later changes nothing without a proof. A file that
+    cannot be read, or a value that is not true / false, is off without a tombstone (file_switch)."""
     from orch import humanproof
 
     if root is None:
         return False
-    file_value = (read(root).get("workflow") or {}).get("agents_may_finish") is True
-    return humanproof.effective(root, "workflow.agents_may_finish", file_value)
+
+    def from_file() -> bool | None:
+        return file_switch(root, "insights", "share_counts", DEFAULT_INSIGHTS_SHARE_COUNTS)
+
+    return humanproof.effective(root, "insights.share_counts", from_file(), from_file)
+
+
+def insights_share_names(root: Path | None) -> bool:
+    """A widening switch: true only with the person's record (a file value of true alone reads false). Off in
+    the file writes the False tombstone, like share_counts (an unreadable file: off, no tombstone)."""
+    from orch import humanproof
+
+    if root is None:
+        return False
+
+    def from_file() -> bool | None:
+        return file_switch(root, "insights", "share_names", DEFAULT_INSIGHTS_SHARE_NAMES)
+
+    return humanproof.effective(root, "insights.share_names", from_file(), from_file)
+
+
+SHARE_BLOCKED_MSG = {
+    "not_connected": "Sharing counts is not available: this workspace is not connected to a relay.",
+    "off_by_admin": "Sharing counts is not available: your admin turned it off for this workspace.",
+}
+
+
+def share_counts_state(root: Path) -> str:
+    """The state of the daily counts upload (counts.md `sharing.counts`, usage-counts.md): `not_connected` (no
+    relay connection, `.orch/secrets/relay.json`), `off_by_admin` (the last relay policy said
+    `usage_counts: "off"`; kept by relay.refresh in `.orch/secrets/policy.json`), else `on` / `off` (the
+    effective `insights.share_counts`). The core and the Insights page read the same state. The policy file
+    counts only while there is a connection, and relay.connect clears it (a new connection never inherits the
+    last relay's policy)."""
+    from orch import net
+
+    sec = net.secrets_dir(root)
+    relay = net.read_json(sec / "relay.json", None)
+    if not isinstance(relay, dict) or not {"url", "workspace", "token"} <= relay.keys():
+        return "not_connected"
+    policy = net.read_json(sec / "policy.json", None)
+    if isinstance(policy, dict) and policy.get("usage_counts") == "off":
+        return "off_by_admin"
+    return "on" if insights_share_counts(root) else "off"
+
+
+def share_counts_blocked(root: Path) -> str | None:
+    """`not_connected` / `off_by_admin` when share_counts cannot be turned on here, else None."""
+    state = share_counts_state(root)
+    return state if state in SHARE_BLOCKED_MSG else None
+
+
+INSIGHTS_KEYS = {  # setting -> ([table], key) in config.toml
+    "insights.share_counts": ("insights", "share_counts"),
+    "insights.share_names": ("insights", "share_names"),
+    "insights.keep_days": ("record", "keep_days"),
+    "insights.max_mb": ("record", "max_mb"),
+}
+
+
+def set_insights(root: Path, setting: str, value: bool | int, by: str | None = None) -> bool | int:
+    """An Insights setting. The record is written first, on EVERY change (humanproof.record_set: a widening
+    needs the verified person in `by`; an off is the False tombstone, a lower number the lower record), then
+    the file. Lowering retention deletes nothing now: the next pruning applies it."""
+    from orch import humanproof
+
+    table, key = INSIGHTS_KEYS[setting]
+    humanproof.record_set(root, setting, value, by or "reset")
+    set_key(root, table, key, value)
+    return value
+
+
+class InsightsRefused(Refused):
+    """A refusal of change_insights with its contract code (`{"error", "code"}`)."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+        self.extra = {"code": code}
+
+
+def insights_value(root: Path, setting: str) -> bool | int:
+    """The EFFECTIVE value of an Insights setting (share_* with the person's record, retention the lower of
+    file and record)."""
+    return {
+        "insights.share_counts": insights_share_counts,
+        "insights.share_names": insights_share_names,
+        "insights.keep_days": record_keep_days,
+        "insights.max_mb": record_max_mb,
+    }[setting](root)
+
+
+def insights_text(value: bool | int) -> str:
+    """How a value is written in a command and in a proof target: on/off, or the number."""
+    return ("on" if value else "off") if isinstance(value, bool) else str(value)
+
+
+def insights_target(setting: str, value: bool | int) -> str:
+    """The proof target of `insights.settings`: VALUE-BOUND (`insights.keep_days=365`), so a proof for one
+    value never sets another."""
+    return f"{setting}={insights_text(value)}"
+
+
+def _same_text(setting: str, text: str, current: bool | int) -> bool:
+    t = str(text).strip().lower()
+    if isinstance(current, bool):
+        t = {"true": "on", "false": "off"}.get(t, t)
+    elif t.isascii() and t.isdigit():
+        t = str(int(t))
+    return t == insights_text(current)
+
+
+def change_insights(
+    root: Path,
+    setting: str,
+    value: bool | int,
+    *,
+    agent: str | None = None,
+    person=None,
+    if_current: str | None = None,
+) -> dict:
+    """THE CORE decides (2.11 addendum): under ONE lock (keys.lock, the lock of the settings record and of the
+    proof nonce store) read the CURRENT effective value, refuse a stale `if_current` (code `changed`),
+    classify widen / narrow / same, and only for a widening ask `person(target)` for the verified person (it
+    verifies and spends the value-bound proof in this same critical section; the proof LINE was read from
+    stdin by the caller before the lock, so a stdin that never closes cannot hold keys.lock). Same value:
+    nothing written, no proof checked. An agent caller (`agent` = the words it is refused with) asking to
+    widen is refused (`needs_person`) before any proof is read. `insights.share_counts` = on is refused
+    (`not_available`, nothing written, no proof read) while the share state is off_by_admin or not_connected;
+    off is always allowed."""
+    from orch import humanproof
+
+    # keys.lock is re-entrant per thread by design (humanproof._key_lock: a per-thread depth count over ONE
+    # O_EXCL lock file), so the nested takes below stay in this section; another thread or process waits.
+    with humanproof._key_lock(humanproof.key_dir(root)):
+        current = insights_value(root, setting)
+        widened = value > current
+        if widened and agent is not None:
+            raise InsightsRefused(agent or humanproof.AGENT_REFUSED, "needs_person")
+        if if_current is not None and not _same_text(setting, if_current, current):
+            raise InsightsRefused(f"This changed in the meantime: now {insights_text(current)}", "changed")
+        if setting == "insights.share_counts" and value is True:
+            blocked = share_counts_blocked(root)  # off_by_admin / not_connected: `on` is not available here
+            if blocked is not None:
+                raise InsightsRefused(SHARE_BLOCKED_MSG[blocked], "not_available")
+        if value == current:
+            return {setting: current, "changed": False, "widened": False}
+        who = "reset"  # a lowering names no person (the record's `by` is never a claim from a flag)
+        if widened:
+            if person is None:
+                raise InsightsRefused(humanproof.AGENT_REFUSED, "needs_person")
+            try:
+                who = person(insights_target(setting, value))
+            except Refused as e:
+                raise InsightsRefused(str(e), "needs_person") from None
+            if not str(who).startswith("human:"):
+                raise InsightsRefused(humanproof.AGENT_REFUSED, "needs_person")
+        set_insights(root, setting, value, who)
+        return {setting: insights_value(root, setting), "changed": True, "widened": widened}
+
+
+def agents_may_finish(root: Path | None) -> bool:
+    """A widening switch (F1): the file value alone grants nothing; a person's proven "on" is recorded in the
+    orch home (humanproof.effective): appending the key to config.toml cannot let an agent finish tickets. An
+    unreadable config.toml or a value that is not true / false is off without a tombstone (file_switch)."""
+    from orch import humanproof
+
+    if root is None:
+        return False
+
+    def from_file() -> bool | None:
+        return file_switch(root, "workflow", "agents_may_finish", False)
+
+    return humanproof.effective(root, "workflow.agents_may_finish", from_file(), from_file)
 
 
 def set_agents_may_finish(root: Path, value: bool, by: str | None = None) -> bool:

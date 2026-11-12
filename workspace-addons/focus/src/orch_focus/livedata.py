@@ -32,9 +32,9 @@ def _time(s) -> float | None:
 def _core_start(lstart: str) -> str | None:
     """`ps -o lstart=` text as core writes a process start in claim records: UTC, 2026-11-05T10:00:00Z."""
     try:
-        return datetime.fromtimestamp(time.mktime(time.strptime(lstart, "%a %b %d %H:%M:%S %Y")), UTC).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
+        return datetime.fromtimestamp(
+            time.mktime(time.strptime(lstart, "%a %b %d %H:%M:%S %Y")), UTC
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
     except (ValueError, OverflowError):
         return None
 

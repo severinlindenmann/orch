@@ -377,9 +377,11 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
     move = js[js.index("function moveTicket") :]
     move = move[: move.index("function list()")]
     assert (
-        "actRetry('ticket.patch', () => ({ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision})"
+        # `extra` (Accept's shown review tip, B13g) goes first: it never overrides ticket, status or revision
+        "actRetry('ticket.patch', () => ({...extra, ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision})"
         in move
     )
+    assert "extra = {...extra, review_tip:'none'}" in move  # a Done from a view that showed no tip says so
     assert "if (!t || t.status === status" in move  # dropping on the same column does nothing
     card = js[js.index("function boardCard") : js.index("function board()")]
     assert (
@@ -402,7 +404,7 @@ def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
 def test_ticket_details_hide_raw_id_and_home_badge_is_named():
     js = webjs.all_js()
     assert "field('Ticket', h('span', {className:'ed-ro mono'}, t.id))" not in js
-    assert "needsYou(needsList().length)" in js
+    assert "needsYou(needCount)" in js
 
 
 def test_settings_wording_and_one_toast_at_a_time():
@@ -489,7 +491,10 @@ def test_v1_home_and_ticket_controls():
     home = js[js.index("function changeUnavailable") : js.index("// Chat (former General)")]
     tickets = js[js.index("function filterTickets") : js.index("function ticketNotFound")]
     assert "row.answer.recommended" in home and "' · Suggested'" in home
-    assert "act('answer', {ticket:row.ticket, question:row.answer.question, answer:option})" in home
+    assert (
+        "act('answer', {ticket:row.ticket, question:row.answer.question, digest:row.answer.digest, answer:option})"
+        in home
+    )
     assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home
     assert "function loadingView()" in home and "'data-key':'loading'" in home
     assert "function connectionNotice(connectionEl, hadState)" in home
@@ -511,3 +516,13 @@ def test_a_view_that_needs_a_few_seconds_is_not_stale(ws, fake_orch):
     from orch_dashboard import views
 
     assert views.TIMEOUT >= 10.0
+
+
+def test_a_refused_change_from_an_old_page_tells_the_person_to_reload():
+    js = webjs.all_js()
+    err = js[js.index("function changeError") :]
+    err = err[: err.index("function ticketTitle")]
+    assert (
+        "This ticket changed since you opened it. Look at it again, then accept." in err
+        and "Read it again" in err
+    )

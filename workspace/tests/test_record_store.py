@@ -13,8 +13,10 @@ from urllib.parse import quote
 
 import jsonschema
 import pytest
+from conftest import seal_lines
 
 from orch import hider, record
+from orch import humanproof as hp
 from orch.record import (
     RecordRefused,
     RecordWriter,
@@ -41,6 +43,7 @@ SECRET = "KEYVALUE-abc123XYZ-secret"
 def store(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
+    hp.record_key(ws)  # the key exists before threads write (a claim makes it in a run)
     return ws, RecordWriter(ws, hider=hider.Hider({"deploy-key": SECRET}))
 
 
@@ -103,16 +106,18 @@ def test_hook_default_id_is_not_the_collector_id(store, case):
     assert writer.append(value)["id"] == case["hook"] != case["collector"]
 
 
-@pytest.mark.parametrize("case", [c for c in VECTORS["detail_names"] if c["kind"] == "step"])
+@pytest.mark.parametrize("case", [c for c in VECTORS["detail_names"] if c["kind"] == "step" and c["ticket"]])
 def test_detail_names(store, case):
     ws, writer = store
     raw = (
         "call/../x y" if case["id"].startswith("x_") else case["id"]
     )  # the writer hashes unsafe raw ids first
-    stored = writer.append(event(id=raw, run=case["run"]), detail={"input": {}, "output": "ok"})
+    stored = writer.append(
+        event(id=raw, run=case["run"], ticket=case["ticket"]), detail={"input": {}, "output": "ok"}
+    )
     assert stored["id"] == case["id"]
     assert stored["detail"] == f"detail/{case['run']}/{case['file']}.json"
-    assert read_detail(ws, case["run"], case["file"]).unwrap()["output"] == "ok"
+    assert read_detail(ws, case["run"], case["file"], line_id=stored["id"]).unwrap()["output"] == "ok"
 
 
 @pytest.mark.parametrize("case", VECTORS["dedupe"])
@@ -129,7 +134,7 @@ def test_dedupe(store, case):
     run = values[0]["run"]
     assert [e["data"]["index"] for e in read_run(ws, run).unwrap()] == case["keep"]
     path = record_dir(ws) / "runs" / f"{run}.jsonl"
-    path.write_text("\n".join(json.dumps(dict(e, seq=i + 1)) for i, e in enumerate(values)) + "\n")
+    path.write_bytes(seal_lines(ws, run, values))  # rewritten by hand, sealed as the writer does
     with path.open("a") as stream:
         stream.write('bad json\n{"v":2}\n')
     assert [e["data"]["index"] for e in read_run(ws, run).unwrap()] == case["keep"]
@@ -187,7 +192,7 @@ def test_hiding_every_file(store):
         )
         stored = writer.append(value, detail={"input": {form: form}, "output": form})
         assert "[hidden: " in stored["text"]
-        detail = read_detail(ws, stored["run"], Path(stored["detail"]).stem).unwrap()
+        detail = read_detail(ws, stored["run"], Path(stored["detail"]).stem, line_id=stored["id"]).unwrap()
         assert detail["hidden"] >= 5
     stored = writer.append(event(id="generic", text="ghp_" + "a" * 36))
     assert "ghp_" not in stored["text"]
@@ -277,7 +282,7 @@ def test_hook_entry(case):
 def test_unsafe_read_names(store, run, file_id):
     ws, _ = store
     with pytest.raises(RecordRefused):
-        read_detail(ws, run, file_id).unwrap()
+        read_detail(ws, run, file_id, line_id="x").unwrap()
 
 
 def test_oversize_data_is_cut(store):
@@ -318,8 +323,9 @@ def test_preflight_leaves_nothing(store):
 
 def test_stale_lock_and_missing_reads(store):
     ws, writer = store
+    hp.record_key(ws)  # a clean guarded home: only then is "no such run" a plain "missing"
     assert read_run(ws, "r_8k2m01").reason == "missing"
-    assert read_detail(ws, "r_8k2m01", "0" * 32).reason == "missing"
+    assert read_detail(ws, "r_8k2m01", "0" * 32, line_id="x").reason == "missing"
     assert list_runs(ws).reason == "missing"
     writer.append(event())
     lock = record_dir(ws) / "runs/r_8k2m01.lock"
@@ -408,9 +414,11 @@ def test_detail_name_property():
     for run in ("r_8k2m01", "r_8k2m02"):
         for kind in ("step", "helper.start", "run.state"):
             for eid in ids:
-                name = detail_name(run, kind, eid)
-                assert re.fullmatch("[0-9a-f]{32}", name)
-                assert seen.setdefault(name, (run, kind, eid)) == (run, kind, eid)
+                assert detail_name(run, kind, eid, None) is None  # no ticket: no detail file (I4)
+                for ticket in ("t_aaaaaa", "t_bbbbbb", "t_cccccc"):
+                    name = detail_name(run, kind, eid, ticket)
+                    assert re.fullmatch("[0-9a-f]{32}", name)
+                    assert seen.setdefault(name, (run, kind, eid, ticket)) == (run, kind, eid, ticket)
     assert len({n.lower() for n in seen}) == len(seen)
 
 
@@ -419,7 +427,7 @@ def test_case_variants_and_collisions_never_drop_the_line(store):
     one = writer.append(event(id="A"), detail={"input": "upper", "output": "upper"})
     two = writer.append(event(id="a"), detail={"input": "lower", "output": "lower"})
     assert one["detail"] != two["detail"] and not one.get("detail_lost") and not two.get("detail_lost")
-    # a planted file of another event under the name an append would use: the line is kept, detail given up
+    # a planted file under the name an append would use: replaced atomically, the new line carries its hash
     target = record_dir(ws) / writer_detail_path(ws, "z1")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
@@ -429,6 +437,7 @@ def test_case_variants_and_collisions_never_drop_the_line(store):
                 "id": "someone",
                 "run": "r_8k2m01",
                 "kind": "step",
+                "ticket": "t_inv7c2",
                 "input": "p",
                 "output": "p",
                 "truncated": False,
@@ -437,13 +446,13 @@ def test_case_variants_and_collisions_never_drop_the_line(store):
         )
     )
     kept = writer.append(event(id="z1"), detail={"input": "x", "output": "y"})
-    assert kept is not None and kept["detail"] is None and kept["detail_lost"] is True
-    assert json.loads(target.read_text())["id"] == "someone"
+    assert kept is not None and kept["detail"] and not kept.get("detail_lost")
+    assert json.loads(target.read_text())["id"] == "z1" and kept["detail_hash"]
     assert [e["id"] for e in read_run(ws, "r_8k2m01").unwrap()] == ["A", "a", "z1"]
-    # unreadable planted file: same
+    # unreadable planted file: replaced too
     target2 = record_dir(ws) / writer_detail_path(ws, "z2")
     target2.write_text("not json")
-    assert writer.append(event(id="z2"), detail={"input": "x", "output": "y"})["detail_lost"] is True
+    assert not writer.append(event(id="z2"), detail={"input": "x", "output": "y"}).get("detail_lost")
     # too large even after cutting: line kept
     big = writer.append(event(id="z3"), detail={"input": "x" * (2 * 1024**2), "output": ""})
     assert big["detail"] is None and big["detail_lost"] is True
@@ -452,7 +461,7 @@ def test_case_variants_and_collisions_never_drop_the_line(store):
 def writer_detail_path(ws, eid):
     from orch.collect_execjson import detail_name
 
-    return f"detail/r_8k2m01/{detail_name('r_8k2m01', 'step', eid)}.json"
+    return f"detail/r_8k2m01/{detail_name('r_8k2m01', 'step', eid, event()['ticket'])}.json"
 
 
 def test_fifo_planted_as_run_file_does_not_hang(store):
@@ -479,10 +488,14 @@ def test_finished_detail_is_write_once(store):
         event(id="w1", via="log", outcome=done), detail={"input": "a", "output": "collector"}
     )
     hook = writer.append(event(id="w1", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
-    assert hook is not None  # the hook line is kept (higher precedence) ...
+    assert hook is None  # a hook line after the log's is dropped (the log wins) ...
     assert (
         json.loads((record_dir(ws) / first["detail"]).read_text())["output"] == "collector"
-    )  # ... its detail is not
+    )  # ... and so is its detail
+    # the other order: the log line writes its own detail over the hook's
+    writer.append(event(id="w3", via="hook", outcome=done), detail={"input": "b", "output": "hook"})
+    log = writer.append(event(id="w3", via="log", outcome=done), detail={"input": "a", "output": "collector"})
+    assert json.loads((record_dir(ws) / log["detail"]).read_text())["output"] == "collector"
     started = writer.append(event(id="w2"), detail={"input": "a", "output": "early"})
     writer.append(event(id="w2", outcome=done), detail={"input": "a", "output": "final"})
     assert json.loads((record_dir(ws) / started["detail"]).read_text())["output"] == "final"
@@ -528,7 +541,7 @@ def test_every_read_path_distrusts_foreign_and_hardlinked_files(store, tmp_path,
         _foreign_owner(monkeypatch)
     assert read_run(ws, "r_8k2m01").status == "tampered"
     assert read_run(ws, "r_8k2m01").status == "tampered"
-    assert read_detail(ws, "r_8k2m01", name).status == "tampered"
+    assert read_detail(ws, "r_8k2m01", name, line_id=stored["id"]).status == "tampered"
     # a new append over the untrusted run file is refused and writes nothing
     with pytest.raises(RecordRefused):
         writer.append(event(id="p2"))
@@ -546,11 +559,22 @@ def test_store_detail_with_untrusted_existing_target_is_lost(store, tmp_path, mo
     ws, writer = store
     from orch.collect_execjson import detail_name
 
-    target = record_dir(ws) / f"detail/r_8k2m02/{detail_name('r_8k2m02', 'step', 'q1')}.json"
+    tid = event()["ticket"]
+    target = record_dir(ws) / f"detail/r_8k2m02/{detail_name('r_8k2m02', 'step', 'q1', tid)}.json"
     target.parent.mkdir(parents=True)
     target.write_text(
         json.dumps(
-            dict(v=1, id="q1", run="r_8k2m02", kind="step", input="a", output="b", truncated=False, hidden=0)
+            dict(
+                v=1,
+                id="q1",
+                run="r_8k2m02",
+                kind="step",
+                ticket=tid,
+                input="a",
+                output="b",
+                truncated=False,
+                hidden=0,
+            )
         )
     )
     if how == "hardlink":

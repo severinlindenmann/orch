@@ -13,6 +13,7 @@ jobs:
           enable-cache: true
       - run: uv sync
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: node --check src/orch_dashboard/web/app.js && node --check src/orch_dashboard/web/blocks.js
       - run: node --test tests/*.test.js ../../workspace/src/orch_ui/tests/*.test.mjs
       - run: uv run pytest -q -n auto
@@ -28,6 +29,7 @@ jobs:
           enable-cache: true
       - run: uv sync
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
   sync:
     runs-on: ubuntu-latest
@@ -41,6 +43,7 @@ jobs:
           enable-cache: true
       - run: uv sync
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
   focus:
     runs-on: ubuntu-latest
@@ -54,6 +57,7 @@ jobs:
           enable-cache: true
       - run: uv sync
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
   tool-name-scan:
     # The cross-tree scan lives in the workspace tests but also reads workspace-addons/,
@@ -79,3 +83,17 @@ jobs:
           enable-cache: true
       - run: cd workspace-addons/focus && uv run --python 3.11 pytest -q tests/test_server.py -k "argv or send or control_char"
       - run: cd workspace && uv run --python 3.11 pytest -q tests/test_chat.py -k "say"
+  page-smoke:
+    # Loads every Focus (and Insights) screen in headless Chromium and fails on a console error, an uncaught exception,
+    # a failed request or a missing window global: a page that throws at load must never reach develop.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g playwright@1.64.1
+      - run: playwright install --with-deps chromium
+      - run: node e2e/focus_insights_smoke.cjs

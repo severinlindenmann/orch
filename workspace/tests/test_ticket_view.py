@@ -38,6 +38,26 @@ def conn(proj, run, rel):
     return rel
 
 
+def png() -> bytes:
+    """A well-formed 1x1 PNG (signature, IHDR, IDAT, IEND): the scan can walk it, so it may be sent."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 0, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(b"\x00\x00"))
+        + chunk(b"IEND", b"")
+    )
+
+
+CHART = png()
+
+
 def views(rel):
     """Snapshots sent with an update, without the quiet one that tells the phone a ticket exists."""
     return [m for m in rel.sent if "ticket_view" in m["body"] and m["body"]["text"] != phone_view.NEW_TEXT]
@@ -63,7 +83,7 @@ def test_result_update_carries_the_snapshot_with_marked_proof_only(proj, run, ne
     for text in ("Read the Q3 sheet", "Write the charts", "Check the totals"):
         run("check", "add", tid, text)
     (proj / "out").mkdir()
-    (proj / "out/q3-chart.png").write_bytes(b"\x89PNG chart bytes")
+    (proj / "out/q3-chart.png").write_bytes(CHART)
     (proj / "out/notes.txt").write_text("support notes, never sent")
     run("check", "done", tid, "c1", "--file", "out/q3-chart.png", "--title", "Q3 chart", "--role", "result",
         "--by", "agent:claude")  # fmt: skip
@@ -83,8 +103,8 @@ def test_result_update_carries_the_snapshot_with_marked_proof_only(proj, run, ne
     assert ("image", "Q3 chart") in kinds and ("link", "Fix #142") in kinds
     assert not [a for a in tv["attachments"] if a.get("name") == "notes.txt"], "support proof stays local"
     img = next(a for a in tv["attachments"] if a["kind"] == "image")
-    assert conn.blobs[img["blob_id"]] == b"\x89PNG chart bytes" and img["size"] == 16
-    assert list(conn.blobs.values()) == [b"\x89PNG chart bytes"], "only the marked file was uploaded"
+    assert conn.blobs[img["blob_id"]] == CHART and img["size"] == len(CHART)
+    assert list(conn.blobs.values()) == [CHART], "only the marked file was uploaded"
     ci = next(a for a in tv["attachments"] if "ci.example.ch" in a.get("url", ""))
     assert "abc123" not in ci["url"] and "token=" in ci["url"]
     texts = [h["text"] for h in tv["history_tail"]]
@@ -366,7 +386,7 @@ def test_phone_chat_hides_settings_notes_without_trusting_raw_phone_label(proj, 
         tickets.add_history(t, f"agent:relay from {PHONE}", "Removed ext.relay", "cli")
         tickets.add_history(t, f"agent:relay from {PHONE}", "From My iPhone: Make the Q3 chart", "phone")
 
-    tickets.apply_op(proj, tid, op)
+    tickets.apply_op(proj, tid, op, by=tickets.SYSTEM)
     hist = phone_view.build(proj, tickets.load(proj, tid), [])["history_tail"]
     shown = [h for h in hist if "Make the Q3 chart" in h["text"]]
     assert [(h["who"], h["role"]) for h in shown] == [("orch", "agent")]
@@ -466,8 +486,10 @@ def test_light_update_for_a_listed_ticket_on_status_change(proj, run, new_ticket
         proj, lambda st: st.setdefault("synced", {}).setdefault(PHONE, []).append(tid)
     )  # listed earlier
     assert phone_view.sync_light(proj, now=1000) == [], "first look: only the baseline"
-    tickets.apply_op(proj, tid, lambda t: t.update(status="waiting", summary="Needs your answer"))
-    tickets.apply_op(proj, other, lambda t: t.update(status="waiting"))
+    tickets.apply_op(
+        proj, tid, lambda t: t.update(status="waiting", summary="Needs your answer"), by=tickets.SYSTEM
+    )
+    tickets.apply_op(proj, other, lambda t: t.update(status="waiting"), by=tickets.SYSTEM)
     assert phone_view.sync_light(proj, now=1001) == [], "debounced"
     assert phone_view.sync_light(proj, now=1100) == [(PHONE, tid)]
     m = conn.sent[-1]
@@ -493,7 +515,7 @@ def _list(proj, tid, ph=PHONE):
 
 
 def _bump(proj, tid, **kw):
-    tickets.apply_op(proj, tid, lambda t: t.update(**kw))
+    tickets.apply_op(proj, tid, lambda t: t.update(**kw), by=tickets.SYSTEM)
 
 
 def test_light_title_is_redacted(proj, run, new_ticket, conn):

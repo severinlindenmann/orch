@@ -26,6 +26,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,7 +62,7 @@ EXT_SCHEMA_MAX = 32 * 1024
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
 # Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
-SHIPPED_ADDONS = ("automation", "dashboard", "focus", "sync")
+SHIPPED_ADDONS = ("automation", "dashboard", "focus", "insights", "sync")
 
 
 # ---------------------------------------------------------------- sources
@@ -357,11 +358,17 @@ def _trace_fallback(real: Path, reason: str) -> None:
         pass
 
 
-def home_candidates() -> list[Path]:
+def home_candidates(include_real: bool = False) -> list[Path]:
     """Every place the user's orch folder can be, resolved, without the trust rules or any fallback trace:
-    ORCH_HOME when set (as home() reads it), then ~/.orch-tool. For "is this path inside it" questions."""
+    ORCH_HOME when set (as home() reads it), then ~/.orch-tool. For "is this path inside it" questions.
+    With ORCH_HOME set and ORCH_HOME_STRICT, only ORCH_HOME (as orch_entry.home_candidates): the real folder
+    is not a candidate. include_real=True keeps it anyway, for guards that must also avoid it."""
     env = os.environ.get("ORCH_HOME")
-    return [*([Path(env).resolve()] if env else []), (real_home() / ".orch-tool").resolve()]
+    real = (real_home() / ".orch-tool").resolve()
+    strict = os.environ.get("ORCH_HOME_STRICT", "") not in ("", "0")
+    if env and strict and not include_real:
+        return [Path(env).resolve()]
+    return [*([Path(env).resolve()] if env else []), real]
 
 
 def home(root: Path | None = None) -> Path:
@@ -631,10 +638,13 @@ def _install_tool(entries: list[dict]) -> None:
         humanproof.write_install_record(plan["env"], plan["kind"])
 
 
-def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str) -> bool:
+def _reinstall(
+    entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str, consents: list[str] = ()
+) -> bool:
     """Reinstall orch with these add-ons, then (if `save`) store them as the registry and run the orch
     commands in `then` with the new code. Returns False when that happens later: on Windows orch can not
     replace its own files while it runs, so a finisher does it once this command has exited (winfinish.py).
+    `consents`: add-ons whose consent (in `root`) this install recorded; the finisher drops them if it fails.
     """
     from orch import winfinish
 
@@ -654,6 +664,12 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
                     path.unlink(missing_ok=True)
                 else:
                     path.write_bytes(before)
+                old = registry()
+                if old != entries:  # the tool env too: no package of this failed install stays
+                    try:
+                        _install_tool(old)
+                    except Exception as e:
+                        print(f"Note: could not put orch's add-ons back as they were: {e}", file=sys.stderr)
             raise
         return True
     if winfinish.pending(home()):
@@ -677,8 +693,10 @@ def _reinstall(entries: list[dict], *, save: bool, then: list[list[str]], root: 
                 "record": [str(plan["env"] / "orch-install.json"), _record_text(plan)],
             }
             if plan
-            else None
+            else {}
         )
+        if consents:
+            extra["consents"] = [str(consent_path()), workspace_id(root), sorted(consents)]
         argv = [uv, *_tool_args(entries)]
         log = (
             winfinish.start(home(), argv, then, root, done, reg, extra)
@@ -1056,21 +1074,211 @@ def _write_consents(items: list[dict]) -> None:
 ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
-def workspace_id(root: Path, create: bool = False) -> str | None:
-    """Random id in gitignored .orch/.local-id. Consent is bound to it: a clone or copy has none."""
+def _orch_dir_is_plain(root: Path) -> bool:
+    """.orch/ is a real folder (no symlink or junction): an agent could point it elsewhere."""
+    from orch import winacl
+
+    try:
+        st = (root / ".orch").lstat()
+    except OSError:
+        return True  # not there yet: a write makes it
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    try:
+        winacl.no_reparse(root / ".orch")
+    except Refused:
+        return False
+    return True
+
+
+_SUP = os.supports_dir_fd
+# The platform can do every step relative to an open folder (POSIX); Windows keeps the path code.
+_DIRFD = hasattr(os, "O_DIRECTORY") and os.open in _SUP and os.link in _SUP and os.rename in _SUP
+
+
+def _dirfd_ok() -> bool:
+    return _DIRFD
+
+
+def _open_orch(root: Path, create: bool) -> int | None:
+    """.orch/ opened ONCE as a folder fd (O_DIRECTORY|O_NOFOLLOW): a link is never followed, so a swap of the
+    folder after this point cannot move a read or write elsewhere. None when it is missing, a link or not
+    ours (create=True makes it first)."""
+    p = root / ".orch"
+    if create:
+        with contextlib.suppress(FileExistsError):
+            os.mkdir(p, 0o777)
+    try:
+        fd = os.open(p, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        os.close(fd)
+        return None
+    if not stat.S_ISDIR(st.st_mode) or (hasattr(os, "getuid") and st.st_uid != os.getuid()):
+        os.close(fd)
+        return None
+    return fd
+
+
+def _parse_id(raw: bytes) -> str | None:
+    v = raw.decode("utf-8", "replace").strip()
+    return v if ID_RE.match(v) else None
+
+
+def read_local_id(root: Path) -> str | None:
+    """The valid id in .orch/.local-id, or None. A link, a special file or a link as .orch/ is damaged: it is
+    never followed (O_NOFOLLOW relative to the .orch folder fd; Windows: lstat and reparse checks)."""
+    if _dirfd_ok():
+        dfd = _open_orch(root, False)
+        if dfd is None:
+            return None
+        try:
+            fd = os.open(".local-id", os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), dir_fd=dfd)
+        except OSError:
+            return None
+        finally:
+            os.close(dfd)
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                return None
+            return _parse_id(os.read(fd, 256))
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
+    if not _orch_dir_is_plain(root):
+        return None
     f = root / ".orch" / ".local-id"
     try:
-        v = f.read_text(encoding="utf-8").strip()
-        if ID_RE.match(v):
-            return v
+        st = f.lstat()
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            return None
+        fd = os.open(f, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     except OSError:
-        pass
-    if not create:
         return None
-    f.parent.mkdir(parents=True, exist_ok=True)
-    v = secrets.token_hex(16)
-    f.write_text(v + "\n", encoding="utf-8")
-    return v
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        return _parse_id(os.read(fd, 256))
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+_LOCAL_ID_BLOCKED = "orch could not write this workspace's id: something is in the way at .orch/.local-id."
+_LINK_REFUSED = "The .orch folder of this workspace is a link. orch does not follow it; ask the owner."
+
+
+def _wait_for_winner(root: Path) -> str | None:
+    """A writer that just linked its file holds it with 2 links for a moment (read_local_id says None):
+    look again for about 50 ms before treating the file as damaged."""
+    for _ in range(10):
+        cur = read_local_id(root)
+        if cur is not None:
+            return cur
+        time.sleep(0.005)
+    return read_local_id(root)
+
+
+def put_local_id(root: Path, v: str, *, replace: bool = False) -> str:
+    """Write id `v` to .orch/.local-id through a temp file in .orch/: a link is replaced, never written
+    through. Without `replace` the first writer wins (a valid id already there is returned and kept); a
+    damaged or link file is replaced. A link as .orch/ is refused. Returns the id that is in the file.
+    POSIX: every step is relative to ONE open .orch folder fd, and the folder is checked against its path
+    afterwards (a swap is refused). Windows (no dir_fd): path code with winacl.no_reparse before and after."""
+    tmpname = f".local-id.{secrets.token_hex(4)}.tmp"
+    if not _dirfd_ok():
+        return _put_by_path(root, v, replace, tmpname)
+    dfd = _open_orch(root, True)
+    if dfd is None:
+        raise Refused(_LINK_REFUSED)
+    try:
+        st0 = os.fstat(dfd)
+        try:
+            fd = os.open(tmpname, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(v + "\n")
+            out = v
+            done = False
+            if not replace:
+                try:
+                    os.link(tmpname, ".local-id", src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)
+                    done = True
+                except FileExistsError:
+                    cur = _wait_for_winner(root)
+                    if cur is not None:
+                        out, done = cur, True
+                except (OSError, NotImplementedError):
+                    pass  # no hard links here: fall through to the replace
+            if not done:
+                try:
+                    os.rename(tmpname, ".local-id", src_dir_fd=dfd, dst_dir_fd=dfd)  # POSIX rename replaces
+                except OSError:  # e.g. a folder planted at .local-id
+                    raise Refused(_LOCAL_ID_BLOCKED) from None
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmpname, dir_fd=dfd)
+        try:
+            now = os.stat(root / ".orch", follow_symlinks=False)
+        except OSError:
+            raise Refused(_LINK_REFUSED) from None
+        if (now.st_dev, now.st_ino) != (st0.st_dev, st0.st_ino):
+            raise Refused(_LINK_REFUSED)
+        return out
+    finally:
+        os.close(dfd)
+
+
+def _put_by_path(root: Path, v: str, replace: bool, tmpname: str) -> str:
+    from orch import winacl
+
+    if not _orch_dir_is_plain(root):
+        raise Refused(_LINK_REFUSED)
+    d = root / ".orch"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / ".local-id"
+    tmp = d / tmpname
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(v + "\n")
+        out, done = v, False
+        if not replace:
+            try:
+                os.link(tmp, f)
+                done = True
+            except FileExistsError:
+                cur = _wait_for_winner(root)
+                if cur is not None:
+                    out, done = cur, True
+            except OSError:
+                pass  # no hard links here: fall through to the replace
+        if not done:
+            try:
+                os.replace(tmp, f)
+            except OSError:  # e.g. a folder planted at .local-id
+                raise Refused(_LOCAL_ID_BLOCKED) from None
+        try:
+            winacl.no_reparse(d)
+        except Refused:
+            raise Refused(_LINK_REFUSED) from None
+        return out
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
+def workspace_id(root: Path, create: bool = False) -> str | None:
+    """Random id in gitignored .orch/.local-id. Consent is bound to it: a clone or copy has none."""
+    v = read_local_id(root)
+    if v is not None or not create:
+        return v
+    return put_local_id(root, secrets.token_hex(16))
 
 
 def folder_hash(folder: Path) -> str:
@@ -1468,6 +1676,7 @@ def batch_install(root: Path):
             then=[t for _, th in batch.items for t in th],
             root=root,
             done=f"{', '.join(sorted(taken))} installed and turned on",
+            consents=sorted(taken - before),  # a failed Windows finisher drops them, like the except below
         )
     except Exception as e:
         undone = []

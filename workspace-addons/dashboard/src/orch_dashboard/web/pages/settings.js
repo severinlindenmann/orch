@@ -2,6 +2,13 @@
 // Settings, add-on pages and add-on actions.
 let settingsTab = 'general';
 const settingsBusy = new Set();
+// A long path keeps its start and its end: "/Users/me/…/team/pilatus". The full path is in the row's title.
+const middleShort = (value, max = 48) => {
+  const text = String(value ?? '');
+  if (text.length <= max) return text;
+  const tail = Math.ceil((max - 1) / 2), head = max - 1 - tail;
+  return text.slice(0, head) + '…' + text.slice(-tail);
+};
 const settingsText = (tag, attrs, value) => {
   const node = h(tag, attrs);
   node.textContent = String(value ?? '');
@@ -124,7 +131,7 @@ function copiesDiskText(d) {
 }
 function copiesCard(settings) {
   const mode = copiesModeOf(settings), on = mode !== 'off', busy = settingsBusy.has('copies');
-  const disk = settings.copies_disk, problems = array(disk?.stuck).length + array(disk?.orphaned).length > 0, off = snapshot || busy || !!settings.copies_locked;
+  const disk = settings.copies_disk, problems = array(disk?.stuck).length + array(disk?.orphaned).length > 0, off = snapshot || busy;
   const cap = h('select', {className:'input copies-max', 'aria-label':'Most copies at the same time', 'data-key':'settings-copies-max', disabled:off},
     [1, 2, 3, 4, 5, 6, 8, 10, 20].map(n => h('option', {value:String(n)}, String(n))));
   cap.value = String(settings.copies_max || 3);
@@ -139,7 +146,6 @@ function copiesCard(settings) {
     h('div', {className:'card'},
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers working at the same time: each gets its own copy of your files')),
         h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Each helper gets its own copy of your files', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
-      settings.copies_locked ? settingsText('p', {className:'meta', 'data-key':'settings-copies-soon'}, 'Coming soon. For now every agent works in the project folder.') : null,
       reviewPanel('copies-switch', settings),
       h('details', {className:'copies-details', 'data-key':'settings-copies-details', open:problems ? '' : null}, h('summary', {}, 'Details'),
         h('div', {className:'stack copies-more'},
@@ -154,6 +160,212 @@ function copiesCard(settings) {
             reviewPanel('copies-clean', settings)),
           row('Prepare a copy with', 'Runs once in each new copy, for example to install what the project needs.', setup),
           settingsText('p', {className:'meta'}, 'Needs version history in this folder. When a copy is removed, its saved changes stay in the version history.')))));
+}
+// Sync (draft sync-card.html, Variant A): Settings › General, below Workspace. Every fact and change goes through
+// the sync add-on's own verbs on the ONE generic op: `orch sync act status|check|set|now|use-public -- <target>`.
+// The address and the choice come only from the person's clicks here; choices that decide for the person are signed.
+const SYNC = 'sync';
+const SYNC_WHERE = [['off', 'Off'], ['local', 'On this computer only'], ['remote', 'Also on another computer or server']];
+const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
+const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
+const SYNC_STATUS = {synced:['ok', 'Last synced'], never:['', 'Not synced yet'], offline:['', 'Offline, will sync when connected'], syncing:['live', 'Syncing…'], paused:['you', 'Paused, review below']};
+// card = the add-on's last status answer; draft = the person's unsaved choice (the review line shows while it differs)
+const syncUi = {card:null, loading:false, draft:null, check:null, note:'', busy:false, nowBusy:false, details:false, wasOff:false, timer:null};
+const syncSaved = card => ({where:card?.mode === 'remote' ? 'remote' : card?.mode === 'local' ? 'local' : 'off', addr:card?.mode === 'remote' ? card.remote || '' : '', every:String(card?.interval && card.mode === 'remote' ? card.interval : 15)});
+const syncNow = () => syncUi.draft || syncSaved(syncUi.card);
+const syncSame = (a, b) => a.where === b.where && (a.where !== 'remote' || (a.addr === b.addr && a.every === b.every));
+const syncHost = addr => { const text = String(addr || '').trim(); const scp = /^[^@\s/]+@([^:\s/]+):/.exec(text); if (scp) return scp[1]; try { return new URL(text).host || text; } catch (_) { return text; } };
+const syncEveryLabel = every => (SYNC_EVERY.find(([v]) => v === String(every)) || SYNC_EVERY[1])[1];
+function syncReviewText(s) {
+  if (s.where === 'off') return 'Sync will stop. Your tickets stay on this computer as they are.';
+  if (s.where === 'local') return 'Sync will keep a copy on this computer only.';
+  if (!s.addr.trim()) return 'Enter a sync address first.';
+  return 'Sync will copy tickets to ' + syncHost(s.addr) + ' every ' + syncEveryLabel(s.every) + '.';
+}
+// One click on the sync add-on's own verb; its answer comes back as state.act_answer.
+async function syncAct(verb, target, extra = {}) {
+  const result = await act('addon.act', {addon:SYNC, verb, target, ...extra});
+  const answer = result.ok && result.state?.act_answer?.addon === SYNC ? result.state.act_answer.answer : null;
+  return {...result, answer};
+}
+async function syncLoad() {
+  if (syncUi.loading || snapshot) return;
+  clearTimeout(syncUi.timer); syncUi.timer = null;
+  if (route().kind !== 'settings') return;  // the page was left: it loads again when Settings opens
+  syncUi.loading = true;
+  try {
+    const result = await syncAct('status', SYNC);
+    if (result.answer && typeof result.answer.shown === 'string') {
+      syncUi.card = result.answer;
+      // just turned on here: "On this computer only" is offered, the person saves it in the review line
+      if (syncUi.wasOff && result.answer.mode === 'off' && !syncUi.draft) syncUi.draft = {where:'local', addr:'', every:'15'};
+      syncUi.wasOff = false;
+    }
+  } finally {
+    syncUi.loading = false;
+    syncUi.timer = setTimeout(syncLoad, 15000);  // before render: a render never starts a second load
+    render();
+  }
+}
+const syncStatusText = card => card.shown === 'synced' ? 'Last synced ' + (time(card.last_ok) || '') : (SYNC_STATUS[card.shown] || SYNC_STATUS.never)[1];
+function syncStatusLine(card) {
+  const shown = syncUi.nowBusy ? 'syncing' : card.shown, [dot] = SYNC_STATUS[shown] || SYNC_STATUS.never;
+  const text = syncUi.nowBusy ? 'Syncing…' : syncStatusText(card);
+  let label = text;
+  if (shown === 'paused') {
+    label = h('a', {href:'#home', 'data-key':'sync-paused-link'}, text);
+    label.addEventListener('click', event => { event.preventDefault(); location.hash = '#home'; requestAnimationFrame(() => { const n = document.getElementById('needs-you'); if (n) { n.scrollIntoView({block:'start'}); n.focus({preventScroll:true}); } }); });
+  }
+  const n = array(card.not_synced).length;
+  const skipped = n ? h('button', {type:'button', className:'sync-skipped', 'aria-controls':'sync-details', 'data-key':'sync-skipped'}, n + (n === 1 ? ' file not synced' : ' files not synced')) : null;
+  skipped?.addEventListener('click', () => { syncUi.details = true; render(); });
+  return h('span', {className:'sync-status-line', 'data-key':'sync-status-line'},
+    h('span', {className:'sync-status' + (shown === 'paused' ? ' you' : ''), role:'status', 'data-key':'sync-status'}, h('span', {className:'dot ' + dot, 'aria-hidden':'true'}), label), skipped);
+}
+function syncLastError(card) {
+  if (!card.last_error) return 'Last error: none';
+  const when = time(card.last_try);
+  return 'Last error' + (when ? ' ' + when : '') + ': ' + (card.last_error === 'offline' ? 'could not reach the sync address.' : String(card.last_error));
+}
+function syncCard(settings) {
+  const addon = array(settings.addons).find(a => a.name === SYNC);
+  if (!addon || snapshot) return null;
+  const wrap = body => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card'}, body));
+  if (!addon.active) {
+    syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
+    return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
+  }
+  const card = syncUi.card;
+  if (!syncUi.loading && !syncUi.timer) queueMicrotask(syncLoad);  // then every 15 s while Settings is open
+  const cur = syncNow(), saved = syncSaved(card), changed = !!card && !syncSame(cur, saved), off = !card || syncUi.busy;
+  const paused = card?.shown === 'paused', blocked = paused || !!card?.public;
+  const radios = SYNC_WHERE.map(([value, label]) => {
+    const radio = h('input', {type:'radio', name:'sync-where', value, 'data-sync-where':value, 'data-key':'sync-where-' + value, disabled:off});
+    radio.checked = cur.where === value;
+    radio.addEventListener('change', () => { syncUi.draft = {...syncNow(), where:value}; render(); });
+    return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio, h('span', {}, label));
+  });
+  const addr = h('input', {type:'text', className:'input mono', id:'sync-addr', 'data-key':'sync-addr', 'data-settings-field':'sync-addr', value:cur.addr, placeholder:'https://…', spellcheck:'false', autocomplete:'off', disabled:off});
+  addr.addEventListener('input', () => { syncUi.draft = {...syncNow(), addr:addr.value}; syncUi.check = null; render(); });
+  const check = button('Check connection', '', async () => {
+    const target = (syncNow().addr || '').trim();
+    if (!target) { syncUi.check = {state:'bad'}; render(); return; }
+    syncUi.check = {state:'checking'}; render();
+    const result = await syncAct('check', target);
+    syncUi.check = {state:result.answer?.ok === true ? 'ok' : 'bad'};
+    render();
+  });
+  check.dataset.key = 'sync-check';
+  const res = syncUi.check ? h('span', {className:'check-res' + (syncUi.check.state === 'ok' ? ' ok' : syncUi.check.state === 'bad' ? ' bad' : ''), role:'status', 'data-key':'sync-check-res'},
+    syncUi.check.state === 'checking' ? null : iconEl(syncUi.check.state === 'ok' ? 'check' : 'x'),
+    syncUi.check.state === 'checking' ? 'Checking…' : syncUi.check.state === 'ok' ? 'Connection works' : 'Can’t reach this address') : null;
+  const chips = SYNC_EVERY.map(([value, label]) => {
+    const chip = h('button', {type:'button', className:'sync-chip', 'aria-pressed':cur.every === value, 'data-key':'sync-every-' + value, disabled:off}, label);
+    chip.addEventListener('click', () => { syncUi.draft = {...syncNow(), every:value}; render(); });
+    return chip;
+  });
+  const now = h('button', {type:'button', className:'btn ' + (blocked ? 'ghost' : 'primary'), 'data-key':'sync-now', disabled:off || syncUi.nowBusy}, iconEl('refresh'), 'Sync now');
+  now.addEventListener('click', syncNowClick);
+  const remoteBox = cur.where === 'remote' ? h('div', {className:'sync-sub', 'data-key':'sync-remote'},
+    h('div', {className:'sync-field'}, h('label', {className:'meta', for:'sync-addr'}, 'Sync address'), h('div', {className:'sync-field-line'}, addr, check), res),
+    h('div', {className:'sync-every'}, h('span', {className:'meta', id:'sync-every-lbl'}, 'Sync every'), h('div', {className:'sync-chips', role:'group', 'aria-labelledby':'sync-every-lbl'}, chips)),
+    h('div', {className:'sync-act'}, now, syncUi.note ? h('span', {className:'sync-note', role:'status', 'data-key':'sync-note'}, syncUi.note) : null)) : null;
+  const review = changed ? h('div', {className:'sync-review', role:'group', 'aria-label':'Review before saving', 'data-key':'sync-review'},
+    h('p', {'data-key':'sync-review-text'}, syncReviewText(cur)),
+    h('div', {className:'row'}, button('Undo', 'quiet', () => { syncUi.draft = null; syncUi.check = null; render(); }), (() => {
+      const save = button('Save', 'primary', syncSave);
+      save.dataset.key = 'sync-review-save';
+      save.disabled = syncUi.busy || (cur.where === 'remote' && !cur.addr.trim());
+      return save;
+    })())) : null;
+  const warn = card?.public ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-public'}, h('p', {}, SYNC_PUBLIC),
+    h('div', {className:'row'}, button('Use public location', '', () => signedAct({addon:SYNC, verb:'use-public', target:'pending'}, 'Using the public location.', syncLoad)),
+    button('Keep on this computer', '', async () => {
+      syncUi.busy = true; render();
+      const r = await syncAct('set', 'local');
+      syncUi.busy = false; syncUi.draft = null;
+      window.orch.toast(r.ok ? 'Your tickets stay on this computer only.' : r.text, r.ok ? 'ok' : 'error');
+      await syncLoad();
+    }))) : null;
+  const notSynced = array(card?.not_synced);
+  const details = card && card.mode !== 'off' ? h('details', {className:'sync-details', id:'sync-details', 'data-key':'sync-details', open:syncUi.details ? '' : null}, h('summary', {}, 'Details'),
+    h('ul', {}, h('li', {'data-key':'sync-last-error'}, syncLastError(card)), notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
+  return wrap([
+    h('div', {className:'sync-head'}, h('h3', {}, 'Sync'), card && card.mode !== 'off' ? syncStatusLine(card) : null),
+    warn,
+    h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    remoteBox, review, details]);
+}
+async function syncSave() {
+  const s = syncNow();
+  if (syncUi.busy || (s.where === 'remote' && !s.addr.trim())) return;
+  const saved = syncSaved(syncUi.card), sameAddr = s.where === 'remote' && saved.where === 'remote' && syncUi.card?.confirmed === true && s.addr.trim() === saved.addr;  // an unconfirmed address is never a 'same address' shortcut
+  if (s.where === 'remote' && !sameAddr) {
+    // choosing the sync address is the person's signed choice: the sign step shows the address the add-on returns
+    await signedAct({addon:SYNC, verb:'set', target:s.addr.trim(), value:s.every}, 'Sync address chosen.', async result => {
+      if (result.ok) { syncUi.draft = null; syncUi.note = ''; }
+      await syncLoad();
+    });
+    return;
+  }
+  syncUi.busy = true; render();
+  const result = sameAddr ? await syncAct('set', s.addr.trim(), {value:s.every}) : await syncAct('set', s.where);  // how often: unsigned
+  syncUi.busy = false;
+  if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); render(); return; }
+  syncUi.draft = null; syncUi.note = '';
+  if (!result.answer?.public) window.orch.toast('Saved.', 'ok');
+  await syncLoad();
+}
+// Sync now never clears a pause or a public address that waits: the add-on says what still needs the person.
+async function syncNowClick() {
+  if (syncUi.nowBusy) return;
+  syncUi.nowBusy = true; syncUi.note = ''; render();
+  const result = await syncAct('now', SYNC);
+  syncUi.nowBusy = false;
+  if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+  else if (result.answer?.still_paused || result.answer?.choose_first) syncUi.note = String(result.answer.text || '');
+  await syncLoad();
+}
+// A signed add-on click in two phases: the add-on says what it signs ({target, review}, worked out from the same bytes
+// the target hashes), the sign step shows exactly that review (never the row's or the page's own text), and Sign
+// echoes the target it showed (`seen`): the server mints only while the add-on still names that same target.
+async function signedAct(args, done, after) {
+  const asked = await act('addon.act', {...args, review:true});
+  const got = asked.ok && asked.state?.act_answer?.addon === args.addon ? asked.state.act_answer.answer : null;
+  if (!got || !got.review || typeof got.review.title !== 'string') {
+    window.orch.toast(asked.text || 'This can’t be signed right now. Nothing was changed.', 'error');
+    return null;
+  }
+  const {title, body, here, there, value} = got.review;
+  return signStep({title, body, here, there, value, done, run:async () => {
+    const result = await act('addon.act', {...args, sign:true, seen:typeof got.target === 'string' ? got.target : null});
+    if (after) await after(result);
+    return result;
+  }});
+}
+// The person's sign step (the draft's modal): what will happen, the exact value signed (an address, a file, a peer's
+// value), both versions when there are two, "You sign this as <name>", then Sign. No typed word.
+function signStep({title, body, here, there, value, done, run}) {
+  const {d, actions} = dialog(String(title || ''), 'dialog sign-step');
+  const sides = here || there ? h('ul', {className:'sign-sides'}, h('li', {}, h('b', {}, 'Here:'), ' ', String(here || '')), h('li', {}, h('b', {}, 'Other computer:'), ' ', String(there || ''))) : null;
+  const shown = value ? settingsText('p', {className:'mono sign-value', 'data-key':'sign-value'}, String(value)) : null;
+  const who = name(state?.who) || 'you';
+  const sign = h('button', {type:'button', className:'btn primary', 'data-key':'sign-ok'}, iconEl('shield'), 'Sign');
+  let pending = false;
+  d.addEventListener('cancel', event => { if (pending) event.preventDefault(); });
+  sign.addEventListener('click', async () => {
+    if (pending) return;
+    pending = true;
+    actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    const result = await run();
+    await window.orch.close(d);
+    window.orch.toast(result?.ok ? 'Signed. ' + (done || '') : result?.text || 'That did not work.', result?.ok ? 'ok' : 'error');
+  });
+  actions.append(sign);
+  d.append(...[shown, sides, body ? settingsText('p', {className:'meta'}, body) : null, settingsText('p', {className:'meta'}, 'You sign this as ' + who + '.'), actions].filter(Boolean));
+  window.orch.open(d);
+  return d;
 }
 function settingsPage() {
   const settings = state.settings;
@@ -187,10 +399,12 @@ function settingsPage() {
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons']].map(([id, label]) => id === 'phone' ? h('a', {href:'#addon/' + phoneAddon.name, 'data-key':'settings-phone'}, label) : h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [privateCard(settings), snapshot ? null : window.OrchMobileMode?.settingsSection(h), snapshot ? null : window.OrchLook?.settingsSection(), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-      // The folder path is a detail: the row says where in plain words, the path opens under Details.
-      h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'}, h('p', {}, 'Stored on this computer'),
-        h('details', {className:'folder-details', 'data-key':'settings-folder-details'}, h('summary', {}, 'Details'), settingsText('p', {className:'mono meta'}, settings.folder)))))),
-      shareCard(settings), workflowCard(settings), copiesCard(settings)]),
+      // Owner fb11: the folder is visible on the row without a click (long paths shortened in the middle, the full
+      // path on hover); the plain words and the full path stay under Details.
+      h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
+        settingsText('p', {className:'mono folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder)),
+        h('details', {className:'folder-details', 'data-key':'settings-folder-details'}, h('summary', {}, 'Details'), h('p', {className:'meta'}, 'Stored on this computer'), settingsText('p', {className:'mono meta'}, settings.folder)))))),
+      syncCard(settings), shareCard(settings), workflowCard(settings), copiesCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),

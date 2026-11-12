@@ -26,12 +26,36 @@ TICKET_PATTERNS = {"token-field": rb'"token"\s*:\s*"'}  # any ticket JSON
 
 NEVER_DIRS = {"me", "secrets", "chat", "run", "inbox", "addons", "harness"}
 _NAME_RE = re.compile(
-    r"^(\.env.*|.*\.(pem|key|p8|p12|pfx|kdbx)|id_rsa.*|id_ed25519.*|credentials.*)$", re.IGNORECASE)
+    r"^(\.env.*|.*\.(pem|key|p8|p12|pfx|kdbx)|id_rsa.*|id_ed25519.*|credentials.*)$", re.IGNORECASE
+)
 _ARCHIVE_EXT = (".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar", ".jar", ".war", ".apk")
-_ARCHIVE_MAGIC = (b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b", b"7z\xbc\xaf\x27\x1c", b"Rar!\x1a\x07", b"BZh", b"\xfd7zXZ\x00")
-_MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"OggS", b"ID3", b"\x1a\x45\xdf\xa3")
-# a signature inside a "picture" means something is hidden in it (PDFs can carry compressed text: always a click)
-_EMBEDDED = tuple(m for m in _ARCHIVE_MAGIC if m != b"\x1f\x8b") + (b"\x1f\x8b\x08",)
+_ARCHIVE_MAGIC = (
+    b"PK\x03\x04",
+    b"PK\x05\x06",
+    b"\x1f\x8b",
+    b"7z\xbc\xaf\x27\x1c",
+    b"Rar!\x1a\x07",
+    b"BZh",
+    b"\xfd7zXZ\x00",
+)
+_MEDIA_MAGIC = (
+    b"\x89PNG\r\n\x1a\n",
+    b"\xff\xd8\xff",
+    b"GIF87a",
+    b"GIF89a",
+    b"OggS",
+    b"ID3",
+    b"\x1a\x45\xdf\xa3",
+)
+# a signature inside a "picture" means something is hidden in it (PDFs can carry compressed text: always a click).
+# Fable B15: whole headers, not 3 bytes that random compressed media contains about once per 16 MB.
+_EMBEDDED = re.compile(
+    # gzip: deflate + a flag byte with the reserved bits clear; XFL and OS are not checked (decoders ignore them)
+    rb"\x1f\x8b\x08[\x00-\x1f]"
+    rb"|BZh[1-9]1AY&SY"  # bzip2: level and the first block's magic
+    rb"|PK\x03\x04[\x0a-\x3f]\x00|PK\x05\x06"  # zip: plausible version needed / end of directory
+    rb"|7z\xbc\xaf\x27\x1c|Rar!\x1a\x07|\xfd7zXZ\x00"
+)
 _TICKET_RE = re.compile(r"^tickets/t_[a-z0-9]{6,16}\.json$")
 
 
@@ -45,8 +69,11 @@ class Finding:
 
 
 def _is_media(data):
-    return data.startswith(_MEDIA_MAGIC) or (data[:4] == b"RIFF" and data[8:12] in (b"WEBP", b"WAVE", b"AVI ")) \
+    return (
+        data.startswith(_MEDIA_MAGIC)
+        or (data[:4] == b"RIFF" and data[8:12] in (b"WEBP", b"WAVE", b"AVI "))
         or data[4:8] == b"ftyp"
+    )
 
 
 def _is_text(data):
@@ -65,8 +92,9 @@ _IGNORABLE_RANGES = ((0x180B, 0x180F), (0xFE00, 0xFE0F), (0xE0100, 0xE01EF), (0x
 
 def _ignorable(c):
     o = ord(c)
-    return (unicodedata.category(c) == "Cf" or o in _IGNORABLE
-            or any(a <= o <= b for a, b in _IGNORABLE_RANGES))
+    return (
+        unicodedata.category(c) == "Cf" or o in _IGNORABLE or any(a <= o <= b for a, b in _IGNORABLE_RANGES)
+    )
 
 
 def norm_segment(seg):
@@ -80,8 +108,13 @@ def norm_segment(seg):
 def norm_path(path):
     """Normalized segments (list), or None when the path is unsafe: absolute, backslash, drive letter, empty,
     '.' or '..' segment (also after normalization), a segment ending in a dot or space, a ':', or a control character."""
-    if (not path or path.startswith(("/", "\\")) or "\\" in path or ":" in path
-            or any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in path)):
+    if (
+        not path
+        or path.startswith(("/", "\\"))
+        or "\\" in path
+        or ":" in path
+        or any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in path)
+    ):
         return None
     raw = path.split("/")
     parts = [norm_segment(p) for p in raw]
@@ -150,7 +183,7 @@ def scan_blob(path, data):
     why = "archive" if archive else None
     if not why and data.startswith(b"%PDF-"):
         why = "pdf"
-    elif not why and _is_media(data) and any(sig in data[8:] for sig in _EMBEDDED):
+    elif not why and _is_media(data) and _EMBEDDED.search(data, 8):
         why = "media-with-archive"
     elif not why and not (_is_media(data) or _is_text(data)):
         why = "unknown-format"

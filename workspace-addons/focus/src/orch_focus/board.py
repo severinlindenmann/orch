@@ -155,7 +155,9 @@ class Board:
                 self._files(e, d)
             self.open_calls.pop(d["id"], None)
             if k == "helper.end" and d["id"] in self.helpers:
-                self.helpers[d["id"]].update(open=False, ok=d.get("ok", True), result=e["text"])
+                # only a confirmed end (a checked line) may default to ok; otherwise a missing ok is unknown
+                ok = d.get("ok", True) if d.get("confirmed") is True else d.get("ok")
+                self.helpers[d["id"]].update(open=False, ok=ok, result=e["text"])
         elif k == "usage":
             self.usage = {
                 "used": d["used"],

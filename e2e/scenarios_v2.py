@@ -830,8 +830,9 @@ def f1_focus(e):
     status, pulled = r.status, r.json()
     check(status == 200 and pulled.get("state") == "ok" and pulled.get("view"), f"dashboard refused the Focus view of a running ticket: {pulled}")
     check(any(i.get("link") == f"addon:t/{tid}" for b in pulled["view"]["blocks"] for i in b.get("items", [])), f"run missing in the Focus view: {pulled['view']}")
-    qid = next(q["id"] for q in v["ticket"]["questions"] if q.get("answer") is None)
-    r = fx.act_ok("answer", {"ticket": tid, "question": qid, "answer": "Yes"})
+    shown = next(q for q in v["ticket"]["questions"] if q.get("answer") is None)
+    qid = shown["id"]
+    r = fx.act_ok("answer", {"ticket": tid, "question": qid, "digest": shown.get("digest"), "answer": "Yes"})
     q = next(q for q in r["view"]["ticket"]["questions"] if q["id"] == qid)
     check(q["answer"] == "Yes" and q.get("via") == "focus", f"answer recorded as {q}")
     v = _until_view(fx, tid, lambda v: v["done"] == 2 and not v["run"]["running"], 60, "both tasks done and the run over")
@@ -884,7 +885,7 @@ def f2_focus(e):
     check(q["options"] == ["Allow and retry", "Not now"] and "WebFetch" in q["text"], f"permission question {q}")
     check(len(_runs(calls)) == 1, f"more than one run before the answer: {_runs(calls)}")
     w.wait_done(tid, 40)
-    fx.act_ok("answer", {"ticket": tid, "question": q["id"], "answer": "Allow and retry"})
+    fx.act_ok("answer", {"ticket": tid, "question": q["id"], "digest": q.get("digest"), "answer": "Allow and retry"})
     check(wait_for(lambda: len(_runs(calls)) == 2, 30), f"Allow and retry did not start a new run: {calls.read_text()!r}")
     second = _runs(calls)[1]
     check("--allowedTools" in second and "WebFetch" in second, f"second run lacks --allow: {second!r}")

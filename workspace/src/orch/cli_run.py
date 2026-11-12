@@ -11,7 +11,7 @@ import sys
 import threading
 from pathlib import Path
 
-from orch import adapters, cli_screen, humanproof, net, runs, runs_live, sharedfolder, term, tickets
+from orch import adapters, cli_screen, history, humanproof, net, runs, runs_live, sharedfolder, term, tickets
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
@@ -78,6 +78,8 @@ def add_parsers(sub, common) -> None:
 
 
 def _out(args, data, text: str) -> None:
+    if args.json:
+        data = history.shown_json(history.args_root(args), data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -178,6 +180,7 @@ def _status(args, root: Path) -> None:
         # once per id). An agent's queued input is never in it.
         human = [i["id"] for i in runs.human_waiting(root, tid)]
         data = {"ticket": tid, "running": False, "pending": waiting, "human_pending_ids": human}
+        data["stop_held_ids"] = runs_live.stop_held(root, tid, human)  # a person stopped: no restart for them
         if waiting:  # input is really queued for a run
             text = (
                 "Queued. Nothing will start it: no background add-on is running here. "
@@ -349,7 +352,9 @@ def dispatch(args, root: Path) -> bool:
     elif sub == "attach":
         runs_live.attach(root, tid, args.watch)
     elif sub == "stop":
-        ok = runs_live.stop(root, tid)
+        ok = runs_live.stop(  # a person's stop (also --by focus) holds what waits; the automation's own never
+            root, tid, hold=by != runs_live.AUTOMATION_BY
+        )
         _out(
             args,
             {"stopped": ok},

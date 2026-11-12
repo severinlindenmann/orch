@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -641,52 +642,434 @@ def read_shared(path: Path, root: Path, confined: bool) -> bytes:
 
 
 INFLATE_MAX = 50 * 1024 * 1024  # all inflated PDF streams together: a bomb is refused, not expanded
+# Inflated bytes whose predictor is undone, all streams of one file together (the undoing is interpreted
+# Python, far costlier per byte than inflating). Past it: strict is Unchecked, else the raw inflated bytes.
+PREDICT_MAX = 8 * 1024 * 1024
+# The cap counts WORK, not input: TIFF at 1/2/4 bits per component costs 8/bpc list elements per byte, PNG
+# Average and Paeth rows are per-byte loops (x4). One sub-byte TIFF stream may inflate to this much at most.
+PREDICT_SUBBYTE_MAX = 1024 * 1024
 
 
-_PDF_IMAGE_FILTERS = {b"DCTDecode", b"JPXDecode", b"CCITTFaxDecode", b"JBIG2Decode"}
+# Pictures only: DCT (JPEG) and JPX (JPEG 2000) decode to pixels. CCITTFax and JBIG2 are not here: they
+# carry arbitrary bit planes, so in strict mode they are Unchecked like any other filter.
+_PDF_IMAGE_FILTERS = {b"/DCTDecode", b"/JPXDecode"}
+# Keys that add a filter or decode parameters beside /Filter and /DecodeParms (readers take the inline-image
+# abbreviations on streams too): strict never guesses what they do.
+_PDF_ODD_KEYS = (b"/F", b"/DP", b"/FFilter", b"/FDecodeParms")
+# Flate predictors undone before the scan (_pdf_unpredict): 2 (TIFF) and 10-15 (PNG, each row's own
+# filter byte decides); 1 is none. Parameters past these bounds are not guessed (strict: Unchecked).
+_PDF_PREDICTORS = {1, 2, 10, 11, 12, 13, 14, 15}
+_PDF_BPC = {1, 2, 4, 8, 16}
+_PDF_COLORS_MAX = 32  # DeviceN's limit
+_PDF_COLUMNS_MAX = 1 << 24
+
+_PDF_WS = rb"\x00\t\n\x0c\r "  # PDF whitespace, NUL included, the same everywhere below
+_PDF_DL = _PDF_WS + rb"()<>\[\]{}/%"  # whitespace and delimiters: what ends a name, word or keyword
+_PDF_DEPTH_MAX = 64  # nesting a reader still takes (PDFium: 64); deeper is not parsed (strict: Unchecked)
+# keys whose repeat strict never resolves (readers differ on first or last wins); other repeats: last wins
+_PDF_NO_REPEAT = {
+    b"/Filter", b"/DecodeParms", b"/F", b"/DP", b"/Type", b"/Subtype",
+    b"/Predictor", b"/Colors", b"/BitsPerComponent", b"/Columns", b"/EarlyChange",
+}  # fmt: skip
+_PDF_DICT_MAX = 4096  # how far back a `>>` before an unparsed `stream` word is looked for (strict: Unchecked)
+# every `stream` keyword (a token of its own), with the end of line the data starts after; spaces before that
+# end of line are taken as tolerant readers do (group 1: strict wants none)
+_PDF_STREAM = re.compile(rb"(?<![^" + _PDF_DL + rb"])stream(?![^" + _PDF_DL + rb"])([ \t\x00]*)(\r\n|\n|\r)?")
+_PDF_ENDSTREAM = re.compile(rb"\r?\nendstream")
+_PDF_ENDSTREAM_WORD = re.compile(rb"(?<![^" + _PDF_DL + rb"])endstream(?![^" + _PDF_DL + rb"])")
+_PDF_ENDSTREAM_AT = re.compile(rb"[" + _PDF_WS + rb"]*endstream(?![^" + _PDF_DL + rb"])")
+# `>>` right before `stream` (any control bytes or comments between): the stream has a dictionary
+_PDF_DICT_END = re.compile(rb">>(?:[\x00-\x20]|%[^\r\n]*[\r\n])*\Z")
+# the only gap strict takes between `>>` and `stream`: plain whitespace and comments
+_PDF_GAP = re.compile(rb"(?:[\t\n\r ]|%[^\r\n]*[\r\n])*")
+_PDF_ODD = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")  # NUL or odd whitespace in a stream dictionary
+# anything a reader (or its recovery scan) may take as an `N G obj` header: comments between the tokens, any
+# byte before the number (`endobj4 0 obj`); the match ends at the `obj` keyword
+_W = rb"(?:[" + _PDF_WS + rb"]|%[^\r\n]*[\r\n])+"
+_PDF_HEADER = re.compile(rb"\d" + _W + rb"\d+" + _W + rb"obj")
+_PDF_HEX = re.compile(rb"<[0-9A-Fa-f" + _PDF_WS + rb"]*>")
+_PDF_NAME = re.compile(rb"/[^" + _PDF_DL + rb"]*")
+_PDF_REF = re.compile(rb"\d+[" + _PDF_WS + rb"]+\d+[" + _PDF_WS + rb"]+R(?![^" + _PDF_DL + rb"])")
+_PDF_WORD = re.compile(rb"[^" + _PDF_DL + rb"]+")
+_PDF_SPACE = re.compile(rb"(?:[" + _PDF_WS + rb"]|%[^\r\n]*)+")
+_PDF_HEX_NAME = re.compile(rb"/[^" + _PDF_DL + rb"]*#[^" + _PDF_DL + rb"]*")
+_PDF_ENCRYPT = re.compile(rb"/Encrypt(?![^" + _PDF_DL + rb"])")
 
 
-def _pdf_filters(data: bytes, start: int) -> list[bytes]:
-    """The /Filter names of the stream that starts at `start` (from its dictionary, after the last ` obj`)."""
-    head = data[max(0, start - 4096) : start]
-    at = head.rfind(b" obj")
-    head = head[at:] if at >= 0 else head
-    f = re.search(rb"/Filter\s*(\[[^\]]*\]|/\w+)", head)
-    return re.findall(rb"/(\w+)", f.group(1)) if f else []
+class _PdfBad(Exception):
+    pass
 
 
-def _pdf_text(data: bytes, strict: bool = False) -> str:
-    """Rough text of a PDF for the secret scan: the raw bytes plus every inflated stream. Streams are inflated
-    in 1 MB steps with a running cap (INFLATE_MAX); a file that expands past it is refused. `strict`: a stream
-    that can't be inflated and is not a picture (another text filter, or broken) can't be read: Unchecked
-    (never "holds a password"). A stream without a filter is plain bytes, already in the raw text."""
-    out = [data.decode("latin-1")]
-    total = 0
-    for m in re.finditer(rb"(?<!end)stream\r?\n(.*?)\r?\nendstream", data, re.S):
-        d = zlib.decompressobj()
-        chunk = m.group(1)
-        try:
+def _pdf_name(raw: bytes) -> bytes:
+    """A name as a reader sees it: `#xx` decoded (`/Encr#79pt` is /Encrypt)."""
+    return re.sub(rb"#([0-9A-Fa-f]{2})", lambda h: bytes([int(h.group(1), 16)]), raw)
+
+
+def _pdf_skip(buf: bytes, i: int) -> int:
+    """The index after the whitespace and % comments at buf[i:]."""
+    while m := _PDF_SPACE.match(buf, i):
+        i = m.end()
+    return i
+
+
+def _pdf_value(buf: bytes, i: int, depth: int = 0) -> tuple[object, int]:
+    """One PDF object at buf[i:] -> (value, end). Names come back `#xx`-decoded with their `/`; refs, numbers
+    and strings as non-name bytes; dicts as dict (a repeated key: last wins, but a repeated _PDF_NO_REPEAT
+    key is refused). _PdfBad when it can't be parsed exactly: nesting past _PDF_DEPTH_MAX, an unterminated
+    string, a hex string with non-hex bytes, a stray delimiter."""
+    if depth > _PDF_DEPTH_MAX:
+        raise _PdfBad
+    i = _pdf_skip(buf, i)
+    if buf.startswith(b"<<", i):
+        d: dict[bytes, object] = {}
+        i = _pdf_skip(buf, i + 2)
+        while not buf.startswith(b">>", i):
+            key, i = _pdf_value(buf, i, depth + 1)
+            if not isinstance(key, bytes) or not key.startswith(b"/") or (key in d and key in _PDF_NO_REPEAT):
+                raise _PdfBad
+            d[key], i = _pdf_value(buf, i, depth + 1)
+            i = _pdf_skip(buf, i)
+        return d, i + 2
+    if buf.startswith(b"[", i):
+        arr = []
+        i = _pdf_skip(buf, i + 1)
+        while not buf.startswith(b"]", i):
+            v, i = _pdf_value(buf, i, depth + 1)
+            arr.append(v)
+            i = _pdf_skip(buf, i)
+        return arr, i + 1
+    if buf.startswith(b"(", i):
+        n, i = 1, i + 1
+        while n:
+            if i >= len(buf):
+                raise _PdfBad
+            c = buf[i]
+            n += (c == 0x28) - (c == 0x29)
+            i += 2 if c == 0x5C else 1
+        return b"()", i
+    if buf.startswith(b"<", i):
+        if not (m := _PDF_HEX.match(buf, i)):
+            raise _PdfBad
+        return b"<>", m.end()
+    if m := _PDF_REF.match(buf, i):
+        return b"R", m.end()
+    if m := _PDF_NAME.match(buf, i):
+        return _pdf_name(m.group()), m.end()
+    if m := _PDF_WORD.match(buf, i):
+        return m.group(), m.end()
+    raise _PdfBad
+
+
+def _pdf_data_end(data: bytes, start: int, d: dict) -> int:
+    """Where the data of a stream starting at data[start] ends, as readers find it: at a direct /Length when
+    `endstream` follows there, else at the next `endstream` bytes. _PdfBad when there is none."""
+    n = d.get(b"/Length")
+    if not (isinstance(n, bytes) and n.isdigit() and len(n) <= 12):  # past 12 digits: no file is that long
+        n = None
+    if n is not None and _PDF_ENDSTREAM_AT.match(data, start + int(n)):
+        return start + int(n)
+    end = data.find(b"endstream", start)
+    if end < 0:
+        raise _PdfBad
+    return end
+
+
+def _pdf_streams(data: bytes) -> dict[int, tuple[int, int, dict]]:
+    """Every stream of the file -> {where its `stream` keyword starts: (its `<<`, after its `>>`, its
+    dictionary)}, found by tokenizing the whole file forward from its first byte, the way a sequential
+    reader does: strings, comments and stream data are never re-entered, so a dictionary is always the one
+    that ends right before its own `stream` keyword, and a fake `N G obj <<` in a string or comment never
+    becomes one. Stream data is skipped (_pdf_data_end), also behind a `stream` word with no dictionary.
+    _PdfBad when the file can't be read that way exactly: a token _pdf_value refuses, stream data with no
+    `endstream`, or an `N G obj` header (as lenient readers and recovery scans find them, _PDF_HEADER)
+    anywhere but at the top level of this parse: inside a string, a comment, a dictionary or stream data,
+    where a reader sent there by the xref table would read another object than this parse."""
+    streams: dict[int, tuple[int, int, dict]] = {}
+    objs: set[int] = set()
+    last: tuple[int, int, dict] | None = None
+    i = _pdf_skip(data, 0)
+    while i < len(data):
+        if m := _PDF_STREAM.match(data, i):
+            if last is not None:
+                streams[i] = last
+            i = _pdf_skip(data, _pdf_data_end(data, m.end(), last[2] if last else {}))
+            last = None
+            continue
+        v, e = _pdf_value(data, i)
+        if v == b"obj":
+            objs.add(i)
+        last = (i, e, v) if isinstance(v, dict) else None
+        i = _pdf_skip(data, e)
+    if any(h.end() - 3 not in objs for h in _PDF_HEADER.finditer(data)):
+        raise _PdfBad
+    return streams
+
+
+def _pdf_predictor(d: dict) -> tuple[int, int, int, int] | None:
+    """The predictor of the Flate stream with dictionary `d` -> (Predictor, Colors, BitsPerComponent,
+    Columns), defaults 1, 1, 8, 1 (Predictor 1: none, the rest is not read). /DecodeParms may be null or a
+    one-entry array; a null entry or value is absent. None when it can't be read exactly: a reference, a
+    non-integer, a predictor other than 1, 2 (TIFF) or 10-15 (PNG), BitsPerComponent not 1, 2, 4, 8 or 16,
+    Colors or Columns out of bounds."""
+    parms = d.get(b"/DecodeParms", b"null")
+    if isinstance(parms, list):
+        if len(parms) != 1:
+            return None
+        parms = parms[0]
+    if parms == b"null":
+        parms = {}
+    if not isinstance(parms, dict):
+        return None
+    got = []
+    for key, default in ((b"/Predictor", 1), (b"/Colors", 1), (b"/BitsPerComponent", 8), (b"/Columns", 1)):
+        v = parms.get(key, b"null")
+        if v == b"null":
+            got.append(default)
+        elif isinstance(v, bytes) and v.isdigit() and len(v) <= 9:
+            got.append(int(v))
+        else:
+            return None
+    pred, colors, bpc, columns = got
+    if pred == 1:
+        return 1, 1, 8, 1
+    if pred not in _PDF_PREDICTORS or bpc not in _PDF_BPC:
+        return None
+    if not (1 <= colors <= _PDF_COLORS_MAX and 1 <= columns <= _PDF_COLUMNS_MAX):
+        return None
+    return pred, colors, bpc, columns
+
+
+def _pdf_lanes(vals: bytes | list[int], step: int, mask: int) -> list[int]:
+    """Running sums of every `step`-th value (each lane on its own), cut to `mask`: what undoing a
+    left-difference (PNG Sub, TIFF 2) gives."""
+    out = [0] * len(vals)
+    for k in range(step):
+        out[k::step] = map(mask.__and__, itertools.accumulate(vals[k::step]))
+    return out
+
+
+def _pdf_tiff_row(cur: bytes, colors: int, bpc: int, n: int) -> bytes:
+    """One TIFF predictor 2 row of `n` components undone: each component plus the one `colors` to its
+    left, mod 2**bpc (16-bit components are big-endian; the padding bits of a row stay as they are)."""
+    if bpc == 8:
+        return bytes(_pdf_lanes(cur, colors, 0xFF))
+    if bpc == 16:
+        dec = _pdf_lanes([h << 8 | lo for h, lo in zip(cur[0::2], cur[1::2], strict=False)], colors, 0xFFFF)
+        out = bytearray(len(cur))
+        out[0::2] = bytes(v >> 8 for v in dec)
+        out[1::2] = bytes(v & 0xFF for v in dec)
+        return bytes(out)
+    per, mask = 8 // bpc, (1 << bpc) - 1
+    vals = [(byte >> (8 - bpc * (j + 1))) & mask for byte in cur for j in range(per)]
+    dec = _pdf_lanes(vals[:n], colors, mask) + vals[n:]
+    out = bytearray(len(cur))
+    for i, v in enumerate(dec):
+        out[i // per] |= v << (8 - bpc * (i % per + 1))
+    return bytes(out)
+
+
+def _pdf_predict_work(data: bytes, pred: int, colors: int, bpc: int, columns: int) -> int:
+    """What undoing the predictor of `data` is charged against PREDICT_MAX (see there): its length times
+    8/bpc for TIFF below 8 bits, times 4 for a PNG stream with an Average or Paeth row (the filter-byte
+    column is scanned; rows that do not fit are refused by _pdf_unpredict at once)."""
+    if pred == 2:
+        return len(data) * (8 // bpc if bpc < 8 else 1)
+    if pred >= 10:
+        row = (colors * bpc * columns + 7) // 8 + 1
+        if not len(data) % row:
+            kinds = data[::row]
+            if 3 in kinds or 4 in kinds:
+                return len(data) * 4
+    return len(data)
+
+
+def _pdf_unpredict(data: bytes, pred: int, colors: int, bpc: int, columns: int) -> bytes | None:
+    """`data` (one inflated Flate stream) with its predictor (_pdf_predictor) undone, row by row: PNG
+    (10-15: each row's own filter byte, None/Sub/Up/Average/Paeth, bytes per pixel ceil(Colors*BPC/8)) or
+    TIFF 2. None when the data does not fit: a length that is not a whole number of rows (ceil(Colors*BPC*
+    Columns/8) bytes, plus the filter byte for PNG), a PNG filter byte past 4. Linear in len(data), which
+    INFLATE_MAX bounds; the result is never longer than `data`."""
+    if pred == 1 or not data:
+        return data
+    size = (colors * bpc * columns + 7) // 8  # one row without the PNG filter byte
+    row = size + (pred >= 10)
+    if len(data) % row:  # also a row longer than the data: nothing below is sized past len(data)
+        return None
+    out = bytearray()
+    if pred == 2:
+        for at in range(0, len(data), row):
+            out += _pdf_tiff_row(data[at : at + row], colors, bpc, colors * columns)
+        return bytes(out)
+    bpp = (colors * bpc + 7) // 8
+    low, high = int.from_bytes(b"\x7f" * size, "big"), int.from_bytes(b"\x80" * size, "big")
+    prev: bytes | bytearray = bytes(size)
+    for at in range(0, len(data), row):
+        kind, cur = data[at], data[at + 1 : at + row]
+        line: bytes | bytearray
+        if kind == 0:  # None
+            line = cur
+        elif kind == 1:  # Sub
+            line = bytes(_pdf_lanes(cur, bpp, 0xFF))
+        elif kind == 2:  # Up: bytewise sums, no carry across bytes
+            a, b = int.from_bytes(cur, "big"), int.from_bytes(prev, "big")
+            line = (((a & low) + (b & low)) ^ ((a ^ b) & high)).to_bytes(size, "big")
+        elif kind == 3:  # Average
+            line = bytearray(cur)
+            for i in range(min(bpp, size)):
+                line[i] = (line[i] + (prev[i] >> 1)) & 0xFF
+            for i in range(bpp, size):
+                line[i] = (line[i] + ((line[i - bpp] + prev[i]) >> 1)) & 0xFF
+        elif kind == 4:  # Paeth (left and upper-left are 0 in the first pixel: the upper byte wins)
+            line = bytearray(cur)
+            for i in range(min(bpp, size)):
+                line[i] = (line[i] + prev[i]) & 0xFF
+            for i in range(bpp, size):
+                a, b, c = line[i - bpp], prev[i], prev[i - bpp]
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 0xFF
+        else:
+            return None
+        out += line
+        prev = line
+    return bytes(out)
+
+
+def _pdf_flate(d: dict) -> bool:
+    """The stream's filter list is exactly [/FlateDecode]."""
+    return d.get(b"/Filter") in (b"/FlateDecode", [b"/FlateDecode"])
+
+
+def _pdf_scanned(d: dict, eol: bool, decoded: bool) -> bool:
+    """THE strict rule (#333), kept in this one place: a stream passes the secret scan only when its own
+    dictionary `d` was parsed exactly (_pdf_streams), its data starts after a plain end of line (`eol`),
+    and its filter list is
+    - empty: plain bytes, already in the raw text that is scanned;
+    - exactly [/FlateDecode], with no predictor or one _pdf_predictor reads exactly (PNG 10-15, TIFF 2),
+      and that single layer was decoded fully (`decoded`: inflated up to the zlib end, the predictor
+      undone by _pdf_unpredict) to text that was scanned;
+    - exactly one picture filter (_PDF_IMAGE_FILTERS) on an /Subtype /Image XObject: accepted unscanned.
+    Everything else (any other filter, a chain, odd predictor parameters, a filter by reference, /F or /DP)
+    is False: Unchecked. No /Type or /Subtype exempts a Flate stream from being decoded and scanned."""
+    if not eol or any(k in d for k in _PDF_ODD_KEYS):
+        return False
+    raw = d.get(b"/Filter", [])
+    filt = raw if isinstance(raw, list) else [raw]
+    if not filt:
+        return True
+    if filt == [b"/FlateDecode"]:
+        return decoded and _pdf_predictor(d) is not None
+    if len(filt) == 1 and filt[0] in _PDF_IMAGE_FILTERS:
+        return d.get(b"/Subtype") == b"/Image" and d.get(b"/Type", b"/XObject") == b"/XObject"
+    return False
+
+
+def _pdf_inflate(
+    view: memoryview, start: int, stop: int, budget: int, cut: int = -1
+) -> tuple[list[bytes], bool, int]:
+    """Inflate view[start:stop] up to the zlib end, in 1 MB output steps (small input steps, so the leftover
+    after the end stays small) -> (parts, reached the zlib end, -1). Refused past `budget` bytes. When the
+    data is not zlib: (what was inflated before, False, where the input fed so far ends), so a failed try
+    is charged too and the caller knows whether a try that stops at `cut` (no input step crosses it) could
+    read more."""
+    d = zlib.decompressobj()
+    parts: list[bytes] = []
+    size, pos = 0, start
+    try:
+        while not d.eof and pos < stop:
+            step = min(stop, pos + (1 << 16), cut if pos < cut else stop)
+            chunk: bytes | memoryview = view[pos:step]
+            pos += len(chunk)
             while chunk:
-                part = d.decompress(chunk, 1 << 20)
-                total += len(part)
-                if total > INFLATE_MAX:
+                parts.append(d.decompress(chunk, 1 << 20))
+                size += len(parts[-1])
+                if size > budget:
                     raise Refused("This file is too large once it is opened, so it was not shared")
-                out.append(part.decode("latin-1"))
                 if d.eof:
                     break
                 chunk = d.unconsumed_tail
-            if not d.eof:
-                tail = d.flush()  # what the decompressor still holds
-                total += len(tail)
-                if total > INFLATE_MAX:
-                    raise Refused("This file is too large once it is opened, so it was not shared")
-                out.append(tail.decode("latin-1"))
-        except zlib.error:
-            filters = _pdf_filters(data, m.start())
-            if strict and filters and not set(filters) <= _PDF_IMAGE_FILTERS:
-                raise Unchecked(UNCHECKED) from None
+        if not d.eof:
+            parts.append(d.flush())  # what the decompressor still holds
+            if size + len(parts[-1]) > budget:
+                raise Refused("This file is too large once it is opened, so it was not shared")
+    except zlib.error:
+        return parts, False, pos
+    return parts, d.eof, -1
+
+
+def _pdf_text(data: bytes, strict: bool = False) -> str:
+    """Rough text of a PDF for the secret scan: the raw bytes plus every inflated stream (a Flate predictor
+    undone, _pdf_unpredict, when the forward read gave the stream its dictionary). Every `stream`
+    start is inflated on its own, up to the zlib end (the next `endstream` only as a fallback, never as the
+    only read), with a running cap (INFLATE_MAX, failed tries charged too); a file that expands past it is
+    refused. `strict` fails closed: the file must read exactly forward (_pdf_streams), and every stream
+    must pass _pdf_scanned with the dictionary that parse gave it, the one rule; a `stream` keyword with a
+    `>>` right before it that the parse did not reach as a stream (inside a string or stream data) is
+    Unchecked too (never "holds a password"). A `stream` word without a dictionary before it is not a
+    stream: inflated best effort only. Not strict (the person's OK): best effort, never Unchecked."""
+    out = [data.decode("latin-1")]
+    total = predicted = 0
+    view = memoryview(data)
+    streams = None
+    try:
+        streams = _pdf_streams(data)
+    except _PdfBad:
+        pass  # strict: Unchecked, after any earlier stream had its say (a bomb is still "too large")
+    for m in _PDF_STREAM.finditer(data):
+        span = _PDF_ENDSTREAM.search(data, m.end())
+        parts, inflated = None, False
+        cut = span.start() if span else -1
+        for stop in (len(data), *([cut] if span else [])):  # zlib end, else `endstream`
+            got, end, bad = _pdf_inflate(view, m.end(), stop, INFLATE_MAX - total, cut)
+            total += sum(map(len, got))
+            if bad < 0:
+                parts, inflated = got, end
+                break
+            if bad <= cut:  # broke before `endstream`: a shorter try breaks the same
+                break
+        # a Flate predictor is undone, so the scanned text is what a reader gets; odd parameters or data
+        # that does not fit them: the inflated bytes are scanned as they are, and strict says Unchecked
+        decoded = inflated
+        own = streams.get(m.start()) if streams else None
+        if inflated and parts is not None and own and _pdf_flate(own[2]):
+            pred = _pdf_predictor(own[2])
+            if pred is None:
+                decoded = False
+            elif pred[0] != 1:
+                joined = b"".join(parts)
+                predicted += _pdf_predict_work(joined, *pred)
+                subbyte = pred[0] == 2 and pred[2] < 8 and len(joined) > PREDICT_SUBBYTE_MAX
+                if subbyte or predicted > PREDICT_MAX:  # too costly: strict Unchecked, else raw
+                    if strict:
+                        raise Unchecked(UNCHECKED)
+                    decoded = False
+                else:
+                    undone = _pdf_unpredict(joined, *pred)
+                    decoded = undone is not None
+                    parts = parts if undone is None else [undone]
+        if parts is not None:
+            out.extend(p.decode("latin-1") for p in parts)
+        if not strict:
             continue
+        if streams is None:
+            raise Unchecked(UNCHECKED)
+        if m.start() not in streams:
+            if _PDF_DICT_END.search(data, max(0, m.start() - _PDF_DICT_MAX), m.start()):
+                raise Unchecked(UNCHECKED)
+            continue
+        p, stop, d = streams[m.start()]
+        exact = _PDF_GAP.fullmatch(data, stop, m.start()) and not _PDF_ODD.search(data, p, stop)
+        if not exact or not _pdf_scanned(d, not m.group(1) and m.group(2) is not None, decoded):
+            raise Unchecked(UNCHECKED)
+    if strict and streams is None:
+        raise Unchecked(UNCHECKED)
     return "\n".join(out)
+
+
+def _pdf_locked(data: bytes) -> bool:
+    """/Encrypt anywhere, also spelled with `#xx` escapes (`/Encr#79pt`)."""
+    if _PDF_ENCRYPT.search(data):
+        return True
+    return any(_pdf_name(m.group()) == b"/Encrypt" for m in _PDF_HEX_NAME.finditer(data))
 
 
 def has_secret(data: bytes, mime: str, allow_unchecked: bool = False) -> bool:
@@ -694,7 +1077,7 @@ def has_secret(data: bytes, mime: str, allow_unchecked: bool = False) -> bool:
     (/Encrypt) can't be read, which is not the same as holding a password: Unchecked."""
     if mime.startswith("image/"):  # the raw bytes (metadata, trailing text) go through the same patterns
         return phone_view._has_secret(data)
-    if mime == "application/pdf" and not allow_unchecked and re.search(rb"/Encrypt\b", data):
+    if mime == "application/pdf" and not allow_unchecked and _pdf_locked(data):
         raise Unchecked(UNCHECKED)
     if mime == "application/pdf":
         text = _pdf_text(data, strict=not allow_unchecked)
@@ -1126,7 +1509,7 @@ def _drop_member_quietly(root: Path, tid: str, ws: str) -> None:
 def _history(root: Path, tid: str, by: str, text: str, chat: bool = False) -> None:
     """chat=True only for what a person or a member said in the group."""
     with contextlib.suppress(Refused, OSError):
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat))
+        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "relay", chat=chat), by=by)
 
 
 def _by_name(g: dict, ws: str) -> str:
@@ -1436,7 +1819,14 @@ def ask(root: Path, tid: str, ws: str, qid: str, by: str = "agent:relay") -> dic
             "The question could not be sent now. It is kept and goes out with the next relay command."
         )
     asked = net.read_json(relay._asked_path(root), {})
-    asked[mid] = {"ticket": tid, "question_id": qid, "to": ws, "group": gid}
+    asked[mid] = {
+        "ticket": tid,
+        "question_id": qid,
+        "to": ws,
+        "group": gid,
+        "question_digest": tickets.question_digest(q),  # the question as it was sent
+    }
+    relay.sign_asked(root, mid, asked[mid])
     net.write_json(relay._asked_path(root), asked, True)
     _history(root, tid, by, f"Asked {ws} (group): {q['text']}"[:2000])
     return msg
@@ -1963,12 +2353,12 @@ def note_answer_kept(root: Path, asked: dict, m: dict) -> None:
     """A later answer to an already answered question is kept as a note, not applied."""
     with contextlib.suppress(Refused, OSError):
         text = clean_untrusted(str(m["body"].get("answer", "")), 500)
+        who = f"agent:{_line(m['from'], 60)}"
         tickets.apply_op(
             root,
             asked["ticket"],
-            lambda t: tickets.add_history(
-                t, f"agent:{_line(m['from'], 60)}", f"Late answer to {asked['question_id']}: {text}", "relay"
-            ),
+            lambda t: tickets.add_history(t, who, f"Late answer to {asked['question_id']}: {text}", "relay"),
+            by=who,
         )
 
 
@@ -2620,7 +3010,13 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
         qm = _send(root, "phones", "question", qb, allow_tid)
         if qm:
             asked = net.read_json(relay._asked_path(root), {})
-            asked[qm["id"]] = {"ticket": allow_tid, "question_id": q["id"], "to": "phones"}
+            asked[qm["id"]] = {
+                "ticket": allow_tid,
+                "question_id": q["id"],
+                "to": "phones",
+                "question_digest": tickets.question_digest(q),  # the question as it was sent
+            }
+            relay.sign_asked(root, qm["id"], asked[qm["id"]])
             net.write_json(relay._asked_path(root), asked, True)
         _report(
             root,

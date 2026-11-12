@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from test_fakeorch import FAKES, check, validator
 
-from orch import cli, cli_record, hider
+from orch import cli, cli_record, hider, record
 from orch.record import RecordWriter, record_dir
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -250,7 +250,8 @@ def test_counts_valid_and_denominators(ws, capsys):
     )
     read = next(i for i in ans["items"] if i["name"] == "Read")
     # run A can report skills and tools; run B wrote no capability list, so it only counts for what it used
-    assert read["uses"] == 5 and read["ok"] == 1 and read["failed"] == 1 and read["unknown"] == 3
+    # the fixture's lines are hook lines (the agent's word): the one that says ok is "unknown", never "ok"
+    assert read["uses"] == 5 and read["ok"] == 0 and read["failed"] == 1 and read["unknown"] == 4
     assert read["runs"] == {"used": 2, "of": 2, "unseen": 0}
 
 
@@ -352,7 +353,9 @@ def test_same_shapes_as_the_fake(ws, capsys):
     assert shape(real_page) == shape(fake_page) and set(real_page) == set(fake_page)
     _, (real_counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
     _, (fake_counts,) = fake_lines("record", "counts", "--json")
-    assert set(real_counts) == set(fake_counts)
+    assert set(real_counts) - {"per_run"} == set(
+        fake_counts
+    )  # per_run (protected + note) is new: S3 renders it
     assert set(real_counts["items"][0]) == set(fake_counts["items"][0]) - {"tickets"}
     for kind in ("invalid", "not_found"):
         args = ["--limit", "0"] if kind == "invalid" else ["--run", "r_nothere1"]
@@ -427,8 +430,8 @@ def test_skipped_lines_are_marked_not_hidden(ws, capsys):
         f.write("this is not an event\n")
     _, lines = cli_lines(capsys, "tail")
     (marker,) = [ln for ln in lines if ln["type"] == "unavailable"]
-    assert (marker["status"], marker["reason"], marker["run"]) == ("ok", "skipped", RUN_B)
-    assert "could not be read" in marker["message"]
+    assert (marker["status"], marker["reason"], marker["run"]) == ("ok", "content", RUN_B)
+    assert marker["changed"] == 1 and "changed outside orch" in marker["message"]
     check(validator("cli-answer", "stream_line"), marker, "marker")
     assert len([ln for ln in lines if ln["type"] == "event"]) == 6
 
@@ -436,7 +439,7 @@ def test_skipped_lines_are_marked_not_hidden(ws, capsys):
 def test_pending_writes_are_marked(ws, capsys):
     pending = record_dir(ws) / "pending" / RUN_A
     pending.mkdir(parents=True)
-    (pending / "x.json").write_text("{}")
+    (pending / ("0" * 20 + "_" + "a" * 32 + ".json")).write_text("{}")
     _, lines = cli_lines(capsys, "tail")
     (marker,) = [ln for ln in lines if ln["type"] == "unavailable"]
     assert (marker["status"], marker["reason"], marker["run"]) == ("ok", "pending", RUN_A)
@@ -600,12 +603,19 @@ def test_marker_state_follows_the_run(ws):
             check(validator("cli-answer", "stream_line"), ln, "marker")
 
 
+def prune(ws, run):
+    """What retention does: the tombstone in the head first, then the run file goes (a file that is gone
+    without it is `removed`)."""
+    record._tombstone(ws, run, "2026-11-16T10:00:00Z")
+    run_file(ws, run).unlink(missing_ok=True)
+
+
 def test_follow_drops_cursor_entries_of_pruned_runs(ws):
     since = cli_record.TailCursor({RUN_A: 4, RUN_B: 2}).encode()
 
     def between(n):
         if n == 1:
-            run_file(ws, RUN_B).unlink()
+            prune(ws, RUN_B)
 
     out = follow(ws, 25, between, since=since)
     ping = [ln for ln in out if ln["type"] == "ping"][-1]
@@ -618,8 +628,8 @@ def test_follow_drops_cursor_entries_of_pruned_runs(ws):
 def test_detail_file_of_another_event_is_tampered(ws, capsys, monkeypatch):
     real = cli_record.record.read_detail
 
-    def other(root, run, file_id):
-        result = real(root, run, file_id)
+    def other(root, run, file_id, **kw):
+        result = real(root, run, file_id, **kw)
         return type(result)("ok", dict(result.value, id="toolu_other"))
 
     monkeypatch.setattr(cli_record.record, "read_detail", other)
@@ -653,7 +663,7 @@ def test_vanished_tampered_run_is_missing_not_recovered(ws):
     hardlink(ws)
 
     def between(n):
-        run_file(ws).unlink(missing_ok=True)
+        prune(ws, RUN_B)
 
     out = follow(ws, 3, between)
     marks = [(m["status"], m["reason"]) for m in out if m["type"] == "unavailable"]
@@ -706,7 +716,11 @@ def test_high3_a_rewritten_run_is_marked_and_resent(ws, capsys):
     path.write_text(raw_line(ws, RUN_B, 0) + "\n")  # shorter than the cursor
     _, rest = cli_lines(capsys, "tail", "--since", last)
     marks = [ln for ln in rest if ln["type"] == "unavailable"]
-    assert [(m["run"], m["status"], m["reason"]) for m in marks] == [(RUN_B, "ok", "rewound")]
+    # a shortened run file is a truncation: the lines that are gone are `removed`, and the steps are resent
+    assert sorted((m["run"], m["status"], m["reason"]) for m in marks) == [
+        (RUN_B, "ok", "removed"),
+        (RUN_B, "ok", "rewound"),
+    ]
     check(validator("cli-answer", "stream_line"), marks[0], "marker")
     assert [ln["event"]["seq"] for ln in rest if ln["type"] == "event"] == [1]
 
@@ -717,6 +731,7 @@ def test_med_vanish_and_return_is_missing_then_recovered(ws):
 
     def between(n):
         if n == 1:
+            record._tombstone(ws, RUN_B, "2026-11-16T10:00:00Z")  # pruned on purpose (retention does this)
             path.rename(away)
         elif n == 2:
             away.rename(path)
@@ -777,8 +792,8 @@ def test_med_a_trimmed_run_rewritten_shorter_is_rewound(ws, monkeypatch):
     path = run_file(ws, RUN_B)
     path.write_text(raw_line(ws, RUN_B, 0) + "\n")
     out = follow(ws, 1, since="rc1.x")
-    marks = [(m["run"], m["reason"]) for m in out if m["type"] == "unavailable"]
-    assert marks == [(RUN_B, "rewound")]
+    marks = sorted((m["run"], m["reason"]) for m in out if m["type"] == "unavailable")
+    assert marks == [(RUN_B, "removed"), (RUN_B, "rewound")]
     assert [ln["event"]["seq"] for ln in out if ln["type"] == "event"] == [1]
 
 
@@ -805,3 +820,39 @@ def test_deeply_nested_cursors_are_invalid(ws, capsys):
         for args in (("tail", "--since", cursor), ("query", "--after", cursor)):
             code, (line,) = cli_lines(capsys, *args)
             assert code == 2 and line["code"] == "invalid"
+
+
+def _plant(ws, run, **changes):
+    """Append a schema-valid line the agent could write itself (not through the writer)."""
+    path = record_dir(ws) / "runs" / f"{run}.jsonl"
+    line = json.dumps(example(run=run, id="toolu_planted", at=at(50), **changes))
+    with open(path, "a") as f:
+        f.write(line + "\n")
+
+
+def test_planted_huge_seq_does_not_freeze_the_tail_cursor(ws, capsys):
+    _plant(ws, RUN_A, seq=10**18)
+    _, before = cli_lines(capsys, "tail", "--run", RUN_A)
+    assert any(ln["type"] == "unavailable" and ln["reason"] == "content" for ln in before)
+    before = [ln for ln in before if ln["type"] == "event"]
+    assert [ln["event"]["seq"] for ln in before] == [1, 2, 3, 4]  # the planted line is skipped
+    w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
+    w.append(example(run=RUN_A, id="toolu_a9", at=at(55)))
+    _, rest = cli_lines(capsys, "tail", "--run", RUN_A, "--since", before[-1]["cursor"])
+    rest = [ln for ln in rest if ln["type"] == "event"]
+    assert [ln["event"]["id"] for ln in rest] == ["toolu_a9"]
+    assert rest[0]["event"]["seq"] == 5  # seq is the chain's: the planted line shifts nothing
+
+
+def test_duplicate_seq_does_not_break_query_paging(ws, capsys):
+    for _ in range(2):
+        _plant(ws, RUN_A, seq=2)  # repeats of an earlier line number
+    seen, after = [], []
+    for _ in range(20):
+        code, (page,) = cli_lines(capsys, "query", "--run", RUN_A, "--limit", "2", *after)
+        assert code == 0
+        seen += [(e["run"], e["seq"]) for e in page["items"]]
+        if not page["next"]:
+            break
+        after = ["--after", page["next"]]
+    assert sorted(seen) == [(RUN_A, n) for n in range(1, 5)]

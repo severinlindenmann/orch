@@ -70,7 +70,7 @@
     },
     "relay.allow": function (p) { return ["Allow ", plain(p.peer), " to start ", q(p.task), " (" + cap(p.mode) + ")?"]; },
     "private.allow": function (p) { return ["Allow ", q(p.name), " to run ", full(p.command), p.interactive ? " (and, live: " : "", p.interactive ? full(p.interactive) : "", p.interactive ? ")" : "", " on this computer?"]; },
-    "private.move": function () { return ["Move the personal files out of the team repo?"]; },
+    "private.move": function () { return ["Move your orch files that are not shared with the team out of the team repo?"]; },
     "config.agent_add": function (p) { return ["Add the agent ", q(p.name), " that runs ", full(p.command)].concat(p.interactive ? [" (live: ", full(p.interactive), ")"] : [], ["?"]); },
     "insights.settings": function (p) { return ["Change ", plain(INSIGHTS_SETTING[p.setting] || "an Insights setting"), " to ", plain(insightsValue(p.setting, p.value)), "?"]; },
     "record.delete_detail": function (p) { return ["Delete the full detail of ", q(p.title), "? The counts stay."]; },

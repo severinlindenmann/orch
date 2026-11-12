@@ -485,6 +485,185 @@ def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_tic
     assert (q["answer"], q["answered_by"], q["via"]) == ("Y", "human:ph_iphone0001", "phone")
 
 
+def test_a_phone_answer_to_a_question_changed_after_it_was_sent_is_not_applied(proj):
+    from conftest import ensure_signing
+
+    from orch import relay, tickets
+
+    ensure_signing(proj)
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
+    shown = tickets.question_digest(tickets.load(proj, tid)["questions"][0])
+    rec = {"ticket": tid, "question_id": "q1", "to": "phones", "question_digest": shown}
+    relay.sign_asked(proj, "m_q00000000000001", rec)
+    relay._asked_path(proj).parent.mkdir(parents=True, exist_ok=True)
+    relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+    path = tickets.ticket_path(proj, tid)
+    t = json.loads(path.read_text())
+    t["questions"][0]["text"] = "Deploy to production?"
+    path.write_text(json.dumps(t))
+    body = {"question_id": "q1", "answer": "yes", "answered_by": "human:a"}
+    ans = msg(
+        "m_ans5000000000005", "answer", body, frm="ph_iphone0001", ticket=tid, reply_to="m_q00000000000001"
+    )
+    note, applied = relay._apply_answer(proj, ans)
+    assert applied is None and "changed after it was shown" in note
+    assert tickets.load(proj, tid)["questions"][0]["answer"] is None
+    for bad in (None, 7, ""):  # a record without a usable digest (also one from before digests): refused
+        rec["question_digest"] = bad
+        relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+        note, applied = relay._apply_answer(proj, ans)
+        assert applied is None and "This question changed or can't be checked. Ask again." in note
+    del rec["question_digest"]
+    relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+    assert relay._apply_answer(proj, ans)[1] is None
+    assert tickets.load(proj, tid)["questions"][0]["answer"] is None
+    rec["question_digest"] = tickets.question_digest(tickets.load(proj, tid)["questions"][0])  # unchanged
+    relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+    assert relay._apply_answer(proj, ans)[1] is None  # the agent's recomputed digest carries no valid MAC
+    relay.sign_asked(proj, "m_q00000000000001", rec)
+    relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+    assert relay._apply_answer(proj, ans)[1] == tid
+    assert tickets.load(proj, tid)["questions"][0]["answer"] == "yes"
+
+
+def _stub_send(monkeypatch, mid):
+    from orch import relay
+
+    monkeypatch.setattr(relay, "_message", lambda root, to, type_, body, tid, **kw: {"id": mid})
+    monkeypatch.setattr(relay, "send_text", lambda *a, **k: None)
+
+
+def test_phone_answer_needs_the_question_mac_of_the_question_as_sent(proj, monkeypatch):
+    """#580: questions-sent.json is workspace-writable. An agent that rewrites the ticket's question AND the
+    record's digest cannot forge question_mac (human key): the phone answer is refused, nothing applied."""
+    from conftest import ensure_signing
+
+    from orch import relay, tickets
+
+    ensure_signing(proj)
+    _stub_send(monkeypatch, "m_q60000000000006")
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    sent = relay.send_question(proj, t, t["questions"][0])
+    mid = sent["id"]
+    good = json.loads(relay._asked_path(proj).read_text())[mid]
+    assert good["question_mac"]
+    body = {"question_id": "q1", "answer": "yes", "answered_by": "human:a"}
+    ans = msg("m_ans6000000000006", "answer", body, frm="ph_iphone0001", ticket=tid, reply_to=mid)
+
+    def refused(rec, key=mid):
+        relay._asked_path(proj).write_text(json.dumps({key: rec}))
+        note, applied = relay._apply_answer(proj, ans if key == mid else {**ans, "reply_to": key})
+        assert applied is None and relay.QUESTION_UNCHECKABLE in note, note
+        assert tickets.load(proj, tid)["questions"][0]["answer"] is None
+
+    # (b) the agent edits the question text and recomputes the record's digest to match
+    path = tickets.ticket_path(proj, tid)
+    raw = json.loads(path.read_text())
+    raw["questions"][0]["text"] = "Deploy to production?"
+    path.write_text(json.dumps(raw))
+    forged = {**good, "question_digest": tickets.question_digest(tickets.load(proj, tid)["questions"][0])}
+    refused(forged)
+    raw["questions"][0]["text"] = "Deploy to staging?"
+    path.write_text(json.dumps(raw))
+    # (c) no MAC, a wrong MAC, the MAC of another message id, the MAC of other fields
+    refused({k: v for k, v in good.items() if k != "question_mac"})
+    refused({**good, "question_mac": "A" * 43})
+    other = relay.sign_asked(proj, "m_other00000000001", dict(good))
+    refused({**good, "question_mac": other["question_mac"]})
+    refused(good, key="m_other00000000001")  # good record moved under another message id
+    refused({**good, "ticket": "t_other00"})  # MAC of other fields
+    # (a) the record as sent: applied
+    relay._asked_path(proj).write_text(json.dumps({mid: good}))
+    assert relay._apply_answer(proj, ans)[1] == tid
+    assert tickets.load(proj, tid)["questions"][0]["answer"] == "yes"
+
+
+def test_record_kind_and_round_are_under_the_question_mac(proj, monkeypatch):
+    """#580: an agent that marks an ordinary record review/proposal (or moves a review round) gets the answer
+    refused BEFORE any dispatch: no verdict, nothing answered, and never reported as already applied."""
+    from conftest import ensure_signing
+
+    from orch import relay, tickets
+
+    ensure_signing(proj)
+    _stub_send(monkeypatch, "m_q80000000000008")
+    monkeypatch.setattr(
+        relay, "_apply_review_answer", lambda *a: pytest.fail("review dispatched without a valid MAC")
+    )
+    monkeypatch.setattr(
+        relay, "_apply_proposal_answer", lambda *a: pytest.fail("proposal dispatched without a valid MAC")
+    )
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy?", ["yes", "no"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    mid = relay.send_question(proj, t, t["questions"][0])["id"]
+    good = json.loads(relay._asked_path(proj).read_text())[mid]
+    body = {"question_id": "q1", "answer": "accept", "answered_by": "human:a"}
+    ans = msg("m_ans8000000000008", "answer", body, frm="ph_iphone0001", ticket=tid, reply_to=mid)
+    for forged in (
+        {**good, "review": True, "round": 1},
+        {**good, "proposal": True, "title": "x"},
+        {**good, "round": 2},
+    ):
+        relay._asked_path(proj).write_text(json.dumps({mid: forged}))
+        note, applied = relay._apply_answer(proj, ans)
+        assert applied is None and relay.QUESTION_UNCHECKABLE in note, note
+        assert tickets.load(proj, tid)["questions"][0]["answer"] is None
+        assert tickets.load(proj, tid)["status"] != "done"
+    # (c) the ticket says "answered" in workspace-writable fields; a MAC-failed record never reports it
+    tickets.answer(proj, tid, "q1", "accept", "human:a", "phone")
+    relay._asked_path(proj).write_text(json.dumps({mid: {**good, "question_mac": "A" * 43}}))
+    assert relay._applied_ticket(proj, ans) is None
+    note, applied = relay._apply_answer(proj, ans)
+    assert applied is None and "answered" not in note
+    relay._asked_path(proj).write_text(json.dumps({mid: good}))
+    assert relay._applied_ticket(proj, ans) == tid  # the signed record: the crash-retry path still works
+
+
+def test_review_and_proposal_records_are_signed_by_their_writers(proj, monkeypatch):
+    from conftest import ensure_signing
+
+    from orch import relay, tickets
+
+    ensure_signing(proj)
+    _stub_send(monkeypatch, "m_unused0000000001")
+    t = tickets.create(proj, "Deploy", "human:tester")
+    relay.send_review_question(proj, t, 3, "m_rev00000000000003")
+    rec = json.loads(relay._asked_path(proj).read_text())["m_rev00000000000003"]
+    assert rec["review"] is True and rec["round"] == 3
+    assert relay.asked_mac_ok(proj, "m_rev00000000000003", rec)
+    assert not relay.asked_mac_ok(proj, "m_rev00000000000003", {**rec, "round": 4})
+    assert not relay.asked_mac_ok(proj, "m_rev00000000000003", {**rec, "review": False})
+    monkeypatch.setattr(relay, "_record_general", lambda *a, **k: None)
+    monkeypatch.setattr(relay, "_message", lambda root, to, type_, body, *a, **k: {"id": a[-1] if a else "x"})
+    sent = relay._send_proposal(
+        proj, "phones", "A proposal", {"title": "Make it"}, {"text": "A proposal"}, None, []
+    )
+    rec = json.loads(relay._asked_path(proj).read_text())[sent["id"]]
+    assert rec["proposal"] is True and relay.asked_mac_ok(proj, sent["id"], rec)
+    assert not relay.asked_mac_ok(proj, sent["id"], {**rec, "title": "Other"})
+    assert not relay.asked_mac_ok(proj, sent["id"], {**rec, "proposal": None, "review": True})
+
+
+def test_question_sent_without_a_key_goes_out_but_its_answer_is_refused(proj, monkeypatch):
+    from orch import humanproof, relay, tickets
+
+    monkeypatch.setattr(humanproof, "local_key", lambda root: None)
+    _stub_send(monkeypatch, "m_q70000000000007")
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy?", ["yes", "no"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    mid = relay.send_question(proj, t, t["questions"][0])["id"]
+    assert "question_mac" not in json.loads(relay._asked_path(proj).read_text())[mid]
+    body = {"question_id": "q1", "answer": "yes", "answered_by": "human:a"}
+    ans = msg("m_ans7000000000007", "answer", body, frm="ph_iphone0001", ticket=tid, reply_to=mid)
+    assert relay._apply_answer(proj, ans)[1] is None
+    assert tickets.load(proj, tid)["questions"][0]["answer"] is None
+
+
 def out_count(text):
     return text.count("ignored:")
 
@@ -635,6 +814,55 @@ def test_done_crash_before_seen_makes_no_second_ticket(proj, run, rel, monkeypat
     assert items[0]["allowed"] is True
     r = json.loads(run("relay", "done", "m_deleg00000000001", "--json")[1])
     assert r["ticket"] == _tickets(run)[0]["id"] and len(_tickets(run)) == 1
+
+
+def test_done_survives_a_refused_ticket_write_and_does_not_retry(proj, run, rel, monkeypatch):
+    """A relay message whose ticket write is refused (the closed-ticket agent guard) is dropped: `done` still
+    marks it seen (no retry storm), reports no ticket, and the next message works."""
+    from orch import relay, tickets
+
+    connect(run, rel)
+    for i in (1, 2):
+        rel.inbox.append(msg(f"m_deleg0000000000{i}", "delegate", {"title": f"T{i}", "text": "x"}))
+    run("relay", "inbox")
+    for i in (1, 2):
+        run("relay", "allow", f"m_deleg0000000000{i}", "--once")
+    real = relay._ticket_for
+    calls = []
+
+    def refuse_first(root, m):
+        calls.append(m["id"])
+        if len(calls) == 1:
+            raise tickets.ClosedRefused("This ticket is closed, so the agent can't change it.")
+        return real(root, m)
+
+    monkeypatch.setattr(relay, "_ticket_for", refuse_first)
+    first = relay.done(proj, "m_deleg00000000001")
+    assert first["ticket"] is None and "m_deleg00000000001" in relay.seen(proj)
+    again = relay.done(proj, "m_deleg00000000001")
+    assert again["new"] is False and calls == ["m_deleg00000000001"]  # not retried
+    second = relay.done(proj, "m_deleg00000000002")
+    assert second["ticket"]  # the next message still gets its ticket
+
+
+def test_done_does_not_swallow_a_busy_refusal(proj, run, rel, monkeypatch):
+    """Only the closed-ticket guard drops a message: a busy lock or a sync wait is retried later."""
+    from orch import relay
+    from orch.errors import Refused
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000001", "delegate", {"title": "T", "text": "x"}))
+    run("relay", "inbox")
+    run("relay", "allow", "m_deleg00000000001", "--once")
+
+    def busy(root, m):
+        raise Refused("Ticket t_x is busy (retried for 5 s). Try again.")
+
+    monkeypatch.setattr(relay, "_ticket_for", busy)
+    with pytest.raises(Refused):
+        relay.done(proj, "m_deleg00000000001")
+    assert "m_deleg00000000001" not in relay.seen(proj)
+    assert not any(g.get("used") for g in relay.allows(proj)["given"])
 
 
 def test_done_holds_the_lock_and_refuses_when_busy(proj, run, rel):
@@ -1261,6 +1489,255 @@ def test_allow_question_always_and_ignore(proj, run, rel):
     assert "Spam" not in run("relay", "inbox")[1], "an ignored message does not come back"
 
 
+def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
+    """Authority: once sync is on, an answered relay:allow question counts only when its answer was made on
+    this machine (history.answer_proven); a peer's synced answer allows (and ignores) nothing here."""
+    from conftest import ensure_signing
+
+    from orch import history, tickets
+
+    connect(run, rel)
+    local_mid, peer_mid, deny_mid = "m_deleg00000000011", "m_deleg00000000012", "m_deleg00000000013"
+    for mid in (local_mid, peer_mid, deny_mid):
+        rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
+    run("relay", "inbox")
+    ensure_signing(proj)
+    history.enable_sync(proj, adopt=True)  # as the sync add-on does
+    by_msg = {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
+    run("answer", by_msg[local_mid]["id"], "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+
+    def peer_answer(word):
+        def plant(t):  # what a sync apply writes: the answer and its line, core made neither here
+            t["questions"][0].update(answer=word, answered_by="human:Marco", via="phone")
+            t["history"].append(
+                {
+                    "at": "2026-11-09T09:00:00Z",
+                    "by": "human:Marco",
+                    "via": "phone",
+                    "text": f"Answered q1: {word}",
+                    "chat_message": False,
+                }
+            )
+            t["waiting_on"] = None
+
+        return plant
+
+    for mid, word in ((peer_mid, "Always"), (deny_mid, "Ignore")):
+        path = tickets.ticket_path(proj, by_msg[mid]["id"])
+        doc = json.loads(path.read_text())
+        peer_answer(word)(doc)
+        path.write_text(json.dumps(doc, indent=2))
+    run("relay", "inbox")
+    run("relay", "inbox")
+    sent = [m for m in rel.sent if m["type"] == "allow"]
+    assert [m["reply_to"] for m in sent] == [local_mid] and sent[0]["body"]["mode"] == "once"
+    given = json.loads((proj / ".orch/secrets/allows.json").read_text())["given"]
+    assert [g["message_id"] for g in given] == [local_mid]
+    for mid in (peer_mid, deny_mid):
+        shown = json.loads(run("ticket", "show", by_msg[mid]["id"], "--json")[1])
+        assert shown["status"] != "dropped" and "allow_applied" not in shown["ext"]["relay"]
+        assert shown["questions"][0]["answered_by"] == history.SYNC_BY  # shown as synced, not verified
+        notes = [h["text"] for h in shown["history"] if "not applied" in h["text"]]
+        assert len(notes) == 1 and f"orch relay allow {mid}" in notes[0]
+    assert not (proj / ".orch/inbox-notes.json").exists() or deny_mid not in json.loads(
+        (proj / ".orch/inbox-notes.json").read_text()
+    )
+    local = json.loads(run("ticket", "show", by_msg[local_mid]["id"], "--json")[1])
+    assert local["ext"]["relay"]["allow_applied"] == "q1"
+
+
+def _synced_allow_tickets(proj, run, rel, *mids):
+    from conftest import ensure_signing
+
+    from orch import history
+
+    connect(run, rel)
+    for mid in mids:
+        rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
+    run("relay", "inbox")
+    ensure_signing(proj)
+    history.enable_sync(proj, adopt=True)  # as the sync add-on does
+    return {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
+
+
+def _peer_edits(proj, tid, change):
+    from orch import tickets
+
+    path = tickets.ticket_path(proj, tid)
+    doc = json.loads(path.read_text())
+    change(doc)
+    path.write_text(json.dumps(doc, indent=2))  # what a sync apply writes
+
+
+def test_a_proven_answer_allows_only_the_message_its_question_was_asked_for(proj, run, rel):
+    """The peer swaps the synced allow_message of a locally answered question to another waiting message: the
+    proven answer allows neither (the binding made when the question was asked here names the first one)."""
+    asked, other = "m_deleg00000000021", "m_deleg00000000022"
+    by_msg = _synced_allow_tickets(proj, run, rel, asked, other)
+    tid = by_msg[asked]["id"]
+    from orch import humanproof
+
+    assert humanproof.relay_allow_get(proj, tid, "q1") == {"message": asked, "applied": False}
+    assert not humanproof.relay_allow_set(proj, tid, "q1", other)  # a recorded message is never replaced
+    _peer_edits(proj, tid, lambda d: d["ext"]["relay"].update(allow_message=other))
+    run("answer", tid, "q1", "Always", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    run("relay", "inbox")
+    assert not [m for m in rel.sent if m["type"] == "allow"]
+    assert (
+        not (proj / ".orch/secrets/allows.json").exists()
+        or not json.loads((proj / ".orch/secrets/allows.json").read_text())["given"]
+    )
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert "allow_applied" not in shown["ext"]["relay"]
+    assert sum("not asked on this computer for this message" in h["text"] for h in shown["history"]) == 1
+
+
+def test_a_reset_allow_applied_does_not_apply_an_answer_again(proj, run, rel):
+    from orch import relay
+
+    mid = "m_deleg00000000023"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    assert [m["reply_to"] for m in rel.sent if m["type"] == "allow"] == [mid]  # the local flow works
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert shown["ext"]["relay"]["allow_applied"] == "q1"
+    _peer_edits(proj, tid, lambda d: d["ext"]["relay"].pop("allow_applied"))  # the peer resets it
+    a = relay.allows(proj)
+    a["given"] = []  # and no earlier allow is found here either
+    relay._save_allows(proj, a)
+    run("relay", "inbox")
+    run("relay", "inbox")
+    assert [m["reply_to"] for m in rel.sent if m["type"] == "allow"] == [mid]  # applied once, not again
+    assert not relay.allows(proj)["given"]
+
+
+def test_a_decoy_question_with_the_same_id_proves_no_other_answer(proj, run, rel):
+    """Opus PR B #2: the person answered q1 "Allow once" here; a peer puts a plain decoy q1 with that answer
+    first and changes the real relay:allow q1 to "Always". The decoy's proof never lets "Always" act."""
+    from orch import humanproof, relay
+
+    mid = "m_deleg00000000024"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+
+    def decoy(d):
+        real = d["questions"][0]
+        d["questions"].insert(0, {**real, "kind": "plain", "action": None})
+        real["answer"] = "Always"
+
+    _peer_edits(proj, tid, decoy)
+    run("relay", "inbox")
+    run("relay", "inbox")
+    assert not [m for m in rel.sent if m["type"] == "allow"]
+    assert not relay.allows(proj)["given"]
+    assert humanproof.relay_allow_get(proj, tid, "q1")["applied"] is False
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert "allow_applied" not in shown["ext"]["relay"] and shown["status"] != "dropped"
+    assert sum("same id" in h["text"] for h in shown["history"]) == 1  # said once
+
+
+def test_the_same_place_answer_word_must_match_the_proven_one(proj, run, rel):
+    """No duplicate ids: the raw question at q's place must be the relay:allow one with the very answer."""
+    from orch import history, relay, tickets
+
+    mid = "m_deleg00000000025"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    raw = json.loads(tickets.ticket_path(proj, tid).read_text())
+    assert history.answer_proven(proj, raw, raw["questions"][0])
+    _peer_edits(proj, tid, lambda d: d["questions"][0].update(answer="Always"))
+    run("relay", "inbox")
+    assert not [m for m in rel.sent if m["type"] == "allow"] and not relay.allows(proj)["given"]
+
+
+@pytest.mark.parametrize("word", ["Always", "Ignore"])
+def test_an_allow_given_here_proves_no_synced_answer_word(proj, run, rel, word):
+    """Allowed here with `orch relay allow --once`; a peer then sets the answer to Always / Ignore. The allow
+    given here only marks the binding applied: the synced word neither widens nor drops anything."""
+    from orch import humanproof, relay
+
+    mid = "m_deleg00000000026"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("relay", "allow", mid, "--once")
+
+    def peer(d):
+        d["questions"][0].update(answer=word, answered_by="human:Marco", via="phone")
+        d["history"].append(
+            {
+                "at": "2026-11-09T09:00:00Z",
+                "by": "human:Marco",
+                "via": "phone",
+                "text": f"Answered q1: {word}",
+            }
+        )
+
+    _peer_edits(proj, tid, peer)
+    run("relay", "inbox")
+    run("relay", "inbox")
+    given = relay.allows(proj)["given"]
+    assert [(g["message_id"], g["mode"]) for g in given] == [(mid, "once")]
+    assert [m["body"]["mode"] for m in rel.sent if m["type"] == "allow"] == ["once"]
+    assert humanproof.relay_allow_get(proj, tid, "q1")["applied"] is True
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert shown["status"] != "dropped"
+    assert not (proj / ".orch/inbox-notes.json").exists() or mid not in json.loads(
+        (proj / ".orch/inbox-notes.json").read_text()
+    )
+
+
+def test_the_applied_binding_is_written_before_the_allow(proj, run, rel, monkeypatch):
+    from orch import humanproof, relay
+
+    mid = "m_deleg00000000027"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    states = []
+    real = relay.give_allow
+    monkeypatch.setattr(
+        relay,
+        "give_allow",
+        lambda root, *a, **k: (
+            states.append(humanproof.relay_allow_get(root, tid, "q1")["applied"]) or real(root, *a, **k)
+        ),
+    )
+    relay.apply_allow_answers(proj)
+    assert states == [True]
+    # a binding that cannot be written: nothing is applied (else it would be applied again on each pass)
+    mid2 = "m_deleg00000000028"
+    rel.inbox.append(msg(mid2, "delegate", {"title": "Task 28", "text": "x"}))
+    run("relay", "inbox")
+    tid2 = next(t["id"] for t in _tickets(run) if t["ext"]["relay"]["allow_message"] == mid2)
+    run("answer", tid2, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    monkeypatch.setattr(humanproof, "relay_allow_set", lambda *a, **k: False)
+    notes = relay.apply_allow_answers(proj)
+    assert any("could not record" in n for n in notes) and len(states) == 1
+
+
+def test_a_sync_free_allow_question_writes_no_binding(proj, run, rel):
+    from orch import addons, history, humanproof
+
+    def binding_file() -> bool:
+        ws = addons.workspace_id(proj, create=False)
+        return (
+            ws is not None and (humanproof.guarded_home(proj) / "keys" / ws / humanproof.RELAY_ALLOW).exists()
+        )
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000029", "delegate", {"title": "T", "text": "x"}))
+    run("relay", "inbox")
+    tid = _allow_ticket_of(run)["id"]
+    assert not history.sync_enabled(proj)
+    assert humanproof.relay_allow_get(proj, tid, "q1") is None and not binding_file()
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    assert [m["reply_to"] for m in rel.sent if m["type"] == "allow"] == ["m_deleg00000000029"]  # as before
+    assert not binding_file()
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert shown["ext"]["relay"]["allow_applied"] == "q1"
+
+
 def test_phone_text_added_to_a_ticket_is_acked_once_on_rerun(proj, run, rel, new_ticket, monkeypatch):
     from orch import relay
 
@@ -1360,7 +1837,7 @@ def test_delegate_title_and_checklist_are_stored_as_framed_data(proj, run, rel):
     assert t["checklist"][1]["text"] == f"From {PEER}: plain"
     from orch import runs
 
-    prompt = runs.fresh_prompt(t, [])
+    prompt = runs.fresh_prompt(t, [], proj)
     assert f"From {PEER}:" in prompt
 
 
@@ -1574,7 +2051,11 @@ def test_relay_answer_reaches_the_agent_that_waits(
         from orch import net
 
         p = net.secrets_dir(proj) / "questions-sent.json"
-        net.write_json(p, {reply: {"ticket": tid, "question_id": "q1", "to": PEER}}, True)
+        from orch import relay, tickets
+
+        q = next(x for x in tickets.load(proj, tid)["questions"] if x["id"] == "q1")
+        rec = {"ticket": tid, "question_id": "q1", "to": PEER, "question_digest": tickets.question_digest(q)}
+        net.write_json(p, {reply: relay.sign_asked(proj, reply, rec)}, True)
     monkeypatch.setattr(
         runs, "read", lambda root, t: {"run": "r1", "ticket": t, "mode": "oneshot", "agent": "x"}
     )
@@ -1699,3 +2180,14 @@ def test_shown_name_is_never_a_raw_workspace_id(monkeypatch):
     assert relay._shown_name(None, "ws_a1", "another workspace") == "Pilatus"
     assert relay._shown_name(None, "ws_u5k5wqp2a5", "another workspace") == "another workspace"
     assert relay._shown_name(None, "ws_u5k5wqp2a5", "") == ""
+
+
+def test_a_sync_free_workspace_keeps_applying_with_duplicate_question_ids(proj, run, rel):
+    """Requirement: sync-free workspaces are unaffected; the duplicate-id refusal only runs with sync on."""
+    from orch import history, relay
+
+    assert not history.sync_enabled(proj)
+    import pathlib
+
+    src = pathlib.Path(relay.__file__).read_text()
+    assert "if synced and len(ids) != len(set(ids)):" in src

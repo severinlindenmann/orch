@@ -56,6 +56,9 @@ def live(monkeypatch):
     assert not leftovers, f"tmux servers left behind: {leftovers}"
 
 
+SECRETS = {}  # cookie -> page secret of the sessions this module signed in
+
+
 def http_post(port, path, body, cookie=None):
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
     h = {
@@ -65,15 +68,19 @@ def http_post(port, path, body, cookie=None):
     }
     if cookie:
         h["Cookie"] = cookie
+        if cookie in SECRETS:
+            h["X-Orch-Page"] = SECRETS[cookie]
     c.request("POST", path, json.dumps(body), h)
     r = c.getresponse()
     return r.status, r.getheader("Set-Cookie"), r.read().decode()
 
 
 def signed_in(root, port):
-    st, ck, _ = http_post(port, "/session", {"token": hp.write_launch_token(root, "dashboard")})
-    assert st == 204
-    return ck.split(";")[0]
+    st, ck, body = http_post(port, "/session", {"token": hp.write_launch_token(root, "dashboard")})
+    assert st == 200
+    cookie = ck.split(";")[0]
+    SECRETS[cookie] = json.loads(body)["secret"]
+    return cookie
 
 
 def act(root, port, ck, op, args):
@@ -84,7 +91,7 @@ def new_ticket(run, title="T", review=False, root=None):
     code, out, _ = run("ticket", "new", title, "--json", "--by", "agent:x")
     tid = json.loads(out)["id"]
     if review:
-        tickets.apply_op(root, tid, lambda t: t.update(status="review"))
+        tickets.apply_op(root, tid, lambda t: t.update(status="review"), by=tickets.SYSTEM)
     return tid
 
 
@@ -94,7 +101,14 @@ def test_answer_click(live, run):
     code, out, _ = run("ask", tid, "Which?", "--json", "--by", "agent:x")
     q = json.loads(out)["id"]
     ck = signed_in(root, port)
-    st, _, body = act(root, port, ck, "answer", {"ticket": tid, "question": q, "answer": "Blue -- not red"})
+    shown = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == q)  # what the page showed
+    st, _, body = act(
+        root,
+        port,
+        ck,
+        "answer",
+        {"ticket": tid, "question": q, "digest": tickets.question_digest(shown), "answer": "Blue -- not red"},
+    )
     assert st == 200, body
     t = tickets.load(root, tid)
     assert t["questions"][0]["answer"] == "Blue -- not red"  # text after `--` survived

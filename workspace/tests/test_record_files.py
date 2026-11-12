@@ -172,7 +172,9 @@ def test_files_survive_dedupe_and_the_finished_line(store):
         detail={"input": {"file_path": "/abs/src/app.py"}, "output": "ok"},
     )
     assert started["files"] == ["src/app.py"] and finished["files"] == ["src/app.py", "tests/t.py"]
-    detail = record.read_detail(ws, RUN, finished["detail"].split("/")[-1][:-5]).unwrap()
+    detail = record.read_detail(
+        ws, RUN, finished["detail"].split("/")[-1][:-5], line_id=finished["id"]
+    ).unwrap()
     assert detail["input"] == {"file_path": "/abs/src/app.py"}  # the detail file is unchanged
 
 

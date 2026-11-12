@@ -224,7 +224,8 @@ class Scheduler:
         A Ready ticket (or one waiting on another open question) with such input and no run gets one run. The ids are saved before the start (never twice
         after a crash); a start that definitely failed gives them back, at most QUEUED_TRIES times per id. The
         saved set is only the ids still waiting (no cap that could forget one). Same gates as the other starts:
-        a ticket switched off here (paused) is left alone, and a ticket started this pass is skipped."""
+        a ticket switched off here (paused) is left alone, and a ticket started this pass is skipped. Input that
+        waited when a person stopped the run (`orch run stop`: core's stop_held_ids) starts nothing; newer does."""
         started: list[str] = []
         skip = list(skip or [])
         for t in [*read_tickets(self.root), *self.chat_stub()]:
@@ -246,7 +247,9 @@ class Scheduler:
             st = orchcli.run_status(self.root, tid)
             if not st or st.get("running") is not False:
                 continue
-            ids = [i for i in st.get("human_pending_ids") or [] if isinstance(i, str)]
+            held = st.get("stop_held_ids")  # a person stopped the run while these waited: no restart
+            held = [i for i in held if isinstance(i, str)] if isinstance(held, list) else []  # else: no hold
+            ids = [i for i in st.get("human_pending_ids") or [] if isinstance(i, str) and i not in held]
             mine = load_state(self.root).get(tid, {})
             tries = {
                 k: v for k, v in (mine.get("queued_tries") or {}).items() if k in ids and isinstance(v, int)

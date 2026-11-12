@@ -647,13 +647,25 @@ async fn file(
             return Err(none());
         }
         let sc = serde_json::to_string(&scope(&c, &s)).unwrap_or("[]".into());
-        let ok: bool = c.query_row(
-            "SELECT EXISTS(SELECT 1 FROM view_blobs v JOIN messages m ON m.id=v.msg_id JOIN blobs b ON b.id=v.blob_id
-               WHERE v.blob_id=?1 AND m.type='text' AND m.to_addr='phones' AND b.uploader=m.from_addr
-                 AND m.from_addr IN (SELECT value FROM json_each(?2)) AND m.stored_at>=?3)",
-            params![id, sc, s.created_at],
-            |r| r.get(0),
-        )?;
+        // The blob is readable only through a referencing message the subscriber sees now (the same kinds
+        // filter `/events` applies), so a hidden event never exposes its files.
+        let refs: Vec<Msg> = c
+            .prepare(
+                "SELECT m.seq,m.id,m.from_addr,m.to_addr,m.type,m.created_at,m.ticket,m.reply_to,m.payload,m.acked_at
+                 FROM view_blobs v JOIN messages m ON m.id=v.msg_id JOIN blobs b ON b.id=v.blob_id
+                 WHERE v.blob_id=?1 AND m.type='text' AND m.to_addr='phones' AND b.uploader=m.from_addr
+                   AND m.from_addr IN (SELECT value FROM json_each(?2)) AND m.stored_at>=?3
+                 ORDER BY m.seq DESC LIMIT 100",
+            )?
+            .query_map(params![id, sc, s.created_at], msg_from_row)?
+            .collect::<Result<_, _>>()?;
+        let mut ok = false;
+        for m in &refs {
+            if event_of(&c, &app.key, m, &s)?.is_some() {
+                ok = true;
+                break;
+            }
+        }
         if !ok {
             return Err(none());
         }

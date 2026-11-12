@@ -99,8 +99,10 @@ async fn pair(State(app): State<AppState>, body: Bytes) -> Res<(StatusCode, Json
 async fn register_push(State(app): State<AppState>, h: HeaderMap, body: Bytes) -> Res<StatusCode> {
     let v = parse_body(&body)?;
     let t = v["apns_token"].as_str().unwrap_or("");
-    if t.is_empty() || !t.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return Err(invalid("`apns_token` must be a hex string."));
+    if !(64..=200).contains(&t.len()) || !t.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return Err(invalid(
+            "`apns_token` must be a hex string of 64 to 200 characters.",
+        ));
     }
     let c = app.db.lock().unwrap();
     let (pid, ..) = auth::phone(&c, &h)?;
@@ -910,6 +912,9 @@ async fn get_settings(State(app): State<AppState>, h: HeaderMap) -> Res<Json<Val
     Ok(Json(store::phone_settings(&c, &pid)))
 }
 
+/// The highest TTS spend cap a phone may set; larger values are clamped to it.
+const MAX_TTS_CAP_USD: f64 = 50.0;
+
 async fn patch_settings(
     State(app): State<AppState>,
     h: HeaderMap,
@@ -921,6 +926,13 @@ async fn patch_settings(
     check("settings_patch_request", &v)?;
     // parse before any write: a bad time must not leave the other fields half saved
     let mute_all = v.get("mute_all_until").map(mute_until).transpose()?;
+    let tts_cap = match v.get("tts_cap_usd") {
+        None => None,
+        Some(n) => match n.as_f64() {
+            Some(x) if x.is_finite() && x >= 0.0 => Some(x.min(MAX_TTS_CAP_USD)),
+            _ => return Err(invalid("`tts_cap_usd` must be a number from 0 to 50.")),
+        },
+    };
     c.execute(
         "INSERT OR IGNORE INTO phone_settings(phone) VALUES(?1)",
         [&pid],
@@ -937,7 +949,7 @@ async fn patch_settings(
             params![pid, b],
         )?;
     }
-    if let Some(n) = v["tts_cap_usd"].as_f64() {
+    if let Some(n) = tts_cap {
         c.execute(
             "UPDATE phone_settings SET tts_cap_usd=?2 WHERE phone=?1",
             params![pid, n],

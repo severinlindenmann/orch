@@ -80,7 +80,8 @@ def test_real_capture():
     assert bash_end["outcome"]["ok"] is False
     assert bash_end["outcome"]["error"].startswith("Exit code 1")
     assert bash_end["text"] == "Attempt to print a file that does not exist"
-    assert bash_end["detail"] == f"detail/{CTX['run']}/{detail_name(CTX['run'], 'step', bash_end['id'])}.json"
+    name = detail_name(CTX["run"], "step", bash_end["id"], CTX["ticket"])
+    assert bash_end["detail"] == f"detail/{CTX['run']}/{name}.json"
     assert all(e["session"] == "00000002-0000-4000-8000-000000000002" for e in events[1:])
     assert events[-2]["data"]["tokens_in"] == 4 + 24629 + 47004 and events[-2]["data"]["tokens_out"] == 345
     assert events[-1]["data"]["state"] == "idle"
@@ -173,7 +174,10 @@ def test_ids_stable_and_unsafe_ids_stay_raw_for_the_writer():
     assert first == second
     assert first[0]["id"] == first[1]["id"] == unsafe  # never pre-hashed: the writer hashes once
     hashed = "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]
-    assert first[1]["detail"] == f"detail/{CTX['run']}/{detail_name(CTX['run'], 'step', hashed)}.json"
+    assert (
+        first[1]["detail"]
+        == f"detail/{CTX['run']}/{detail_name(CTX['run'], 'step', hashed, CTX['ticket'])}.json"
+    )
     assert first[3]["id"] == "ok_1"
 
 
@@ -183,10 +187,34 @@ def test_unsafe_id_dedupes_with_a_hook_line_through_the_writer(store):
     collect([use(unsafe), result(unsafe)], writer, CTX)
     done = [e for e in mapper().events([use(unsafe), result(unsafe)]) if e["outcome"]][0]
     hook = dict(done, via="hook", detail=None)
-    writer.append(hook)  # hooks win: appended, and readers dedupe on (run, id, kind, finished, via class)
+    assert writer.append(hook) is None  # after the log's line: dropped (the log wins, same hashed id)
     finished = [e for e in read_run(ws, CTX["run"]).unwrap() if e["kind"] == "step" and e["outcome"]]
     assert len(finished) == 1
     assert finished[0]["id"] == "x_" + hashlib.sha256(unsafe.encode()).hexdigest()[:32]
+
+
+@pytest.mark.parametrize(
+    "interrupt, code", [(None, "tool_failed"), (False, "tool_failed"), (True, "interrupted")]
+)
+def test_a_failure_hook_maps_to_a_failed_end_with_a_fixed_code(interrupt, code):
+    from orch.collect_claude import hook_line
+
+    raw = {
+        "hook_event_name": "PostToolUseFailure", "tool_name": "Bash", "tool_use_id": "toolu_f1",
+        "tool_input": {"command": "rm -rf build"}, "error": "Exit code 1\n" + "x" * 50_000,
+    }  # fmt: skip
+    if interrupt is not None:
+        raw["is_interrupt"] = interrupt
+    got = hook_line(raw)
+    assert got["outcome"] == {"ok": False, "error": code, "ms": None}  # never the error text
+    assert (got["id"], got["kind"], got["text"]) == ("toolu_f1", "step", "Run rm -rf build")
+    assert got["payload"]["input"] == {"command": "rm -rf build"}
+    out = got["payload"]["output"]  # the error text, cut like any hook output (hidden by the writer)
+    assert out.startswith("Exit code 1\n") and out.endswith("more characters]") and len(out) < 33_000
+    pre = hook_line(dict(raw, hook_event_name="PreToolUse"))
+    post = hook_line(dict(raw, hook_event_name="PostToolUse"))
+    assert pre["outcome"] is None and "payload" not in pre
+    assert post["outcome"] == {"ok": None, "error": None, "ms": None}  # a success never says it ended well
 
 
 def test_result_events_get_stable_ids_from_the_line():
@@ -275,7 +303,9 @@ def test_collect_into_writer_hides_secrets_and_replay_dedupes(store):
     assert SECRET not in blob and "[hidden: deploy-key]" in blob
     finished = [e for e in events if e["kind"] == "step" and e["outcome"]]
     assert len(finished) == 1 and finished[0]["detail"]
-    detail = read_detail(ws, CTX["run"], finished[0]["detail"].rsplit("/", 1)[1][:-5])
+    detail = read_detail(
+        ws, CTX["run"], finished[0]["detail"].rsplit("/", 1)[1][:-5], line_id=finished[0]["id"]
+    )
     text = json.dumps(detail.unwrap())
     assert SECRET not in text and "[hidden: deploy-key]" in text
     for path in (ws / ".orch").rglob("*"):

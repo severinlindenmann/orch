@@ -56,7 +56,7 @@
             buttons.forEach(button => { button.disabled = true; });
             options.setAttribute('aria-busy', 'true');
             try {
-              const r = await S.act('answer', {ticket: card.ticket, question: question.id, answer: option});
+              const r = await S.act('answer', {ticket: card.ticket, question: question.id, digest: question.digest, answer: option});
               if (!r.ok) toast(text(r.message), 'error');
             } catch (e) { toast('Could not send your answer. Try again.', 'error'); }
             finally {
@@ -73,13 +73,14 @@
       const steps = h('ul', {class: 'fx-ln-steps'}, (card.steps || []).slice(0, 3).map(step =>
         h('li', {}, h('time', {datetime: step.at, text: hhmm(step.at)}),
           h('span', {class: 'fx-ln-icon' + (step.ok ? ' ok' : ''), 'aria-hidden': 'true', text: ({step: '·', done: '✓', ask: '?', helper: '↳'})[step.kind] || '·'}),
-          h('span', {text: text(step.text)}))));
+          h('span', {}, h('span', {text: text(step.text)}), step.unchecked ? h('span', {class: 'fx-unchecked', title: step.unchecked === 'before' ? 'Made before orch checked records.' : 'Reported by the agent, not checked by orch.', text: 'not checked'}) : null))));
+      const notes = (card.notes || []).map(t => h('p', {class: 'fx-record-note', role: 'note', text: text(t)}));
       return h('article', {class: 'fx-ln-card' + (question ? ' asking' : '')},
         h('header', {class: 'fx-ln-head'}, h('div', {class: 'fx-ln-title'},
           card.key ? h('div', {class: 'fx-ln-key', text: text(card.key)}) : null,
           h('a', {href, text: text(card.title)})),
         h('span', {class: 'fx-ln-agent', text: text(card.agent) + (card.minutes == null ? '' : ' · ' + card.minutes + ' min') + (card.area ? ' · ' + text(card.area) : '')})),
-        now, steps, h('footer', {class: 'fx-ln-foot'}, h('a', {href, text: 'Open →'})));
+        now, ...notes, steps, h('footer', {class: 'fx-ln-foot'}, h('a', {href, text: 'Open →'})));
     }
 
     /* A ticket shown as a live card is not listed again under "Working". */

@@ -17,7 +17,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import harness, humanproof, keystore, net, runs, skillrender, skills, tickets
+from orch import harness, history, humanproof, keystore, net, runs, skillrender, skills, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -44,7 +44,21 @@ def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
 
 
 def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str]:
-    who = net.connect_service(root, "relay", "orch-relay", url, workspace, token, "orn_")
+    # a (re)connection never inherits the last relay's admin policy (a stale "off" or "on"), and a FAILED one
+    # (a wrong token, the relay not answering) leaves the current connection's policy alone: it is cleared
+    # once connect_service succeeded, or when it stopped half-way after writing the new relay.json (written
+    # atomically: net.write_json). refresh below writes the policy of THIS connection. While disconnected (no
+    # relay.json) it counts for nothing (config.share_counts_state reads relay.json first); orch has no
+    # disconnect command that removes relay.json.
+    secrets = net.secrets_dir(root)
+    before = net.read_json(secrets / "relay.json", None)
+    connected = False
+    try:
+        who = net.connect_service(root, "relay", "orch-relay", url, workspace, token, "orn_")
+        connected = True
+    finally:
+        if connected or net.read_json(secrets / "relay.json", None) != before:
+            (secrets / "policy.json").unlink(missing_ok=True)
     return who, refresh(root)
 
 
@@ -303,7 +317,7 @@ def give_allow(root: Path, mid: str, mode: str, by: str | None = None, via: str 
                     tk["status"] = "active"
             tickets.add_history(tk, "agent:relay", f"Allowed by {who} ({via or 'cli'})", "relay")
 
-        tickets.apply_op(root, atid, settle)
+        tickets.apply_op(root, atid, settle, by=tickets.SYSTEM)
         # the ticket stays: `relay done` turns it into the task's ticket (one delegate = one ticket)
     return out
 
@@ -579,14 +593,40 @@ UPDATE_KINDS = ("ack", "working", "note", "result", "question", "failure", "stop
 
 
 def _update_title(root: Path, ticket: str) -> str | None:
-    """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces)."""
+    """The ticket's title as the phone's one-line title (letters, numbers, punctuation, symbols, spaces), with
+    secrets and stored key values hidden like every text of the ticket view (send_text itself hides nothing).
+    No value hider: no title (fail closed)."""
+    from orch import phone_results, phone_view
+
     try:
         title = tickets.load(root, ticket)["title"]
     except (Refused, ValueError, KeyError):
         return None
-    line = " ".join(clean_untrusted(title, 200).split())
+    if (h := phone_results.value_hider(root)) is None:
+        return None
+    # no cut before hiding (a cut ahead of a collapse can leave a prefix of a stored value inside the
+    # shown 120): titles are short, a huge one gets no title. Then clean, collapse and filter (these can
+    # join or split text into a secret), then hide the stored values and redact; the result must be a
+    # fixed point of both, else no title (fail closed)
+    raw = str(title)
+    if len(raw) > 4000:
+        return None
+    hidden = h.hide_text(raw)
+    lim = len(hidden) * 3 + 64  # cleaning only drops characters (NFC grows a text at most threefold)
+    cleaned = clean_untrusted(hidden, lim + 1)
+    if len(cleaned) > lim:  # never true; if it ever is, a cut happened: no title
+        return None
+    line = " ".join(cleaned.split())
     line = "".join(c for c in line if unicodedata.category(c)[0] in "LMNPS" or c == " ")
-    return line[:120].strip() or None
+
+    def stable(t: str) -> bool:
+        return h.hide_text(t) == t and phone_view.redact(t) == t
+
+    line = h.hide_text(phone_view.redact(h.hide_text(line)))
+    if not stable(line):
+        return None
+    line = line[:120].strip()  # a cut can only drop text, never join: but check the cut text as well
+    return line if line and stable(line) else None
 
 
 def _topic_of_message(root: Path, mid: str) -> str | None:
@@ -703,7 +743,27 @@ def send_text(
             if isinstance(view, dict) or _unreachable(e) or getattr(e, "status", None) is None:
                 raise  # a light update without its view says nothing: refused means refused
             try:
-                msg = _message(root, to, "text", body, ticket, reply_to, mid)
+                if tv.get(
+                    "results"
+                ):  # an older relay does not know results: the same update once without them
+                    try:
+                        msg = _message(
+                            root,
+                            to,
+                            "text",
+                            {**body, "ticket_view": {k: v for k, v in tv.items() if k != "results"}},
+                            ticket,
+                            reply_to,
+                            mid,
+                        )
+                    except Refused as e1:
+                        if _unreachable(e1) or getattr(e1, "status", None) is None:
+                            raise
+                        if getattr(e1, "status", None) == 409:
+                            raise
+                        msg = _message(root, to, "text", body, ticket, reply_to, mid)
+                else:
+                    msg = _message(root, to, "text", body, ticket, reply_to, mid)
             except Refused as e2:
                 if getattr(e2, "status", None) != 409:
                     raise
@@ -735,7 +795,12 @@ def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs
     from orch import chat
 
     gid = tickets.ensure_general(root, tickets.current_actor())
-    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True))
+    tickets.apply_op(
+        root,
+        gid,
+        lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True),
+        by=tickets.current_actor(),
+    )
     chat.record(root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs)
 
 
@@ -773,6 +838,7 @@ def _send_proposal(
     with contextlib.suppress(Refused, OSError):
         _record_general(root, local, text, general_body, reply_to, refs)
     rec = {"ticket": None, "question_id": body["question_id"], "to": to, "proposal": True, "title": title}
+    sign_asked(root, mid, rec)
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     # The caller (the helper's command) always gets "sent": relay trouble is not its business; a message that
     # is only waiting offline goes out later from the outbox, the same bytes.
@@ -892,7 +958,13 @@ def send_question(
         **question_extras(q, previews, scope),
     }
     msg = _message(root, "phones", "question", body, ticket["id"])
-    rec = {"ticket": ticket["id"], "question_id": q["id"], "to": "phones"}
+    rec = {
+        "ticket": ticket["id"],
+        "question_id": q["id"],
+        "to": "phones",
+        "question_digest": tickets.question_digest(q),  # the question as the phones were shown it
+    }
+    sign_asked(root, msg["id"], rec)
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
@@ -907,17 +979,19 @@ REVIEW_OPTIONS = ["accept", "changes"]
 def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
     """fb8: the review question of round n to the phones (contracts/relay-api.md 'Review question'), as the
     message `mid` the round is bound to. The asked record is written BEFORE the send. A normal question with
-    body.review true; the relay does not push it (the Ready-for-review text did)."""
+    body.review true; the relay does not push it (the Ready-for-review text did). The title is cut, scrubbed
+    and value-hidden like every ticket title for a phone (no value hider: "Ticket", fail closed)."""
     qid = f"review-{n}"
     body = {
         "question_id": qid,
-        "title": ticket["title"],
+        "title": _update_title(root, ticket["id"]) or "Ticket",
         "text": REVIEW_TEXT,
         "options": REVIEW_OPTIONS,
         "recommended": None,
         "review": True,
     }
     rec = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
+    sign_asked(root, mid, rec)
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     try:
         return _message(root, "phones", "question", body, ticket["id"], mid=mid)
@@ -1222,7 +1296,7 @@ def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
 def _applied_ticket(root: Path, msg: dict) -> str | None:
     """The ticket this answer was written into (by this message), else None. Read-only."""
     asked, _ = _answer_asked(root, msg)
-    if not asked:
+    if not asked or not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # unsigned: never "answered"
         return None
     by, via = _answer_by(msg, asked)
     try:
@@ -1243,17 +1317,71 @@ def _applied_ticket(root: Path, msg: dict) -> str | None:
     )
 
 
+QUESTION_UNCHECKABLE = "This question changed or can't be checked. Ask again."
+
+# questions-sent.json lives in the workspace, so an agent can rewrite a record's question_digest together with
+# the ticket's question, or mark an ordinary record as a review (round) or proposal one. Every record kind
+# counts only with question_mac: the local1 MAC (human key, which the agent cannot read) over the message id,
+# the record's kind (ordinary / review / proposal, the raw flags), round, title and the other fields. It is
+# checked BEFORE any dispatch. No key at send time: the question still goes out, but its record carries no
+# MAC and any answer to it is refused (fail closed, never unchecked). Older records without a MAC: refused.
+QUESTION_MAC_KIND = "question-sent"
+
+
+def _asked_kind(rec: dict) -> str:
+    return (
+        "review" if rec.get("review") is True else "proposal" if rec.get("proposal") is True else "ordinary"
+    )
+
+
+def _asked_signed_fields(mid: str, rec: dict) -> list:
+    return [
+        mid,
+        _asked_kind(rec),
+        rec.get("review"),
+        rec.get("proposal"),
+        rec.get("round"),
+        rec.get("title"),
+        rec.get("ticket"),
+        rec.get("question_id"),
+        rec.get("to"),
+        rec.get("group"),
+        rec.get("question_digest"),
+    ]
+
+
+def sign_asked(root: Path, mid: str, rec: dict) -> dict:
+    """Adds question_mac to the record of an answerable question sent as `mid` (when it can be signed)."""
+    mac = humanproof.local_sign(root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec))
+    if mac:
+        rec["question_mac"] = mac
+    else:
+        rec.pop("question_mac", None)
+    return rec
+
+
+def asked_mac_ok(root: Path, mid: str, rec: dict) -> bool:
+    return humanproof.local_ok(
+        root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec), rec.get("question_mac")
+    )
+
+
 def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
     asked, why = _answer_asked(root, msg)
     if not asked:
         return why, None
+    if not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # first: kind, round, digest provably ours
+        return f"not applied: {QUESTION_UNCHECKABLE}", None
     if asked.get("review") is True:
         return _apply_review_answer(root, msg, asked)
     if asked.get("proposal") is True:
         return _apply_proposal_answer(root, msg, asked)
     by, via = _answer_by(msg, asked)
     try:
+        digest = asked.get("question_digest")
+        if not isinstance(digest, str) or not digest:  # no digest of the question as sent: never unchecked
+            raise Refused(QUESTION_UNCHECKABLE)
         t, q = tickets.answer(
             root,
             asked["ticket"],
@@ -1261,6 +1389,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
             clean_untrusted(str(msg.get("body", {}).get("answer")), 2000),
             by,
             via,
+            expected_question_digest=digest,
         )
     except Refused as e:
         if _applied_ticket(root, msg):  # a crash after the write, before "seen": same answer, nothing to redo
@@ -1575,7 +1704,7 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool 
     """What a phone text says in plain words for the ticket's history and the agent: the text, the voice
     transcript (and its language), saved photos and files (paths), the location with a map link and the
     feedback on a proof. Files are downloaded on the way."""
-    from orch import phone_view
+    from orch import phone_results, phone_view
 
     lines = []
     limit = tickets.ATTACH_MAX // 4  # characters: at most 2 MB in the file
@@ -1633,10 +1762,11 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool 
             ticket = tickets.load(root, tid)
         except (Refused, OSError, ValueError):
             ticket = {}
-        title = (
-            _line(phone_view.artifact_title(root, ticket, str(fb.get("artifact_id", ""))) or "", 100)
-            or "a file"
+        aid = str(fb.get("artifact_id", ""))
+        title = _line(
+            phone_view.artifact_title(root, ticket, aid, phone_results.value_hider(root)) or "", 100
         )
+        title = title or "a file"
         rev = re.sub(r"[^A-Za-z0-9._:-]", "", str(fb.get("artifact_rev", "")))[:12]
         head = f"Feedback on {title}" + (f" ({rev})" if rev else "")
         if fb.get("verdict") == "approve":
@@ -1789,7 +1919,7 @@ def _continue(
         elif t["status"] == "waiting":
             t["status"] = "active"
 
-    tickets.apply_op(root, tid, op)
+    tickets.apply_op(root, tid, op, by=tickets.SYSTEM)
 
 
 def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
@@ -1851,7 +1981,7 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     if mid not in _v3_state(root)["described"]:
         # also the retry of a message whose files could not be fetched the first time (Transient)
         text = _describe(root, tid, mid, who, body, final)
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
+        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=by)
         _mark_described(root, mid)
         _working_add(root, mid, frm, tid, False, "run")
     _ack_once(root, mid, frm, tid, False, f"Got it: {tickets.load(root, tid)['title']}"[:300])
@@ -1875,7 +2005,9 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
             # started but never finished (an error half way): finish it now
             tid = t["id"]
             text = _describe(root, tid, mid, who, body, True)
-            tickets.apply_op(root, tid, lambda tk, text=text: tickets.add_history(tk, by, text, "phone"))
+            tickets.apply_op(
+                root, tid, lambda tk, text=text: tickets.add_history(tk, by, text, "phone"), by=by
+            )
             _mark_described(root, mid)
             st = _v3_state(root)
             st["acked"].append(mid)
@@ -1889,7 +2021,7 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
     tid = t["id"]
     tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
     text = _describe(root, tid, mid, who, body, True)
-    tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
+    tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=by)
     _mark_described(root, mid)
     st = _v3_state(root)
     st["acked"].append(mid)  # this ack names the ticket; the General "Got it" is not sent again
@@ -1933,6 +2065,12 @@ def _ensure_allow_question(root: Path, msg: dict, notify: bool = True) -> str:
     grouped = msg_group(msg) and msg["type"] == "delegate"
     options = ["once", "always", "no"] if grouped else list(ALLOW_OPTIONS)  # G11 wire words
     _, q = tickets.ask(root, tid, text, options, None, by, kind="relay:allow", action=json.dumps(action))
+    # the binding (guarded home) of this question to this message: ext.relay is synced, a peer can change it.
+    # Sync-free: nothing is written (no peer; allow_message decides, as before; enabling sync adopts it, see
+    # history.adopt_local_objects). Not written: the question is not "ours" and its answer is never applied
+    # (apply_allow_answers says so on the ticket): fail closed.
+    if history.sync_enabled(root):
+        humanproof.relay_allow_set(root, tid, q["id"], msg["id"])
     if (
         grouped and notify
     ):  # a task from a group: the host hears "waiting for approval", our phones the question
@@ -1970,16 +2108,76 @@ def apply_allow_answers(root: Path) -> list[str]:
     notes: list[str] = []
     denied: list[str] = []
     with locked(root):
-        for t in tickets.list_all(root):
+        synced = history.sync_enabled(root)
+        for raw in tickets.list_all(root):
+            t = history.shown_ticket(root, raw)  # answered_by: as proven
             r = t.get("ext", {}).get("relay", {})
             mid = r.get("allow_message") if isinstance(r, dict) else None
             if not mid or t.get("status") in ("done", "dropped"):
                 continue
-            q = next(
-                (x for x in t["questions"] if x.get("kind") == "relay:allow" and x.get("answer") is not None),
-                None,
+            i, q = next(
+                (
+                    (i, x)
+                    for i, x in enumerate(t["questions"])
+                    if x.get("kind") == "relay:allow" and x.get("answer") is not None
+                ),
+                (None, None),
             )
-            if q is None or r.get("allow_applied") == q["id"]:
+            if q is None:
+                continue
+            # Which message a question allows, and whether it was applied, come from this machine's binding
+            # (guarded home, made when the question was asked here), never from the synced ext.relay: a peer
+            # can swap allow_message or reset allow_applied. Without sync (no peer) a question asked before
+            # the binding existed still goes by allow_applied, as before.
+            bound = humanproof.relay_allow_get(root, t["id"], q["id"])
+            if (bound or {}).get("applied") or (not synced and r.get("allow_applied") == q["id"]):
+                continue
+
+            def skip(text, qid=q["id"], tid=t["id"], r=r):
+                if r.get("allow_note") != qid:  # said once
+
+                    def op(tk):
+                        tk["ext"]["relay"]["allow_note"] = qid
+                        tickets.add_history(tk, "agent:relay", text, "relay")
+
+                    tickets.apply_op(root, tid, op, by=tickets.SYSTEM)
+
+            ids = [str(x.get("id")) if isinstance(x, dict) else "" for x in raw["questions"]]
+            # which one was answered here cannot be told: none counts (only with sync; without it there is no
+            # peer, and a sync-free workspace keeps its old behaviour)
+            if synced and len(ids) != len(set(ids)):
+                skip(
+                    "Two questions on this ticket have the same id, so no answer is applied - run: "
+                    f"orch relay allow {mid} --once (or --permanent), or: orch relay done {mid} to ignore it"
+                )
+                continue
+            # the proof is for the raw question at the SAME place, with the same kind and the same answer word
+            raw_q = raw["questions"][i] if i < len(raw["questions"]) else None
+            same = (
+                isinstance(raw_q, dict)
+                and raw_q.get("id") == q["id"]
+                and raw_q.get("kind") == "relay:allow"
+                and raw_q.get("answer") == q["answer"]
+            )
+            ours = bound["message"] == mid if bound is not None else not synced  # asked here about mid
+            if not ours:
+                skip(
+                    "This question was not asked on this computer for this message, so its answer is not "
+                    "applied - see: orch relay inbox"
+                )
+                continue
+            if not (same and history.answer_proven(root, raw, raw_q)):
+                if any(g.get("message_id") == mid for g in allows(root)["given"]):
+                    # allowed here already (orch relay allow): the binding is marked applied, nothing more; an
+                    # allow given here never proves this (maybe synced) answer word
+                    if synced or bound is not None:
+                        humanproof.relay_allow_set(root, t["id"], q["id"], mid, applied=True)
+                    continue
+                # an answer this machine cannot prove (e.g. synced from another computer) decides nothing here
+                skip(
+                    "Answer not given on this computer, so not applied - run: "
+                    f"orch relay allow {mid} --once (or --permanent), or: orch relay done {mid} to ignore it"
+                )
                 continue
             from orch import chat_groups
 
@@ -2000,13 +2198,21 @@ def apply_allow_answers(root: Path) -> list[str]:
                             "relay",
                         )
 
-                    tickets.apply_op(root, t["id"], note)
+                    tickets.apply_op(root, t["id"], note, by=tickets.SYSTEM)
                 continue
             who, via, by = (
                 _person(q.get("answered_by")),
                 q.get("via") or "cli",
                 q.get("answered_by") or "unknown",
             )
+            # applied once: recorded in the binding FIRST (the synced allow_applied below is shown, never
+            # trusted); what cannot be recorded is not applied (else it would be applied again each pass).
+            # Sync-free: no binding is written (allow_applied decides, as before).
+            if (synced or bound is not None) and not humanproof.relay_allow_set(
+                root, t["id"], q["id"], mid, applied=True
+            ):
+                notes.append(f"could not record that the answer to {mid} is applied, so it was not applied")
+                continue
             if choice == "ignore":
                 denied.append(mid)  # told to the group after relay.lock is released
                 _drop_note(root, mid, f"ignored by {who} ({via})")
@@ -2028,7 +2234,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                     tickets.add_history(tk, by, label, "relay")
                     tk["status"], tk["waiting_on"] = status, None
 
-            tickets.apply_op(root, t["id"], op)
+            tickets.apply_op(root, t["id"], op, by=by)
             notes.append(label)
     for mid in denied:  # outside relay.lock
         _group_denied(root, mid)
@@ -2334,8 +2540,13 @@ def done(root: Path, mid: str) -> dict:
         if msg.get("type") in ("delegate", "start"):
             tid = _ticket_by_message(root, mid)
             if tid is None and allowed(root, msg):
-                tid = _ticket_for(root, msg)
-                _use_once(root, msg)
+                try:
+                    tid = _ticket_for(root, msg)
+                    _use_once(root, msg)
+                except tickets.ClosedRefused:  # its allow ticket was closed meanwhile: drop this message
+                    tid = None  # (seen below: no retry storm), the rest of the inbox goes on
+                    with contextlib.suppress(Refused, OSError):
+                        _use_once(root, msg)  # a once-allow is spent: the message is not offered again
             res["ticket"] = tid
         _mark_seen(root, mid)
         return res
@@ -2374,14 +2585,14 @@ def _ticket_for(root: Path, msg: dict) -> str:
             if tk["status"] in ("waiting", "dropped"):
                 tk["status"] = "active"
 
-        tickets.apply_op(root, tid, retitle)
+        tickets.apply_op(root, tid, retitle, by=tickets.SYSTEM)
     else:
         tid = tickets.create(root, title, by)["id"]
         # a re-run after a crash finds this ticket (allow_message) and reuses it, never makes a second
         first = {"allow_message": msg["id"], "from": msg["from"]}
         tickets.ext_set(root, tid, "relay", json.dumps(first), by)
         if line := _allow_history(root, msg):
-            tickets.apply_op(root, tid, lambda tk: tickets.add_history(tk, by, line, "relay"))
+            tickets.apply_op(root, tid, lambda tk: tickets.add_history(tk, by, line, "relay"), by=by)
     if not tickets.load(root, tid)["checklist"]:
         for item in b.get("checklist", []) if msg["type"] == "delegate" else []:
             said = " ".join(clean_untrusted(str(item), 200).split()) or "(empty)"
@@ -2406,7 +2617,7 @@ def _merge_allow(root: Path, atid: str, into: str, by: str) -> None:
             tk["status"], tk["waiting_on"] = "dropped", None
             tickets.add_history(tk, by, f"Joined {into}", "relay")
 
-    tickets.apply_op(root, atid, op)
+    tickets.apply_op(root, atid, op, by=tickets.SYSTEM)  # bookkeeping on a ticket that may be closed
 
 
 _WIN_RESERVED = re.compile(
@@ -2506,6 +2717,7 @@ def refresh(root: Path) -> str:
         _commit(root, stage, snap, names, skipped)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+    _keep_policy(root, snap.get("policy"))
     skillrender.refresh_skills(root)
     sync_phone_views(root)
     with locked(root):  # the refresh-hints waiting in the inbox are handled now
@@ -2524,6 +2736,13 @@ def refresh(root: Path) -> str:
     if skipped:
         msg += "\nSkipped: " + "; ".join(skipped)
     return msg
+
+
+def _keep_policy(root: Path, policy) -> None:
+    """The admin's policy from the snapshot (usage-counts.md): kept so the core knows `off_by_admin`
+    (config.share_counts_state) while the relay cannot be reached. A snapshot without one keeps the last."""
+    if isinstance(policy, dict) and policy.get("usage_counts") in ("on", "off"):
+        net.write_json(net.secrets_dir(root) / "policy.json", {"usage_counts": policy["usage_counts"]}, True)
 
 
 def _stage(stage: Path, snap: dict, skipped: list[str]) -> list[str]:

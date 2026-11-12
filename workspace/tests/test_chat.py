@@ -254,13 +254,20 @@ def test_session_is_resumed_the_same_day_and_fresh_the_next(proj, run, gen, one_
     gid = tickets.ensure_general(proj, "phone:Marco")
     today = chat.day_key(proj)
     tickets.record_session(proj, gid, "fake", "sess-1", runs.host())
-    tickets.apply_op(proj, gid, lambda t: t.setdefault("ext", {}).__setitem__("chat", {"session_day": today}))
+    tickets.apply_op(
+        proj,
+        gid,
+        lambda t: t.setdefault("ext", {}).__setitem__("chat", {"session_day": today}),
+        by=tickets.SYSTEM,
+    )
     assert (
         runs.plan(proj, gid)["session"] in ("sess-1", None)
         and tickets.sessions_for(proj, gid, tickets.load(proj, gid), "fake", runs.host()) == "sess-1"
     )
     # a session of an earlier Chat day: cut, the next start is empty
-    tickets.apply_op(proj, gid, lambda t: t["ext"].__setitem__("chat", {"session_day": "2020-01-01"}))
+    tickets.apply_op(
+        proj, gid, lambda t: t["ext"].__setitem__("chat", {"session_day": "2020-01-01"}), by=tickets.SYSTEM
+    )
     p = runs.plan(proj, gid)
     assert p["resumed"] is False
     t = tickets.load(proj, gid)
@@ -804,7 +811,9 @@ def test_general_is_not_touched_by_the_run_wrapper_hooks(proj, conn, run):
 
 def test_only_real_messages_carry_chat_message(proj, conn, run):
     gid = _general(proj, conn, run, "hello there")
-    tickets.apply_op(proj, gid, lambda t: tickets.add_history(t, "agent:x", "Claude started"))
+    tickets.apply_op(
+        proj, gid, lambda t: tickets.add_history(t, "agent:x", "Claude started"), by=tickets.SYSTEM
+    )
     hist = tickets.load(proj, gid)["history"]
     flagged = [e["text"] for e in hist if e.get("chat_message") is True]
     assert "Claude started" not in flagged and flagged
@@ -837,7 +846,7 @@ def test_an_inbound_phone_text_in_general_carries_the_chat_flag(proj, run, conn)
 def test_an_agent_cannot_pass_a_note_off_as_a_chat_message_by_env_via(proj, conn, run, monkeypatch):
     gid = _general(proj, conn, run)
     monkeypatch.setenv("ORCH_VIA", "phone")
-    tickets.apply_op(proj, gid, lambda t: tickets.add_history(t, "agent:x", "sneaky note"))
+    tickets.apply_op(proj, gid, lambda t: tickets.add_history(t, "agent:x", "sneaky note"), by=tickets.SYSTEM)
     assert not [
         e for e in tickets.load(proj, gid)["history"] if e["text"] == "sneaky note" and e.get("chat_message")
     ]

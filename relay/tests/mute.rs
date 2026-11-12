@@ -75,7 +75,16 @@ async fn routes_and_end_to_end_push() {
     let (a, b) = (t.add_ws("A").await, t.add_ws("B").await);
     let p = t.pair_phone(&[&a]).await;
     let q = t.pair_phone(&[&a, &b]).await;
-    for (ph, tok) in [(&p, "ab12"), (&q, "cd34")] {
+    for (ph, tok) in [
+        (
+            &p,
+            "ab12000000000000000000000000000000000000000000000000000000000000",
+        ),
+        (
+            &q,
+            "cd34000000000000000000000000000000000000000000000000000000000000",
+        ),
+    ] {
         let r = t
             .phone(
                 ph,
@@ -340,7 +349,7 @@ async fn bad_mute_time_saves_nothing_and_mobile_mode_pushes_obey_mute_all() {
             &p,
             "POST",
             "/v1/phone/push",
-            Some(json!({"apns_token": "abcdef01", "sandbox": true})),
+            Some(json!({"apns_token": "abcdef0100000000000000000000000000000000000000000000000000000000", "sandbox": true})),
         )
         .await;
     assert_eq!(r.0, 204);

@@ -82,6 +82,8 @@ elif args[:2] == ["run", "status"]:
     d = {{"ticket": args[2], "running": not (root / ("ended-" + args[2])).exists()}}
     pq = root / ("pending-" + args[2])
     if pq.exists(): d["human_pending_ids"] = json.loads(pq.read_text())
+    sh = root / ("stop-held-" + args[2])
+    if sh.exists(): d["stop_held_ids"] = json.loads(sh.read_text())
     print(json.dumps(d))
 elif args[0] == "ask":
     t = load(args[1]); qs = t.setdefault("questions", [])

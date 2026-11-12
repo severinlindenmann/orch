@@ -123,12 +123,12 @@ test('inline options send the question and selected answer, disable together, an
   const {ctx, toasts, calls} = pageContext();
   let complete, sent;
   ctx.act = (op, args) => { sent = {op, ...args}; return new Promise(resolve => { complete = resolve; }); };
-  const row = ctx.needRow({id:'n1', ticket:'t_one', answer:{question:'q1', options:['Hi','Hello'], recommended:'Hi'}});
+  const row = ctx.needRow({id:'n1', ticket:'t_one', answer:{question:'q1', digest:'a'.repeat(64), options:['Hi','Hello'], recommended:'Hi'}});
   const buttons = row.querySelectorAll('button');
   assert.equal(buttons.length, 2); assert.equal(buttons[0].children[0], 'Hi · Suggested');
   const pending = buttons[0].click({currentTarget:{closest:() => row}});
   assert.ok(buttons.every(b => b.disabled));
-  assert.deepEqual(sent, {op:'answer', ticket:'t_one', question:'q1', answer:'Hi'});
+  assert.deepEqual(sent, {op:'answer', ticket:'t_one', question:'q1', digest:'a'.repeat(64), answer:'Hi'});
   complete({ok:true}); await pending;
   assert.ok(buttons.every(b => !b.disabled)); assert.deepEqual(toasts, ['Answered']); assert.deepEqual(calls, ['render']);
 });

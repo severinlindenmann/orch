@@ -190,7 +190,7 @@ function chatTicketCard(ref, key, readOnly) {
   // Only actions the ticket already offers: a plain question's options (one tap, like Home), else Answer on
   // the ticket; a ticket ready for review gets Mark done / Send back. Nothing in a day you can only read.
   const actions = readOnly || snapshot || !ticket ? null : q ? q.kind == null && array(q.options).length
-    ? array(q.options).slice(0, 4).map((option, i) => chatButton(option, 'answer', {'data-key':key + '-answer-' + i, 'data-ticket':ticket.id, 'data-q':q.id, 'data-answer':option, disabled:pending}))
+    ? array(q.options).slice(0, 4).map((option, i) => chatButton(option, 'answer', {'data-key':key + '-answer-' + i, 'data-ticket':ticket.id, 'data-q':q.id, 'data-digest':q.digest, 'data-answer':option, disabled:pending}))
     : h('a', {className:'chat-button', href:chatLink(ticket.id)}, 'Answer')
     : ticket.status === 'review' && typeof reviewActions === 'function' ? reviewActions(ticket) : null;
   return h('article', {className:'chat-card chat-ticket', 'data-key':key},
@@ -406,10 +406,10 @@ async function chatClick(event) {
   if (action === 'filter') { chatUi.filter = control.dataset.id === 'phone' ? 'phone' : 'all'; return render(); }
   if (action === 'answer') {
     // The same answer a question card sends (op "answer"); the buttons wait while it is on its way.
-    const {ticket, q, answer} = control.dataset, id = 'answer-' + ticket + '-' + q;
+    const {ticket, q, digest, answer} = control.dataset, id = 'answer-' + ticket + '-' + q;
     if (snapshot || chatUi.pending.has(id)) return;
     chatUi.pending.set(id, true); render();
-    if (await chatOperation('answer', {ticket, question:q, answer}, 'Could not send your answer.')) window.orch.toast('Answered: ' + clean(answer), 'ok');
+    if (await chatOperation('answer', {ticket, question:q, digest, answer}, 'Could not send your answer.')) window.orch.toast('Answered: ' + clean(answer), 'ok');
     chatUi.pending.delete(id); render(); return;
   }
   if (action === 'file') { const id = control.dataset.id; chatUi.files.has(id) ? chatUi.files.delete(id) : chatUi.files.add(id); return render(); }
