@@ -58,9 +58,22 @@ OWN_BYTES = 4 * 1024 * 1024  # a larger store file verifies nothing for THAT tic
 DECISION_SECONDS = 5
 _TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
-KINDS = ("lines", "evidence", "refs", "steps")
+KINDS = ("lines", "evidence", "refs", "steps", "answers")
+_OPTIONAL_KINDS = ("steps", "answers")  # in the store file only once they hold a digest
 _REF_LOOSE = ("title", "status", "thumb")  # an add-on or a person edits these later; not part of the digest
-_STEP_MARK = ("id", "state", "by", "at")  # a step's "doing" mark (tickets.check_start); the rest changes
+# a step's "doing" mark (tickets.check_start), bound to the step's CONTENT (text, covers): a rewritten
+# step is not the one the person started. The rest (done, evidence, ...) changes.
+_STEP_MARK = ("id", "state", "by", "at", "text", "covers")
+_ANSWER_MARK = (
+    "id",
+    "text",
+    "options",
+    "kind",
+    "action",  # what answering does (e.g. the relay:allow message): a rewritten action was not answered
+    "answer",
+    "answered_by",
+    "via",
+)  # what an answer was given to
 
 
 def is_agent_history_author(by) -> bool:
@@ -102,9 +115,18 @@ def _digest(kind: str, obj) -> str | None:
             obj = {k: v for k, v in obj.items() if k not in _REF_LOOSE}
         if kind == "steps" and isinstance(obj, dict):
             obj = {k: obj.get(k) for k in _STEP_MARK}
+        if kind == "answers" and isinstance(obj, dict):
+            obj = {k: obj.get(k) for k in _ANSWER_MARK}
         return hashlib.sha256(_canon([kind, obj]).encode("utf-8")).hexdigest()
     except (TypeError, ValueError, RecursionError):
         return None
+
+
+def bound_evidence(ev, step) -> dict:
+    """An evidence piece together with the content of the step it belongs to (id, text, covers): its digest
+    proves the piece for THAT step as written, so a rewritten step does not keep core's evidence."""
+    st = step if isinstance(step, dict) else {}
+    return {"ev": ev, "step": {k: st.get(k) for k in ("id", "text", "covers")}}
 
 
 def line_digest(line) -> str | None:
@@ -143,6 +165,8 @@ def _take_created(ticket: dict) -> dict[str, list]:
             if hit is not None and hit[1] is obj and hit[0] == kind:
                 del _CREATED[id(obj)]
                 found[kind].append(obj)
+                return True
+            return False
 
         for h in ticket.get("history") if isinstance(ticket.get("history"), list) else []:
             take("lines", h)
@@ -150,9 +174,12 @@ def _take_created(ticket: dict) -> dict[str, list]:
             if isinstance(c, dict):
                 take("steps", c)
             for ev in (c.get("evidence") if isinstance(c, dict) else None) or []:
-                take("evidence", ev)
+                if take("evidence", ev):
+                    found["evidence"][-1] = bound_evidence(ev, c)
         for r in ticket.get("refs") if isinstance(ticket.get("refs"), list) else []:
             take("refs", r)
+        for q in ticket.get("questions") if isinstance(ticket.get("questions"), list) else []:
+            take("answers", q)
     return found
 
 
@@ -346,7 +373,7 @@ def _own_path(root: Path, tid: str) -> Path:
 
 def _own_record(tid: str, have: dict) -> dict:
     # "steps" is in the record (and the file) only once it holds a digest: a store written before it verifies
-    return {"ticket": tid, **{k: have[k] for k in KINDS if k != "steps" or have.get(k)}}
+    return {"ticket": tid, **{k: have[k] for k in KINDS if k not in _OPTIONAL_KINDS or have.get(k)}}
 
 
 def _parse_own(raw: bytes, tid: str, root: Path, ctx) -> dict | None:
@@ -358,7 +385,7 @@ def _parse_own(raw: bytes, tid: str, root: Path, ctx) -> dict | None:
         return None
     have = {}
     for k in KINDS:
-        v = data.get(k, [] if k == "steps" else None)
+        v = data.get(k, [] if k in _OPTIONAL_KINDS else None)
         if not isinstance(v, list) or len(v) > OWN_MAX:
             return None
         if not all(isinstance(d, str) and _DIGEST_RE.fullmatch(d) for d in v):
@@ -477,11 +504,18 @@ def adopt_local_objects(root: Path) -> int:
                 found = {
                     "lines": [h for h in doc.get("history") or [] if isinstance(h, dict)],
                     "evidence": [
-                        e
+                        bound_evidence(e, c)
                         for c in doc.get("checklist") or []
                         if isinstance(c, dict)
                         for e in c.get("evidence") or []
                         if isinstance(e, dict)
+                    ],
+                    "answers": [
+                        q
+                        for q in doc.get("questions") or []
+                        if isinstance(q, dict)
+                        and q.get("answer") is not None
+                        and q.get("answered_by") is not None
                     ],
                     "refs": [r for r in doc.get("refs") or [] if isinstance(r, dict)],
                     "steps": [c for c in doc.get("checklist") or [] if isinstance(c, dict) and "by" in c],
@@ -634,7 +668,10 @@ def _shown(proof: _Proof, t: dict) -> dict:
                 # Every piece not in the own store is the sync role, with or without a `by` (an agent's too):
                 # readers would otherwise give it an author (evidence_author falls back to the step's line).
                 new_evs = [
-                    {**e, "by": SYNC_BY} if isinstance(e, dict) and not has("evidence", e) else e for e in evs
+                    {**e, "by": SYNC_BY}
+                    if isinstance(e, dict) and not has("evidence", bound_evidence(e, c))
+                    else e
+                    for e in evs
                 ]
                 if new_evs != evs:
                     nc = {**nc, "evidence": new_evs}
@@ -673,7 +710,10 @@ def _shown(proof: _Proof, t: dict) -> dict:
                 isinstance(q, dict)
                 and q.get("answered_by") is not None
                 and needs_proof(q.get("answered_by"))
-                and (q.get("answered_by"), f"Answered {q.get('id')}: {q.get('answer')}") not in said
+                and (
+                    (q.get("answered_by"), f"Answered {q.get('id')}: {q.get('answer')}") not in said
+                    or not has("answers", q)  # bound to the question as it was answered
+                )
             ):
                 q = {**q, "answered_by": SYNC_BY}
             new_q.append(q)
@@ -716,6 +756,8 @@ def answer_proven(root: Path, ticket, question) -> bool:
         own = _own(root, ticket.get("id"), _ctx_key(root)) or {}
         text = f"Answered {question.get('id')}: {ans}"
         hist = ticket.get("history") if isinstance(ticket.get("history"), list) else []
+        if _digest("answers", question) not in own.get("answers", ()):
+            return False
         return any(
             isinstance(h, dict)
             and h.get("by") == by
