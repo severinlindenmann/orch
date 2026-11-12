@@ -43,6 +43,7 @@ def add_parsers(sub, common) -> None:
                     q.add_argument(
                         "--real-home", action="store_true"
                     )  # person: the command may see your home
+                    q.add_argument("--any-command", action="store_true")  # person: no fixed form needed
 
 
 def _agent(root, args, profile, mode, words) -> bool:
@@ -117,14 +118,18 @@ def _change_profile(root, args, who):
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
-            secretrun.check_arguments(root, profile["set"].values(), args.run[0] if args.run else None)
+            secretrun.check_arguments(root, profile["set"].values())
+            if args.real_home:
+                profile["real_home"] = True
             if args.run:  # found once, here: stored as the real full path, never searched later
                 path, warnings = secretrun.approve_program(root, args.run[0])
                 profile["run"] = [path, *args.run[1:]]
-                secretrun.check_arguments(root, args.run[1:], path)
+                profile["kind"] = secretrun.program_kind(path)  # from the real file, not the name typed
+                if args.any_command:
+                    profile["any_command"] = True
+                template = secretrun.command_template(profile)
+                secretrun.check_arguments(root, args.run[1:], template, profile["files"])
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
-            if args.real_home:
-                profile["real_home"] = True
             if args.skill:
                 profile["skills"] = args.skill
             if args.extra:
