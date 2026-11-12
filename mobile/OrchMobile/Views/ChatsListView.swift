@@ -171,7 +171,7 @@ struct ChatsListView: View {
     }
 
     @ViewBuilder private var attentionCards: some View {
-        let questions = model.questions.filter { !$0.isReview && !$0.isMakeTicket && model.answers[$0.id] == nil }
+        let questions = ChatsRowRules.needsYou(model.questions, answers: model.answers)
         if !questions.isEmpty && (filter == "All" || filter == "Needs your OK") {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Needs your OK · \(questions.count)").themeFont(13, .semibold).foregroundStyle(Theme.warn)
@@ -204,10 +204,7 @@ struct ChatsListView: View {
         let name = WorkspaceAlias.name(for: summary.workspace)
         let newest = summary.topics.max { ($0.lastAt ?? "") < ($1.lastAt ?? "") }
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
-        let shownQuestions = (filter == "All" || filter == "Needs your OK") ? model.questions.filter {
-            !$0.isReview && !$0.isMakeTicket && model.answers[$0.id] == nil && $0.message.from == summary.id
-        } : []
-        let preview = ChatsRowRules.preview(summary.lastLine, starting: starting, shownQuestionCount: shownQuestions.count)
+        let preview = ChatsRowRules.preview(summary.lastLine, starting: starting)
         return TimelineView(.everyMinute) { context in
             let muted = model.notificationsMuted(workspace: summary.id, now: context.date)
             NavigationLink(value: ChatRoute.workspace(summary.id)) {
@@ -219,7 +216,7 @@ struct ChatsListView: View {
                             if muted { MutedIcon() }
                         }
                         Text(preview).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
-                        if shownQuestions.isEmpty && summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs your OK" : "\(summary.openQuestions) need your OK").themeFont(13).foregroundStyle(Theme.warn) }
+                        if let label = ChatsRowRules.questionLabel(summary.openQuestions) { Text(label).themeFont(13).foregroundStyle(Theme.warn) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .trailing, spacing: 10) {
                         Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
@@ -356,9 +353,25 @@ struct ChatsListView: View {
 }
 
 
+/// Chat list numbers, one meaning each: the row badge is unread messages (`WorkspaceSummary.unread`), the row's
+/// "1 question" line is open questions (`openQuestions`), "Needs your OK · N" is conversations with an open question.
 enum ChatsRowRules {
-    static func preview(_ text: String, starting: Bool = false, shownQuestionCount: Int = 0) -> String {
-        if shownQuestionCount > 0 { return shownQuestionCount == 1 ? "1 needs your OK" : "\(shownQuestionCount) need your OK" }
+    /// Questions still waiting for an answer (not reviews, not "make a ticket" offers).
+    static func openQuestions(_ questions: [Question], answers: [String: String], workspace: String? = nil) -> [Question] {
+        questions.filter { !$0.isReview && !$0.isMakeTicket && answers[$0.id] == nil && (workspace == nil || $0.message.from == workspace) }
+    }
+    /// One entry per conversation (General or topic) with an open question: the oldest open question there.
+    static func needsYou(_ questions: [Question], answers: [String: String]) -> [Question] {
+        var seen = Set<String>()
+        return openQuestions(questions, answers: answers)
+            .sorted { $0.message.createdAt < $1.message.createdAt }
+            .filter { seen.insert($0.message.from + "|" + ($0.message.ticket ?? "")).inserted }
+    }
+    /// "1 question", "3 questions"; nil when none.
+    static func questionLabel(_ count: Int) -> String? {
+        count > 0 ? (count == 1 ? "1 question" : "\(count) questions") : nil
+    }
+    static func preview(_ text: String, starting: Bool = false) -> String {
         if starting { return "Getting started…" }
         return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No messages yet" : text
     }

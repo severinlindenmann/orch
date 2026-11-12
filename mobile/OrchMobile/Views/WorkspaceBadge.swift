@@ -9,6 +9,7 @@ struct WorkspaceBadge: View {
     var size: CGFloat = 46
     var lastSeen: String?? = nil
     var id: String? = nil
+    @Environment(AppModel.self) private var model: AppModel?
 
     private var shown: Look.Shown { Look.shown(icon: icon, color: color, name: name) }
     private var tone: Color { Color(hex: Look.darkHex(shown.color)) }
@@ -29,7 +30,7 @@ struct WorkspaceBadge: View {
         .overlay(alignment: .bottomTrailing) {
             if let lastSeen {
                 TimelineView(.everyMinute) { context in
-                    Circle().fill(Presence.of(lastSeen: lastSeen, now: context.date).isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
+                    Circle().fill(WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: context.date)).isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
                         .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
                 }
             }
