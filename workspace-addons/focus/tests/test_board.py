@@ -240,11 +240,41 @@ def test_secret_across_every_limit_is_hidden_on_every_producer_path():
         valid(e)
 
 
-def test_huge_value_is_redacted_fast(monkeypatch):
-    """Structural, not wall-clock: make() scans only a capped window of a huge value, and redact() is linear
-    (8x the input costs about 8x, never the 64x a quadratic pattern would; the bound is generous for a busy machine)."""
+def _work_ratio(fn, unit, n=2000, k=16, reps=2, tries=5):
+    """CPU time of `reps` calls on a text k times longer over that of k * reps calls on the short text: the same
+    amount of input, measured interleaved in this thread (time.thread_time: time the machine gives to other processes
+    is not counted). About 1 for linear work whatever the load, about k for quadratic work; best of `tries`."""
     import time
 
+    small, large = unit * n, unit * (n * k)
+    best = float("inf")
+    for _ in range(tries):
+        t0 = time.thread_time()
+        for _ in range(k * reps):
+            fn(small)
+        t1 = time.thread_time()
+        for _ in range(reps):
+            fn(large)
+        t2 = time.thread_time()
+        best = min(best, (t2 - t1) / max(t1 - t0, 1e-6))
+    return best
+
+
+def test_work_ratio_tells_linear_from_quadratic():
+    def linear(t):  # each 64-char piece once
+        return [t[j : j + 64].count("y") for j in range(0, len(t), 64)]
+
+    def quadratic(t):  # re-scans the rest of the text every 64 chars
+        return [t[j:].count("y") for j in range(0, len(t), 64)]
+
+    assert _work_ratio(linear, "x") < 4
+    assert _work_ratio(quadratic, "x") >= 4
+
+
+def test_huge_value_is_redacted_fast(monkeypatch):
+    """Structural, not wall-clock: make() scans only a capped window of a huge value, redact() makes one pass per
+    pattern over the text, and no pattern backtracks: 16x the input in one text costs about what 16 short texts cost
+    (a quadratic pattern costs ~16x that; the bound 4 leaves room both ways)."""
     seen = []
     real = ev.redact
     monkeypatch.setattr(ev, "redact", lambda t: seen.append(len(t)) or real(t))
@@ -254,17 +284,24 @@ def test_huge_value_is_redacted_fast(monkeypatch):
     assert seen and max(seen) <= 500 + 256 + 4096
     monkeypatch.undo()
 
-    def best(text):
-        out = []
-        for _ in range(3):
-            t0 = time.perf_counter()
-            ev.redact(text)
-            out.append(time.perf_counter() - t0)
-        return max(min(out), 1e-4)
+    class Counted:  # one sub() per pattern per redact(), each over the text once (counted, not timed)
+        def __init__(self, pat):
+            self.pat, self.calls = pat, []
+
+        def sub(self, repl, text):
+            self.calls.append(len(text))
+            return self.pat.sub(repl, text)
+
+    counted = [Counted(p) for p in ev._SECRETS]
+    monkeypatch.setattr(ev, "_SECRETS", counted)
+    for size in (1000, 64000):
+        ev.redact("x" * size)
+    assert all(c.calls == [1000, 64000] for c in counted)
+    monkeypatch.undo()
 
     for unit in ("x", "path/.orch" + "x", "ghp_ab "):
-        small, large = best(unit * 20000), best(unit * 160000)
-        assert large / small < 32, (unit, small, large)
+        ratio = _work_ratio(ev.redact, unit)
+        assert ratio < 4, (unit, ratio)
 
 
 def test_secret_at_the_cap_is_hidden():
