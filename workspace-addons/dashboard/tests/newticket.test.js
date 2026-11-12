@@ -40,7 +40,7 @@ function setup() {
   const d = body.children[0], nodes = walk(d), input = nodes.find(n => n.name === 'text'), form = nodes.find(n => n.tag === 'form');
   const picker = nodes.find(n => n.type === 'file');
   const paste = text => input.fire('paste', {clipboardData:{getData:() => text}});
-  const drop = files => input.fire('drop', {dataTransfer:{files}});
+  const drop = files => form.fire('drop', {dataTransfer:{files}});
   const chips = () => walk(d).filter(n => n.className.includes('new-ticket-file-main'));
   return {c, body, d, input, form, picker, paste, drop, chips, calls, revoked, toasts};
 }
@@ -77,7 +77,7 @@ test('long paste appends, previews safely, closes independently, and submits ful
 });
 test('typed long text becomes note.md and removal restores required validity', async () => {
   const s = setup(); await s.paste('x'.repeat(1501));
-  await walk(s.d).find(n => n['aria-label'] === 'Remove note.md').click();
+  await walk(s.d).find(n => n['aria-label'] === 'Remove pasted text').click();
   assert.equal(s.input.required, true); assert.equal(s.form.reportValidity(), false);
   s.input.value = '\n' + 'a'.repeat(1800); await s.input.fire('input');
   await s.form.fire('submit');
@@ -163,12 +163,15 @@ test('a typed title stays: with a 20 KB paste or files title_auto is false and t
   assert.equal(u.calls[0].args.title_auto, true);
 });
 
-test('Show plan first creates a plan-first ticket and starts its agent', async () => {
+test('Show me the plan first is a box in More options; Start creates a plan-first ticket and starts it', async () => {
   const s = setup();
   s.form.requestSubmit = () => s.form.fire('submit');
   s.input.value = 'Make a plan'; await s.input.fire('input');
-  assert.ok(walk(s.d).some(n => n.textContent === '"Show plan first" waits for you before work starts.'));
-  await walk(s.d).find(n => n.textContent === 'Show plan first').click();
+  const options = walk(s.d).find(n => n.className === 'new-ticket-options');
+  const box = walk(options).find(n => n.name === 'plan_first');
+  assert.equal(box.type, 'checkbox');
+  box.checked = true;
+  await s.form.fire('submit');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(s.calls[0].op, 'ticket.new');
   assert.equal(s.calls[0].args.plan_first, true);
@@ -176,15 +179,29 @@ test('Show plan first creates a plan-first ticket and starts its agent', async (
   assert.equal(s.calls[1].args.ticket, 'new');
 });
 
-test('Create and Create & Start omit plan_first', async () => {
-  for (const label of ['Create', 'Create & Start']) {
+test('one Start button; Create without starting is a text link; neither sends plan_first by default', async () => {
+  const labels = walk(setup().d).filter(n => n.tag === 'button' && /btn/.test(n.className)).map(n => n.textContent);
+  assert.ok(labels.includes('Start') && !labels.includes('Create & Start') && !labels.includes('Show plan first'));
+  for (const label of ['Create without starting', 'Start']) {
     const s = setup();
     s.form.requestSubmit = () => s.form.fire('submit');
     s.input.value = 'Work'; await s.input.fire('input');
-    await walk(s.d).find(n => n.textContent === label).click();
-    if (label === 'Create & Start') await s.form.fire('submit');
+    const node = walk(s.d).find(n => n.textContent === label);
+    if (label === 'Start') { await node.click(); await s.form.fire('submit'); } else { assert.equal(node.className, 'new-ticket-link'); await node.click(); }
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(s.calls[0].args.plan_first, undefined);
-    assert.equal(s.calls.length, label === 'Create' ? 1 : 2);
+    assert.equal(s.calls.length, label === 'Start' ? 2 : 1);
   }
+});
+
+test('attach is a link, drops land anywhere on the form, pasted text reads in pages', async () => {
+  const s = setup();
+  assert.ok(walk(s.d).some(n => n.textContent === 'Attach file' && n.className === 'new-ticket-attach'));
+  assert.equal(s.input.rows, 4);
+  assert.equal((await s.form.fire('drop', {dataTransfer:{files:[{name:'plan.md', size:3, arrayBuffer:async () => new TextEncoder().encode('abc').buffer}]}})).prevented, true);
+  await s.paste('x'.repeat(9000));
+  walk(s.d).find(n => n.type === 'submit').disabled = true; await s.form.fire('submit');
+  const labels = s.chips().map(n => n.children.map(c => c.textContent).join('|'));
+  assert.deepEqual(labels, ['Pasted text (about 3 pages)', 'plan.md']);
+  assert.equal(s.c.pastedLabel('x'.repeat(100)), 'Pasted text (about 1 page)');
 });

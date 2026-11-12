@@ -242,8 +242,9 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     const all = nodes(ctx.detail(t));
     assert.equal(all.filter(n => n.attrs.className === 'card next-step next-question').length,1);
     assert.equal(all.filter(n => n.attrs['data-question'] === 'q1').length,1);
-    assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length,1);
-    assert.ok(all.some(n => n.children.includes('No parent ticket')));
+    assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length,0, 'no Steps card without steps');
+    assert.ok(!all.some(n => n.children.includes('No parent ticket')));
+    assert.ok(!all.some(n => n.attrs.id === 'ticket-tab-tasks'), 'no Tasks tab');
     all.find(n => n.tag === 'button' && n.children.includes('Answer')).onclick();
   }
   assert.ok(scrolled && focused);
@@ -539,7 +540,7 @@ test('a file is listed once per list, and Overview chips skip the file already i
   const tree = nodes(ctx.detail(t));
   const fileChips = tree.filter(n => n.attrs.className === 'ticket-file-chips').flatMap(n => n.children.map(c => c.children.find(k => k.tag === 'span').children[0]));
   assert.deepEqual(fileChips, ['notes.pdf'], 'the review card already shows report.pdf');
-  assert.deepEqual(tree.filter(n => n.attrs.className === 'task-proofs row').map(n => n.children.length), [1, 1, 1, 1], 'one chip per file per task (Overview and Tasks tab)');
+  assert.deepEqual(tree.filter(n => n.attrs.className === 'task-proofs row').map(n => n.children.length), [1, 1], 'one chip per file per task, one Tasks list');
   const filesTab = tree.find(n => n.attrs.id === 'ticket-panel-artifacts');
   assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'card ticket-result').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
   assert.ok(nodes(filesTab).some(n => n.tag === 'h2' && n.children.includes('Files')));

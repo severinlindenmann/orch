@@ -364,7 +364,13 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     src = webjs.all_js()
     tree = src[src.index("function treeBranch") : src.index("let ticketView")]
-    assert tree.count("ticketAttentionChip(t)") == 1  # the one chip: Needs you (yellow) or the status word
+    assert tree.count("ticketAttentionChip(t, section)") == 1  # one chip, told which section the row sits in
+    assert "ticketAttentionChip(t)" not in tree
+    chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
+    assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
+    assert "columnOf(status) === section) return null" in chip  # the status word is left out where it matches
+    nxt = src[src.index("function ticketNext") : src.index("function ticketMenu")]
+    assert "'Next step: '" in nxt and "text = 'Paused'" in nxt  # text only when it adds something
     assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
     assert "activity(t," not in tree
 

@@ -33,16 +33,24 @@ function boardParentLine(t) {
   const parent = boardParent(tickets(), t);
   return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, 'Step of ' + clean(parent.title))) : null;
 }
-function ticketAttentionChip(t) {
-  return questions(t).length && shown(t).status !== 'done' ? chip('Needs you', 'attn') : statusChip(t);
+// `section`: the group or column the row sits in; its own status chip is left out there. Done shows when it finished.
+function ticketAttentionChip(t, section) {
+  const status = shown(t).status;
+  if (questions(t).length && status !== 'done') return section === 'waiting' ? null : chip('Needs you', 'attn');
+  if (status === 'done') { const at = t.done_at || t.updated_at; return at ? h('span', {className:'meta ticket-finished'}, 'Finished ' + localDay(at)) : null; }
+  if (section && window.DashHelpers.columnOf(status) === section) return null;
+  return statusChip(t);
 }
+const localDay = at => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}) : ''; };
+// Started before (tasks or helper sessions) but not running now: paused, not new.
+const ticketIsPaused = t => array(t.checklist).length > 0 || array(t.sessions).length > 0;
 function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : ''); }
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; render(); });
-  const mine = button('Mine', 'outline sm', () => { ticketMine = !ticketMine; render(); });
-  mine.setAttribute('aria-pressed', String(ticketMine)); mine.dataset.key = 'ticket-mine';
-  return h('div', {className:'row ticket-filters', 'data-key':'ticket-filters'}, input, mine);
+  const seg = (label, on, key) => { const b = button(label, 'ghost seg', () => { ticketMine = on; render(); }); b.setAttribute('aria-pressed', String(ticketMine === on)); b.dataset.key = key; return b; };
+  const whose = h('div', {className:'view-toggle', role:'group', 'aria-label':'Whose tickets'}, seg('All', false, 'ticket-all'), seg('Mine', true, 'ticket-mine'));
+  return h('div', {className:'row ticket-filters', 'data-key':'ticket-filters'}, input, whose);
 }
 function clearTicketFilters() {
   ticketSearch = ''; ticketMine = false;
@@ -56,7 +64,7 @@ function ticketNext(t) {
   const status = shown(t).status, need = needsList().find(n => n.ticket === t.id);
   let text = '', action = null;
   if (status === 'waiting' || questions(t).length) {
-    text = window.DashHelpers.questionPreview(t) || need?.title || 'Answer the question';
+    text = window.DashHelpers.questionPreview(t) || need?.title || '';
     if (!snapshot) {
       action = button('Answer', 'outline sm', event => {
         const current = needsList().find(n => n.ticket === t.id);
@@ -64,11 +72,13 @@ function ticketNext(t) {
         else { ticketTabs.set(t.id, 'questions'); location.hash = href(t.id); }
       });
     }
+    if (text) text = 'Next step: ' + text;
   } else if (status === 'review') {
-    text = 'Read the result'; action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
+    action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
-    text = 'Let the helper begin';
-    if (!snapshot) action = button('Start helper', 'outline sm', async event => {
+    const paused = ticketIsPaused(t);
+    if (paused) text = 'Paused' + (t.updated_at ? ' ' + localDay(t.updated_at) : '');
+    if (!snapshot) action = button(paused ? 'Resume' : 'Start helper', 'outline sm', async event => {
       if (changeUnavailable()) return;
       const control = event.currentTarget;
       if (control.disabled) return;
@@ -77,11 +87,8 @@ function ticketNext(t) {
       control.disabled = false;
       if (!result.ok) window.orch.toast(changeError(result), 'error');
     });
-  } else if (status === 'active') {
-    const task = array(t.checklist).find(task => !window.DashHelpers.resolved(task));
-    text = task?.text || task?.title || '';
   }
-  return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, 'Next step: ' + clean(text)) : null, action) : null;
+  return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, clean(text)) : null, action) : null;
 }
 function ticketMenu(t, scope) {
   if (snapshot) return null;
@@ -90,7 +97,7 @@ function ticketMenu(t, scope) {
   summary.className = 'btn ghost icon sm move-button';
   return menu;
 }
-function treeBranch(rows, index) {
+function treeBranch(rows, index, section) {
   const row = rows[index], t = row.ticket;
   if (!treeSeen.has(t.id)) { treeSeen.add(t.id); treeExpanded.add(t.id); }
   const open = treeExpanded.has(t.id), children = [];
@@ -98,31 +105,31 @@ function treeBranch(rows, index) {
   const tasks = array(t.checklist);
   const node = h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
-    h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, typeof t.key === 'string' ? h('span', {className:'meta mono'}, t.key + ' ') : null, clean(t.title))), ticketNext(t),
+    h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), ticketNext(t),
       row.children ? h('p', {className:'meta'}, row.done + ' of ' + row.children + ' steps done') : null,
       row.parentMissing ? parentLine(t) : null),
-    h('div', {className:'row ticket-meta'}, ticketAttentionChip(t), tasks.length ? h('span', {className:'meta'}, tasks.filter(window.DashHelpers.resolved).length + '/' + tasks.length) : null,
+    h('div', {className:'row ticket-meta'}, ticketAttentionChip(t, section), tasks.length ? h('span', {className:'meta'}, tasks.filter(window.DashHelpers.resolved).length + '/' + tasks.length) : null,
       name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null,
       t.due ? h('span', {className:'meta'}, date(t.due)) : null, ticketMenu(t, 'tree')));
   node.style.marginLeft = Math.min(row.depth, 6) * 20 + 'px';
-  return fragment(node, open ? children.map(i => treeBranch(rows, i)) : null);
+  return fragment(node, open ? children.map(i => treeBranch(rows, i, section)) : null);
 }
 let ticketView = 'list';
 try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'board'; } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
 const viewToggle = () => h('div', {className:'board-tools row', 'data-key':'board-tools'},
   h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
-function boardCard(t, nested = false) {
+function boardCard(t, nested = false, column = '') {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
   const parts = boardChildren(tickets(), t);
   return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
-    h('div', {className:'row'}, h('span', {className:'mono key grow'}, typeof t.key === 'string' ? t.key : ''),
+    h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, clean(t.title))),
       snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', STATUS_CHOICES)))),
-    h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), ticketAttentionChip(t),
+    ticketAttentionChip(t, column),
     !nested ? boardParentLine(t) : null,
     parts.length ? h('div', {className:'board-parts'},
       h('p', {className:'meta'}, 'Steps · ' + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
-      parts.map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'mono'}, part.key || ''), h('span', {className:'part-title'}, clean(part.title)), ticketAttentionChip(part)))) : null,
+      parts.map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'part-title'}, clean(part.title)), ticketAttentionChip(part)))) : null,
     ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null, t.due ? h('span', {className:'due'}, date(t.due)) : null),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
 }
@@ -133,7 +140,7 @@ function board() {
     const mine = visible.filter(t => window.DashHelpers.columnOf(shown(t).status) === status);
     const rows = window.DashHelpers.treeRows(mine), roots = rows.filter(r => !r.depth);
     const cap = status === 'done' && !boardMore.has('done') ? 3 : roots.length;
-    const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0),
+    const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0, status),
       rows.filter(child => child.depth === row.depth + 1 && [row.ticket.id, row.ticket.key].includes(child.ticket.parent)).map(branch));
     return h('section', {className:'kanban-col', 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
       h('div', {className:'col-head'}, h('h2', {className:'grow'}, label), h('span', {className:'status-count'}, String(mine.length))), h('p', {className:'meta column-hint'}, COLUMN_HINT[status]),
@@ -186,7 +193,7 @@ function list() {
     const rows = window.DashHelpers.treeRows(items);
     const group = rows.map((row, i) => ({row, i})).filter(({row}) => row.depth === 0);
     if (!group.length) return null;
-    const body = group.map(({i}) => treeBranch(rows, i));
+    const body = group.map(({i}) => treeBranch(rows, i, status));
     if (status !== 'done') return card('group-' + status, title, items.length, body);
     const open = expanded.has(status);
     return h('section', {className:'card', 'data-key':'group-' + status}, h('button', {type:'button', className:'card-h card-toggle', 'data-action':'group', 'data-group':status, 'aria-expanded':open, 'aria-controls':'group-' + status}, iconEl('down'), h('span', {}, 'Done (' + items.length + ')')), h('div', {id:'group-' + status, hidden:!open}, body));

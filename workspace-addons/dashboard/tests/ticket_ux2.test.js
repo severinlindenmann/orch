@@ -1,0 +1,79 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const WEB = path.join(__dirname, '../src/orch_dashboard/web');
+const helpers = require(path.join(WEB, 'helpers.js'));
+const ticketSrc = fs.readFileSync(path.join(WEB, 'pages/ticket.js'), 'utf8');
+const listSrc = fs.readFileSync(path.join(WEB, 'pages/tickets.js'), 'utf8');
+const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {}, dataset:{}});
+const text = n => !n ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join('');
+const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
+
+function listCtx(extra = {}) {
+  const c = {h, window:{DashHelpers:helpers}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
+    shown:t => t, chip:(t, cls) => h('span', {className:'chip ' + cls}, t), statusChip:t => h('span', {className:'chip'}, t.status), state:{runs:{}}, starting:new Set(),
+    needsList:() => [], snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
+    button:(label, cls, fn) => { const b = h('button', {className:'btn ' + cls}, label); b.onclick = fn; return b; }, ...extra};
+  vm.createContext(c); vm.runInContext(listSrc, c); return c;
+}
+test('Dash 21: no chip when it matches the section; Done shows the finish day; next step only with the actual question', () => {
+  const c = listCtx();
+  assert.equal(c.ticketAttentionChip({status:'review'}, 'review'), null);
+  assert.equal(text(c.ticketAttentionChip({status:'review'}, 'active')), 'review');
+  assert.equal(c.ticketAttentionChip({status:'waiting', questions:[{text:'Which?'}]}, 'waiting'), null);
+  assert.match(text(c.ticketAttentionChip({status:'done', updated_at:'2026-11-12T10:00:00Z'}, 'done')), /^Finished /);
+  assert.doesNotMatch(text(c.ticketNext({id:'r', status:'review'})), /Next step|Read the result/);
+  assert.equal(c.ticketNext({id:'a', status:'active', checklist:[{text:'Draft it'}]}), null);
+});
+test('Dash 23: a ticket with progress that is not running offers Resume with a Paused line', () => {
+  const c = listCtx();
+  assert.match(text(c.ticketNext({id:'p', status:'open', checklist:[{text:'x', done:true}], updated_at:'2026-11-12T10:00:00Z'})), /^Paused .*Resume$/);
+  assert.equal(text(c.ticketNext({id:'n', status:'open'})), 'Start helper');
+});
+test('Dash 49: All / Mine is a segmented control with aria-pressed', () => {
+  const c = listCtx();
+  const segs = nodes(c.ticketFilters()).filter(n => n.attrs.className === 'btn ghost seg');
+  assert.deepEqual(segs.map(n => [text(n), n.attrs['aria-pressed']]), [['All', 'true'], ['Mine', 'false']]);
+  segs[1].onclick();
+  assert.deepEqual(nodes(c.ticketFilters()).filter(n => n.attrs.className === 'btn ghost seg').map(n => n.attrs['aria-pressed']), ['false', 'true']);
+});
+test('Dash 02: rows, board cards and step names carry no ticket key', () => {
+  assert.doesNotMatch(listSrc, /t\.key \+ ' '|mono key|part\.key/);
+  const c = {clean:String}; vm.createContext(c);
+  vm.runInContext(ticketSrc.slice(ticketSrc.indexOf('const partName'), ticketSrc.indexOf('function ticketAddStep')) + '\nthis.partName = partName;', c);
+  assert.equal(c.partName({key:'PIL-54', title:'Plan'}), 'Plan');
+});
+test('Dash 50: a change request task reads as the change, with what you asked below', () => {
+  const c = {}; vm.createContext(c);
+  vm.runInContext(ticketSrc.slice(ticketSrc.indexOf('function changeTask'), ticketSrc.indexOf('function taskRows')), c);
+  assert.deepEqual({...c.changeTask('Change: Please add a rain plan.')}, {title:'Add a rain plan', asked:'Please add a rain plan.'});
+  assert.equal(c.changeTask('Write the report'), null);
+});
+test('Dash 20/23/34/02: one Tasks list, Resume when paused, Details without empty fields, key under Technical details', () => {
+  const t = {id:'t1', key:'PIL-54', title:'Report', status:'open', checklist:[{id:'c1', text:'Change: Please add a rain plan.', done:true}], note:'Remember', created_at:'2026-11-10T09:00:00Z', updated_at:'2026-11-12T09:00:00Z'};
+  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
+    array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '', act:async () => ({ok:true}),
+    el:(tag, cls, txt) => h(tag, {className:cls}, txt), fragment:(...kids) => h('fragment', {}, kids),
+    card:(key, title, suffix, kids) => h('section', {'data-key':key}, title, suffix, kids), emptyRow:x => h('p', {}, x),
+    questions:x => (x.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map([['t1', 'tasks']]), addons:() => [], tickets:() => [t], ticketOf:() => t,
+    statusChip:x => h('span', {}, x.status), chip:x => h('span', {}, x), href:id => '#t/' + id, MOVE_CHOICES:[], main:{querySelector:() => null}, locks:new Set()};
+  vm.createContext(ctx); vm.runInContext(ticketSrc, ctx);
+  ctx.snapshot = false; ctx.state = {settings:{}, runs:{}};
+  vm.runInContext('loadArtifacts = () => {}; inlineField = (t,f) => h("span", {"data-field":f}, String(t[f] || "")); addTaskRow = () => null; agentBar = () => null; sharedFolderLine = () => null; copyLine = () => null; liveSessionStrip = () => null; ticketFiles = () => null; addonRows = () => null; ticketLinks = () => null; linksCard = () => null; fieldSections = () => null; ticketHistoryPanel = () => null; artifactData.set("t1", {data:{files:[]}});', ctx);
+  const tree = ctx.detail(t), all = nodes(tree), body = text(tree);
+  assert.ok(!all.some(n => n.attrs.id === 'ticket-tab-tasks'));
+  assert.equal(all.filter(n => n.attrs['data-key'] === 'overview-tasks').length, 1);
+  assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
+  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-paused') && /Resume/.test(body) && !/Start helper/.test(body));
+  const panel = all.find(n => n.attrs.id === 'ticket-panel-overview');
+  assert.ok(!panel.attrs.hidden, 'an old Tasks choice opens the Overview');
+  assert.ok(nodes(panel).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
+  assert.doesNotMatch(text(all.find(n => n.attrs.className === 'ticket-details ed-list')), /Owner|Due|Done when|Note|PIL-54|No parent/);
+  assert.ok(all.some(n => text(n) === '+ Add detail'));
+  assert.match(text(all.find(n => n.attrs['data-key'] === 'ticket-technical-t1')), /Technical details.*PIL-54/);
+  assert.equal(body.split('PIL-54').length, 2, 'the key appears only under Technical details');
+  assert.match(body, /Add a rain planYou asked: Please add a rain plan\./);
+});
