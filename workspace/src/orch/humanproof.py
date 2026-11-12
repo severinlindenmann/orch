@@ -691,6 +691,8 @@ def human_key(root: Path, create: bool = True) -> bytes:
             except (
                 LooseFile
             ) as e:  # a loose key is never read: rotate it (old proofs and MACs stop verifying)
+                if _LOADING_OLD:
+                    raise  # a reset is already reading the old key: it carries nothing over
                 reset_protection(root, str(e))
                 raw = _read_guarded(f)
             hexkey = raw.decode("utf-8", "replace").strip()
@@ -1535,6 +1537,9 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+_LOADING_OLD: list = []
+
+
 def reset_protection(root: Path, reason: str) -> None:
     """ONE response to a loose secret or integrity file (human.key, human-settings.json, proofs-used,
     delivered, handoffs, the dev record): tighten the folders, rotate human.key (old proofs and MACs stop
@@ -1554,7 +1559,17 @@ def reset_protection(root: Path, reason: str) -> None:
             loose = file_problem(d / "human.key") is not None
         except OSError:
             loose = True
-        listed = (False, set(), None) if loose else _cutover_load(root)
+        listed = (False, set(), None)
+        if not loose:
+            _LOADING_OLD.append(
+                1
+            )  # human_key must not start a reset of its own while this one reads the old key
+            try:
+                listed = _cutover_load(root)
+            except Refused:  # a key that cannot be read soundly carries nothing over
+                listed = (False, set(), None)
+            finally:
+                _LOADING_OLD.pop()
         _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
         _cutover_reseal(root, listed)
         record_reset_note(root)  # when the record key changed (orch's own time; old-key runs age from it)
