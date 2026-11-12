@@ -468,3 +468,28 @@ test('the Accept button is keyed by the shown tip, so a refresh never keeps a st
   assert.notEqual(key(undefined), key('a'.repeat(40)));
   assert.notEqual(key('a'.repeat(40)), key('b'.repeat(40)));
 });
+
+test('a file is listed once per list, and Overview chips skip the file already in the review card', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), append(...more){this.children.push(...more);}});
+  const shot = {type:'file', ref:'.orch/tickets/t_dup/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
+  const t = {id:'t_dup', title:'Dup', status:'review', checklist:[{id:'a', text:'One', done:true, evidence:[shot, {...shot}]}, {id:'b', text:'Two', done:true, evidence:[{...shot}]}]};
+  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h,
+    array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '', route:() => ({kind:'ticket'}), render(){},
+    el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids), button:(label, cls) => h('button',{className:cls},label),
+    card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
+    questions:() => [], capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
+    statusChip:() => h('span',{},'Review'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[]};
+  vm.createContext(ctx); vm.runInContext(source,ctx);
+  ctx.snapshot=false; ctx.state={settings:{agents:[]}};
+  vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;" +
+    "artifactData.set('t_dup', {at:Date.now(), data:{files:[{name:'report.pdf', size:10}, {name:'report.pdf', size:10}, {name:'notes.pdf', size:5}]}});", ctx);
+  const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
+  const tree = nodes(ctx.detail(t));
+  const fileChips = tree.filter(n => n.attrs.className === 'ticket-file-chips').flatMap(n => n.children.map(c => c.children.find(k => k.tag === 'span').children[0]));
+  assert.deepEqual(fileChips, ['notes.pdf'], 'the review card already shows report.pdf');
+  assert.deepEqual(tree.filter(n => n.attrs.className === 'task-proofs row').map(n => n.children.length), [1, 1, 1, 1], 'one chip per file per task (Overview and Tasks tab)');
+  const filesTab = tree.find(n => n.attrs.id === 'ticket-panel-artifacts');
+  assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'card ticket-result').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
+  assert.ok(nodes(filesTab).some(n => n.tag === 'h2' && n.children.includes('Files')));
+  assert.ok(tree.some(n => n.attrs.id === 'ticket-tab-artifacts' && n.children.includes('Files 3')));
+});
