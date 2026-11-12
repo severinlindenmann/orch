@@ -770,7 +770,7 @@ def _read_run_strict(ws, run, fd, only=None):
             if only is None or only(event.get("id")):
                 # exactly what the reader (_parse) keeps: a line it skips must not suppress a real one. The
                 # full schema check costs ~0.2 ms a line, so a hook's write checks the lines of its own
-                # call only (dedupe looks at nothing else); the collector's read (only=None) checks all.
+                # call only (dedupe looks at nothing else); the collector reads with only=lambda i: False.
                 _validate(event)
             previous.append(event)
         except (ValueError, TypeError, KeyError, RecursionError, RecordInvalid):
@@ -1035,7 +1035,7 @@ def _pending_count(workspace, run):
         raise
 
 
-def run_lines(workspace, run, *, lock_wait=None, drain=None) -> list[dict]:
+def run_lines(workspace, run, *, lock_wait=None, drain=None, only=None) -> list[dict]:
     """The run file's lines AS WRITTEN (no dedupe, no reader view), read under the run lock: for a writer-side
     caller that must see every line (a collector numbering its id-less lines `<run>:<n>` past every seq and
     every such id already used). `drain`: a writer's drain (RecordWriter.drain); the spooled lines of the run
@@ -1055,7 +1055,7 @@ def run_lines(workspace, run, *, lock_wait=None, drain=None) -> list[dict]:
                     return []
                 raise
             try:
-                return _read_run_strict(workspace, run, fd)[0]
+                return _read_run_strict(workspace, run, fd, only)[0]
             finally:
                 _close(fd)
     except (RecordTampered, RecordUnavailable) as error:
@@ -1165,6 +1165,7 @@ def _store_detail(ws, event, payload, previous):
                 return _Detail(reason="collision")
             finished = any(
                 old.get("detail") == event["detail"]
+                and old.get("id") == event["id"]  # the detail name derives from the id
                 and old.get("outcome") is not None
                 and not (old.get("via") == "hook" and event["via"] == "log")
                 for old in previous
@@ -1390,7 +1391,10 @@ class RecordWriter:
                 name is not None
                 and event["detail"] is None
                 and any(old.get("detail") == f"detail/{run}/{file}" for old in replaced)
-                and not any(old.get("detail") == f"detail/{run}/{file}" for old in _shown([*previous, event]))
+                and not any(
+                    old.get("detail") == f"detail/{run}/{file}" and old.get("id") == event["id"]
+                    for old in _shown([*previous, event])
+                )
             ):
                 try:
                     _unlink(self.workspace, ("detail", run, file))

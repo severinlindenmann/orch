@@ -1490,3 +1490,32 @@ def test_a_planted_huge_id_does_not_move_the_collectors_seq_start(store):
     assert seq < 100
     alerts = "".join(p.read_text() for p in (record.record_dir(ws) / "alerts").glob("*.jsonl"))
     assert '"reason":"content"' in alerts
+
+
+def test_ids_that_ran_ahead_by_dropped_events_stay_numbered_after_many_turns(store):
+    from orch import run_record
+
+    ws, writer = store
+    # three turns that each dropped 600 events: the id counter runs 600 ahead of the seqs every time
+    for n, id_no in enumerate((1, 601, 1201, 1801), 1):
+        assert writer.append(event(id=f"{RUN}:{id_no}", via="log"))["seq"] == n
+    seq, _ = run_record._so_far(ws, RUN)
+    assert seq == 1801  # the next id-less line gets 1802: new, so the writer does not drop it
+    assert not (record.record_dir(ws) / "alerts").exists()
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(dict(event(id=f"{RUN}:{10**18}"), run=RUN, seq=5)) + "\n")
+    assert run_record._so_far(ws, RUN)[0] == 1801
+
+
+def test_a_planted_line_with_another_id_cannot_decide_about_a_detail_file(store):
+    ws, writer = store
+    started = writer.append(event(id="toolu_d"), detail=DETAIL)
+    planted = dict(started, id="toolu_other", seq=2, outcome=dict(ok=True, error=None, ms=1), via="hook")
+    with runfile(ws).open("a") as f:
+        f.write(json.dumps(planted) + "\n")
+    finished = writer.append(
+        event(id="toolu_d", outcome=dict(ok=True, error=None, ms=2)),
+        detail={"input": "new-input", "output": "new-output"},
+    )
+    assert finished["detail"] == started["detail"]
+    assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()

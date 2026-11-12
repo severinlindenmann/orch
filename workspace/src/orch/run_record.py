@@ -37,16 +37,16 @@ def _so_far(root: Path, run: str, writer=None) -> tuple[int, int]:
     prefix = re.compile(re.escape(run) + r":(\d{1,18})")
     seq = helpers = 0
     drain = writer.drain if writer is not None else None
-    lines = record.run_lines(root, run, lock_wait=LOCK_WAIT, drain=drain)
-    # every line here has seq == its physical line number, so no id can honestly run far past the highest
-    # seq (only dedupe-dropped repeats push it, a few per turn): a planted `<run>:10**18` is ignored, once
-    top = max((e["seq"] for e in lines if type(e.get("seq")) is int), default=0)
+    # the collector's seq counter also counts events dedupe dropped, so ids run ahead of seqs by however many
+    # a turn dropped; one id far past everything before it is planted. The bound moves with the file order:
+    # an id is taken only if it is within ID_MARGIN of the highest seq or accepted id of the lines before it.
+    lines = record.run_lines(root, run, lock_wait=LOCK_WAIT, drain=drain, only=lambda i: False)
     planted = False
     for e in lines:
         if type(e.get("seq")) is int:
             seq = max(seq, e["seq"])
         if isinstance(e.get("id"), str) and (m := prefix.fullmatch(e["id"])):
-            if int(m.group(1)) > top + ID_MARGIN:
+            if int(m.group(1)) > seq + ID_MARGIN:
                 planted = True
             else:
                 seq = max(seq, int(m.group(1)))
