@@ -1814,6 +1814,10 @@ def profile_body(profile: dict) -> dict:
     # The person-approved real HOME is covered by the MAC only when present (older profiles keep theirs).
     if profile.get("real_home") is True:
         body["real_home"] = True
+    if profile.get("kind"):  # the program kind and the person's "any command" (#577), likewise
+        body["kind"] = profile["kind"]
+    if profile.get("any_command") is True:
+        body["any_command"] = True
     return body
 
 
