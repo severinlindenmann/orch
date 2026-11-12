@@ -688,6 +688,16 @@ def test_session_post_without_origin_refused(start_server, fake_session):
     assert srv.page_secret is None
 
 
+def test_settings_target_is_the_core_form_byte_identical():
+    from orch.config import insights_target
+
+    from orch_insights.settings import KEYS
+
+    for key, (_, allowed) in KEYS.items():
+        for value in allowed:
+            assert insights_target(key, value) == f"{key}={value}"
+
+
 def test_cookie_without_page_secret_never_mints(start_server, fake_orch, fake_session):
     srv = start_server(session=fake_session)
     for headers in ({}, {"X-Orch-Page": "wrong"}, {"X-Orch-Page": ""}):
