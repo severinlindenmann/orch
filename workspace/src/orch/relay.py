@@ -317,7 +317,7 @@ def give_allow(root: Path, mid: str, mode: str, by: str | None = None, via: str 
                     tk["status"] = "active"
             tickets.add_history(tk, "agent:relay", f"Allowed by {who} ({via or 'cli'})", "relay")
 
-        tickets.apply_op(root, atid, settle)
+        tickets.apply_op(root, atid, settle, by=tickets.SYSTEM)
         # the ticket stays: `relay done` turns it into the task's ticket (one delegate = one ticket)
     return out
 
@@ -795,7 +795,12 @@ def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs
     from orch import chat
 
     gid = tickets.ensure_general(root, tickets.current_actor())
-    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True))
+    tickets.apply_op(
+        root,
+        gid,
+        lambda t: tickets.add_history(t, tickets.current_actor(), text, chat=True),
+        by=tickets.current_actor(),
+    )
     chat.record(root, msg["id"], body["by"], body["via"], text, msg["created_at"], reply_to, refs=refs)
 
 
@@ -1851,7 +1856,7 @@ def _continue(
         elif t["status"] == "waiting":
             t["status"] = "active"
 
-    tickets.apply_op(root, tid, op)
+    tickets.apply_op(root, tid, op, by=tickets.SYSTEM)
 
 
 def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
@@ -1913,7 +1918,7 @@ def _phone_text(root: Path, msg: dict, final: bool = False) -> tuple[str, str]:
     if mid not in _v3_state(root)["described"]:
         # also the retry of a message whose files could not be fetched the first time (Transient)
         text = _describe(root, tid, mid, who, body, final)
-        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
+        tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=by)
         _mark_described(root, mid)
         _working_add(root, mid, frm, tid, False, "run")
     _ack_once(root, mid, frm, tid, False, f"Got it: {tickets.load(root, tid)['title']}"[:300])
@@ -1937,7 +1942,9 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
             # started but never finished (an error half way): finish it now
             tid = t["id"]
             text = _describe(root, tid, mid, who, body, True)
-            tickets.apply_op(root, tid, lambda tk, text=text: tickets.add_history(tk, by, text, "phone"))
+            tickets.apply_op(
+                root, tid, lambda tk, text=text: tickets.add_history(tk, by, text, "phone"), by=by
+            )
             _mark_described(root, mid)
             st = _v3_state(root)
             st["acked"].append(mid)
@@ -1951,7 +1958,7 @@ def topic(root: Path, mid: str, title: str, by: str) -> dict:
     tid = t["id"]
     tickets.ext_set(root, tid, "relay", json.dumps({"origin": "phone", "from": frm, "message": mid}), by)
     text = _describe(root, tid, mid, who, body, True)
-    tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"))
+    tickets.apply_op(root, tid, lambda t: tickets.add_history(t, by, text, "phone"), by=by)
     _mark_described(root, mid)
     st = _v3_state(root)
     st["acked"].append(mid)  # this ack names the ticket; the General "Got it" is not sent again
@@ -2070,7 +2077,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                         tk["ext"]["relay"]["allow_note"] = qid
                         tickets.add_history(tk, "agent:relay", text, "relay")
 
-                    tickets.apply_op(root, tid, op)
+                    tickets.apply_op(root, tid, op, by=tickets.SYSTEM)
 
             ids = [str(x.get("id")) if isinstance(x, dict) else "" for x in raw["questions"]]
             # which one was answered here cannot be told: none counts (only with sync; without it there is no
@@ -2128,7 +2135,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                             "relay",
                         )
 
-                    tickets.apply_op(root, t["id"], note)
+                    tickets.apply_op(root, t["id"], note, by=tickets.SYSTEM)
                 continue
             who, via, by = (
                 _person(q.get("answered_by")),
@@ -2164,7 +2171,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                     tickets.add_history(tk, by, label, "relay")
                     tk["status"], tk["waiting_on"] = status, None
 
-            tickets.apply_op(root, t["id"], op)
+            tickets.apply_op(root, t["id"], op, by=by)
             notes.append(label)
     for mid in denied:  # outside relay.lock
         _group_denied(root, mid)
@@ -2510,14 +2517,14 @@ def _ticket_for(root: Path, msg: dict) -> str:
             if tk["status"] in ("waiting", "dropped"):
                 tk["status"] = "active"
 
-        tickets.apply_op(root, tid, retitle)
+        tickets.apply_op(root, tid, retitle, by=tickets.SYSTEM)
     else:
         tid = tickets.create(root, title, by)["id"]
         # a re-run after a crash finds this ticket (allow_message) and reuses it, never makes a second
         first = {"allow_message": msg["id"], "from": msg["from"]}
         tickets.ext_set(root, tid, "relay", json.dumps(first), by)
         if line := _allow_history(root, msg):
-            tickets.apply_op(root, tid, lambda tk: tickets.add_history(tk, by, line, "relay"))
+            tickets.apply_op(root, tid, lambda tk: tickets.add_history(tk, by, line, "relay"), by=by)
     if not tickets.load(root, tid)["checklist"]:
         for item in b.get("checklist", []) if msg["type"] == "delegate" else []:
             said = " ".join(clean_untrusted(str(item), 200).split()) or "(empty)"
@@ -2542,7 +2549,7 @@ def _merge_allow(root: Path, atid: str, into: str, by: str) -> None:
             tk["status"], tk["waiting_on"] = "dropped", None
             tickets.add_history(tk, by, f"Joined {into}", "relay")
 
-    tickets.apply_op(root, atid, op)
+    tickets.apply_op(root, atid, op, by=by)
 
 
 _WIN_RESERVED = re.compile(

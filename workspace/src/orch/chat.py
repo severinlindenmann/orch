@@ -369,7 +369,7 @@ def cut_session(root: Path, tid: str, now=None) -> bool:
         t.setdefault("ext", {})["chat"] = {"session_day": today}
         return had
 
-    return tickets.apply_op(root, tid, op)[1] is True
+    return tickets.apply_op(root, tid, op, by=tickets.SYSTEM)[1] is True
 
 
 # ---------------------------------------------------------------- what the person writes in the dashboard
@@ -389,7 +389,7 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False, proven:
     gid = tickets.ensure_general(root, who)
     mid = relay.new_id()
     entry = record(root, mid, "you", "dashboard", text, convo_start=new)
-    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, "dashboard", chat=True))
+    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, "dashboard", chat=True), by=who)
     runs.pending_add(root, gid, who, "message", text, "dashboard", "p_" + mid[2:], proven=proven)
     sent = None
     with contextlib.suppress(Refused, OSError):
@@ -500,7 +500,7 @@ def _make_ticket(root: Path, mid: str, title: str | None = None, by: str | None 
 
             state["made_from"] = mid
 
-        tickets.apply_op(root, t["id"], copy_history)
+        tickets.apply_op(root, t["id"], copy_history, by=tickets.SYSTEM)
         moved = {"id": t["id"], "key": t["key"], "title": t["title"]}
         for m in conversation:
             m["moved_to"] = moved

@@ -128,7 +128,7 @@ def test_the_persons_looks_good_signs_the_done_and_it_lists_as_done(ws, run, mon
 
 def test_the_phone_accept_signs_through_the_relay_channel(ws, run):
     tid = _new(run)
-    tickets.apply_op(ws, tid, lambda t: t.update(status="review"))
+    tickets.apply_op(ws, tid, lambda t: t.update(status="review"), by=tickets.SYSTEM)
     hp.human_key(ws)
     with pytest.raises(Refused):
         tickets.accept_review(ws, tid, "human:phone")  # not proven: nothing becomes Done
@@ -192,7 +192,9 @@ def test_a_direct_write_of_a_new_done_without_a_verifying_entry_is_refused(ws, r
             ws, {**t, "status": "done", "verdicts": [{"kind": "person", "nonce": "0" * 16, "mac": "A" * 43}]}
         )
     with pytest.raises(Refused, match="Done needs your OK"):
-        tickets.apply_op(ws, tid, lambda x: x.update(status="done"))  # no op makes a ticket Done unsigned
+        tickets.apply_op(
+            ws, tid, lambda x: x.update(status="done"), by=tickets.SYSTEM
+        )  # no op makes a ticket Done unsigned
     assert _raw(ws, tid)["status"] != "done"
 
 
@@ -302,7 +304,7 @@ def test_an_unrelated_op_keeps_the_raw_done_of_an_unsigned_ticket(ws, run):
     tid = _finished(ws, run)
     _edit(ws, tid, status="done")
     code, out, err = run("ticket", "set", tid, "note", "a note", "--by", "human:pat", "--json")
-    tickets.apply_op(ws, tid, lambda t: tickets.add_history(t, "human:pat", "a line"))
+    tickets.apply_op(ws, tid, lambda t: tickets.add_history(t, "human:pat", "a line"), by=tickets.SYSTEM)
     assert _raw(ws, tid)["status"] == "done"
     assert tickets.load(ws, tid)["status"] == "review"
 
@@ -310,7 +312,7 @@ def test_an_unrelated_op_keeps_the_raw_done_of_an_unsigned_ticket(ws, run):
 def test_the_person_can_still_click_looks_good_after_unrelated_ops(ws, run, monkeypatch):
     tid = _finished(ws, run)
     _edit(ws, tid, status="done")
-    tickets.apply_op(ws, tid, lambda t: tickets.add_history(t, "human:pat", "a line"))
+    tickets.apply_op(ws, tid, lambda t: tickets.add_history(t, "human:pat", "a line"), by=tickets.SYSTEM)
     _verdict(ws, run, monkeypatch, tid)
     assert tickets.load(ws, tid)["status"] == "done"
 
@@ -590,7 +592,7 @@ def test_a_done_write_that_stopped_verifying_tombstones_the_entry(ws, run, monke
     t = _raw(ws, tid)
     t["checklist"][0]["text"] = "reworded"  # the file still says done and still holds the entry
     tickets.ticket_path(ws, tid).write_text(json.dumps(t))
-    tickets.apply_op(ws, tid, lambda x: tickets.add_history(x, "human:pat", "a line"))
+    tickets.apply_op(ws, tid, lambda x: tickets.add_history(x, "human:pat", "a line"), by=tickets.SYSTEM)
     assert hp.verdict_ledger(ws)[tid] is None  # the old state can never come back by editing the file back
 
 

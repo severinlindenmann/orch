@@ -4,8 +4,10 @@ import base64
 import io
 import json
 import os
+import re
 import sys
 import time
+import urllib.parse
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1845,3 +1847,117 @@ def test_every_lost_reason_is_named_in_the_contract():
     text = (ROOT / "contracts/activity.md").read_text()
     for reason in (*record.LOST_REASONS, *record.UNPROVEN_REASONS, "trimmed"):
         assert reason in text, reason
+
+
+# --- G1 H3: the hider derives every escaped form; hide and backstop use the same set ---
+_QUOTED = 'p@ss"w0rd\\ZZ-9'  # a quote and a backslash
+_PEM = "\n".join(
+    [
+        "-----BEGIN KEY-----",
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+        "abcdEFGHijklMNOPqrstUVWXyz0123456789",
+        "-----END KEY-----",
+    ]
+)
+
+
+def _variants(value):
+    """Forms of a key a tool, a shell or a JSON layer can print (the search test looks for every one)."""
+    raw = value.encode()
+    forms = {value, json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]}
+    forms.add(json.dumps(json.dumps(value))[1:-1][1:-1])  # JSON inside JSON
+    forms.add(value.replace("\\", "\\\\").replace('"', '\\"'))  # shell style backslash escapes
+    forms.add(urllib.parse.quote(value, safe=""))
+    forms.add(urllib.parse.quote_plus(value))
+    for pad in range(3):
+        enc = base64.b64encode(b"\0" * pad + raw).decode().rstrip("=")
+        forms.add(enc[(8 * pad + 5) // 6 : 8 * (pad + len(raw)) // 6])
+    forms.add(raw.hex())
+    # twice escaped: non-ASCII as \\u00e4, and a "/" written \/ at the first level and escaped again
+    forms.add(json.dumps(json.dumps({"p": value}))[1:-1].split('\\"p\\": \\"', 1)[1].rsplit('\\"}', 1)[0])
+    forms.add(json.dumps(json.dumps(value, ensure_ascii=False), ensure_ascii=False)[1:-1][1:-1])
+    forms.add(json.dumps(json.dumps(value).replace("/", "\\/"))[1:-1][1:-1])
+    forms.add(re.sub(r'([$`"\\])', r"\\\1", value))  # shell double quotes
+    return {f for f in forms if len(f) >= 8}
+
+
+def _record_blob(root):
+    return b"".join(p.read_bytes() for p in (root / ".orch/record").rglob("*") if p.is_file())
+
+
+def _record_strings(root):
+    """Every decoded string value and key of every JSON line under .orch/record/."""
+    found = []
+
+    def walk(value):
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                walk(k)
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+
+    for p in (root / ".orch/record").rglob("*"):
+        if p.is_file():
+            content = p.read_text()
+            for text in content.splitlines() or [content]:
+                try:
+                    walk(json.loads(text))
+                except ValueError:
+                    found.append(text)
+    return found
+
+
+_UNICODE = 'pä/ss"w0rd\\é+/ZZ-9$`'
+
+
+@pytest.mark.parametrize("secret", [_QUOTED, _PEM, _UNICODE], ids=["quote-backslash", "pem", "unicode-slash"])
+def test_escaped_and_encoded_forms_never_reach_the_record_folder(proj, monkeypatch, secret):
+    t = tickets.create(proj, "Hook me", "human:t")
+    rec = runs.claim(proj, t["id"], "agent:x", "claude", pid=os.getpid())
+    monkeypatch.setenv("ORCH_RUN", rec["run"])
+    monkeypatch.setenv("ORCH_TICKET", t["id"])
+    forms = sorted(_variants(secret))
+    assert len(forms) >= 6
+    with hider.use_hider(hider.Hider({"deploy-key": secret})):
+        for n, form in enumerate(forms):
+            record_hook.hook(
+                proj,
+                line(
+                    id=f"toolu_{n}",
+                    text="Run with " + form.replace("\n", " "),
+                    data={"note": f"token {form}"},
+                    outcome={"ok": False, "error": f"failed {form}", "ms": 1},
+                    payload={
+                        "input": {"command": f"curl -H {form}", form: "as a key"},
+                        "output": f"leaked {form}",
+                    },
+                ),
+            )
+    blob = _record_blob(proj)
+    assert b"[hidden: " in blob
+    strings = _record_strings(proj)
+    for form in forms:
+        assert form.encode() not in blob, form
+        assert json.dumps(form)[1:-1].encode() not in blob, form  # as the file spells a string holding it
+        assert not any(form in s for s in strings), form
+
+
+def test_the_decoded_value_check_catches_what_the_serialized_check_misses():
+    """Removing Hider.leaks from the writer's backstop must fail this: a hider whose scan of the serialized
+    line sees nothing (as when an escape form was not derived) still cannot get a key into a line."""
+
+    class Blind(hider.Hider):
+        def hide_text(self, s):
+            return s if s.startswith("{") else super().hide_text(s)
+
+    blind = Blind({"deploy-key": SECRET})
+    obj = {"text": f"x {SECRET}", "data": {SECRET: 1}}
+    line = record._json(obj)
+    assert blind.hide_text(line) == line  # the serialized check alone passes it
+    with pytest.raises(record.RecordInvalid):
+        record._hidden_line(blind, obj)
+    assert record._hidden_line(blind, {"text": "clean"}) == b'{"text":"clean"}'

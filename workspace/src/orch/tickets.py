@@ -481,6 +481,11 @@ def _is_person(by: str) -> bool:
     return by.startswith("human:") and not agent_tool()
 
 
+# `by` of a write that is not an agent-callable op: sync apply, relay/chat system lines, run bookkeeping.
+# It is never an agent actor and is never guarded; it behaves exactly like an op without an actor.
+SYSTEM = "system"
+
+
 CLOSED_AGENT = "This ticket is closed, so the agent can't change it."
 
 
@@ -491,6 +496,17 @@ def _agent_actor(by: str) -> bool:
     return by.startswith("agent:") or (by.startswith("human:") and bool(agent_tool()))
 
 
+def _refuse_closed_agent(root: Path, tid: str, by: str) -> None:
+    """The closed-ticket guard for a write that happens outside apply_op (a file copy): same rule, checked
+    under the caller's ticket lock BEFORE anything is written."""
+    if not _agent_actor(by):
+        return
+    ticket = _load_raw(root, tid)
+    status = _effective(root, ticket)["status"] if ticket.get("status") == "done" else ticket.get("status")
+    if status in CLOSED:
+        raise Refused(CLOSED_AGENT)
+
+
 def apply_op(
     root: Path,
     tid: str,
@@ -498,14 +514,15 @@ def apply_op(
     *,
     expect: tuple[str, object] | None = None,
     if_revision: int | None = None,
-    by: str | None = None,
+    by: str,
 ):
     """The one write path: load, change and write under ONE lock, so concurrent plain ops all land on the
     latest revision. `fn(ticket)` changes the dict (no subprocess, nothing slow) and returns a result.
     Only an edit of something a person saw passes `expect=(path, old value)` or `if_revision`;
-    it is refused (Conflict, exit 2) when that changed. `by` (the validated actor of an op an agent can call)
-    is THE guard of a closed ticket: an agent changes nothing in a done/dropped ticket, re-opening included,
-    refused before `fn` runs, so nothing (ticket, history, ledger) is touched (#542).
+    it is refused (Conflict, exit 2) when that changed. `by` is required: the validated actor of an op an
+    agent can call, or SYSTEM for any other write. It is THE guard of a closed ticket: an agent changes
+    nothing in a done/dropped ticket, re-opening included, refused before `fn` runs, so nothing (ticket,
+    history, ledger) is touched (#542).
     Returns (ticket, result)."""
     ticket_path(root, tid)  # id shape check, same friendly refusal
     with _locked(root, tid):
@@ -514,7 +531,7 @@ def apply_op(
         eff_status = _effective(root, ticket)["status"] if raw_status == "done" else raw_status
         if raw_status == "done":
             ticket["status"] = eff_status  # ops see what readers see: an unsigned Done is Review
-        if by is not None and eff_status in CLOSED and _agent_actor(by):
+        if eff_status in CLOSED and _agent_actor(by):
             raise Refused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
@@ -1036,7 +1053,7 @@ def _sign_done(root: Path, ticket: dict, actor: str, proven: bool) -> None:
 
 def note_history(root: Path, tid: str, by: str, text: str, via: str | None = None) -> None:
     """One history line, nothing else changes (e.g. a phone answer that was too late)."""
-    apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via))
+    apply_op(root, tid, lambda ticket: add_history(ticket, by, text, via), by=by)
 
 
 def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: bool = False) -> dict:
@@ -1106,7 +1123,7 @@ def ask_for_changes(
         root, tid, by, "message", note, via or _env_via(), pid, phone=phone, proven=proven
     )
     try:
-        return apply_op(root, tid, op)[0]
+        return apply_op(root, tid, op, by=SYSTEM)[0]
     except BaseException:
         runs.pending_discard(root, tid, item["id"])
         raise
@@ -1128,7 +1145,7 @@ def mark_working(root: Path, tid: str, by: str, agent_label: str) -> None:
         add_history(ticket, by, f"{agent_label} started")
 
     try:
-        apply_op(root, tid, op)
+        apply_op(root, tid, op, by=SYSTEM)
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -1154,7 +1171,7 @@ def agent_stopped(root: Path, tid: str, by: str, still_running=None, say: bool =
         return True
 
     try:
-        return apply_op(root, tid, op)[1] is True
+        return apply_op(root, tid, op, by=SYSTEM)[1] is True
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -1174,7 +1191,7 @@ def wait_for_start(root: Path, tid: str, reason: str, by: str) -> None:
         add_history(ticket, by, "Waiting: the agent is not up")
 
     try:
-        apply_op(root, tid, op)
+        apply_op(root, tid, op, by=SYSTEM)
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -1191,7 +1208,7 @@ def resume_after_start_wait(root: Path, tid: str, by: str) -> None:
         add_history(ticket, by, "The agent is up")
 
     try:
-        apply_op(root, tid, op)
+        apply_op(root, tid, op, by=SYSTEM)
     except (Refused, FileNotFoundError):
         if ticket_path(root, tid).exists():
             raise
@@ -2037,7 +2054,7 @@ def merge_refresh(
             add_history(t, by, f"{addon} refresh: {what} {old} -> {new}")
         return changes
 
-    t, changes = apply_op(root, tid, op)
+    t, changes = apply_op(root, tid, op, by=by)  # an agent can run an add-on refresh: its real actor
     return t, changes or []
 
 
@@ -2079,7 +2096,7 @@ def ext_set(
         ext[addon] = merged
         add_history(ticket, by, f"Set ext.{addon}")
 
-    return apply_op(root, tid, op, if_revision=if_revision)[0]
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
 def ext_unset(
@@ -2121,7 +2138,7 @@ def ext_unset(
         if not ext:
             del ticket["ext"]
 
-    return apply_op(root, tid, op, if_revision=if_revision)[0]
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
 _SECRET_FOLDER_RE = re.compile(r"\.orch[/\\]+secrets|\borch secrets\b|\bsecrets folder\b", re.I)
@@ -2208,7 +2225,10 @@ def ask(
         if _asks_for_secret(part):
             with contextlib.suppress(Exception):  # the attempt stays visible in the history
                 apply_op(
-                    root, tid, lambda t: add_history(t, by, "A question was refused: it asked for a secret.")
+                    root,
+                    tid,
+                    lambda t: add_history(t, by, "A question was refused: it asked for a secret."),
+                    by=by,
                 )
             raise Refused(
                 "A question must never ask for a password, token, API key or other credential, "
@@ -2515,7 +2535,7 @@ def record_session(root: Path, tid: str, agent: str, sid: str, host: str) -> dic
                 sessions.sort(key=lambda s: s.get("last_used", ""))
                 del sessions[0 : len(sessions) - 32]
 
-    ticket = apply_op(root, tid, op)[0]
+    ticket = apply_op(root, tid, op, by=SYSTEM)[0]
     _record_own_session(root, tid, agent, sid, host)
     return ticket
 
@@ -2558,11 +2578,20 @@ def _too_big(name: str) -> str:
 
 
 def attach_file(
-    root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
+    root: Path,
+    tid: str,
+    path: str,
+    title: str | None,
+    role: str | None,
+    summary: str | None = None,
+    *,
+    by: str,
 ) -> dict:
-    """Copy a workspace file into the ticket's evidence/ folder (gate -> ticket lock held for the copy)."""
+    """Copy a workspace file into the ticket's evidence/ folder (gate -> ticket lock held for the copy).
+    An agent actor is refused on a closed ticket before anything is written (#542)."""
     ticket_path(root, tid)
     with _locked(root, tid):
+        _refuse_closed_agent(root, tid, by)
         return _attach_file(root, tid, path, title, role, summary)
 
 
@@ -2810,6 +2839,7 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
     means it was done before (returned with existed=True, nothing written)."""
     ticket_path(root, tid)
     with _locked(root, tid):
+        _refuse_closed_agent(root, tid, by)  # before the file is written
         res = _attach_write(root, tid, hint, data, exact)
     text = f"Attached {res['name']}"
     if res.get("existed"):
@@ -2823,9 +2853,10 @@ def attach(root: Path, tid: str, hint, data: bytes, by: str, *, exact: str | Non
                 if any(h.get("text") == text for h in t.get("history", []))
                 else add_history(t, by, text)
             ),
+            by=by,
         )
     else:
-        apply_op(root, tid, lambda t: add_history(t, by, text))
+        apply_op(root, tid, lambda t: add_history(t, by, text), by=by)
     return res
 
 

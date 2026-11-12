@@ -318,7 +318,7 @@
         setCopy(src.text);
         const area = h('div', {class: 'fx-pv-pagearea'});
         const showSource = () => area.replaceChildren(h('pre', {class: 'fx-pv-pre code', tabindex: '0'}, highlight(src.text, false)));
-        const showPage = () => area.replaceChildren(h('p', {class: 'fx-pv-cap', text: 'Agent preview. Scripts in this page run in a closed box, apart from Focus. Don’t type secrets into this preview.'}),
+        const showPage = () => area.replaceChildren(h('p', {class: 'fx-pv-cap', text: 'Helper preview. Scripts in this page run in a closed box, apart from Focus. Don’t type secrets into this preview.'}),
           h('iframe', {class: 'fx-pv-frame', sandbox: 'allow-scripts', referrerpolicy: 'no-referrer', src: url(ev, 'page'), title: title(ev, kind)}));
         const seg = [['Page', showPage], ['Code', showSource]].map(([t, fn], n) => {
           const b = h('button', {type: 'button', class: 'btn sm ' + (n ? 'ghost' : ''), 'aria-pressed': String(!n), text: t, onclick: () => { seg.forEach(x => { x.classList.toggle('ghost', x !== b); x.setAttribute('aria-pressed', String(x === b)); }); fn(); }});

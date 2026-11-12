@@ -659,3 +659,88 @@ def test_closed_ticket_agent_check_open_ticket_still_allowed(proj, new_ticket):
     tid = new_ticket()
     tickets.set_status(proj, tid, "review", "human:t")  # Review is not closed
     assert tickets.check_add(proj, tid, "more work", "agent:claude")[1]["id"] == "c1"
+
+
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_closed_ticket_refuses_agent_ext_attach_and_attach_file_before_writing(proj, new_ticket, status):
+    """#542: ext set/unset, attach, attach file take the real actor; a closed ticket refuses an agent before
+    anything is written (no file copied), the ticket and the disk stay as they were; a person can."""
+    tid = new_ticket()
+    tickets.ext_set(proj, tid, "demo", '{"a": 1, "b": 2}', "human:t")
+    (proj / "proof.txt").write_text("proof\n")
+    tickets.set_status(proj, tid, status, "human:t")
+    before, files = tickets.load(proj, tid), _files(proj)
+    msg = "This ticket is closed, so the agent can't change it."
+    for write in (
+        lambda: tickets.ext_set(proj, tid, "demo", '{"a": 9}', "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "demo.a", "agent:claude"),
+        lambda: tickets.ext_unset(proj, tid, "demo", "agent:claude"),
+        lambda: tickets.attach(proj, tid, "note.md", b"late", "agent:claude"),
+        lambda: tickets.attach_file(proj, tid, str(proj / "proof.txt"), None, None, by="agent:claude"),
+    ):
+        with pytest.raises(Refused, match=msg):
+            write()
+    assert tickets.load(proj, tid) == before and _files(proj) == files
+    tickets.ext_set(proj, tid, "demo", '{"a": 9}', "human:t")  # a person can
+    assert tickets.attach(proj, tid, "note.md", b"by a person", "human:t")["name"] == "note.md"
+    assert tickets.attach_file(proj, tid, str(proj / "proof.txt"), None, None, by="human:t")
+    tickets.ext_unset(proj, tid, "demo.a", "human:t")
+
+
+def test_agent_ext_attach_and_attach_file_work_on_an_open_ticket(proj, new_ticket):
+    tid = new_ticket()
+    (proj / "proof.txt").write_text("proof\n")
+    tickets.ext_set(proj, tid, "demo", '{"a": 1, "b": 2}', "agent:claude")
+    tickets.ext_unset(proj, tid, "demo.a", "agent:claude")
+    assert tickets.attach(proj, tid, "note.md", b"hello", "agent:claude")["name"] == "note.md"
+    assert tickets.attach_file(proj, tid, str(proj / "proof.txt"), None, None, by="agent:claude")
+
+
+def test_no_agent_callable_op_writes_as_system():
+    """An op with a `by` parameter writes as that actor: none of its apply_op calls passes SYSTEM, so an
+    agent op can never be disguised as a system write (which the guard does not look at)."""
+    import ast
+
+    # the only ops with a `by` that may write as SYSTEM: run bookkeeping of the automation host, and the
+    # person-only ask_for_changes (refuses any non-person `by` before it writes)
+    bookkeeping = {
+        "mark_working",
+        "agent_stopped",
+        "wait_for_start",
+        "resume_after_start_wait",
+        "ask_for_changes",
+    }
+    tree = ast.parse(Path(tickets.__file__).read_text(encoding="utf-8"))
+    bad = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef) or fn.name in bookkeeping:
+            continue
+        if "by" not in {a.arg for a in fn.args.args + fn.args.kwonlyargs}:
+            continue
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "apply_op":
+                for k in n.keywords:
+                    if k.arg == "by" and isinstance(k.value, ast.Name) and k.value.id == "SYSTEM":
+                        bad.append(f"{fn.name}:{n.lineno}")
+    assert not bad, f"ops with a `by` that write as SYSTEM: {bad}"
+
+
+def test_every_apply_op_call_names_its_actor():
+    """apply_op takes `by` (a required keyword): the actor of an agent op, or tickets.SYSTEM. A call
+    in the sources that leaves it out would skip the closed-ticket guard, so a new op cannot do that."""
+    import ast
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    files = [*(repo / "workspace" / "src").rglob("*.py"), *repo.glob("workspace-addons/*/src/**/*.py")]
+    assert files
+    missing = []
+    for f in files:
+        for n in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+            if not isinstance(n, ast.Call):
+                continue
+            fn = n.func
+            name = fn.id if isinstance(fn, ast.Name) else fn.attr if isinstance(fn, ast.Attribute) else None
+            if name == "apply_op" and not any(k.arg == "by" for k in n.keywords):
+                missing.append(f"{f.relative_to(repo)}:{n.lineno}")
+    assert not missing, f"apply_op without by=: {missing}"

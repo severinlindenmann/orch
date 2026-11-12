@@ -333,7 +333,7 @@ def test_a_continued_conversation_counts_as_used_now(proj, run, tmp_path, monkey
     def stamp(t):
         t["sessions"][0]["last_used"] = "2026-01-01T00:00:00Z"
 
-    tickets.apply_op(proj, tid, stamp)
+    tickets.apply_op(proj, tid, stamp, by=tickets.SYSTEM)
     assert run("run", "start", tid, "--mode", "oneshot")[0] == 0
     _wait(proj, tid)
     s = tickets.load(proj, tid)["sessions"][0]

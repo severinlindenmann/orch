@@ -59,7 +59,8 @@ test('csv parses quotes, commas, CRLF; table view cuts at 50 rows', () => {
 test('a page is shown in a sandboxed frame', () => {
   const html = E.full(file('report.html'), {url: 'evidence/ab-report.html'});
   assert.match(html, /<iframe[^>]*sandbox=""/);
-  assert.match(html, /Agent preview/);
+  assert.match(html, /Helper preview/);
+  assert.doesNotMatch(html, /Agent preview/);
 });
 
 test('technical details hold the raw ref', () => {

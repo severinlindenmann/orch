@@ -61,7 +61,7 @@
     let body;
     if (ctx.missing) body = '<p class="ev-missing">on another computer</p>';
     else if (kind === 'image') body = src ? `<figure class="ev-img"><img src="${esc(src)}" alt="${esc(caption)}" loading="lazy"></figure>` : '<p class="muted">Picture preview unavailable.</p>';
-    else if (kind === 'page') body = src ? `<div class="ev-html"><div class="agent-chrome">Agent preview</div><iframe sandbox="" referrerpolicy="no-referrer" src="${esc(src)}" title="${esc(caption)}" loading="lazy"></iframe></div>` : '<p class="muted">Page preview unavailable.</p>';
+    else if (kind === 'page') body = src ? `<div class="ev-html"><div class="agent-chrome">Helper preview</div><iframe sandbox="" referrerpolicy="no-referrer" src="${esc(src)}" title="${esc(caption)}" loading="lazy"></iframe></div>` : '<p class="muted">Page preview unavailable.</p>';
     else if (kind === 'table') {
       const data = tableData(ev, ctx);
       body = data.columns.length ? `<div class="ev-table" tabindex="0" role="region" aria-label="${esc(caption)}"><table><thead><tr>${data.columns.map(c => `<th scope="col">${esc(c)}</th>`).join('')}</tr></thead><tbody>${data.rows.slice(0, 50).map(row => `<tr>${row.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${data.rows.length > 50 ? `<p class="ev-cap">Showing 50 of ${data.rows.length} rows.</p>` : ''}` : '<p class="muted">No table rows to show.</p>';
