@@ -1338,3 +1338,40 @@ def test_failed_batch_puts_the_list_and_the_tool_env_back(proj, monkeypatch, uv_
     assert uv_calls[0].count("--with") == 3
     assert uv_calls[1].count("--with") == 1 and any("workspace-addons/automation" in a for a in uv_calls[1])
     assert not addons.consented(proj, "dashboard") and not addons.consented(proj, "focus")
+
+
+def test_insights_is_shipped_and_its_manifest_is_valid():
+    import tomllib
+
+    import jsonschema
+
+    base = Path(__file__).resolve().parents[2]
+    folder = base / "workspace-addons" / "insights"
+    manifest = folder / "src" / "orch_insights" / addons.MANIFEST
+    jsonschema.validate(
+        tomllib.loads(manifest.read_text()),
+        json.loads((base / "contracts" / "addon-manifest.schema.json").read_text()),
+    )
+    assert "insights" in addons.SHIPPED_ADDONS and addons._builtin_ok("insights")
+    m = addons.folder_manifest(folder)
+    assert m["name"] == "insights" and m["recommended"] is False  # one click to add, never on by default
+    assert m["dashboard"]["label"] == "Insights" and m["page"]["path"] == "/"
+
+
+def test_insights_can_be_added_and_removed(proj, monkeypatch, run, uv_calls):
+    base = Path(__file__).resolve().parents[2]
+    manifest = base / "workspace-addons" / "insights" / "src" / "orch_insights" / addons.MANIFEST
+    monkeypatch.delenv("ORCH_HOME_STRICT")
+    monkeypatch.setenv("ORCH_HOME", str(addons.real_home() / ".orch-tool"))
+    monkeypatch.setattr(addons, "repo", lambda: "https://github.com/example/orch")
+    monkeypatch.setattr(addons, "_entry_points", lambda: {"insights": "orch_insights"} if uv_calls else {})
+    monkeypatch.setattr(addons, "_manifest_file", lambda module: manifest)
+    code, _, err = run("addon", "add", "insights", "--yes")
+    assert code == 0, err
+    assert "insights" in addons.active(proj)
+    assert any("workspace-addons/insights" in arg for arg in uv_calls[0])
+    code, out, err = run("addon", "list")
+    assert code == 0 and "insights" in out, err
+    code, _, err = run("addon", "remove", "insights")
+    assert code == 0, err
+    assert "insights" not in addons.active(proj)
