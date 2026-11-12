@@ -33,11 +33,31 @@ def ws(proj, monkeypatch):
     return root
 
 
+def _use_as_person(argv, unproven):
+    """A use of a key (env/file/exec/get) is made as the PERSON by default in these tests: a valid
+    single-use hp1 proof on stdin. `unproven=True`, an agent marker or --by agent:... keeps the call as a
+    plain caller (agent-level, H1)."""
+    if (
+        unproven
+        or len(argv) < 3
+        or argv[:1] != ("secret",)
+        or argv[1] not in ("env", "file", "exec", "get")
+        or "--proof-stdin" in argv
+        or "--by" in argv
+        or os.environ.get("CLAUDECODE")
+    ):
+        return argv, None
+    return (*argv[:2], "--proof-stdin", *argv[2:]), _proof(Path.cwd(), "secret.profile", argv[2] + ":use") + "\n"
+
+
 @pytest.fixture
-def run(capsys):
+def run(capsys, monkeypatch):
     """Like the shared `run`, but a command's own exit code (SystemExit) is returned as the code."""
 
-    def _run(*argv):
+    def _run(*argv, unproven=False):
+        argv, stdin = _use_as_person(argv, unproven)
+        if stdin is not None:
+            monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
         try:
             code = cli.main(list(argv))
         except SystemExit as e:
@@ -777,7 +797,7 @@ def test_profile_set_turns_the_switch_off_again(lock, run, ws, monkeypatch):
     _enable_agents(run, monkeypatch, ws)
     code, out, err = _as_person(
         run, monkeypatch, ws, ("set", "lock"), "lock",
-        "--env", "LOCK_TOKEN=other-token", "--run", PY, "--run=-c", "--run", "pass",
+        "--env", "LOCK_TOKEN=other-token", "--run", PY, "--allow-user-owned", "--run=-c", "--run", "pass",
     )  # fmt: skip
     assert code == 0, out + err
     _refused(run, "/bin/sh", "-c", "echo hi")
@@ -1059,7 +1079,14 @@ def test_agent_is_a_required_argument(store, ws):
         secretrun.run(ws, "env", "plain", [PY], stdout=_Sink(), stderr=_Sink())
 
 
+def _pin(extra):
+    """The test interpreter lives in a user-owned folder: the person pins its hash (--allow-user-owned)."""
+    pinned = "--run" in extra and extra[extra.index("--run") + 1] == PY
+    return (*extra, "--allow-user-owned") if pinned else extra
+
+
 def _set(run, monkeypatch, ws, name, *extra):
+    extra = _pin(extra)
     return _cli(
         run, monkeypatch, _proof(ws, "secret.profile", name), "secret", "profile", "set", name,
         "--env", "T=other-token", *extra,
@@ -1180,7 +1207,7 @@ def test_a_use_is_written_to_the_run_record_without_the_value(store, run, ws, in
     code, out, err = run(
         "secret", "env", "plain", "--", PY, "-c", "import os;print(os.environ['PLAIN_TOKEN'])"
     )
-    assert code == 0
+    assert code == 0, err
     lines = read_run(ws, RUN).unwrap()
     uses = [x for x in lines if x["kind"] == "key.use"]
     assert (
@@ -1442,6 +1469,7 @@ def _edit_file(ws, old, new):
 
 
 def _set_ok(run, monkeypatch, ws, name, *extra, proof_name=None):
+    extra = _pin(extra)
     code, out, err = _cli(
         run, monkeypatch, _proof(ws, "secret.profile", proof_name or name), "secret", "profile", "set", name,
         "--env", "T=other-token", *extra,
@@ -1589,7 +1617,7 @@ def test_a_denied_variable_with_a_valid_mac_still_fails_at_run(store, run, ws, m
 def test_exec_checks_the_program_again_when_it_runs(store, run, ws, monkeypatch):
     _set_ok(run, monkeypatch, ws, "good", "--run", PY)
     monkeypatch.setattr(
-        secretrun, "approve_program", lambda root, name: (_ for _ in ()).throw(Refused("Refused: gone."))
+        secretrun, "approve_program", lambda root, name, **kw: (_ for _ in ()).throw(Refused("Refused: gone."))
     )
     code, _, err = run("secret", "exec", "good", "--", "-c", "pass")
     assert code == 2 and "gone" in err

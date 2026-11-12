@@ -377,8 +377,22 @@ def stray_tmux(under: str) -> list[str]:
 def seed_profiles(root, profiles):
     """Test setup only: like a person's `profile set` of every new or body-changed profile (the production
     write_profiles signs only the names it is told to)."""
+    import hashlib
+    import os
+
     from orch import humanproof as hp
-    from orch import keystore
+    from orch import keystore, secretrun
+    from orch.errors import Refused
+
+    for p in profiles.values():  # the test interpreter lives in a user-owned folder: the person pinned its hash
+        run = p.get("run")
+        if run and os.path.isabs(run[0]) and "run_sha256" not in p:
+            try:
+                secretrun.approve_program(root, run[0])
+            except Refused as exc:
+                if str(exc) == secretrun.USER_OWNED:
+                    with open(run[0], "rb") as f:
+                        p["run_sha256"] = hashlib.sha256(f.read()).hexdigest()
 
     try:
         old = keystore.read_profiles(root)

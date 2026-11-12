@@ -565,7 +565,7 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
     for pn, p in profiles.items():
         if not isinstance(pn, str) or not PROFILE_RE.match(pn) or not isinstance(p, dict):
             raise Refused("A profile name uses lower-case letters, digits and dashes.")
-        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "agents_may_env", "skills", "extra"}):
+        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "agents_may_env", "skills", "extra", "run_sha256", "real_home"}):
             raise Refused(f"The profile {pn} has a setting orch does not know.")
         if not (p.get("env") or p.get("files")):
             raise Refused(f"The profile {pn} needs at least one key.")
@@ -618,7 +618,12 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             or not all(isinstance(x, str) and 1 <= len(x) <= 300 for x in run)
         ):
             raise Refused(f"The profile {pn} has a bad command.")
-        for flag in ("allow_get", "agents_may_env"):
+        sha = p.get("run_sha256")
+        if sha is not None and (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)):
+            raise Refused(f"The profile {pn} has a bad program fingerprint.")
+        if sha is not None and not run:
+            raise Refused(f"The profile {pn} has a program fingerprint but no command.")
+        for flag in ("allow_get", "agents_may_env", "real_home"):
             if flag in p and not isinstance(p[flag], bool):
                 raise Refused(f"The profile {pn} has a bad {flag.replace('_', ' ')} setting.")
         sk = p.get("skills", [])
@@ -648,7 +653,9 @@ def _toml(profiles: dict) -> str:
             out.append("run = [" + ", ".join(_q(x) for x in p["run"]) + "]")
         if p.get("skills"):
             out.append("skills = [" + ", ".join(_q(x) for x in p["skills"]) + "]")
-        for flag in ("allow_get", "agents_may_env"):
+        if p.get("run_sha256"):
+            out.append(f"run_sha256 = {_q(p['run_sha256'])}")
+        for flag in ("allow_get", "agents_may_env", "real_home"):
             if p.get(flag):
                 out.append(f"{flag} = true")
         out.append("")

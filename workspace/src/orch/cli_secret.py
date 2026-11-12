@@ -1,6 +1,7 @@
 """Secret commands: proof-gated changes and direct delivery to child commands."""
 
 import argparse
+import hashlib
 import json
 import os
 import stat
@@ -40,12 +41,22 @@ def add_parsers(sub, common) -> None:
                 if action == "set":
                     for option in ("env", "files", "set", "run", "skill", "extra"):
                         q.add_argument("--" + option, action="append", default=[])
+                    q.add_argument("--allow-user-owned", action="store_true")  # person: pin this exact binary
+                    q.add_argument("--real-home", action="store_true")  # person: the command may see your home
 
 
-def _agent(args) -> bool:
-    """An agent tool in the environment, or --by agent:... (an agent that hides its identity looks like a
-    script: Level 1)."""
-    return bool(tickets.agent_tool()) or str(getattr(args, "by", None) or "").startswith("agent:")
+def _agent(root, args, profile) -> bool:
+    """True unless a PERSON proves otherwise (H1). Nothing the caller controls (an environment variable, a
+    flag, being a script) lowers it: a caller is a person only with a valid single-use hp1 proof for
+    `secret.profile` with target `<profile>:use` on the first line of stdin (`orch secret env --proof-stdin <profile> ...`),
+    minted by the dashboard or the person's key. tickets.agent_tool() and --by agent:... only ever add a
+    reason to refuse."""
+    if tickets.agent_tool() or str(getattr(args, "by", None) or "").startswith("agent:"):
+        return True
+    if not getattr(args, "proof_stdin", False):
+        return True
+    who = hp.verify_and_consume(root, hp.read_proof_line(), "secret.profile", profile + ":use", getattr(args, "by", None))
+    return not who.startswith("human:")
 
 
 def _person(root, args, op, target):
@@ -101,9 +112,16 @@ def _change_profile(root, args, who):
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
             if args.run:  # found once, here: stored as the real full path, never searched later
-                path, warnings = secretrun.approve_program(root, args.run[0])
+                path, warnings = secretrun.approve_program(
+                    root, args.run[0], allow_user_owned=args.allow_user_owned
+                )
                 profile["run"] = [path, *args.run[1:]]
+                if args.allow_user_owned:  # the person pins this exact file; checked before every start
+                    with open(path, "rb") as f:
+                        profile["run_sha256"] = hashlib.sha256(f.read()).hexdigest()
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
+            if args.real_home:
+                profile["real_home"] = True
             if args.skill:
                 profile["skills"] = args.skill
             if args.extra:
@@ -146,7 +164,7 @@ def dispatch(args, root: Path) -> bool:
             rest,
             stdout=sys.stdout.buffer,
             stderr=sys.stderr.buffer,
-            agent=_agent(args),
+            agent=_agent(root, args, args.profile),
         )
         sys.stdout.flush()
         sys.stderr.flush()
@@ -159,7 +177,7 @@ def dispatch(args, root: Path) -> bool:
             args.key,
             stdout_is_tty=term.is_terminal(sys.stdout),
             out=sys.stdout.buffer,
-            agent=_agent(args),
+            agent=_agent(root, args, args.profile),
         )
     elif action == "list":
         answer = secretrun.list_answer(root)

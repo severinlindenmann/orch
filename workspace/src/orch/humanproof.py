@@ -1612,13 +1612,20 @@ PROFILE_CHANGED = "this key profile was changed outside orch; set it up again"
 def profile_body(profile: dict) -> dict:
     """The part of a profile the MAC covers: what runs and what it receives (the switches have their own
     settings records)."""
-    return {
+    body = {
         "env": dict(profile.get("env") or {}),
         "files": dict(profile.get("files") or {}),
         "set": dict(profile.get("set") or {}),
         "run": list(profile["run"]) if profile.get("run") else None,
         "extra": sorted(profile.get("extra") or []),
     }
+    # Person-approved exceptions (user-owned program: its fingerprint; the real HOME): covered by the MAC only
+    # when present, so profiles saved before they existed keep their MAC.
+    if profile.get("run_sha256"):
+        body["run_sha256"] = profile["run_sha256"]
+    if profile.get("real_home") is True:
+        body["real_home"] = True
+    return body
 
 
 def profile_mac(key: bytes, workspace: str, name: str, body: dict) -> str:
