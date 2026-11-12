@@ -2301,3 +2301,11 @@ def test_a_stub_is_refused_when_no_developer_folder_exists(ws, monkeypatch, tmp_
     monkeypatch.setattr(secretrun, "_developer_dir", lambda: str(tmp / "nothing-here"))
     with pytest.raises(Refused, match="developer folder it runs from is missing"):
         secretrun._check_xcode(str(tmp / "git"), str(ws))
+
+
+def test_a_refusal_is_printed_with_one_prefix_and_says_what_is_allowed(store, run, ws):
+    with pytest.raises(Refused, match="user:pass") as e:
+        secretrun.check_arguments(ws, ["user:pass"], None)
+    assert "full path of a file" in str(e.value)
+    code, _, err = run("secret", "env", "nope", "--", PY)
+    assert code == 2 and err.startswith("Refused: ") and "Refused: Refused:" not in err
