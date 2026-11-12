@@ -117,11 +117,11 @@ def _change_profile(root, args, who):
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
-            secretrun.check_arguments(root, profile["set"].values())
+            secretrun.check_arguments(root, profile["set"].values(), args.run[0] if args.run else None)
             if args.run:  # found once, here: stored as the real full path, never searched later
                 path, warnings = secretrun.approve_program(root, args.run[0])
                 profile["run"] = [path, *args.run[1:]]
-                secretrun.check_arguments(root, args.run[1:])
+                secretrun.check_arguments(root, args.run[1:], path)
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
             if args.real_home:
                 profile["real_home"] = True

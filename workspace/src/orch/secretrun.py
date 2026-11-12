@@ -408,18 +408,35 @@ def _is_plain_address(value: str) -> bool:
         raise Refused("Refused: an address in the command could not be read.") from None
     if "%2f" in query.lower() or "%5c" in query.lower():
         return False
+    host_part = urllib.parse.unquote(
+        parts.netloc
+    )  # a user or host that starts with - is an option, not an address
+    if host_part.startswith("-") or any(
+        p.startswith("-") for p in host_part.replace("@", ":").split(":")[:2]
+    ):
+        return False
+    if "@-" in host_part:
+        return False
     return not any(
         "/" in v or "\\" in v or v[:1] in ("~", ".", "/") for v in (x for pair in pairs for x in pair)
     )
 
 
-def check_arguments(root, arguments) -> None:
+_OPTION_TAKERS = {"ssh", "scp", "sftp", "git", "rsync"}  # programs that run a command given with -o
+
+
+def check_arguments(root, arguments, program=None) -> None:
     """One fail-closed rule for the arguments of a profile's command and for its `set` values: one with a path
     separator must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative path), must not
     go through a link, and neither it nor any parent may be inside the workspace or changeable by you (an
     agent running as you could change it). Only plain http, https, ssh and git addresses are not paths."""
     ws = os.path.realpath(root)
+    takes_options = os.path.basename(program or "").lower().removesuffix(".exe") in _OPTION_TAKERS
     for arg in arguments:
+        if takes_options and arg.startswith("-o"):
+            raise Refused("Refused: an -o option can run a command through this program and is not allowed.")
+        if re.match(r"^[^\s/]*@-", arg) or re.match(r"^[^\s/:]+:-", arg):
+            raise Refused("Refused: an argument looks like an option hidden in an address.")
         if _is_plain_address(arg):
             continue
         if (
@@ -714,7 +731,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         profile = _profile(root, profile_name)
         if agent and profile.get("real_home") is True:  # the real HOME undoes the containment: person only
             raise Refused("Refused: this profile uses your real home folder, so only you can run it.")
-        check_arguments(root, profile.get("set", {}).values())
+        check_arguments(root, profile.get("set", {}).values(), (profile.get("run") or [None])[0])
         if mode not in ("env", "file", "exec"):
             raise Refused("Refused: unknown secret command.")
         sweep_tmp(root)
@@ -737,7 +754,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
                     "Refused: this profile's command is not a full path. Ask the person to set it again."
                 )
             approve_program(root, run0)  # still a safe, existing program now
-            check_arguments(root, profile["run"][1:])
+            check_arguments(root, profile["run"][1:], run0)
         if mode == "env" and not profile.get("env") and profile.get("files"):
             raise Refused("Refused: this profile needs files. Use orch secret file.")
         needles = keystore.all_needles(root)

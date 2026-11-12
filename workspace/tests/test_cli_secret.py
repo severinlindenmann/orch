@@ -2185,6 +2185,30 @@ def test_nothing_uses_keys_as_root_in_run_or_get(store, ws, monkeypatch):
         secretrun.get(ws, "plain", "other-token", stdout_is_tty=False, out=io.BytesIO(), agent=False)
 
 
+def test_options_hidden_in_addresses_are_refused(ws):
+    for bad in (
+        "ssh://-oProxyCommand=x@h/r",
+        "ssh://u@-h/r",
+        "ssh://%2DoProxy@h",
+        "ssh://%2DoProxy=x@h/r",
+        "https://-h/x",
+        "git@-h:r",
+        "user@-host",
+        "host:-x",
+    ):
+        with pytest.raises(Refused):
+            secretrun.check_arguments(ws, [bad])
+    secretrun.check_arguments(ws, ["ssh://git@h/repo.git", "https://example.test/a"])
+
+
+def test_an_o_option_is_refused_for_programs_that_can_run_a_command_through_it(ws):
+    for program in ("/usr/bin/ssh", "/usr/bin/git", "scp", "/usr/bin/rsync", "sftp"):
+        for arg in ("-oProxyCommand=x", "-o", "-oStrictHostKeyChecking=no"):
+            with pytest.raises(Refused, match="-o option"):
+                secretrun.check_arguments(ws, [arg], program)
+    secretrun.check_arguments(ws, ["-oProxyCommand=x"], "/usr/bin/true")  # not such a program: not our rule
+
+
 def test_only_plain_web_and_git_addresses_are_not_paths(ws):
     secretrun.check_arguments(
         ws,
