@@ -1951,6 +1951,7 @@ def test_a_tool_planted_in_the_developer_folder_after_approval_is_refused_at_the
         secretrun._check_xcode(str(stubs / "git"), str(ws))
 
 
+@pytest.mark.real_checks  # (on a runner whose python lives in /usr/bin the fixture would drop that folder)
 def test_a_system_folder_the_user_can_write_through_a_group_counts_as_user_owned(ws, monkeypatch):
     real = secretrun._user_can_write
     monkeypatch.setattr(secretrun, "_user_can_write", lambda p: p == "/usr/bin" or real(p))
