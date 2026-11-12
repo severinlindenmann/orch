@@ -378,6 +378,15 @@ The sync add-on's records (`orch_sync.records`, each `{..., kind, target, id, ma
 | `allow-delete.json` `[<ticket>]` | `delete` | `<ticket>` | once (spent when the removal is staged) |
 | `ignored.json` `[<ticket>][<add-on>]` | `ignore` | `<ticket>:<add-on>:<value sha256>` | while that value waits |
 | `approved.json` `[<ticket>][<add-on>]` | `allow` | `<ticket>:<add-on>:<value sha256>` | once: approve writes the value and spends the id at once; no merge ever reads it, so an approval is never replayed (#540) |
+| `left-out.json` `[<path>]` (path, sha256) | `left-out` | `<path>:<sha256 of the bytes left out>` | each stage of exactly those bytes at that path (an artifact of this computer stays local; changed bytes ask again) |
+
+The dashboard reaches these choices through its one generic op (`orch sync act <verb> -- <target>`, a person's
+proof with `--proof-stdin`): `keep-mine` / `keep-theirs` (= `resolve`), `leave-out` (target
+`sync:leave-out:<sha256 of path NUL bytes>`), `allow` / `ignore` (= `approve`), `leave-deleted` (= `deleted`) and
+`use-public` (target `sync:use-public:<sha256 of the address>`: the person's signed choice to sync to an address the
+visibility probe found public; until then that address is only kept as waiting and never used).
+`orch sync act <verb> --proof-target -- <target>` answers which target the proof must name (or null), changing
+nothing; the page server mints only `addon.act` proofs whose target starts with the add-on's own name.
 
 **Local records.** A local integrity record no person signs carries the core's local1 MAC: HMAC-SHA256(`human.key`,
 canonical JSON of `["local1", workspace id, kind, record]`) (`humanproof.local_sign` / `local_ok`), a domain that can

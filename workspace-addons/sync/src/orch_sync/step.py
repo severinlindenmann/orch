@@ -220,6 +220,7 @@ def stage(root, head, index, state, now):
         names.update((Path(parent) / f).relative_to(work).as_posix() for f in files)
     names.add("ticket-counter.json")
     generals, preserved = set(), set()
+    left = cli.read(root, "left-out")  # Leave it out (pause.leave_out): checked per path against its bytes
     for path in sorted(names):
         if any(path.startswith(f"tickets/{tid}/") for tid in preserved):
             continue  # The index already contains HEAD's artifacts.
@@ -252,6 +253,8 @@ def stage(root, head, index, state, now):
                     if doc.get("general") is True:
                         (preserved if path in old else generals).add(Path(path).stem)
                         continue
+                if path in left and pause.left_out(root, path, p.read_bytes()):
+                    continue  # a person left exactly these bytes out: they stay here (the index keeps HEAD's)
                 repo.git(root, "add", "-f", "--", ":(literal)" + path, index=index)
             except FileNotFoundError:
                 if paths.TICKET.fullmatch(path):

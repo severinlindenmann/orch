@@ -65,6 +65,52 @@
 .settings .settings-review .settings-review-what{font-weight:600}
 .settings .settings-review:focus-visible{outline-offset:-2px}
 .settings .copies-sub>.settings-review{justify-self:stretch;margin:0}
+/* Sync (draft sync-card.html, Variant A): below Workspace; head with the one status line, where to keep a copy,
+   the sync address with its check, Sync every, Sync now, the review line, then Details. */
+.settings [data-key=settings-sync]{order:-1}
+.settings .sync-head{padding:14px 16px 0;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-head h3{font-weight:600;flex:1;min-width:120px;margin:0}
+.settings .sync-status-line{display:flex;gap:4px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-status{display:inline-flex;gap:8px;align-items:center;font-size:13px;color:var(--text-muted)}
+.settings .sync-status.you,.settings .sync-status.you a{color:var(--warning)}
+.settings .sync-status a{text-underline-offset:2px}
+.settings .sync-status .dot{width:8px;height:8px;border-radius:50%;background:var(--text-faint);flex:none}
+.settings .sync-status .dot.ok{background:var(--success)}
+.settings .sync-status .dot.live{background:var(--brand)}
+.settings .sync-status .dot.you{background:var(--warning)}
+.settings .sync-skipped{background:none;border:0;padding:0;font-size:13px;color:var(--text-muted);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;cursor:pointer}
+.settings .sync-where{border:0;margin:0;padding:0;min-width:0}
+.settings .sync-where legend{padding:10px 16px 0}
+.settings .sync-card .radio-row{cursor:pointer;justify-content:flex-start;gap:10px;padding:14px 16px}
+.settings .sync-card .radio-row+.radio-row{border-top:1px solid var(--border)}
+.settings .sync-card .radio-row input{accent-color:var(--brand);margin:0;flex:none;width:18px;height:18px}
+.settings .sync-sub{padding:0 16px 16px 44px;display:flex;flex-direction:column;gap:12px}
+.settings .sync-field{display:flex;flex-direction:column;gap:6px}
+.settings .sync-field-line{display:flex;gap:8px;flex-wrap:wrap}
+.settings .sync-field-line .input{flex:1 1 220px;min-width:0;width:auto}
+.settings .check-res{display:inline-flex;gap:6px;align-items:center;font-size:12px}
+.settings .check-res.ok{color:var(--success)}
+.settings .check-res.bad{color:var(--danger)}
+.settings .check-res .ic-wrap svg{width:14px;height:14px}
+.settings .sync-every{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-chips{display:flex;gap:6px;flex-wrap:wrap}
+.settings .sync-chip{min-height:44px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:13px;cursor:pointer}
+.settings .sync-chip[aria-pressed=true]{border-color:var(--brand);background:var(--brand-soft);color:var(--text)}
+.settings .sync-act{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-act .btn.ghost{background:none;border-color:var(--border-strong);color:var(--text)}
+.settings .sync-note{font-size:12px;color:var(--warning)}
+.settings .sync-review{margin:0 16px 14px;padding:10px 12px;border:1px solid var(--border-strong);border-radius:var(--r1);background:var(--surface-2);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-review p{flex:1;min-width:180px;margin:0}
+.settings .sync-review .row{flex-wrap:wrap;gap:8px}
+.settings .sync-warn{margin:12px 16px 4px;padding:10px 12px;border-radius:var(--r1);background:var(--warning-soft);color:var(--warning);display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+.settings .sync-warn p{flex:1;min-width:180px;margin:0}
+.settings .sync-warn .row{flex-wrap:wrap;gap:8px}
+.settings .sync-details{padding:0 16px 14px;border-top:1px solid var(--border)}
+.settings .sync-details ul{margin:8px 0 0;padding-left:18px;font-size:12px;color:var(--text-muted);display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+@media(max-width:600px){.settings .sync-sub{padding-left:16px}}
+/* The sign step (a person's choice): both versions when there are two, who signs, then Sign. */
+.sign-step .sign-sides{margin:0 0 8px;padding-left:18px;font-size:12px;color:var(--text-muted);display:flex;flex-direction:column;gap:4px}
+.sign-step .sign-sides b{color:var(--text);font-weight:600}
 /* Narrow: every labelled row puts its label above the value (no label running into the value). */
 @media(max-width:720px){
   .settings .card-row:has(>.set-label){flex-wrap:wrap}

@@ -1,5 +1,5 @@
 {
- "_note": "Screenshot state for Chat (Today, Earlier, a past day) and Settings, 1280 and 390 px wide (e2e/dash_ux_shots.cjs). The Chat day itself comes from chat-day-pilatus-2026-11-11.json. The three 'Team lunch' groups of the live test data are distinct groups and stay distinct.",
+ "_note": "Screenshot state for Chat (Today, Earlier, a past day) and Settings, 1280 and 390 px wide (e2e/dash_ux_shots.cjs). The Chat day itself comes from chat-day-pilatus-2026-11-11.json. The three 'Team lunch' groups of the live test data are distinct groups and stay distinct. Mockup of the Sync card and its three Needs rows: draft sync-card.html (Variant A); act_answer is the sync add-on's status answer the card reads (`orch sync act status`).",
  "rev": "shots-1",
  "now": "2026-11-11T13:05:00",
  "workspace": "pilatus",
@@ -14,8 +14,25 @@
   {"id": "n_5", "ticket": "t_6cbxce"},
   {"id": "n_6", "ticket": "t_rev001"},
   {"id": "n_7", "ticket": "t_hbneed"},
-  {"id": "n_8", "ticket": "t_klj17l", "answer": {"question": "q_w79"}}
+  {"id": "n_8", "ticket": "t_klj17l", "answer": {"question": "q_w79"}},
+  {"id": "sync:paused:5b7f0c1d2e3a4b5c6d7e8f90", "source": "sync", "kind": "sync:paused", "ticket": null, "title": "t_q3x8k1.json", "tone": "needs-you", "since": "2026-11-11T10:12:00Z",
+   "text": "Sync paused: “Close March books” changed here and on another computer.", "answer": {"question": "q1", "options": ["Keep mine", "Keep theirs"], "recommended": null},
+   "actions": [
+    {"label": "Keep mine", "verb": "keep-mine", "target": "tickets/t_q3x8k1.json", "sign": true, "review": {"title": "Keep your version of “Close March books”?", "body": "The change from the other computer is set aside.", "here": "Due: 2026-03-31", "there": "Note: Bank fees added", "done": "Kept your version."}},
+    {"label": "Keep theirs", "verb": "keep-theirs", "target": "tickets/t_q3x8k1.json", "sign": true, "review": {"title": "Keep the other computer’s version of “Close March books”?", "body": "The change made here is set aside.", "here": "Due: 2026-03-31", "there": "Note: Bank fees added", "done": "Kept the other version."}}]},
+  {"id": "sync:move:orch-files", "source": "sync", "kind": "sync:move", "ticket": null, "title": "Sync", "tone": "needs-you", "since": "2026-11-11T10:12:00Z",
+   "text": "Move your orch files out of the team repository?",
+   "actions": [
+    {"label": "Move", "op": "private.move", "sign": true, "review": {"title": "Move your orch files out of the team repository?", "body": "Why: your tickets sit in your team’s repository, so everyone on the team sees each change. Where: they stay in this folder on this computer; the team repository no longer keeps them. Your team’s files are not touched.", "done": "Moved your orch files."}},
+    {"label": "Not now", "later": true}]},
+  {"id": "sync:secret:0a1b2c3d4e5f60718293a4b5", "source": "sync", "kind": "sync:secret", "ticket": null, "title": "payroll-access.txt", "tone": "needs-you", "since": "2026-11-11T10:12:00Z",
+   "text": "Not synced: payroll-access.txt may contain a password or access key.", "answer": {"question": "q1", "options": ["Keep mine", "Keep theirs"], "recommended": null},
+   "actions": [
+    {"label": "Leave it out", "verb": "leave-out", "target": "tickets/t_q3x8k1/artifacts/payroll-access.txt", "sign": true, "review": {"title": "Leave payroll-access.txt out of sync?", "body": "It stays on this computer only.", "done": "Left out. It stays on this computer."}},
+    {"label": "View file", "view": {"ticket": "t_q3x8k1", "name": "payroll-access.txt"}}]}
  ],
+ "act_answer": {"addon": "sync", "answer": {"mode": "remote", "remote": "https://files.example.org/mia/month-end", "interval": 15, "shown": "synced", "last_ok": "2026-11-11T10:15:00", "last_try": "2026-11-11T10:15:00", "last_error": null, "paused_needs": 0,
+  "not_synced": [{"name": "scans-march.zip", "why": "too big, stays on this computer"}, {"name": "payroll-access.txt", "why": "may contain a password or access key"}], "public": null, "remote_allowed": true, "running": true}},
  "runs": {},
  "tickets": [
   {"id": "t_xcl5y8", "key": "PIL-71", "title": "Water office plants – planter 0142-FFE2A659, Wed 11 Nov", "status": "waiting", "due": "2026-11-11",
@@ -95,7 +112,8 @@
   ],
   "addons": [
    {"name": "dashboard", "label": "Dashboard", "description": "This page.", "active": true},
-   {"name": "automation", "label": "Automation", "description": "Repeat a ticket on a schedule.", "active": true}
+   {"name": "automation", "label": "Automation", "description": "Repeat a ticket on a schedule.", "active": true},
+   {"name": "sync", "label": "Sync", "description": "Keep a copy of your tickets on this computer or another one.", "active": true}
   ]
  },
  "mobile_mode": {"on": false, "default_hours": 12, "hours_choices": [4, 8, 12, 24], "awake": null, "since": null, "ends_at": null, "machine": "Office Mac", "ended": null},

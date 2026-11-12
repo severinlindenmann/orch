@@ -613,22 +613,85 @@ def _addon_start(a):
     return ["start"], ["--no-open"], []
 
 
+def _act_target(v) -> str:
+    """What an add-on verb acts on: a ticket id, or one plain value the add-on checks itself (a sync address, a file
+    of a ticket, `<ticket>:<add-on>`): one line, no control character, never starting with "-". It always goes
+    after `--`, so it can never be read as an option."""
+    if isinstance(v, str) and TID.fullmatch(v):
+        return v
+    if (
+        not isinstance(v, str)
+        or not v.strip()
+        or len(v) > 500
+        or v.startswith("-")
+        or v != v.strip()
+        or any(ord(c) < 32 or ord(c) == 127 or c in "\u2028\u2029" for c in v)
+    ):
+        raise BadRequest("That is not something this action can work on.")
+    return _text(v, "target", limit=500)
+
+
 def _addon_act(a):
     """ONE generic op for an add-on's own verbs: `orch <addon> act <verb> -- <target>`. The add-on name is checked
-    against `orch addon list` in run_op (it must be on here); the dashboard code never names one."""
-    _only(a, ("addon", "verb", "target", "value"))
+    against `orch addon list` in run_op (it must be on here); the dashboard code never names one. `sign` = the
+    person signed this click on the page: run_op asks the add-on which proof target the verb needs and passes a
+    proof minted for exactly that (see addon_proof_target)."""
+    _only(a, ("addon", "verb", "target", "value", "sign"))
     addon, verb = a.get("addon"), a.get("verb")
     if not (isinstance(addon, str) and ADDON.fullmatch(addon) and addon not in RESERVED):
         raise BadRequest("That is not an add-on.")
     if not (isinstance(verb, str) and VERB.fullmatch(verb)):
         raise BadRequest("That action is not available.")
+    if "sign" in a and a["sign"] is not True:
+        raise BadRequest("A signed click says sign: true.")
     flags = []
     if "value" in a:
-        value = _text(a["value"], "time")
-        if verb != "repeat" or len(value) > 200:
-            raise BadRequest("Only repeat takes a time, at most 200 characters.")
+        if verb == "set":  # a setting's value: a whole number (sync: every 5, 15 or 60 minutes)
+            if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
+                raise BadRequest("Set takes a whole number.")
+            value = a["value"]
+        else:
+            value = _text(a["value"], "time")
+            if verb != "repeat" or len(value) > 200:
+                raise BadRequest("Only repeat takes a time, at most 200 characters.")
         flags.append(f"--value={value}")
-    return [addon, "act", verb], flags, [_tid(a.get("target"))]
+    return [addon, "act", verb], flags, [_act_target(a.get("target"))]
+
+
+PROOF_TARGET = re.compile(r"[a-z][a-z0-9-]{1,31}:[A-Za-z0-9_.:@/+=-]{1,400}")
+
+
+def addon_proof_target(root: Path, orch_bin: str, argv: list[str], addon: str) -> str | None:
+    """Which proof a signed add-on click needs: `orch <addon> act <verb> --proof-target ... -- <target>` answers
+    {"target": "<addon>:..."} or {"target": null} and changes nothing. Only a target under the add-on's own name is
+    minted, and only for the core op `addon.act` (a proof that only that add-on's own CLI checks); anything else is
+    refused before a proof exists."""
+    i = argv.index("--") if "--" in argv else len(argv)
+    try:
+        r = _run(
+            [*argv0(orch_bin), *argv[:i], "--proof-target", *argv[i:]],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            stdin=subprocess.DEVNULL,
+            env=human_env(root, orch_bin),
+        )
+        out = json.loads(r.stdout)
+    except subprocess.TimeoutExpired:
+        raise BadRequest("That took too long. Please try again.") from None
+    except (OSError, ValueError):
+        out = None
+    if not isinstance(out, dict) or r.returncode != 0 or "target" not in out:
+        err = out.get("error") if isinstance(out, dict) else None
+        raise BadRequest(str(err or "This can't be signed right now. Nothing was changed.")[:300])
+    target = out["target"]
+    if target is None:
+        return None
+    if not (isinstance(target, str) and PROOF_TARGET.fullmatch(target) and target.startswith(addon + ":")):
+        raise BadRequest("This can't be signed right now. Nothing was changed.")
+    return target
 
 
 def _agent_name(v) -> str:
@@ -935,6 +998,9 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest(
             "An agent with that name is already set up. Pick another name (changing one is done in the terminal)."
         )
+    if op == "addon.act" and args.get("sign") is True and orch_bin == SELF:
+        target = addon_proof_target(root, orch_bin, argv, args["addon"])  # a click with a session only (above)
+        need = ("addon.act", target) if target else None
     try:
         if need:
             r = run_with_proof(

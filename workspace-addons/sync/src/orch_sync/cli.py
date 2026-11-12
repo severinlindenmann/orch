@@ -13,6 +13,9 @@ from orch.errors import Refused as CoreRefused
 from . import repo
 from .settings import DEFAULTS, minutes
 
+ACT_VERBS = ("status", "check", "set", "now", "use-public", "keep-mine", "keep-theirs", "leave-out", "allow",
+             "ignore", "leave-deleted", "restored")
+
 
 def remote_allowed():
     """PR 4's sync step must call this on every run, before remote operations."""
@@ -52,6 +55,122 @@ def status_line(s):
     run = f"running, next {s['next_run']}" if s["running"] else "not running (orch sync start)"
     return (f"Sync: {s['mode']}, every {s['interval']} minutes, {run}. Last synced: {s['last_ok'] or 'never'}. "
             f"Paused: {'yes' if s['paused'] else 'no'}." + (f" Problem: {s['last_error']}" if s["last_error"] else ""))
+
+
+def save_settings(root, settings):
+    target = repo.safe(root, "run/sync/settings.json")
+    with tempfile.NamedTemporaryFile(mode="w", dir=repo.local_dir(root), delete=False) as f:
+        json.dump(settings, f)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        os.replace(f.name, target)
+    finally:
+        Path(f.name).unlink(missing_ok=True)
+
+
+def apply_set(root, settings, mode=None, remote=None, interval=None, kind="private"):
+    """`orch sync set` (also `orch sync act set`): check, save and wake the loop. Returns (settings, notice): the
+    notice is the visibility line for a remote address seen for the first time, else None."""
+    if mode is None and interval is None:
+        raise repo.Refused("Say what to change: --mode off|local|remote or --interval 5|15|60")
+    if interval is not None and interval not in (5, 15, 60):
+        raise repo.Refused("Sync can run every 5, 15 or 60 minutes")
+    mode = mode or settings["mode"]
+    if mode == "local" and interval is not None:
+        raise repo.Refused("Local sync runs every 5 minutes at most. --interval is only for remote sync")
+    if kind != "private":
+        raise repo.Refused("Team sync is not available yet")
+    if (mode == "remote" or remote is not None) and not remote_allowed():
+        raise repo.Refused("Remote sync is preview-only")
+    if remote:
+        repo.validate_url(remote)
+    if mode == "off" and remote:
+        raise repo.Refused("Set a remote in local or remote mode")
+    if mode == "remote" and not (remote or settings.get("remote")):
+        raise repo.Refused("A remote address is required")
+    if mode != "off":
+        repo.ensure(root)
+    notice = None
+    if remote:
+        repo.set_remote(root, remote)
+        settings["remote"] = remote
+        from .visibility import remote_visibility
+
+        safe_url = safe_address(remote)
+        notices = read(root, "visibility")
+        if safe_url not in notices:
+            visibility = remote_visibility(remote)
+            notices[safe_url] = visibility
+            from .step import encoded, write
+
+            write(root, "run/sync/visibility.json", encoded(notices))
+            notice = "Anyone can read this repository" if visibility == "public" else "Make sure this repository is private"
+    settings.update(mode=mode, kind=kind, interval=interval or settings["interval"])
+    save_settings(root, settings)
+    from . import loop, service
+
+    if service.running_pid(root):
+        loop.wake_up(root)  # the loop reads the new settings now (and ends when set to off)
+    return settings, notice
+
+
+def status_result(root, settings):
+    """`orch sync status --json`: the settings with the loop's and the last step's facts."""
+    from . import loop, service
+    from .pause import verified_pause
+
+    state = read(root, "state")
+    info = service.read(root, loop.INFO)
+    pid = service.running_pid(root)
+    return {
+        "state": state,
+        **settings,
+        "interval": loop.minutes(settings),
+        "running": bool(pid),
+        "remote_allowed": remote_allowed(),
+        **{k: state.get(k) for k in ("last_ok", "ahead", "behind")},
+        "last_try": info.get("last_try"),
+        "last_error": info.get("last_error") or state.get("last_error"),
+        "paused": verified_pause(root, state) is not None,
+        "next_run": info.get("next_run") if pid else None,
+    }
+
+
+def deleted(root, ticket, keep, args):
+    """A missing ticket notice: OK (keep it restored) or leave it deleted on every computer (a person's proof)."""
+    from orch import config, humanproof, syncgate
+
+    from .step import encoded, entries, step_lock, write
+
+    with step_lock(root), syncgate.hold(root):
+        state = read(root, "state")
+        if ticket not in state.get("deleted", {}):
+            raise repo.Refused("No missing ticket notice")
+        if not keep:
+            by = humanproof.person_by(
+                root,
+                args,
+                "addon.act",
+                "sync:deleted:" + ticket,
+                no_handoff="Leaving a ticket deleted needs a person's proof.",
+            )
+            config.require_person(by, "leave this ticket deleted")
+            from . import records
+
+            # bound to the synced copy the person leaves deleted: a changed ticket needs them again
+            old = entries(root, "HEAD").get(f"tickets/{ticket}.json")
+            if not old:
+                raise repo.Refused("This ticket has no synced copy to leave deleted")
+            allowed = read(root, "allow-delete")
+            allowed[ticket] = records.make(root, "delete", f"{ticket}:{old[1]}", {"ticket": ticket, "blob": old[1]})
+            write(root, "run/sync/allow-delete.json", encoded(allowed))
+        state["deleted"].pop(ticket)
+        from .pause import verified_pause
+
+        state["paused"] = verified_pause(root, state)  # a planted pause is not written back
+        write(root, "run/sync/state.json", encoded(state))
+    return {"acknowledged": ticket}
 
 
 def _run_loop(root):
@@ -130,6 +249,15 @@ def main(argv=None):
     p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
+    # what the dashboard's Sync card and Needs rows do: `orch sync act <verb> [--value V] -- <target>` (act.py)
+    p = sub.add_parser("act")
+    p.add_argument("verb", choices=ACT_VERBS)
+    p.add_argument("target")
+    p.add_argument("--value")
+    p.add_argument("--proof-target", action="store_true", help="say what a signed verb needs proven; changes nothing")
+    p.add_argument("--proof-stdin", action="store_true")
+    p.add_argument("--by")
+    p.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     try:
         start = Path(args.dir).absolute()
@@ -139,59 +267,17 @@ def main(argv=None):
         settings = DEFAULTS | read(root, "settings")
         if args.cmd == "run":
             return _run_loop(root)
+        if args.cmd == "act":
+            from .act import act
+
+            result = act(root, settings, args)
+            print(json.dumps(result) if args.json else result.get("text") or str(result))
+            return 0
         if args.cmd == "set":
-            if args.mode is None and args.interval is None:
-                raise repo.Refused("Say what to change: --mode off|local|remote or --interval 5|15|60")
-            if args.interval is not None and args.interval not in (5, 15, 60):
-                raise repo.Refused("Sync can run every 5, 15 or 60 minutes")
-            asked, args.mode = args.mode, args.mode or settings["mode"]
-            if args.mode == "local" and args.interval is not None:
-                raise repo.Refused("Local sync runs every 5 minutes at most. --interval is only for remote sync")
-            if args.kind != "private":
-                raise repo.Refused("Team sync is not available yet")
-            if (args.mode == "remote" or args.remote is not None) and not remote_allowed():
-                raise repo.Refused("Remote sync is preview-only")
-            if args.remote:
-                repo.validate_url(args.remote)
-            if args.mode == "off" and args.remote:
-                raise repo.Refused("Set a remote in local or remote mode")
-            if args.mode == "remote" and not (args.remote or settings.get("remote")):
-                raise repo.Refused("A remote address is required")
-            if args.mode != "off":
-                repo.ensure(root)
-            if args.remote:
-                repo.set_remote(root, args.remote)
-                settings["remote"] = args.remote
-                from .visibility import remote_visibility
-
-                safe_url = safe_address(args.remote)
-                notices = read(root, "visibility")
-                if safe_url not in notices:
-                    visibility = remote_visibility(args.remote)
-                    notices[safe_url] = visibility
-                    from .step import encoded, write
-
-                    write(root, "run/sync/visibility.json", encoded(notices))
-                    print(
-                        "Anyone can read this repository"
-                        if visibility == "public"
-                        else "Make sure this repository is private",
-                        file=sys.stderr,
-                    )
-            settings.update(mode=args.mode, kind=args.kind, interval=args.interval or settings["interval"])
-            target = repo.safe(root, "run/sync/settings.json")
-            with tempfile.NamedTemporaryFile(mode="w", dir=repo.local_dir(root), delete=False) as f:
-                json.dump(settings, f)
-                f.flush()
-                os.fsync(f.fileno())
-            try:
-                os.replace(f.name, target)
-            finally:
-                Path(f.name).unlink(missing_ok=True)
-            from . import loop, service
-
-            if service.running_pid(root):
-                loop.wake_up(root)  # the loop reads the new settings now (and ends when set to off)
+            asked = args.mode
+            settings, notice = apply_set(root, settings, args.mode, args.remote, args.interval, args.kind)
+            if notice:
+                print(notice, file=sys.stderr)
             result = settings
             if asked in ("local", "remote"):
                 text = consent(settings)
@@ -218,24 +304,7 @@ def main(argv=None):
             print(json.dumps(result) if args.json else str(result))
             return 2 if result.get("last_error") else 0
         elif args.cmd == "status":
-            from . import loop, service
-            from .pause import verified_pause
-
-            state = read(root, "state")
-            info = service.read(root, loop.INFO)
-            pid = service.running_pid(root)
-            result = {
-                "state": state,
-                **settings,
-                "interval": loop.minutes(settings),
-                "running": bool(pid),
-                "remote_allowed": remote_allowed(),
-                **{k: state.get(k) for k in ("last_ok", "ahead", "behind")},
-                "last_try": info.get("last_try"),
-                "last_error": info.get("last_error") or state.get("last_error"),
-                "paused": verified_pause(root, state) is not None,
-                "next_run": info.get("next_run") if pid else None,
-            }
+            result = status_result(root, settings)
             if not args.json:
                 print(status_line(result))
                 return 0
@@ -263,40 +332,7 @@ def main(argv=None):
 
             result = rows(root)
         elif args.cmd == "deleted":
-            from orch import config, humanproof, syncgate
-
-            from .step import encoded, entries, step_lock, write
-
-            with step_lock(root), syncgate.hold(root):
-                state = read(root, "state")
-                if args.ticket not in state.get("deleted", {}):
-                    raise repo.Refused("No missing ticket notice")
-                if not args.keep:
-                    by = humanproof.person_by(
-                        root,
-                        args,
-                        "addon.act",
-                        "sync:deleted:" + args.ticket,
-                        no_handoff="Leaving a ticket deleted needs a person's proof.",
-                    )
-                    config.require_person(by, "leave this ticket deleted")
-                    from . import records
-
-                    # bound to the synced copy the person leaves deleted: a changed ticket needs them again
-                    old = entries(root, "HEAD").get(f"tickets/{args.ticket}.json")
-                    if not old:
-                        raise repo.Refused("This ticket has no synced copy to leave deleted")
-                    allowed = read(root, "allow-delete")
-                    allowed[args.ticket] = records.make(
-                        root, "delete", f"{args.ticket}:{old[1]}", {"ticket": args.ticket, "blob": old[1]}
-                    )
-                    write(root, "run/sync/allow-delete.json", encoded(allowed))
-                state["deleted"].pop(args.ticket)
-                from .pause import verified_pause
-
-                state["paused"] = verified_pause(root, state)  # a planted pause is not written back
-                write(root, "run/sync/state.json", encoded(state))
-            result = {"acknowledged": args.ticket}
+            result = deleted(root, args.ticket, args.keep, args)
         elif args.cmd == "start":
             from . import orchcli, service
 

@@ -27,5 +27,14 @@
 .ticket-title .mono{white-space:nowrap}
 .ticket-title .mono{flex:none}
 .chip.attn{background:var(--warning-soft);border-color:var(--warning);color:var(--warning)}
+/* An add-on row with its own buttons (sync, draft sync-card.html): text and source on the left, the buttons right;
+   a signed choice says "Needs your signature" next to them. Stacked on a narrow screen. */
+.home-need.need-acts{flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.home-need.need-acts>.grow{flex:1 1 260px;min-width:0;display:grid;gap:2px;overflow-wrap:anywhere}
+.home-need.need-acts .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+.home-need .sig{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--text-muted);margin-right:4px}
+.home-need .sig .ic-wrap{display:inline-flex;opacity:.8}
+.home-need .sig .ic-wrap svg{width:12px;height:12px}
+@media(max-width:600px){.home-need.need-acts .acts{justify-content:flex-start}}
 .status-leaving{opacity:0;transition:opacity 160ms ease-out}
 @media(prefers-reduced-motion:reduce){.status-leaving{transition:none}}

@@ -392,6 +392,98 @@ def resolve(root, path, keep, args=None, *, now=None):
         return step._run(root, "resolved", now, cli.remote_allowed())
 
 
+def resolve_target(root, path, keep):
+    """The proof `resolve(root, path, keep)` will ask for, worked out the same way and without changing anything;
+    None when that choice needs no proof. The dashboard mints exactly this target (a stale one simply fails)."""
+    from . import step
+
+    state = cli.read(root, "state")
+    paused = verified_pause(root, state)
+    if not paths.allowed(path) or not paused or path not in paused["files"]:
+        raise repo.Refused("This file is not waiting for a choice")
+    remote = paused["remote_sha"]
+    live = repo.safe(root, path)
+    head = step.blob(root, step.entries(root, "HEAD").get(path))
+    mine = live.read_bytes() if live.exists() else head
+    saved = repo.safe(root, "run/sync/theirs/" + path)
+    theirs = saved.read_bytes() if saved.exists() else None
+    data = mine if keep == "mine" else theirs
+    data = data if data is not None else mine or theirs
+    if data is None:
+        return None
+    issues = findings(root, path, data)
+    if issues and all(f.code == "cannot-check" for f in issues):
+        return "sync:file:" + hashlib.sha256(data).hexdigest()
+    if paths.TICKET.fullmatch(path) and keep == "theirs" and data == theirs and mine != data:
+        return "sync:keep-theirs:" + hashlib.sha256(path.encode() + b"\0" + data).hexdigest()
+    if path == "ticket-counter.json" and (keep == "theirs" or paused.get("reason") == JUMP):
+        return f"sync:keep-{keep}-counter:{remote}"
+    return None
+
+
+def _left_bytes(root, path):
+    """The file on this computer a person may leave out: an artifact only (a ticket is edited instead)."""
+    if not paths.ARTIFACT.fullmatch(path):
+        raise repo.Refused("Only a file of a ticket can be left out; edit the ticket to take out the password or key")
+    live = repo.safe(root, path)
+    if repo.is_link(live) or not live.is_file():
+        raise repo.Refused("Only a file on this computer can be left out")
+    return live.read_bytes()
+
+
+def leave_out_target(root, path):
+    """The proof target of Leave it out: the path and the exact bytes left out (changed content asks again)."""
+    return "sync:leave-out:" + hashlib.sha256(path.encode() + b"\0" + _left_bytes(root, path)).hexdigest()
+
+
+def left_out(root, path, data):
+    """True when a person left exactly these bytes at this path out of sync (signed record "left-out")."""
+    entry = cli.read(root, "left-out").get(path)
+    return records.ok(root, "left-out", f"{path}:{hashlib.sha256(data).hexdigest()}", entry)
+
+
+def left_out_names(root):
+    """The paths a person left out (signed records only), for the "not synced" list."""
+    out = []
+    for path, entry in sorted(cli.read(root, "left-out").items()):
+        hashed = entry.get("sha256") if isinstance(entry, dict) else None
+        if isinstance(path, str) and isinstance(hashed, str) and records.ok(root, "left-out", f"{path}:{hashed}", entry):
+            out.append(path)
+    return out
+
+
+def leave_out(root, path, args, *, now=None):
+    """Not synced, by a person's choice: a file of this computer that may contain a password or access key stays
+    here only. Bound to its bytes; the pause for it ends and sync looks again."""
+    from . import step
+
+    now = now or datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    with step.step_lock(root):
+        state = cli.read(root, "state")
+        paused = state["paused"] = verified_pause(root, state)
+        if not paths.allowed(path) or not paused or path not in paused["files"] or "secret" not in paused["reason"]:
+            raise repo.Refused("This file is not waiting for a choice")
+        data = _left_bytes(root, path)
+        hashed = hashlib.sha256(data).hexdigest()
+        by = humanproof.person_by(
+            root,
+            args,
+            "addon.act",
+            "sync:leave-out:" + hashlib.sha256(path.encode() + b"\0" + data).hexdigest(),
+            no_handoff="Leaving a file out of sync needs a person's proof over stdin.",
+        )
+        config.require_person(by, "leave this file out of sync")
+        left = cli.read(root, "left-out")
+        left[path] = records.make(root, "left-out", f"{path}:{hashed}", {"path": path, "sha256": hashed})
+        step.write(root, "run/sync/left-out.json", step.encoded(left))
+        paused["files"].remove(path)
+        state["paused"] = sign(root, paused) if paused["files"] else None
+        step.write(root, "run/sync/state.json", step.encoded(state))
+    if state["paused"]:
+        return state
+    return step.run_once(root, "left a file out", now=now)
+
+
 def take_target(remote, tree):
     """The proof target of take-remote: the reviewed remote commit AND the exact tree that will be applied."""
     return f"sync:take-remote:{remote}:{tree}"

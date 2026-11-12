@@ -161,6 +161,186 @@ function copiesCard(settings) {
           row('Prepare a copy with', 'Runs once in each new copy, for example to install what the project needs.', setup),
           settingsText('p', {className:'meta'}, 'Needs version history in this folder. When a copy is removed, its saved changes stay in the version history.')))));
 }
+// Sync (draft sync-card.html, Variant A): Settings › General, below Workspace. Every fact and change goes through
+// the sync add-on's own verbs on the ONE generic op: `orch sync act status|check|set|now|use-public -- <target>`.
+// The address and the choice come only from the person's clicks here; choices that decide for the person are signed.
+const SYNC = 'sync';
+const SYNC_WHERE = [['off', 'Off'], ['local', 'On this computer only'], ['remote', 'Also on another computer or server']];
+const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
+const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
+const SYNC_STATUS = {synced:['ok', 'Last synced'], never:['', 'Not synced yet'], offline:['', 'Offline, will sync when connected'], syncing:['live', 'Syncing…'], paused:['you', 'Paused, review below']};
+// card = the add-on's last status answer; draft = the person's unsaved choice (the review line shows while it differs)
+const syncUi = {card:null, loading:false, draft:null, check:null, note:'', busy:false, nowBusy:false, details:false, wasOff:false, timer:null};
+const syncSaved = card => ({where:card?.mode === 'remote' ? 'remote' : card?.mode === 'local' ? 'local' : 'off', addr:card?.mode === 'remote' ? card.remote || '' : '', every:String(card?.interval && card.mode === 'remote' ? card.interval : 15)});
+const syncNow = () => syncUi.draft || syncSaved(syncUi.card);
+const syncSame = (a, b) => a.where === b.where && (a.where !== 'remote' || (a.addr === b.addr && a.every === b.every));
+const syncHost = addr => { const text = String(addr || '').trim(); const scp = /^[^@\s/]+@([^:\s/]+):/.exec(text); if (scp) return scp[1]; try { return new URL(text).host || text; } catch (_) { return text; } };
+const syncEveryLabel = every => (SYNC_EVERY.find(([v]) => v === String(every)) || SYNC_EVERY[1])[1];
+function syncReviewText(s) {
+  if (s.where === 'off') return 'Sync will stop. Your tickets stay on this computer as they are.';
+  if (s.where === 'local') return 'Sync will keep a copy on this computer only.';
+  if (!s.addr.trim()) return 'Enter a sync address first.';
+  return 'Sync will copy tickets to ' + syncHost(s.addr) + ' every ' + syncEveryLabel(s.every) + '.';
+}
+// One click on the sync add-on's own verb; its answer comes back as state.act_answer.
+async function syncAct(verb, target, extra = {}) {
+  const result = await act('addon.act', {addon:SYNC, verb, target, ...extra});
+  const answer = result.ok && result.state?.act_answer?.addon === SYNC ? result.state.act_answer.answer : null;
+  return {...result, answer};
+}
+async function syncLoad() {
+  if (syncUi.loading || snapshot) return;
+  clearTimeout(syncUi.timer); syncUi.timer = null;
+  if (route().kind !== 'settings') return;  // the page was left: it loads again when Settings opens
+  syncUi.loading = true;
+  try {
+    const result = await syncAct('status', SYNC);
+    if (result.answer && typeof result.answer.shown === 'string') {
+      syncUi.card = result.answer;
+      // just turned on here: "On this computer only" is offered, the person saves it in the review line
+      if (syncUi.wasOff && result.answer.mode === 'off' && !syncUi.draft) syncUi.draft = {where:'local', addr:'', every:'15'};
+      syncUi.wasOff = false;
+    }
+  } finally {
+    syncUi.loading = false;
+    syncUi.timer = setTimeout(syncLoad, 15000);  // before render: a render never starts a second load
+    render();
+  }
+}
+const syncStatusText = card => card.shown === 'synced' ? 'Last synced ' + (time(card.last_ok) || '') : (SYNC_STATUS[card.shown] || SYNC_STATUS.never)[1];
+function syncStatusLine(card) {
+  const shown = syncUi.nowBusy ? 'syncing' : card.shown, [dot] = SYNC_STATUS[shown] || SYNC_STATUS.never;
+  const text = syncUi.nowBusy ? 'Syncing…' : syncStatusText(card);
+  let label = text;
+  if (shown === 'paused') {
+    label = h('a', {href:'#home', 'data-key':'sync-paused-link'}, text);
+    label.addEventListener('click', event => { event.preventDefault(); location.hash = '#home'; requestAnimationFrame(() => { const n = document.getElementById('needs-you'); if (n) { n.scrollIntoView({block:'start'}); n.focus({preventScroll:true}); } }); });
+  }
+  const n = array(card.not_synced).length;
+  const skipped = n ? h('button', {type:'button', className:'sync-skipped', 'aria-controls':'sync-details', 'data-key':'sync-skipped'}, n + (n === 1 ? ' file not synced' : ' files not synced')) : null;
+  skipped?.addEventListener('click', () => { syncUi.details = true; render(); });
+  return h('span', {className:'sync-status-line', 'data-key':'sync-status-line'},
+    h('span', {className:'sync-status' + (shown === 'paused' ? ' you' : ''), role:'status', 'data-key':'sync-status'}, h('span', {className:'dot ' + dot, 'aria-hidden':'true'}), label), skipped);
+}
+function syncLastError(card) {
+  if (!card.last_error) return 'Last error: none';
+  const when = time(card.last_try);
+  return 'Last error' + (when ? ' ' + when : '') + ': ' + (card.last_error === 'offline' ? 'could not reach the sync address.' : String(card.last_error));
+}
+function syncCard(settings) {
+  const addon = array(settings.addons).find(a => a.name === SYNC);
+  if (!addon || snapshot) return null;
+  const wrap = body => h('div', {className:'stack sync-wrap', 'data-key':'settings-sync'}, h('div', {className:'card sync-card', id:'sync-card'}, body));
+  if (!addon.active) {
+    syncUi.wasOff = true; syncUi.card = null; syncUi.draft = null;
+    return wrap(h('div', {className:'card-row'}, h('span', {className:'grow sync-lbl'}, 'Keep a copy of my tickets'),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':false, 'aria-label':'Keep a copy of my tickets', 'data-key':'settings-switch-sync-off', 'data-action':'settings-addon', 'data-name':addon.name, disabled:settingsBusy.has('addon-' + addon.name)})));
+  }
+  const card = syncUi.card;
+  if (!syncUi.loading && !syncUi.timer) queueMicrotask(syncLoad);  // then every 15 s while Settings is open
+  const cur = syncNow(), saved = syncSaved(card), changed = !!card && !syncSame(cur, saved), off = !card || syncUi.busy;
+  const paused = card?.shown === 'paused', blocked = paused || !!card?.public;
+  const radios = SYNC_WHERE.map(([value, label]) => {
+    const radio = h('input', {type:'radio', name:'sync-where', value, 'data-sync-where':value, 'data-key':'sync-where-' + value, disabled:off});
+    radio.checked = cur.where === value;
+    radio.addEventListener('change', () => { syncUi.draft = {...syncNow(), where:value}; render(); });
+    return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio, h('span', {}, label));
+  });
+  const addr = h('input', {type:'text', className:'input mono', id:'sync-addr', 'data-key':'sync-addr', 'data-settings-field':'sync-addr', value:cur.addr, placeholder:'https://…', spellcheck:'false', autocomplete:'off', disabled:off});
+  addr.addEventListener('input', () => { syncUi.draft = {...syncNow(), addr:addr.value}; syncUi.check = null; render(); });
+  const check = button('Check connection', '', async () => {
+    const target = (syncNow().addr || '').trim();
+    if (!target) { syncUi.check = {state:'bad'}; render(); return; }
+    syncUi.check = {state:'checking'}; render();
+    const result = await syncAct('check', target);
+    syncUi.check = {state:result.answer?.ok === true ? 'ok' : 'bad'};
+    render();
+  });
+  check.dataset.key = 'sync-check';
+  const res = syncUi.check ? h('span', {className:'check-res' + (syncUi.check.state === 'ok' ? ' ok' : syncUi.check.state === 'bad' ? ' bad' : ''), role:'status', 'data-key':'sync-check-res'},
+    syncUi.check.state === 'checking' ? null : iconEl(syncUi.check.state === 'ok' ? 'check' : 'x'),
+    syncUi.check.state === 'checking' ? 'Checking…' : syncUi.check.state === 'ok' ? 'Connection works' : 'Can’t reach this address') : null;
+  const chips = SYNC_EVERY.map(([value, label]) => {
+    const chip = h('button', {type:'button', className:'sync-chip', 'aria-pressed':cur.every === value, 'data-key':'sync-every-' + value, disabled:off}, label);
+    chip.addEventListener('click', () => { syncUi.draft = {...syncNow(), every:value}; render(); });
+    return chip;
+  });
+  const now = h('button', {type:'button', className:'btn ' + (blocked ? 'ghost' : 'primary'), 'data-key':'sync-now', disabled:off || syncUi.nowBusy}, iconEl('refresh'), 'Sync now');
+  now.addEventListener('click', syncNowClick);
+  const remoteBox = cur.where === 'remote' ? h('div', {className:'sync-sub', 'data-key':'sync-remote'},
+    h('div', {className:'sync-field'}, h('label', {className:'meta', for:'sync-addr'}, 'Sync address'), h('div', {className:'sync-field-line'}, addr, check), res),
+    h('div', {className:'sync-every'}, h('span', {className:'meta', id:'sync-every-lbl'}, 'Sync every'), h('div', {className:'sync-chips', role:'group', 'aria-labelledby':'sync-every-lbl'}, chips)),
+    h('div', {className:'sync-act'}, now, syncUi.note ? h('span', {className:'sync-note', role:'status', 'data-key':'sync-note'}, syncUi.note) : null)) : null;
+  const review = changed ? h('div', {className:'sync-review', role:'group', 'aria-label':'Review before saving', 'data-key':'sync-review'},
+    h('p', {'data-key':'sync-review-text'}, syncReviewText(cur)),
+    h('div', {className:'row'}, button('Undo', 'quiet', () => { syncUi.draft = null; syncUi.check = null; render(); }), (() => {
+      const save = button('Save', 'primary', syncSave);
+      save.dataset.key = 'sync-review-save';
+      save.disabled = syncUi.busy || (cur.where === 'remote' && !cur.addr.trim());
+      return save;
+    })())) : null;
+  const warn = card?.public ? h('div', {className:'sync-warn', role:'alert', 'data-key':'sync-public'}, h('p', {}, SYNC_PUBLIC),
+    h('div', {className:'row'}, button('Use public location', '', () => signStep({title:'Use a public location?', body:'Anyone who knows the address can read your tickets.', done:'Using the public location.',
+      run:async () => { const r = await syncAct('use-public', 'pending', {sign:true}); await syncLoad(); return r; }})),
+    button('Keep on this computer', '', async () => {
+      syncUi.busy = true; render();
+      const r = await syncAct('set', 'local');
+      syncUi.busy = false; syncUi.draft = null;
+      window.orch.toast(r.ok ? 'Your tickets stay on this computer only.' : r.text, r.ok ? 'ok' : 'error');
+      await syncLoad();
+    }))) : null;
+  const notSynced = array(card?.not_synced);
+  const details = card && card.mode !== 'off' ? h('details', {className:'sync-details', id:'sync-details', 'data-key':'sync-details', open:syncUi.details ? '' : null}, h('summary', {}, 'Details'),
+    h('ul', {}, h('li', {'data-key':'sync-last-error'}, syncLastError(card)), notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
+  return wrap([
+    h('div', {className:'sync-head'}, h('h3', {}, 'Sync'), card && card.mode !== 'off' ? syncStatusLine(card) : null),
+    warn,
+    h('fieldset', {className:'sync-where'}, h('legend', {className:'meta'}, 'Where to keep a copy'), radios),
+    remoteBox, review, details]);
+}
+async function syncSave() {
+  const s = syncNow();
+  if (syncUi.busy || (s.where === 'remote' && !s.addr.trim())) return;
+  syncUi.busy = true; render();
+  const result = s.where === 'remote' ? await syncAct('set', s.addr.trim(), {value:s.every}) : await syncAct('set', s.where);
+  syncUi.busy = false;
+  if (!result.ok) { window.orch.toast(result.text || 'That did not work.', 'error'); render(); return; }
+  syncUi.draft = null; syncUi.note = '';
+  if (!result.answer?.public) window.orch.toast('Saved.', 'ok');
+  await syncLoad();
+}
+// Sync now never clears a pause or a public address that waits: the add-on says what still needs the person.
+async function syncNowClick() {
+  if (syncUi.nowBusy) return;
+  syncUi.nowBusy = true; syncUi.note = ''; render();
+  const result = await syncAct('now', SYNC);
+  syncUi.nowBusy = false;
+  if (!result.ok) window.orch.toast(result.text || 'That did not work.', 'error');
+  else if (result.answer?.still_paused || result.answer?.choose_first) syncUi.note = String(result.answer.text || '');
+  await syncLoad();
+}
+// The person's sign step (the draft's modal): what will happen, both versions when there are two, "You sign this as
+// <name>", then Sign. The server mints the proof for exactly what the add-on names; no typed word.
+function signStep({title, body, here, there, done, run}) {
+  const {d, actions} = dialog(title, 'dialog sign-step');
+  const sides = here || there ? h('ul', {className:'sign-sides'}, h('li', {}, h('b', {}, 'Here:'), ' ', String(here || '')), h('li', {}, h('b', {}, 'Other computer:'), ' ', String(there || ''))) : null;
+  const who = name(state?.who) || 'you';
+  const sign = h('button', {type:'button', className:'btn primary', 'data-key':'sign-ok'}, iconEl('shield'), 'Sign');
+  let pending = false;
+  d.addEventListener('cancel', event => { if (pending) event.preventDefault(); });
+  sign.addEventListener('click', async () => {
+    if (pending) return;
+    pending = true;
+    actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    const result = await run();
+    await window.orch.close(d);
+    window.orch.toast(result?.ok ? 'Signed. ' + (done || '') : result?.text || 'That did not work.', result?.ok ? 'ok' : 'error');
+  });
+  actions.append(sign);
+  d.append(...[sides, body ? settingsText('p', {className:'meta'}, body) : null, settingsText('p', {className:'meta'}, 'You sign this as ' + who + '.'), actions].filter(Boolean));
+  window.orch.open(d);
+  return d;
+}
 function settingsPage() {
   const settings = state.settings;
   const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
@@ -198,7 +378,7 @@ function settingsPage() {
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('p', {className:'mono folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder)),
         h('details', {className:'folder-details', 'data-key':'settings-folder-details'}, h('summary', {}, 'Details'), h('p', {className:'meta'}, 'Stored on this computer'), settingsText('p', {className:'mono meta'}, settings.folder)))))),
-      shareCard(settings), workflowCard(settings), copiesCard(settings)]),
+      syncCard(settings), shareCard(settings), workflowCard(settings), copiesCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),
