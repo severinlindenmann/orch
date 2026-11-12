@@ -331,12 +331,13 @@ test('home rows: no key or chip, no empty Working now, See all tickets (N), fini
   assert.equal(left.children.at(-1).attrs.className, 'see-all');
 });
 // Dash 03/04/14: results fold to 3 one-link rows; same-name results stack with "Mark older as done".
-test('home results: one link per row, same-name stacked, 3 shown and Show all (N)', () => {
+test('home results: one link per row, same-name stacked, newest first, 3 shown and Show all (N)', async () => {
   const r = (id, title, at) => ({id, title, status:'review', updated_at:'2026-11-0' + at + 'T10:00:00Z'});
-  const items = [r('v1', 'Report', 1), r('v2', 'Report', 2), r('v3', 'report', 3), r('x', 'Logo', 4), r('y', 'Menu', 5), r('z', 'Flyer', 6)];
+  const items = [r('v1', 'Report', 1), r('v2', 'Report', 2), r('v3', 'report', 9), r('x', 'Logo', 4), r('y', 'Menu', 5), r('z', 'Flyer', 6)];
   const moved = [];
   const c = context(items, {snapshot:false, locks:new Set(), button:(label, cls, click) => ({tag:'button', attrs:{}, children:[label], click})});
-  c.moveTicket = (id, s) => moved.push([id, s]);
+  let running = 0;
+  c.moveTicket = async (id, s) => { assert.equal(running++, 0); moved.push([id, s]); await null; running--; };
   const home = c.home(), section = nodes(home, n => n.attrs?.['data-key'] === 'check-result')[0], text = JSON.stringify(section);
   const rows = nodes(section, n => n.attrs?.className === 'card-row home-result');
   assert.equal(rows.length, 3);
@@ -344,12 +345,27 @@ test('home results: one link per row, same-name stacked, 3 shown and Show all (N
   assert.equal(nodes(rows[0], n => n.tag === 'a').length, 1);
   assert.equal(nodes(rows[0], n => n.tag === 'a')[0].attrs.href, '#ticket/v3');
   assert.match(text, /3 versions/); assert.match(text, /Show all \(6\)/);
-  nodes(rows[0], n => n.tag === 'button')[0].click();
+  // newest group first; Logo (the stalest) is folded away
+  assert.deepEqual(rows.map(r => nodes(r, n => n.tag === 'a')[0].attrs.href), ['#ticket/v3', '#ticket/z', '#ticket/y']);
+  const control = {disabled:false}, older = nodes(rows[0], n => n.tag === 'button')[0];
+  const done = older.click({currentTarget:control});
+  assert.equal(control.disabled, true);
+  older.click({currentTarget:control}); // a second click while running does nothing
+  await done;
+  assert.equal(control.disabled, false);
   assert.deepEqual(moved, [['v1', 'done'], ['v2', 'done']]);
+});
+test('home results: untitled results do not stack', () => {
+  const items = [{id:'u1', title:'', status:'review'}, {id:'u2', title:'[E2E]', status:'review'}, {id:'u3', status:'review'}];
+  const c = context(items, {snapshot:false, locks:new Set()});
+  c.clean = v => String(v || '').replace(/^\[E2E\]$/, '');
+  const section = nodes(c.home(), n => n.attrs?.['data-key'] === 'check-result')[0];
+  assert.equal(nodes(section, n => n.attrs?.className === 'card-row home-result').length, 3);
+  assert.doesNotMatch(JSON.stringify(section), /versions/);
 });
 // Dash 12/14: the fold shows the oldest question with its answers, then "N more questions"; identical questions stack.
 test('home needs: fold shows the oldest card with answers; identical questions are answered once', async () => {
-  const items = ['a', 'b', 'c', 'd'].map(id => ({id, title:'T ' + id, status:'waiting', questions:[{id:id + '1', text:id === 'd' ? 'Other?' : 'Tuesday or Friday?'}]}));
+  const items = ['a', 'b', 'c', 'd', 'e'].map(id => ({id, title:'T ' + id, status:'waiting', questions:[{id:id + '1', text:id === 'd' ? 'Other?' : id === 'e' ? 'Else?' : 'Tuesday or Friday?'}]}));
   const needs = items.map((t, i) => ({id:t.id + '1', ticket:t.id, since:'2026-11-0' + (i + 1) + 'T00:00:00Z', answer:{question:t.id + '1', digest:'x', options:['Tuesday', 'Friday']}}));
   const sent = [], toasts = [];
   const button = (label, cls, click) => ({tag:'button', attrs:{}, children:[label], click, dataset:{}});
@@ -357,12 +373,35 @@ test('home needs: fold shows the oldest card with answers; identical questions a
   c.window.orch = {toast:t => toasts.push(t)};
   const home = c.home(), text = JSON.stringify(home);
   assert.match(text, /Asked on 3 tickets – answer once/);
-  assert.match(text, /1 more question"/);
+  assert.match(text, /2 more questions"/); // 3 rows: the stacked one, d and e
   const cards = nodes(home, n => n.attrs?.className === 'card-row home-need');
   assert.equal(cards.length, 1);
   const host = {querySelectorAll:() => []};
   await nodes(cards[0], n => n.tag === 'button')[0].click({currentTarget:{closest:() => host}});
   assert.deepEqual(sent, ['a', 'b', 'c']); assert.deepEqual(toasts, ['Answered on 3 tickets']);
+});
+const sameNeeds = (n, act) => {
+  const items = Array.from({length:n}, (_, i) => ({id:'t' + i, title:'T' + i, status:'waiting', questions:[{id:'q' + i, text:'Tuesday or Friday?'}]}));
+  const needs = items.map((t, i) => ({id:'q' + i, ticket:t.id, since:'2026-11-0' + (i + 1) + 'T00:00:00Z', answer:{question:'q' + i, digest:'x', options:['Tuesday', 'Friday']}}));
+  const toasts = [], button = (label, cls, click) => ({tag:'button', attrs:{}, children:[label], click, dataset:{}});
+  const c = context(items, {snapshot:false, document:{getElementById:() => null}, needsList:() => needs, button, locks:new Set(), render(){}, act});
+  c.window.orch = {toast:(t, kind) => toasts.push([t, kind])};
+  return {c, toasts};
+};
+test('home needs: three identical questions are one row, not folded', () => {
+  const {c} = sameNeeds(3, async () => ({ok:true}));
+  const home = c.home(), text = JSON.stringify(home);
+  assert.match(text, /Asked on 3 tickets – answer once/);
+  assert.doesNotMatch(text, /more question/); assert.doesNotMatch(text, /needs-hide/);
+  assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
+});
+test('home needs: a failed answer on stacked questions says how many were answered', async () => {
+  let n = 0;
+  const {c, toasts} = sameNeeds(3, async () => ++n === 2 ? {ok:false, status:409, text:'Nope'} : {ok:true});
+  c.window.DashHelpers.scrubText = t => t;
+  const card = nodes(c.home(), n => n.attrs?.className === 'card-row home-need')[0];
+  await nodes(card, n => n.tag === 'button')[0].click({currentTarget:{closest:() => ({querySelectorAll:() => []})}});
+  assert.deepEqual(toasts, [['Answered on 2 of 3 tickets. Nope', 'error']]);
 });
 
 // Dash 01: clean() drops leading test tags and trailing machine stamps, keeps a title that is only a tag.

@@ -45,7 +45,8 @@ function needRow(row, newest, questionCount = 1, same = []) {
             const result = await act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:option});
             if (result.ok) answered++; else failed = failed || result;
           }
-          window.orch.toast(failed ? changeError(failed) : same.length ? 'Answered on ' + answered + ' tickets' : 'Answered', failed ? 'error' : 'ok');
+          const total = same.length + 1;
+          window.orch.toast(failed ? (answered ? 'Answered on ' + answered + ' of ' + total + ' tickets. ' : '') + changeError(failed) : same.length ? 'Answered on ' + answered + ' tickets' : 'Answered', failed ? 'error' : 'ok');
         } finally {
           locks.delete(key);
           host.querySelectorAll('button').forEach(b => { b.disabled = false; });
@@ -141,17 +142,26 @@ const resultWhen = t => Date.parse(t.updated_at || t.created_at) || 0;
 function resultGroups(review) {
   const groups = new Map();
   for (const t of review.slice().sort((a, b) => resultWhen(a) - resultWhen(b))) {
-    const key = clean(t.title).toLowerCase();
+    const key = clean(t.title).toLowerCase() || 'id:' + t.id; // untitled results never stack
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(t);
   }
-  return [...groups.values()];
+  // newest first, by each group's newest member
+  return [...groups.values()].sort((a, b) => resultWhen(b[b.length - 1]) - resultWhen(a[a.length - 1]));
 }
 function resultRow(group) {
   const t = group[group.length - 1], older = group.slice(0, -1);
   return h('div', {className:'card-row home-result', 'data-key':'ticket-' + t.id},
     h('a', {className:'result-link', href:href(t.id)}, h('span', {className:'grow'}, clean(t.title)), older.length ? h('span', {className:'meta'}, group.length + ' versions') : null, h('span', {className:'chevron', 'aria-hidden':'true'}, '›')),
-    older.length && !snapshot ? h('div', {className:'row'}, button('Mark older as done', 'ghost sm', () => older.forEach(o => moveTicket(o.id, 'done')))) : null);
+    older.length && !snapshot ? h('div', {className:'row'}, button('Mark older as done', 'ghost sm', async event => {
+      const lock = 'older-' + t.id, control = event?.currentTarget;
+      if (locks.has(lock)) return;
+      locks.add(lock);
+      if (control) control.disabled = true;
+      // one at a time, so the moves (and their Undo) do not race each other
+      try { for (const o of older) await moveTicket(o.id, 'done'); }
+      finally { locks.delete(lock); if (control) control.disabled = false; }
+    })) : null);
 }
 function homeSection(key, title, body) {
   return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null}, h('h2', {}, title), h('div', {className:'card'}, body));
@@ -176,7 +186,7 @@ function homeNeeds(rows) {
 }
 let needsOpen = false;
 // Three or more items fold: the oldest question shows as a full card with its answers, then "N more questions".
-function needsFold(groups, failed, count, newest) {
+function needsFold(groups, failed, newest) {
   const oldest = groups.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))[0];
   const first = oldest ? needRow(oldest.row, newest, oldest.count, oldest.same) : failed.length ? startFailedRow(...failed[0]) : null;
   const more = groups.length + failed.length - 1; // stacked identical questions count once
@@ -190,7 +200,8 @@ function needsToday() {
 }
 function home() {
   const {needs, failed, count:needCount} = needsToday(), groupedNeeds = homeNeeds(needs), all = tickets();
-  if (needCount < 3) needsOpen = false;
+  const rowsShown = groupedNeeds.length + failed.length; // stacked identical questions are one row
+  if (rowsShown < 3) needsOpen = false;
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)), results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
@@ -200,7 +211,7 @@ function home() {
   const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
   return fragment(heading('Good ' + (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'), now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'})), banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      homeSection('needs-you', 'Needs you (' + needCount + ')', needCount >= 3 && !needsOpen ? needsFold(groupedNeeds, failed, needCount, newest) : needCount ? [...groupedNeeds.map(({row, count, same}) => needRow(row, newest, count, same)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), needCount >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null] : emptyRow('Nothing needs you right now.')),
+      homeSection('needs-you', 'Needs you (' + needCount + ')', rowsShown >= 3 && !needsOpen ? needsFold(groupedNeeds, failed, newest) : needCount ? [...groupedNeeds.map(({row, count, same}) => needRow(row, newest, count, same)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), rowsShown >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null] : emptyRow('Nothing needs you right now.')),
       working.length ? homeSection('working-now', 'Working now', working.map(workingRow)) : null,
       homeSection('check-result', 'Check result (' + review.length + ')', results.length ? [...results.slice(0, 3).map(resultRow),
         results.length > 3 ? h('div', {className:'card-row', 'data-key':'results-all'}, h('a', {className:'btn ghost sm', href:'#tickets'}, 'Show all (' + review.length + ')')) : null] : emptyRow('No results to check.')),
