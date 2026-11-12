@@ -2724,3 +2724,24 @@ def test_b13q_a_failed_recheck_is_written_as_bad_and_a_later_pass_does_not_certi
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
     assert not worktrees._copy_authority(root, tid).get("merged")
+
+
+def test_b13r_orch_stopped_inside_the_check_then_a_commit_on_top_certifies_nothing(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    to_review(root, tid)
+
+    def stopped(*a):
+        raise KeyboardInterrupt  # the sweep is killed while the check runs
+
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", stopped)
+        with pytest.raises(KeyboardInterrupt):
+            done_and_sweep(root, tid)
+    assert worktrees._copy_authority(root, tid)["journal"]["post_check"] == "pending"
+    git(
+        root, "-c", "user.name=p", "-c", "user.email=p@x", "commit", "--allow-empty", "-qm", "person works on"
+    )
+    worktrees.sweep(root)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
+    assert not worktrees._copy_authority(root, tid).get("merged")

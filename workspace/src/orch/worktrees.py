@@ -2065,19 +2065,12 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             return wait(CHANGED)
         if _bb_read(top, ["rev-parse", "HEAD^{tree}"]) != tree:
             return wait(CHANGED)  # the journal stays: this merge commit is not what was checked
-        problem = _after_merge(top, touched, _bb_read(top, ["rev-parse", "HEAD"]))
-        if problem:
-            # Recorded in the signed journal: ancestry alone never certifies this merge (_recover re-runs
-            # the check for "pending" and keeps "bad" until a person acts).
-            _set_journal(
-                root,
-                ticket,
-                {
-                    **journal,
-                    "post_check": "pending" if problem == "later" else "bad",
-                    "merge_commit": parents[0],
-                },
-            )
+        # Recorded in the signed journal BEFORE the check (it can take minutes and orch may be stopped in it):
+        # ancestry alone never certifies this merge; _recover re-runs the check for "pending" and keeps "bad".
+        _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": parents[0]})
+        problem = _after_merge(top, touched, parents[0])
+        if problem == "bad":
+            _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": parents[0]})
         if problem == "later":
             return wait(CHANGED)  # the merge is in; the next sweep checks again
         if problem:
