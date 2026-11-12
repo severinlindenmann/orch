@@ -1674,14 +1674,10 @@ def _fsck(top: Path, *ids: str) -> int:
         _ctx.deadline = before
 
 
-def _after_merge_ok(top: Path, touched, merge_commit: str) -> bool:
-    """Checked after the merge, in the same locked section: what the merge WROTE is what its commit says.
-    The copy shares the project's object folder, so a blob swapped between the check before the merge and
-    the merge itself would land on disk (and may be swapped back afterwards): every merged file is hashed
-    here (git's stat shortcut is not trusted) against the blob id in the new commit, and the objects
-    reachable from the commit must hash to their ids."""
-    if _fsck(top, merge_commit) != 0:
-        return False
+def _files_match(top: Path, touched) -> bool:
+    """Every touched file in the folder hashes (in Python: git's stat shortcut is not trusted) to the blob id
+    the index holds for it (mode 100644/100755 only; a missing file, link or gitlink is skipped: refused
+    before the merge already)."""
     listing = _bb_read(top, ["ls-files", "-s", "-z"], strip=False)
     index = {}
     for entry in listing.split("\0"):
@@ -1692,7 +1688,7 @@ def _after_merge_ok(top: Path, touched, merge_commit: str) -> bool:
     for name in touched:
         mode, blob = index.get(name, (None, None))
         if mode not in ("100644", "100755"):
-            continue  # gone, a link or a gitlink: refused before the merge already
+            continue
         path = top / name
         try:
             if path.is_symlink() or not path.is_file():
@@ -1707,6 +1703,19 @@ def _after_merge_ok(top: Path, touched, merge_commit: str) -> bool:
         if h.hexdigest() != blob:
             return False
     return True
+
+
+def _after_merge(top: Path, touched, merge_commit: str) -> str | None:
+    """Checked after the merge, in the same locked section: what the merge WROTE is what its commit says.
+    The copy shares the project's object folder, so a blob swapped between the check before the merge and
+    the merge itself would land on disk (and may be swapped back afterwards). None: fine; "later": the
+    object check ran out of time; "bad": a file or object differs from its id."""
+    rc = _fsck(top, merge_commit)
+    if rc == 124:
+        return "later"
+    if rc != 0 or not _files_match(top, touched):
+        return "bad"
+    return None
 
 
 def _set_journal(root: Path, ticket: str, value: dict | None) -> None:
@@ -2030,16 +2039,29 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             return wait(CHANGED)
         if _bb_read(top, ["rev-parse", "HEAD^{tree}"]) != tree:
             return wait(CHANGED)  # the journal stays: this merge commit is not what was checked
-        if not _after_merge_ok(top, touched, _bb_read(top, ["rev-parse", "HEAD"])):
-            # Back to where the project was. --hard only when the folder had no changes outside the merged
-            # files (git's --keep refuses over files whose bytes it finds swapped); otherwise a person looks.
-            # (ignored files are not touched by a reset)
+        problem = _after_merge(top, touched, _bb_read(top, ["rev-parse", "HEAD"]))
+        if problem == "later":
+            return wait(CHANGED)  # the merge is in; the journal stays and the next sweep checks again
+        if problem:
+            # Back to where the project was, never with --hard (a person's edit is never thrown away):
+            # --keep refuses over any file whose bytes differ from the index, and then a person looks.
+            # Only when HEAD and the branch are still the merge's and the folder NOW (re-read: the check can
+            # take minutes) holds no change outside the merged files. Afterwards the restored files are
+            # hashed again: a swapped pre-merge blob must not land either.
+            now = _bb_status(top)
             clean = not any(
                 f[:2] != "!!" and ("R" in f[:2] or "C" in f[:2] or not _hits(prep, f[3:]))
-                for f in pre["status"].split("\0")
+                for f in now.split("\0")
                 if f
             )
-            if clean and _git(["reset", "--hard", pre["head"]], top)[0] == 0:
+            if (
+                clean
+                and _bb_read(top, ["rev-parse", "HEAD"]) == parents[0]
+                and _bb_read(top, ["symbolic-ref", "-q", "HEAD"]) == pre["branch"]
+                and _git(["reset", "--keep", pre["head"]], top)[0] == 0
+                and _files_match(top, touched)
+                and _fsck(top, pre["head"]) == 0
+            ):
                 _set_journal(root, ticket, None)
                 return wait(FILES_CHANGED)
             return wait(CHANGED)  # the journal stays: a person needs to look

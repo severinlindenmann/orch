@@ -2608,7 +2608,7 @@ def test_b13n_a_done_without_a_shown_tip_clears_an_old_binding(done_copy):
     assert "done_shown" not in worktrees._copy_authority(root, tid)
 
 
-def test_b13o_blob_swapped_between_the_check_and_the_merge_is_rolled_back(done_copy, monkeypatch):
+def test_b13o_blob_swapped_between_the_check_and_the_merge_is_never_counted_merged(done_copy, monkeypatch):
     """The object check before the merge passed; the blob is rewritten after it. The merge writes the bad
     bytes: the check after the merge finds them, rolls back to where the project was, nothing is merged."""
     import zlib
@@ -2631,6 +2631,36 @@ def test_b13o_blob_swapped_between_the_check_and_the_merge_is_rolled_back(done_c
     head = git(root, "rev-parse", "HEAD")
     done_and_sweep(root, tid)
     back = tickets.load(root, tid)["work"]["bring_back"]
+    # git's --keep refuses over the swapped bytes: nothing is thrown away, the ticket never counts as merged
+    # and a person looks (the journal stays)
+    assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
+    assert not worktrees._copy_authority(root, tid).get("merged")
+    assert head
+
+
+def test_b13o_a_person_edit_between_merge_and_rollback_is_kept(done_copy, monkeypatch):
+    """The post-merge check fails; meanwhile the person edited a merged file. The rollback never throws the
+    edit away: nothing is reset, the journal stays and a person looks."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+
+    def fail_after_edit(top, touched, commit):
+        (root / "code.py").write_text("my own edit\n")
+        return "bad"
+
+    monkeypatch.setattr(worktrees, "_after_merge", fail_after_edit)
+    done_and_sweep(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
+    assert (root / "code.py").read_text() == "my own edit\n"
+
+
+def test_b13o_a_failed_post_merge_check_with_an_untouched_folder_rolls_back(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    monkeypatch.setattr(worktrees, "_after_merge", lambda *a: "bad")
+    head = git(root, "rev-parse", "HEAD")
+    done_and_sweep(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting" and back["reason"] == worktrees.FILES_CHANGED, back
-    assert git(root, "rev-parse", "HEAD") == head
-    assert (root / "code.py").read_text() != "EVIL\n"
+    assert git(root, "rev-parse", "HEAD") == head and (root / "code.py").read_text() != "print(2)\n"
