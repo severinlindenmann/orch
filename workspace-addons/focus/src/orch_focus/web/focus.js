@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const S = window.FocusStore;
-  const {root, ic, TID, P, INAPP, h, toast, STATUS_WORD, statusWord, STATE, els, act, proof} = S;
+  const {root, ic, TID, P, INAPP, h, toast, statusWord, els, act, proof} = S;
 
   function apply(v) {
     const prev = S.state.view;
@@ -16,7 +16,7 @@
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
     els.agent.textContent = v.run.label;
-    const stateText = v.state === 'working' ? 'Working' : v.state === 'stopped' ? (t.status === 'review' ? STATUS_WORD.review : t.started || v.run.run ? 'Paused' : statusWord(t)) : STATE[v.state];
+    const stateText = window.FocusHelpers.sessionState(v).pill || statusWord(t);
     const shownText = window.FocusHelpers.holdText(v) || stateText;  /* why orch waits, in the core's words; gone when it clears */
     if (els.stateText.textContent !== shownText) els.stateText.textContent = shownText;
     els.live.toggleAttribute('data-hold', shownText !== stateText);

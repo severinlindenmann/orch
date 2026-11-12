@@ -64,6 +64,19 @@
   function holdText(v) {
     return v && v.run && v.run.running === true && typeof v.hold === 'string' ? v.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   }
-  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, attentionText, pickerLine, fileIcon, ago, agentColor, holdText};
+  /* The one source for the session's words: pill, feed headline, and whether work is shown as happening now
+     ("Now:" marks and the "Waiting for the first step…" row). pill null: not started, the ticket's own status word. */
+  function sessionState(v) {
+    const t = v.ticket || {}, run = v.run || {};
+    if (v.state === 'done') return {key: 'finished', pill: 'Done', headline: 'Work completed', active: false};
+    if ((t.questions || []).some(q => q.answer == null)) return {key: 'waiting-for-you', pill: 'Needs you', headline: 'Before the question', active: false};
+    if (v.state === 'needs') return {key: 'waiting-for-you', pill: 'Needs you', headline: 'The work is taking shape', active: run.running === true};
+    if (v.state === 'working') return {key: 'running', pill: 'Working', headline: 'The work is taking shape', active: true};
+    if (v.state === 'waiting') return {key: 'paused', pill: 'Paused', headline: 'Paused', active: false};
+    if (t.status === 'review') return {key: 'stopped', pill: 'Ready for review', headline: 'Work so far', active: false};
+    if (t.started || run.run) return {key: 'paused', pill: 'Paused', headline: 'Paused', active: false};
+    return {key: 'stopped', pill: null, headline: 'Work so far', active: false};
+  }
+  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, attentionText, pickerLine, fileIcon, ago, agentColor, holdText, sessionState};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);
