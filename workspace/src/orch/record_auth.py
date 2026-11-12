@@ -182,7 +182,7 @@ class State:
     pending: int = 0  # lines of a foreign key id before the first verified line: old segment or planted?
     gaps: list = field(default_factory=list)  # [lo, hi] seq ranges skipped by a resync
 
-    def copy(self) -> "State":
+    def copy(self) -> State:
         o = self.out
         return State(
             Verified(list(o.events), o.last_seq, o.last_mac, o.changed, o.removed, o.reason),
@@ -265,9 +265,9 @@ def finish(state: State, kid: str, head: dict | None = None) -> Verified:
     out = s.out
     n_bad, n_oldkey = s.n_bad, 0
     if s.pending:
-        # the genuine rotation shape: the first verified line of the current key starts at seq 1 (its `p` is the
-        # genesis then), or nothing of the current key exists and no head of it says there were lines. Anything
-        # else (a gap, a missing chain) means the foreign lines are planted, not history.
+        # the genuine rotation shape: the first verified line of the current key starts at seq 1 (its `p` is
+        # the genesis then), or nothing of the current key exists and no head of it says there were lines.
+        # Anything else (a gap, a missing chain) means the foreign lines are planted, not history.
         has_head = bool(head and head.get("kid") == kid and type(head.get("seq")) is int and head["seq"] >= 1)
         if out.events:
             rotation = out.events[0]["seq"] == 1
@@ -313,27 +313,15 @@ def _reason(v: Verified, n_bad: int, n_noauth: int, n_oldkey: int) -> str | None
 
 
 def legacy_split(raw: bytes, head_exists: bool) -> tuple[str, bytes, int]:
-    """(mode, raw to verify, unchecked prefix lines). A run file with no sealed line and no chain head is a
+    """(mode, raw to verify, number of legacy lines). A run file with no sealed line and no chain head is a
     legacy run (made before orch sealed lines): mode "legacy", every line unchecked, nothing to verify. Any
-    other file is "sealed": its unsigned lines that all come before the first sealed line are a legacy
-    prefix (counted as unchecked, not verified); every later unsigned line stays in the raw to verify, so it
-    is `changed`. A run that has a head or a sealed line never goes back to "legacy": stripping `auth` is a
-    downgrade that does not work."""
-    lines = [x for x in raw.split(b"\n") if x]
-    first = next((n for n, x in enumerate(lines) if split(x) is not None), None)
-    if first is None:
-        if head_exists:
-            return "sealed", raw, 0
-        return "legacy", b"", len(lines)
-    if first == 0:
-        return "sealed", raw, 0
-    cut, seen = 0, 0
-    while seen < first:  # the byte offset of the first sealed line
-        end = raw.find(b"\n", cut)
-        end = len(raw) if end < 0 else end
-        seen += end > cut
-        cut = end + 1
-    return "sealed", raw[cut:], first
+    other file is "sealed" and verified as a whole: its unsigned lines, wherever they are (also before the
+    first sealed line), are `changed`. A run that has a head or a sealed line never goes back to "legacy":
+    stripping or prepending `auth` is a downgrade that does not work. The caller must have found the head
+    state cleanly ("absent", not "unknown") before it believes "legacy"."""
+    if not head_exists and not any(split(x) is not None for x in raw.split(b"\n") if x):
+        return "legacy", b"", len([x for x in raw.split(b"\n") if x])
+    return "sealed", raw, 0
 
 
 # ------------------------------ spool, head, detail

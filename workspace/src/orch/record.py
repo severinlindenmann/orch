@@ -58,6 +58,10 @@ _MESSAGES = {
         "Some records of this run were changed outside orch. "
         "To be safe, orch does not show them. Nothing was deleted."
     ),
+    "content": (
+        "Some records of this run were changed outside orch. "
+        "To be safe, orch does not show them. Nothing was deleted."
+    ),
     "removed": "Some records of this run were removed outside orch.",
     "unverified": "orch cannot check these records, so it does not show them.",
     "old_key": (
@@ -849,13 +853,11 @@ def _verified(workspace, run, raw) -> _View:
         return _legacy_view(raw, run)
     if not verified.events and (verified.changed or verified.removed):
         raise RecordTampered(verified.reason)
-    reason = verified.reason or ("unchecked" if prefix else None)
     return _View(
         verified.events,
         verified.changed,
         verified.removed,
-        reason,
-        unchecked=prefix,
+        verified.reason,
         last_seq=verified.last_seq,
         last_mac=verified.last_mac,
     )
@@ -1201,7 +1203,7 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
             legacy=view.legacy,
             pending=pending,
             reason=reason,
-            message=_MESSAGES.get(reason) if reason else None,
+            message=_MESSAGES[reason] if reason else None,
         )
     except (RecordTampered, RecordUnavailable) as error:
         if isinstance(error, RecordUnavailable) and error.reason == "missing":
@@ -1655,7 +1657,9 @@ class RecordWriter:
             _report(self.workspace, error, "folder", run, "writer")
             return
         head, _ = humanproof.record_head_read(self.workspace, run)
-        if head is not None:  # only a run that already has a chain keeps the count (a head makes it non-legacy)
+        if (
+            head is not None
+        ):  # only a run that already has a chain keeps the count (a head makes it non-legacy)
             self._move_head(run, head, head["seq"], head.get("mac"), rejected=1)
 
     def _drain(self, run, *, check_lock=lambda: None):

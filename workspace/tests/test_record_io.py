@@ -18,9 +18,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from jsonschema import Draft202012Validator
-
 from conftest import seal_lines
+from jsonschema import Draft202012Validator
 
 from orch import hider, record, record_auth
 
@@ -577,7 +576,7 @@ def test_03_symlink_each_level(store, part):
         expected = "lock" if part.endswith(".lock") else "meta" if part.endswith("meta.json") else None
         if expected:
             assert caught.value.alert["target"] == expected
-    assert not list(outside.iterdir())
+    assert [p.name for p in outside.iterdir() if p.name != ".local-id"] == []  # only the workspace id
     if "runs" in part and not part.endswith(".lock") or part in (".orch", ".orch/record"):
         assert record.read_run(ws, RUN).reason == "link"
 

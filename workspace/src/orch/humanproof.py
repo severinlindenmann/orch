@@ -625,12 +625,24 @@ def _head_path(root: Path, run: str, create: bool) -> Path:
     return d / "record-heads" / f"{run}.json"
 
 
+def ensure_record_key(root: Path) -> bool:
+    """Make the workspace's human key (and so its record key) when a run is claimed: the one place a key is
+    created for recording (a writer never creates it, no key = recording is off). False when this folder has
+    no usable guarded home (nothing is made, nothing is raised: the run starts, it records nothing)."""
+    try:
+        guarded_home(root)
+        return record_key(root, create=True) is not None
+    except Refused:
+        return False
+
+
 def record_head_state(root: Path, run: str) -> str:
     """Whether a run has a chain head in the guarded home: "present", "absent" or "unknown". "absent" only
     when the guarded home, the workspace id and this workspace's key folder all resolve cleanly AND the head
     file is truly not there. Anything else (a missing or forged local id, a key folder that is missing,
     linked, loose or unreadable, a head folder that cannot be read) is "unknown": the caller must fail
-    closed (a run that may have a chain is never read as a legacy run). No key is needed, nothing is checked."""
+    closed (a run that may have a chain is never read as a legacy run). No key is needed, nothing is
+    checked."""
     try:
         if not isinstance(run, str) or not _RUN_NAME.fullmatch(run):
             return "unknown"

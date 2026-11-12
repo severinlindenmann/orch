@@ -323,6 +323,7 @@ class _Problem(dict):
     """One thing a person must be told about a read; `alert` is shown with it, never on its own."""
 
     alert = None
+    legacy = False
 
 
 def _known(root: Path) -> list[str]:
@@ -356,18 +357,20 @@ def _problems(run: str, result) -> list[dict]:
     out = []
     if result.reason in ("content", "removed", "unchecked") or result.changed or result.removed:
         reason = result.reason if result.reason in ("content", "removed", "unchecked") else "content"
-        out.append(
-            _Problem(
-                run=run,
-                status="ok",
-                reason=reason,
-                message=record.problem_message(reason),
-                changed=result.changed,
-                removed=result.removed,
-            )
+        found = _Problem(
+            run=run,
+            status="ok",
+            reason=reason,
+            message=record.problem_message(reason),
+            changed=result.changed,
+            removed=result.removed,
         )
+        found.legacy = result.legacy  # decided once, by the read status (never from the reason text)
+        out.append(found)
     if result.pending:
-        out.append(_Problem(run=run, status="ok", reason="pending", message=record.problem_message("pending")))
+        out.append(
+            _Problem(run=run, status="ok", reason="pending", message=record.problem_message("pending"))
+        )
     return out
 
 
@@ -829,9 +832,9 @@ def _window(args) -> tuple[str, str]:
 
 def run_model(run: str, events: list[dict], *, root=None, problem: bool = False) -> dict:
     """One run as counts.md sees it: ticket, day started, what its agent tool can report, uses. `complete` is
-    false when the run had lines changed, removed or unchecked (activity.md, Authenticated record); `protected`
-    is false for a run by a tool orch cannot give deny rules (record.UNPROTECTED_TEXT is shown for it), None
-    when that is not known."""
+    false when the run had lines changed, removed or unchecked (activity.md, Authenticated record);
+    `protected` is false for a run by a tool orch cannot give deny rules (record.UNPROTECTED_TEXT is shown
+    for it) and when the tool is not known from a verified line."""
     from orch import adapters
 
     uses: dict[tuple, dict] = {}
@@ -873,11 +876,20 @@ def run_model(run: str, events: list[dict], *, root=None, problem: bool = False)
     if sees is None:  # no capability list was written: only what the run actually used is known to be seen
         sees = sorted({i["kind"] for i in items})
     first = events[0]["at"] if events else None
-    harness = events[0].get("harness") if events else None
+    # the harness only from a line orch itself wrote and verified (the core's run.state): a hook line is the
+    # agent's word and could claim another tool. Unknown means "not protected": the marker is shown.
+    harness = next(
+        (
+            e.get("harness")
+            for e in events
+            if e["kind"] == "run.state" and e.get("via") == "core" and e.get("checked") is not False
+        ),
+        None,
+    )
     return {
         "run": run,
         "complete": not problem,
-        "protected": adapters.can_deny(harness, root) if isinstance(harness, str) else None,
+        "protected": bool(adapters.can_deny(harness, root)) if isinstance(harness, str) else False,
         "ticket": events[0].get("ticket") if events else None,
         "day": first[:10] if first else None,
         "sees": sees,
@@ -970,7 +982,7 @@ def counts(root: Path, args) -> dict:
     day_from, day_to = _window(args)
     models = []
     by_run, unavailable = _events(root, _known(root), args.ticket)
-    unchecked = {p["run"] for p in unavailable if p.get("reason") == "unchecked"}
+    unchecked = {p["run"] for p in unavailable if p.legacy}
     flagged = {p["run"] for p in unavailable}
     for run, events in by_run.items():
         if not events or run in unchecked:  # a run made before orch checked it is never counted

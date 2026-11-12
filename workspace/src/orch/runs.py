@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, history, procs, runhooks, services, tickets
+from orch import adapters, addons, history, humanproof, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -676,6 +676,7 @@ def claim(
     folder: where the agent works when that is not the workspace root (a separate copy); it goes in the
     record."""
     ticket = tickets.load(root, tid)
+    humanproof.ensure_record_key(root)  # the record is sealed with a key made here (activity.md); idempotent
     with locked(root, tid):
         cur = read(root, tid)
         if cur:

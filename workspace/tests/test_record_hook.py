@@ -492,10 +492,11 @@ def test_pid_must_match_the_recorded_start_time(live, monkeypatch):
     path = _claim_file(root)
     claim = json.loads(path.read_text())
     assert claim.get("pid_started")
+    real_started = procs.pid_started
     monkeypatch.setattr(procs, "pid_started", lambda pid: None)  # current start time unreadable
     with pytest.raises(record_hook.NotRecorded, match="not from inside"):
         record_hook.hook(root, line(id="toolu_a"))
-    monkeypatch.undo()
+    monkeypatch.setattr(procs, "pid_started", real_started)
     monkeypatch.setenv("ORCH_RUN", run)
     monkeypatch.setenv("ORCH_TICKET", tid)
     claim.pop("pid_started")  # claim without a recorded start time

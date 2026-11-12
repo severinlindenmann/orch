@@ -400,7 +400,7 @@ _RECORD_MODULES = re.compile(
 
 
 @pytest.fixture(autouse=True)
-def _record_keys(request, monkeypatch, tmp_path_factory):
+def _record_keys(request, tmp_path_factory):
     """The record writer is fail closed: no human key, no recording (record_auth, activity.md). The record
     test modules write in plain tmp folders that are no guarded workspace, so for them the guarded home falls
     back to a test folder and the record key is made on first use. This is this test package's fixture only:
@@ -422,20 +422,11 @@ def _record_keys(request, monkeypatch, tmp_path_factory):
         except hp.HomeRefused:
             return fallback
 
-    orig_id = addons.workspace_id
-
-    def local_id(root, create=False):
-        """The key helpers get a stable id derived from the folder when it has none (nothing is written into
-        the folder under test: the symlink tests count what lands there); everything else sees the real one."""
-        found = orig_id(root, create=False)
-        if found is not None or sys._getframe(1).f_globals.get("__name__") != "orch.humanproof":
-            return orig_id(root, create=create) if found is None else found
-        return hashlib.sha256(os.path.realpath(root).encode()).hexdigest()[:32]
-
-    monkeypatch.setattr(addons, "workspace_id", local_id)
-    monkeypatch.setattr(hp, "guarded_home", home)
-    monkeypatch.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
-    yield
+    # its own patcher: a test that calls monkeypatch.undo() must not undo the key setup
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(hp, "guarded_home", home)
+        mp.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
+        yield
 
 
 def seal_lines(root, run, events, *, start=1, link=None):

@@ -427,8 +427,8 @@ def test_skipped_lines_are_marked_not_hidden(ws, capsys):
         f.write("this is not an event\n")
     _, lines = cli_lines(capsys, "tail")
     (marker,) = [ln for ln in lines if ln["type"] == "unavailable"]
-    assert (marker["status"], marker["reason"], marker["run"]) == ("ok", "skipped", RUN_B)
-    assert "could not be read" in marker["message"]
+    assert (marker["status"], marker["reason"], marker["run"]) == ("ok", "content", RUN_B)
+    assert marker["changed"] == 1 and "changed outside orch" in marker["message"]
     check(validator("cli-answer", "stream_line"), marker, "marker")
     assert len([ln for ln in lines if ln["type"] == "event"]) == 6
 
@@ -436,7 +436,7 @@ def test_skipped_lines_are_marked_not_hidden(ws, capsys):
 def test_pending_writes_are_marked(ws, capsys):
     pending = record_dir(ws) / "pending" / RUN_A
     pending.mkdir(parents=True)
-    (pending / "x.json").write_text("{}")
+    (pending / ("0" * 20 + "_" + "a" * 32 + ".json")).write_text("{}")
     _, lines = cli_lines(capsys, "tail")
     (marker,) = [ln for ln in lines if ln["type"] == "unavailable"]
     assert (marker["status"], marker["reason"], marker["run"]) == ("ok", "pending", RUN_A)
@@ -706,7 +706,11 @@ def test_high3_a_rewritten_run_is_marked_and_resent(ws, capsys):
     path.write_text(raw_line(ws, RUN_B, 0) + "\n")  # shorter than the cursor
     _, rest = cli_lines(capsys, "tail", "--since", last)
     marks = [ln for ln in rest if ln["type"] == "unavailable"]
-    assert [(m["run"], m["status"], m["reason"]) for m in marks] == [(RUN_B, "ok", "rewound")]
+    # a shortened run file is a truncation: the lines that are gone are `removed`, and the steps are resent
+    assert sorted((m["run"], m["status"], m["reason"]) for m in marks) == [
+        (RUN_B, "ok", "removed"),
+        (RUN_B, "ok", "rewound"),
+    ]
     check(validator("cli-answer", "stream_line"), marks[0], "marker")
     assert [ln["event"]["seq"] for ln in rest if ln["type"] == "event"] == [1]
 
@@ -777,8 +781,8 @@ def test_med_a_trimmed_run_rewritten_shorter_is_rewound(ws, monkeypatch):
     path = run_file(ws, RUN_B)
     path.write_text(raw_line(ws, RUN_B, 0) + "\n")
     out = follow(ws, 1, since="rc1.x")
-    marks = [(m["run"], m["reason"]) for m in out if m["type"] == "unavailable"]
-    assert marks == [(RUN_B, "rewound")]
+    marks = sorted((m["run"], m["reason"]) for m in out if m["type"] == "unavailable")
+    assert marks == [(RUN_B, "removed"), (RUN_B, "rewound")]
     assert [ln["event"]["seq"] for ln in out if ln["type"] == "event"] == [1]
 
 
@@ -818,7 +822,7 @@ def _plant(ws, run, **changes):
 def test_planted_huge_seq_does_not_freeze_the_tail_cursor(ws, capsys):
     _plant(ws, RUN_A, seq=10**18)
     _, before = cli_lines(capsys, "tail", "--run", RUN_A)
-    assert any(ln["type"] == "unavailable" and ln["reason"] == "skipped" for ln in before)
+    assert any(ln["type"] == "unavailable" and ln["reason"] == "content" for ln in before)
     before = [ln for ln in before if ln["type"] == "event"]
     assert [ln["event"]["seq"] for ln in before] == [1, 2, 3, 4]  # the planted line is skipped
     w = RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
@@ -826,7 +830,7 @@ def test_planted_huge_seq_does_not_freeze_the_tail_cursor(ws, capsys):
     _, rest = cli_lines(capsys, "tail", "--run", RUN_A, "--since", before[-1]["cursor"])
     rest = [ln for ln in rest if ln["type"] == "event"]
     assert [ln["event"]["id"] for ln in rest] == ["toolu_a9"]
-    assert rest[0]["event"]["seq"] == 6  # the planted line still counts as physical line 5
+    assert rest[0]["event"]["seq"] == 5  # seq is the chain's: the planted line shifts nothing
 
 
 def test_duplicate_seq_does_not_break_query_paging(ws, capsys):
