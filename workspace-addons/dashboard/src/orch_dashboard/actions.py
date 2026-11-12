@@ -391,7 +391,7 @@ def _ticket_patch(a):
     # "Accept" sends the review tip the page showed; the core binds the Done to it. Anything that is not a
     # commit id is ignored (the Done is then judged as without one, never refused).
     tip = a.get("review_tip")
-    if data.get("status") == "done" and isinstance(tip, str) and SHA.fullmatch(tip):
+    if data.get("status") == "done" and isinstance(tip, str) and (tip == "none" or SHA.fullmatch(tip)):
         flags.append(f"--shown-tip={tip}")
     return (
         ["ticket", "patch", _tid(a.get("ticket"))],

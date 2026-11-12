@@ -315,6 +315,10 @@ def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> l
         # person: no verification at all, and every gpg program is the trusted no-op
         "-c", "merge.verifySignatures=false",
         "-c", "core.useReplaceRefs=false",
+        # .git/objects/info/commit-graph is agent-writable and git trusts the parents stored in it
+        "-c", "core.commitGraph=false",
+        "-c", "gc.writeCommitGraph=false",
+        "-c", "fetch.writeCommitGraph=false",
         "-c", "diff.ignoreSubmodules=none",
         "-c", "status.submoduleSummary=false",
         "-c", f"gpg.program={true}",
@@ -721,9 +725,52 @@ def driver_args(
     return pairs
 
 
+HISTORY_FILES = ("shallow", "objects/info/alternates", "objects/info/grafts", "info/grafts")
+HISTORY_REFUSAL = (
+    "this repository has a shallow, alternates or grafts file, which can change what its history says: "
+    "orch did not run git here"
+)
+
+
+def _git_dirs(cwd: Path) -> list[Path]:
+    """The git folder of `cwd` and its common folder (a work copy points at the project's), found without
+    running git; [] when none is found (git itself then fails or finds nothing)."""
+    here = Path(cwd).absolute()
+    for d in (here, *here.parents):
+        dot = d / ".git"
+        try:
+            if dot.is_dir() and not dot.is_symlink():
+                return [dot]
+            if dot.is_file():
+                line = dot.read_text(errors="replace").splitlines()[0:1]
+                if line and line[0].startswith("gitdir:"):
+                    gd = Path(line[0][7:].strip())
+                    gd = gd if gd.is_absolute() else d / gd
+                    out = [gd]
+                    common = gd / "commondir"
+                    if common.is_file():
+                        c = Path(common.read_text(errors="replace").strip())
+                        out.append(c if c.is_absolute() else gd / c)
+                    return out
+                return []
+        except (OSError, ValueError):
+            return []
+    return []
+
+
+def hostile_history(cwd: Path) -> str | None:
+    """A reason when the repository carries a file git trusts for history that an agent can write (shallow
+    boundary, alternates, grafts): they fake ancestry, merge bases and what a commit id contains."""
+    for g in _git_dirs(cwd):
+        for f in HISTORY_FILES:
+            if os.path.lexists(g / f):
+                return HISTORY_REFUSAL
+    return None
+
+
 def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
     """(argv, config) for git `args`, or (None, (rc, reason)) when orch refuses to run it."""
-    why = refusal(args) or unusable_root(guard if guard is not None else root)
+    why = refusal(args) or unusable_root(guard if guard is not None else root) or hostile_history(cwd)
     if why:
         return None, (REFUSED, why)
     top: list[str] = []  # options before the subcommand

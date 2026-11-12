@@ -460,3 +460,11 @@ test('a parent lists its steps in creation order, whatever order the ticket list
   const ordered = order(shown([parent, alpha, zebra, middle]));
   assert.ok(ordered[0] < ordered[1] && ordered[1] < ordered[2]);
 });
+test('the Accept button is keyed by the shown tip, so a refresh never keeps a stale handler (B13g)', () => {
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), moveTicket:() => Promise.resolve()});
+  const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
+  const key = tip => nodes(c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:tip})).find(n => n.tag === 'button' && n.children.includes('Accept')).attrs['data-key'];
+  assert.notEqual(key(undefined), key('a'.repeat(40)));
+  assert.notEqual(key('a'.repeat(40)), key('b'.repeat(40)));
+});

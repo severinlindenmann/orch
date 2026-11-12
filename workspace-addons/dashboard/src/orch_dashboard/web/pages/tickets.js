@@ -146,6 +146,7 @@ const movePending = new Map();
 // Optimistic: the card moves and the notice (with Undo) shows at once; a failed save puts the card back.
 // `extra`: more arguments of the change (Accept on a ticket in Review sends the review tip it showed).
 function moveTicket(id, status, undoing = false, extra = {}) {
+  if (status === 'done' && !extra.review_tip) extra = {...extra, review_tip:'none'}; // this view showed no review tip
   const t = ticketOf(id), lock = 'status-' + id;
   if (!t || t.status === status || snapshot || locks.has(lock) || changeUnavailable()) return Promise.resolve();
   const previous = t.status, revision = t.revision;

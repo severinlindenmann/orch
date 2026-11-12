@@ -104,6 +104,7 @@ def test_done_click_sends_the_displayed_review_tip():
     assert "--shown-tip=" + "b" * 64 in actions.build_argv("ticket.patch", {**args, "review_tip": "b" * 64})
     other = actions.build_argv("ticket.patch", {**args, "data": {"status": "active"}})
     assert not any(a.startswith("--shown-tip") for a in other)
+    assert "--shown-tip=none" in actions.build_argv("ticket.patch", {**args, "review_tip": "none"})
 
 
 @pytest.mark.parametrize(

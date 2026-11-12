@@ -797,6 +797,7 @@ BRING_BACK_TIMEOUT = None  # git is never killed in the middle of a merge (desig
 APPROVAL_NEEDED = (
     "These changes are not the ones you reviewed before marking this done: they need your approval"
 )
+NO_TIP = "none"  # --shown-tip value: the page showed no review tip
 NEW_CHANGES = "New changes arrived after you looked; approve them to bring them back"
 CONFLICT_PENDING = "The agent has not finished resolving a conflict"
 CRISS_CROSS = "bring it back by hand"
@@ -1386,7 +1387,10 @@ def bind_shown(root: Path, ticket: str, shown) -> bool:
     recorded review tip is no longer that tip, new changes arrived after they looked, so the recorded tip is
     forgotten (the Done still happens; bringing the work back then waits for their approval of the new tip)
     and False is returned. True otherwise."""
-    if not isinstance(shown, str) or not _SHA.fullmatch(shown):
+    if shown == NO_TIP:
+        # The page showed no tip: any tip recorded since (a run ended later) was never seen.
+        shown = None
+    elif not isinstance(shown, str) or not _SHA.fullmatch(shown):
         return True
 
     def stale(r):
@@ -1399,7 +1403,12 @@ def bind_shown(root: Path, ticket: str, shown) -> bool:
         with _scoped(root):
             top = _top_of(root)
             tip = _branch_tip(top, ticket) if top is not None else None
-            if tip == shown and _copy_authority(root, ticket).get("review_tip") == shown:
+            recorded = _copy_authority(root, ticket).get("review_tip")
+            if shown is None and not recorded:
+                # nothing to forget, but a run that ends before the Done is written must not record one
+                _copy_authority(root, ticket, lambda r: r.update(review_void=True))
+                return True
+            if shown is not None and tip == shown and recorded == shown:
                 return True
             _copy_authority(root, ticket, stale)
     except (OSError, ValueError, Refused):
@@ -1426,7 +1435,7 @@ def _bb_state(root: Path, ticket: str, state: str, reason: str = "", commit: str
             return tickets.NO_WRITE  # the same answer again: no new revision, "since" stays
         t.setdefault("work", {}).update(bring_back=value)
 
-    tickets.apply_op(root, ticket, fn)
+    tickets.apply_op(root, ticket, fn, by=tickets.SYSTEM)
     # Local retention survives deletion of the ticket itself.
     _mark(root, "kept", ticket, reason=reason, reason_code=code, bring_back=state == "waiting")
     return value
@@ -1434,7 +1443,8 @@ def _bb_state(root: Path, ticket: str, state: str, reason: str = "", commit: str
 
 def _finished(root: Path, ticket: str, state: str, commit: str) -> dict:
     """This round is brought back (or had nothing): a branch that shows up again later is not this work."""
-    _copy_authority(root, ticket, lambda r: r.update(finished=True))
+    if tickets.load(root, ticket).get("status") == "done":  # reopened meanwhile: the next round starts clean
+        _copy_authority(root, ticket, lambda r: r.update(finished=True))
     return _bb_state(root, ticket, state, commit=commit)
 
 
@@ -1892,6 +1902,8 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         journal_written = True
         if _bb_snapshot(top) != pre:
             return wait(CHANGED)
+        if tickets.load(root, ticket).get("status") != "done":
+            return None  # reopened while this was prepared: the Done that approved it is withdrawn
         merge_started = True
         rc, _, _ = _bb_merge(
             top,
@@ -2746,7 +2758,15 @@ def on_status(root: Path, ticket: str, before: str | None, after: str | None) ->
                 for k in ROUND_KEYS if before == "done" else REVIEW_KEYS:
                     r.pop(k, None)
 
-            _copy_authority(root, ticket, forget)
+            if before == "done":
+                # a reopen must not interleave with a running bring-back (it re-checks the status)
+                try:
+                    with runs.locked(root, LOCK_ID, wait=SWEEP_WAIT):
+                        _copy_authority(root, ticket, forget)
+                except Exception:  # noqa: BLE001 - busy for long: forget anyway, the merge re-checks the status
+                    _copy_authority(root, ticket, forget)
+            else:
+                _copy_authority(root, ticket, forget)
             if after == "review":
                 with runs.locked(root, LOCK_ID, wait=SWEEP_WAIT):
                     _record_review_locked(root, ticket)

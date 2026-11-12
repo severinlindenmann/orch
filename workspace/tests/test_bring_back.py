@@ -637,7 +637,7 @@ def test_forged_merged_flag_cannot_authorize_removal(done_copy):
     root, tid, copy = done_copy
     (root / "code.py").write_text("personal")
     assert_waiting_unchanged(root, tid, copy, project_hashes(root))
-    tickets.apply_op(root, tid, lambda t: t["work"].update(bring_back={"state": "merged"}))
+    tickets.apply_op(root, tid, lambda t: t["work"].update(bring_back={"state": "merged"}), by=tickets.SYSTEM)
     before = project_hashes(root)
     worktrees.remove(root, tid)
     assert project_hashes(root) == before
@@ -701,6 +701,7 @@ def test_reviewed_tip_cannot_move(done_copy, monkeypatch, mode):
             lambda t: t["work"].update(
                 bring_back={"reviewed_tip": git(copy, "rev-parse", "HEAD"), "state": "merged"}
             ),
+            by=tickets.SYSTEM,
         )
     if mode == "forged_registry":
         reg = worktrees.registry(root)
@@ -2226,7 +2227,9 @@ BRING_TIME = "saving needs more time; the next sweep will try again"
 def test_b13f_title_cannot_add_commit_trailers(done_copy):
     """Fable #16: the ticket title goes into the merge message as one line."""
     root, tid, copy = done_copy
-    tickets.apply_op(root, tid, lambda t: t.update(title="Fix\nCo-authored-by: Evil <e@x>"))
+    tickets.apply_op(
+        root, tid, lambda t: t.update(title="Fix\nCo-authored-by: Evil <e@x>"), by=tickets.SYSTEM
+    )
     assert finish(root, tid)["state"] == "merged"
     message = git(root, "log", "-1", "--format=%B")
     assert "\n" not in message and message.startswith(f"orch: {tid} Fix")
@@ -2396,6 +2399,39 @@ def test_b13g_moved_branch_after_display_needs_approval(done_copy, run):
     assert not (root / "late.py").exists()
 
 
+@pytest.mark.parametrize("how", ["status", "patch"])
+def test_b13g_page_showed_no_tip_later_run_end_tip_is_not_approved(done_copy, run, how):
+    """The page showed no review tip (none was recorded: the agent's run was alive); the run ends afterwards
+    and records a tip the person never saw. Their Done (sent as --shown-tip=none) approves nothing."""
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(worktrees, "_alive_here", lambda *a: {"live": True})
+        tickets.set_status(root, tid, "review", "human:test")
+        assert not worktrees._copy_authority(root, tid).get("review_tip")
+    agent_commits(copy)
+    worktrees.on_run_ended(root, tid)
+    assert worktrees._copy_authority(root, tid).get("review_tip")
+    head = git(root, "rev-parse", "HEAD")
+    code, out, err = cli_done(run, root, tid, how, "--shown-tip=none")
+    assert code == 0, err
+    assert worktrees.NEW_CHANGES in out
+    assert tickets.load(root, tid)["status"] == "done"
+    worktrees.sweep(root)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.NEW_CHANGES
+    assert git(root, "rev-parse", "HEAD") == head and not (root / "late.py").exists()
+
+
+def test_b13g_none_with_no_recorded_tip_changes_nothing(done_copy, run):
+    root, tid, copy = done_copy
+    tickets.set_status(root, tid, "review", "human:test")
+    worktrees._copy_authority(root, tid, lambda r: r.pop("review_tip", None))
+    code, out, err = cli_done(run, root, tid, "status", "--shown-tip=none")
+    assert code == 0, err
+    assert worktrees.NEW_CHANGES not in out
+
+
 @pytest.mark.parametrize(
     "bad", ["HEAD", "a" * 39, "a" * 65, "A" * 40, "g" * 40, " " + "a" * 40, "a" * 40 + "\n", "", "--x"]
 )
@@ -2422,3 +2458,23 @@ def test_b13g_displayed_tip_without_a_person_changes_nothing(done_copy, run):
     assert worktrees.NEW_CHANGES not in out + err
     assert tickets.load(root, tid)["status"] == "review"  # an agent's Done is no Done
     assert worktrees._copy_authority(root, tid).get("review_tip")
+
+
+def test_b13h_reopened_while_the_merge_is_prepared_merges_nothing(done_copy, monkeypatch):
+    """A reopen during the preparation withdraws the Done: nothing is merged and the next round starts clean."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    head = git(root, "rev-parse", "HEAD")
+    real = worktrees._bb_snapshot
+
+    def reopen_then_snapshot(top):
+        if tickets.load(root, tid)["status"] == "done":
+            tickets.set_status(root, tid, "active", "human:test")
+        return real(top)
+
+    monkeypatch.setattr(worktrees, "_bb_snapshot", reopen_then_snapshot)
+    worktrees.sweep(root)
+    assert tickets.load(root, tid)["status"] == "active"
+    assert git(root, "rev-parse", "HEAD") == head and not (root / "code.py").read_text() == "print(2)\n"
+    assert not worktrees._copy_authority(root, tid).get("finished")

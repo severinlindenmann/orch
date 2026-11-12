@@ -1574,3 +1574,45 @@ def test_ignore_submodules_in_the_repo_config_does_not_hide_a_gitlink(tmp_path):
     plain_git(r, "config", "diff.ignoreSubmodules", "all")
     rc, out, _ = safegit.run(["diff", "--raw", "-z", "--no-renames", "HEAD~1", "HEAD"], r, read_only=True)
     assert rc == 0 and ":000000 160000" in out
+
+
+def test_history_files_an_agent_can_write_are_not_trusted(tmp_path, monkeypatch):
+    """B13: the commit-graph is switched off for every call; a shallow, alternates or grafts file in the
+    repository (or the project a work copy belongs to) makes orch refuse to run git there."""
+    seen = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
+    )
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    safegit.run(["status"], r, read_only=True, filters=False)
+    assert "core.commitGraph=false" in seen[-1] and "gc.writeCommitGraph=false" in seen[-1]
+    for rel in ("shallow", "objects/info/alternates", "objects/info/grafts", "info/grafts"):
+        f = r / ".git" / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("0" * 40 + "\n")
+        n = len(seen)
+        rc, _, err = safegit.run(["status"], r, read_only=True, filters=False)
+        assert rc == safegit.REFUSED and err == safegit.HISTORY_REFUSAL and len(seen) == n, rel
+        f.unlink()
+    assert safegit.run(["status"], r, read_only=True, filters=False)[0] == 0
+
+
+def test_a_work_copy_of_a_shallow_project_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(safegit, "_raw", lambda *a, **k: (0, "", ""))
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a").write_text("x\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "i")
+    wt = tmp_path / "wt"
+    plain_git(r, "worktree", "add", "-q", "-b", "q", str(wt))
+    assert safegit.run(["status"], wt, read_only=True, filters=False)[0] == 0
+    (r / ".git" / "shallow").write_text("0" * 40 + "\n")
+    assert safegit.run(["status"], wt, read_only=True, filters=False)[0] == safegit.REFUSED

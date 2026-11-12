@@ -763,7 +763,7 @@ function ticketChangesEditor(t) {
   // B13g: the tip recorded for this review is shown, and Accept sends that same tip: the core tells when
   // new changes arrived after you looked (the Done still happens; bringing them back then needs your OK).
   const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
-  const done = ticketButton('Accept', 'primary', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}));
+  const done = ticketButton('Accept', 'primary', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}), {'data-key':'ticket-button-Accept-' + (tip ? tip.slice(0, 20) : 'none')}); // keyed by the tip: a refresh never keeps a handler with a stale one
   const row = h('div', {className:'row ticket-review-actions'});
   const shown = tip ? h('span', {className:'meta', 'data-key':'ticket-review-tip'}, 'Changes up to ', h('code', {}, tip.slice(0, 12))) : null;
   const open = ticketButton('Ask for changes', 'outline', () => {

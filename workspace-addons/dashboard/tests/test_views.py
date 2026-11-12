@@ -381,6 +381,7 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
         "actRetry('ticket.patch', () => ({...extra, ticket:id, data:{status}, if_revision:(ticketOf(id) || t).revision || revision})"
         in move
     )
+    assert "extra = {...extra, review_tip:'none'}" in move  # a Done from a view that showed no tip says so
     assert "if (!t || t.status === status" in move  # dropping on the same column does nothing
     card = js[js.index("function boardCard") : js.index("function board()")]
     assert (
