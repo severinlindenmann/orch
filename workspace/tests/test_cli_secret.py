@@ -57,14 +57,17 @@ def _use_as_person(argv, unproven):
 
 @pytest.fixture(autouse=True)
 def _trust_the_test_interpreter(monkeypatch, request):
-    """The test interpreter lives in folders the test user owns, so it could never be approved as a command.
-    For these tests only, those exact paths (the interpreter and its parents) count as not user-writable;
-    every other path (the tests' own programs) keeps the real answer."""
+    """The test interpreter lives in folders its developer owns or shares with a group (a Homebrew Cellar is
+    user-owned and group-writable, a uv/pyenv python is user-owned), so it could never be approved as a
+    command on a developer laptop, and CI differs from a laptop. For these tests only, the interpreter and its
+    parent folders are left out of the chain the check looks at (one seam: secretrun._chain); every other
+    path (the tests' own programs, the workspace) keeps the real check. The tests marked real_checks run the
+    real check on everything."""
     if request.node.get_closest_marker("real_checks"):
         return
     trusted = set(secretrun._chain(os.path.realpath(PY)))
-    real = secretrun._user_can_write
-    monkeypatch.setattr(secretrun, "_user_can_write", lambda p: False if p in trusted else real(p))
+    real = secretrun._chain
+    monkeypatch.setattr(secretrun, "_chain", lambda p: [c for c in real(p) if c not in trusted])
     # (this machine's Xcode folder is in the user's own Applications: the Xcode tests use the real check)
     monkeypatch.setattr(secretrun, "_check_xcode", lambda path, ws: None)
 
@@ -1932,9 +1935,11 @@ def test_a_tool_planted_in_the_developer_folder_after_approval_is_refused_at_the
     link.symlink_to(dev)
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
     monkeypatch.setattr(secretrun, "XCRUN_STUB_DIR", str(stubs))
-    real = secretrun._user_can_write
-    safe = set(secretrun._chain(str(dev)))  # (pretend the folder itself is safe; only the tool is not)
-    monkeypatch.setattr(secretrun, "_user_can_write", lambda p: False if p in safe else real(p))
+    real = secretrun._chain
+    # (pretend the folder and what is above it is safe; only the tool is not. The temp folder above it is
+    # world-writable on a laptop and in CI, so it is left out of the chain the check looks at.)
+    safe = set(real(str(dev)))
+    monkeypatch.setattr(secretrun, "_chain", lambda p: [c for c in real(p) if c not in safe])
     secretrun._check_xcode(str(stubs / "git"), str(ws))  # nothing there yet: fine
     (dev / "usr" / "bin" / "git").write_bytes(b"planted")  # the agent plants the tool afterwards
     with pytest.raises(Refused, match=LOCATION):
