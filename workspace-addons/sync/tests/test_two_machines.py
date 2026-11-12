@@ -3,7 +3,7 @@ import json
 import subprocess
 
 import pytest
-from test_step import ART, NOW, TICKET, configure, run, save, success, ticket, tracked
+from test_step import ART, NOW, TICKET, at, configure, run, save, success, ticket, tracked
 
 from orch_sync import repo, step
 
@@ -60,7 +60,7 @@ def test_hostile_local_remote_hooks_never_run(machines):
         hook = bare / "hooks" / name
         hook.write_text(f'#!/bin/sh\necho {name} >> "{canary}"\n')
         hook.chmod(0o755)
-    edit(b, title="from B", updated_at="2026-11-11T13:00:00Z")
+    edit(b, title="from B", updated_at=at(13))
     before = remote_sha(bare)
     for root in (b, a):
         assert run(root)["last_error"] == repo.LOCAL_REMOTE_REFUSED
@@ -88,8 +88,8 @@ def test_hostile_local_remote_config_never_runs(machines):
 
 def test_two_fields_status_counter(machines):
     a, b, _ = both(machines)
-    edit(a, title="A title", updated_at="2026-11-11T13:00:00Z")
-    edit(b, note="B note", updated_at="2026-11-11T14:00:00Z")
+    edit(a, title="A title", updated_at=at(13))
+    edit(b, note="B note", updated_at=at(14))
     save(a, "ticket-counter.json", {"last": 10})
     save(b, "ticket-counter.json", {"last": 20})
     success(a)
@@ -97,8 +97,8 @@ def test_two_fields_status_counter(machines):
     success(a)
     assert load(a)["title"] == "A title" and load(a)["note"] == "B note"
     assert json.loads((a / ".orch/ticket-counter.json").read_text())["last"] == 20
-    edit(a, status="done", updated_at="2026-11-11T15:00:00Z")
-    edit(b, status="active", updated_at="2026-11-11T16:00:00Z")
+    edit(a, status="done", updated_at=at(15))
+    edit(b, status="active", updated_at=at(16))
     success(a)
     success(b)
     success(a)
@@ -161,7 +161,7 @@ def test_force_push_closed(machines):
     a, b, bare = both(machines)
     tree = step.oid(a, "HEAD^{tree}")
     # Use a different timestamp: an idle sync now retains the initial root commit.
-    new = step.commit(a, tree, [], "2026-11-11T13:00:00Z")
+    new = step.commit(a, tree, [], at(13))
     repo.git(a, "update-ref", "refs/heads/orch-state", new)
     repo.git(a, "push", "--force", "origin", "HEAD:orch-state")
     before, content, tip = step.oid(b, "HEAD"), load(b), remote_sha(bare)
@@ -460,7 +460,7 @@ def test_merge_uses_checked_commit_when_remote_ref_moves(machines, monkeypatch, 
 
     def commit_once(root, tree, parent, message):
         # A commit no step ever builds itself (its own message and date), so it can never coincide with one.
-        date = "2026-11-11T09:00:00Z"
+        date = at(9)
         made = repo.git(root, *ID, "commit-tree", tree, "-p", parent, input=message.encode(), commit_date=date)
         return made.stdout.decode().strip()
 
