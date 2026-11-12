@@ -218,6 +218,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "record_auth.spool_mac",
     "record_auth.spool_name",
     "record_auth.spool_name_ok",
+    "record_auth.spool_old_ok",
+    "humanproof.record_upgrade_ns",
     "sealed.rfind",
     "self._move_head",
     "self._reject",
@@ -1199,9 +1201,9 @@ def test_pending_tampering_is_alerted_and_skipped(store, monkeypatch):
     writer.append(event())
     pending = record.record_dir(ws) / "pending" / RUN
     pending.mkdir(parents=True)
-    target = pending / ("0" * 19 + "1_" + "a" * 32 + ".json")
+    target = pending / ("9" * 19 + "1_" + "a" * 32 + ".json")  # newer than the upgrade: never read
     target.symlink_to(ws / "outside")
-    planted = pending / ("0" * 19 + "2_" + "b" * 32 + ".json")  # orch's name, but no MAC: planted
+    planted = pending / ("9" * 19 + "2_" + "b" * 32 + ".json")  # orch's name, but no MAC: planted
     planted.write_text(json.dumps(dict(event=event(id="bad"), payload="{}", default_id=False)))
     assert writer.append(event(id="good"))["seq"] == 2
     assert not planted.exists()  # deleted by its exact path, never committed (M4)

@@ -781,20 +781,92 @@ def ensure_record_key(root: Path) -> bool:
 
 
 def _cutover_upgrade(root: Path) -> None:
-    """A key made before the cutover list existed (an upgrade): the list is made once, but only while no run
-    was ever sealed (no chain head). Once a head exists a missing list stays missing (no run is legacy)."""
+    """The record upgrade, exactly once per workspace: a key made before the upgrade marker existed. The MACed
+    marker (record-upgrade.json) is written FIRST; then, only when the cutover list is missing, the list is
+    made from the run files whose mtime is not newer than the marker time. A present marker (valid or not)
+    means done: a list missing afterwards means no run is legacy. Never raises."""
     try:
         d = key_dir(root, create=False)
-        if (d / "record-cutover.json").exists() or (d / "record-cutover.json").is_symlink():
-            return
-        try:
-            if any(n.endswith(".json") for n in os.listdir(d / "record-heads")):
+        with _key_lock(d):
+            path = _upgrade_path(root)
+            if path.exists() or path.is_symlink():
                 return
-        except FileNotFoundError:
-            pass
+            now_ns = time.time_ns()
+            if not _upgrade_mark(root, now_ns):
+                return
+            _cutover_write(root, _iso_s(now_ns), now_ns)
     except (Refused, OSError, ValueError):
         return
-    record_cutover_ensure(root)
+
+
+def _iso_s(ns: int) -> str:
+    return datetime.fromtimestamp(ns // 10**9, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _iso_ns(ns: int) -> str:
+    t = datetime.fromtimestamp(ns // 10**9, UTC).replace(microsecond=(ns // 1000) % 10**6)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _upgrade_path(root: Path) -> Path:
+    return key_dir(root, create=False) / "record-upgrade.json"
+
+
+def _upgrade_mark(root: Path, now_ns: int, at: str | None = None) -> bool:
+    """Write the upgrade marker (MACed with the current record key). True when written."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return False
+    body = {"schema": "orch.record-upgrade/1", "kid": rec[1], "at": at or _iso_ns(now_ns)}
+    body["cm"] = record_auth.upgrade_mac(rec[2], rec[0], body)
+    try:
+        _write_private(_upgrade_path(root), json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
+    except (Refused, OSError, ValueError):
+        return False
+    return True
+
+
+def _upgrade_load(root: Path) -> str | None:
+    """The upgrade marker's time when it verifies under the current record key, else None."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return None
+    try:
+        body = json.loads(_read_guarded(_upgrade_path(root)))
+        ok = (
+            isinstance(body, dict)
+            and body.get("schema") == "orch.record-upgrade/1"
+            and body.get("kid") == rec[1]
+            and isinstance(body.get("at"), str)
+            and isinstance(body.get("cm"), str)
+            and hmac.compare_digest(
+                record_auth.upgrade_mac(rec[2], rec[0], body).encode(), body["cm"].encode()
+            )
+        )
+    except (FileNotFoundError, Refused, OSError, ValueError, TypeError, UnicodeError, RecursionError):
+        return None
+    return body["at"] if ok else None
+
+
+def record_upgrade_at(root: Path) -> str | None:
+    """When the record upgrade ran (orch's own time, MACed in record-upgrade.json), or None."""
+    return _upgrade_load(root)
+
+
+def record_upgrade_ns(root: Path) -> int | None:
+    """record_upgrade_at in ns since the epoch, or None."""
+    at = _upgrade_load(root)
+    if at is None:
+        return None
+    try:
+        t = datetime.strptime(at, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    return (int(t.timestamp()) * 1_000_000 + t.microsecond) * 1000
 
 
 def _cutover_path(root: Path) -> Path:
@@ -909,10 +981,31 @@ def _cutover_reseal(root: Path, listed) -> None:
         return
 
 
+def _upgrade_reseal(root: Path, at: str | None) -> None:
+    """After a key rotation: the same marker time, MACed with the NEW record key, when the old marker verified
+    under the old key. One that did not verify is left as it is (present: the upgrade never runs again)."""
+    if at is not None:
+        _upgrade_mark(root, 0, at)
+
+
 def record_cutover_ensure(root: Path) -> None:
     """Write the cutover list once, at the moment the human key is made (human_key, create branch and nowhere
     else): the unsigned run files in the workspace's record folder at that moment. Never changed afterwards (a
     later run is never legacy); a list that is missing while a key exists means no legacy. Never raises."""
+
+    now_ns = time.time_ns()
+    try:
+        path = _upgrade_path(root)
+        if not (path.exists() or path.is_symlink()):
+            _upgrade_mark(root, now_ns)  # the key is new: there is nothing to upgrade, ever
+    except (Refused, OSError, ValueError):
+        pass
+    _cutover_write(root, _iso_s(now_ns), None)
+
+
+def _cutover_write(root: Path, at: str, max_mtime_ns: int | None) -> None:
+    """Write the cutover list when it is missing: the unsigned run files in the record folder now (with
+    max_mtime_ns: only those whose mtime is not newer than it). Never raises."""
     from orch import record_auth
 
     rec = record_key(root)
@@ -922,21 +1015,19 @@ def record_cutover_ensure(root: Path) -> None:
         path = _cutover_path(root)
         if path.exists() or path.is_symlink():
             return
+        runs = root / ".orch" / "record" / "runs"
         names = sorted(
             n[:-6]
-            for n in os.listdir(root / ".orch" / "record" / "runs")
-            if _RUN_NAME.fullmatch(n[:-6]) and n.endswith(".jsonl")
+            for n in os.listdir(runs)
+            if _RUN_NAME.fullmatch(n[:-6])
+            and n.endswith(".jsonl")
+            and (max_mtime_ns is None or os.lstat(runs / n).st_mtime_ns <= max_mtime_ns)
         )
     except FileNotFoundError:
         names = []
     except (Refused, OSError, ValueError):
         names = []  # cannot be listed: no run is legacy (never a silent give-up, never a guess)
-    body = {
-        "schema": "orch.record-cutover/1",
-        "kid": rec[1],
-        "runs": names,
-        "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
+    body = {"schema": "orch.record-cutover/1", "kid": rec[1], "runs": names, "at": at}
     body["cm"] = record_auth.cutover_mac(rec[2], rec[0], body)
     try:
         _write_private(path, json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
@@ -1609,16 +1700,19 @@ def reset_protection(root: Path, reason: str) -> None:
         except OSError:
             loose = True
         listed = (False, set(), None)
+        upgraded = None
         if not loose:
             _LOADING_OLD.active = True  # human_key must not start a reset of its own while this one reads it
             try:
                 listed = _cutover_load(root)
+                upgraded = _upgrade_load(root)
             except Refused:  # a key that cannot be read soundly carries nothing over
-                listed = (False, set(), None)
+                listed, upgraded = (False, set(), None), None
             finally:
                 _LOADING_OLD.active = False
         _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
         _cutover_reseal(root, listed)
+        _upgrade_reseal(root, upgraded)
         record_reset_note(root)  # when the record key changed (orch's own time; old-key runs age from it)
         for name in _SECRET_FILES:
             with contextlib.suppress(OSError):

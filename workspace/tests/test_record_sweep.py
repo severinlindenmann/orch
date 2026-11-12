@@ -181,8 +181,10 @@ def test_planted_spool_names_never_starve_a_genuine_entry_and_are_never_read(sto
     (genuine,) = list(d.iterdir())
     rec = hp.record_key(ws)
     assert ra.spool_name_ok(rec[2], rec[0], RUN, genuine.name)
-    planted = {f".{n:04d}" for n in range(600)} | {f"{n:020d}_{'a' * 32}.json" for n in range(600)}
-    for name in planted:  # all sort before the genuine entry
+    planted = {f".{n:04d}" for n in range(600)} | {
+        f"{9 * 10**19 + n:020d}_{'a' * 32}.json" for n in range(600)
+    }
+    for name in planted:  # newer than the upgrade marker: never old-format candidates
         (d / name).write_text("{}")
     seen = []
     for fn in ("_read_json", "_file_size"):
@@ -207,7 +209,8 @@ def test_an_upgraded_key_without_a_cutover_list_adopts_existing_runs_once(tmp_pa
     ws.mkdir()
     assert hp.ensure_record_key(ws)
     cutover = hp.key_dir(ws, create=False) / "record-cutover.json"
-    cutover.unlink()  # a key made before the list existed
+    cutover.unlink()  # a key made before the list and the upgrade marker existed
+    (cutover.parent / "record-upgrade.json").unlink()
     (record_dir(ws) / "runs").mkdir(parents=True, exist_ok=True)
     (record_dir(ws) / "runs" / f"{RUN}.jsonl").write_text(json.dumps(example(seq=1)) + "\n")
     assert hp.ensure_record_key(ws)
@@ -217,4 +220,91 @@ def test_an_upgraded_key_without_a_cutover_list_adopts_existing_runs_once(tmp_pa
     )  # a head exists
     cutover.unlink()
     assert hp.ensure_record_key(ws)
-    assert not cutover.exists()  # never re-made once a run was sealed
+    assert not cutover.exists()  # never re-made once the upgrade ran
+
+
+def _pre_upgrade_key(ws):
+    """A key made before the upgrade code: no cutover list, no upgrade marker."""
+    assert hp.ensure_record_key(ws)
+    d = hp.key_dir(ws, create=False)
+    (d / "record-cutover.json").unlink()
+    (d / "record-upgrade.json").unlink()
+    return d
+
+
+def _run_file(ws, run, mtime_ns=None):
+    f = record_dir(ws) / "runs" / f"{run}.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(example(run=run, seq=1)) + "\n")
+    if mtime_ns is not None:
+        import os
+
+        os.utime(f, ns=(mtime_ns, mtime_ns))
+    return f
+
+
+def test_the_upgrade_runs_once_and_writes_its_marker(tmp_path):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    d = _pre_upgrade_key(ws)
+    _run_file(ws, RUN)
+    future = _run_file(ws, "r_future01", time.time_ns() + 10**12)  # an mtime set into the future
+    assert hp.ensure_record_key(ws)
+    assert hp.record_upgrade_at(ws) and hp.record_cutover_read(ws) == {RUN}
+    assert read_run(ws, RUN).legacy is True and read_run(ws, future.stem).legacy is not True
+    before = {n: (d / n).read_bytes() for n in ("record-upgrade.json", "record-cutover.json")}
+    assert hp.ensure_record_key(ws)
+    assert before == {n: (d / n).read_bytes() for n in before}  # never rewritten
+
+
+def test_a_deleted_list_after_the_upgrade_never_adopts_a_planted_run(tmp_path):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    assert hp.ensure_record_key(ws)
+    d = hp.key_dir(ws, create=False)
+    (d / "record-cutover.json").unlink()
+    import shutil
+
+    shutil.rmtree(d / "record-heads", ignore_errors=True)
+    _run_file(ws, "r_planted1", 0)  # an old mtime does not help after the upgrade
+    assert hp.ensure_record_key(ws)
+    assert not (d / "record-cutover.json").exists()
+    assert hp.record_cutover_read(ws) is None and read_run(ws, "r_planted1").legacy is not True
+
+
+def test_a_reset_keeps_legacy_runs_and_the_upgrade_marker(tmp_path):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    _pre_upgrade_key(ws)
+    _run_file(ws, RUN)
+    assert hp.ensure_record_key(ws)
+    at = hp.record_upgrade_at(ws)
+    hp.reset_protection(ws, "test")
+    assert hp.record_upgrade_at(ws) == at and hp.record_cutover_read(ws) == {RUN}
+    assert read_run(ws, RUN).legacy is True
+
+
+def _old_entry(ws, t_ns, good=True):
+    from orch import record_auth as ra
+
+    rec = hp.record_key(ws)
+    name = f"{t_ns:020d}_{'5' * 32}.json"
+    event = example(id="toolu_old", at="2026-11-16T09:00:04Z")
+    entry = {"event": event, "payload": None, "default_id": False}
+    entry["sm"] = ra.spool_mac(rec[2], rec[0], RUN, name, dict(entry)) if good else "x" * 43
+    (spool(ws) / name).write_text(json.dumps(entry))
+    return spool(ws) / name
+
+
+@pytest.mark.parametrize("case", ["ok", "bad_sm", "newer", "no_marker"])
+def test_old_format_spool_entries_drain_only_when_older_than_the_upgrade(store, case):
+    ws, w = store
+    up = hp.record_upgrade_ns(ws)
+    assert up is not None
+    if case == "no_marker":
+        (hp.key_dir(ws, create=False) / "record-upgrade.json").unlink()
+    f = _old_entry(ws, up + 10**9 if case == "newer" else up - 10**9, good=case != "bad_sm")
+    w.append(example(id="toolu_5", at="2026-11-16T09:00:05Z"))
+    ids = [e["id"] for e in read_run(ws, RUN).unwrap()]
+    assert ("toolu_old" in ids) is (case == "ok")
+    assert not f.exists()  # drained or refused, never left

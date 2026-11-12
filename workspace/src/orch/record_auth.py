@@ -37,6 +37,7 @@ _D_JOB = b"orch.record.job/1\0"
 _D_JOB_GENESIS = b"orch.record.job.genesis/1\0"
 _D_HEAD = b"orch.record.head/1\0"
 _D_CUTOVER = b"orch.record.cutover/1\0"
+_D_UPGRADE = b"orch.record.upgrade/1\0"
 
 REASONS = ("content", "removed", "unverified", "old_key")
 
@@ -421,6 +422,16 @@ def spool_name_ok(rk: bytes, ws: str, run: str, name) -> bool:
     return hmac.compare_digest(want.encode(), name.encode())
 
 
+def spool_old_ok(name, upgrade_ns) -> bool:
+    """A spool name of the format before name proofs (`<20-digit time>_<32 random hex>.json`) may be read (its
+    `sm`, which binds the name, is then checked by drain_ok) only when the upgrade marker's time is known and
+    the name's time is older than it: such an entry was made before the upgrade. Anything else is refused."""
+    if not isinstance(name, str) or type(upgrade_ns) is not int:
+        return False
+    m = _SPOOL_NAME.fullmatch(name)
+    return m is not None and int(m.group(1)) < upgrade_ns
+
+
 def spool_mac(rk: bytes, ws: str, run: str, name: str, entry: dict) -> str:
     """`sm` of a pending/<run>/<name> entry: over {event, payload, default_id} (the file name is bound)."""
     msg = _D_SPOOL + _enc(ws) + b"\0" + _enc(run) + b"\0" + _enc(name) + b"\0" + canon_strict(entry)
@@ -460,6 +471,13 @@ def cutover_mac(rk: bytes, ws: str, body: dict) -> str:
     """`cm` of the cutover list: the runs that existed (as unsigned run files) when protection began."""
     return _mac(
         rk, _D_CUTOVER + _enc(ws) + b"\0" + canon_strict({k: v for k, v in body.items() if k != "cm"})
+    )
+
+
+def upgrade_mac(rk: bytes, ws: str, body: dict) -> str:
+    """`cm` of the upgrade marker (record-upgrade.json): the record upgrade ran once, at `at`."""
+    return _mac(
+        rk, _D_UPGRADE + _enc(ws) + b"\0" + canon_strict({k: v for k, v in body.items() if k != "cm"})
     )
 
 
