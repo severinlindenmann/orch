@@ -51,7 +51,7 @@ log; Insights shows "Recording since Mon 16 Nov 2026".
   which is what makes dedupe work). Otherwise `<run>:<seq>` (e.g. `r_8k2m01:12`). A collector that knows a tool-call id
   must use it; it must not invent one. A tool-call id with characters outside `[A-Za-z0-9_.:-]` (or longer than 160) is
   replaced by `x_` + the first 32 hex of its sha256, the same for hook and collector, so dedupe still works (vectors `ids`).
-- `seq` = position in the run file, 1, 2, 3 …, assigned by the writer. Never reused, never reordered.
+- `seq` = position in the run's chain (Authenticated record), 1, 2, 3 …, assigned by the writer. Never reused, never reordered.
 - `run`, `session`, `agent` (`main` or `h_<n>`), `parent` (null for main) bind the event; `ticket` is the run's ticket.
 - **Detail file name** (invariant I4): always 32 lowercase hex characters, `sha256(b"orch.detail/2\0" + run + b"\0" + kind +
   b"\0" + id + b"\0" + ticket)[:32]` (UTF-8; vectors `detail_names`). **An event with no ticket gets no detail file**: its
@@ -416,16 +416,109 @@ counts include `complete: false` when that list is nonempty. Errors use
 
 Windows re-lstat checks narrow but do not close the replacement race. Non-surrogate
 OneDrive placeholders are allowed. Secrets shorter than the hider's minimum
-are not hidden. In-place edits by the same user are not detected: trust is based
-on file identity, not content authentication. Tests compare the bundled schema
-with this contract to detect drift.
+are not hidden. File identity checks (above) do not authenticate content; the record MAC does
+(next section). Tests compare the bundled schema with this contract to detect drift.
 
-### Known limit: record content is not authenticated yet (Gate G1, issue #563)
+## Authenticated record (Gate G1 H1, issue #563)
 
-The checks above stop planted special files, links and foreign owners. They do not
-authenticate the CONTENT of a record line. Anything that runs as the same user can
-append a schema-valid line to `runs/<run>.jsonl` or put one in `pending/<run>/`,
-including a line with `via: "log"` or `via: "core"`. Until the per-line MAC and
-hash chain land (planned next, keyed from a subkey of the guarded key), readers
-must not derive permissions, retention or shared counts from record content, and
-screens show what an agent reported and what orch checked as two different things.
+Slice S1 defines the contract and the pure core (`workspace/src/orch/record_auth.py`, independent reference in
+`validate.py`, vectors `record_auth` in `vectors/activity-v1.json`). The writer and the readers adopt it in S2/S3; until
+then the files and screens behave as before and the limits below apply to the whole record.
+
+**Invariant A1.** A record line counts (shown, deduped, counted, used for retention, run state or caps) only when it
+carries this workspace's record MAC over its exact bytes, its run, its seq and its predecessor's MAC, AND it links into
+the run's chain whose head is kept in the guarded home. Every other line is "changed outside orch": never shown as an
+event, never counted, always reported as a loud marker with a count. One pure function decides it
+(`record_auth.verify_run`). A verified `via: hook` line is still the agent's word (it proves only that orch's hook entry
+wrote it); verified `log|core|broker|job` lines are orch-checked.
+
+**Key.** `ikm = human.key` (32 bytes); `prk = HMAC-SHA256(salt "orch.record/1", ikm)`;
+`rk = HMAC-SHA256(prk, "orch.record.mac/1\0" + ws + 0x01)`; `kid = sha256("orch.record.kid/1\0" + rk)` hex, first 8.
+`ws` is the workspace local id. A derived subkey, never `human.key` itself, so no record MAC can pass as a
+profile1/action1/verdict1/local1 MAC. It is never in argv, the environment, the workspace, a log, a spool file or an
+error text.
+
+**Sealed line.** The writer builds the event body (compact JSON in writer order, no `auth` key) and appends a fixed-length
+suffix:
+```
+p    = MAC of the previous line of the chain; for seq 1: b64u(HMAC(rk, "orch.record.genesis/1\0" + ws + 0 + run))
+msg  = "orch.record.line/1\0" + ws + 0 + run + 0 + str(seq) + 0 + p + 0 + body
+m    = b64u(HMAC-SHA256(rk, msg))                                  # 43 characters
+line = body[:-1] + ',"auth":{"k":"<kid>","p":"<p>","m":"<m>"}}' + "\n"       # the suffix is exactly 125 bytes
+```
+The canonical form is the exact bytes orch wrote: a reader cuts the last 125 bytes, appends `}` and has `body` back
+byte-exact; no re-serialisation, so no float, Unicode or key-order ambiguity. Every event field is inside the MAC
+(`via` and `kind` too, which is what stops a hook line from passing as `log`), plus workspace, run, seq and `p` out of
+band. A body with an `auth` key, a duplicate key, another `run` or no integer `seq` is not verified. Compare MACs with a
+constant-time compare. The 8192-byte line cap includes the suffix. `detail_hash` (32 lowercase hex = first 16 bytes of
+sha256 of the detail file's exact bytes) is present iff `detail` is non-null and is inside the MAC, so a line
+authenticates its detail file. Schema: `$defs/event_body` (what the writer validates and MACs), `$defs/sealed_event`
+(the stored line); the root schema keeps `auth` and `detail_hash` optional so lines made before the MAC still validate.
+
+**Chain and head.** Line `n` carries `p` = `m` of line `n-1`; seq comes from the chain, not from the physical line
+number, so a planted junk line cannot shift later lines. The head (authority for rollback) is
+`<guarded home>/keys/<ws>/record-heads/<run>.json`, 0600, written under the run lock after the line:
+`{"schema": "orch.record-head/1", "run", "kid", "seq", "mac", "jobs": {"<job>": {"seq", "mac"}}, "rejected", "drained",
+"drained_floor", "pruned", "hm"}` where `hm = b64u(HMAC(rk, "orch.record.head/1\0" + ws + 0 + canonical JSON of the head
+without hm))` (sorted keys, compact). A crash between line and head leaves verified lines beyond the head; readers
+accept them and the next commit moves the head. The head is bound to its run (`run` is inside `hm` and a reader requires
+it to equal the run it reads, so one run's head copied over another's never verifies). A head with a wrong `hm`, `run`
+or shape is treated as missing and alerted by the writer; a head of another `kid` (after a reset) is `old_key`: treated
+as missing, no alert (`record_head_read` returns `(None, "old_key")`).
+
+`verify_run` walks the lines. A line failing the suffix, key id, parse or MAC is `changed`. A genuine line must have
+`seq == last_seq + 1` and `p == last_mac` (genesis for seq 1); a genuine line with `seq > last_seq + 1` resyncs there
+with `removed += seq - last_seq - 1`; a genuine line with `seq <= last_seq`, or at the next seq with the wrong `p`
+(replayed, duplicated, spliced from an older copy, moved behind its successor) is `changed` (a moved line that was
+counted `removed` is un-counted). At the end `removed += max(0, head.seq - last_seq)` when the head's `kid` is ours.
+
+| Case | What the reader sees |
+|---|---|
+| line edited in place | that line `changed`; the next genuine line resyncs: `removed: 1` |
+| line inserted (any `via`) | `changed: 1`; every genuine line still shown |
+| two lines swapped | one genuine line shown, the other `changed` (nothing `removed`) |
+| middle line deleted | `removed: 1` |
+| tail truncated, or run file deleted | `removed: head.seq - last_seq` |
+| line of another run or workspace | `changed` (run and workspace are in the MAC) |
+| older genuine copy restored | `removed` (the head is ahead) |
+| no head, chain verifies from genesis | ok |
+
+Result and reasons: `reason` is `content` when lines are shown and some line is changed, `removed` when only genuine
+lines are gone, `unverified` when no line verifies and some have no `auth`, `old_key` when the only changed lines carry
+another key id (see rotation). A line with another key id counts as `old_key` only while no line with the current key
+id has verified yet (the old segment of a rotation always comes first and its MAC cannot be checked); after that it is a
+planted line: `changed`, reason `content`. A run with verified lines plus problems stays readable; one with none is `tampered`.
+Messages: content: "Some records of this run were changed outside orch. To be safe, orch does not show them. Nothing was
+deleted."; removed: "Some records of this run were removed outside orch."; unverified: "orch cannot check these
+records, so it does not show them."; old_key: "These records were made before orch's protection was reset. orch cannot
+check them any more, so it does not show them."
+
+**Key absent, rotation.** No `human.key`: the writer records nothing (`RecordOff`, fail closed, no degraded mode); readers
+report `unverified`. A `reset_protection` rotation changes the `kid`: the next commit starts a new chain segment at
+seq 1 with `p` = the genesis of the new key and rewrites the head (the old head has another key id: not an alert); the
+old lines stay in the file before it and are `old_key`, never `removed`. Lines without `auth` are `changed`. No migration (pre-release).
+
+**Spool and drain.** A spool entry `pending/<run>/<time_uuid>.json` carries `sm = b64u(HMAC(rk, "orch.record.spool/1\0" +
+ws + 0 + run + 0 + name + 0 + canonical JSON of {event, payload, default_id}))`; the file name is bound. It is sealed
+into the chain only when drained under the lock. An entry with a missing or wrong `sm`, a name already drained, or a
+name older than `drained_floor` is never committed: it is deleted by exact path, counted in `head.rejected` and alerted.
+The MACed object is exactly `{event, payload, default_id}`: an entry with any other key (`sm` aside) is refused.
+
+**Job streams** (`jobs/<run>/<job>.jsonl`) use the same seal with domain `orch.record.job/1\0`, scope run + job, genesis
+`orch.record.job.genesis/1` and the head entry `jobs.<job>`; `replace_last` re-seals the new last line with the same seq. A job line carries its `job` inside the MACed body (the
+reader checks it equals the stream's job), as it carries `run`.
+
+### Known limit (Level 1)
+
+The MAC turns "append a line" into "run code that loads orch's key". It does not stop:
+
+- **Code run as the same user.** An agent that executes code importing orch, or that reads `human.key` by a path form
+  the text-based deny rules miss (secrets.md), or that runs under an adapter whose deny format is `none` (codex,
+  generic), can seal anything. Records from such helpers show a plain marker ("Records from this helper can't be fully
+  checked.").
+- **Level 2** is the key held by a separate process or OS user that seals on request. Not built.
+- **Head deleted.** The head lives in the guarded home; deleting it (or leaving one of another key id) means "no
+  head": a tail truncation of the run file is then not detected (the chain still verifies from genesis).
+- Input injection into the collector (on Linux an agent can write into the harness's stdout pipe); such lines arrive
+  through orch's real collector and are sealed as `log`.
+- Alerts and counts files get their own per-file MAC in a later slice; `meta.json` stays unauthenticated (display only).
