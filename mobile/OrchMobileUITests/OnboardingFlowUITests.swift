@@ -145,7 +145,7 @@ final class OnboardingFlowUITests: XCTestCase {
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
         app.launch()
         if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        app.buttons["Paste invitation link"].tap()
+        app.buttons["invite-paste"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap(); expectKeyboardFocus(field)
@@ -164,7 +164,7 @@ final class OnboardingFlowUITests: XCTestCase {
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
         app.launch()
         if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        app.buttons["Paste invitation link"].tap()
+        app.buttons["invite-paste"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap(); expectKeyboardFocus(field)
@@ -173,7 +173,9 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
         connect.tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'expired or was already used'")).firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Connect this phone"].exists)
+        XCTAssertTrue(app.buttons["invite-new"].exists, "an expired invitation offers a new one")
+        app.buttons["invite-new"].tap()
+        XCTAssertTrue(app.buttons["invite-scan"].waitForExistence(timeout: 5), "back to scan / paste")
     }
 
     /// The whole Sign out box is a tap target (left edge, not only the label).

@@ -41,6 +41,8 @@ final class AppModel {
     private(set) var sendTick = 0
     private(set) var errorTick = 0
     var message: String?            // plain error / info line
+    /// Transport health, separate from `message`: only a network failure marks the link down; a failed action does not.
+    private(set) var transportDown = false
 
     // Navigation
     var tab: Tab = .chats
@@ -148,7 +150,15 @@ final class AppModel {
     }
 
     enum Connection { case checking, ok, unreachable }
-    var connection: Connection { message != nil ? .unreachable : (hasLoaded ? .ok : .checking) }
+    var connection: Connection { Self.connection(transportDown: transportDown, hasLoaded: hasLoaded) }
+    /// A failed action (bad answer, server refusal) is not "offline": only a transport failure is.
+    static func connection(transportDown: Bool, hasLoaded: Bool) -> Connection {
+        transportDown ? .unreachable : (hasLoaded ? .ok : .checking)
+    }
+    /// Network failures (no route, timeout, relay unreachable) count as transport errors; API refusals do not.
+    static func isTransportError(_ error: Error) -> Bool { isOffline(error) }
+    /// P49: pairing failed because the invitation itself is no good (expired, used, unknown); a new one is needed.
+    private(set) var inviteNeedsReplacement = false
     var lastUpdatedText: String? {
         guard let lastUpdated else { return nil }
         let now = Date()
@@ -210,11 +220,14 @@ final class AppModel {
     func openInvite(_ text: String) {
         do {
             let link = try PairingLink(text)
-            invite = link; inviteState = .found(host: link.host); message = nil
+            invite = link; inviteState = .found(host: link.host); message = nil; inviteNeedsReplacement = false
         } catch { message = error.localizedDescription }
     }
 
     func openSampleInvite() { openInvite(PairingLink.sample.link) }
+
+    /// Drops the current invitation and goes back to scan / paste.
+    func clearInvite() { invite = nil; inviteState = .none; inviteNeedsReplacement = false; message = nil }
 
     func connect(phoneName: String) async {
         guard let invite else { return }
@@ -231,6 +244,7 @@ final class AppModel {
         } catch {
             inviteState = .found(host: invite.host)
             if case RelayError.api(let status, _, _) = error, status == 401 || status == 404 || status == 410 {
+                inviteNeedsReplacement = true
                 message = "This invitation has expired or was already used. Ask the person who invited you for a new one."
             } else if error is URLError {
                 message = "Can't reach the server. Check your connection, then tap Connect this phone again."
@@ -302,6 +316,7 @@ final class AppModel {
             await reloadMessages()
             for item in questions where questionLog[item.id] != item { questionLog[item.id] = item }
             if message != nil { message = nil }
+            if transportDown { transportDown = false }
             if !hasLoaded { hasLoaded = true }
             if lastUpdated == nil || Date().timeIntervalSince(lastUpdated ?? .distantPast) > 30 { lastUpdated = Date() }
             await flushOutbox()
@@ -385,7 +400,7 @@ final class AppModel {
         outbox.enqueueAnswer(question: q, answer: option)
         let events = await outbox.flush(using: client)
         guard credentials?.phoneId == me, me != nil || useMock else { return }   // signed out meanwhile: drop the late result
-        if events.contains(.offline) { announcement = "No connection. Your answer waits on this phone." }
+        if events.contains(.offline) { transportDown = true; announcement = "No connection. Your answer waits on this phone." }
         await handle(events)
         if events.contains(where: { if case .answered = $0 { true } else { false } }) { await refresh() }
     }
@@ -471,7 +486,7 @@ final class AppModel {
         guard !outbox.items.isEmpty, credentials != nil || useMock else { return }
         let events = await outbox.flush(using: client)
         guard credentials?.phoneId == me else { return }
-        if events.contains(.offline) { announcement = "No connection. The message waits on this phone." }
+        if events.contains(.offline) { transportDown = true; announcement = "No connection. The message waits on this phone." }
         await handle(events)
         if events.contains(where: { if case .sent = $0 { true } else { false } }) { await reloadMessages(); await refreshUpdates() }
     }
@@ -689,11 +704,12 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
-        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false
-        pairedWorkspaces = []; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
+        credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false
+        pairedWorkspaces = []; lastUpdated = nil; message = nil; transportDown = false; tab = .chats; phase = .onboarding
     }
 
     private func handle(_ error: Error) {
+        if Self.isOffline(error) { transportDown = true }
         if case RelayError.unauthorized = error { Keychain.delete(); reset(); message = error.localizedDescription }
         else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
         else if error is RelayError { message = error.localizedDescription }

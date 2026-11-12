@@ -30,8 +30,8 @@ final class RealRelayUITests: XCTestCase {
     func test1PairAndNewChat() {
         let app = launch(reset: true)
         if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 15))
-        app.buttons["Paste invitation link"].tap()
+        XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 15))
+        app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         XCTAssertTrue(f.waitForExistence(timeout: 5))
         f.tap(); f.typeText(env["ORCH_PAIR_LINK"] ?? "")
@@ -151,8 +151,8 @@ final class RealRelayUITests: XCTestCase {
     func test6ThreeTicketsNested() {
         let app = launch(reset: true)
         if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 15))
-        app.buttons["Paste invitation link"].tap()
+        XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 15))
+        app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         XCTAssertTrue(f.waitForExistence(timeout: 5))
         f.tap(); f.typeText(env["ORCH_PAIR_LINK"] ?? "")

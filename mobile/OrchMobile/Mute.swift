@@ -30,12 +30,21 @@ enum MuteRules {
         formatter.dateFormat = "H:mm"
         return (banner ? "until " : "Until ") + formatter.string(from: date)
     }
+    /// The value of a "Notifications" row: "On", "Muted until 08:00", "Muted until tomorrow 08:00", "Muted".
+    static func notificationsValue(_ value: String?, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard isMuted(value, now: now) else { return "On" }
+        guard let value, let end = date(value) else { return "Muted" }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar; formatter.timeZone = calendar.timeZone; formatter.dateFormat = "HH:mm"
+        let day = calendar.isDate(end, inSameDayAs: now) ? "" : "tomorrow "
+        return "Muted until " + day + formatter.string(from: end)
+    }
 }
 
 enum MuteChoice: String, CaseIterable, Identifiable {
     case hour = "1 hour"
-    case morning = "Until tomorrow 8:00"
-    case forever = "Until I turn it back on"
+    case morning = "Until tomorrow"
+    case forever = "Until I turn it on"
     var id: String { rawValue }
     func mute(now: Date = Date(), calendar: Calendar = .current) -> Mute {
         switch self {

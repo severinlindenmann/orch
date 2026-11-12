@@ -36,3 +36,5 @@
 Added Chats Groups, open / sent / read-only group rooms and Done groups. Redrew PIL-12 info to the shipped layout, with collapsible agent / job Results, one dated label per card, fitted previews, counted text tabs and right-aligned numeric cells. Replaced the publishing question demo with a Result artifact and Accept / Ask for changes bar; finished work without a question keeps Ready for review and no bar. Standardized tasks and References. All new states have right-panel jumps and connected in-phone navigation; existing question kinds remain available.
 
 11 Nov: helper wording
+
+12 Nov phone UX, batch 2: one onboarding screen (Scan QR code, Paste link, Get an invitation steps, Try a demo); Add workspace sheet says Join this workspace? with Connection details, one Add button, Use a different link / Use a new invitation; Settings shows the real connection state and a short version line; workspace Notifications row (On / Muted until …) with 1 hour, Until tomorrow, Until I turn it on; Voice caption as section footer and budget labelled USD; scanner explains denied camera.
