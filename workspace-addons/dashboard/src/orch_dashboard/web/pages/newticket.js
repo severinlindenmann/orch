@@ -27,7 +27,7 @@ function ticketForm(t) {
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
   let optionalFields = fields;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
-  let updateAttachments = () => {};
+  let updateAttachments = () => {}, grow = () => {};
   const updateValidity = () => {
     if (t) return;
     const empty = !inputs.text.value.trim() && !pastedText && !files.length;
@@ -45,7 +45,7 @@ function ticketForm(t) {
     input.rows = 4; input.maxLength = 500000; input.required = true;
     input.placeholder = 'Paste or write it here. A short title or a long text with many points: the agent splits it into tasks.';
     // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
-    const grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
+    grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
     input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
     const zone = button('Attach file', 'new-ticket-attach', () => picker.click());
@@ -188,7 +188,7 @@ function ticketForm(t) {
       if (fullText.length > 1500) {
         const combined = pastedText ? pastedText + '\n\n' + fullText : fullText;
         if (combined.length > 500000) { error.textContent = 'Text is over 500000 characters'; submit.disabled = false; return; }
-        pastedText = combined; inputs.text.value = ''; updateAttachments();
+        pastedText = combined; inputs.text.value = ''; grow(); updateAttachments();
       }
       const longText = pastedText, shortText = inputs.text.value;
       values.title = ticketTextTitle(fullText.trim() ? fullText : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length ? 80 : 200);

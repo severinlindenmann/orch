@@ -848,8 +848,9 @@ function ticketAddStep(t) {
   actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
-  if (!children.length) return null;
   const add = snapshot ? null : ticketButton('+ Add a step', 'ghost add-row', () => ticketAddStep(t));
+  // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
+  if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
   return card('parts', 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
@@ -938,10 +939,14 @@ function headerProof(t) {
   return ticketProofLine(t);
 }
 
+// The history entry that marked the ticket done; the ticket page and the list both take the finish time from it.
+function ticketDoneEvent(t) {
+  return array(t.history).slice().reverse().find(e => e && (e.kind === 'done' || /(?:->|to) done\b|^Done\b/i.test(e.text || '')));
+}
 function ticketDoneLine(t) {
   if (t.status !== 'done') return null;
-  const event = array(t.history).slice().reverse().find(e => /(?:->|to) done\b|^Done\b/i.test(e.text || '') || e.kind === 'done');
-  const at = event?.at || t.updated_at;
+  const event = ticketDoneEvent(t);
+  const at = event?.at || t.done_at || t.updated_at;
   return h('p', {className:'ticket-done'}, '✓ Finished' + (at ? ' ' + localStamp(at) : '') + (event?.by ? ' by ' + name(event.by) : ''));
 }
 // One local format for every time on the ticket page: "Thu 12 Nov, 14:03" (the year only when it is not this year).
@@ -951,9 +956,10 @@ function localStamp(at, withTime = true) {
   const opts = {weekday:'short', day:'numeric', month:'short', ...(d.getFullYear() !== new Date().getFullYear() ? {year:'numeric'} : {}), ...(withTime ? {hour:'2-digit', minute:'2-digit'} : {})};
   return d.toLocaleString(undefined, opts);
 }
-// A ticket that was started before (tasks or helper sessions) but is not running now is paused, not new.
+// A ticket a helper already worked on (it has sessions) but that is not running now is paused, not new.
+// Tasks a person typed before any helper ran do not make it paused.
 function ticketPaused(t, run) {
-  return ['open', 'ready'].includes(t.status) && !run?.running && (array(t.checklist).length > 0 || array(t.sessions).length > 0);
+  return ['open', 'ready'].includes(t.status) && !run?.running && array(t.sessions).length > 0;
 }
 const ticketDetailsMore = new Set();
 
@@ -974,7 +980,7 @@ function detail(t) {
   const panel = (id, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, capitalise(id === 'artifacts' ? 'files' : id)) : null, body);
   const answered = array(t.questions).filter(q => q.answer != null).slice().reverse().map(q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
     h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines'}, clean(q.answer)), h('p', {className:'meta'}, ['Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · ')))));
-  const fresh = !total && !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
+  const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   let next = null;
   if (t.status !== 'done') {

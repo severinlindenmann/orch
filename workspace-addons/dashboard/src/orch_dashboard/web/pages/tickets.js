@@ -37,13 +37,13 @@ function boardParentLine(t) {
 function ticketAttentionChip(t, section) {
   const status = shown(t).status;
   if (questions(t).length && status !== 'done') return section === 'waiting' ? null : chip('Needs you', 'attn');
-  if (status === 'done') { const at = t.done_at || t.updated_at; return at ? h('span', {className:'meta ticket-finished'}, 'Finished ' + localDay(at)) : null; }
+  if (status === 'done') { const at = (typeof ticketDoneEvent === 'function' ? ticketDoneEvent(t)?.at : null) || t.done_at || t.updated_at; return at ? h('span', {className:'meta ticket-finished'}, 'Finished ' + localDay(at)) : null; }
   if (section && window.DashHelpers.columnOf(status) === section) return null;
   return statusChip(t);
 }
 const localDay = at => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}) : ''; };
-// Started before (tasks or helper sessions) but not running now: paused, not new.
-const ticketIsPaused = t => array(t.checklist).length > 0 || array(t.sessions).length > 0;
+// A helper worked on it before (sessions) but it is not running now: paused, not new. Typed tasks alone are not.
+const ticketIsPaused = t => array(t.sessions).length > 0;
 function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : ''); }
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});

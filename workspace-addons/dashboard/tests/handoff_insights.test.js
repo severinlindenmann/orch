@@ -36,6 +36,9 @@ test('an answer request reads as one sentence with the answer, Send answer butto
   vm.runInContext(src.slice(start, end) + '\nthis.T = TEMPLATES;', c);
   const text = n => typeof n === 'string' ? n : (n.textContent || n.text || '') + (n.kids || []).map(text).join('');
   assert.equal(c.T['ticket.answer']({title: 'Weekly report', question: 'Which colour'}, {value: 'Blue'}).map(text).join(''), 'Send this answer to Weekly report? Which colour \u2192 Blue');
+  const exact = 'say  "yes"';
+  assert.equal(c.T['ticket.answer']({title: 'R'}, {value: exact}).map(text).join(''), 'Send this answer to R?  \u2192 ' + exact, 'the short answer is shown exactly as sent');
+  assert.match(src, /"Technical details", "meta"\)[^\n]*\n[^\n]*min-height:44px/);
   assert.match(src, /"ticket.answer": "Send answer"/);
   assert.match(src, /display:inline-flex;gap:8px/);
   assert.match(src, /"Technical details"/);

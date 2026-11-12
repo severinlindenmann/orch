@@ -28,10 +28,17 @@ test('Dash 21: no chip when it matches the section; Done shows the finish day; n
   assert.doesNotMatch(text(c.ticketNext({id:'r', status:'review'})), /Next step|Read the result/);
   assert.equal(c.ticketNext({id:'a', status:'active', checklist:[{text:'Draft it'}]}), null);
 });
-test('Dash 23: a ticket with progress that is not running offers Resume with a Paused line', () => {
+test('Dash 23: a ticket a helper worked on that is not running offers Resume with a Paused line', () => {
   const c = listCtx();
-  assert.match(text(c.ticketNext({id:'p', status:'open', checklist:[{text:'x', done:true}], updated_at:'2026-11-12T10:00:00Z'})), /^Paused .*Resume$/);
+  assert.match(text(c.ticketNext({id:'p', status:'open', sessions:[{id:'s1'}], updated_at:'2026-11-12T10:00:00Z'})), /^Paused .*Resume$/);
   assert.equal(text(c.ticketNext({id:'n', status:'open'})), 'Start helper');
+  assert.equal(text(c.ticketNext({id:'t', status:'open', checklist:[{text:'typed by me'}]})), 'Start helper', 'typed tasks alone are not paused');
+});
+test('the list takes the finish day from the done history entry, like the ticket page', () => {
+  const c = listCtx();
+  vm.runInContext(ticketSrc.slice(ticketSrc.indexOf('function ticketDoneEvent'), ticketSrc.indexOf('function ticketDoneLine')), c);
+  const t = {status:'done', updated_at:'2026-12-20T10:00:00Z', history:[{at:'2026-11-03T10:00:00Z', text:'open -> done'}]};
+  assert.equal(text(c.ticketAttentionChip(t, 'done')), 'Finished ' + new Date('2026-11-03T10:00:00Z').toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}));
 });
 test('Dash 49: All / Mine is a segmented control with aria-pressed', () => {
   const c = listCtx();
@@ -53,7 +60,7 @@ test('Dash 50: a change request task reads as the change, with what you asked be
   assert.equal(c.changeTask('Write the report'), null);
 });
 test('Dash 20/23/34/02: one Tasks list, Resume when paused, Details without empty fields, key under Technical details', () => {
-  const t = {id:'t1', key:'PIL-54', title:'Report', status:'open', checklist:[{id:'c1', text:'Change: Please add a rain plan.', done:true}], note:'Remember', created_at:'2026-11-10T09:00:00Z', updated_at:'2026-11-12T09:00:00Z'};
+  const t = {id:'t1', key:'PIL-54', title:'Report', status:'open', sessions:[{id:'s1', last_used:'2026-11-12T09:00:00Z'}], checklist:[{id:'c1', text:'Change: Please add a rain plan.', done:true}], note:'Remember', created_at:'2026-11-10T09:00:00Z', updated_at:'2026-11-12T09:00:00Z'};
   const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '', act:async () => ({ok:true}),
     el:(tag, cls, txt) => h(tag, {className:cls}, txt), fragment:(...kids) => h('fragment', {}, kids),
@@ -67,6 +74,7 @@ test('Dash 20/23/34/02: one Tasks list, Resume when paused, Details without empt
   assert.ok(!all.some(n => n.attrs.id === 'ticket-tab-tasks'));
   assert.equal(all.filter(n => n.attrs['data-key'] === 'overview-tasks').length, 1);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
+  assert.equal(text(all.find(n => n.attrs['data-key'] === 'parts-add')), '+ Add a step', 'a ticket without steps can get its first one');
   assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-paused') && /Resume/.test(body) && !/Start helper/.test(body));
   const panel = all.find(n => n.attrs.id === 'ticket-panel-overview');
   assert.ok(!panel.attrs.hidden, 'an old Tasks choice opens the Overview');
@@ -76,4 +84,8 @@ test('Dash 20/23/34/02: one Tasks list, Resume when paused, Details without empt
   assert.match(text(all.find(n => n.attrs['data-key'] === 'ticket-technical-t1')), /Technical details.*PIL-54/);
   assert.equal(body.split('PIL-54').length, 2, 'the key appears only under Technical details');
   assert.match(body, /Add a rain planYou asked: Please add a rain plan\./);
+  const typed = {...t, id:'t2', sessions:[]};
+  ctx.tickets = () => [typed];
+  const fresh = text(ctx.detail(typed));
+  assert.ok(/Start helper/.test(fresh) && !/Resume/.test(fresh), 'tasks typed before any helper ran: Start helper, not Resume');
 });

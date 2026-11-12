@@ -179,6 +179,17 @@ test('Show me the plan first is a box in More options; Start creates a plan-firs
   assert.equal(s.calls[1].args.ticket, 'new');
 });
 
+test('long typed text moved to a chip on submit shrinks the text box back', async () => {
+  const s = setup();
+  s.input.style = {};
+  Object.defineProperty(s.input, 'scrollHeight', {get() { return this.value ? 1000 : 0; }});
+  s.input.value = 'y'.repeat(1600); await s.input.fire('input');
+  assert.equal(s.input.style.height, '480px');
+  await s.form.fire('submit');
+  assert.equal(s.input.value, '');
+  assert.equal(s.input.style.height, 'auto');
+});
+
 test('one Start button; Create without starting is a text link; neither sends plan_first by default', async () => {
   const labels = walk(setup().d).filter(n => n.tag === 'button' && /btn/.test(n.className)).map(n => n.textContent);
   assert.ok(labels.includes('Start') && !labels.includes('Create & Start') && !labels.includes('Show plan first'));

@@ -43,7 +43,7 @@
     "copy.retry": function (p) { return ["Try cleaning up the copy for ", q(p.title), " again?"]; },
     "ticket.answer": function (p, i) {  // "Send this answer to Weekly report? Which colour → Blue"
       var v = i && i.value != null ? String(i.value) : "";
-      return ["Send this answer to ", plain(p.title), "? "].concat(p.question ? [el("span", cap(p.question))] : [], v && shortValue(v) ? [" \u2192 ", plain(v)] : []);
+      return ["Send this answer to ", plain(p.title), "? "].concat(p.question ? [el("span", cap(p.question))] : [], v && shortValue(v) ? [" \u2192 ", full(v)] : []);
     },
     "ticket.verdict": function (p) {
       if (p.status) { var w = STATUS[p.status] || STATUS.back; return [w[0], q(p.title), w[1] + (p.also && p.also.length ? " (it also changes: " + p.also.map(cap).join(", ") + ")" : "")]; }
@@ -127,7 +127,7 @@
   }
   function source() {  // where the request came from: behind a small click
     var d = el("details"), s = el("summary", "Technical details", "meta"), p = el("p", "Requested from a terminal on this computer.", "meta");
-    s.style.cssText = "font-size:12px;cursor:pointer"; p.style.cssText = "margin:4px 0 0;font-size:12px";
+    s.style.cssText = "font-size:12px;cursor:pointer;min-height:44px;display:flex;align-items:center"; p.style.cssText = "margin:4px 0 0;font-size:12px";
     d.appendChild(s); d.appendChild(p); return d;
   }
   function render(items) {
