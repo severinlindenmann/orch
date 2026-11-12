@@ -377,9 +377,16 @@ def stray_tmux(under: str) -> list[str]:
 def seed_profiles(root, profiles):
     """Test setup only: like a person's `profile set` of every new or body-changed profile (the production
     write_profiles signs only the names it is told to)."""
-    from orch import humanproof as hp
-    from orch import keystore
+    import os
 
+    from orch import humanproof as hp
+    from orch import keystore, secretrun
+
+    for p in profiles.values():  # like `profile set`: the kind from the real file; "any command" for others
+        if p.get("run") and "kind" not in p and os.path.isabs(p["run"][0]):
+            p["kind"] = secretrun.program_kind(os.path.realpath(p["run"][0]))
+            if p["kind"] == "other" or p.get("real_home"):
+                p["any_command"] = True
     try:
         old = keystore.read_profiles(root)
     except Exception:  # noqa: BLE001

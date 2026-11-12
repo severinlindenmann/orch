@@ -56,7 +56,7 @@ ENV_DENY = frozenset(
 ENV_DENY_PREFIX = (
     "LD_", "DYLD_", "PATH", "GIT_", "ORCH_", "PYTHON", "PERL", "RUBY", "NODE_", "BASH", "XDG_",
     "LUA_", "GCONV", "GLIBC", "COR_", "CORECLR", "DOTNET", "RUSTC", "CARGO_", "SSH_", "GPG_", "SUDO_",
-    "PSMODULEPATH", "NPM_CONFIG", "GNUPG", "PHPRC", "TCLLIBPATH", "R_PROFILE", "CLASSPATH",
+    "PSMODULEPATH", "NPM_CONFIG", "GNUPG", "PHPRC", "TCLLIBPATH", "R_PROFILE", "CLASSPATH", "RSYNC_",
 )  # fmt: skip
 ENV_DENY_SUFFIX = ("_OPTIONS",)
 ENV_DENY_CONTAINS = ("ASKPASS",)
@@ -578,6 +578,8 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
                 "skills",
                 "extra",
                 "real_home",
+                "kind",
+                "any_command",
             }
         ):
             raise Refused(f"The profile {pn} has a setting orch does not know.")
@@ -632,7 +634,9 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             or not all(isinstance(x, str) and 1 <= len(x) <= 300 for x in run)
         ):
             raise Refused(f"The profile {pn} has a bad command.")
-        for flag in ("allow_get", "agents_may_env", "real_home"):
+        if "kind" in p and not (isinstance(p["kind"], str) and re.fullmatch(r"[a-z]{1,16}", p["kind"])):
+            raise Refused(f"The profile {pn} has a bad command kind.")
+        for flag in ("allow_get", "agents_may_env", "real_home", "any_command"):
             if flag in p and not isinstance(p[flag], bool):
                 raise Refused(f"The profile {pn} has a bad {flag.replace('_', ' ')} setting.")
         sk = p.get("skills", [])
@@ -660,9 +664,11 @@ def _toml(profiles: dict) -> str:
             out.append("extra = [" + ", ".join(_q(x) for x in p["extra"]) + "]")
         if p.get("run"):
             out.append("run = [" + ", ".join(_q(x) for x in p["run"]) + "]")
+        if p.get("kind"):
+            out.append(f"kind = {_q(p['kind'])}")
         if p.get("skills"):
             out.append("skills = [" + ", ".join(_q(x) for x in p["skills"]) + "]")
-        for flag in ("allow_get", "agents_may_env", "real_home"):
+        for flag in ("allow_get", "agents_may_env", "real_home", "any_command"):
             if p.get(flag):
                 out.append(f"{flag} = true")
         out.append("")
