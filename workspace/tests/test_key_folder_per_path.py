@@ -7,7 +7,7 @@ import secrets
 
 import pytest
 
-from orch import config, keystore, secretrun
+from orch import addons, config, keystore, secretrun
 from orch import humanproof as hp
 from orch.humanproof import Refused
 
@@ -240,6 +240,7 @@ def test_first_setup_race_one_id_one_folder(proj, monkeypatch):
     assert _keys(proj) == [other_id]
 
 
+@pytest.mark.skipif(not addons._dirfd_ok(), reason="matches the dir-fd code path only")
 def test_orch_swapped_for_link_at_write_time(proj, tmp_path, monkeypatch):
     """.orch is swapped for a link to another folder right when the temp file is made: nothing lands there."""
     from orch import addons
@@ -296,3 +297,30 @@ def test_winner_seen_late_is_kept(proj, monkeypatch):
     monkeypatch.setattr(addons, "read_local_id", lambda r: next(answers, winner))
     assert addons.put_local_id(proj, secrets.token_hex(16)) == winner
     assert (proj / ".orch" / ".local-id").read_text().strip() == winner
+
+
+def test_a_folder_planted_at_local_id_is_refused(proj):
+    from orch import addons
+
+    (proj / ".orch" / ".local-id").mkdir(parents=True)
+    with pytest.raises(Refused):
+        addons.put_local_id(proj, secrets.token_hex(16), replace=True)
+    assert (proj / ".orch" / ".local-id").is_dir()
+
+
+@pytest.mark.skipif(not hasattr(os, "link"), reason="needs hard links")
+def test_a_hardlinked_local_id_is_rejected_and_healed(proj, tmp_path):
+    from orch import addons
+
+    d = hp.key_dir(proj)
+    f = proj / ".orch" / ".local-id"
+    guarded = tmp_path / "guarded"
+    guarded.write_bytes(f.read_bytes())
+    f.unlink()
+    os.link(guarded, f)
+    before = guarded.read_bytes()
+    assert addons.read_local_id(proj) is None  # 2 links: rejected
+    assert hp.key_dir(proj) == d  # healed to the bound folder
+    assert guarded.read_bytes() == before  # never written through
+    assert f.stat().st_nlink == 1
+    assert addons.read_local_id(proj) == d.name

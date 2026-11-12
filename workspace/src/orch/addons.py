@@ -1106,7 +1106,11 @@ def _open_orch(root: Path, create: bool) -> int | None:
         fd = os.open(p, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except OSError:
         return None
-    st = os.fstat(fd)
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        os.close(fd)
+        return None
     if not stat.S_ISDIR(st.st_mode) or (hasattr(os, "getuid") and st.st_uid != os.getuid()):
         os.close(fd)
         return None
@@ -1160,6 +1164,7 @@ def read_local_id(root: Path) -> str | None:
         os.close(fd)
 
 
+_LOCAL_ID_BLOCKED = "orch could not write this workspace's id: something is in the way at .orch/.local-id."
 _LINK_REFUSED = "The .orch folder of this workspace is a link. orch does not follow it; ask the owner."
 
 
@@ -1190,7 +1195,12 @@ def put_local_id(root: Path, v: str, *, replace: bool = False) -> str:
         st0 = os.fstat(dfd)
         try:
             fd = os.open(tmpname, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            try:
+                fh = os.fdopen(fd, "w", encoding="utf-8")
+            except BaseException:
+                os.close(fd)
+                raise
+            with fh:
                 fh.write(v + "\n")
             out = v
             done = False
@@ -1205,7 +1215,10 @@ def put_local_id(root: Path, v: str, *, replace: bool = False) -> str:
                 except (OSError, NotImplementedError):
                     pass  # no hard links here: fall through to the replace
             if not done:
-                os.rename(tmpname, ".local-id", src_dir_fd=dfd, dst_dir_fd=dfd)  # POSIX rename replaces
+                try:
+                    os.rename(tmpname, ".local-id", src_dir_fd=dfd, dst_dir_fd=dfd)  # POSIX rename replaces
+                except OSError:  # e.g. a folder planted at .local-id
+                    raise Refused(_LOCAL_ID_BLOCKED) from None
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(tmpname, dir_fd=dfd)
@@ -1231,7 +1244,12 @@ def _put_by_path(root: Path, v: str, replace: bool, tmpname: str) -> str:
     tmp = d / tmpname
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        try:
+            fh = os.fdopen(fd, "w", encoding="utf-8")
+        except BaseException:
+            os.close(fd)
+            raise
+        with fh:
             fh.write(v + "\n")
         out, done = v, False
         if not replace:
@@ -1245,7 +1263,10 @@ def _put_by_path(root: Path, v: str, replace: bool, tmpname: str) -> str:
             except OSError:
                 pass  # no hard links here: fall through to the replace
         if not done:
-            os.replace(tmp, f)
+            try:
+                os.replace(tmp, f)
+            except OSError:  # e.g. a folder planted at .local-id
+                raise Refused(_LOCAL_ID_BLOCKED) from None
         try:
             winacl.no_reparse(d)
         except Refused:
