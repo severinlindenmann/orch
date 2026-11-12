@@ -384,7 +384,9 @@ def seed_profiles(root, profiles):
     from orch import keystore, secretrun
     from orch.errors import Refused
 
-    for p in profiles.values():  # the test interpreter lives in a user-owned folder: the person pinned its hash
+    for (
+        p
+    ) in profiles.values():  # the test interpreter lives in a user-owned folder: the person pinned its hash
         run = p.get("run")
         if run and os.path.isabs(run[0]) and "run_sha256" not in p:
             try:

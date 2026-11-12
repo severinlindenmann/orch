@@ -565,7 +565,22 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
     for pn, p in profiles.items():
         if not isinstance(pn, str) or not PROFILE_RE.match(pn) or not isinstance(p, dict):
             raise Refused("A profile name uses lower-case letters, digits and dashes.")
-        if not (p.keys() <= {"env", "files", "set", "run", "allow_get", "agents_may_env", "skills", "extra", "run_sha256", "real_home"}):
+        if not (
+            p.keys()
+            <= {
+                "env",
+                "files",
+                "set",
+                "run",
+                "allow_get",
+                "agents_may_env",
+                "skills",
+                "extra",
+                "run_sha256",
+                "run_pins",
+                "real_home",
+            }
+        ):
             raise Refused(f"The profile {pn} has a setting orch does not know.")
         if not (p.get("env") or p.get("files")):
             raise Refused(f"The profile {pn} needs at least one key.")
@@ -621,6 +636,19 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
         sha = p.get("run_sha256")
         if sha is not None and (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)):
             raise Refused(f"The profile {pn} has a bad program fingerprint.")
+        pins = p.get("run_pins")
+        if pins is not None and (
+            not isinstance(pins, dict)
+            or len(pins) > 16
+            or not all(
+                isinstance(k, str)
+                and 1 <= len(k) <= 300
+                and isinstance(v, str)
+                and re.fullmatch(r"[0-9a-f]{64}", v)
+                for k, v in pins.items()
+            )
+        ):
+            raise Refused(f"The profile {pn} has bad pinned files.")
         if sha is not None and not run:
             raise Refused(f"The profile {pn} has a program fingerprint but no command.")
         for flag in ("allow_get", "agents_may_env", "real_home"):
@@ -655,6 +683,10 @@ def _toml(profiles: dict) -> str:
             out.append("skills = [" + ", ".join(_q(x) for x in p["skills"]) + "]")
         if p.get("run_sha256"):
             out.append(f"run_sha256 = {_q(p['run_sha256'])}")
+        if p.get("run_pins"):
+            out.append(
+                "run_pins = { " + ", ".join(f"{_q(k)} = {_q(v)}" for k, v in p["run_pins"].items()) + " }"
+            )
         for flag in ("allow_get", "agents_may_env", "real_home"):
             if p.get(flag):
                 out.append(f"{flag} = true")

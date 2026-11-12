@@ -4,7 +4,8 @@ Every use is written to the run's record (`.orch/record`, record.py) as a key.us
 starts and before any key file is written, without any value; a writer that cannot write (no hider, damaged
 record) stops the command. A call outside a run by a PROVEN person (hp1 proof, cli_secret) goes to the
 workspace's unattributed run of the day (run r_outside_<yyyymmdd>, ticket t_outside); every other caller
-(`agent=True`, the default of the CLI: nothing the caller controls can lower it) outside a run is refused. set_recorder() replaces the writer (tests).
+(`agent=True`, the default of the CLI: nothing the caller controls can lower it) outside a run is refused.
+set_recorder() replaces the writer (tests).
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 from orch import hider, keystore, launchenv, term
 from orch import humanproof as hp
@@ -218,6 +218,18 @@ def record_change(root, action, profile, by):
         pass
 
 
+# A pinned (user-owned) program must not be an interpreter: its script arguments are not covered by the pin.
+# Tests switch this off (and then the hash is only checked, the file is not copied) to use the test
+# interpreter, which cannot run from a copy, as the pinned program.
+PIN_STRICT = True
+PINNED_INTERPRETER = (
+    "Refused: this program runs scripts or any code you give it, so pinning its file would not protect "
+    "anything. Choose a program that does one fixed job."
+)
+PIN_TEXT = (
+    "The fingerprint covers this program file (and any file you named as an argument), not the libraries or "
+    "settings it loads. orch starts a private copy of the approved file."
+)
 USER_OWNED = (
     "Refused: the program or a folder above it belongs to your own user, so an agent running as you could "
     "replace it. Choose a program in a system folder, or approve this exact file as the person."
@@ -239,7 +251,8 @@ def approve_program(root, name, *, allow_user_owned=False):
     the program or a folder above it inside the workspace, or changeable by others (group/other-writable; the
     root and admin groups of a normal system are fine); unless `allow_user_owned` (a person's override, whose
     sha256 is then checked right before every spawn), also a program or folder above it owned by the current
-    non-root user (an agent running as that user can rewrite it). Interpreters and tools that run arbitrary code (sh,
+    non-root user (an agent running as that user can rewrite it).
+    Interpreters and tools that run arbitrary code (sh,
     python, node, env, git, npm, curl, and database clients that read commands from stdin or run shell
     escapes: psql, mysql, sqlite3, redis-cli, mongosh) are allowed but warned about: approving one is
     approving anything."""
@@ -268,6 +281,12 @@ def approve_program(root, name, *, allow_user_owned=False):
             uid = os.stat(p).st_uid
             if uid != 0 and uid == os.getuid():
                 raise Refused(USER_OWNED)
+    if (
+        allow_user_owned
+        and PIN_STRICT
+        and (RISKY_PROGRAMS.match(os.path.basename(real)) or RISKY_PROGRAMS.match(os.path.basename(name)))
+    ):
+        raise Refused(PINNED_INTERPRETER)
     warnings = []
     if RISKY_PROGRAMS.match(os.path.basename(real)) or RISKY_PROGRAMS.match(os.path.basename(name)):
         warnings.append(
@@ -282,7 +301,11 @@ def safe_path_dirs(root):
     belong to root and nobody else can change. Never the caller's PATH (an agent can prepend to it)."""
     fixed = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
     if os.name == "nt":
-        return [p for p in [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")] if os.path.isdir(p)]
+        return [
+            p
+            for p in [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")]
+            if os.path.isdir(p)
+        ]
     result = []
     for p in fixed:
         try:
@@ -325,6 +348,21 @@ def _program(name, dirs, h):
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path
     raise Refused(h.hide_text(f"Refused: the program {name} was not found."))
+
+
+def _pinned_copy(path, want, temp):
+    """Read the program once, check its hash, write exactly those bytes to a private file and return it."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        raise Refused("Refused: could not read the program to check it.") from None
+    if hashlib.sha256(data).hexdigest() != want:
+        raise Refused("Refused: the program is not the one the person approved (it has changed).")
+    copy = temp / "~program"
+    keystore._write_private_bytes(copy, data)
+    os.chmod(copy, 0o700)
+    return str(copy)
 
 
 def _check_sha(path, want, h):
@@ -563,10 +601,15 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         run0 = (profile.get("run") or [None])[0]
         if run0 is not None and command[0] == run0:  # the profile's own program, in every mode
             if not os.path.isabs(run0):
-                raise Refused("Refused: this profile's command is not a full path. Ask the person to set it again.")
+                raise Refused(
+                    "Refused: this profile's command is not a full path. Ask the person to set it again."
+                )
             # still a safe, existing program now; a user-owned one only with the person's stored fingerprint
             approve_program(root, run0, allow_user_owned=bool(profile.get("run_sha256")))
             program_sha = profile.get("run_sha256")
+        for path, want in (profile.get("run_pins") or {}).items():  # every file named in the command
+            if path in command[1:]:
+                _check_sha(path, want, hider.Hider([]))
         if mode == "env" and not profile.get("env") and profile.get("files"):
             raise Refused("Refused: this profile needs files. Use orch secret file.")
         needles = keystore.all_needles(root)
@@ -583,8 +626,6 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             raise Refused("Refused: no keys are available for hiding output.")
         dirs = safe_path_dirs(root)
         command[0] = _program(command[0], dirs, h)
-        if program_sha is not None:
-            _check_sha(command[0], program_sha, h)
         home = hp.guarded_home(root)
         parent = home / "keys" / "tmp"
         candidate = parent / f"{os.getpid()}-{secrets.token_hex(8)}"
@@ -609,6 +650,11 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         hp.winacl.set_private(temp, True)
         hp._private_dir(temp, parent)
         private.mkdir(mode=0o700)
+        if program_sha is not None:  # run a private copy of the exact bytes that were hashed (no swap race)
+            if PIN_STRICT:
+                command[0] = _pinned_copy(command[0], program_sha, temp)
+            else:
+                _check_sha(command[0], program_sha, h)
         if files:
             paths = {}
             for var, name in files.items():

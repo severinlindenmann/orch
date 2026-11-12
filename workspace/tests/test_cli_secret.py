@@ -47,7 +47,18 @@ def _use_as_person(argv, unproven):
         or os.environ.get("CLAUDECODE")
     ):
         return argv, None
-    return (*argv[:2], "--proof-stdin", *argv[2:]), _proof(Path.cwd(), "secret.profile", argv[2] + ":use") + "\n"
+    return (*argv[:2], "--proof-stdin", *argv[2:]), _proof(
+        next(d for d in (Path.cwd(), *Path.cwd().parents) if (d / ".orch").is_dir()),
+        "secret.profile",
+        argv[2] + ":use",
+    ) + "\n"
+
+
+@pytest.fixture(autouse=True)
+def _pin_the_test_interpreter(monkeypatch):
+    """The test interpreter is the pinned program of many tests; the refusal of pinned interpreters has its
+    own tests (they switch it back on). The tests of the private copy use a small shell script."""
+    monkeypatch.setattr(secretrun, "PIN_STRICT", False)
 
 
 @pytest.fixture
@@ -1617,7 +1628,9 @@ def test_a_denied_variable_with_a_valid_mac_still_fails_at_run(store, run, ws, m
 def test_exec_checks_the_program_again_when_it_runs(store, run, ws, monkeypatch):
     _set_ok(run, monkeypatch, ws, "good", "--run", PY)
     monkeypatch.setattr(
-        secretrun, "approve_program", lambda root, name, **kw: (_ for _ in ()).throw(Refused("Refused: gone."))
+        secretrun,
+        "approve_program",
+        lambda root, name, **kw: (_ for _ in ()).throw(Refused("Refused: gone.")),
     )
     code, _, err = run("secret", "exec", "good", "--", "-c", "pass")
     assert code == 2 and "gone" in err
@@ -1783,3 +1796,222 @@ def test_forged_extra_without_a_proof_is_refused(store, run, ws, monkeypatch):
     )
     assert run(*args)[0] == 2
     assert "f" not in keystore.read_profiles(ws)
+
+
+# --------------------------------------------------------------------------- G1 fixes (H1-H3, #565)
+
+
+def test_h1_an_agent_that_unsets_its_marker_is_still_agent_level(store, run, ws, monkeypatch, events):
+    """No marker, no proof: refused outside a run (and the marker is not what decides anything)."""
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    code, out, err = run(
+        "secret", "env", "plain", "--", "/bin/sh", "-c", 'printf %s "$PLAIN_TOKEN" | rev', unproven=True
+    )
+    assert code == 2 and "only inside an active orch run" in err
+    assert TOKEN2 not in out + err and TOKEN2[::-1] not in out + err
+
+
+def test_h1_unproven_in_a_run_may_only_run_the_profiles_own_command(
+    store, run, ws, in_run, monkeypatch, events
+):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    code, out, err = run(
+        "secret", "env", "plain", "--", "/bin/sh", "-c", 'echo "$PLAIN_TOKEN"', unproven=True
+    )
+    assert code == 2 and "agents may only run this profile's own command" in err
+    assert {e["refused"] for e in events} == {"agent_command"}
+
+
+def test_h1_get_without_a_proof_is_agent_level_and_needs_a_run(store, run, ws, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    code, out, err = run("secret", "get", "plain", "other-token", unproven=True)
+    assert code == 2 and TOKEN2 not in out + err and "only inside an active orch run" in err
+
+
+def test_h1_a_proof_for_another_profile_or_op_does_not_make_a_person(store, run, ws, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    for proof in (
+        _proof(ws, "secret.profile", "svc:use"),  # another profile
+        _proof(ws, "secret.profile", "plain:allow_get"),  # another target
+        _proof(ws, "secret.add", "plain:use"),  # another op
+    ):
+        code, out, err = _cli(run, monkeypatch, proof, "secret", "env", "plain", "--", "/bin/echo", "x")
+        assert code == 2 and "x\n" != out
+
+
+def test_h1_a_person_proof_is_single_use(store, run, ws, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    proof = _proof(ws, "secret.profile", "plain:use")
+    argv = ("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "pass")
+    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
+    assert run(*argv, unproven=True)[0] == 0
+    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
+    assert run(*argv, unproven=True)[0] == 2
+
+
+def test_h1_an_agent_marker_with_a_valid_proof_stays_an_agent(store, run, ws, monkeypatch):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setattr("sys.stdin", io.StringIO(_proof(ws, "secret.profile", "plain:use") + "\n"))
+    code, out, err = run("secret", "env", "--proof-stdin", "plain", "--", PY, "-c", "pass", unproven=True)
+    assert code == 2
+
+
+def _user_prog(tmp_path, body="#!/bin/sh\nexit 0\n"):
+    exe = tmp_path / "bin" / "tool"
+    exe.parent.mkdir()
+    exe.write_text(body)
+    exe.chmod(0o755)
+    return exe
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_program_owned_by_the_user_is_refused_unless_the_person_pins_it(
+    store, run, ws, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    exe = _user_prog(tmp_path)
+    code, _, err = _set(run, monkeypatch, ws, "mine", "--run", str(exe))
+    assert code == 2 and "belongs to your own user" in err and "mine" not in keystore.read_profiles(ws)
+    code, out, err = _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")
+    assert code == 0, out + err
+    prof = keystore.read_profiles(ws)["mine"]
+    assert len(prof["run_sha256"]) == 64 and hp.profile_verified(ws, "mine", prof)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_pinned_program_replaced_after_approval_is_refused_in_every_mode(
+    store, run, ws, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    exe = _user_prog(tmp_path)
+    assert _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")[0] == 0
+    assert run("secret", "exec", "mine")[0] == 0
+    exe.write_text("#!/bin/sh\necho planted\nexit 0\n")  # the agent rewrites the approved binary
+    for argv in (("exec", "mine"), ("env", "mine", "--", str(exe)), ("file", "mine", "--", str(exe))):
+        code, out, err = run("secret", *argv)
+        assert code == 2 and "planted" not in out and "has changed" in err, argv
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_the_stored_fingerprint_cannot_be_edited_without_a_person(store, run, ws, monkeypatch, tmp_path):
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    exe = _user_prog(tmp_path)
+    assert _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")[0] == 0
+    exe.write_text("#!/bin/sh\necho planted\n")
+    import hashlib
+
+    new = hashlib.sha256(exe.read_bytes()).hexdigest()
+    old = keystore.read_profiles(ws)["mine"]["run_sha256"]
+    f = _pfile(ws)  # an agent edits profiles.toml: the MAC no longer matches
+    f.write_text(f.read_text().replace(old, new))
+    code, out, err = run("secret", "exec", "mine")
+    assert code == 2 and "planted" not in out
+
+
+def test_h2_a_plain_name_is_searched_only_in_system_folders_never_the_callers_path(
+    store, ws, monkeypatch, tmp_path
+):
+    evil = tmp_path / "evil"
+    evil.mkdir()
+    (evil / "mytool").write_text("#!/bin/sh\n")
+    (evil / "mytool").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{evil}{os.pathsep}/usr/bin")
+    assert str(evil) not in secretrun.safe_path_dirs(ws)
+    with pytest.raises(Refused, match="not found"):
+        secretrun.resolve_program(ws, "mytool")
+    assert all(os.stat(d).st_uid == 0 for d in secretrun.safe_path_dirs(ws))
+
+
+def test_h3_the_child_runs_in_a_private_empty_cwd_with_that_as_home(store, run, ws, monkeypatch):
+    planted = ws / "work"
+    planted.mkdir()
+    (planted / "foo.py").write_text("print('planted module ran')\n")
+    monkeypatch.chdir(planted)
+    code, out, err = run(
+        "secret", "env", "plain", "--", PY, "-c",
+        "import os;print(os.getcwd());print(os.environ['HOME']);print(os.environ['TMPDIR']);"
+        "print(os.listdir('.'))",
+    )  # fmt: skip
+    assert code == 0, err
+    cwd, home, tmpdir, listing = out.splitlines()
+    assert cwd == home == tmpdir and listing == "[]"
+    assert os.path.realpath(planted) != os.path.realpath(cwd) and "keys" in cwd
+    assert not os.path.exists(cwd)  # removed after the run
+    code, out, err = run("secret", "env", "plain", "--", PY, "-m", "foo")
+    assert "planted module ran" not in out
+
+
+def test_h3_the_real_home_only_with_the_persons_real_home_setting(store, run, ws, monkeypatch):
+    from orch import launchenv
+
+    real = launchenv.user_home()
+    assert real is not None
+    prog = "import os;print(os.environ['HOME'])"
+    code, out, err = run("secret", "env", "plain", "--", PY, "-c", prog)
+    assert out.strip() != str(real)
+    code, out, err = _set(run, monkeypatch, ws, "rh", "--run", PY, "--real-home")
+    assert code == 0, out + err
+    assert keystore.read_profiles(ws)["rh"]["real_home"] is True
+    code, out, err = run("secret", "exec", "rh", "--", "-c", prog)
+    assert code == 0 and out.strip() == str(real), err
+    f = _pfile(ws)  # an edit of the stored setting by hand breaks the MAC
+    f.write_text(f.read_text().replace("real_home = true\n", ""))
+    assert hp.profile_body(keystore.read_profiles(ws)["rh"]).get("real_home") is None
+    code, out, err = run("secret", "exec", "rh", "--", "-c", prog)
+    assert code == 2  # the body no longer matches its MAC
+
+
+def test_h2_an_interpreter_cannot_be_pinned(store, run, ws, monkeypatch):
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    code, _, err = _set(run, monkeypatch, ws, "py", "--run", PY)
+    assert code == 2 and "runs scripts" in err and "py" not in keystore.read_profiles(ws)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_pinned_data_file_swapped_after_approval_is_refused(store, run, ws, monkeypatch, tmp_path):
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    exe = _user_prog(tmp_path)
+    data = tmp_path / "bin" / "conf.txt"
+    data.write_text("one\n")
+    code, out, err = _set(
+        run, monkeypatch, ws, "mine", "--run", str(exe), "--run", str(data), "--allow-user-owned"
+    )
+    assert code == 0, out + err
+    assert "not the libraries" in err or "not the libraries" in out
+    assert str(data) in keystore.read_profiles(ws)["mine"]["run_pins"]
+    assert run("secret", "exec", "mine")[0] == 0
+    data.write_text("planted\n")
+    code, out, err = run("secret", "exec", "mine")
+    assert code == 2 and "has changed" in err
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_binary_swapped_between_the_hash_and_the_start_is_not_started(
+    store, run, ws, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    exe = _user_prog(tmp_path, "#!/bin/sh\necho approved\n")
+    assert _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")[0] == 0
+    real = secretrun._pinned_copy
+    swapped = []
+
+    def swap_after_copy(path, want, temp):
+        copy = real(path, want, temp)
+        Path(path).write_text("#!/bin/sh\necho planted\n")  # swapped right after the bytes were read
+        swapped.append(1)
+        return copy
+
+    monkeypatch.setattr(secretrun, "_pinned_copy", swap_after_copy)
+    code, out, err = run("secret", "exec", "mine")
+    assert swapped and code == 0 and "approved" in out and "planted" not in out  # the private copy ran
+    monkeypatch.setattr(secretrun, "_pinned_copy", real)
+    prog = secretrun._program
+
+    def swap_before_copy(name, dirs, h):
+        found = prog(name, dirs, h)
+        Path(found).write_text("#!/bin/sh\necho planted\n")
+        return found
+
+    monkeypatch.setattr(secretrun, "_program", swap_before_copy)
+    code, out, err = run("secret", "exec", "mine")
+    assert code == 2 and "planted" not in out

@@ -1623,6 +1623,8 @@ def profile_body(profile: dict) -> dict:
     # when present, so profiles saved before they existed keep their MAC.
     if profile.get("run_sha256"):
         body["run_sha256"] = profile["run_sha256"]
+    if profile.get("run_pins"):
+        body["run_pins"] = dict(profile["run_pins"])
     if profile.get("real_home") is True:
         body["real_home"] = True
     return body
