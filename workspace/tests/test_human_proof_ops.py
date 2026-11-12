@@ -270,8 +270,16 @@ def test_page_session_headers(ws):
     assert s.key is not None
     name = pageproof.cookie_name("dashboard", 8420)
     assert name == "orch_page_dashboard_8420"
-    ck = {"Host": "127.0.0.1:8420", "Cookie": f"{name}={s.cookie}"}
+    ck = {"Host": "127.0.0.1:8420", "Cookie": f"{name}={s.cookie}", pageproof.PAGE_HEADER: s.secret}
     assert s.can_mint(ck, 8420)
+    # the cookie alone is never a session (#539): browsers send it to every loopback port
+    cookie_only = {"Host": "127.0.0.1:8420", "Cookie": f"{name}={s.cookie}"}
+    assert not s.can_mint(cookie_only, 8420) and not s.authed(cookie_only, 8420)
+    assert not s.can_mint({**ck, pageproof.PAGE_HEADER: "x" * len(s.secret)}, 8420)  # wrong secret
+    assert not s.can_mint({**ck, pageproof.PAGE_HEADER: ""}, 8420)
+    assert not s.can_mint({**ck, pageproof.PAGE_HEADER: s.cookie}, 8420)  # the cookie value is not the secret
+    assert s.secret != s.cookie and len(s.secret) >= 40
+    assert not s.can_mint({"Host": "127.0.0.1:8420", pageproof.PAGE_HEADER: s.secret}, 8420)  # secret only
     assert not s.can_mint({**ck, "Host": "evil.example:8420"}, 8420)
     assert not s.can_mint({**ck, "X-Forwarded-For": "1.2.3.4"}, 8420)
     assert not s.can_mint({**ck, "Forwarded": "for=1.2.3.4"}, 8420)
@@ -307,8 +315,11 @@ def test_two_page_servers_have_independent_sessions(ws, monkeypatch):
     n_dash, n_ins, n_dash2 = dash.cookie_name(8420), ins.cookie_name(8433), dash2.cookie_name(8421)
     assert len({n_dash, n_ins, n_dash2}) == 3
     jar = f"{n_dash}={c_dash}; {n_ins}={c_ins}; {n_dash2}={c_dash2}"  # the browser keeps all three
-    assert dash.authed({"Cookie": jar}, 8420) and ins.authed({"Cookie": jar}, 8433)
-    assert dash2.authed({"Cookie": jar}, 8421)
+    assert dash.authed({"Cookie": jar, pageproof.PAGE_HEADER: dash.secret}, 8420)
+    assert ins.authed({"Cookie": jar, pageproof.PAGE_HEADER: ins.secret}, 8433)
+    assert dash2.authed({"Cookie": jar, pageproof.PAGE_HEADER: dash2.secret}, 8421)
+    assert not dash.authed({"Cookie": jar, pageproof.PAGE_HEADER: ins.secret}, 8420)  # other server's secret
+    assert len({dash.secret, ins.secret, dash2.secret}) == 3
     assert not ins.authed({"Cookie": f"{n_dash}={c_dash}"}, 8433)  # one's cookie is no session on the other
     assert not dash.authed({"Cookie": f"{n_ins}={c_ins}"}, 8420)
     assert not ins.authed({"Cookie": f"{n_ins}={c_dash}"}, 8433)  # nor its value under the other's name
@@ -470,16 +481,20 @@ def test_second_use_of_a_spent_token_revokes_the_session(ws, capsys):
     tok = hp.write_launch_token(ws, "dashboard")
     cookie = s.launch(tok)
     name = pageproof.cookie_name("dashboard", 1)
-    hdr = {"Host": "127.0.0.1:1", "Cookie": f"{name}={cookie}"}
+    hdr = {"Host": "127.0.0.1:1", "Cookie": f"{name}={cookie}", pageproof.PAGE_HEADER: s.secret}
+    old_secret = s.secret
     assert s.can_mint(hdr, 1)
     assert s.launch(tok) is None  # the same link used again
     assert s.revoked and not s.can_mint(hdr, 1)  # the session minted from it is dead
+    assert s.secret != old_secret  # cookie and secret both rotate
     assert "Someone else tried to use this sign-in link" in pageproof.REVOKED_MSG
     err = capsys.readouterr().err
     assert "used twice" in err and tok not in err and cookie not in err  # the log line holds no secret
     # one more click on the dashboard from orch gives a new token and a working session
     cookie2 = s.launch(hp.write_launch_token(ws, "dashboard"))
-    assert cookie2 and cookie2 != cookie and s.can_mint({**hdr, "Cookie": f"{name}={cookie2}"}, 1)
+    new = {**hdr, "Cookie": f"{name}={cookie2}", pageproof.PAGE_HEADER: s.secret}
+    assert cookie2 and cookie2 != cookie and s.can_mint(new, 1)
+    assert not s.can_mint({**new, pageproof.PAGE_HEADER: old_secret}, 1)
 
 
 def test_two_threads_with_the_same_token_exactly_one_session_then_revoked(ws, capsys):
@@ -500,7 +515,8 @@ def test_two_threads_with_the_same_token_exactly_one_session_then_revoked(ws, ca
     assert s.revoked  # the other one revoked it
     first = next(g for g in got if g)
     name = pageproof.cookie_name("dashboard", 1)
-    assert not s.can_mint({"Host": "127.0.0.1:1", "Cookie": f"{name}={first}"}, 1)
+    stale = {"Host": "127.0.0.1:1", "Cookie": f"{name}={first}", pageproof.PAGE_HEADER: s.secret}
+    assert not s.can_mint(stale, 1)
     err = capsys.readouterr().err
     assert "used twice" in err and tok not in err and first not in err
 
@@ -2181,6 +2197,25 @@ def test_copies_identity_key_survives_workspace_deletion(ws, monkeypatch):
     assert worktrees.orphaned(other) == [{"ws8": wid[:8], "copies": 1}]
     assert worktrees.remove_orphaned(other, wid[:8], discard=True) == []
     assert not folder.exists()
+
+
+def test_copy_approve_binds_tip_and_refuses_agents(ws, run, monkeypatch):
+    from orch import worktrees
+
+    tid = _review_ticket(ws, run)
+    target = f"approve:{tid}:{'a' * 40}:2:12345678"
+    called = []
+    monkeypatch.setattr(worktrees, "approval_view", lambda *a: (target, "a" * 40, [".orch/a", ".orch/b"]))
+    monkeypatch.setattr(worktrees, "approve_copy", lambda *a: called.append(a) or {"state": "merged"})
+    assert run("copy", "approve", tid, "--by", "agent:x")[0] == 2
+    assert not called
+    stale = _proof(ws, "copy.retry", f"approve:{tid}:{'b' * 40}:2:12345678")
+    assert _cli(run, monkeypatch, stale, "copy", "approve", tid, "--json")[0] == 2
+    assert not called
+    proof = _proof(ws, "copy.retry", target)
+    code, out, err = _cli(run, monkeypatch, proof, "copy", "approve", tid, "--json")
+    assert code == 0, out + err
+    assert called[0][-1] == target
 
 
 @pytest.mark.parametrize("result", ["ok", "fail", "missing"])

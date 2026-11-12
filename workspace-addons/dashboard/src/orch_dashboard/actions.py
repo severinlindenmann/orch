@@ -63,6 +63,7 @@ LONG_NOTE = (
 )
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
+SHA = re.compile(r"[0-9a-f]{40,64}")
 DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
 ADDON = re.compile(r"[a-z][a-z0-9-]{1,31}")
 VERB = re.compile(r"[a-z][a-z-]{0,20}")
@@ -121,6 +122,10 @@ PROOF_OPS = {
         lambda a: f"{a.get('ws8')}:discard" if a.get("discard") else a.get("ws8"),
     ),
     "copies.retry": ("copy.retry", lambda a: a.get("ticket")),
+    "copies.approve": (
+        "copy.retry",
+        lambda a: f"approve:{a.get('ticket')}:{a.get('tip')}:{a.get('control_paths')}:{a.get('paths_hash')}",
+    ),
     "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
     "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
     "chat.say": ("chat.send", lambda a: "general"),
@@ -370,7 +375,7 @@ def _ticket_paste(a):
 
 
 def _ticket_patch(a):
-    _only(a, ("ticket", "data", "if_revision"))
+    _only(a, ("ticket", "data", "if_revision", "review_tip"))
     data = a.get("data")
     if not isinstance(data, dict) or not data or set(data) - set(PATCH_KEYS):
         raise BadRequest("Nothing to change, or a field that cannot be changed here.")
@@ -382,9 +387,15 @@ def _ticket_patch(a):
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
+    flags = [f"--if-revision={rev}"]
+    # "Accept" sends the review tip the page showed; the core binds the Done to it. Anything that is not a
+    # commit id is ignored (the Done is then judged as without one, never refused).
+    tip = a.get("review_tip")
+    if data.get("status") == "done" and isinstance(tip, str) and (tip == "none" or SHA.fullmatch(tip)):
+        flags.append(f"--shown-tip={tip}")
     return (
         ["ticket", "patch", _tid(a.get("ticket"))],
-        [f"--if-revision={rev}"],
+        flags,
         [json.dumps(data, ensure_ascii=False)],
     )
 
@@ -541,6 +552,33 @@ def _copies_remove_orphaned(a):
     if not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{8}", v):
         raise BadRequest("That is not a copies folder.")
     return ["copy", "remove-orphaned", v, "--json"], [], []
+
+
+def _copies_ask_update(a):
+    _only(a, ("ticket",))
+    v = a.get("ticket")
+    if not isinstance(v, str) or not TID.fullmatch(v):
+        raise BadRequest("That is not a ticket.")
+    return ["copy", "ask-update", v, "--json"], [], []
+
+
+def _copies_approve(a):
+    _only(a, ("ticket", "tip", "control_paths", "paths_hash"))
+    tid, tip, count = a.get("ticket"), a.get("tip"), a.get("control_paths")
+    if (
+        not isinstance(tid, str)
+        or not TID.fullmatch(tid)
+        or not isinstance(tip, str)
+        or not re.fullmatch(r"[0-9a-f]{40,64}", tip)
+        or type(count) is not int
+        or count < 0
+        or not isinstance(a.get("paths_hash"), str)
+        or not re.fullmatch(r"[0-9a-f]{8}", a["paths_hash"])
+    ):
+        raise BadRequest("Review the copy again before bringing it back.")
+    # What the person saw travels with the click; the core compares it with the copy as it is now.
+    shown = ["--approve-tip", tip, "--control-paths", str(count), "--paths-hash", a["paths_hash"]]
+    return ["copy", "retry", tid, *shown, "--json"], [], []
 
 
 def _copies_retry(a):
@@ -864,6 +902,8 @@ OPS = {
     "copies.clean": _copies_clean,
     "copies.remove_orphaned": _copies_remove_orphaned,
     "copies.retry": _copies_retry,
+    "copies.approve": _copies_approve,
+    "copies.ask-update": _copies_ask_update,
     "ticket.field": _ticket_field,
 }
 

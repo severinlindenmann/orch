@@ -35,6 +35,7 @@ def post(server, body, headers=None, cookie=False, path="/api/act", secret=None)
         "Origin": f"http://127.0.0.1:{port}",
         "Content-Type": "application/json",
         "Content-Length": str(len(raw)),
+        "Sec-Fetch-Site": "same-origin",  # a browser always sends it; tests of its absence use post_bare
     }
     if cookie:
         base["Cookie"] = f"orch_page_insights_{port}=good-cookie-value"
@@ -46,6 +47,28 @@ def post(server, body, headers=None, cookie=False, path="/api/act", secret=None)
     result = response.status, dict(response.getheaders()), response.read()
     conn.close()
     return result
+
+
+def post_bare(server, body, path="/api/act"):
+    """A POST with NO Sec-Fetch-Site header (a script or old client) but otherwise a valid-looking request."""
+    port = server.server_address[1]
+    raw = json.dumps(body).encode()
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request(
+        "POST",
+        path,
+        body=raw,
+        headers={
+            "Host": f"127.0.0.1:{port}",
+            "Origin": f"http://127.0.0.1:{port}",
+            "Content-Type": "application/json",
+            "Content-Length": str(len(raw)),
+            "Cookie": f"orch_page_insights_{port}=good-cookie-value",
+        },
+    )
+    status = conn.getresponse().status
+    conn.close()
+    return status
 
 
 def link(server, token=FakeSession.token):
@@ -547,6 +570,16 @@ def test_admin_lock_refuses_sharing_on(start_server, fake_orch, fake_session, an
     assert person(srv, setting("insights.share_counts", "off"))[0] == 200  # turning it off stays possible
 
 
+def test_act_and_session_both_refuse_a_missing_sec_fetch_site(start_server, fake_orch, fake_session):
+    """One shared rule (_site_refusal): an absent Sec-Fetch-Site is refused on /api/act like on /session."""
+    srv = start_server(session=fake_session)
+    secret = link(srv)
+    assert post_bare(srv, setting("insights.keep_days", "30")) == 403
+    assert post_bare(srv, {"token": FakeSession.token}, path="/session") == 403
+    assert writes(fake_orch) == [] and fake_session.minted == []
+    assert post(srv, setting("insights.share_counts", "off"), cookie=True, secret=secret)[0] == 200
+
+
 def test_fence_on_post(start_server, fake_orch, fake_session):
     srv = start_server(session=fake_session)
     body = setting("insights.keep_days", "30")
@@ -625,7 +658,9 @@ def test_session_post(start_server, fake_session):
 @pytest.mark.parametrize(
     "headers",
     [
-        {},  # no Sec-Fetch-Site: refused too
+        {
+            "Sec-Fetch-Site": ""
+        },  # empty/absent: refused too (truly absent: test_act_and_session_both_refuse...)
         {"Sec-Fetch-Site": "cross-site"},
         {"Sec-Fetch-Site": "same-site"},
         {"Sec-Fetch-Site": "same-origin", "Content-Type": "text/plain"},
@@ -651,6 +686,16 @@ def test_session_post_without_origin_refused(start_server, fake_session):
     assert response.status == 403 and response.getheader("Set-Cookie") is None
     conn.close()
     assert srv.page_secret is None
+
+
+def test_settings_target_is_the_core_form_byte_identical():
+    from orch.config import insights_target
+
+    from orch_insights.settings import KEYS
+
+    for key, (_, allowed) in KEYS.items():
+        for value in allowed:
+            assert insights_target(key, value) == f"{key}={value}"
 
 
 def test_cookie_without_page_secret_never_mints(start_server, fake_orch, fake_session):
@@ -754,12 +799,18 @@ def real_session(ws):
 
 
 def cookie_headers(port, cookie, **extra):
-    return {"Host": f"127.0.0.1:{port}", "Cookie": cookie, **extra}
+    return {"Host": f"127.0.0.1:{port}", "Cookie": cookie, "X-Orch-Page": SESSION_SECRET[0], **extra}
+
+
+SESSION_SECRET = [
+    ""
+]  # the page secret of the session under test (set by test_cookie_parsing_matches_the_core)
 
 
 @pytest.mark.parametrize("session_kind", ["real", "fake"])
 def test_cookie_parsing_matches_the_core(real_session, session_kind):
     session = real_session if session_kind == "real" else FakeSession()
+    SESSION_SECRET[0] = session.secret
     value = session.cookie
     name = session.cookie_name(8431)
     good = [f"{name}={value}", f"a=b; {name}={value}", f'{name}="{value}"; x=y']
@@ -892,3 +943,63 @@ def test_deadline_stops_a_late_child():
 
     code, _, _ = actions.orch(Path("/nonexistent"), "/bin/true", ["x"], deadline=0)
     assert code == 124
+
+
+# ---- #539: /session cannot be used by another local page; no CORS; the secret never leaks ----------------------
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"Origin": "http://127.0.0.1:1"},  # another loopback port
+        {"Origin": "http://localhost:1"},
+        {"Origin": "https://evil.example"},
+        {"Origin": "null"},
+        {"Sec-Fetch-Site": "cross-site"},
+        {"Host": "evil.example:1"},
+        {"Host": "127.0.0.1:1"},
+    ],
+    ids=lambda e: ",".join(f"{k}={v}" for k, v in e.items()),
+)
+def test_session_refused_for_foreign_origin_or_wrong_host(start_server, fake_session, extra):
+    srv = start_server(session=fake_session)
+    token = {"token": FakeSession.token}
+    code, headers, body = post(srv, token, path="/session", headers={**SAME_SITE, **extra})
+    # a request without Origin is covered below; here Origin is the server's own unless overridden
+    assert code == 403 and b"secret" not in body and "Set-Cookie" not in headers
+    assert not any(k.lower().startswith("access-control-") for k in headers)
+    assert srv.page_secret is None
+
+
+def test_session_refused_without_origin_and_never_cors(start_server, fake_session):
+    srv = start_server(session=fake_session)
+    port = srv.server_address[1]
+    raw = json.dumps({"token": FakeSession.token}).encode()
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request(
+        "POST",
+        "/session",
+        body=raw,
+        headers={"Host": f"127.0.0.1:{port}", "Content-Type": "application/json", **SAME_SITE},
+    )
+    response = conn.getresponse()
+    response.read()
+    assert response.status == 403
+    assert not any(k.lower().startswith("access-control-") for k, _ in response.getheaders())
+    secret = link(srv)
+    for path in ("/", "/api/settings", "/api/overview"):
+        for method in ("GET", "OPTIONS"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            conn.request(
+                method,
+                path,
+                headers={
+                    "Host": f"127.0.0.1:{port}",
+                    "Origin": "https://evil.example",
+                    "X-Orch-Page": secret,
+                },
+            )
+            response = conn.getresponse()
+            data = response.read()
+            assert secret.encode() not in data and response.getheader("Location") is None
+            assert not any(k.lower().startswith("access-control-") for k, _ in response.getheaders())

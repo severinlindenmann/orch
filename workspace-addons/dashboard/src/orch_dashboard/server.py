@@ -115,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.send_header(
-            "Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'"
+            "Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'"
         )
         self.end_headers()
         self.wfile.write(body)
@@ -431,8 +431,12 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "dashboard"), "text/plain; charset=utf-8")
+        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its sessionStorage
         self._send(
-            204, b"", "text/plain", {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)}
+            200,
+            json.dumps({"secret": self.session.secret}).encode(),
+            "application/json",
+            {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)},
         )
 
     def do_POST(self):

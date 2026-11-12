@@ -460,6 +460,12 @@ def key_dir(root: Path, create: bool = True) -> Path:
     return d
 
 
+def _healed_id(root: Path, create: bool) -> str:
+    """The workspace id as healed and bound by key_dir (the name of its key folder). A MAC uses this id, never
+    the raw .local-id read before healing. Refused when there is none."""
+    return key_dir(root, create=create).name
+
+
 BINDING_MISMATCH = (
     "Refused: this folder's key id belongs to another folder (it was copied or moved). "
     "Its keys stay where they are."
@@ -580,8 +586,8 @@ _LOCKS = threading.local()
 _RESETS = 0  # count of reset_protection runs in this process: a verify that saw one is refused
 
 
-def _lock_held(d: Path) -> bool:
-    return getattr(_LOCKS, "held", {}).get(str(d), 0) > 0
+def _lock_held(d: Path, name: str = "keys.lock") -> bool:
+    return getattr(_LOCKS, "held", {}).get((str(d), name), 0) > 0
 
 
 @contextlib.contextmanager
@@ -604,12 +610,13 @@ def _folders_lock(keys: Path):
 def _file_lock(d: Path, name: str):
     """The O_EXCL lock file `name` in `d`, re-entrant in the same thread."""
     held = _LOCKS.__dict__.setdefault("held", {})
-    if held.get(str(d), 0) > 0:
-        held[str(d)] += 1
+    k = (str(d), name)
+    if held.get(k, 0) > 0:
+        held[k] += 1
         try:
             yield
         finally:
-            held[str(d)] -= 1
+            held[k] -= 1
         return
     lock = d / name
     end = time.monotonic() + 10
@@ -625,11 +632,11 @@ def _file_lock(d: Path, name: str):
             if time.monotonic() > end:
                 raise Refused("The key store is busy. Try again.") from None
             time.sleep(0.02)
-    held[str(d)] = 1
+    held[k] = 1
     try:
         yield
     finally:
-        held.pop(str(d), None)
+        held.pop(k, None)
         with contextlib.suppress(OSError):
             lock.unlink()
 
@@ -689,13 +696,12 @@ def record_key(root: Path, create: bool = False) -> tuple[str, str, bytes] | Non
     sealed). rk is derived from human.key (record_auth.derive) so human.key itself is never used for a MAC.
     Cached
     per process by the key file's identity and mtime, so a reset_protection rotation is picked up at once."""
-    from orch import addons, record_auth
+    from orch import record_auth
 
     try:
-        ws = addons.workspace_id(root, create=create)
-        if not ws:
-            return None
-        f = key_dir(root, create=create) / "human.key"
+        d = key_dir(root, create=create)
+        ws = d.name  # the healed id (_healed_id), never the raw .local-id read before healing
+        f = d / "human.key"
         try:
             st = f.lstat()
         except FileNotFoundError:
@@ -1620,10 +1626,9 @@ def action_mac(key: bytes, workspace: str, target: str, record: dict) -> str:
 def action_sign(root: Path, target: str, record: dict) -> str | None:
     """This core's MAC binding `record` to a person's verified action on `target`. Call only after person_by
     returned a person for exactly `target`. None when there is no usable key or workspace id."""
-    from orch import addons
 
     try:
-        ws = addons.workspace_id(root, create=False)
+        ws = _healed_id(root, False)
         if not ws or not isinstance(target, str) or not isinstance(record, dict):
             return None
         return action_mac(human_key(root, create=False), ws, target, record)
@@ -1634,12 +1639,11 @@ def action_sign(root: Path, target: str, record: dict) -> str | None:
 def action_is_human(root: Path, target, record, mac) -> bool:
     """True only when `mac` is this core's action1 MAC for `target` and `record`. Fails closed: no key, no
     workspace id, a damaged record or any other shape = nobody."""
-    from orch import addons
 
     if not isinstance(mac, str) or not mac or not isinstance(target, str) or not isinstance(record, dict):
         return False
     try:
-        ws = addons.workspace_id(root, create=False)
+        ws = _healed_id(root, False)
         if not ws:
             return False
         return hmac.compare_digest(mac, action_mac(human_key(root, create=False), ws, target, record))
@@ -1703,10 +1707,9 @@ def local_mac(key: bytes, workspace: str, kind: str, record) -> str:
 
 def local_key(root: Path) -> tuple[str, bytes] | None:
     """(workspace id, human key) for local records, or None (no usable key or id: nothing verifies)."""
-    from orch import addons
 
     try:
-        ws = addons.workspace_id(root, create=False)
+        ws = _healed_id(root, False)
         return (ws, human_key(root, create=False)) if ws else None
     except (Refused, OSError, ValueError):
         return None
@@ -1830,11 +1833,10 @@ def profile_mac(key: bytes, workspace: str, name: str, body: dict) -> str:
 def profile_sign(root: Path, name: str, body: dict | None) -> None:
     """Record the current MAC of profile `name` (None: tombstone). Raises Refused when it cannot be recorded
     (the caller must not write the profile then)."""
-    from orch import addons
 
     mac = None
     if body is not None:
-        ws = addons.workspace_id(root, create=True)
+        ws = _healed_id(root, True)
         mac = profile_mac(human_key(root), ws, name, body)
     if not _ledger_put(root, PROFILE_LEDGER, "orch.profile-ledger/1", name, mac):
         raise Refused("orch could not record this key profile. Nothing was changed.")
@@ -1843,10 +1845,9 @@ def profile_sign(root: Path, name: str, body: dict | None) -> None:
 def profile_verified(root: Path, name: str, body: dict) -> bool:
     """True only when the body's MAC (this key, this workspace, this name) is the current ledger entry.
     Never raises; no key, no workspace id or no readable ledger = False (fail closed)."""
-    from orch import addons
 
     try:
-        ws = addons.workspace_id(root, create=False)
+        ws = _healed_id(root, False)
         ent = _ledger_load(root, PROFILE_LEDGER)
         cur = ent.get(name) if ent else None
         if not ws or not isinstance(cur, str):
@@ -1859,10 +1860,9 @@ def profile_verified(root: Path, name: str, body: dict) -> bool:
 def wont_sign(root: Path, ticket: str, step: dict) -> str | None:
     """The receiving core's own wontdo1 MAC for this step's decision, recorded as the CURRENT entry of the
     ledger (None when there is no usable key or ledger). The step must already carry a fresh `wont_nonce`."""
-    from orch import addons
 
     try:
-        ws = addons.workspace_id(root, create=False)
+        ws = _healed_id(root, False)
         if not ws or not isinstance(step.get("wont_nonce"), str):
             return None
         mac = wontdo_mac(human_key(root, create=False), ws, ticket, wont_decision(step))
@@ -1890,10 +1890,9 @@ def wont_verifier(root: Path, relay_ok=None):
     call, so the sync caller must read, merge and write under the ticket's apply_op lock (the ledger cannot
     move between the merge and the write). The text `by: human:` is never
     looked at. Fails closed: no key, no workspace id, no readable ledger = nobody."""
-    from orch import addons
 
     try:
-        ws = addons.workspace_id(root, create=False)
+        ws = _healed_id(root, False)
         key = human_key(root, create=False)
     except (Refused, OSError):
         return lambda step, ticket: False
@@ -2039,13 +2038,12 @@ def verdict_sign(
 ) -> dict:
     """A fresh verdict entry for the ticket as it is NOW (its checklist must be final), recorded as the
     CURRENT ledger entry. No key, no workspace id or a damaged ledger = Refused: never a half-signed Done."""
-    from orch import addons
 
     if kind not in VERDICT_KINDS:
         raise Refused(VERDICT_NEEDED)
     tid = ticket.get("id")
     try:
-        ws = addons.workspace_id(root, create=False)
+        ws = _healed_id(root, False)
         key = human_key(root, create=False)
     except (Refused, OSError):
         raise Refused(VERDICT_LEDGER_DAMAGED) from None
@@ -2090,7 +2088,7 @@ class VerdictChecker:
         if not self._tried:
             self._tried = True
             try:
-                ws = self._addons.workspace_id(self.root, create=False)
+                ws = _healed_id(self.root, False)
                 self._ctx = (ws, human_key(self.root, create=False)) if ws else None
             except (Refused, OSError):
                 self._ctx = None
@@ -2791,23 +2789,30 @@ RESUME_LIFE = (
 )
 
 
-def write_resume_cookie(root: Path, server: str, cookie: str) -> bool:
+def write_resume_cookie(root: Path, server: str, cookie: str, secret: str) -> bool:
     """Called by a page server just before it lets an update (which restarts it) run: the restarted server
-    adopts this cookie once, so the person's open tab keeps its session (no extra click). Narrow on purpose:
-    one server, one use, 15 minutes, written only after a person's click."""
-    if server not in ("focus", "dashboard") or not isinstance(cookie, str) or not 20 <= len(cookie) <= 80:
+    adopts this cookie and page secret once, so the person's open tab keeps its session (no extra click).
+    Narrow on purpose: one server, one use, 15 minutes, written only after a person's click."""
+    if (
+        server not in ("focus", "dashboard")
+        or not isinstance(cookie, str)
+        or not isinstance(secret, str)
+        or not 20 <= len(cookie) <= 80
+        or not 20 <= len(secret) <= 80
+    ):
         return False
     try:
         _write_private(
-            key_dir(root) / f"resume-{server}.cookie", f"{cookie}\n{int(time.time()) + RESUME_LIFE}\n"
+            key_dir(root) / f"resume-{server}.cookie",
+            f"{cookie}\n{secret}\n{int(time.time()) + RESUME_LIFE}\n",
         )
         return True
     except (Refused, OSError):
         return False
 
 
-def take_resume_cookie(root: Path, server: str) -> str | None:
-    """The cookie a restarted server may adopt, once; the file is removed whatever it holds."""
+def take_resume_session(root: Path, server: str) -> tuple[str, str] | None:
+    """The (cookie, page secret) a restarted server may adopt, once; the file is removed whatever it holds."""
     if server not in ("focus", "dashboard"):
         return None
     try:
@@ -2821,8 +2826,14 @@ def take_resume_cookie(root: Path, server: str) -> str | None:
                     f.unlink()
     except (Refused, OSError, ValueError):
         return None
-    if len(lines) == 2 and lines[1].isdigit() and int(lines[1]) > time.time() and 20 <= len(lines[0]) <= 80:
-        return lines[0]
+    if (
+        len(lines) == 3
+        and lines[2].isdigit()
+        and int(lines[2]) > time.time()
+        and 20 <= len(lines[0]) <= 80
+        and 20 <= len(lines[1]) <= 80
+    ):
+        return lines[0], lines[1]
     return None
 
 

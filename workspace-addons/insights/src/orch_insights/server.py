@@ -7,10 +7,8 @@ import hmac
 import json
 import os
 import re
-import secrets
 import subprocess
 import sys
-import threading
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -109,16 +107,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(data).encode(), "application/json")
 
     def _can_act(self):
-        """This request carries the person's page session: cookie, loopback Host, no proxy headers (can_mint)
-        AND this server's page secret in X-Orch-Page (H2). The cookie name is the core's and is not
-        port-scoped, so a cookie set for another page server on this computer reaches us too: the header is
-        the real guard, the cookie alone never mints."""
-        secret = getattr(self.server, "page_secret", None)
-        sent = self.headers.get("X-Orch-Page") or ""
+        """This request carries the person's page session: cookie AND page secret (X-Orch-Page), loopback Host,
+        no proxy headers. The rule lives in PageSession.can_mint (the cookie alone never mints: another
+        loopback port receives it); the server-side secret must also have been handed out by a launch."""
         return (
             self.session is not None
-            and secret is not None
-            and hmac.compare_digest(sent.encode(), secret.encode())
+            and getattr(self.server, "page_secret", None) is not None
             and self.session.can_mint(self.headers, self.server.server_address[1])
         )
 
@@ -174,14 +168,21 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = do_TRACE = do_CONNECT = _refuse
 
+    def _site_refusal(self):
+        """The one Sec-Fetch-Site rule of every POST: same-origin or none; an absent header is refused too."""
+        if self.headers.get("Sec-Fetch-Site") not in ("same-origin", "none"):
+            return "This request came from another website and was refused."
+        return None
+
     def _session_refusal(self):
         """Why POST /session is refused: the action fence, plus Sec-Fetch-Site same-origin/none (absent is
         refused too) and a JSON body (M5), loopback Host and no proxy headers."""
         why = self._fence("POST", True)
         if why:
             return why
-        if self.headers.get("Sec-Fetch-Site") not in ("same-origin", "none"):
-            return "This request came from another website and was refused."
+        why = self._site_refusal()
+        if why:
+            return why
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return "forbidden"
         from orch.pageproof import forwarded, host_ok
@@ -211,7 +212,8 @@ class Handler(BaseHTTPRequestHandler):
             if getattr(self.session, "revoked", False):
                 self.server.page_secret = None  # a reused link ended the session: the secret goes with it
             return self._send(403, RELINK.encode())
-        secret = self.server.new_page_secret()
+        secret = self.session.secret  # the core's page secret (PageSession); one rule, one place
+        self.server.page_secret = secret
         body = json.dumps({"secret": secret}).encode()
         cookie_header = self.session.set_cookie(self.server.server_address[1], cookie)
         self._send(200, body, "application/json", extra={"Set-Cookie": cookie_header})
@@ -233,8 +235,9 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence("POST", True)
         if why:
             return 403, why
-        if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
-            return 403, "This request came from another website and was refused."
+        why = self._site_refusal()
+        if why:
+            return 403, why
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return 415, "send JSON"
         return None
@@ -284,17 +287,10 @@ def _page_session(root, orch_bin):
 
 
 class InsightsServer(ThreadingHTTPServer):
-    """The HTTP server plus this instance's page secret (H2): created only after a launch token was spent,
-    kept in memory, never logged."""
+    """The HTTP server; `page_secret` is set once a launch token was spent (it is the PageSession's secret) and
+    reset when a reused link ends the session."""
 
     page_secret = None
-    _secret_lock = threading.Lock()
-
-    def new_page_secret(self) -> str:
-        with self._secret_lock:
-            if self.page_secret is None:
-                self.page_secret = secrets.token_urlsafe(32)
-            return self.page_secret
 
 
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin=None, session=None) -> ThreadingHTTPServer:

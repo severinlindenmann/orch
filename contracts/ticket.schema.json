@@ -77,6 +77,17 @@
       "type": "object",
       "description": "Optional. The ticket works in a separate copy of the project (a git worktree made by orch, branch orch/<ticket>), kept for the life of the ticket. A record for people and other machines: it holds NO local path (those stay in the machine-local registry .orch/run/worktrees.json) and no code resolves a path from it. A single-repo workspace has one entry per machine; more repositories add entries.",
       "properties": {
+        "bring_back": {
+          "type": "object",
+          "required": ["state", "reason", "at"],
+          "properties": {
+            "state": { "enum": ["waiting", "merged", "none"] },
+            "reason": { "type": "string" },
+            "at": { "type": "string", "format": "date-time" },
+            "commit": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" }
+          },
+          "description": "Optional bring-back result. Informational only; deletion always verifies ancestry with git."
+        },
         "folders": {
           "type": "array",
           "maxItems": 32,
