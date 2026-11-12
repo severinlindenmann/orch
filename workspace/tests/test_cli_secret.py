@@ -1991,14 +1991,26 @@ LOCATION = "belongs to your own user|changed by other users"  # which reason fir
 
 def _safe_file():
     """A real (not linked) file in a system folder that the user cannot change, on any OS."""
-    for cand in ("/usr/bin/false", "/bin/false", "/usr/bin/env", "/bin/ls", "/usr/bin/ls"):
-        if os.path.isfile(cand) and os.path.realpath(cand) == cand:
+    why = {}
+    names = ["false", "env", "ls", "true", "cat"]
+    for folder in ("/usr/bin", "/bin", "/usr/sbin"):
+        if os.path.isdir(folder):
+            names += sorted(os.listdir(folder))[:60]
+    for name in dict.fromkeys(names):
+        for folder in ("/usr/bin", "/bin", "/usr/sbin"):
+            cand = f"{folder}/{name}"
+            if not os.path.isfile(cand):
+                continue
+            if os.path.realpath(cand) != cand:
+                why.setdefault("linked", cand)
+                continue
             try:
                 secretrun._check_chain(cand, "/nonexistent-workspace")
-            except Refused:
+            except Refused as exc:
+                why.setdefault(str(exc)[:60], cand)
                 continue
             return cand
-    pytest.fail("no system file passes the location check: the check is wrong or this machine is unusual")
+    pytest.fail(f"no system file passes the location check (reasons by first example: {why})")
 
 
 def _user_program(tmp_path):
