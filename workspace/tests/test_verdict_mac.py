@@ -214,6 +214,9 @@ def test_reopen_tombstones_and_the_old_file_content_is_review(ws, run, monkeypat
     old = _raw(ws, tid)
     assert tickets.load(ws, tid)["status"] == "done"
     code, out, err = run("ticket", "status", tid, "active", "--by", "agent:x", "--json")
+    assert code == 2 and "ticket is closed" in out + err  # an agent never re-opens a Done ticket (#542)
+    assert hp.verdict_ledger(ws)[tid] is not None
+    code, out, err = run("ticket", "status", tid, "active", "--by", "human:x", "--json")
     assert code == 0, out + err
     assert hp.verdict_ledger(ws)[tid] is None  # tombstone, written by the core's own write
     tickets.ticket_path(ws, tid).write_text(json.dumps(old))  # the old Done content comes back
@@ -252,7 +255,8 @@ def test_a_newer_verdict_supersedes_an_older_one(ws, run, monkeypatch):
     tid = _finished(ws, run)
     _verdict(ws, run, monkeypatch, tid)
     first = _raw(ws, tid)
-    run("ticket", "status", tid, "active", "--by", "agent:x", "--json")
+    code, out, err = run("ticket", "status", tid, "active", "--by", "human:x", "--json")  # a person re-opens
+    assert code == 0, out + err
     _verdict(ws, run, monkeypatch, tid)
     assert tickets.load(ws, tid)["status"] == "done"
     tickets.ticket_path(ws, tid).write_text(json.dumps(first))  # the older valid MAC replayed

@@ -1219,11 +1219,11 @@ def test_undo_is_decided_under_the_lock_a_load_error_requires_the_proof_and_a_sw
     # operation itself refuses (nothing is decided before the lock)
     orig = tickets.apply_op
 
-    def become_wont_do_first(root, t, op):
+    def become_wont_do_first(root, t, op, **kw):
         if t == tid:
             tickets.apply_op = orig  # one swap only
             orig(root, tid, lambda x: x["checklist"][0].update(wont_do=True))
-        return orig(root, t, op)
+        return orig(root, t, op, **kw)
 
     monkeypatch.setattr(tickets, "apply_op", become_wont_do_first)
     code, out, err = run("check", "reopen", tid, cid, "--by", "human:pat", "--json")
@@ -1326,11 +1326,11 @@ def test_the_library_edit_and_remove_decide_under_the_lock(ws, run, monkeypatch)
     t2, c2 = _ticket_with_step(ws, run)
     orig = tickets.apply_op
 
-    def swap(root, t, op):
+    def swap(root, t, op, **kw):
         if t == t2:
             tickets.apply_op = orig
             orig(root, t2, lambda x: x["checklist"][0].update(wont_do=True))
-        return orig(root, t, op)
+        return orig(root, t, op, **kw)
 
     monkeypatch.setattr(tickets, "apply_op", swap)
     with pytest.raises(tickets.NeedsProof):

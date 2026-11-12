@@ -483,13 +483,32 @@ def _is_person(by: str) -> bool:
     return by.startswith("human:") and not agent_tool()
 
 
+CLOSED_AGENT = "This ticket is closed, so the agent can't change it."
+
+
+def _agent_actor(by: str) -> bool:
+    """An agent wrote it: `by` is agent:*, or a human:* claimed from inside an agent's environment (a run sets
+    ORCH_AGENT, so an agent run cannot pass for a person; the same rule as _is_person). System actors (orch)
+    are neither."""
+    return by.startswith("agent:") or (by.startswith("human:") and bool(agent_tool()))
+
+
 def apply_op(
-    root: Path, tid: str, fn, *, expect: tuple[str, object] | None = None, if_revision: int | None = None
+    root: Path,
+    tid: str,
+    fn,
+    *,
+    expect: tuple[str, object] | None = None,
+    if_revision: int | None = None,
+    by: str | None = None,
 ):
     """The one write path: load, change and write under ONE lock, so concurrent plain ops all land on the
     latest revision. `fn(ticket)` changes the dict (no subprocess, nothing slow) and returns a result.
     Only an edit of something a person saw passes `expect=(path, old value)` or `if_revision`;
-    it is refused (Conflict, exit 2) when that changed. Returns (ticket, result)."""
+    it is refused (Conflict, exit 2) when that changed. `by` (the validated actor of an op an agent can call)
+    is THE guard of a closed ticket: an agent changes nothing in a done/dropped ticket, re-opening included,
+    refused before `fn` runs, so nothing (ticket, history, ledger) is touched (#542).
+    Returns (ticket, result)."""
     ticket_path(root, tid)  # id shape check, same friendly refusal
     with _locked(root, tid):
         ticket = _load_raw(root, tid)
@@ -497,6 +516,8 @@ def apply_op(
         eff_status = _effective(root, ticket)["status"] if raw_status == "done" else raw_status
         if raw_status == "done":
             ticket["status"] = eff_status  # ops see what readers see: an unsigned Done is Review
+        if by is not None and eff_status in CLOSED and _agent_actor(by):
+            raise Refused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
         if expect is not None and _get(ticket, expect[0]) != expect[1]:
@@ -536,12 +557,20 @@ def apply_op(
         closed_now = ticket.get("status") in CLOSED and eff_status not in CLOSED and not restored
     if closed_now:
         # THE one place a ticket becomes done/dropped, whatever op did it (accept, status, patch from the
-        # dashboard, ...): its live agent run stops (#542) and its separate copy goes, after the ticket lock
-        # is released (never raises)
-        from orch import runs_live, worktrees  # both import tickets
+        # dashboard, ...): its live agent run stops when a person closed it (#542) and its separate copy
+        # goes, after the ticket lock is released. Each in its own try: one failing never skips the other.
+        try:
+            from orch import runs_live  # runs_live imports tickets
 
-        runs_live.stop_closed(root, tid)
-        worktrees.on_closed(root, tid)
+            runs_live.stop_closed(root, tid, by)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from orch import worktrees  # worktrees imports tickets
+
+            worktrees.on_closed(root, tid)
+        except Exception:  # noqa: BLE001
+            pass
     return ticket, result
 
 
@@ -1021,7 +1050,7 @@ def accept_review(root: Path, tid: str, by: str, via: str = "phone", proven: boo
         add_history(ticket, by, "Status review -> done", via)
         _sign_done(root, ticket, by, proven)
 
-    return apply_op(root, tid, op)[0]  # apply_op takes the copy away (worktrees.on_closed)
+    return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away (worktrees.on_closed)
 
 
 def ask_for_changes(
@@ -1179,7 +1208,7 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
         if target == "done" and old != "done":
             _sign_done(root, ticket, actor, proven)
 
-    return apply_op(root, tid, op)[0]  # apply_op takes the copy away of a done/closed ticket
+    return apply_op(root, tid, op, by=by)[0]  # apply_op takes the copy away of a done/closed ticket
 
 
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
@@ -1251,7 +1280,7 @@ def edit(
         if fields:
             add_history(ticket, by, "Edited " + ", ".join(sorted(fields)))
 
-    return apply_op(root, tid, op, if_revision=if_revision)[0]
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
 LONG_NOTE = (
@@ -1316,7 +1345,7 @@ def set_auto_title(root: Path, tid: str, title: str, by: str, description: str |
                 ticket.pop("note", None)
             add_history(ticket, by, f"Description written by {by[:100]}")
 
-    return apply_op(root, tid, op)[0]
+    return apply_op(root, tid, op, by=by)[0]
 
 
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
@@ -1330,13 +1359,13 @@ def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str)
         ticket["plan"] = {"goal": goal, **({"not_included": ni} if ni else {}), "by": by[:100]}
         add_history(ticket, by, "Plan written")
 
-    return apply_op(root, tid, op)[0]
+    return apply_op(root, tid, op, by=by)[0]
 
 
 def set_summary(root: Path, tid: str, text: str, by: str) -> dict:
     """No history line: it would double the history on every run."""
     clean_field("summary", text)
-    return apply_op(root, tid, lambda t: _set_field(t, "summary", text))[0]
+    return apply_op(root, tid, lambda t: _set_field(t, "summary", text), by=by)[0]
 
 
 # Short plain-text fields on a ticket (outcome parts); the schema maxLength matches.
@@ -1373,7 +1402,7 @@ def set_outcome(root: Path, tid: str, by: str, **parts) -> dict:
         else:
             ticket.pop("outcome", None)
 
-    return apply_op(root, tid, op)[0]
+    return apply_op(root, tid, op, by=by)[0]
 
 
 def _next_id(items: list[dict], prefix: str) -> str:
@@ -1417,22 +1446,12 @@ def _clean_covers(covers: str | None) -> str | None:
     return line
 
 
-CLOSED_AGENT = "This ticket is closed, so the agent can't add or change checks."
-
-
-def _refuse_closed_agent(ticket: dict, by: str) -> None:
-    """An agent never writes checks into a done/dropped ticket (#542); a person still can. Under the lock."""
-    if by.startswith("agent:") and ticket.get("status") in CLOSED:
-        raise Refused(CLOSED_AGENT)
-
-
 def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = None) -> tuple[dict, dict]:
     if not text.strip():
         raise Refused("A checklist item needs text.")
     covers = _clean_covers(covers)
 
     def op(ticket):
-        _refuse_closed_agent(ticket, by)
         item = {"id": _next_id(ticket["checklist"], "c"), "text": text.strip(), "done": False, "evidence": []}
         if covers:
             item["covers"] = covers
@@ -1440,7 +1459,7 @@ def check_add(root: Path, tid: str, text: str, by: str, covers: str | None = Non
         add_history(ticket, by, f"Added check {item['id']}")
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def parse_evidence(raw: str) -> dict:
@@ -1539,7 +1558,6 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
     _item(ticket, cid)
 
     def op(t):
-        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         _refuse_if_wont_do(item, tid, cid)
         for ev in evs:
@@ -1551,7 +1569,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
         add_history(t, by, f"Check {cid} done")
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 WONT_DO_AGENT = (
@@ -1621,7 +1639,7 @@ def check_wont_do(root: Path, tid: str, cid: str, by: str, reason: str | None = 
         add_history(t, by, text)
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def _output_tail(root: Path, source: str | None) -> str | None:
@@ -1668,7 +1686,6 @@ def check_record(
     ev["by"], ev["at"] = by, now()
 
     def op(t):
-        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         item["evidence"] = trim_runs([*item["evidence"], ev])
         add_history(
@@ -1678,7 +1695,7 @@ def check_record(
         )
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def check_exists(root: Path, tid: str, cid: str) -> None:
@@ -1715,7 +1732,6 @@ def check_edit(
     covers = _clean_covers(covers)
 
     def op(t):
-        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)
@@ -1735,12 +1751,11 @@ def check_edit(
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
-    return apply_op(root, tid, op, expect=expect, if_revision=if_revision)
+    return apply_op(root, tid, op, expect=expect, if_revision=if_revision, by=by)
 
 
 def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dict, dict]:
     def op(t):
-        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         _item(t, after)
         if after == cid:
@@ -1751,7 +1766,7 @@ def check_move(root: Path, tid: str, cid: str, after: str, by: str) -> tuple[dic
         add_history(t, by, f"Moved {cid} after {after}")
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
@@ -1759,7 +1774,6 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
     under the lock). The history line keeps the step text and its proof."""
 
     def op(t):
-        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)  # an agent cannot delete a person's decision
@@ -1774,7 +1788,7 @@ def check_remove(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         )
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) -> tuple[dict, dict]:
@@ -1784,7 +1798,6 @@ def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
     gap, and a ticket that cannot be read refuses)."""
 
     def op(t):
-        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         if item.get("wont_do"):
             _undo_guard(by, item, tid, cid, proven)
@@ -1803,14 +1816,13 @@ def check_reopen(root: Path, tid: str, cid: str, by: str, proven: bool = False) 
         add_history(t, by, f"Reopened {cid}" + (f" (old proof: {proof})" if proof else ""))
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
     """Mark a step as being worked on; the mark on any other step goes."""
 
     def op(t):
-        _refuse_closed_agent(t, by)
         item = _item(t, cid)
         if item.get("done"):
             raise Refused(f"{cid} is already done. Reopen it first: orch check reopen {tid} {cid}")
@@ -1820,7 +1832,7 @@ def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         item.update({"state": "doing", "by": by, "at": now()})
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def check_stop(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
@@ -1829,7 +1841,7 @@ def check_stop(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         _clear_doing(item)
         return item
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -> bool:
@@ -1859,7 +1871,7 @@ def doing_stale(root: Path, ticket: dict, item: dict, at: float | None = None) -
 def log(root: Path, tid: str, text: str, by: str) -> dict:
     if not text.strip():
         raise Refused("A history entry needs text.")
-    return apply_op(root, tid, lambda t: add_history(t, by, text.strip()))[0]
+    return apply_op(root, tid, lambda t: add_history(t, by, text.strip()), by=by)[0]
 
 
 def ref_add(
@@ -1895,7 +1907,7 @@ def ref_add(
         add_history(ticket, by, f"{verb} {refs.target(result)}")
         return result
 
-    t, _ = apply_op(root, t["id"], op)
+    t, _ = apply_op(root, t["id"], op, by=by)
     return t, result, added
 
 
@@ -1944,7 +1956,7 @@ def ref_remove(root: Path, tid: str, target: str, by: str) -> tuple[dict, dict]:
         add_history(ticket, by, f"Removed reference {refs.target(result)}")
         return result
 
-    t, _ = apply_op(root, t["id"], op)
+    t, _ = apply_op(root, t["id"], op, by=by)
     return t, result
 
 
@@ -2222,7 +2234,7 @@ def ask(
         add_history(ticket, by, f"Asked {q['id']}, waiting")
         return q
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tuple[dict, dict]:
@@ -2258,7 +2270,7 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         return q
 
-    return apply_op(root, tid, op)
+    return apply_op(root, tid, op, by=by)
 
 
 def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -> dict:
@@ -2285,7 +2297,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
                 ticket["status"] = "active"
             add_history(ticket, by, "Wait cleared")
 
-        return apply_op(root, tid, op)[0]
+        return apply_op(root, tid, op, by=by)[0]
     if bool(until) == bool(on):
         raise Refused("Use exactly one of --until <time> or --on <kind>:<ref>.")
     if until:
@@ -2304,7 +2316,7 @@ def wait(root: Path, tid: str, until: str | None, on: str | None, by: str, clear
         add_history(ticket, by, note)
 
     load(root, tid)
-    return apply_op(root, tid, op2)[0]
+    return apply_op(root, tid, op2, by=by)[0]
 
 
 def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bool = False) -> dict:
@@ -2362,7 +2374,7 @@ def patch(root: Path, tid: str, if_revision: int, data: str, by: str, proven: bo
         if status == "done" and old != "done":
             _sign_done(root, ticket, actor, proven)
 
-    return apply_op(root, tid, op, if_revision=if_revision)[0]
+    return apply_op(root, tid, op, if_revision=if_revision, by=by)[0]
 
 
 # ---------------------------------------------------------------- agent sessions (used by the run lane)
