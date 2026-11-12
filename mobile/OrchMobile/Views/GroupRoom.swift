@@ -11,6 +11,8 @@ struct GroupRoomView: View {
     @State private var viewer: ArtifactItem?
     /// The "group-bottom" marker is on screen (new rows then follow to the bottom).
     @State private var atBottom = true
+    /// Message rows on screen now: read goes only up to the last of these while scrolled up.
+    @State private var visible: Set<String> = []
     private var group: PhoneGroup? { model.groups.groups.first { $0.key == key } }
 
     var body: some View {
@@ -36,14 +38,23 @@ struct GroupRoomView: View {
                                             outgoingView(item, group: group)
                                         }
                                     }.id(row.id)
+                                    .onAppear { if let id = row.groupMessage?.id { visible.insert(id); markRead(group) } }
+                                    .onDisappear { if let id = row.groupMessage?.id { visible.remove(id) } }
                                 }
                                 Color.clear.frame(height: 1).id("group-bottom")
-                                    .onAppear { atBottom = true }.onDisappear { atBottom = false }
+                                    .onAppear { atBottom = true; markRead(group) }.onDisappear { atBottom = false }
                             }.padding(16)
                         }
                         .defaultScrollAnchor(.bottom).defaultScrollAnchor(.top, for: .alignment)
                         .scrollDismissesKeyboard(.interactively)
                         .accessibilityIdentifier("group-messages")
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if !atBottom {
+                                Button { scrollToBottom(proxy) } label: {
+                                    JumpToLatestButton(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)))
+                                }.buttonStyle(PressStyle()).frame(maxWidth: .infinity, alignment: .trailing).padding(12)
+                            }
+                        }
                         .onChange(of: rows.count) { old, new in
                             // Follow new rows only when already at the bottom or the newest row is this phone's own:
                             // someone reading older messages is not pulled away.
@@ -228,7 +239,10 @@ struct GroupRoomView: View {
             }
         }
     }
-    private func markRead(_ group: PhoneGroup) { model.markRead(GroupRoomRules.readKey(group), items: GroupRoomRules.readItems(group)) }
+    private func markRead(_ group: PhoneGroup) {
+        let lastVisible = group.messages.last { visible.contains($0.id) }?.id
+        model.markRead(GroupRoomRules.readKey(group), items: GroupRoomRules.readItems(group), atBottom: atBottom, lastVisibleId: lastVisible)
+    }
     private func privacy(_ group: PhoneGroup) -> String {
         "Members see the group's messages from when they joined. They do not see the rest of the \(group.hostName) ticket."
     }

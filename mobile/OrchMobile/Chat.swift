@@ -60,6 +60,19 @@ struct RoomRow: Identifiable, Equatable {
     var id: String { workspace.id }
 }
 
+/// What the person has actually seen: everything when the list is at the bottom, otherwise only up to the last
+/// message on screen. Returns the time to mark read up to (nil: nothing new was seen). Items are oldest first.
+enum ReadRules {
+    typealias Line = (id: String, at: String, incoming: Bool)
+    static func readUpTo(_ items: [Line], atBottom: Bool, lastVisibleId: String? = nil) -> String? {
+        let shown: ArraySlice<Line>
+        if atBottom { shown = items[...] }
+        else if let lastVisibleId, let i = items.firstIndex(where: { $0.id == lastVisibleId }) { shown = items[...i] }
+        else { return nil }
+        return shown.filter(\.incoming).map(\.at).max()
+    }
+}
+
 /// Which message the last visit has seen, per chat. Client only.
 struct ReadState: Equatable {
     private(set) var seen: [String: String] = [:]
