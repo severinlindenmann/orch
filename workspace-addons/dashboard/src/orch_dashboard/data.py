@@ -975,8 +975,11 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
     files = raw.get("files", []) if isinstance(raw, dict) else []
     # The server's file list carries no link: rebuild it here from the saved publish address, the file id and
     # the key saved on this computer (publish list merges it in). The key is never sent to the server.
+    # Never an address the server supplies: a compromised server could steer copied links (with the key) to itself.
     saved = _load(root / ".orch" / "secrets" / "publish.json")
-    base = _host(saved.get("url")) if isinstance(saved, dict) else ""
+    base = str(saved.get("url") or "").rstrip("/") if isinstance(saved, dict) else ""
+    if not re.fullmatch(r"https://[A-Za-z0-9.:\[\]-]+(/[A-Za-z0-9._~-]+)*", base):
+        base = ""
     links = []
     for f in files if isinstance(files, list) else []:
         if (
@@ -991,9 +994,7 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
             expired = (when if when.tzinfo else when.replace(tzinfo=UTC)) <= datetime.now(UTC)
         except (ValueError, TypeError, AttributeError):
             expired = False
-        key, url = f.get("key"), f.get("url")
-        if not isinstance(url, str) and base.startswith("https://"):
-            url = f"{base}/f/{f['id']}"
+        key, url = f.get("key"), f"{base}/f/{f['id']}" if base else None
         ok = (
             isinstance(key, str)
             and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key)

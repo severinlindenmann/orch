@@ -747,7 +747,7 @@ def test_event_handler_flushes_initial_and_changed_revision_without_a_listener(w
     assert revisions.clients == 0
 
 
-def test_links_shape_and_origin(act_server, act_orch):
+def test_links_shape_and_origin(act_server, act_orch, ws):
     import http.client
 
     script = act_orch.read_text()
@@ -765,6 +765,9 @@ if sys.argv[1:3] == ["publish", "list"]:
         + script[pos:]
     )
     act_orch.write_text(script)
+    secrets = ws / ".orch" / "secrets"
+    secrets.mkdir(parents=True, exist_ok=True)
+    (secrets / "publish.json").write_text(json.dumps({"url": "https://example.test", "workspace": "w", "token": "t"}))
     code, body, _ = get(act_server + "/api/links")
     assert code == 200
     rows = json.loads(body)["links"]
@@ -774,41 +777,51 @@ if sys.argv[1:3] == ["publish", "list"]:
         "size": 3,
         "expires_at": "2020-01-01T00:00:00Z",
         "expired": True,
-        "link": "https://example.test/f/a#k=secretsecretsecret1",
+        "link": "https://example.test/f/f_a#k=secretsecretsecret1",
         "copy": True,
     }
-    assert rows[1]["link"] is None and rows[1]["copy"] is False
+    assert rows[1]["link"] is None and rows[1]["copy"] is False  # no saved key
     assert "hidden" not in body.decode() and '"key"' not in body.decode()
     c = http.client.HTTPConnection("127.0.0.1", int(act_server.rsplit(":", 1)[1]))
     c.request("GET", "/api/links", headers={"Origin": "https://evil.example"})
     assert c.getresponse().status == 403
 
 
-def test_links_are_rebuilt_locally_when_the_list_has_no_url(act_server, act_orch, ws):
-    """The server's file list carries no link: base address (saved) + id + the saved key; the key stays local."""
+def _links_with(act_server, act_orch, ws, saved, files):
     script = act_orch.read_text()
     pos = script.index("\n") + 1
     script = (
         script[:pos]
-        + """import sys, json
-if sys.argv[1:3] == ["addon", "list"]:
-    print('[{"name":"publish","active":true}]'); sys.exit(0)
-if sys.argv[1:3] == ["publish", "whoami"]:
-    print('{"id":"w_local"}'); sys.exit(0)
-if sys.argv[1:3] == ["publish", "list"]:
-    print(json.dumps({"files":[{"id":"f_a","name":"Report","size":3,"expires_at":None,"key":"secretsecretsecret1"},{"id":"f_b","name":"No key","size":4,"expires_at":None}]})); sys.exit(0)
-"""
+        + "import sys, json\n"
+        + 'if sys.argv[1:3] == ["addon", "list"]:\n    print(\'[{"name":"publish","active":true}]\'); sys.exit(0)\n'
+        + 'if sys.argv[1:3] == ["publish", "whoami"]:\n    print(\'{"id":"w_local"}\'); sys.exit(0)\n'
+        + f'if sys.argv[1:3] == ["publish", "list"]:\n    print(json.dumps({{"files": {files!r}}})); sys.exit(0)\n'
         + script[pos:]
     )
     act_orch.write_text(script)
     secrets = ws / ".orch" / "secrets"
     secrets.mkdir(parents=True, exist_ok=True)
-    (secrets / "publish.json").write_text(json.dumps({"url": "https://pub.example.test", "workspace": "w", "token": "t"}))
-    rows = json.loads(get(act_server + "/api/links")[1])["links"]
-    assert rows[0]["link"] == "https://pub.example.test/f/f_a#k=secretsecretsecret1" and rows[0]["copy"] is True
-    assert rows[1]["link"] is None and rows[1]["copy"] is False  # no saved key: nothing to copy
-    body = get(act_server + "/api/links")[1].decode()
-    assert '"key"' not in body and "token" not in body
+    (secrets / "publish.json").write_text(json.dumps({**saved, "workspace": "w", "token": "t"}))
+    return json.loads(get(act_server + "/api/links")[1])["links"]
+
+
+FILE = {"id": "f_a", "name": "R", "size": 3, "expires_at": None, "key": "secretsecretsecret1"}
+
+
+def test_a_link_never_uses_an_address_the_server_supplies(act_server, act_orch, ws):
+    rows = _links_with(
+        act_server, act_orch, ws, {"url": "https://pub.example.test"}, [{**FILE, "url": "https://evil.example/f/x"}]
+    )
+    assert rows[0]["link"] == "https://pub.example.test/f/f_a#k=secretsecretsecret1"
+    rows = _links_with(act_server, act_orch, ws, {}, [{**FILE, "url": "https://evil.example/f/x"}])
+    assert rows[0]["link"] is None and rows[0]["copy"] is False  # no saved address: no link
+
+
+def test_a_saved_sub_path_is_kept_and_odd_addresses_are_refused(act_server, act_orch, ws):
+    rows = _links_with(act_server, act_orch, ws, {"url": "https://pub.example.test/orch/"}, [FILE])
+    assert rows[0]["link"] == "https://pub.example.test/orch/f/f_a#k=secretsecretsecret1"
+    for bad in ("http://pub.example.test", "https://user@pub.example.test", "https://pub.example.test/a?x=1", "https://pub.example.test/a b"):
+        assert _links_with(act_server, act_orch, ws, {"url": bad}, [FILE])[0]["link"] is None
 
 
 def test_links_off(server):
