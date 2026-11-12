@@ -39,7 +39,10 @@ OPTIONS = ('protocol.https.allow=always', 'protocol.ssh.allow=always',
 # safegit empties core.sshCommand (it never talks to a network); an EMPTY sshCommand would be run as a shell
 # command, so sync's network calls name git's own default, `ssh` from the sanitized PATH. GIT_SSH_COMMAND, if
 # the person set one, still wins.
-NETWORK_OPTIONS = ('core.sshCommand=ssh',)
+NETWORK_OPTIONS = ('core.sshCommand=ssh -o BatchMode=yes',)  # never a prompt (no terminal, nobody to answer)
+# An address that was only typed (`orch sync act check`): not the person's own ssh command either, in batch mode,
+# with no credential helper (safegit's empty one; helpers only for the configured origin) and no prompt.
+TYPED_SSH = 'ssh -o BatchMode=yes'
 NETWORK = ('push', 'fetch', 'ls-remote', 'clone')
 # Options a caller must never pass to a network verb: they name the program run on the remote side.
 _PACK_OPTIONS = ('--receive-pack', '--upload-pack', '--exec', '-u', '--repo', '--config', '-c')
@@ -193,6 +196,9 @@ def git(root, *args, input=None, timeout=60, index=None, allowed_codes=(0,), com
     env = base_env(root, true)
     env.update({k: os.environ[k] for k in ENV_PASSED if k in os.environ})
     env.pop('SSH_ASKPASS', None)
+    if args[0] in NETWORK and not configured:
+        env.pop('GIT_SSH', None)
+        env['GIT_SSH_COMMAND'] = TYPED_SSH
     if commit_date is not None:
         env.update(GIT_AUTHOR_DATE=commit_date, GIT_COMMITTER_DATE=commit_date)
     if index is not None:
