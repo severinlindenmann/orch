@@ -150,6 +150,10 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
     orch ext set <id> <addon> '<json object>'       # data an add-on keeps on the ticket
     orch ext unset <id> <addon>[.<key>]               # remove that data again
 
+**Asked to update your copy** (you work in a separate copy and the project changed in the same places)
+
+    orch copy update <id>        # run it inside your copy, resolve any conflicts there, then commit
+
 **End of every run**
 
     orch ticket summary <id> "<what was done and what is left>"      # at most 200 characters

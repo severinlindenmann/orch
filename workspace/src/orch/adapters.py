@@ -65,6 +65,12 @@ def _registry() -> dict:
 _warned: set[str] = set()
 
 
+# Names (case-folded path components) that steer a built-in agent tool from inside a project: its settings,
+# hooks and MCP folders and its instruction files. Bringing back work that touches one needs a person's
+# review (worktrees._control_paths); the tool names live here, not in the copies code.
+AGENT_CONTROL_NAMES = frozenset({".claude", ".codex", "claude.md", "claude.local.md"})
+
+
 def builtin_names() -> list[str]:
     return list(_registry())
 

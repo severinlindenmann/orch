@@ -417,6 +417,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = t.add_parser("status", parents=[common])
     x.add_argument("id")
     x.add_argument("status", choices=tickets.STATUSES)
+    x.add_argument("--shown-tip", help=argparse.SUPPRESS)  # the review tip the person's page showed
     x = t.add_parser("edit", parents=[common])
     x.add_argument("id")
     x.add_argument("--title")
@@ -474,6 +475,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help='JSON object: status, waiting_on, owner, due, note, done_when, e.g. \'{"title": "New"}\'',
     )
     x.add_argument("--if-revision", type=int, required=True, metavar="N")
+    x.add_argument("--shown-tip", help=argparse.SUPPRESS)  # the review tip the person's page showed
 
     x = sub.add_parser("wait", parents=[common], help="same as: ticket wait")
     x.add_argument("id")
@@ -698,6 +700,32 @@ def _verdict_who(root: Path, args, tid: str, data: str, by: str, shown: str = ""
     return who, who.startswith("human:")
 
 
+def _looked_at_this(root: Path, args, tid: str, status, proven: bool) -> bool:
+    """A person's Done from a page names the review tip the page showed (--shown-tip). Bound here, before
+    the Done is written: False when new changes arrived after they looked (the Done still happens; bringing
+    the work back waits for their approval). Without a shown tip (the terminal, older pages) nothing
+    changes."""
+    if status != "done" or not proven:
+        return True
+    try:
+        if tickets.load(root, tid)["status"] == "done":
+            return True
+    except (KeyError, Refused):
+        return True
+    from orch import worktrees
+
+    return worktrees.bind_shown(root, tid, getattr(args, "shown_tip", None))
+
+
+def _with_notice(t: dict, warn, looked: bool) -> dict:
+    out = {**t, "warnings": warn} if warn else t
+    if looked or t.get("status") != "done":
+        return out
+    from orch import worktrees
+
+    return {**out, "notice": worktrees.NEW_CHANGES}
+
+
 def run(args: argparse.Namespace) -> None:
     root = _find_root()
     by = lambda: tickets.current_actor(getattr(args, "by", None))  # noqa: E731
@@ -836,14 +864,16 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
         who, proven = _verdict_who(root, args, args.id, json.dumps({"status": args.status}), by())
+        looked = _looked_at_this(root, args, args.id, args.status, proven)
         t = tickets.set_status(root, args.id, args.status, who, proven)
         warn = _child_warning(root, t)
+        shown = _with_notice(t, warn, looked)
         _out(
             args,
-            {**t, "warnings": warn} if warn else t,
+            shown,
             tickets.REVIEW_MESSAGE
             if args.status == "done" and t["status"] == "review"
-            else f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}",
+            else shown.get("notice") or f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}",
         )
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
@@ -901,14 +931,20 @@ def run(args: argparse.Namespace) -> None:
         who, proven = _verdict_who(
             root, args, args.id, args.data, by(), args.data
         )  # Looks good needs the person's proof
+        try:
+            status = json.loads(args.data).get("status")
+        except (ValueError, AttributeError):
+            status = None
+        looked = _looked_at_this(root, args, args.id, status, proven)
         t = tickets.patch(root, args.id, args.if_revision, args.data, who, proven)
         warn = _child_warning(root, t)
+        shown = _with_notice(t, warn, looked)
         _out(
             args,
-            {**t, "warnings": warn} if warn else t,
+            shown,
             tickets.REVIEW_MESSAGE
-            if json.loads(args.data).get("status") == "done" and t["status"] == "review"
-            else f"{t['id']} changed (revision {t['revision']})",
+            if status == "done" and t["status"] == "review"
+            else shown.get("notice") or f"{t['id']} changed (revision {t['revision']})",
         )
     elif (cmd == "ticket" and sub == "wait") or cmd == "wait":
         t = tickets.wait(root, args.id, args.until, args.on, by(), args.clear)

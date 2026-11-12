@@ -120,7 +120,7 @@ def test_creating_preparing_and_dropping_a_copy_never_runs_repo_code(hostile, pr
     addons.workspace_id(r, create=True)
     e = worktrees.create(r, "t_abc123")
     assert e is not None and (Path(e["path"]) / "a.txt").read_text() == "hello\n"
-    worktrees._drop_partial(r, Path(e["path"]), e["branch"], True)
+    worktrees._drop_partial(r, Path(e["path"]), e["branch"], True, e["base"])
     assert marks(marker) == []
 
 
@@ -238,6 +238,8 @@ def test_diff_like_calls_get_no_ext_diff_and_the_future_defaults(tmp_path, monke
     for want in (
         "diff.external=",
         "commit.gpgSign=false",
+        "merge.autoStash=false",
+        "rerere.enabled=false",
         "tag.gpgSign=false",
         "core.sshCommand=",
         "credential.helper=",
@@ -751,6 +753,9 @@ def test_external_tools_and_interactive_modes_are_refused(args, tmp_path):
         ["stash", "list"],
         ["commit", "-m", "msg"],
         ["worktree", "add", "p"],
+        ["rev-list", "--count", "a..b"],
+        ["merge-tree", "--write-tree", "--name-only", "-z", "a", "b"],
+        ["check-attr", "filter", "diff", "text", "--", "f.txt"],
     ],
 )
 def test_ordinary_calls_are_not_refused(args):
@@ -814,8 +819,40 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
             assert want in argv, (cmd, want)
         assert any(a.startswith("core.editor=/") for a in argv), cmd
         assert any(a == "core.hooksPath=/dev/null" for a in argv), cmd
+        # a repo-writable config can never make git run a signature program (every git call of orch)
+        true = next(a.split("=", 1)[1] for a in argv if a.startswith("core.editor="))
+        for want in (
+            "merge.verifySignatures=false",
+            "core.useReplaceRefs=false",
+            "diff.ignoreSubmodules=none",
+            f"gpg.program={true}",
+            f"gpg.openpgp.program={true}",
+            f"gpg.x509.program={true}",
+            f"gpg.ssh.program={true}",
+            "gpg.ssh.defaultKeyCommand=",
+            "core.gitProxy=",
+            "core.askPass=",
+        ):
+            assert want in argv, (cmd, want)
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["merge-tree", "--write-tree", "--merge-base=x", "a", "b"],
+        ["merge-tree", "--trivial-merge", "a", "b", "c"],
+        ["rev-list", "--output=/tmp/x", "HEAD"],
+        ["rev-list", "--exec=x", "HEAD"],
+        ["rev-list", "--count", "--objects", "HEAD"],
+        ["check-attr", "--source", "x", "filter", "--", "f"],
+        ["check-attr", "--all", "--", "f"],
+        ["check-attr", "-z", "--stdin", "filter"],
+    ],
+)
+def test_rev_list_and_check_attr_run_only_exact_read_flags(args):
+    assert safegit.refusal(args) is not None
 
 
 def test_flags_that_are_not_bad_words_still_pass():
@@ -1494,3 +1531,112 @@ def test_safegit_works_with_an_untrusted_orch_home(proj, monkeypatch, tmp_path):
     assert safegit.run_bytes(["rev-parse", "--is-inside-work-tree"], proj)[0] in (0, 128)
     assert safegit.run(["--version"], proj, filters=False)[0] == 0
     assert harness._in_git_repo(proj) is False
+
+
+def test_replace_refs_and_grafts_never_change_what_orch_sees(tmp_path):
+    """The shared repository's refs/replace/* (an agent can write them) must not alter commit content or
+    ancestry for any orch git call: the reviewed-tip and ancestor checks depend on it."""
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("one\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "one")
+    plain_git(r, "checkout", "-qb", "side")
+    (r / "a.txt").write_text("two\n")
+    plain_git(r, "commit", "-qam", "two")
+    side = plain_git(r, "rev-parse", "HEAD")
+    plain_git(r, "checkout", "-q", "-")
+    (r / "a.txt").write_text("evil\n")
+    plain_git(r, "commit", "-qam", "evil")
+    evil = plain_git(r, "rev-parse", "HEAD")
+    plain_git(r, "replace", side, evil)  # same id, other content
+    plain_git(r, "replace", "--graft", plain_git(r, "rev-parse", "HEAD"), side)  # side becomes an ancestor
+    rc, out, _ = safegit.run(["cat-file", "-p", f"{side}:a.txt"], r, read_only=True)
+    assert rc == 0 and out.strip() == "two"
+    rc, _, _ = safegit.run(["merge-base", "--is-ancestor", side, "HEAD"], r, read_only=True)
+    assert rc != 0
+
+
+def test_ignore_submodules_in_the_repo_config_does_not_hide_a_gitlink(tmp_path):
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("x\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "base")
+    plain_git(r, "update-index", "--add", "--cacheinfo", "160000", "a" * 40, "sub")
+    plain_git(r, "commit", "-qm", "gitlink")
+    plain_git(r, "config", "diff.ignoreSubmodules", "all")
+    rc, out, _ = safegit.run(["diff", "--raw", "-z", "--no-renames", "HEAD~1", "HEAD"], r, read_only=True)
+    assert rc == 0 and ":000000 160000" in out
+
+
+def test_history_files_an_agent_can_write_are_not_trusted(tmp_path, monkeypatch):
+    """B13: the commit-graph is switched off for every call; a shallow, alternates or grafts file in the
+    repository (or the project a work copy belongs to) makes orch refuse to run git there."""
+    seen = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
+    )
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    safegit.run(["status"], r, read_only=True, filters=False)
+    assert "core.commitGraph=false" in seen[-1] and "gc.writeCommitGraph=false" in seen[-1]
+    for rel in ("shallow", "objects/info/alternates", "objects/info/grafts", "info/grafts"):
+        f = r / ".git" / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("0" * 40 + "\n")
+        n = len(seen)
+        rc, _, err = safegit.run(["status"], r, read_only=True, filters=False)
+        assert rc == safegit.REFUSED and err == safegit.HISTORY_REFUSAL and len(seen) == n, rel
+        f.unlink()
+    assert safegit.run(["status"], r, read_only=True, filters=False)[0] == 0
+
+
+def test_a_work_copy_of_a_shallow_project_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(safegit, "_raw", lambda *a, **k: (0, "", ""))
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a").write_text("x\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "i")
+    wt = tmp_path / "wt"
+    plain_git(r, "worktree", "add", "-q", "-b", "q", str(wt))
+    assert safegit.run(["status"], wt, read_only=True, filters=False)[0] == 0
+    (r / ".git" / "shallow").write_text("0" * 40 + "\n")
+    assert safegit.run(["status"], wt, read_only=True, filters=False)[0] == safegit.REFUSED
+
+
+def test_fsck_runs_only_in_its_checking_form_and_a_symlinked_git_folder_is_refused(tmp_path):
+    ok = ["fsck", "--strict", "--no-dangling", "--no-reflogs", "a" * 40, "b" * 40]
+    assert safegit.refusal(ok) is None
+    for bad in (["fsck", "--lost-found"], ["fsck", "--name-objects"], ["fsck", "HEAD"], ["fsck", "--", "x"]):
+        assert safegit.refusal(bad), bad
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    moved = tmp_path / "elsewhere"
+    (r / ".git").rename(moved)
+    (r / ".git").symlink_to(moved)
+    assert safegit.hostile_history(r) == safegit.HISTORY_REFUSAL
+
+
+def test_every_fsck_format_id_can_really_be_ignored(tmp_path):
+    """git refuses to demote some ids ("Cannot demote ... to ignore"): only accepted ids are listed."""
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    for i in safegit.FSCK_FORMAT_OK:
+        p = subprocess.run(["git", "-c", f"fsck.{i}=ignore", "fsck"], cwd=r, capture_output=True, text=True)
+        assert "Cannot demote" not in p.stderr, i
