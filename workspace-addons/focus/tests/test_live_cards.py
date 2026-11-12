@@ -103,3 +103,18 @@ def test_api_live_lists_running_tickets_and_nothing_when_none_run(server, fake_o
         time.sleep(0.2)
     assert len(cards) == 1 and cards[0]["ticket"] == TID and cards[0]["now"] == "Read the March report"
     assert cards[0]["title"] == "Close March books"
+
+
+def test_s3_card_marks_unchecked_steps_and_carries_notes():
+    ev = [
+        {"kind": "tool.start", "text": "Read it", "at": "2026-01-01T10:00:00Z", "data": {"source": "hook"}},
+        {"kind": "tool.start", "text": "Old step", "at": "2026-01-01T09:00:00Z",
+         "data": {"source": "hook", "before": True}},
+        {"kind": "tool.start", "text": "Checked", "at": "2026-01-01T11:00:00Z", "data": {"source": "log"}},
+    ]  # fmt: skip
+    v = {"ticket": ticket(), "run": {"label": "Claude", "worked": 0}, "board": {}, "events": ev,
+         "record_notes": ["Some records were changed outside orch."]}  # fmt: skip
+    c = livecards.card(v)
+    marks = {s["text"]: s.get("unchecked") for s in c["steps"]}
+    assert marks == {"Checked": None, "Read it": "agent", "Old step": "before"}
+    assert c["notes"] == ["Some records were changed outside orch."]

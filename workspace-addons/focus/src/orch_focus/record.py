@@ -103,15 +103,17 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
         checked = e.get("checked") is True
         source = str(e.get("via") or "log") if checked else "hook"
 
+        old = True if not checked and e.get("before_protection") else None  # made before orch checked records
+
         def make(k, **data):
             return events.make(run, ticket, agent, k, text, source, at=at, **data)
 
         if kind == "step":
             used, files = _label(e), clean_files(e.get("files")) or None
             if done is None:
-                return [make("tool.start", id=eid, used=used, files=files)]
+                return [make("tool.start", id=eid, used=used, files=files, before=old)]
             ok = done.get("ok") is not False if checked else done.get("ok")  # a hook's "ok" is only its word
-            return [make("tool.end", id=eid, ok=ok, used=used, files=files, confirmed=checked)]
+            return [make("tool.end", id=eid, ok=ok, used=used, files=files, confirmed=checked, before=old)]
         if kind.startswith("helper.") and not checked:
             return []  # the agent's word: never opens or closes a helper
         if kind == "helper.start":
@@ -139,6 +141,10 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
     return []
 
 
+# news about the stream itself, not a problem with the records
+INFO_REASONS = ("missing", "recovered", "rewound", "trimmed", "pending")
+
+
 class RecordFeed:
     """One per run. Starts the followed command on first poll; `close()` ends it (by its own pid)."""
 
@@ -160,6 +166,18 @@ class RecordFeed:
             self.thread.start()
         with self.lock:
             out, self.queue = self.queue, []
+        return out
+
+    def problems(self) -> list[str]:
+        """orch's own words for what is wrong with this run's records, once each (display only)."""
+        with self.lock:
+            notes = list(self.notes.values())
+        out: list[str] = []
+        for n in notes:
+            msg = n.get("message")
+            text = " ".join(msg.split())[:300] if isinstance(msg, str) else ""
+            if n.get("reason") not in INFO_REASONS and text and text not in out:
+                out.append(text)
         return out
 
     def _argv(self) -> list[str]:

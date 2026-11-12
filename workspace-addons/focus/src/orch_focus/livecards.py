@@ -42,6 +42,8 @@ def _steps(events: list[dict]) -> list[dict]:
             }
         else:
             continue
+        if data.get("source") == "hook" and kind in ("tool.start", "tool.end"):
+            row["unchecked"] = "before" if data.get("before") else "agent"
         out.append({"at": e.get("at"), **row})
         if len(out) == MAX_STEPS:
             break
@@ -91,7 +93,8 @@ def card(v: dict) -> dict:
         "minutes": int(run.get("worked") or 0) // 60,
         "now": now, "why": _task_line(board, checklist),
         "progress": {"done": int(v.get("done") or 0), "total": int(v.get("total") or 0)},
-        "steps": steps, "question": question, "working": v.get("state") == "working",
+        "steps": steps, "notes": list(v.get("record_notes") or [])[:3],
+        "question": question, "working": v.get("state") == "working",
         "files": [{"path": f["path"], "how": f["how"], "at": f.get("at")} for f in board.get("files") or []][:50],
     }  # fmt: skip
 

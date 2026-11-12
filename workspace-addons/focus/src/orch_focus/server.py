@@ -453,6 +453,7 @@ class Tracker:
         v["capabilities"] = {"phone_mode": mobile["available"]}
         v["phone_mode"] = mobile["on"]
         v["page_key"] = proofs.page_key(tid)
+        v["record_notes"] = tr["feed"].problems() if tr and tr.get("feed") is not None else []
         v["retry_error"] = None if v["run"]["running"] else self.perms.failed.get(tid)
         return v
 

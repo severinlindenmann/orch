@@ -26,8 +26,9 @@
     for (const e of v.events) {
       if (agent && (e.agent || 'main') !== agent) continue;
       const used = (e.data && e.data.used) || null, by = e.agent || 'main';
-      if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: plainNames(e.text), used, agent: by});
-      else if (e.kind === 'tool.end') items.push({at: e.at, icon: e.data.ok === false ? 'x' : 'check', ok: e.data.ok !== false, text: e.text, used, agent: by});
+      const unchecked = e.data && e.data.source === 'hook' ? (e.data.before ? 'before' : 'agent') : null;
+      if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: plainNames(e.text), used, agent: by, unchecked});
+      else if (e.kind === 'tool.end') items.push({at: e.at, icon: e.data.ok === false ? 'x' : 'check', ok: e.data.ok !== false, text: e.text, used, agent: by, unchecked});
       else if (e.kind === 'helper.start') items.push({at: e.at, icon: 'user', text: 'Helper: ' + e.text, agent: by});
       else if (e.kind === 'helper.end') items.push({at: e.at, icon: 'check', ok: true, text: 'Helper done: ' + e.text, agent: by});
     }
@@ -35,13 +36,18 @@
     return items.slice(-80);
   }
   const usedChip = used => (used && S.views.used ? S.views.used.chip(used) : null);
+  /* A step only the agent reported: a small plain mark; a checked step shows nothing extra. */
+  const UNCHECKED_WHY = {agent: 'Reported by the agent, not checked by orch.', before: 'Made before orch checked records.'};
+  const uncheckedMark = kind => (kind ? h('span', {class: 'fx-unchecked', title: UNCHECKED_WHY[kind] || UNCHECKED_WHY.agent, text: 'not checked'}) : null);
+  /* orch's own words when this run's records have a problem: one quiet line each, never per step. */
+  const recordNotes = v => (v.record_notes || []).map(t => h('p', {class: 'fx-record-note', role: 'note', text: t}));
 
   /* The plain step list right under the task: the newest first and marked, each with what it used (never raw names). */
   function stepList(v, agent, max) {
     const items = feedItems(v, agent).slice(-max).reverse();
     if (!items.length) return null;
     return h('ol', {class: 'fx-now-steps', 'aria-label': 'Latest steps'}, items.map((it, i) => h('li', {class: 'fx-now-step' + (i === 0 ? ' newest' : '') + (it.ok === false ? ' bad' : '')},
-      h('time', {datetime: it.at, text: hhmm(it.at)}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used)))));
+      h('time', {datetime: it.at, text: hhmm(it.at)}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used), uncheckedMark(it.unchecked)))));
   }
 
   /* A helper picked in "Working on this": its own header, what it does now, and only its steps. */
@@ -56,12 +62,13 @@
     x.at ? h('p', {class: 'meta', text: 'Started ' + hhmm(x.at)}) : null];
     if (x.open && now) nodes.push(h('div', {class: 'fx-worker-now'}, h('span', {class: 'fx-worker-l', text: 'NOW'}), h('span', {text: plainNames(now)})));
     else nodes.push(h('div', {class: 'fx-worker-now done'}, h('span', {class: 'fx-worker-l', text: x.ok === false ? 'STOPPED' : 'DONE'}), h('span', {text: plainNames(x.result || now || 'Finished.')})));
+    nodes.push(...recordNotes(v));
     nodes.push(stepList(v, agent, 30) || h('p', {class: 'meta', text: 'No steps from this helper yet.'}));
     return nodes;
   }
 
   function renderFeed(v) {
-    const key = keyOf([v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.board.step, v.events, v.ticket.history, S.state.agentFilter || null, S.state.agentFilter ? [v.board.helper_tree, v.board.agent_now] : null]);
+    const key = keyOf([v.record_notes, v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.board.step, v.events, v.ticket.history, S.state.agentFilter || null, S.state.agentFilter ? [v.board.helper_tree, v.board.agent_now] : null]);
     if (key === S.state.lastFeedKey) return;
     S.state.lastFeedKey = key;
     const helper = S.state.agentFilter && S.state.agentFilter !== 'main' && ((v.board && v.board.helper_tree) || []).some(x => x.agent === S.state.agentFilter);
@@ -81,7 +88,7 @@
     }
     const story = checks.filter(c => !c.wont_do && (c.done || c.state === 'doing'));
     const heading = asking ? 'Before the question' : v.state === 'done' ? 'Work completed' : v.run.running ? 'The work is taking shape' : 'Work so far';
-    const nodes = [h('h2', {text: heading})];
+    const nodes = [h('h2', {text: heading}), ...recordNotes(v)];
     if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
     let now = null;
     for (const c of story) {
@@ -100,7 +107,7 @@
     /* Details: the full history, the ticket's own lines included */
     const details = h('details', {class: 'fx-history', open: !!S.state.detailsOpen}, h('summary', {text: 'Details'}));
     details.addEventListener('toggle', () => { S.state.detailsOpen = details.open; });  // a poll draws it again; it stays as the person left it
-    for (const it of feedItems(v, null)) details.append(h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used))));
+    for (const it of feedItems(v, null)) details.append(h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used), uncheckedMark(it.unchecked))));
     nodes.push(details);
     keepFocus(els.feed, () => els.feed.replaceChildren(...nodes));
   }
