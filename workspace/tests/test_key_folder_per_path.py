@@ -299,12 +299,13 @@ def test_winner_seen_late_is_kept(proj, monkeypatch):
     assert (proj / ".orch" / ".local-id").read_text().strip() == winner
 
 
-def test_a_folder_planted_at_local_id_is_refused(proj):
+@pytest.mark.parametrize("replace", [True, False])
+def test_a_folder_planted_at_local_id_is_refused(proj, replace):
     from orch import addons
 
     (proj / ".orch" / ".local-id").mkdir(parents=True)
     with pytest.raises(Refused):
-        addons.put_local_id(proj, secrets.token_hex(16), replace=True)
+        addons.put_local_id(proj, secrets.token_hex(16), replace=replace)
     assert (proj / ".orch" / ".local-id").is_dir()
 
 
@@ -324,3 +325,22 @@ def test_a_hardlinked_local_id_is_rejected_and_healed(proj, tmp_path):
     assert guarded.read_bytes() == before  # never written through
     assert f.stat().st_nlink == 1
     assert addons.read_local_id(proj) == d.name
+
+
+def test_action_mac_uses_the_healed_id_not_a_forged_one(proj):
+    d = hp.key_dir(proj)
+    hp.human_key(proj)
+    _forge(proj)  # stale/forged id read before healing
+    rec = {"id": hp.new_action_id(), "decision": "yes"}
+    mac = hp.action_sign(proj, "t_1", rec)
+    assert mac == hp.action_mac(hp.human_key(proj, create=False), d.name, "t_1", rec)
+    assert _id(proj) == d.name and hp.action_is_human(proj, "t_1", rec, mac)
+
+
+def test_record_key_survives_a_stale_local_id(proj):
+    d = hp.key_dir(proj)
+    before = hp.record_key(proj, create=True)
+    assert before is not None and before[0] == d.name
+    _forge(proj)  # a stale id must not derive another subkey (every sealed record would stop verifying)
+    assert hp.record_key(proj) == before
+    assert _id(proj) == d.name

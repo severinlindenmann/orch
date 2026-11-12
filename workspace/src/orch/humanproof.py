@@ -692,13 +692,12 @@ def record_key(root: Path, create: bool = False) -> tuple[str, str, bytes] | Non
     sealed). rk is derived from human.key (record_auth.derive) so human.key itself is never used for a MAC.
     Cached
     per process by the key file's identity and mtime, so a reset_protection rotation is picked up at once."""
-    from orch import addons, record_auth
+    from orch import record_auth
 
     try:
-        ws = addons.workspace_id(root, create=create)
-        if not ws:
-            return None
-        f = key_dir(root, create=create) / "human.key"
+        d = key_dir(root, create=create)
+        ws = d.name  # the healed id (_healed_id), never the raw .local-id read before healing
+        f = d / "human.key"
         try:
             st = f.lstat()
         except FileNotFoundError:

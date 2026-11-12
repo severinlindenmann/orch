@@ -1195,12 +1195,7 @@ def put_local_id(root: Path, v: str, *, replace: bool = False) -> str:
         st0 = os.fstat(dfd)
         try:
             fd = os.open(tmpname, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
-            try:
-                fh = os.fdopen(fd, "w", encoding="utf-8")
-            except BaseException:
-                os.close(fd)
-                raise
-            with fh:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(v + "\n")
             out = v
             done = False
@@ -1244,12 +1239,7 @@ def _put_by_path(root: Path, v: str, replace: bool, tmpname: str) -> str:
     tmp = d / tmpname
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            fh = os.fdopen(fd, "w", encoding="utf-8")
-        except BaseException:
-            os.close(fd)
-            raise
-        with fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(v + "\n")
         out, done = v, False
         if not replace:
