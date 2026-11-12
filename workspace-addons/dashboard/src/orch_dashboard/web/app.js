@@ -212,13 +212,13 @@ function render(arrived = new Set()) {
     crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
   } else crumb.textContent = pageName;
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
-  const needCount = needsList().length, menuToggle = document.getElementById('menu-toggle');
+  const needCount = needsToday().count, menuToggle = document.getElementById('menu-toggle');
   menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
-  reconcile(nav, fragment(navLink('#home', 'Home', 'page', needsList().length ? h('span', {className:'count', title:window.DashHelpers.needsYou(needsList().length), 'aria-label':window.DashHelpers.needsYou(needsList().length)}, window.DashHelpers.needsYou(needsList().length)) : null), navLink('#tickets', 'Tickets', 'table'), navLink('#notes', 'Notes', 'text'), state.chat || state.general ? navLink('#chat', 'Chat', 'text', chatBadge()) : null,
+  reconcile(nav, fragment(navLink('#home', 'Home', 'page', needCount ? h('span', {className:'count', title:window.DashHelpers.needsYou(needCount), 'aria-label':window.DashHelpers.needsYou(needCount)}, window.DashHelpers.needsYou(needCount)) : null), navLink('#tickets', 'Tickets', 'table'), navLink('#notes', 'Notes', 'text'), state.chat || state.general ? navLink('#chat', 'Chat', 'text', chatBadge()) : null,
     // On a narrow screen the header has no room for "Open helper": it is a Menu item there (CSS shows it only then).
     snapshot ? null : h('button', {type:'button', className:'nav-item nav-helper', 'data-key':'nav-open-agent', 'data-nav':'open-agent'}, iconEl('spark'), 'Open helper'),
     addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));

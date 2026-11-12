@@ -149,10 +149,15 @@ function needsFold(rows, count) {
   return h('div', {className:'card-row home-need needs-fold', 'data-key':'needs-fold'},
     h('div', {className:'row'}, h('p', {className:'grow'}, h('span', {className:'meta'}, 'Oldest · '), text), button('Show all', 'outline sm', () => { needsOpen = true; render(); })));
 }
+// What needs the person today (Home, the Home badge and the Menu count all use this).
+function needsToday() {
+  const needs = needsList().filter(r => !laterToday(r));
+  const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
+  return {needs, failed, count:window.DashHelpers.needsYouCount(needs, failed)};
+}
 function home() {
-  const needs = needsList().filter(r => !laterToday(r)), groupedNeeds = homeNeeds(needs), all = tickets();
+  const {needs, failed, count:needCount} = needsToday(), groupedNeeds = homeNeeds(needs), all = tickets();
   if (groupedNeeds.length < 3) needsOpen = false;
-  const failed = all.map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
   const review = sorted(all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)));
   const used = new Set([...failed.map(([t]) => t.id), ...needs.map(n => n.ticket), ...working.map(t => t.id), ...review.map(t => t.id)]);
@@ -165,9 +170,9 @@ function home() {
   const hour = now().getHours();
   const stopped = array(state.services).some(s => s.running === false);
   const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
-  return fragment(heading('Good ' + (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'), now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + (needs.length + failed.length) + (needs.length + failed.length === 1 ? ' question for you · ' : ' questions for you · ') + agent + ' is working on ' + working.length + (working.length === 1 ? ' ticket' : ' tickets')), banner,
+  return fragment(heading('Good ' + (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'), now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}) + ' · ' + needCount + (needCount === 1 ? ' question for you · ' : ' questions for you · ') + agent + ' is working on ' + working.length + (working.length === 1 ? ' ticket' : ' tickets')), banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      homeSection('needs-you', 'Needs you (' + (groupedNeeds.length + failed.length) + ')', groupedNeeds.length + failed.length >= 3 && !needsOpen ? needsFold(groupedNeeds, groupedNeeds.length + failed.length) : groupedNeeds.length + failed.length ? [...groupedNeeds.map(({row, count}) => needRow(row, newest, count)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), groupedNeeds.length + failed.length >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null] : emptyRow('Nothing needs you right now.')),
+      homeSection('needs-you', 'Needs you (' + needCount + ')', needCount >= 3 && !needsOpen ? needsFold(groupedNeeds, needCount) : needCount ? [...groupedNeeds.map(({row, count}) => needRow(row, newest, count)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), needCount >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null] : emptyRow('Nothing needs you right now.')),
       homeSection('working-now', 'Working now', working.length ? working.map(workingRow) : emptyRow('No tickets are being worked on.')),
       homeSection('check-result', 'Check result (' + review.length + ')', review.length ? review.map(resultRow) : emptyRow('No results to check.')),
       h('div', {className:'card card-row', 'data-key':'everything-else'}, h('span', {className:'grow muted'}, 'Everything else (' + all.filter(t => activeTicket(t) && !used.has(t.id)).length + ')'), h('a', {className:'btn ghost sm', href:'#tickets'}, 'View Tickets →'))),
