@@ -267,7 +267,9 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
 
 test('task proof chips: only plain evidence files and http(s) links get a chip, and the summary is the task line', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
-  const c = context({h, snapshot:false, safeHref:u => u, array:v => Array.isArray(v) ? v : [], clean:String, previewFile(){}, proofLabel:ev => ev.ref});
+  const opened = [];
+  const button = (text, cls, click) => ({tag:'button', text, cls, click});
+  const c = context({h, button, snapshot:false, safeHref:u => u, array:v => Array.isArray(v) ? v : [], clean:String, previewFile:(...a) => opened.push(a), proofLabel:ev => ev.ref});
   vm.runInContext(source.slice(source.indexOf('const KIND_WORD'), source.indexOf('function ticketResultCard')), c);
   vm.runInContext(source.slice(source.indexOf('// A small chip per proof'), source.indexOf('function taskRows')), c);
   vm.runInContext('globalThis.evidenceFile = evidenceFile', c);
@@ -281,6 +283,12 @@ test('task proof chips: only plain evidence files and http(s) links get a chip, 
   assert.equal(row({type:'url', ref:'data:text/html,x'}), 'null');
   assert.match(row({type:'url', ref:'HTTPS://example.com/x'}), /example\.com/);
   assert.equal(row({type:'file', ref:base + '../x'}), 'null');
+  // a proof file chip is a real button: clicking it opens the file's preview (it was a dead onclick attribute)
+  const chip = c.taskProofChips(t, {evidence:[{type:'file', ref:base + 'ok/plan.md', title:'Plan'}]}).children[0];
+  assert.equal(typeof chip.click, 'function');
+  assert.equal(chip.title, 'Open');
+  chip.click();
+  assert.deepEqual(opened, [['t_a', 'evidence', 'ok/plan.md']]);
   // the summary of the proof is the task line, even when a later proof has none
   const task = {done:true, evidence:[{type:'file', ref:base + 'a.md', summary:'Connected as Dev Team.'}, {type:'file', ref:base + 'b.png'}]};
   assert.equal(helpers.outcome(task), 'Connected as Dev Team.');
