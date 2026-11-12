@@ -16,6 +16,7 @@ import pytest
 from conftest import seal_lines
 
 from orch import hider, record
+from orch import humanproof as hp
 from orch.record import (
     RecordRefused,
     RecordWriter,
@@ -42,6 +43,7 @@ SECRET = "KEYVALUE-abc123XYZ-secret"
 def store(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
+    hp.record_key(ws)  # the key exists before threads write (a claim makes it in a run)
     return ws, RecordWriter(ws, hider=hider.Hider({"deploy-key": SECRET}))
 
 
@@ -321,6 +323,7 @@ def test_preflight_leaves_nothing(store):
 
 def test_stale_lock_and_missing_reads(store):
     ws, writer = store
+    hp.record_key(ws)  # a clean guarded home: only then is "no such run" a plain "missing"
     assert read_run(ws, "r_8k2m01").reason == "missing"
     assert read_detail(ws, "r_8k2m01", "0" * 32, line_id="x").reason == "missing"
     assert list_runs(ws).reason == "missing"

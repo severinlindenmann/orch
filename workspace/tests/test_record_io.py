@@ -66,6 +66,12 @@ def store(tmp_path):
     return ws, record.RecordWriter(ws, hider=hider.Hider({"key": "a-long-secret-value"}))
 
 
+def record_auth_home(ws):
+    from orch import humanproof
+
+    humanproof.record_key(ws)  # makes the key folder (the fixture creates keys on first use)
+
+
 def runfile(ws):
     return record.record_dir(ws) / "runs" / (RUN + ".jsonl")
 
@@ -213,6 +219,13 @@ SAFE_ATTRIBUTE_CALLS = {
     "e.get",
     "humanproof.record_head_state",
     "lines[-1].get",
+    "hashlib.sha256(whole[:record_auth.prefix_cut(whole, n)]).hexdigest",
+    "raw.strip",
+    "record_auth.legacy_prefix",
+    "record_auth.prefix_cut",
+    "record_auth.start_state",
+    "self._sealed_tail",
+    "whole.split",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
@@ -255,6 +268,8 @@ SAFE_ATTRIBUTE_VALUES = {
     "view.unchecked",
     "view.status",
     "view.value",
+    "self.message",
+    "view.before",
 }
 ERROR_BOUNDARIES = {
     "_alert",
@@ -283,6 +298,7 @@ ERROR_BOUNDARIES = {
     "list_jobs",
     "append_job",
     "_reject",
+    "_sealed_tail",
 }
 
 
@@ -752,6 +768,7 @@ def test_11_line_failure_removes_new_detail(store, monkeypatch):
 @pytest.mark.parametrize("mode", ["missing", "io", "tampered"])
 def test_12_public_read_statuses(store, monkeypatch, mode):
     ws, writer = store
+    record_auth_home(ws)  # a clean guarded home: only then is "no such run" a plain "missing"
     if mode != "missing":
         writer.append(event())
     if mode == "io":

@@ -346,14 +346,101 @@ def test_unsigned_lines_prepended_to_a_sealed_run_are_changed_not_legacy(store, 
     assert counts["complete"] is False and counts["runs"] == 1  # still counted, never excluded
 
 
-def test_appending_to_a_legacy_run_makes_the_old_lines_changed(store):
-    ws, writer = store
+def _upgraded(ws, writer):
+    """A legacy run that then gets its first sealed lines (an upgrade of a real run)."""
     _legacy_run(ws, writer)
-    writer.append(example(run=OTHER, id="toolu_new", at=at(9)))
+    writer.append(example(run=OTHER, id="toolu_new", via="log", at=at(9)))
+    writer.append(example(run=OTHER, id="toolu_new2", via="log", at=at(10)))
+    return runfile(ws, OTHER)
+
+
+def test_upgrading_a_legacy_run_keeps_its_old_lines_shown_as_not_checked(store, proj_cli, capsys):
+    ws, writer = store
+    _upgraded(ws, writer)
     r = read_run(ws, OTHER)
-    assert (r.legacy, r.changed, r.reason) == (False, 2, "content") and [e["id"] for e in r.unwrap()] == [
-        "toolu_new"
+    assert (r.status, r.legacy, r.changed, r.reason) == ("ok", False, 0, "unchecked")
+    got = r.unwrap()
+    assert [(e["id"], e.get("before_protection", False), e["seq"]) for e in got] == [
+        ("toolu_1", True, 1),
+        ("toolu_2", True, 2),
+        ("toolu_new", False, 3),
+        ("toolu_new2", False, 4),
     ]
+    head, _ = hp.record_head_read(ws, OTHER)
+    assert head["legacy_lines"] == 2 and len(head["legacy_hash"]) == 64 and head["seq"] == 4
+    code, lines = cli_lines(capsys, "tail", "--run", OTHER)
+    assert [(ln["event"]["id"], ln["event"]["checked"]) for ln in lines if ln["type"] == "event"] == [
+        ("toolu_1", False),
+        ("toolu_2", False),
+        ("toolu_new", True),
+        ("toolu_new2", True),
+    ]
+    code, (counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
+    assert counts["complete"] is False and counts["runs"] == 1
+    assert [e["id"] for e in record._own(got)] == ["toolu_new", "toolu_new2"]  # retention believes only these
+
+
+def test_a_legacy_prefix_that_is_prepended_edited_or_extended_is_changed(store):
+    ws, writer = store
+    path = _upgraded(ws, writer)
+    good = path.read_bytes()
+    first = good.splitlines(keepends=True)
+    fake = (json.dumps(dict(planted(via="core", run=OTHER), seq=1, run_=None)) + "\n").encode()
+    fake = json.dumps(dict(planted(via="core"), seq=1, run=OTHER)).encode() + b"\n"
+    cases = {
+        "prepended": fake + good,
+        "edited": first[0].replace(b"toolu_1", b"toolu_X") + b"".join(first[1:]),
+        "extended": first[0] + first[1] + fake + b"".join(first[2:]),
+        "removed": b"".join(first[1:]),
+    }
+    for name, raw in cases.items():
+        path.write_bytes(raw)
+        r = read_run(ws, OTHER)
+        assert r.changed >= 1 and r.reason == "content", name
+        shown = [e["id"] for e in r.unwrap() if e.get("before_protection")]
+        # the recorded prefix still matches only when nothing in front of the first sealed line changed; an
+        # unsigned line added behind it is changed on its own
+        assert shown == (["toolu_1", "toolu_2"] if name == "extended" else []), name
+        assert "toolu_planted" not in [e["id"] for e in r.unwrap()], name
+        assert [e["id"] for e in r.unwrap()][-2:] == ["toolu_new", "toolu_new2"], name
+    path.write_bytes(good)
+    assert read_run(ws, OTHER).changed == 0
+
+
+def test_the_legacy_prefix_is_recorded_once(store):
+    ws, writer = store
+    path = _upgraded(ws, writer)
+    head, _ = hp.record_head_read(ws, OTHER)
+    writer.append(example(run=OTHER, id="toolu_3", at=at(11)))
+    again, _ = hp.record_head_read(ws, OTHER)
+    assert (again["legacy_lines"], again["legacy_hash"]) == (head["legacy_lines"], head["legacy_hash"])
+    assert path.read_bytes().count(b"\n") == 5
+
+
+def test_a_rejected_spool_entry_keeps_a_count_only_where_a_head_exists(store, monkeypatch):
+    ws, writer = store
+    # a legacy run (no head): the entry is deleted and alerted, no head is made, the run stays legacy
+    _legacy_run(ws, writer)
+    d = record_dir(ws) / "pending" / OTHER
+    d.mkdir(parents=True)
+    bad = d / ("0" * 19 + "1_" + "a" * 32 + ".json")
+    bad.write_text("{}")
+    writer.drain(OTHER, check_lock=lambda: None)
+    assert not bad.exists() and hp.record_head_read(ws, OTHER) == (None, True)
+    assert read_run(ws, OTHER).legacy is True
+    # a sealed run: counted in its head
+    write3(writer)
+    d2 = _spool_dir(ws)
+    d2.mkdir(parents=True)
+    (d2 / ("0" * 19 + "1_" + "b" * 32 + ".json")).write_text("{}")
+    writer.drain(RUN, check_lock=lambda: None)
+    assert hp.record_head_read(ws, RUN)[0]["rejected"] == 1
+    # a sealed run whose head is missing (a crash before the first head write): the head is made, with the count
+    (hp.key_dir(ws, create=False) / "record-heads" / f"{RUN}.json").unlink()
+    (d2 / ("0" * 19 + "2_" + "c" * 32 + ".json")).write_text("{}")
+    writer.drain(RUN, check_lock=lambda: None)
+    head = hp.record_head_read(ws, RUN)[0]
+    assert head["rejected"] == 1 and head["seq"] == 3
 
 
 # ------------------------------------------------------------------ the marker for helpers without deny rules

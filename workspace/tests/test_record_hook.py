@@ -1050,7 +1050,7 @@ def test_the_generated_command_reaches_the_hook_and_is_proven_inside_the_run(too
     )  # fmt: skip
     assert r.returncode == 0 and r.stderr == "orch: Recording is off until key hiding is ready.\n"
     assert "hider_off" in lost_notes(root)  # a proven caller: the trace is under the run
-    assert record.read_run(root, run).status == "unavailable"  # nothing raw, nothing at all
+    assert record.read_run(root, run).value is None  # nothing raw, nothing at all (no key folder: unverified)
 
 
 # ---------------------------------------------------------------- the oneshot wrapper feeds its collector

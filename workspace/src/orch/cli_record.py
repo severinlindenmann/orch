@@ -389,7 +389,10 @@ def _events(root: Path, runs: list[str], ticket, *, explicit: bool = False, tell
             # `checked` is computed, never stored: a hook line is the agent's word, and every line of a run
             # made before orch checked it is unchecked too
             out[run] = [
-                {**e, "checked": not result.legacy and e.get("via") != "hook"}
+                {
+                    **e,
+                    "checked": not (result.legacy or e.get("before_protection")) and e.get("via") != "hook",
+                }
                 for e in result.value
                 if ticket is None or e.get("ticket") == ticket
             ]
@@ -985,7 +988,10 @@ def counts(root: Path, args) -> dict:
     unchecked = {p["run"] for p in unavailable if p.legacy}
     flagged = {p["run"] for p in unavailable}
     for run, events in by_run.items():
-        if not events or run in unchecked:  # a run made before orch checked it is never counted
+        if run in unchecked:  # a run made before orch checked it is never counted
+            continue
+        events = [e for e in events if not e.get("before_protection")]  # nor its lines from before protection
+        if not events:
             continue
         model = run_model(run, events, root=root, problem=run in flagged)
         model["first"] = events[0]["at"]

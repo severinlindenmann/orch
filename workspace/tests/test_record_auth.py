@@ -574,3 +574,13 @@ def test_a_key_rotation_hides_the_old_lines_and_the_new_segment_is_verified(tws)
     read = record.read_run(tws, "r_8k2m01")
     assert (read.reason, read.changed) == ("old_key", 2) and [e["id"] for e in read.unwrap()] == ["toolu_new"]
     assert hiding  # noqa: B015
+
+
+def test_an_unknown_home_state_with_no_run_file_is_unverified_not_missing(tws):
+    from orch import record
+
+    _sealed_ws(tws)
+    assert record.read_run(tws, "r_nofile01").reason == "missing"  # clean home, no such run
+    (tws / ".orch/.local-id").write_text("cd" * 16 + "\n")  # forged id: the home cannot be looked at
+    read = record.read_run(tws, "r_nofile01")
+    assert (read.status, read.reason) == ("tampered", "unverified")

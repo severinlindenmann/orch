@@ -181,6 +181,7 @@ class State:
     n_noauth: int = 0
     pending: int = 0  # lines of a foreign key id before the first verified line: old segment or planted?
     gaps: list = field(default_factory=list)  # [lo, hi] seq ranges skipped by a resync
+    base: int = 0  # lines of a legacy prefix before the chain: the first sealed line is seq base + 1
 
     def copy(self) -> State:
         o = self.out
@@ -190,6 +191,7 @@ class State:
             self.n_noauth,
             self.pending,
             list(self.gaps),
+            self.base,
         )
 
 
@@ -216,7 +218,7 @@ def scan(
         if not hmac.compare_digest(k.encode(), kid.encode()):
             # another key id: the old segment of a rotation (it comes first) or a planted line. Held until
             # the first line of the current key is known (finish): the rotation shape decides.
-            if out.last_seq:
+            if out.events:
                 state.n_bad += 1
             else:
                 state.pending += 1
@@ -270,7 +272,7 @@ def finish(state: State, kid: str, head: dict | None = None) -> Verified:
         # Anything else (a gap, a missing chain) means the foreign lines are planted, not history.
         has_head = bool(head and head.get("kid") == kid and type(head.get("seq")) is int and head["seq"] >= 1)
         if out.events:
-            rotation = out.events[0]["seq"] == 1
+            rotation = out.events[0]["seq"] == s.base + 1
         else:
             rotation = not has_head
         if rotation:
@@ -282,6 +284,14 @@ def finish(state: State, kid: str, head: dict | None = None) -> Verified:
     out.changed = n_bad + s.n_noauth + n_oldkey
     out.reason = _reason(out, n_bad, s.n_noauth, n_oldkey)
     return out
+
+
+def start_state(base: int = 0) -> State:
+    """A walk that begins after `base` legacy lines (the head records them): the first sealed line is seq
+    base + 1 and links to the genesis."""
+    state = State(base=base)
+    state.out.last_seq = base
+    return state
 
 
 def verify_run(
@@ -322,6 +332,39 @@ def legacy_split(raw: bytes, head_exists: bool) -> tuple[str, bytes, int]:
     if not head_exists and not any(split(x) is not None for x in raw.split(b"\n") if x):
         return "legacy", b"", len([x for x in raw.split(b"\n") if x])
     return "sealed", raw, 0
+
+
+def prefix_cut(raw: bytes, n: int) -> int | None:
+    """The byte offset just after the newline of the n-th non-empty line of `raw`, or None when `raw` has
+    fewer than n complete lines. The legacy prefix of a run is raw[:cut] (the head records n and its hash)."""
+    cut = seen = 0
+    while seen < n:
+        end = raw.find(b"\n", cut)
+        if end < 0:
+            return None
+        seen += end > cut
+        cut = end + 1
+    return cut
+
+
+def legacy_prefix(raw: bytes, head: dict | None) -> tuple[bytes, int]:
+    """(the legacy prefix bytes, its line count) a run file starts with, per the head's `legacy_lines` and
+    `legacy_hash`. The bytes are returned only when the file starts with exactly that prefix (same count,
+    same hash) and none of its lines is sealed; otherwise b"" and the head's count (the chain numbering
+    still begins after it, but the unsigned lines are `changed`)."""
+    n = head.get("legacy_lines") if isinstance(head, dict) else None
+    want = head.get("legacy_hash") if isinstance(head, dict) else None
+    if type(n) is not int or n <= 0 or not isinstance(want, str):
+        return b"", 0
+    cut = prefix_cut(raw, n)
+    if cut is None:
+        return b"", n
+    pre = raw[:cut]
+    if hmac.compare_digest(hashlib.sha256(pre).hexdigest().encode(), want.encode()) and all(
+        split(x) is None for x in pre.split(b"\n") if x
+    ):
+        return pre, n
+    return b"", n
 
 
 # ------------------------------ spool, head, detail

@@ -792,33 +792,37 @@ _VERIFIED_MAX = 64
 
 
 def _chain(workspace, run, raw, rec, head, head_present):
-    """(Verified, mode, unchecked prefix lines) of a run file's bytes: the one place that decides which lines
+    """(Verified, mode, legacy prefix bytes) of a run file's bytes: the one place that decides which lines
     count (record_auth.verify_run's walk, resumed from the cache). `head` is the checked chain head or None;
-    `head_present`: a head file exists (even a damaged one), so the run is never a legacy run."""
+    `head_present`: a head file exists (even a damaged one), so the run is never a legacy run. When the head
+    records a legacy prefix that the file still starts with exactly, those bytes are returned (not walked) and
+    the chain numbering begins after them."""
     ws_id, kid, rk = rec
-    mode, sealed, prefix = record_auth.legacy_split(raw, head_present)
+    mode, sealed, _ = record_auth.legacy_split(raw, head_present)
     if mode == "legacy":
-        return record_auth.Verified(), mode, prefix
+        return record_auth.Verified(), mode, b""
     if head is not None and head.get("pruned"):
         head = None
+    pre, lines = record_auth.legacy_prefix(sealed, head)
+    sealed = sealed[len(pre) :]
     cut = sealed.rfind(b"\n") + 1
     whole, torn = sealed[:cut], sealed[cut:]
     key = (str(workspace), run)
     digest = hashlib.sha256(whole).digest()
     hit = _VERIFIED.get(key)
-    state, base = None, 0
-    if hit is not None and hit[0] == kid and len(whole) >= hit[1]:
+    state, done = None, 0
+    if hit is not None and hit[0] == (kid, lines) and len(whole) >= hit[1]:
         if hashlib.sha256(whole[: hit[1]]).digest() == hit[2]:
-            state, base = hit[3].copy(), hit[1]
+            state, done = hit[3].copy(), hit[1]
     if state is None:
-        state = record_auth.State()
-    record_auth.scan(state, whole[base:], run, ws_id, rk, kid)
+        state = record_auth.start_state(lines)
+    record_auth.scan(state, whole[done:], run, ws_id, rk, kid)
     if len(_VERIFIED) >= _VERIFIED_MAX:
         _VERIFIED.clear()
-    _VERIFIED[key] = (kid, len(whole), digest, state.copy())
+    _VERIFIED[key] = ((kid, lines), len(whole), digest, state.copy())
     if torn:  # a cut-off last line (a crash): never cached, counted as changed
         record_auth.scan(state, torn, run, ws_id, rk, kid)
-    return record_auth.finish(state, kid, head), mode, prefix
+    return record_auth.finish(state, kid, head), mode, pre
 
 
 @dataclass
@@ -831,6 +835,15 @@ class _View:
     unchecked: int = 0
     last_seq: int = 0
     last_mac: str | None = None
+    before: tuple = ()  # lines made before protection, recorded in the head
+
+
+def _legacy_parse_prefix(pre, run):
+    """The legacy prefix the head recorded, as lines to show (not checked, before protection)."""
+    if not pre:
+        return [], 0
+    events, skipped = _legacy_parse(pre, run)
+    return [dict(e, before_protection=True) for e in events], skipped
 
 
 def _verified(workspace, run, raw) -> _View:
@@ -850,18 +863,21 @@ def _verified(workspace, run, raw) -> _View:
             raise RecordTampered("unverified")  # sealed lines or a head, and no key: fail closed
         return _legacy_view(raw, run)
     head, _ = humanproof.record_head_read(workspace, run) if state == "present" else (None, True)
-    verified, mode, prefix = _chain(workspace, run, raw, rec, head, state == "present")
+    verified, mode, pre = _chain(workspace, run, raw, rec, head, state == "present")
     if mode == "legacy":
         return _legacy_view(raw, run)
-    if not verified.events and (verified.changed or verified.removed):
+    old, _skipped = _legacy_parse_prefix(pre, run)
+    if not verified.events and not old and (verified.changed or verified.removed):
         raise RecordTampered(verified.reason)
     return _View(
         verified.events,
         verified.changed,
         verified.removed,
-        verified.reason,
+        verified.reason or ("unchecked" if old else None),
+        unchecked=len(old),
         last_seq=verified.last_seq,
         last_mac=verified.last_mac,
+        before=tuple(old),
     )
 
 
@@ -1198,7 +1214,7 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
         reason = view.reason or ("pending" if pending else None)
         return ReadResult(
             "ok",
-            _dedupe(view.events, run),
+            [*view.before, *_dedupe(view.events, run)],
             changed=view.changed,
             removed=view.removed,
             unchecked=view.unchecked,
@@ -1211,8 +1227,8 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
         if isinstance(error, RecordUnavailable) and error.reason == "missing":
             try:
                 gone, _head = _removed_run(workspace, run)
-            except RecordTampered:  # the guarded home cannot be looked at: nothing shown, "missing" stays
-                gone = 0
+            except RecordTampered as unknown:  # the guarded home cannot be looked at: fail closed
+                return _report(workspace, unknown, "run", run, seen_by)
             if gone:  # the file is gone but orch wrote lines to it (not pruned): removed outside orch
                 return _report(workspace, RecordTampered("removed"), "run", run, seen_by)
             if pending:
@@ -1257,7 +1273,7 @@ def read_detail(workspace, run, file_id, *, line_id, ticket=None):
         if not lines:
             raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
         want = None
-        if not view.legacy:
+        if not view.legacy and not lines[-1].get("before_protection"):
             want = lines[-1].get("detail_hash")
             if not isinstance(want, str):
                 raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
@@ -1500,16 +1516,24 @@ class RecordWriter:
                 alert_content(self.workspace, run)
             if head is not None and head.get("pruned"):
                 head = None
-            view, _mode, _prefix = _chain(
+            view, mode, _pre = _chain(
                 self.workspace, run, raw, rec, head, not (head is None and head_state is True)
             )
             previous = view.events  # verified lines only: an unverified line never suppresses a real one
-            if head is not None and head["seq"] > view.last_seq:
+            legacy = None
+            last_seq = view.last_seq
+            if mode == "legacy" and raw.strip():
+                # the run was made before orch sealed lines: its lines are recorded once, in the head (count
+                # and hash of the exact bytes), so they stay readable as "not checked" and nothing else can
+                # pass as one. The chain then numbers on after them.
+                whole = raw + (b"\n" if torn else b"")
+                n = len([x for x in whole.split(b"\n") if x])
+                legacy = (n, hashlib.sha256(whole[: record_auth.prefix_cut(whole, n)]).hexdigest())
+                last_seq = n
+            if head is not None and head["seq"] > last_seq:
                 seq, link = head["seq"] + 1, head.get("mac") or record_auth.genesis(rk, ws_id, run)
-            elif view.last_seq:
-                seq, link = view.last_seq + 1, view.last_mac
             else:
-                seq, link = 1, record_auth.genesis(rk, ws_id, run)
+                seq, link = last_seq + 1, view.last_mac or record_auth.genesis(rk, ws_id, run)
             event = dict(event, seq=seq)
             if default_id:
                 # a hook's default id has its own namespace: <run>:<seq> belongs to the collectors, so a hook
@@ -1568,7 +1592,7 @@ class RecordWriter:
                         if isinstance(cleanup, RecordTampered):
                             _report(self.workspace, cleanup, "detail", run, "writer")
                 raise
-            self._move_head(run, head, seq, mac, drained=drained)
+            self._move_head(run, head, seq, mac, drained=drained, legacy=legacy)
             replaced = [old for old in previous if _replaces(old, event)]
             # a log line without a detail of its own (lost, or none) replaced hook lines: the hook's detail
             # file (the same name) goes when no line the reader keeps points to it, so the agent's payload
@@ -1595,7 +1619,7 @@ class RecordWriter:
         finally:
             _close(fd)
 
-    def _move_head(self, run, head, seq, mac, *, drained=None, rejected=0):
+    def _move_head(self, run, head, seq, mac, *, drained=None, rejected=0, legacy=None):
         """Write the chain head after the line (a failure is reported, never raised: the line is stored and
         verifies without it; the next commit moves the head)."""
         body = dict(head or {})
@@ -1606,6 +1630,8 @@ class RecordWriter:
         body.setdefault("drained_floor", "0" * 20)
         body.setdefault("pruned", None)
         body["rejected"] += rejected
+        if legacy is not None and head is None:
+            body["legacy_lines"], body["legacy_hash"] = legacy
         if drained:
             names = [*body["drained"], drained]
             horizon = f"{time.time_ns() - 24 * 3600 * 10**9:020d}"
@@ -1659,10 +1685,33 @@ class RecordWriter:
             _report(self.workspace, error, "folder", run, "writer")
             return
         head, _ = humanproof.record_head_read(self.workspace, run)
-        if (
-            head is not None
-        ):  # only a run that already has a chain keeps the count (a head makes it non-legacy)
+        if head is not None:
             self._move_head(run, head, head["seq"], head.get("mac"), rejected=1)
+            return
+        # No head. A run that is already sealed (a crash before its first head write) gets one now, so the
+        # count is kept. A legacy run or a run with no file keeps no count (a head would make it non-legacy):
+        # the alert above is its only trace.
+        tail = self._sealed_tail(run)
+        if tail is not None:
+            self._move_head(run, None, tail[0], tail[1], rejected=1)
+
+    def _sealed_tail(self, run):
+        """(seq, mac) of the last verified line of a run that has sealed lines, else None."""
+        rec = humanproof.record_key(self.workspace)
+        if rec is None:
+            return None
+        try:
+            fd = _open(self.workspace, ("runs", run + ".jsonl"), "read")
+        except RecordUnavailable:
+            return None
+        try:
+            raw = _read_bytes(fd)
+        finally:
+            _close(fd)
+        verified, mode, _pre = _chain(self.workspace, run, raw, rec, None, False)
+        if mode == "legacy" or not verified.last_mac:
+            return None
+        return verified.last_seq, verified.last_mac
 
     def _drain(self, run, *, check_lock=lambda: None):
         try:
@@ -2071,6 +2120,11 @@ def _ended_run(run, events, now):
     return f"{end:%Y-%m-%dT%H:%M:%SZ}" if over else None
 
 
+def _own(events):
+    """The lines orch checked (not those made before protection): the only ones retention may believe."""
+    return [e for e in events if not e.get("before_protection")]
+
+
 def _tombstone(workspace, run, now):
     """The run's chain head says it was pruned on purpose (a run file that is gone otherwise is `removed`)."""
     head, _ = humanproof.record_head_read(workspace, run)
@@ -2103,7 +2157,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
             runs.append(
                 dict(
                     run=run,
-                    ended=None if read.legacy else _ended_run(run, read.value, now),
+                    ended=None if read.legacy else _ended_run(run, _own(read.value), now),
                     detail_mb=_detail_parts(workspace, run, "retention")[1] / 1024**2,
                     file_mb=(_size(workspace, ("runs", run + ".jsonl")) + _size(workspace, ("jobs", run)))
                     / 1024**2,
@@ -2123,7 +2177,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 if read.pending:
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
                     continue
-                ended_now = None if read.legacy else _ended_run(run, read.value, now)
+                ended_now = None if read.legacy else _ended_run(run, _own(read.value), now)
                 if not ended_now or ended_now != snapshots[run]:
                     continue
                 # Check every deletion target before invoking the irreversible fold. In detail/<run> only the
@@ -2137,7 +2191,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 if _pending_count(workspace, run):
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
                     continue
-                fold(run, read.value)
+                fold(run, _own(read.value))
                 check_lock()
                 if _pending_count(workspace, run):
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
