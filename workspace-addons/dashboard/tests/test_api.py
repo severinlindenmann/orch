@@ -820,7 +820,10 @@ def test_a_link_never_uses_an_address_the_server_supplies(act_server, act_orch, 
 def test_a_saved_sub_path_is_kept_and_odd_addresses_are_refused(act_server, act_orch, ws):
     rows = _links_with(act_server, act_orch, ws, {"url": "https://pub.example.test/orch/"}, [FILE])
     assert rows[0]["link"] == "https://pub.example.test/orch/f/f_a#k=secretsecretsecret1"
-    for bad in ("http://pub.example.test", "https://user@pub.example.test", "https://pub.example.test/a?x=1", "https://pub.example.test/a b"):
+    # self-hosted on localhost or a LAN address, TLS optional: http is fine, exactly the saved base
+    rows = _links_with(act_server, act_orch, ws, {"url": "http://192.168.1.20:8080"}, [FILE])
+    assert rows[0]["link"] == "http://192.168.1.20:8080/f/f_a#k=secretsecretsecret1"
+    for bad in ("https://user@pub.example.test", "https://pub.example.test/a?x=1", "https://pub.example.test/a b"):
         assert _links_with(act_server, act_orch, ws, {"url": bad}, [FILE])[0]["link"] is None
 
 

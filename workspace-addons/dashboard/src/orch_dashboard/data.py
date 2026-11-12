@@ -978,7 +978,7 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
     # Never an address the server supplies: a compromised server could steer copied links (with the key) to itself.
     saved = _load(root / ".orch" / "secrets" / "publish.json")
     base = str(saved.get("url") or "").rstrip("/") if isinstance(saved, dict) else ""
-    if not re.fullmatch(r"https://[A-Za-z0-9.:\[\]-]+(/[A-Za-z0-9._~-]+)*", base):
+    if not re.fullmatch(r"https?://[A-Za-z0-9.:\[\]-]+(/[A-Za-z0-9._~-]+)*", base):
         base = ""
     links = []
     for f in files if isinstance(files, list) else []:
@@ -999,7 +999,7 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
             isinstance(key, str)
             and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key)
             and isinstance(url, str)
-            and re.fullmatch(r"https://[A-Za-z0-9.:\[\]-]+/[!-~]*", url.split("#", 1)[0])
+            and re.fullmatch(r"https?://[A-Za-z0-9.:\[\]-]+/[!-~]*", url.split("#", 1)[0])
         )
         link = url.split("#", 1)[0] + "#k=" + key if ok else None
         links.append(
