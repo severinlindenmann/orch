@@ -1003,7 +1003,7 @@ def test_low1_made_up_key_ids_are_content_not_old_key():
 
     state = rauth.State()
     state.pending = 2
-    out = rauth.finish(state, "aaaaaaaa", None, foreign_head=False)
+    out = rauth.finish(state, "aaaaaaaa", None, old_kid=None)
     assert (out.changed, out.reason) == (2, "content")
 
 
@@ -1112,3 +1112,28 @@ def test_perf_a_warm_read_and_append_are_cheap(store):
         writer.append(example(id=f"p{n}", at=at(9)))
     append_ms = (time.perf_counter() - t) / 20 * 1000
     assert read_ms < 6 and append_ms < 15, (read_ms, append_ms)
+
+
+def test_foreign_key_lines_are_old_history_only_for_the_exact_recorded_old_kid(store):
+    ws, writer = store
+    write3(writer)
+    old_kid = hp.record_key(ws)[1]
+    f = hp.key_dir(ws, create=False) / "human.key"
+    f.write_text("11" * 32 + "\n")
+    st = f.stat()
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    hp.record_reset_note(ws)
+    r = read_run(ws, RUN)
+    assert (r.status, r.reason) == ("tampered", "old_key")  # the exact old kid: history
+    # a genuine pre-reset run (no current-key lines) is pruned from the reset time
+    later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 100 * 86400))
+    # a planted foreign kid in front of a CURRENT-key run: content, and the run is not pruned
+    writer.append(example(id="toolu_new", at=at(9)))  # the new segment, seq 1
+    raw = runfile(ws).read_bytes()
+    fake = raw.splitlines(keepends=True)[0].replace(old_kid.encode(), b"deadbeef")
+    runfile(ws).write_bytes(fake + raw)
+    r = read_run(ws, RUN)
+    assert r.status == "ok" and r.reason == "content" and [e["id"] for e in r.unwrap()] == ["toolu_new"]
+    assert r.changed >= 1
+    res = record.apply_retention(ws, later, 90, 2048, lambda *a: None)
+    assert RUN not in res["delete_run"] and runfile(ws).exists()

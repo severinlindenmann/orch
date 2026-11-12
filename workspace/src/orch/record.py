@@ -831,7 +831,7 @@ _VERIFIED: dict = {}
 _VERIFIED_MAX = 64
 
 
-def _chain(workspace, run, raw, rec, head, head_present, foreign_head=True):
+def _chain(workspace, run, raw, rec, head, head_present, old_kid=None):
     """(Verified, mode, legacy prefix bytes) of a run file's bytes: the one place that decides which lines
     count (record_auth.verify_run's walk, resumed from the cache). `head` is the checked chain head or None;
     `head_present`: a head file exists (even a damaged one), so the run is never a legacy run. When the head
@@ -862,7 +862,7 @@ def _chain(workspace, run, raw, rec, head, head_present, foreign_head=True):
     _VERIFIED[key] = ((kid, lines), len(whole), digest, state.copy())
     if torn:  # a cut-off last line (a crash): never cached, counted as changed
         record_auth.scan(state, torn, run, ws_id, rk, kid)
-    return record_auth.finish(state, kid, head, foreign_head=foreign_head), mode, pre
+    return record_auth.finish(state, kid, head, old_kid=old_kid), mode, pre
 
 
 @dataclass
@@ -912,8 +912,8 @@ def _verified(workspace, run, raw) -> _View:
     head, hstate = humanproof.record_head_read(workspace, run) if state == "present" else (None, True)
     carry = humanproof.record_head_carry(workspace, run) if hstate == "old_key" else {}
     # a head of another key id: the run lived through a protection reset (or a new segment carries its old id)
-    foreign = hstate == "old_key" or bool((head or {}).get("old_kid")) or bool(carry)
-    verified, mode, pre = _chain(workspace, run, raw, rec, head, present, foreign)
+    old_kid = carry.get("old_kid") or (head or {}).get("old_kid")  # recorded by orch at the reset
+    verified, mode, pre = _chain(workspace, run, raw, rec, head, present, old_kid)
     if mode == "legacy":
         view = _legacy_view(raw, run)
         view.rejected = humanproof.record_rejects_read(workspace, run)
@@ -1630,8 +1630,8 @@ class RecordWriter:
             if head is not None and head.get("pruned"):
                 head = None
             carry = humanproof.record_head_carry(self.workspace, run) if head_state == "old_key" else {}
-            foreign = head_state == "old_key" or bool((head or {}).get("old_kid"))
-            view, mode, _pre = _chain(self.workspace, run, raw, rec, head, present, foreign)
+            old_kid = carry.get("old_kid") or (head or {}).get("old_kid")
+            view, mode, _pre = _chain(self.workspace, run, raw, rec, head, present, old_kid)
             previous = view.events  # verified lines only: an unverified line never suppresses a real one
             legacy = None
             last_seq = view.last_seq
@@ -2345,6 +2345,12 @@ def _tombstone(workspace, run, now):
     humanproof.record_head_try_write(workspace, run, dict(head or {"seq": 0}, pruned=now))
 
 
+def _no_current_chain(workspace, run):
+    """The run has no head of the current key: nothing of it was written since the reset."""
+    head, state = humanproof.record_head_read(workspace, run)
+    return head is None and state in (True, "old_key")
+
+
 def _retention_end(workspace, run, read, now):
     """(when the run ended, whether its size counts toward max_mb), or None when retention must leave it.
     A checked run ends with its checked core run.state. A true legacy run (made before protection: no head,
@@ -2359,7 +2365,7 @@ def _retention_end(workspace, run, read, now):
         listed = humanproof.record_cutover_read(workspace)
         if isinstance(listed, set) and run in listed:
             return humanproof.record_cutover_at(workspace), False
-    if read.status == "tampered" and read.reason == "old_key":
+    if read.status == "tampered" and read.reason == "old_key" and _no_current_chain(workspace, run):
         # made before a protection reset: ages from the recorded reset (orch's own MACed time), never counted
         return humanproof.record_reset_at(workspace), False
     return None

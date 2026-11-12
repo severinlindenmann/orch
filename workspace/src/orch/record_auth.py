@@ -181,6 +181,7 @@ class State:
     n_bad: int = 0
     n_noauth: int = 0
     pending: int = 0  # lines of a foreign key id before the first verified line: old segment or planted?
+    kids: dict = field(default_factory=dict)  # the same, by key id
     gaps: list = field(default_factory=list)  # [lo, hi] seq ranges skipped by a resync
     base: int = 0  # lines of a legacy prefix before the chain: the first sealed line is seq base + 1
 
@@ -191,6 +192,7 @@ class State:
             self.n_bad,
             self.n_noauth,
             self.pending,
+            dict(self.kids),
             list(self.gaps),
             self.base,
         )
@@ -223,6 +225,7 @@ def scan(
                 state.n_bad += 1
             else:
                 state.pending += 1
+                state.kids[k] = state.kids.get(k, 0) + 1
             continue
         obj = _parse(body)
         seq = obj.get("seq") if obj is not None else None
@@ -262,10 +265,11 @@ def scan(
     return state
 
 
-def finish(state: State, kid: str, head: dict | None = None, *, foreign_head: bool = True) -> Verified:
-    """The result for the walk so far (does not change `state`, so a cache can go on from it). `foreign_head`:
-    the run has a chain head of another key id (a protection reset happened to it); without one, lines with
-    another key id are planted (made-up key id, a run copied from another workspace), not history."""
+def finish(state: State, kid: str, head: dict | None = None, *, old_kid=True) -> Verified:
+    """The result for the walk so far (does not change `state`, so a cache can go on from it). `old_kid`: the
+    key id orch recorded for the run when its key changed (a protection reset), a str. Only lines of exactly
+    that key id can be old history; any other foreign id is planted (a made-up key id, a run copied from
+    another workspace). None: no reset is recorded, nothing is history. True (the pure vectors only): any."""
     s = state.copy()
     out = s.out
     n_bad, n_oldkey = s.n_bad, 0
@@ -278,8 +282,9 @@ def finish(state: State, kid: str, head: dict | None = None, *, foreign_head: bo
             rotation = out.events[0]["seq"] == s.base + 1
         else:
             rotation = not has_head
-        if rotation and foreign_head:
-            n_oldkey = s.pending
+        if rotation and old_kid is not None and old_kid is not False:
+            n_oldkey = s.pending if old_kid is True else s.kids.get(old_kid, 0)
+            n_bad += s.pending - n_oldkey
         else:
             n_bad += s.pending
     if head and head.get("kid") == kid and type(head.get("seq")) is int:

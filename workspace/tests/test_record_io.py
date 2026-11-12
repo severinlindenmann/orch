@@ -241,6 +241,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "humanproof.record_cutover_at",
     "humanproof.record_head_carry",
     "humanproof.record_reset_at",
+    "carry.get",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
