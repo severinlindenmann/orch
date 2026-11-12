@@ -48,7 +48,7 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    link) in its JSON body `{"secret": ...}`, never in a cookie, URL or HTML. The page keeps it in its own `sessionStorage`
    (per origin, so per port) and sends it as `X-Orch-Page` on every same-origin request. `PageSession.authed` and
    `can_mint` require cookie AND secret (constant-time compare); every route that mints or acts with the session (act,
-   notices, update status, area/process clicks) asks one of them. An update restart hands cookie and secret over together
+   notices, update status, area clicks; Focus process stop/stop-all stays fence-only as before, it is no proof) asks one of them. An update restart hands cookie and secret over together
    (`humanproof.write_resume_cookie` / `take_resume_session`, one use, 15 min).
    **Mint routes exist only on the loopback listener**; every request, GET included, must carry `Host: 127.0.0.1:<port>` or
    `localhost:<port>`; any `X-Forwarded-*` or `Forwarded` header, or a request that arrived through a remote-access path

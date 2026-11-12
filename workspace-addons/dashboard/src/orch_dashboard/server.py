@@ -115,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.send_header(
-            "Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'"
+            "Content-Security-Policy", csp or "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'"
         )
         self.end_headers()
         self.wfile.write(body)

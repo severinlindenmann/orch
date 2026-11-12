@@ -11,7 +11,8 @@
     var secret = stored();
     if (secret) {
       var url = typeof input === "string" ? input : (input && input.url) || "";
-      var local = url.charAt(0) === "/" ? url.charAt(1) !== "/" : url.indexOf(location.origin + "/") === 0;
+      var local = false;
+      try { local = new URL(url, location.href).origin === location.origin; } catch (e) { local = false; }
       if (local) {
         init = Object.assign({}, init || {});
         var h = new Headers(init.headers || (typeof input !== "string" && input ? input.headers : undefined) || {});

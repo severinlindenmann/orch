@@ -860,3 +860,11 @@ def test_secret_compare_is_constant_time_and_rotates_with_the_session(live, monk
     tok2 = hp.write_launch_token(root, "dashboard")
     st, hdr, body = _raw(port, "POST", "/session", {"token": tok2}, {"Origin": f"http://127.0.0.1:{port}"})
     assert st == 200 and json.loads(body)["secret"]
+
+
+def test_every_dashboard_answer_forbids_framing_by_other_sites(live):
+    """A foreign local page must not frame a signed-in dashboard tab (clickjacking with the page secret)."""
+    _root, port = live
+    for path in ("/", "/api/notices", "/nope"):
+        _st, hdr, _ = _raw(port, "GET", path)
+        assert "frame-ancestors 'self'" in hdr.get("content-security-policy", ""), path
