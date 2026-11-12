@@ -1802,7 +1802,7 @@ def test_colour_is_off_for_every_call(tmp_path, monkeypatch):
         safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
     )
     monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
-    safegit.run(["status"], tmp_path, read_only=True, filters=False)
+    safegit.run(["rev-parse", "HEAD"], tmp_path, read_only=True, filters=False)
     assert "color.ui=never" in seen[-1] and "color.diff=never" in seen[-1]
 
 
