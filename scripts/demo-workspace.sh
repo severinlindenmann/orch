@@ -21,26 +21,41 @@ die() { echo "demo-workspace: $*" >&2; exit 1; }
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 DEMO_HOME="${DEMO_HOME:-$HOME/orch-demo/home}"
 DEMO_DIR="${DEMO_DIR:-$HOME/orch-demo/work/demo}"
-PUBLIC_HOST="develop.netbird.cloud"
 DESCRIPTION="Demo workspace: plans a team lunch, books tables, answers questions"
+
+MARK=".orch-demo-owned"   # written into both demo folders first; remove deletes only folders that carry it
+
+realpath_of() { python3 -I -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
 
 check_paths() {
   for v in "$DEMO_HOME" "$DEMO_DIR"; do
     case "$v" in /*) ;; *) die "DEMO_HOME and DEMO_DIR must be full paths (start with /)." ;; esac
-    case "$v" in *..*) die "DEMO_HOME and DEMO_DIR must not contain '..'." ;; esac
   done
-  h="${HOME%/}"; d="${DEMO_HOME%/}"; w="${DEMO_DIR%/}"
-  [ -n "$d" ] && [ "$d" != "/" ] || die "DEMO_HOME is empty or /."
-  [ -n "$w" ] && [ "$w" != "/" ] || die "DEMO_DIR is empty or /."
-  [ "$d" != "$h" ] || die "DEMO_HOME must not be your own home folder ($HOME)."
-  [ "$w" != "$h" ] || die "DEMO_DIR must not be your own home folder ($HOME)."
-  case "$h" in "$d"/*) die "DEMO_HOME must not contain your home folder." ;; esac
-  for v in "$d" "$w"; do
-    case "$v" in
-      "$h/.config/orch"|"$h/.config/orch"/*|"$h/.orch-tool"|"$h/.orch-tool"/*)
-        die "$v is inside your own orch settings; pick another folder." ;;
-    esac
+  h="$(realpath_of "$HOME")"; acct="$(realpath_of ~)"
+  RHOME="$(realpath_of "$DEMO_HOME")"; RDIR="$(realpath_of "$DEMO_DIR")"
+  for v in "$RHOME" "$RDIR"; do
+    case "$v" in /|"") die "DEMO_HOME and DEMO_DIR must not be / or empty." ;; esac
+    for base in "$h" "$acct"; do
+      [ "$v" != "$base" ] || die "$v is your own home folder; pick a folder below it, e.g. ~/orch-demo/home."
+      case "$base" in "$v"/*) die "$v contains your home folder; pick a folder below it." ;; esac
+      case "$v" in
+        "$base/.config/orch"|"$base/.config/orch"/*|"$base/.orch-tool"|"$base/.orch-tool"/*)
+          die "$v is inside your own orch settings; pick another folder." ;;
+      esac
+    done
   done
+  [ "$RHOME" != "$RDIR" ] || die "DEMO_HOME and DEMO_DIR must be two different folders."
+  case "$RDIR" in "$RHOME"/*) die "DEMO_DIR must not be inside DEMO_HOME." ;; esac
+  case "$RHOME" in "$RDIR"/*) die "DEMO_HOME must not be inside DEMO_DIR." ;; esac
+}
+
+# A demo folder: missing, empty, or already carrying the marker. Anything else is someone's real folder.
+claim() {
+  if [ -e "$1" ] && [ ! -f "$1/$MARK" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; then
+    die "$1 already exists and is not a demo folder. Pick an empty or new folder."
+  fi
+  mkdir -p "$1"
+  [ -f "$1/$MARK" ] || echo "orch demo folder; scripts/demo-workspace.sh remove deletes it" > "$1/$MARK"
 }
 
 # Every orch call: a clean environment, the demo's HOME, nothing ORCH_*/XDG_* from the caller.
@@ -54,9 +69,11 @@ orch_demo() { (cd "$DEMO_DIR" && denv orch "$@"); }
 STATE="$DEMO_HOME/.orch-demo"     # the script's own notes: ref, port, workspace id
 installed() { [ -x "$DEMO_HOME/.local/bin/orch" ]; }
 
+in_range() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "$1" -ge 8780 ] && [ "$1" -le 8799 ]; }
+
 pick_port() {
   if [ -n "${DEMO_PORT:-}" ]; then
-    case "$DEMO_PORT" in *[!0-9]*|'') die "DEMO_PORT must be a number." ;; esac
+    in_range "$DEMO_PORT" || die "DEMO_PORT must be a number from 8780 to 8799."
     echo "$DEMO_PORT"; return
   fi
   p=8780
@@ -69,7 +86,7 @@ pick_port() {
 
 print_where() {
   port="$(cat "$STATE/port" 2>/dev/null || true)"
-  [ -n "$port" ] && echo "Dashboard: http://$PUBLIC_HOST:$port/   (on this machine: http://127.0.0.1:$port/)"
+  [ -n "$port" ] && echo "Dashboard (on this machine's screen only): http://127.0.0.1:$port/"
   if [ -f "$STATE/workspace" ]; then
     echo "Demo workspace id: $(cat "$STATE/workspace")  (in your directory it shows with the name the admin gave it, e.g. Demo)"
   fi
@@ -100,8 +117,10 @@ cmd_setup() {
     [ -r "$PROMPT_FILE" ] || die "Cannot read $PROMPT_FILE."
     line="$(grep -o 'orch relay connect [^`]*' "$PROMPT_FILE" | head -n 1 || true)"
     [ -n "$line" ] || die "No 'orch relay connect' line in $PROMPT_FILE. Copy the whole text from Add workspace."
+    set -f  # the pasted text is split into words, never expanded as file names
     # shellcheck disable=SC2086
     set -- $line
+    set +f
     shift 3
     RELAY="${1:-}"
     [ $# -gt 0 ] && shift
@@ -114,6 +133,7 @@ cmd_setup() {
     done
   elif [ "$TOKEN_FILE" = "-" ]; then
     IFS= read -r TOKEN || true
+    TOKEN="$(printf '%s' "$TOKEN" | tr -d '\r\n ')"
   elif [ -n "$TOKEN_FILE" ]; then
     [ -r "$TOKEN_FILE" ] || die "Cannot read $TOKEN_FILE."
     TOKEN="$(head -n 1 "$TOKEN_FILE" | tr -d '\r\n ')"
@@ -122,7 +142,8 @@ cmd_setup() {
   case "$RELAY" in http://*|https://*) ;; *) die "The relay address must start with https:// or http://." ;; esac
   case "$WS" in ws_*) ;; *) die "The workspace id should start with ws_ (got '$WS')." ;; esac
 
-  mkdir -p "$DEMO_HOME" "$STATE"
+  claim "$DEMO_HOME"; claim "$DEMO_DIR"
+  mkdir -p "$STATE"
   chmod 700 "$DEMO_HOME" "$STATE"
 
   # 1. install orch into the demo HOME
@@ -138,7 +159,6 @@ cmd_setup() {
   fi
 
   # 2. the demo folder
-  mkdir -p "$DEMO_DIR"
   if [ ! -d "$DEMO_DIR/.git" ]; then
     (cd "$DEMO_DIR" && denv git init -q)
   fi
@@ -174,12 +194,12 @@ print(h.mint_dev(Path(sys.argv[1]), "relay.connect", sys.argv[2]))' "$DEMO_DIR" 
         || die "Could not connect to the relay (test proof)."
     else
       # The CLI hands the connect to the dashboard; it opens the browser on THIS machine when it runs in a terminal.
-      if command -v script >/dev/null 2>&1; then
+      if [ "$(uname)" = Darwin ] && command -v script >/dev/null 2>&1; then
         (cd "$DEMO_DIR" && denv script -q /dev/null orch relay connect "$RELAY" --workspace "$WS" --token "$TOKEN" >/dev/null 2>&1) || true
       else
         orch_demo relay connect "$RELAY" --workspace "$WS" --token "$TOKEN" >/dev/null 2>&1 || true
       fi
-      echo "On this machine's screen, the demo dashboard (http://127.0.0.1:$port/) asks you to press Continue."
+      echo "On this machine's screen, open the demo dashboard (http://127.0.0.1:$port/) and press Continue."
       echo "Waiting up to 10 minutes for that click ..."
       i=0
       until relay_connected; do
@@ -206,6 +226,8 @@ print(h.mint_dev(Path(sys.argv[1]), "relay.connect", sys.argv[2]))' "$DEMO_DIR" 
   echo "The demo is ready."
   print_where
   echo "The admin must approve the demo's description on the relay page before others see it."
+  [ -n "$PROMPT_FILE" ] && echo "Delete $PROMPT_FILE now: it holds the demo's relay key."
+  return 0
 }
 
 # Refuse unless orch itself resolves its folder inside the demo HOME (never the machine's own ~/.orch-tool).
@@ -227,16 +249,17 @@ cmd_start() {
   # orch start would put the dashboard on 8420 (else any free port). The demo wants a known port in 8780-8799
   # and must never take 8420, so its dashboard is started first on that port; orch start then finds it running.
   port="$(cat "$STATE/port" 2>/dev/null || true)"
-  if [ -z "$port" ]; then
+  if ! in_range "$port"; then
     port="$(pick_port)"
   elif nc -z 127.0.0.1 "$port" >/dev/null 2>&1 && ! dash_ours "$port"; then
     port="$(pick_port)"  # someone else took the old port meanwhile
   fi
-  tool_py -c 'import sys; from pathlib import Path
+  got="$(tool_py -c 'import sys; from pathlib import Path
 from orch_dashboard import service
-service.start(Path(sys.argv[1]), int(sys.argv[2]))' "$DEMO_DIR" "$port" >/dev/null \
+print(service.start(Path(sys.argv[1]), int(sys.argv[2]))["port"])' "$DEMO_DIR" "$port")" \
     || die "The dashboard did not start on port $port; see $DEMO_DIR/.orch/run/dashboard/server.log"
-  echo "$port" > "$STATE/port"
+  in_range "$got" || die "The demo dashboard runs on port $got, outside 8780-8799. Run: scripts/demo-workspace.sh stop, then setup again."
+  echo "$got" > "$STATE/port"
   orch_demo start --no-open >/dev/null || echo "Note: orch start reported a problem; see: scripts/demo-workspace.sh status"
 }
 
@@ -262,7 +285,7 @@ cmd_status() {
 cmd_stop() {
   check_paths
   if installed && [ -d "$DEMO_DIR/.orch" ]; then
-    home_check
+    ( home_check ) || { echo "Note: orch's folder is not inside the demo; not calling orch stop."; return 0; }
     orch_demo stop >/dev/null 2>&1 || true
     echo "Demo services stopped (dashboard included)."
   fi
@@ -272,18 +295,22 @@ cmd_remove() {
   YES=""
   [ "${1:-}" = "--yes" ] && YES=1
   check_paths
-  cmd_stop
+  cmd_stop || echo "Note: could not stop everything cleanly; deleting anyway."
+  DEL_HOME=""; DEL_DIR=""
+  if [ -f "$RHOME/$MARK" ]; then DEL_HOME=1; elif [ -e "$RHOME" ]; then echo "Kept $RHOME: it is not a demo folder (no $MARK)."; fi
+  if [ -f "$RDIR/$MARK" ]; then DEL_DIR=1; elif [ -e "$RDIR" ]; then echo "Kept $RDIR: it is not a demo folder (no $MARK)."; fi
+  [ -n "$DEL_HOME$DEL_DIR" ] || { echo "Nothing to delete."; return 0; }
   echo "This deletes:"
-  echo "  $DEMO_HOME"
-  echo "  $DEMO_DIR"
+  [ -n "$DEL_HOME" ] && echo "  $RHOME"
+  [ -n "$DEL_DIR" ] && echo "  $RDIR"
   if [ -z "$YES" ]; then
     printf 'Type yes to delete them: '
     read -r ans || ans=""
     [ "$ans" = "yes" ] || die "Nothing deleted."
   fi
   # No relay disconnect command exists; the admin removes the workspace on the relay page.
-  [ -e "$DEMO_HOME" ] && rm -rf -- "$DEMO_HOME"
-  [ -e "$DEMO_DIR" ] && rm -rf -- "$DEMO_DIR"
+  [ -n "$DEL_HOME" ] && rm -rf -- "$RHOME"
+  [ -n "$DEL_DIR" ] && rm -rf -- "$RDIR"
   echo "Deleted. Ask the admin to remove the Demo workspace on the relay page."
 }
 

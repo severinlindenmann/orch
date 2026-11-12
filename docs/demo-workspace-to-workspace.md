@@ -10,7 +10,7 @@ group chat with it and share a file, as it would with a colleague's workspace.
 
 - Your own workspace, with orch installed and connected to your relay ([relay.md](relay.md)).
 - Admin access to the relay page.
-- The dev machine reachable from your notebook over the private network (VPN).
+- Someone at the dev machine for one or two clicks, or screen sharing to it.
 
 ## Connect the demo
 
@@ -30,8 +30,8 @@ Connecting needs **one person's click on the dev machine's own screen**: Demo's 
 press **Continue**. The team does this, or you do it over screen sharing. The script waits for the click and then
 prints:
 
-- Demo's dashboard address (`http://develop.netbird.cloud:<port>/`), to watch Demo from your notebook;
-- Demo's workspace id (`ws_…`).
+- Demo's workspace id (`ws_…`);
+- Demo's dashboard address. It opens only on the dev machine's own screen; to watch Demo, use screen sharing.
 
 Afterwards the team deletes `demo-prompt.txt`.
 
