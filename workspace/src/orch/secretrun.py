@@ -242,8 +242,13 @@ def _under(path: str, base: str) -> bool:
 XCODE_SELECT_LINK = (
     "/var/db/xcode_select_link"  # macOS: where /usr/bin/git, make, python3 ... really run from
 )
-ROOT_REFUSED = "Refused: orch does not start key commands as root. Run it as your own user."
+ROOT_REFUSED = "Refused: orch does not use keys as root. Run it as a normal user or a service user."
 WINDOWS = "Refused: orch secret commands that start programs are not available on Windows yet."
+
+
+def _refuse_root() -> None:
+    if hasattr(os, "getuid") and os.getuid() == 0:
+        raise Refused(ROOT_REFUSED)
 
 
 def _windows() -> bool:
@@ -289,12 +294,10 @@ def _developer_dir() -> str:
 
 def _check_xcode(path: str, ws: str) -> None:
     """macOS: /usr/bin/git, make, python3, clang ... are stubs that run the real tool from the developer
-    folder. For any /usr/bin program that folder must itself be safe, and so must a real tool found there."""
+    folder. When the program's name exists there, that folder and the tool must be safe."""
     if sys.platform != "darwin" or os.path.dirname(path) != "/usr/bin":
         return
     dev = _developer_dir()
-    if os.path.isdir(dev):
-        _check_chain(dev, ws)
     name = os.path.basename(path)
     candidates = [os.path.join(dev, "usr", "bin", name)]
     toolchains = os.path.join(dev, "Toolchains")
@@ -304,9 +307,11 @@ def _check_xcode(path: str, ws: str) -> None:
         ]
     except OSError:
         pass
-    for c in candidates:
-        if os.path.isfile(c):
-            _check_chain(os.path.realpath(c), ws)
+    found = [c for c in candidates if os.path.isfile(c)]
+    if found and os.path.isdir(dev):  # only a program that really lives there is run from there
+        _check_chain(dev, ws)
+    for c in found:
+        _check_chain(os.path.realpath(c), ws)
 
 
 def approve_program(root, name, *, _depth=0):
@@ -320,8 +325,7 @@ def approve_program(root, name, *, _depth=0):
     approving anything."""
     if _windows():
         raise Refused(WINDOWS)
-    if hasattr(os, "getuid") and os.getuid() == 0:
-        raise Refused(ROOT_REFUSED)  # no root exemption: nothing counts as user-writable under root
+    _refuse_root()  # no root exemption: nothing counts as user-writable under root
     if not os.path.isabs(name) and (os.sep in name or (os.altsep and os.altsep in name) or "/" in name):
         raise Refused("Refused: give the program as a full path or a plain name, not a relative path.")
     path = resolve_program(root, name)
@@ -365,7 +369,11 @@ def check_arguments(root, arguments) -> None:
     agent running as you could change it). Web addresses (scheme://) are not paths."""
     ws = os.path.realpath(root)
     for arg in arguments:
-        if _URL.match(arg) or ("/" not in arg and "\\" not in arg and not (os.altsep and os.altsep in arg)):
+        if _URL.match(arg) and not re.search(r"\s", arg):
+            scheme, _, arg = arg.partition("://")
+            if scheme.lower() not in ("file", "unix"):  # a web address is not a path
+                continue
+        if "/" not in arg and "\\" not in arg and not (os.altsep and os.altsep in arg):
             continue
         if not os.path.isabs(arg) or "\0" in arg or "\\" in arg:
             raise Refused(
@@ -378,6 +386,8 @@ def check_arguments(root, arguments) -> None:
         if not os.path.exists(real):
             raise Refused("Refused: a file named in the command does not exist.")
         _check_chain(real, ws)
+        if not os.path.isfile(real):
+            raise Refused("Refused: a path in the command must be a regular file.")
 
 
 def use_target(profile: str, mode: str, argv) -> str:
@@ -645,6 +655,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
     try:
         if _windows():
             raise Refused(WINDOWS)
+        _refuse_root()
         require_run(root, agent)  # before any key or file is touched
         profile = _profile(root, profile_name)
         if agent and profile.get("real_home") is True:  # the real HOME undoes the containment: person only
@@ -746,6 +757,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
 def _get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
     if _windows():
         raise Refused(WINDOWS)
+    _refuse_root()
     require_run(root, agent)
     profile = _profile(root, profile_name)
     h = hider.Hider(keystore.all_needles(root))

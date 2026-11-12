@@ -2110,14 +2110,13 @@ def test_an_unreadable_script_program_is_refused(ws, tmp_path):
 
 @pytest.mark.real_checks
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode folder")
-def test_the_developer_folder_itself_must_be_safe_for_any_usr_bin_program(ws, monkeypatch, tmp_path):
-    dev = tmp_path / "Developer"  # owned by the test user
+def test_an_unsafe_developer_folder_blocks_only_programs_that_live_there(ws, monkeypatch, tmp_path):
+    dev = Path(os.path.realpath(tmp_path)) / "Developer"  # owned by the test user, without a `true` inside
     dev.mkdir()
     link = tmp_path / "link"
     link.symlink_to(dev)
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
-    with pytest.raises(Refused, match=LOCATION):
-        secretrun.approve_program(ws, "/usr/bin/true")
+    assert secretrun.approve_program(ws, "/usr/bin/true")[0]
 
 
 @pytest.mark.real_checks
@@ -2133,3 +2132,37 @@ def test_get_is_refused_on_windows(store, ws, monkeypatch):
     monkeypatch.setattr(secretrun, "_windows", lambda: True)
     with pytest.raises(Refused, match="Windows"):
         secretrun.get(ws, "plain", "other-token", stdout_is_tty=False, out=io.BytesIO(), agent=False)
+
+
+def test_nothing_uses_keys_as_root_in_run_or_get(store, ws, monkeypatch):
+    monkeypatch.setattr(secretrun.os, "getuid", lambda: 0)
+    with pytest.raises(Refused, match="service user"):
+        secretrun.run(
+            ws, "env", "plain", ["/usr/bin/true"], stdout=io.BytesIO(), stderr=io.BytesIO(), agent=False
+        )
+    with pytest.raises(Refused, match="as root"):
+        secretrun.get(ws, "plain", "other-token", stdout_is_tty=False, out=io.BytesIO(), agent=False)
+
+
+def test_urls_are_not_paths_unless_file_or_unix_or_they_hide_a_path_behind_a_space(ws):
+    secretrun.check_arguments(ws, ["https://example.test/x", "postgres://u@h/db"])
+    for bad, why in (
+        ("a://b /Users/me/ws/evil", "full path"),
+        ("file://relative/x", "full path"),
+        ("file:///nonexistent/x", "does not exist"),
+        ("unix:///nonexistent/sock", "does not exist"),
+    ):
+        with pytest.raises(Refused, match=why):
+            secretrun.check_arguments(ws, [bad])
+
+
+def test_a_folder_is_not_accepted_as_a_command_argument(ws):
+    safe_dir = next((d for d in ("/usr/bin", "/bin") if os.path.isdir(d) and os.path.realpath(d) == d), None)
+    if safe_dir is None:
+        pytest.skip("no suitable system folder")
+    with pytest.raises(Refused, match="regular file"):
+        secretrun.check_arguments(ws, [safe_dir])
+
+
+def test_the_developer_variables_are_never_handed_to_a_command():
+    assert keystore.env_denied("DEVELOPER_DIR") and keystore.env_denied("SDKROOT")
