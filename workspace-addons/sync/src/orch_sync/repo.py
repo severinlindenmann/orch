@@ -293,12 +293,7 @@ def state(root):
         return 'ready' if safe(root, '.git/orch-state').is_file() else 'needs-adoption'
     # Read-only discovery from .orch before init; no command ever changes the outer repo.
     if any((p / '.git').exists() for p in (Path(root), *Path(root).parents)):
-        # exactly the personal files the Move click (core private.move) untracks, so the row goes away after
-        # Move; sync's own hardened git, which raises when git can't tell (fail closed)
-        from orch import harness
-
-        rels = [rel.removeprefix('.orch/') for rel, _ in harness.PRIVATE_FILES]
-        tracked = git(root, 'ls-files', '-z', '--', *[f':(literal){r}' for r in rels]).stdout
+        tracked = git(root, 'ls-files', '-z', '--', '.').stdout  # any tracked .orch file (design: Move first)
         return 'needs-move' if tracked else 'new'
     return 'new'
 
