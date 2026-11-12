@@ -228,7 +228,7 @@ PINNED_INTERPRETER = (
 )
 PIN_TEXT = (
     "The fingerprint covers this program file (and any file you named as an argument), not the libraries or "
-    "settings it loads. orch starts a private copy of the approved file."
+    "settings it loads. orch starts private copies of the approved files."
 )
 USER_OWNED = (
     "Refused: the program or a folder above it belongs to your own user, so an agent running as you could "
@@ -350,8 +350,18 @@ def _program(name, dirs, h):
     raise Refused(h.hide_text(f"Refused: the program {name} was not found."))
 
 
-def _pinned_copy(path, want, temp):
-    """Read the program once, check its hash, write exactly those bytes to a private file and return it."""
+def _shebang_interpreter(data):
+    """The interpreter path of a file that starts with #!, else None."""
+    if not data.startswith(b"#!"):
+        return None
+    line = data[2:].split(b"\n", 1)[0].decode("utf-8", "replace").strip()
+    return line.split()[0] if line.split() else ""
+
+
+def _pinned_copy(root, path, want, temp, name):
+    """Read a user-owned file once, check its hash, write exactly those bytes to a private file and return it.
+    A script (#!) is accepted only when its interpreter is a system program that passes approve_program
+    without the user-owned override; env and the interpreters in RISKY_PROGRAMS are refused outright."""
     try:
         with open(path, "rb") as f:
             data = f.read()
@@ -359,10 +369,28 @@ def _pinned_copy(path, want, temp):
         raise Refused("Refused: could not read the program to check it.") from None
     if hashlib.sha256(data).hexdigest() != want:
         raise Refused("Refused: the program is not the one the person approved (it has changed).")
-    copy = temp / "~program"
+    interp = _shebang_interpreter(data)
+    if interp is not None:
+        if (
+            not os.path.isabs(interp)
+            or os.path.basename(interp) == "env"
+            or RISKY_PROGRAMS.match(os.path.basename(interp))
+            or RISKY_PROGRAMS.match(os.path.basename(os.path.realpath(interp)))
+        ):
+            raise Refused(PINNED_INTERPRETER)
+        approve_program(root, interp)  # a system program, not owned by the user
+    copy = temp / name
     keystore._write_private_bytes(copy, data)
     os.chmod(copy, 0o700)
     return str(copy)
+
+
+def _pinned_command(root, command, program_sha, pins, temp):
+    """The command with the program and every pinned file replaced by private copies of the approved bytes."""
+    out = [_pinned_copy(root, command[0], program_sha, temp, "~program")]
+    for i, arg in enumerate(command[1:]):
+        out.append(_pinned_copy(root, arg, pins[arg], temp, f"~arg{i}") if arg in pins else arg)
+    return out
 
 
 def _check_sha(path, want, h):
@@ -372,7 +400,7 @@ def _check_sha(path, want, h):
         with open(path, "rb") as f:
             got = hashlib.sha256(f.read()).hexdigest()
     except OSError:
-        raise Refused(h.hide_text("Refused: could not read the program to check it.")) from None
+        raise Refused("Refused: could not read the program to check it.") from None
     if got != want:
         raise Refused("Refused: the program is not the one the person approved (it has changed).")
 
@@ -609,7 +637,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             program_sha = profile.get("run_sha256")
         for path, want in (profile.get("run_pins") or {}).items():  # every file named in the command
             if path in command[1:]:
-                _check_sha(path, want, hider.Hider([]))
+                _check_sha(path, want, None)
         if mode == "env" and not profile.get("env") and profile.get("files"):
             raise Refused("Refused: this profile needs files. Use orch secret file.")
         needles = keystore.all_needles(root)
@@ -652,7 +680,7 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         private.mkdir(mode=0o700)
         if program_sha is not None:  # run a private copy of the exact bytes that were hashed (no swap race)
             if PIN_STRICT:
-                command[0] = _pinned_copy(command[0], program_sha, temp)
+                command = _pinned_command(root, command, program_sha, profile.get("run_pins") or {}, temp)
             else:
                 _check_sha(command[0], program_sha, h)
         if files:

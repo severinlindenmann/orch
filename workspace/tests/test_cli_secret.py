@@ -1856,12 +1856,24 @@ def test_h1_an_agent_marker_with_a_valid_proof_stays_an_agent(store, run, ws, mo
     assert code == 2
 
 
-def _user_prog(tmp_path, body="#!/bin/sh\nexit 0\n"):
+def _user_prog(tmp_path, source="/usr/bin/true"):
+    """A user-owned copy of a small system binary (a script would need an approved interpreter)."""
+    import shutil
+
     exe = tmp_path / "bin" / "tool"
-    exe.parent.mkdir()
-    exe.write_text(body)
+    exe.parent.mkdir(exist_ok=True)
+    shutil.copy(source, exe)
     exe.chmod(0o755)
     return exe
+
+
+def _replace(exe, source="/usr/bin/false"):
+    """What the agent can do to a user-owned file: overwrite it."""
+    import shutil
+
+    exe.unlink()
+    shutil.copy(source, exe)
+    exe.chmod(0o755)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
@@ -1886,7 +1898,7 @@ def test_h2_a_pinned_program_replaced_after_approval_is_refused_in_every_mode(
     exe = _user_prog(tmp_path)
     assert _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")[0] == 0
     assert run("secret", "exec", "mine")[0] == 0
-    exe.write_text("#!/bin/sh\necho planted\nexit 0\n")  # the agent rewrites the approved binary
+    _replace(exe)  # the agent rewrites the approved binary
     for argv in (("exec", "mine"), ("env", "mine", "--", str(exe)), ("file", "mine", "--", str(exe))):
         code, out, err = run("secret", *argv)
         assert code == 2 and "planted" not in out and "has changed" in err, argv
@@ -1897,7 +1909,7 @@ def test_h2_the_stored_fingerprint_cannot_be_edited_without_a_person(store, run,
     monkeypatch.setattr(secretrun, "PIN_STRICT", True)
     exe = _user_prog(tmp_path)
     assert _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")[0] == 0
-    exe.write_text("#!/bin/sh\necho planted\n")
+    _replace(exe)
     import hashlib
 
     new = hashlib.sha256(exe.read_bytes()).hexdigest()
@@ -1970,7 +1982,7 @@ def test_h2_an_interpreter_cannot_be_pinned(store, run, ws, monkeypatch):
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
 def test_h2_a_pinned_data_file_swapped_after_approval_is_refused(store, run, ws, monkeypatch, tmp_path):
     monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path)
+    exe = _user_prog(tmp_path, "/usr/bin/true")
     data = tmp_path / "bin" / "conf.txt"
     data.write_text("one\n")
     code, out, err = _set(
@@ -1979,39 +1991,91 @@ def test_h2_a_pinned_data_file_swapped_after_approval_is_refused(store, run, ws,
     assert code == 0, out + err
     assert "not the libraries" in err or "not the libraries" in out
     assert str(data) in keystore.read_profiles(ws)["mine"]["run_pins"]
-    assert run("secret", "exec", "mine")[0] == 0
+    started = []
+    child = secretrun._child
+    monkeypatch.setattr(
+        secretrun, "_child", lambda command, *a, **k: started.append(command) or child(command, *a, **k)
+    )
+    code, out, err = run("secret", "exec", "mine")
+    assert code == 0, err
+    assert "~program" in started[0][0] and "~arg0" in started[0][1] and str(data) not in started[0]  # copies
     data.write_text("planted\n")
+    code, out, err = run("secret", "exec", "mine")
+    assert code == 2 and "has changed" in err and "planted" not in out
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_files_swapped_after_the_hash_run_the_approved_bytes(store, run, ws, monkeypatch, tmp_path):
+    """Program and pinned argument are read once; the command runs private copies of those bytes."""
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    exe = _user_prog(tmp_path, "/usr/bin/true")
+    data = tmp_path / "bin" / "conf.txt"
+    data.write_text("approved\n")
+    assert (
+        _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--run", str(data), "--allow-user-owned")[0]
+        == 0
+    )
+    real = secretrun._pinned_copy
+    swapped, seen = [], {}
+
+    def swap_after_copy(root, path, want, temp, name):
+        copy = real(root, path, want, temp, name)
+        seen[name] = Path(copy).read_bytes()
+        if name == "~arg0":
+            Path(path).write_text("planted\n")  # swapped right after the bytes were read
+            swapped.append(1)
+        else:
+            _replace(Path(path))
+        return copy
+
+    monkeypatch.setattr(secretrun, "_pinned_copy", swap_after_copy)
+    code, out, err = run("secret", "exec", "mine")
+    assert swapped and code == 0, (code, out, err)  # the private copies ran
+    assert seen["~arg0"] == b"approved\n" and data.read_text() == "planted\n"
+    assert seen["~program"] == Path("/usr/bin/true").read_bytes()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_binary_swapped_before_the_copy_is_not_started(store, run, ws, monkeypatch, tmp_path):
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    exe = _user_prog(tmp_path, "/bin/echo")
+    assert (
+        _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--run", "approved", "--allow-user-owned")[0]
+        == 0
+    )
+    prog = secretrun._program
+
+    def swap_before_copy(name, dirs, h):
+        found = prog(name, dirs, h)
+        _replace(Path(found))
+        return found
+
+    monkeypatch.setattr(secretrun, "_program", swap_before_copy)
     code, out, err = run("secret", "exec", "mine")
     assert code == 2 and "has changed" in err
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_binary_swapped_between_the_hash_and_the_start_is_not_started(
-    store, run, ws, monkeypatch, tmp_path
-):
+@pytest.mark.parametrize(
+    "shebang,ok",
+    [
+        ("#!/usr/bin/awk -f\nBEGIN{{}}\n", True),
+        ("#!/usr/bin/env awk\n", False),
+        ("#!/bin/sh\n", False),
+        ("#!/usr/bin/python3\n", False),
+        ("#!{own}\n", False),  # a user-owned interpreter
+        ("#!awk\n", False),  # not an absolute path
+    ],
+)
+def test_h2_a_pinned_script_needs_a_system_interpreter(store, run, ws, monkeypatch, tmp_path, shebang, ok):
     monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path, "#!/bin/sh\necho approved\n")
-    assert _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")[0] == 0
-    real = secretrun._pinned_copy
-    swapped = []
-
-    def swap_after_copy(path, want, temp):
-        copy = real(path, want, temp)
-        Path(path).write_text("#!/bin/sh\necho planted\n")  # swapped right after the bytes were read
-        swapped.append(1)
-        return copy
-
-    monkeypatch.setattr(secretrun, "_pinned_copy", swap_after_copy)
+    own = _user_prog(tmp_path, "/usr/bin/true")
+    script = tmp_path / "bin" / "job"
+    script.write_text(shebang.format(own=own))
+    script.chmod(0o755)
+    assert _set(run, monkeypatch, ws, "mine", "--run", str(script), "--allow-user-owned")[0] in (0, 2)
+    if "mine" not in keystore.read_profiles(ws):  # refused already when the person saved it
+        assert not ok
+        return
     code, out, err = run("secret", "exec", "mine")
-    assert swapped and code == 0 and "approved" in out and "planted" not in out  # the private copy ran
-    monkeypatch.setattr(secretrun, "_pinned_copy", real)
-    prog = secretrun._program
-
-    def swap_before_copy(name, dirs, h):
-        found = prog(name, dirs, h)
-        Path(found).write_text("#!/bin/sh\necho planted\n")
-        return found
-
-    monkeypatch.setattr(secretrun, "_program", swap_before_copy)
-    code, out, err = run("secret", "exec", "mine")
-    assert code == 2 and "planted" not in out
+    assert (code == 0) == ok, (code, err)
