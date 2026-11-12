@@ -42,6 +42,14 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    The cookie is named per server AND per port, `orch_page_<server>_<port>` (`pageproof.cookie_name`; server name
    `[a-z0-9_]`, port an integer): cookies on 127.0.0.1 reach every loopback port, so one shared name would let opening
    Insights log the dashboard out. A server reads only its own name; another server's cookie is no session.
+   **The cookie alone is never a session (#539).** The browser still sends every cookie of 127.0.0.1 to every loopback
+   port, so any local page or dev server the person visits receives the value. The `/session` answer therefore also
+   carries a **page secret** (`PageSession.secret`, 32 random bytes, new on every server start and on a revoking reuse of a
+   link) in its JSON body `{"secret": ...}`, never in a cookie, URL or HTML. The page keeps it in its own `sessionStorage`
+   (per origin, so per port) and sends it as `X-Orch-Page` on every same-origin request. `PageSession.authed` and
+   `can_mint` require cookie AND secret (constant-time compare); every route that mints or acts with the session (act,
+   notices, update status, area clicks; Focus process stop/stop-all stays fence-only as before, it is no proof) asks one of them. An update restart hands cookie and secret over together
+   (`humanproof.write_resume_cookie` / `take_resume_session`, one use, 15 min).
    **Mint routes exist only on the loopback listener**; every request, GET included, must carry `Host: 127.0.0.1:<port>` or
    `localhost:<port>`; any `X-Forwarded-*` or `Forwarded` header, or a request that arrived through a remote-access path
    (relay or any proxy, even when the peer is 127.0.0.1), never gets a proof: it is watch-only. Origin is checked on POST as today.

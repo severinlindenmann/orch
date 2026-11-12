@@ -704,6 +704,8 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence("POST", True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
+            return self._send(403, b"This request came from another website and was refused.", "text/plain")
         from orch.pageproof import forwarded, host_ok
 
         if self.session is None or forwarded(self.headers) or not host_ok(self.headers, self.server.server_address[1]):
@@ -716,7 +718,13 @@ class Handler(BaseHTTPRequestHandler):
         cookie = self.session.launch(token)
         if not cookie:
             return self._send(403, _link_msg(self.session, "Focus"), "text/plain; charset=utf-8")
-        self._send(204, b"", "text/plain", {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)})
+        # the cookie plus the page secret (PAGE_HEADER); the page keeps the secret in its sessionStorage
+        self._send(
+            200,
+            json.dumps({"secret": self.session.secret}).encode(),
+            "application/json",
+            {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)},
+        )
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
