@@ -581,6 +581,73 @@ def test_phone_answer_needs_the_question_mac_of_the_question_as_sent(proj, monke
     assert tickets.load(proj, tid)["questions"][0]["answer"] == "yes"
 
 
+def test_record_kind_and_round_are_under_the_question_mac(proj, monkeypatch):
+    """#580: an agent that marks an ordinary record review/proposal (or moves a review round) gets the answer
+    refused BEFORE any dispatch: no verdict, nothing answered, and never reported as already applied."""
+    from conftest import ensure_signing
+
+    from orch import relay, tickets
+
+    ensure_signing(proj)
+    _stub_send(monkeypatch, "m_q80000000000008")
+    monkeypatch.setattr(
+        relay, "_apply_review_answer", lambda *a: pytest.fail("review dispatched without a valid MAC")
+    )
+    monkeypatch.setattr(
+        relay, "_apply_proposal_answer", lambda *a: pytest.fail("proposal dispatched without a valid MAC")
+    )
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy?", ["yes", "no"], None, "agent:claude")
+    t = tickets.load(proj, tid)
+    mid = relay.send_question(proj, t, t["questions"][0])["id"]
+    good = json.loads(relay._asked_path(proj).read_text())[mid]
+    body = {"question_id": "q1", "answer": "accept", "answered_by": "human:a"}
+    ans = msg("m_ans8000000000008", "answer", body, frm="ph_iphone0001", ticket=tid, reply_to=mid)
+    for forged in (
+        {**good, "review": True, "round": 1},
+        {**good, "proposal": True, "title": "x"},
+        {**good, "round": 2},
+    ):
+        relay._asked_path(proj).write_text(json.dumps({mid: forged}))
+        note, applied = relay._apply_answer(proj, ans)
+        assert applied is None and relay.QUESTION_UNCHECKABLE in note, note
+        assert tickets.load(proj, tid)["questions"][0]["answer"] is None
+        assert tickets.load(proj, tid)["status"] != "done"
+    # (c) the ticket says "answered" in workspace-writable fields; a MAC-failed record never reports it
+    tickets.answer(proj, tid, "q1", "accept", "human:a", "phone")
+    relay._asked_path(proj).write_text(json.dumps({mid: {**good, "question_mac": "A" * 43}}))
+    assert relay._applied_ticket(proj, ans) is None
+    note, applied = relay._apply_answer(proj, ans)
+    assert applied is None and "answered" not in note
+    relay._asked_path(proj).write_text(json.dumps({mid: good}))
+    assert relay._applied_ticket(proj, ans) == tid  # the signed record: the crash-retry path still works
+
+
+def test_review_and_proposal_records_are_signed_by_their_writers(proj, monkeypatch):
+    from conftest import ensure_signing
+
+    from orch import relay, tickets
+
+    ensure_signing(proj)
+    _stub_send(monkeypatch, "m_unused0000000001")
+    t = tickets.create(proj, "Deploy", "human:tester")
+    relay.send_review_question(proj, t, 3, "m_rev00000000000003")
+    rec = json.loads(relay._asked_path(proj).read_text())["m_rev00000000000003"]
+    assert rec["review"] is True and rec["round"] == 3
+    assert relay.asked_mac_ok(proj, "m_rev00000000000003", rec)
+    assert not relay.asked_mac_ok(proj, "m_rev00000000000003", {**rec, "round": 4})
+    assert not relay.asked_mac_ok(proj, "m_rev00000000000003", {**rec, "review": False})
+    monkeypatch.setattr(relay, "_record_general", lambda *a, **k: None)
+    monkeypatch.setattr(relay, "_message", lambda root, to, type_, body, *a, **k: {"id": a[-1] if a else "x"})
+    sent = relay._send_proposal(
+        proj, "phones", "A proposal", {"title": "Make it"}, {"text": "A proposal"}, None, []
+    )
+    rec = json.loads(relay._asked_path(proj).read_text())[sent["id"]]
+    assert rec["proposal"] is True and relay.asked_mac_ok(proj, sent["id"], rec)
+    assert not relay.asked_mac_ok(proj, sent["id"], {**rec, "title": "Other"})
+    assert not relay.asked_mac_ok(proj, sent["id"], {**rec, "proposal": None, "review": True})
+
+
 def test_question_sent_without_a_key_goes_out_but_its_answer_is_refused(proj, monkeypatch):
     from orch import humanproof, relay, tickets
 
