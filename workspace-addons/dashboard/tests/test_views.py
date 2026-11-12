@@ -516,3 +516,13 @@ def test_a_view_that_needs_a_few_seconds_is_not_stale(ws, fake_orch):
     from orch_dashboard import views
 
     assert views.TIMEOUT >= 10.0
+
+
+def test_a_refused_change_from_an_old_page_tells_the_person_to_reload():
+    js = webjs.all_js()
+    err = js[js.index("function changeError") :]
+    err = err[: err.index("function ticketTitle")]
+    assert (
+        "This ticket changed since you opened it. Look at it again, then accept." in err
+        and "Read it again" in err
+    )

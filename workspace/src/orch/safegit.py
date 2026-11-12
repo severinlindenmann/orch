@@ -48,7 +48,6 @@ from orch import addons
 # Modules that still start git themselves. MUST SHRINK TO ZERO: each moves onto safegit. (Empty since B11b.)
 LEGACY = ()
 
-IDENTITY = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits orch makes (bring-back)
 EMPTY_TREE = {  # by `rev-parse --show-object-format`
     "sha1": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
     "sha256": "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
@@ -330,6 +329,9 @@ def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> l
         "-c", "credential.helper=",
         "-c", "diff.external=",
         "-c", "log.showSignature=false",
+        # .git/config is agent-writable: colour codes must never hide what orch parses from git's output
+        "-c", "color.ui=never",
+        "-c", "color.diff=never",
         "-c", f"core.editor={true}",
         "-c", f"sequence.editor={true}",
     ]  # fmt: skip
@@ -590,6 +592,7 @@ _WORKTREE_OK = {"add", "remove", "prune", "list"}
 # rev-list and check-attr only read: exact flag sets (no --output=<file>, no abbreviations, no bundles)
 _REV_LIST_OK = {
     "--count", "--parents", "--first-parent", "--no-merges", "--merges", "--reverse", "-q", "--quiet", "-n",
+    "--objects",
 }  # fmt: skip
 _CHECK_ATTR_OK = {"-z", "--cached"}
 _FSCK_OK = {"--strict", "--no-dangling", "--no-reflogs", "--no-progress"}  # re-hashes what it reads
@@ -599,7 +602,6 @@ _MERGE_TREE_OK = {
     "-z",
     "--no-messages",
 }  # computes a result tree, touches no work tree
-_ATTR_SOURCE = re.compile(r"--source=[0-9a-fA-F]{7,64}")
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _NO_MODES = {"add", "commit", "reset", "stash"}  # (checkout/restore/clean/rebase are not allowed at all)
 _BAD_GLOBALS = (
@@ -690,6 +692,7 @@ def refusal(args: list[str]) -> str | None:
 _LS_FILES_OK = {"-z", "-s", "--stage", "-o", "--others", "--exclude-standard", "--error-unmatch"}
 FILTERS_OFF_OK = {
     "rev-parse": None,  # resolves names and paths; reads refs only
+    "for-each-ref": {"--format=%(refname)"},  # ref names only (one call lists every work branch)
     "symbolic-ref": None,  # reads / writes HEAD
     "branch": {"-D", "-d", "--list"},  # refs only
     "check-attr": None,  # attribute lookup only; refusal() limits it to -z, --cached, --source=<commit>

@@ -23,16 +23,32 @@ def common(target):
 def test_sync_verbs_map_to_one_generic_argv():
     url = "https://files.example.org/mia/month-end"
     assert actions.build_argv("addon.act", {"addon": "sync", "verb": "status", "target": "sync"}) == [
-        "sync", "act", "status", *common("sync")]
-    assert actions.build_argv("addon.act", {"addon": "sync", "verb": "set", "target": url, "value": "15"}) == [
-        "sync", "act", "set", "--value=15", *common(url)]
-    assert actions.build_argv("addon.act", {"addon": "sync", "verb": "check", "target": "git@host:me/orch"})[-1] == "git@host:me/orch"
+        "sync",
+        "act",
+        "status",
+        *common("sync"),
+    ]
+    assert actions.build_argv(
+        "addon.act", {"addon": "sync", "verb": "set", "target": url, "value": "15"}
+    ) == ["sync", "act", "set", "--value=15", *common(url)]
+    assert (
+        actions.build_argv("addon.act", {"addon": "sync", "verb": "check", "target": "git@host:me/orch"})[-1]
+        == "git@host:me/orch"
+    )
     path = "tickets/t_abc123/artifacts/payroll access.txt"
-    assert actions.build_argv("addon.act", {"addon": "sync", "verb": "leave-out", "target": path, "sign": True,
-                                            "seen": "sync:leave-out:" + "a" * 64}) == [
-        "sync", "act", "leave-out", *common(path)]  # `sign` and `seen` are the page's, never argv words
-    assert actions.build_argv("addon.act", {"addon": "sync", "verb": "leave-out", "target": path, "review": True}) == [
-        "sync", "act", "leave-out", *common(path)]  # a review only ever adds --proof-target (run_op)
+    assert actions.build_argv(
+        "addon.act",
+        {
+            "addon": "sync",
+            "verb": "leave-out",
+            "target": path,
+            "sign": True,
+            "seen": "sync:leave-out:" + "a" * 64,
+        },
+    ) == ["sync", "act", "leave-out", *common(path)]  # `sign` and `seen` are the page's, never argv words
+    assert actions.build_argv(
+        "addon.act", {"addon": "sync", "verb": "leave-out", "target": path, "review": True}
+    ) == ["sync", "act", "leave-out", *common(path)]  # a review only ever adds --proof-target (run_op)
 
 
 @pytest.mark.parametrize(
@@ -47,12 +63,28 @@ def test_sync_verbs_map_to_one_generic_argv():
         {"addon": "sync", "verb": "set", "target": "local", "value": 15},
         {"addon": "sync", "verb": "now", "target": "sync", "value": "5"},
         {"addon": "sync", "verb": "now", "target": "sync", "sign": "yes"},
-        {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json", "sign": True},  # no `seen`
+        {
+            "addon": "sync",
+            "verb": "keep-theirs",
+            "target": "tickets/t_abc123.json",
+            "sign": True,
+        },  # no `seen`
         {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json", "sign": True, "seen": 5},
-        {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json", "seen": "sync:x"},  # unsigned
+        {
+            "addon": "sync",
+            "verb": "keep-theirs",
+            "target": "tickets/t_abc123.json",
+            "seen": "sync:x",
+        },  # unsigned
         {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json", "review": "yes"},
-        {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json", "review": True, "sign": True,
-         "seen": None},
+        {
+            "addon": "sync",
+            "verb": "keep-theirs",
+            "target": "tickets/t_abc123.json",
+            "review": True,
+            "sign": True,
+            "seen": None,
+        },
     ],
 )
 def test_bad_sync_clicks_are_refused(args):
@@ -107,8 +139,12 @@ class R:
     returncode, stdout, stderr = 0, '{"text": "Kept the other version."}', ""
 
 
-REVIEW = {"title": "Keep the other computer’s version of “Close March books”?", "body": "The change made here is set aside.",
-          "here": "due: 2026-03-31", "there": "note: bank fees"}
+REVIEW = {
+    "title": "Keep the other computer’s version of “Close March books”?",
+    "body": "The change made here is set aside.",
+    "here": "due: 2026-03-31",
+    "there": "note: bank fees",
+}
 
 
 def test_a_signed_sync_click_mints_for_the_target_the_addon_names(live, monkeypatch):
@@ -119,20 +155,38 @@ def test_a_signed_sync_click_mints_for_the_target_the_addon_names(live, monkeypa
     monkeypatch.setattr(actions, "_run", run)
     monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
     seen = []
-    monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **kw: seen.append((argv, proof)) or R())
+    monkeypatch.setattr(
+        actions, "run_with_proof", lambda argv, proof, **kw: seen.append((argv, proof)) or R()
+    )
     args = {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json"}
     # phase 1: what the person will sign; nothing runs, nothing is minted
-    st, _, body = post(port, "/api/act", {"op": "addon.act", "args": {**args, "review": True}}, {"Cookie": ck})
+    st, _, body = post(
+        port, "/api/act", {"op": "addon.act", "args": {**args, "review": True}}, {"Cookie": ck}
+    )
     assert st == 200, body
     assert json.loads(body)["act_answer"] == {"addon": "sync", "answer": {"target": target, "review": REVIEW}}
     assert len(calls) == 1 and "--proof-target" in calls[0] and seen == []
     # phase 2: the signed click echoes the target the page showed
-    st, _, body = post(port, "/api/act", {"op": "addon.act", "args": {**args, "sign": True, "seen": target}}, {"Cookie": ck})
+    st, _, body = post(
+        port, "/api/act", {"op": "addon.act", "args": {**args, "sign": True, "seen": target}}, {"Cookie": ck}
+    )
     assert st == 200, body
     query = calls[1]
-    assert query[query.index("act"):] == ["act", "keep-theirs", "--by", actions.actor(), "--json", "--proof-target",
-                                          "--", "tickets/t_abc123.json"]
-    assert len(seen) == 1 and "--proof-target" not in seen[0][0] and seen[0][0][:3] == ["sync", "act", "keep-theirs"]
+    assert query[query.index("act") :] == [
+        "act",
+        "keep-theirs",
+        "--by",
+        actions.actor(),
+        "--json",
+        "--proof-target",
+        "--",
+        "tickets/t_abc123.json",
+    ]
+    assert (
+        len(seen) == 1
+        and "--proof-target" not in seen[0][0]
+        and seen[0][0][:3] == ["sync", "act", "keep-theirs"]
+    )
     payload = json.loads(base64.urlsafe_b64decode(seen[0][1].split(".")[1] + "=="))
     assert (payload["op"], payload["target"]) == ("addon.act", target)
     assert hp.verify_and_consume(root, seen[0][1], "addon.act", target).startswith("human:")
@@ -149,9 +203,17 @@ def test_review_vs_target_mismatch_mints_nothing(live, monkeypatch, shown):
     monkeypatch.setattr(actions, "_run", run)
     monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: pytest.fail("a proof was minted"))
-    args = {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json", "sign": True, "seen": shown}
+    args = {
+        "addon": "sync",
+        "verb": "keep-theirs",
+        "target": "tickets/t_abc123.json",
+        "sign": True,
+        "seen": shown,
+    }
     st, _, body = post(port, "/api/act", {"op": "addon.act", "args": args}, {"Cookie": ck})
-    assert st == 400 and body.decode() == "This changed after you opened it. Nothing was changed; open it again."
+    assert (
+        st == 400 and body.decode() == "This changed after you opened it. Nothing was changed; open it again."
+    )
     assert len(calls) == 1 and "--proof-target" in calls[0]
 
 
@@ -165,15 +227,26 @@ def test_a_review_is_plain_text_lines_only(live, monkeypatch):
     args = {"addon": "sync", "verb": "keep-mine", "target": "tickets/t_abc123.json", "review": True}
     st, _, body = post(port, "/api/act", {"op": "addon.act", "args": args}, {"Cookie": ck})
     assert st == 200
-    assert json.loads(body)["act_answer"]["answer"] == {"target": None, "review": {"title": "T", "value": "v" * 4000}}
+    assert json.loads(body)["act_answer"]["answer"] == {
+        "target": None,
+        "review": {"title": "T", "value": "v" * 4000},
+    }
     _, run = _answer({"target": None})  # no review: nothing to sign
     monkeypatch.setattr(actions, "_run", run)
     assert post(port, "/api/act", {"op": "addon.act", "args": args}, {"Cookie": ck})[0] == 400
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("reply", [{"target": "other:keep-theirs:x"}, {"target": "sync:has space"}, {"target": 5},
-                                   {"error": "This file is not waiting for a choice"}, ["sync:x"]])
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"target": "other:keep-theirs:x"},
+        {"target": "sync:has space"},
+        {"target": 5},
+        {"error": "This file is not waiting for a choice"},
+        ["sync:x"],
+    ],
+)
 def test_a_target_outside_the_addons_own_name_is_never_minted(live, monkeypatch, reply):
     root, port = live
     ck = session(root, port)
@@ -182,11 +255,24 @@ def test_a_target_outside_the_addons_own_name_is_never_minted(live, monkeypatch,
     monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: pytest.fail("a proof was minted"))
     seen = reply.get("target") if isinstance(reply, dict) and isinstance(reply.get("target"), str) else None
-    args = {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json", "sign": True, "seen": seen}
+    args = {
+        "addon": "sync",
+        "verb": "keep-theirs",
+        "target": "tickets/t_abc123.json",
+        "sign": True,
+        "seen": seen,
+    }
     st, _, body = post(port, "/api/act", {"op": "addon.act", "args": args}, {"Cookie": ck})
     assert st == 400
-    st, _, _ = post(port, "/api/act", {"op": "addon.act", "args": {**{k: v for k, v in args.items() if k not in ("sign", "seen")},
-                                                                  "review": True}}, {"Cookie": ck})
+    st, _, _ = post(
+        port,
+        "/api/act",
+        {
+            "op": "addon.act",
+            "args": {**{k: v for k, v in args.items() if k not in ("sign", "seen")}, "review": True},
+        },
+        {"Cookie": ck},
+    )
     assert st == 400  # never shown for signing either
     if isinstance(reply, dict) and "error" in reply:
         assert body.decode() == "This file is not waiting for a choice"
@@ -199,9 +285,18 @@ def test_a_signed_click_that_needs_no_proof_runs_plainly(live, monkeypatch):
     monkeypatch.setattr(actions, "_run", run)
     monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: pytest.fail("no proof is needed"))
-    args = {"addon": "sync", "verb": "keep-mine", "target": "tickets/t_abc123.json", "sign": True, "seen": None}
+    args = {
+        "addon": "sync",
+        "verb": "keep-mine",
+        "target": "tickets/t_abc123.json",
+        "sign": True,
+        "seen": None,
+    }
     assert post(port, "/api/act", {"op": "addon.act", "args": args}, {"Cookie": ck})[0] == 200
-    assert [c[c.index("act") + 1] for c in calls] == ["keep-mine", "keep-mine"] and "--proof-target" not in calls[1]
+    assert [c[c.index("act") + 1] for c in calls] == [
+        "keep-mine",
+        "keep-mine",
+    ] and "--proof-target" not in calls[1]
 
 
 def test_an_unsigned_sync_click_never_asks_for_a_target(live, monkeypatch):
@@ -219,8 +314,15 @@ def test_an_unsigned_sync_click_never_asks_for_a_target(live, monkeypatch):
 def test_sync_clicks_are_watch_only_without_a_session(live, monkeypatch):
     _root, port = live
     monkeypatch.setattr(actions, "_run", lambda *a, **k: pytest.fail("ran without a session"))
-    for args in ({"addon": "sync", "verb": "set", "target": "local"},
-                 {"addon": "sync", "verb": "leave-out", "target": "tickets/t_abc123/artifacts/a.txt", "sign": True,
-                  "seen": "sync:leave-out:" + "a" * 64},
-                 {"addon": "sync", "verb": "leave-out", "target": "tickets/t_abc123/artifacts/a.txt", "review": True}):
+    for args in (
+        {"addon": "sync", "verb": "set", "target": "local"},
+        {
+            "addon": "sync",
+            "verb": "leave-out",
+            "target": "tickets/t_abc123/artifacts/a.txt",
+            "sign": True,
+            "seen": "sync:leave-out:" + "a" * 64,
+        },
+        {"addon": "sync", "verb": "leave-out", "target": "tickets/t_abc123/artifacts/a.txt", "review": True},
+    ):
         assert post(port, "/api/act", {"op": "addon.act", "args": args})[0] == 403
