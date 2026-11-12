@@ -306,14 +306,57 @@ test('agent bar shows the hold reason as plain text and hides it when absent', (
   assert.doesNotMatch(bare, /Waiting:/);
 });
 
+test('an open task menu and its typed reason survive render() until submit, Escape or close', async () => {
+  const calls = [];
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
+  const t = {id:'t_test', checklist:[{id:'c1', text:'Try this', done:false}]};
+  const locks = new Set();
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
+  const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
+  const draw = () => { const all = c.taskRows(t).flatMap(nodes); return {more:all.find(n => n.attrs['aria-label'] === 'More'), form:all.find(n => n.tag === 'form'), input:all.find(n => n.tag === 'input')}; };
+  let ui = draw();
+  assert.equal(ui.form.hidden, true);
+  ui.more.onclick();
+  ui.input.value = 'Not needed any more';
+  ui.input.listeners.input();
+  ui.form.listeners.focusin();
+  assert.ok(locks.has('task-menu-c1'), 'the row is not redrawn while focus is inside its form');
+  // the background refresh redraws the row: the menu is still open and the text is still there
+  ui = draw();
+  assert.equal(ui.form.hidden, false);
+  assert.equal(ui.more.attrs['aria-expanded'], 'true');
+  assert.equal(ui.input.value, 'Not needed any more');
+  // Escape closes it and forgets the draft
+  ui.form.listeners.keydown({key:'Escape', preventDefault(){}});
+  assert.equal(draw().form.hidden, true);
+  assert.equal(draw().input.value, '');
+  assert.ok(!locks.has('task-menu-c1'));
+  // a task removed while its menu was open leaves no lock or draft behind
+  ui = draw(); ui.more.onclick(); ui.input.value = 'draft'; ui.input.listeners.input(); ui.form.listeners.focusin();
+  assert.ok(locks.has('task-menu-c1'));
+  t.checklist = [];
+  c.taskRows(t);
+  assert.ok(!locks.has('task-menu-c1'));
+  t.checklist = [{id:'c1', text:'Try this', done:false}];
+  assert.equal(draw().form.hidden, true);
+  // submit clears it too
+  ui = draw(); ui.more.onclick(); ui.input.value = 'Changed plans'; ui.input.listeners.input();
+  await ui.form.onsubmit({preventDefault(){}});
+  const sent = calls.pop();
+  assert.equal(sent[0], 'check.wont_do');
+  assert.equal(sent[1].reason, 'Changed plans');
+  assert.equal(draw().form.hidden, true);
+});
+
 test("won't-do tasks render resolved, hide activity and reasons, and reopen", async () => {
   const calls = [], errors = [];
-  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), setAttribute(k,v){this.attrs[k]=v;}});
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
   const t = {id:'t_test', checklist:[{id:'c1', text:'Skip this', done:false, wont_do:true, state:'doing', reason:'No longer needed'}]};
   const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   c.window.orch.toast = (text) => errors.push(text);
   vm.runInContext(source.slice(source.indexOf('async function toggleTask'), source.indexOf('function localUrl')), c);
-  vm.runInContext(source.slice(source.indexOf('function taskRows'), source.indexOf('// "+ Add task"')), c);
+  vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   let all = c.taskRows(t).flatMap(nodes);
   assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
