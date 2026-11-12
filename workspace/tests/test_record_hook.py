@@ -492,10 +492,11 @@ def test_pid_must_match_the_recorded_start_time(live, monkeypatch):
     path = _claim_file(root)
     claim = json.loads(path.read_text())
     assert claim.get("pid_started")
+    real_started = procs.pid_started
     monkeypatch.setattr(procs, "pid_started", lambda pid: None)  # current start time unreadable
     with pytest.raises(record_hook.NotRecorded, match="not from inside"):
         record_hook.hook(root, line(id="toolu_a"))
-    monkeypatch.undo()
+    monkeypatch.setattr(procs, "pid_started", real_started)
     monkeypatch.setenv("ORCH_RUN", run)
     monkeypatch.setenv("ORCH_TICKET", tid)
     claim.pop("pid_started")  # claim without a recorded start time
@@ -801,7 +802,7 @@ def test_pre_and_post_tool_use_of_one_call_make_one_step_with_its_detail(tool_ru
         assert got["via"] == "hook" and got["harness"] == "claude" and got["session"] == SID
         assert got["run"] == run and got["ticket"] == tid and got["agent"] == "main"
         assert got["used"] == READ and got["text"] == "Read notes.txt" and got["files"] == ["notes.txt"]
-    detail = record.read_detail(root, run, post["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    detail = record.read_detail(root, run, post["detail"].rsplit("/", 1)[1][:-5], line_id=post["id"]).unwrap()
     assert detail["id"] == TOOL_ID and detail["input"] == {"file_path": "notes.txt"}
     assert detail["output"] == {"type": "text", "file": {"filePath": "notes.txt", "content": "hello"}}
     assert record_hook.hook(root, tool_hook("PostToolUse")) is None  # delivered twice: one line
@@ -830,7 +831,7 @@ def test_a_failed_tool_call_in_a_live_run_is_recorded_as_failed(tool_run, interr
     assert end["id"] == TOOL_ID and end["kind"] == "step" and end["via"] == "hook"
     assert end["outcome"] == {"ok": False, "error": code, "ms": None}
     assert end["used"] == READ and end["text"] == "Read notes.txt" and end["files"] == ["notes.txt"]
-    detail = record.read_detail(root, run, end["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    detail = record.read_detail(root, run, end["detail"].rsplit("/", 1)[1][:-5], line_id=end["id"]).unwrap()
     assert detail["input"] == {"file_path": "notes.txt"}
     assert detail["output"] == "Exit code 1\nrm: build: Permission denied [hidden: deploy-key]"
     stored = (root / f".orch/record/runs/{run}.jsonl").read_text()
@@ -845,7 +846,7 @@ def test_a_big_failure_text_is_cut_in_the_detail(tool_run):
     root, run, _ = tool_run
     end = record_hook.hook(root, tool_hook("PostToolUseFailure", error="x" * 100_000))
     assert end["outcome"] == {"ok": False, "error": "tool_failed", "ms": None}
-    detail = record.read_detail(root, run, end["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    detail = record.read_detail(root, run, end["detail"].rsplit("/", 1)[1][:-5], line_id=end["id"]).unwrap()
     assert len(detail["output"]) < 33_000 and detail["output"].endswith("more characters]")
 
 
@@ -893,7 +894,9 @@ def test_a_hook_failure_and_the_logs_failure_agree_the_logs_line_replaces_it(too
         ("log", (False, "Exit code 1")),
     ]
     assert not any("conflict" in e for e in seen)
-    detail = record.read_detail(root, run, seen[1]["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    detail = record.read_detail(
+        root, run, seen[1]["detail"].rsplit("/", 1)[1][:-5], line_id=seen[1]["id"]
+    ).unwrap()
     assert detail["output"] == "Exit code 1\nboom"  # the log's detail replaced the hook's
     assert [u["result"] for u in cli_record.run_model(run, seen)["uses"]] == ["failed"]
     assert record_hook.hook(root, failure_hook(interrupt=interrupt)) is None  # late: dropped
@@ -941,7 +944,9 @@ def test_hook_and_collector_of_one_tool_call_the_logs_lines_replace_the_hooks(to
     seen = events(root, run)
     assert [(e["via"], e["outcome"] and e["outcome"]["ok"]) for e in seen] == [("log", None), ("log", True)]
     assert not any("conflict" in e for e in seen)
-    detail = record.read_detail(root, run, seen[1]["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    detail = record.read_detail(
+        root, run, seen[1]["detail"].rsplit("/", 1)[1][:-5], line_id=seen[1]["id"]
+    ).unwrap()
     assert detail["output"] == "hello"  # the log's detail replaced the hook's
     assert [u["result"] for u in cli_record.run_model(run, seen)["uses"]] == ["ok"]
     assert record_hook.hook(root, tool_hook("PostToolUse")) is None  # a late hook end after the log: dropped
@@ -1045,7 +1050,7 @@ def test_the_generated_command_reaches_the_hook_and_is_proven_inside_the_run(too
     )  # fmt: skip
     assert r.returncode == 0 and r.stderr == "orch: Recording is off until key hiding is ready.\n"
     assert "hider_off" in lost_notes(root)  # a proven caller: the trace is under the run
-    assert record.read_run(root, run).status == "unavailable"  # nothing raw, nothing at all
+    assert record.read_run(root, run).value is None  # nothing raw, nothing at all (no key folder: unverified)
 
 
 # ---------------------------------------------------------------- the oneshot wrapper feeds its collector
@@ -1261,7 +1266,9 @@ def test_a_forged_hook_success_never_hides_the_logs_failure(tool_run):
     assert [(e["via"], e["outcome"]["ok"], e["outcome"]["error"]) for e in finished] == [
         ("log", False, "Exit code 1")
     ]
-    detail = record.read_detail(root, run, finished[0]["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    detail = record.read_detail(
+        root, run, finished[0]["detail"].rsplit("/", 1)[1][:-5], line_id=finished[0]["id"]
+    ).unwrap()
     assert detail["output"] == "Exit code 1\nboom"  # the forged detail is gone with its line
     assert [u["result"] for u in cli_record.run_model(run, events(root, run))["uses"]] == ["failed"]
     assert record_hook.hook(root, forged) is None  # sent again after the log: dropped
@@ -1425,7 +1432,7 @@ def test_an_edit_hook_keeps_no_copy_of_the_whole_file(tool_run):
     post = record_hook.hook(
         root, tool_hook("PostToolUse", tid="toolu_edit", name="Edit", inp=edit, tool_response=response)
     )
-    detail = record.read_detail(root, run, post["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+    detail = record.read_detail(root, run, post["detail"].rsplit("/", 1)[1][:-5], line_id=post["id"]).unwrap()
     assert detail["output"] == {"filePath": "notes.txt"} and detail["input"] == edit
     blob = b"".join(p.read_bytes() for p in (root / ".orch/record").rglob("*") if p.is_file())
     assert b"originalFile" not in blob and b"WHOLE FILE BEFORE" not in blob and b"structuredPatch" not in blob
@@ -1833,7 +1840,9 @@ def test_the_installed_orch_script_records_a_tool_call(proj, subprocess_home, tm
             (TOOL_ID, "hook", False),
             (TOOL_ID, "hook", True),
         ]
-        detail = record.read_detail(root, rec["run"], seen[1]["detail"].rsplit("/", 1)[1][:-5]).unwrap()
+        detail = record.read_detail(
+            root, rec["run"], seen[1]["detail"].rsplit("/", 1)[1][:-5], line_id=seen[1]["id"]
+        ).unwrap()
         assert detail["input"] == {"file_path": "notes.txt", "note": "[hidden: deploy-key]"}  # store's hider
         kept = "".join(p.read_text() for p in (root / ".orch/record").rglob("*") if p.is_file())
         assert SECRET not in kept and not lost_text(root)  # nothing raw, nothing set aside

@@ -184,7 +184,16 @@ def test_page_only_serves_asset_kinds(server, ev):
 
 @pytest.mark.parametrize(
     "name",
-    ["../x.css", "a/../../x.css", "%2e%2e/x.css", "..%2fx.css", "/etc/x.css", "a\\b.css", "x%00.css", "a//b.css"],
+    [
+        "../x.css",
+        "a/../../x.css",
+        "%2e%2e/x.css",
+        "..%2fx.css",
+        "/etc/x.css",
+        "a\\b.css",
+        "x%00.css",
+        "a//b.css",
+    ],
 )
 def test_page_traversal_refused(server, ev, name):
     (ev.parent / "x.css").write_text("secret")

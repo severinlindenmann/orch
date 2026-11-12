@@ -183,7 +183,12 @@ def _check_wont_do(a):
     flags = []
     if "reason" in a:
         reason = a["reason"]
-        if not isinstance(reason, str) or len(reason) > 200 or any(ch in reason for ch in "\r\n") or _CONTROL.search(reason):
+        if (
+            not isinstance(reason, str)
+            or len(reason) > 200
+            or any(ch in reason for ch in "\r\n")
+            or _CONTROL.search(reason)
+        ):
             raise BadRequest("The reason must be one line, at most 200 characters.")
         flags.append(f"--reason={reason}")
     return ["check", "wont-do", t, c], flags, []
@@ -231,7 +236,10 @@ OPS = {
     "check.remove": _check_plain("remove"),
     "check.reopen": _check_plain("reopen"),
 }
-BY = {"run.start": "focus", "mobile.set": "focus"}  # who a start is recorded as (the page is the starter); other ops: the person
+BY = {
+    "run.start": "focus",
+    "mobile.set": "focus",
+}  # who a start is recorded as (the page is the starter); other ops: the person
 
 
 def actor() -> str:
@@ -269,7 +277,9 @@ def _without_agent(environ) -> dict:
         fn = getattr(e, "filename", None)
         where = Path(fn).name if isinstance(fn, str) and fn else ""  # never a full path or file content
         why = e.__class__.__name__ + (f" in {where}" if where else "")
-        raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
+        raise Unavailable(
+            f"orch could not check who is acting here ({why}). Fix that and try again."
+        ) from None
 
 
 def human_env(root: Path, orch_bin: str) -> dict:
@@ -285,7 +295,9 @@ def orch(
         raise Unavailable("The orch command is not available here.")
     try:
         if proof:
-            r = run_with_proof(argv, proof, orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=timeout)
+            r = run_with_proof(
+                argv, proof, orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=timeout
+            )
         else:
             r = _run(
                 [*argv0(orch_bin), *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,

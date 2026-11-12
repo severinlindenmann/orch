@@ -22,6 +22,7 @@ from typing import Any, Generic, Literal, TypeVar
 from jsonschema import Draft202012Validator, FormatChecker
 
 from orch import hider as hiding
+from orch import humanproof, record_auth
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
@@ -29,6 +30,11 @@ from orch.phone_view import redact
 from orch.record_files import MAX_INPUT, file_ok
 
 _OFF = "Recording is off until key hiding is ready."
+_OFF_KEY = "Recording is off until orch's protection is ready."
+# The one place for the plain words about records made before orch checked them (Focus and the phone show it).
+UNCHECKED_TEXT = "These records were made before orch checked them."
+# The one place for the marker of a run by a helper whose deny rules orch cannot set.
+UNPROTECTED_TEXT = "Records from this helper can't be fully checked."
 _INVALID = "This record entry is not valid."
 _RUN = r"r_[a-z0-9_]{6,32}"
 _FILE = r"[0-9a-f]{32}"
@@ -43,12 +49,27 @@ TAMPER_REASONS = (
     "not_dir",
     "swapped",
     "content",
+    "removed",
+    "unverified",
+    "old_key",
 )
 _MESSAGES = {
     "tampered": (
         "Some records of this run were changed outside orch. "
         "To be safe, orch does not show them. Nothing was deleted."
     ),
+    "content": (
+        "Some records of this run were changed outside orch. "
+        "To be safe, orch does not show them. Nothing was deleted."
+    ),
+    "removed": "Some records of this run were removed outside orch.",
+    "unverified": "orch cannot check these records, so it does not show them.",
+    "old_key": (
+        "These records were made before orch's protection was reset. "
+        "orch cannot check them any more, so it does not show them."
+    ),
+    "unchecked": UNCHECKED_TEXT,
+    "swapped_detail": "Details changed outside orch.",
     "io": "The records of this run cannot be read right now. Try again later.",
     "missing": "There are no records for this run.",
     "pending": "Some records of this run are waiting to be written.",
@@ -91,8 +112,8 @@ class RecordUnavailable(RecordRefused):
 class RecordTampered(RecordRefused):
     code = "tampered"
 
-    def __init__(self, reason):
-        super().__init__(_MESSAGES["tampered"], reason=reason)
+    def __init__(self, reason, message=None):
+        super().__init__(message or _MESSAGES.get(reason, _MESSAGES["tampered"]), reason=reason)
 
 
 T = TypeVar("T")
@@ -105,14 +126,20 @@ class ReadResult(Generic[T]):
     value: T | None = None
     reason: str | None = None
     message: str | None = None
-    skipped: int = 0
+    changed: int = 0  # lines of the run that are not genuine (planted, edited, replayed, no auth)
+    removed: int = 0  # genuine lines that are gone
+    unchecked: int = 0  # lines made before orch checked them (never counted as orch-checked)
+    rejected: int = 0  # of `changed`: spool entries refused (they never keep a finished run from retention)
+    legacy: bool = False  # the whole run is such (no sealed line, no chain head)
     pending: int = 0
     alert: dict | None = None
 
     def unwrap(self) -> T:
         if self.status != "ok":
             error = (
-                RecordTampered(self.reason) if self.status == "tampered" else RecordUnavailable(self.reason)
+                RecordTampered(self.reason, self.message)
+                if self.status == "tampered"
+                else RecordUnavailable(self.reason)
             )
             error.alert = self.alert
             raise error
@@ -383,6 +410,20 @@ def _read_bytes(fd):
         return b"".join(chunks)
 
 
+def _read_capped(fd, limit):
+    """The bytes of an open regular file, or None when it is larger than `limit`: the size is taken from the
+    SAME fd, before anything is read, and no more than limit + 1 bytes are ever read."""
+    with _io():
+        if os.fstat(fd).st_size > limit:
+            return None
+        os.lseek(fd, 0, os.SEEK_SET)
+        chunks, total = [], 0
+        while total <= limit and (chunk := os.read(fd, min(65536, limit + 1 - total))):
+            chunks.append(chunk)
+            total += len(chunk)
+        return None if total > limit else b"".join(chunks)
+
+
 def _write(fd, payload):
     with _io():
         if os.write(fd, payload) != len(payload):
@@ -469,7 +510,12 @@ def _write_new(ws, rel, payload, *, expected=None):
     return True
 
 
+_MAX_DEPTH = 8  # no folder tree of orch's own is deeper; a planted deeper one is refused, never walked
+
+
 def _size(ws, rel):
+    if len(rel) > _MAX_DEPTH:
+        raise RecordTampered("not_dir")
     try:
         try:
             fd = _open(ws, rel, "read")
@@ -495,7 +541,8 @@ def _size(ws, rel):
 
 
 def _rmtree(ws, rel):
-    # Preflight the entire tree before deleting anything; directory links refuse.
+    # Preflight the entire tree before deleting anything; directory links refuse. Never used on pending/
+    # (spool entries are flat files: see RecordWriter._reject).
     _size(ws, rel)
     try:
         names = _entries(ws, rel)
@@ -512,6 +559,71 @@ def _rmtree(ws, rel):
         _rmtree(ws, (*rel, name))
     with _walk(ws, rel[:-1]) as directory:
         os.rmdir(rel[-1] if _FD else directory.path / rel[-1], **({"dir_fd": directory.fd} if _FD else {}))
+
+
+def _file_size(ws, rel):
+    """The size of ONE regular file (flat: anything else, a folder included, is refused as not_regular and
+    never walked). For spool entries."""
+    fd = _open(ws, rel, "read")
+    try:
+        with _io():
+            return os.fstat(fd).st_size
+    finally:
+        _close(fd)
+
+
+def _flat_size(ws, name):
+    """Bytes of the direct entries of record/<name>/ and of record/<name>/<run>/ (one level each), by lstat:
+    a planted tree below is never walked. At most _SIZE_ENTRIES_MAX entries are counted (a flood is cheap)."""
+    total = counted = 0
+    try:
+        for run in _entries(ws, (name,))[:_SIZE_ENTRIES_MAX]:
+            counted += 1
+            try:
+                for n in _entries(ws, (name, run))[: max(0, _SIZE_ENTRIES_MAX - counted)]:
+                    counted += 1
+                    total += _one_size(ws, (name, run, n))
+            except (RecordTampered, RecordUnavailable):
+                continue  # not a folder of ours: not counted, not walked
+            if counted >= _SIZE_ENTRIES_MAX:
+                break
+    except (RecordTampered, RecordUnavailable):
+        return 0
+    return total
+
+
+_SIZE_ENTRIES_MAX = 10000
+
+
+def _one_size(ws, rel):
+    """The size of one entry by lstat, a folder or special file counted as 0."""
+    with _walk(ws, rel[:-1]) as directory:
+        kw = {"dir_fd": directory.fd} if _FD else {}
+        info = os.stat(rel[-1] if _FD else directory.path / rel[-1], follow_symlinks=False, **kw)
+    return info.st_size if stat.S_ISREG(info.st_mode) else 0
+
+
+def _rename_aside(ws, rel, run, *, inside=False):
+    """Move one entry (of any kind, a link is not followed) out of the spool, atomically, under a name orch
+    makes: into quarantine/<run>/ (a folder only orch writes), or with `inside` within its own folder under a
+    name the spool never matches (`.rejected_...`: the scan tells it, it is never counted or drained). No
+    recursion, nothing is deleted."""
+    _parts(rel)
+    if inside:
+        with _walk(ws, rel[:-1]) as source:
+            kw = {"src_dir_fd": source.fd, "dst_dir_fd": source.fd} if _FD else {}
+            src = rel[-1] if _FD else source.path / rel[-1]
+            aside = ".rejected_" + uuid.uuid4().hex
+            with _io():
+                os.rename(src, aside if _FD else source.path / aside, **kw)
+        return
+    aside = "q_" + uuid.uuid4().hex
+    with _walk(ws, ("quarantine", run), create=True) as target, _walk(ws, rel[:-1]) as source:
+        kw = {"src_dir_fd": source.fd, "dst_dir_fd": target.fd} if _FD else {}
+        src = rel[-1] if _FD else source.path / rel[-1]
+        dst = aside if _FD else target.path / aside
+        with _io():
+            os.rename(src, dst, **kw)
 
 
 def _rmdir_empty(ws, rel):
@@ -645,6 +757,11 @@ def _hidden_line(hider, obj) -> bytes:
     return line.encode("utf-8")
 
 
+def problem_message(reason):
+    """The plain words for a read problem (one place for every screen)."""
+    return _MESSAGES[reason]
+
+
 def alert_content(workspace, run):
     """Leave one integrity alert for a run file whose content disagrees with what the writer guarantees."""
     return _alert(workspace, target="run", run=run, reason="content", seen_by="writer")
@@ -733,20 +850,19 @@ def _shown(events):
 
 
 def _dedupe(events, run):
-    return sorted(_shown([e for e in events if e["run"] == run]), key=lambda e: e["seq"])
+    # copies: `_decision` marks `conflict` on the event it is given, and verified events are cached
+    return sorted(_shown([dict(e) for e in events if e["run"] == run]), key=lambda e: e["seq"])
 
 
-def _parse(fd, run):
+def _legacy_parse(raw, run):
+    """The lines of a run made before orch sealed lines, as the old reader took them (schema check, the run,
+    seq == the physical line number): (events, skipped). They are never trusted: the caller marks them."""
     events, skipped = [], 0
-    for lineno, line in enumerate(_read_bytes(fd).splitlines(), 1):
+    for lineno, line in enumerate(raw.splitlines(), 1):
         try:
             event = json.loads(line)
             _validate(event)
-            if event["run"] != run:
-                raise RecordInvalid()
-            # the writer guarantees seq == the 1-based physical line number; a line that disagrees was
-            # planted (a huge or repeated seq freezes a tail cursor or breaks paging): skipped and counted
-            if event["seq"] != lineno or isinstance(event["seq"], bool):
+            if event["run"] != run or event["seq"] != lineno or isinstance(event["seq"], bool):
                 raise RecordInvalid()
             events.append(event)
         except (ValueError, TypeError, UnicodeError, RecursionError, RecordInvalid):
@@ -754,32 +870,160 @@ def _parse(fd, run):
     return events, skipped
 
 
-def _read_run_strict(ws, run, fd, only=None):
-    _check_fd(fd)
-    raw = _read_bytes(fd)
-    previous = []
-    for lineno, line in enumerate(raw.splitlines(), 1):
-        try:
-            event = json.loads(line)
-            if not isinstance(event, dict) or event.get("run") != run:
-                continue
-            if event.get("seq") != lineno or isinstance(event.get("seq"), bool):
-                continue
-            outcome = event.get("outcome")
-            if outcome is not None and not (isinstance(outcome, dict) and {"ok", "error"} <= outcome.keys()):
-                continue
-            _key(event)
-            if only is None or only(event.get("id")):
-                # exactly what the reader (_parse) keeps: a line it skips must not suppress a real one. The
-                # full schema check costs ~0.2 ms a line, so a hook's write checks the lines of its own
-                # call only (dedupe looks at nothing else); the collector reads with only=lambda i: False.
-                _validate(event)
-            previous.append(event)
-        except (ValueError, TypeError, KeyError, RecursionError, RecordInvalid):
-            continue
-    return previous, len(raw.splitlines()), bool(raw and not raw.endswith(b"\n"))
+# Per process: the walk over the verified prefix of a run file, so a re-read (tail --follow, the collector,
+# query paging) verifies only what was appended. Keyed by workspace and run; valid only while the first
+# `offset` bytes still hash the same and the key id is the same.
+_VERIFIED: dict = {}
+_VERIFIED_MAX = 64
 
 
+def _old_kids(carry, head):
+    """The key ids orch recorded as earlier keys of this run (a protection reset), from the old head's carry
+    and the current head: only lines of exactly these ids can be old history."""
+    out = set()
+    for source in (carry or {}, head or {}):
+        for k in [source.get("old_kid"), *(source.get("old_kids") or [])]:
+            if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{8}", k):
+                out.add(k)
+    return out or None
+
+
+def _chain(workspace, run, raw, rec, head, head_present, old_kid=None):
+    """(Verified, mode, legacy prefix bytes) of a run file's bytes: the one place that decides which lines
+    count (record_auth.verify_run's walk, resumed from the cache). `head` is the checked chain head or None;
+    `head_present`: a head file exists (even a damaged one), so the run is never a legacy run. When the head
+    records a legacy prefix that the file still starts with exactly, those bytes are returned (not walked) and
+    the chain numbering begins after them."""
+    ws_id, kid, rk = rec
+    mode, sealed, _ = record_auth.legacy_split(raw, head_present)
+    if mode == "legacy":
+        return record_auth.Verified(), mode, b""
+    if head is not None and head.get("pruned"):
+        head = None
+    pre, lines = record_auth.legacy_prefix(sealed, head)
+    sealed = sealed[len(pre) :]
+    cut = sealed.rfind(b"\n") + 1
+    whole, torn = sealed[:cut], sealed[cut:]
+    key = (str(workspace), run)
+    digest = hashlib.sha256(whole).digest()
+    hit = _VERIFIED.get(key)
+    state, done = None, 0
+    if hit is not None and hit[0] == (kid, lines) and len(whole) >= hit[1]:
+        if hashlib.sha256(whole[: hit[1]]).digest() == hit[2]:
+            state, done = hit[3].copy(), hit[1]
+    if state is None:
+        state = record_auth.start_state(lines)
+    record_auth.scan(state, whole[done:], run, ws_id, rk, kid)
+    if len(_VERIFIED) >= _VERIFIED_MAX:
+        _VERIFIED.clear()
+    _VERIFIED[key] = ((kid, lines), len(whole), digest, state.copy())
+    if torn:  # a cut-off last line (a crash): never cached, counted as changed
+        record_auth.scan(state, torn, run, ws_id, rk, kid)
+    return record_auth.finish(state, kid, head, old_kid=old_kid), mode, pre
+
+
+@dataclass
+class _View:
+    events: list
+    changed: int = 0
+    removed: int = 0
+    reason: str | None = None
+    legacy: bool = False
+    unchecked: int = 0
+    last_seq: int = 0
+    last_mac: str | None = None
+    before: tuple = ()  # lines made before protection, recorded in the head
+    rejected: int = 0  # spool entries refused for this run (head.rejected, or the counter of a headless run)
+
+
+def _legacy_parse_prefix(pre, run):
+    """The legacy prefix the head recorded, as lines to show (not checked, before protection)."""
+    if not pre:
+        return [], 0
+    events, skipped = _legacy_parse(pre, run)
+    return [dict(e, before_protection=True) for e in events], skipped
+
+
+def _verified(workspace, run, raw) -> _View:
+    """The one read path of a run file (A1): what counts, what was changed outside orch, what is gone.
+    Raises RecordTampered("unverified") whenever the run may have a chain that cannot be checked: sealed
+    lines or a head and no key, or ANY unknown state of the guarded home (a damaged local id, a key folder
+    that cannot be read): never a legacy read then. Only a run with no sealed line and a head file that is
+    truly absent, in a guarded home that resolves cleanly, is a legacy run (UNCHECKED_TEXT): shown, never
+    counted as checked."""
+    state = humanproof.record_head_state(workspace, run)
+    if state == "unknown":
+        raise RecordTampered("unverified")
+    rec = humanproof.record_key(workspace)
+    # a run whose unsigned lines may be shown as "not checked": it existed when protection began (the cutover
+    # list, made when the key was made). No list, or a run not on it, holds planted lines.
+    cutover = humanproof.record_cutover_read(workspace)
+    legacy_ok = isinstance(cutover, set) and run in cutover
+    present = state == "present" or not legacy_ok
+    if rec is None:
+        mode, _sealed, _prefix = record_auth.legacy_split(raw, present)
+        if mode != "legacy":
+            raise RecordTampered("unverified")  # sealed lines or a head, and no key: fail closed
+        return _legacy_view(raw, run)
+    # (a run with no key returns above; below the counters can be read)
+    head, hstate = humanproof.record_head_read(workspace, run) if state == "present" else (None, True)
+    carry = humanproof.record_head_carry(workspace, run) if hstate == "old_key" else {}
+    # a head of another key id: the run lived through a protection reset (or a new segment carries its old id)
+    old_kid = _old_kids(carry, head)  # recorded by orch at the reset(s)
+    verified, mode, pre = _chain(workspace, run, raw, rec, head, present, old_kid)
+    if mode == "legacy":
+        view = _legacy_view(raw, run)
+        view.rejected = humanproof.record_rejects_read(workspace, run)
+        view.changed += view.rejected
+        return view
+    old, _skipped = _legacy_parse_prefix(pre, run)
+    gone = 0
+    if (head or {}).get("legacy_lines") and not pre:
+        first = next((x for x in raw.split(b"\n") if x), b"")
+        if (
+            record_auth.split(first) is not None
+        ):  # the file now starts with a sealed line: the old ones are gone
+            gone = head["legacy_lines"]
+    # two counters, never folded or deleted (so nothing can be lost or counted twice): the head's, and the
+    # guarded one a run keeps from before its first head
+    rejected = int((head or {}).get("rejected") or 0) + humanproof.record_rejects_read(workspace, run)
+    if not verified.events and not old and (verified.changed or verified.removed):
+        raise RecordTampered(verified.reason)
+    return _View(
+        verified.events,
+        verified.changed + rejected,  # a refused spool entry is a change outside orch, though it is gone
+        verified.removed + gone,
+        verified.reason
+        or ("content" if rejected else None)
+        or ("removed" if gone else None)
+        or ("unchecked" if old else None),
+        unchecked=len(old),
+        last_seq=verified.last_seq,
+        last_mac=verified.last_mac,
+        before=tuple(old),
+        rejected=rejected,
+    )
+
+
+def _legacy_view(raw, run):
+    events, skipped = _legacy_parse(raw, run)
+    return _View(
+        [dict(e, before_protection=True) for e in events],  # every line of a legacy run is tagged: one rule
+        changed=0,  # unreadable lines of a legacy run are part of "not checked", not a change
+        reason="unchecked" if events or skipped else None,
+        legacy=True,
+        unchecked=len(events) + skipped,
+    )
+
+
+_DETAIL_MAX = 1024**2 + 4096  # the most a detail file orch writes can hold (the writer's cap and a margin)
+_SPOOL_MAX_BYTES = 3 * 1024**2  # one line (8 KB), its detail (1 MB) and the escaping of both
+_SPOOL_NAME = re.compile(r"[0-9]{20}_[0-9a-f]{32}\.json")
+_OLD_BATCH = 50  # entries of the format before name proofs read per drain
+_SPOOL_LIST_MAX = 50000  # names checked per drain (by name, unread): a flood is told once and cut
+_REJECT_BATCH = (
+    50  # planted entries refused per drain: the rest on the next one (a flood cannot stall a write)
+)
 _ALERTED = set()
 
 
@@ -1030,19 +1274,28 @@ def _report(ws, error, target, run, seen_by):
 def _pending_count(workspace, run):
     try:
         with _io("folder"):
-            return len(_entries(workspace, ("pending", run)))
+            return len([n for n in _entries(workspace, ("pending", run)) if _SPOOL_NAME.fullmatch(n)])
     except RecordUnavailable as error:
         if error.reason == "missing":
             return 0
         raise
 
 
+def _pending_preflight(workspace, run):
+    """Retention's look at pending/<run>/ before it deletes anything: a flat listing only, never a size or a
+    walk of what is inside (a planted tree must not be able to stop it or exhaust it)."""
+    return _pending_count(workspace, run)
+
+
 def run_lines(workspace, run, *, lock_wait=None, drain=None, only=None) -> list[dict]:
-    """The run file's lines AS WRITTEN (no dedupe, no reader view), read under the run lock: for a writer-side
-    caller that must see every line (a collector numbering its id-less lines `<run>:<n>` past every seq and
-    every such id already used). `drain`: a writer's drain (RecordWriter.drain); the spooled lines of the run
-    (pending/<run>/) are committed first, under the same lock, so their ids are seen too. No run file yet: [].
-    Raises RecordBusy, RecordTampered (its alert is left) or RecordUnavailable."""
+    """The run's VERIFIED lines AS WRITTEN (no dedupe, no reader view), read under the run lock: for a
+    writer-side caller that must see every line (a collector numbering its id-less lines `<run>:<n>` past
+    every seq and every such id already used). Lines that are not genuine are not in it (A1); a changed or
+    removed line leaves one integrity alert. `drain`: a writer's drain (RecordWriter.drain); the spooled
+    lines of the run (pending/<run>/) are committed first, under the same lock, so their ids are seen too. No
+    run file yet: []. A legacy run (made before orch checked it): [], its lines are not verified. `only` is
+    kept for callers; every verified line is returned. Raises RecordBusy, RecordTampered (its alert is
+    left) or RecordUnavailable."""
     _name(run, _RUN)
     try:
         with _lock(workspace, run, lock_wait) as check_lock:
@@ -1057,12 +1310,33 @@ def run_lines(workspace, run, *, lock_wait=None, drain=None, only=None) -> list[
                     return []
                 raise
             try:
-                return _read_run_strict(workspace, run, fd, only)[0]
+                _check_fd(fd)
+                view = _verified(workspace, run, _read_bytes(fd))
             finally:
                 _close(fd)
+            if (view.changed or view.removed) and not view.legacy:
+                alert_content(workspace, run)
+            return [] if view.legacy else [dict(e) for e in view.events]
     except (RecordTampered, RecordUnavailable) as error:
         _report(workspace, error, "run", run, "writer")
         raise
+
+
+def _removed_run(workspace, run):
+    """(0, None) or (n, head) when the run file is gone but its chain head says it had n lines (not pruned).
+    An unknown state of the guarded home raises RecordTampered("unverified"): a missing file is not "gone
+    for good" when its head cannot be looked up."""
+    state = humanproof.record_head_state(workspace, run)
+    if state == "unknown":
+        raise RecordTampered("unverified")
+    if state == "absent":
+        return 0, None
+    head, hstate = humanproof.record_head_read(workspace, run)
+    if hstate == "old_key" and humanproof.record_head_old_live(workspace, run):
+        return 1, None  # a head from before a protection reset with lines: the file was there
+    if head is None or head.get("pruned") or not head["seq"]:
+        return 0, None
+    return head["seq"], head
 
 
 def read_run(workspace, run, *, seen_by="reader") -> RunRead:
@@ -1072,44 +1346,98 @@ def read_run(workspace, run, *, seen_by="reader") -> RunRead:
         pending = _pending_count(workspace, run)
         fd = _open(workspace, ("runs", run + ".jsonl"), "read")
         try:
-            events, skipped = _parse(fd, run)
+            view = _verified(workspace, run, _read_bytes(fd))
         finally:
             _close(fd)
         pending = max(pending, _pending_count(workspace, run))
+        reason = view.reason or ("pending" if pending else None)
         return ReadResult(
             "ok",
-            _dedupe(events, run),
-            skipped=skipped,
+            [*view.before, *_dedupe(view.events, run)],
+            changed=view.changed,
+            rejected=view.rejected,
+            removed=view.removed,
+            unchecked=view.unchecked,
+            legacy=view.legacy,
             pending=pending,
-            reason="pending" if pending else None,
-            message=_MESSAGES["pending"] if pending else None,
+            reason=reason,
+            message=_MESSAGES[reason] if reason else None,
         )
     except (RecordTampered, RecordUnavailable) as error:
-        if isinstance(error, RecordUnavailable) and error.reason == "missing" and pending:
-            return ReadResult("ok", [], reason="pending", message=_MESSAGES["pending"], pending=pending)
+        if isinstance(error, RecordUnavailable) and error.reason == "missing":
+            try:
+                gone, _head = _removed_run(workspace, run)
+            except RecordTampered as unknown:  # the guarded home cannot be looked at: fail closed
+                return _report(workspace, unknown, "run", run, seen_by)
+            if gone:  # the file is gone but orch wrote lines to it (not pruned): removed outside orch
+                return _report(workspace, RecordTampered("removed"), "run", run, seen_by)
+            rejected = humanproof.record_rejects_read(workspace, run)
+            if rejected:  # a planted spool entry was refused for a run that has no file and no head
+                return ReadResult(
+                    "ok",
+                    [],
+                    changed=rejected,
+                    reason="content",
+                    message=_MESSAGES["content"],
+                    pending=pending,
+                )
+            if pending:
+                return ReadResult("ok", [], reason="pending", message=_MESSAGES["pending"], pending=pending)
         return _report(workspace, error, "run", run, seen_by)
 
 
 def _read_json(ws, rel):
+    return _json_of(_read_file(ws, rel))
+
+
+def _read_file(ws, rel, limit=None):
+    """The file's bytes; with `limit`, a file larger than it is refused (RecordTampered "content") unread."""
     fd = _open(ws, rel, "read")
     try:
-        try:
-            return json.loads(_read_bytes(fd))
-        except (ValueError, UnicodeError, RecursionError):
-            raise RecordTampered("swapped") from None
+        if limit is None:
+            return _read_bytes(fd)
+        raw = _read_capped(fd, limit)
+        if raw is None:
+            raise RecordTampered("content")
+        return raw
     finally:
         _close(fd)
 
 
-def read_detail(workspace, run, file_id, *, ticket=None):
-    """The detail file `file_id` of `run`. Its name must be the one made from the payload's own (run, kind,
-    id, ticket), else it is refused as swapped. `ticket`: the ticket of the line that points at the file; a
-    file whose payload belongs to another ticket is refused as swapped too (a planted line of ticket B
-    cannot read A's detail through its own `detail` pointer)."""
+def _json_of(raw):
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeError, RecursionError):
+        raise RecordTampered("swapped") from None
+
+
+def read_detail(workspace, run, file_id, *, line_id, ticket=None):
+    """The detail file `file_id` of `run`, as presented by the VERIFIED line `line_id` that points at it. The
+    hash that file must have is taken from that line here (inside its MAC), never from the caller; a run
+    made before orch checked it (legacy) has none and is read as before. A sealed line with a detail pointer
+    but no `detail_hash`, a file with other bytes, or no verified line of the run naming this file is
+    refused as swapped ("Details changed outside orch."). The name must also be the one made from the
+    payload's own (run, kind, id, ticket), and `ticket` the ticket of the line that points at the file."""
     _name(run, _RUN)
     _name(file_id, _FILE)
     try:
-        value = _read_json(workspace, ("detail", run, file_id + ".json"))
+        view = read_run(workspace, run, seen_by="reader")
+        if view.status != "ok":
+            return view
+        point = f"detail/{run}/{file_id}.json"
+        lines = [e for e in view.value if e.get("id") == line_id and e.get("detail") == point]
+        if not lines:
+            raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
+        unchecked = not is_sealed(lines[-1])
+        want = None
+        if not unchecked:
+            want = lines[-1].get("detail_hash")
+            if not isinstance(want, str):
+                raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
+        raw = _read_file(workspace, ("detail", run, file_id + ".json"), _DETAIL_MAX)
+        if want is not None and record_auth.detail_hash(raw) != want:
+            raise RecordTampered("swapped", _MESSAGES["swapped_detail"])
+        value = _json_of(raw)
         if (
             not _DETAIL_VALIDATOR.is_valid(value)
             or value["run"] != run
@@ -1117,6 +1445,8 @@ def read_detail(workspace, run, file_id, *, ticket=None):
             or (ticket is not None and value["ticket"] != ticket)
         ):
             raise RecordTampered("swapped")
+        if unchecked:  # made before orch checked it: shown, never as verified
+            return ReadResult("ok", value, reason="unchecked", message=UNCHECKED_TEXT, unchecked=1)
         return ReadResult("ok", value)
     except (RecordTampered, RecordUnavailable) as error:
         return _report(workspace, error, "detail", run, "reader")
@@ -1133,11 +1463,30 @@ def read_meta(workspace):
 
 
 def list_runs(workspace):
+    """Every run orch knows: the run files AND the runs that have a chain head (not pruned) but no file, so a
+    deleted run file (or runs/ folder) cannot hide a run: reading such a run says `removed`."""
+    files, problem = [], None
     try:
         names = _entries(workspace, ("runs",))
-        return ReadResult("ok", sorted(n[:-6] for n in names if re.fullmatch(_RUN + r"\.jsonl", n)))
+        files = [n[:-6] for n in names if re.fullmatch(_RUN + r"\.jsonl", n)]
     except (RecordTampered, RecordUnavailable) as error:
-        return _report(workspace, error, "folder", None, "reader")
+        problem = _report(workspace, error, "folder", None, "reader")
+    gone = []
+    for name in humanproof.record_head_names(workspace):
+        if name not in files:
+            head, hstate = humanproof.record_head_read(workspace, name)
+            if (head is not None and head["seq"] and not head.get("pruned")) or (
+                hstate == "old_key" and humanproof.record_head_old_live(workspace, name)
+            ):
+                gone.append(name)
+    if problem is not None and not (problem.status == "unavailable" and problem.reason == "missing"):
+        return problem
+    if not files and not gone and not humanproof.record_reject_names(workspace) and problem is not None:
+        return problem
+    for name in humanproof.record_reject_names(workspace):
+        if name not in files and name not in gone:
+            gone.append(name)
+    return ReadResult("ok", sorted([*files, *gone]))
 
 
 @dataclass(frozen=True)
@@ -1145,38 +1494,40 @@ class _Detail:
     created: bool = False
     reason: str | None = None
     alert: dict | None = None
+    hash: str | None = None  # detail_hash of the bytes on disk (inside the line's MAC)
 
 
 def _store_detail(ws, event, payload, previous):
+    """Store the detail file of `event` and return the hash of the bytes that are on disk. An existing file
+    at the name is kept only when a VERIFIED previous line of the run carries its hash (activity.md, Detail
+    files): anything else is an orphan or planted and is replaced atomically."""
     rel = tuple(event["detail"].split("/"))
     exists = False
     try:
         try:
-            stored = _read_json(ws, rel)
+            current = _read_file(ws, rel)
             exists = True
         except RecordUnavailable as error:
             if error.reason != "missing":
                 raise
         if exists:
-            if not isinstance(stored, dict) or (
-                stored.get("run"),
-                stored.get("kind"),
-                stored.get("id"),
-                stored.get("ticket"),
-            ) != (event["run"], event["kind"], event["id"], event["ticket"]):
-                return _Detail(reason="collision")
-            finished = any(
-                old.get("detail") == event["detail"]
+            digest = record_auth.detail_hash(current)
+            same = [
+                old
+                for old in previous
+                if old.get("detail") == event["detail"]
+                and old.get("detail_hash") == digest
                 # the detail name derives from these four
                 and all(old.get(k) == event[k] for k in ("run", "kind", "id", "ticket"))
-                and old.get("outcome") is not None
-                and not (old.get("via") == "hook" and event["via"] == "log")
-                for old in previous
+            ]
+            finished = any(
+                old.get("outcome") is not None and not (old.get("via") == "hook" and event["via"] == "log")
+                for old in same
             )  # a log line writes its own detail over a hook line's (the log wins, Precedence and dedupe)
-            if finished or event["outcome"] is None:
-                return _Detail()
+            if finished or (same and event["outcome"] is None):
+                return _Detail(hash=digest)
         _write_new(ws, rel, payload)
-        return _Detail(created=not exists)
+        return _Detail(created=not exists, hash=record_auth.detail_hash(payload))
     except (RecordTampered, RecordUnavailable) as error:
         result = _report(ws, error, "detail", event["run"], "writer")
         return _Detail(reason=error.reason, alert=result.alert)
@@ -1220,17 +1571,22 @@ class RecordWriter:
             event["detail_lost"] = True
             return None
 
-    def append(self, event, *, detail=None, lock_wait=None):
-        """lock_wait: seconds to wait for the run lock before the write is spooled (default 30)."""
+    def append(self, event, *, detail=None, lock_wait=None, admit=None, spool=True):
+        """lock_wait: seconds to wait for the run lock before the write is spooled (default 30). admit: called
+        under the run lock with (verified lines, head) right before the line is sealed; it returns True to
+        write or raises (a quota is checked and used atomically). spool=False: a busy lock raises
+        RecordBusy."""
         try:
-            return self._append(event, detail, lock_wait)
+            return self._append(event, detail, lock_wait, admit=admit, spool=spool)
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
             raise RecordInvalid() from None
 
-    def _append(self, event, detail, lock_wait=None):
+    def _append(self, event, detail, lock_wait=None, *, admit=None, spool=True):
         if not isinstance(event, dict):
             raise RecordInvalid()
         run = _name(event.get("run"), _RUN)
+        if humanproof.record_key(self.workspace) is None:
+            raise RecordOff(_OFF_KEY)  # no key, no recording: fail closed, nothing written (not even a spool)
         event = dict(event, seq=1, v=1)
         default_id = event.get("id") is None
         eid = event.get("id") if not default_id else f"{run}:1"
@@ -1293,6 +1649,7 @@ class RecordWriter:
                 prepared["detail"] = (
                     f"detail/{run}/{detail_name(run, event['kind'], event['id'], event['ticket'])}.json"
                 )
+                prepared["detail_hash"] = "0" * 32
             try:
                 self._line(prepared)
                 self._line(dict(prepared, detail=None, detail_lost=True))
@@ -1306,8 +1663,10 @@ class RecordWriter:
                 check_lock()
                 self._drain(run, check_lock=check_lock)
                 check_lock()
-                return self._commit(event, payload, default_id, check_lock=check_lock)
+                return self._commit(event, payload, default_id, check_lock=check_lock, admit=admit)
         except RecordBusy:
+            if not spool:
+                raise
             return self._spool(event, payload, default_id)
         except (RecordTampered, RecordUnavailable) as error:
             _report(self.workspace, error, "run", run, "writer")
@@ -1315,25 +1674,57 @@ class RecordWriter:
 
     def _line(self, event):
         line = self._serialized(event) + b"\n"
-        if len(line) > 8192:
+        # the sealed line is the body with `}` replaced by the 125-byte auth suffix (record_auth.SUFFIX_LEN)
+        if len(line) + record_auth.SUFFIX_LEN - 1 > 8192:
             raise RecordInvalid("The record entry is too large.")
         return line
 
-    def _commit(self, event, payload, default_id, *, check_lock=lambda: None):
+    def _commit(self, event, payload, default_id, *, check_lock=lambda: None, drained=None, admit=None):
+        """The only place a run line is sealed (activity.md, Authenticated record). Under the run lock: the
+        next seq and link come from the last VERIFIED line of the current key (the chain head only when the
+        file was cut short), the line is sealed and written, then the head."""
         run = event["run"]
+        rec = humanproof.record_key(self.workspace)
+        if rec is None:
+            raise RecordOff(_OFF_KEY)
+        ws_id, kid, rk = rec
+        # once, BEFORE this run's file is made: which runs existed (unsigned) when protection began
         fd = _open(self.workspace, ("runs", run + ".jsonl"), "read_append", create_dirs=True)
         try:
             check_lock()
-            previous, count, torn = _read_run_strict(
-                self.workspace,
-                run,
-                fd,
-                only=lambda i: (
-                    i == event.get("id")
-                    or (default_id and isinstance(i, str) and run + ":" in i[: len(run) + 3])
-                ),
-            )
-            event = dict(event, seq=count + 1)
+            _check_fd(fd)
+            raw = _read_bytes(fd)
+            torn = bool(raw and not raw.endswith(b"\n"))
+            cutover = humanproof.record_cutover_read(self.workspace)
+            legacy_ok = isinstance(cutover, set) and run in cutover
+            head, head_state = humanproof.record_head_read(self.workspace, run)
+            if head_state is False:  # damaged, of another run or failing its MAC: treated as missing
+                alert_content(self.workspace, run)
+            # a head file that exists (a pruned run's tombstone too) means the run is never a legacy run
+            present = not (head is None and head_state is True) or not legacy_ok
+            if head is not None and head.get("pruned"):
+                head = None
+            carry = humanproof.record_head_carry(self.workspace, run) if head_state == "old_key" else {}
+            old_kid = _old_kids(carry, head)
+            view, mode, _pre = _chain(self.workspace, run, raw, rec, head, present, old_kid)
+            previous = view.events  # verified lines only: an unverified line never suppresses a real one
+            if admit is not None and admit([dict(e) for e in previous], head) is not True:
+                raise RecordRefused()
+            legacy = None
+            last_seq = view.last_seq
+            if mode == "legacy" and raw.strip():
+                # the run was made before orch sealed lines: its lines are recorded once, in the head (count
+                # and hash of the exact bytes), so they stay readable as "not checked" and nothing else can
+                # pass as one. The chain then numbers on after them.
+                whole = raw + (b"\n" if torn else b"")
+                n = len([x for x in whole.split(b"\n") if x])
+                legacy = (n, hashlib.sha256(whole[: record_auth.prefix_cut(whole, n)]).hexdigest())
+                last_seq = n
+            if head is not None and head["seq"] > last_seq:
+                seq, link = head["seq"] + 1, head.get("mac") or record_auth.genesis(rk, ws_id, run)
+            else:
+                seq, link = last_seq + 1, view.last_mac or record_auth.genesis(rk, ws_id, run)
+            event = dict(event, seq=seq)
             if default_id:
                 # a hook's default id has its own namespace: <run>:<seq> belongs to the collectors, so a hook
                 # line can never take the id of a collector line that is still to come (dedupe would drop it)
@@ -1342,14 +1733,13 @@ class RecordWriter:
                     wrapped = json.loads(payload)
                     wrapped["id"] = event["id"]
                     payload = _json(wrapped).encode()
+            previous = [dict(e) for e in previous]
             if not _decision(previous, event):
                 return None
             if payload is not None:
                 event["detail"] = (
                     f"detail/{run}/{detail_name(run, event['kind'], event['id'], event['ticket'])}.json"
                 )
-            line = (_json(event) + "\n").encode()
-            lost_line = (_json(dict(event, detail=None, detail_lost=True)) + "\n").encode()
             check_lock()
             meta = _open(self.workspace, ("meta.json",), "create_excl")
             if meta is not None:
@@ -1368,14 +1758,31 @@ class RecordWriter:
                 _close(check)
             stored = _Detail()
             if payload is not None:
+                # the body and size checks first (with a stand-in hash), so no detail file is ever written
+                # for a line that then fails them (no orphan)
+                dry = dict(event, detail_hash="0" * 32)
+                if not _BODY_VALIDATOR.is_valid(dry):
+                    raise RecordInvalid()
+                if (
+                    len(_hidden_line(self.hider, dry)) + record_auth.SUFFIX_LEN > 8192
+                ):  # body, suffix, newline
+                    raise RecordInvalid("The record entry is too large.")
                 check_lock()
                 stored = _store_detail(self.workspace, event, payload, previous)
                 if stored.reason:
                     event.update(detail=None, detail_lost=True)
-                    line = lost_line
+                else:
+                    event["detail_hash"] = stored.hash
+            if not _BODY_VALIDATOR.is_valid(event):
+                raise RecordInvalid()
+            body = _hidden_line(self.hider, event)
+            sealed = record_auth.seal(rk, kid, ws_id, run, seq, link, body)
+            if len(sealed) > 8192:
+                raise RecordInvalid("The record entry is too large.")
+            mac = record_auth.split(sealed)[3]
             try:
                 check_lock()
-                _write(fd, (b"\n" if torn else b"") + line)
+                _write(fd, (b"\n" if torn else b"") + sealed)
             except (RecordUnavailable, RecordTampered):
                 if stored.created:
                     try:
@@ -1384,6 +1791,7 @@ class RecordWriter:
                         if isinstance(cleanup, RecordTampered):
                             _report(self.workspace, cleanup, "detail", run, "writer")
                 raise
+            _move_head(self.workspace, run, head, seq, mac, drained=drained, legacy=legacy, carry=carry)
             replaced = [old for old in previous if _replaces(old, event)]
             # a log line without a detail of its own (lost, or none) replaced hook lines: the hook's detail
             # file (the same name) goes when no line the reader keeps points to it, so the agent's payload
@@ -1411,20 +1819,26 @@ class RecordWriter:
             _close(fd)
 
     def _spool(self, event, payload, default_id):
-        rel = ("pending", event["run"], f"{time.time_ns():020d}_{uuid.uuid4().hex}.json")
+        """A line the lock was too busy for: MACed now (the entry and its file name), sealed into the chain
+        only when drained under the lock (it has no seq or link yet)."""
+        rec = humanproof.record_key(self.workspace)
+        if rec is None:
+            raise RecordOff(_OFF_KEY)
+        base = dict(event=event, payload=payload.decode() if payload else None, default_id=default_id)
+        start = time.time_ns()
         try:
-            fd = _open(self.workspace, rel, "create_excl", create_dirs=True)
+            for step in range(6):  # a name taken (same time) is retried with the next nanoseconds
+                name = record_auth.spool_name(rec[2], rec[0], event["run"], start + step)
+                rel = ("pending", event["run"], name)
+                entry = dict(base)
+                entry["sm"] = record_auth.spool_mac(rec[2], rec[0], event["run"], name, dict(base))
+                fd = _open(self.workspace, rel, "create_excl", create_dirs=True)
+                if fd is not None:
+                    break
             if fd is None:
                 raise RecordUnavailable("io")
             try:
-                _write(
-                    fd,
-                    _json(
-                        dict(
-                            event=event, payload=payload.decode() if payload else None, default_id=default_id
-                        )
-                    ).encode(),
-                )
+                _write(fd, _json(entry).encode())
             finally:
                 _close(fd)
         except (RecordTampered, RecordUnavailable) as error:
@@ -1447,16 +1861,65 @@ class RecordWriter:
             if error.reason == "missing":
                 return
             raise
-        for name in sorted(names):
+        rec = humanproof.record_key(self.workspace)
+        if rec is None:
+            raise RecordOff(_OFF_KEY)
+        if len(names) > _SPOOL_LIST_MAX:
+            _alert(self.workspace, target="folder", run=run, reason="content", seen_by="writer")
+        names = names[:_SPOOL_LIST_MAX]
+        # a name proves itself (record_auth.spool_name, no read): every listed name is checked BEFORE any cut,
+        # so planted names cannot crowd a genuine entry out; only proven names are ever read, and first
+        valid = sorted(n for n in names if record_auth.spool_name_ok(rec[2], rec[0], run, n))
+        # entries made before the upgrade (no name proof yet): read only when older than the MACed marker
+        head, _ = humanproof.record_head_read(self.workspace, run)
+        gone = set((head or {}).get("drained", []))
+        listed = (
+            humanproof.record_upgrade_old(self.workspace, run) - gone
+        )  # recorded at a real upgrade, MACed
+        proven = set(valid)
+        old = [n for n in names if n not in proven and n in listed]
+        valid = sorted(valid + sorted(old)[:_OLD_BATCH])
+        self._drain_valid(run, rec, valid, check_lock)
+        if any(not _SPOOL_NAME.fullmatch(n) for n in names):
+            # orch never names an entry so: left, alerted, not counted
+            _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
+        proven = set(valid)
+        # every name the marker lists waits for a later drain when this one's budget is used: only unlisted
+        # (or unverifiable) names are refused
+        invalid = sorted(n for n in names if _SPOOL_NAME.fullmatch(n) and n not in proven and n not in listed)
+        for name in invalid[:_REJECT_BATCH]:  # a well-shaped name without its proof: refused by name, unread
             check_lock()
-            if not re.fullmatch(_PART, name) or name in (".", ".."):
-                _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
-                continue
+            _reject_entry(self.workspace, run, ("pending", run, name))
+
+    def _drain_valid(self, run, rec, valid, check_lock):
+        refused = 0
+
+        def refuse(rel):
+            """Refuse an entry under a proven name that still fails (MAC, shape, size), up to the batch."""
+            if refused >= _REJECT_BATCH:
+                return 0
+            _reject_entry(self.workspace, run, rel)
+            return 1
+
+        for name in valid:
+            check_lock()
             rel = ("pending", run, name)
             try:
-                pending = _read_json(self.workspace, rel)
+                # never more than a line and its detail: an oversized entry is refused unread (one fd)
+                pending = _json_of(_read_file(self.workspace, rel, _SPOOL_MAX_BYTES))
             except (RecordTampered, RecordUnavailable) as error:
                 _report(self.workspace, error, "folder", run, "writer")
+                if isinstance(error, RecordTampered):
+                    refused += refuse(rel)  # a link, a special file, a folder, not JSON
+                continue
+            head, _ = humanproof.record_head_read(self.workspace, run)
+            drained = (head or {}).get("drained", [])
+            floor = (head or {}).get("drained_floor", "0" * 20)
+            entry = {k: v for k, v in pending.items() if k != "sm"} if isinstance(pending, dict) else None
+            if entry is None or not record_auth.drain_ok(
+                rec[2], rec[0], run, name, entry, pending.get("sm"), drained, floor
+            ):
+                refused += refuse(rel)
                 continue
             try:
                 event = pending["event"]
@@ -1477,14 +1940,14 @@ class RecordWriter:
                 self._serialized(pending)
                 self._line(event)
             except (KeyError, TypeError, ValueError, RecursionError, RecordInvalid):
-                _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
+                refused += refuse(rel)
                 continue
             try:
-                self._commit(event, payload, pending["default_id"], check_lock=check_lock)
+                self._commit(event, payload, pending["default_id"], check_lock=check_lock, drained=name)
             except (KeyError, TypeError, ValueError, UnicodeError, RecursionError, RecordInvalid):
                 # one bad entry is skipped with a trace, never raised: every later write and every
                 # run_lines(drain=...) of the run would fail with it. A lock or run-file problem still raises.
-                _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
+                refused += refuse(rel)
                 continue
             try:
                 with _io():
@@ -1492,6 +1955,144 @@ class RecordWriter:
             except (RecordTampered, RecordUnavailable) as error:
                 # committed already; left behind it is deduped next time (or alerted), never raised
                 _report(self.workspace, error, "folder", run, "writer")
+
+
+def _reject_bad_spool(workspace, run, check_lock):
+    """Under the run lock, with no writer: refuse the spool entries of a run whose MAC does not hold (planted,
+    renamed, replayed, oversized, not a regular file). Entries orch made are left for a writer to commit, so a
+    planted one can never keep a finished run from retention. At most _REJECT_BATCH per call."""
+    rec = humanproof.record_key(workspace)
+    if rec is None:
+        return
+    try:
+        names = _entries(workspace, ("pending", run))
+    except RecordUnavailable as error:
+        if error.reason == "missing":
+            return
+        raise
+    head, _ = humanproof.record_head_read(workspace, run)
+    drained = (head or {}).get("drained", [])
+    floor = (head or {}).get("drained_floor", "0" * 20)
+    listed = humanproof.record_upgrade_old(workspace, run) - set(drained)
+    refused = 0
+    for name in sorted(names):
+        if refused >= _REJECT_BATCH:
+            return
+        check_lock()
+        if not _SPOOL_NAME.fullmatch(name):
+            continue  # never counted; a writer's drain tells it
+        rel = ("pending", run, name)
+        if not record_auth.spool_name_ok(rec[2], rec[0], run, name) and name not in listed:
+            refused += 1  # a name without its proof: refused by name, never read
+            _reject_entry(workspace, run, rel)
+            continue
+        try:
+            pending = _json_of(_read_file(workspace, rel, _SPOOL_MAX_BYTES))  # oversized: refused unread
+            entry = {k: v for k, v in pending.items() if k != "sm"} if isinstance(pending, dict) else None
+            bad = entry is None or not record_auth.drain_ok(
+                rec[2], rec[0], run, name, entry, pending.get("sm"), drained, floor
+            )
+        except RecordTampered:
+            bad = True
+        except RecordUnavailable:
+            continue
+        if bad:
+            refused += 1
+            _reject_entry(workspace, run, rel)
+
+
+def _reject_entry(workspace, run, rel):
+    """A spool entry orch did not prepare (planted, renamed, replayed, not valid): one alert, deleted by
+    its exact path, counted in the head (`rejected`). Never committed, never left in place."""
+    alert_content(workspace, run)
+    # Spool entries are flat regular files. Anything else is never walked and never deleted recursively.
+    # In order, until it is gone from its valid name: remove it by its exact name (a link is removed,
+    # never followed); rename it into quarantine/<run>/; rename it inside the spool to a name the scan
+    # alerts on and never counts or drains. It is never left under a valid spool name.
+    try:
+        with _io():
+            _unlink(workspace, rel)
+    except (RecordTampered, RecordUnavailable, RecursionError):
+        try:
+            _rename_aside(workspace, rel, run)
+        except (RecordTampered, RecordUnavailable, RecursionError) as error:
+            if not isinstance(error, RecursionError):
+                _report(workspace, error, "folder", run, "writer")  # quarantine is not a clean folder
+            try:
+                _rename_aside(workspace, rel, run, inside=True)
+            except (RecordTampered, RecordUnavailable, RecursionError) as again:
+                if not isinstance(again, RecursionError):
+                    _report(workspace, again, "folder", run, "writer")
+                return
+    head, _ = humanproof.record_head_read(workspace, run)
+    if head is not None:
+        _move_head(workspace, run, head, head["seq"], head.get("mac"), rejected=1)
+        return
+    # No head. A run that is already sealed (a crash before its first head write) gets one now, so the
+    # count is kept. A legacy run or a run with no file keeps no count (a head would make it non-legacy):
+    # the alert above is its only trace.
+    tail = _sealed_tail(workspace, run)
+    if tail is not None:
+        _move_head(workspace, run, None, tail[0], tail[1], rejected=1)
+    else:
+        humanproof.record_rejects_bump(workspace, run)  # a small guarded counter, no head
+
+
+def _sealed_tail(workspace, run):
+    """(seq, mac) of the last verified line of a run that has sealed lines, else None."""
+    rec = humanproof.record_key(workspace)
+    if rec is None:
+        return None
+    try:
+        fd = _open(workspace, ("runs", run + ".jsonl"), "read")
+    except RecordUnavailable:
+        return None
+    try:
+        raw = _read_bytes(fd)
+    finally:
+        _close(fd)
+    verified, mode, _pre = _chain(workspace, run, raw, rec, None, False)
+    if mode == "legacy" or not verified.last_mac:
+        return None
+    return verified.last_seq, verified.last_mac
+
+
+_DRAINED_MAX = 2048  # names a head keeps (besides its time horizon and the last 512)
+
+
+def _move_head(workspace, run, head, seq, mac, *, drained=None, rejected=0, legacy=None, carry=None):
+    """Write the chain head after the line (a failure is reported, never raised: the line is stored and
+    verifies without it; the next commit moves the head)."""
+    body = dict(head or carry or {})  # a new segment after a reset keeps what is safe from the old head
+    body.update(run=run, seq=seq, mac=mac)
+    body.setdefault("jobs", {})
+    body.setdefault("rejected", 0)
+    body.setdefault("drained", [])
+    body.setdefault("drained_floor", "0" * 20)
+    body.setdefault("pruned", None)
+    body["rejected"] += rejected
+    if legacy is not None and head is None:
+        body["legacy_lines"], body["legacy_hash"] = legacy
+    if drained:
+        names = [*body["drained"], drained]
+        horizon = f"{time.time_ns() - 24 * 3600 * 10**9:020d}"
+        keep = [n for n in names if n[:20] >= horizon][-512:][-_DRAINED_MAX:]
+        dropped = [n for n in names if n not in keep]
+        if dropped:
+            floor = f"{int(max(dropped)[:20]) + 1:020d}"
+            # never past a name the upgrade marker lists that is still waiting: it must stay drainable
+            waiting = humanproof.record_upgrade_old(workspace, run) - set(names)
+            if waiting:
+                try:  # only those still in the spool (a drained one that left the list is not waiting)
+                    waiting &= set(_entries(workspace, ("pending", run)))
+                except (RecordTampered, RecordUnavailable):
+                    pass
+            if waiting:
+                floor = min(floor, f"{int(min(waiting)[:20]):020d}")
+            body["drained_floor"] = max(body["drained_floor"], floor)
+        body["drained"] = keep
+    if not humanproof.record_head_try_write(workspace, run, body):
+        alert_content(workspace, run)
 
 
 def _files_in_budget(files: list[str]) -> list[str]:
@@ -1534,17 +2135,20 @@ def plan_retention(runs: list[dict], now: str, keep_days: int = 90, max_mb: int 
     plan: dict[str, list[str]] = dict(fold_first=[], delete_detail=[], delete_run=[])
     cutoff = datetime.fromisoformat(now) - timedelta(days=keep_days)
     ended = sorted((r for r in runs if r["ended"]), key=lambda r: datetime.fromisoformat(r["ended"]))
-    total = sum(r["detail_mb"] + r["file_mb"] for r in runs)
+    # a run orch cannot check (legacy, unverified: `counted` false) is pruned only by age, and its size never
+    # counts toward max_mb: planted big files must not push genuine runs out
+    total = sum(r["detail_mb"] + r["file_mb"] for r in runs if r.get("counted", True))
     for run in ended:
         if datetime.fromisoformat(run["ended"]) < cutoff:
             plan["delete_detail"].append(run["run"])
             plan["delete_run"].append(run["run"])
-            total -= run["detail_mb"] + run["file_mb"]
+            if run.get("counted", True):
+                total -= run["detail_mb"] + run["file_mb"]
     for field, size in (("delete_detail", "detail_mb"), ("delete_run", "file_mb")):
         for run in ended:
             if total <= max_mb:
                 break
-            if run["run"] not in plan[field] and run[size] > 0:
+            if run.get("counted", True) and run["run"] not in plan[field] and run[size] > 0:
                 plan[field].append(run["run"])
                 total -= run[size]
     plan["fold_first"] = plan["delete_run"].copy()
@@ -1785,7 +2389,12 @@ def record_sizes(workspace):
             if error.reason != "missing":
                 raise
             names = []
-        total = sum(_size(workspace, (name,)) for name in names)
+        # pending/ and quarantine/ hold what an agent can plant: only their direct entries are counted, flat
+        # (one lstat each, nothing below them is walked)
+        flat = ("pending", "quarantine")
+        total = sum(_size(workspace, (name,)) for name in names if name not in flat)
+        for name in flat:
+            total += _flat_size(workspace, name)
         return ReadResult("ok", dict(record=total, detail=_size(workspace, ("detail",))))
     except RecordInvalid:
         return _report(workspace, RecordTampered("swapped"), "folder", None, "reader")
@@ -1833,6 +2442,77 @@ def _ended_run(run, events, now):
     return f"{end:%Y-%m-%dT%H:%M:%SZ}" if over else None
 
 
+def is_sealed(line) -> bool:
+    """The ONE definition of "orch verified this line": it is a line of a run read through the verified view,
+    not a line of a legacy run and not one made before protection. What retention, caps, counts and run state
+    may believe (a hook line is sealed too: it is verified to be the hook entry's, see is_checked)."""
+    return not line.get("before_protection")
+
+
+def is_checked(line) -> bool:
+    """The ONE definition of the computed `checked` marker (never stored): True only for a sealed, verified
+    line that is not a hook line (a verified `via: hook` line is still the agent's word). Every screen,
+    count and detail that shows or reads a trust marker uses this and nothing else."""
+    return is_sealed(line) and line.get("via") != "hook"
+
+
+def _own(events):
+    """The lines orch checked (not those made before protection): the only ones retention may believe."""
+    return [e for e in events if is_sealed(e)]
+
+
+def _tombstone(workspace, run, now):
+    """The run's chain head says it was pruned on purpose (a run file that is gone otherwise is `removed`)."""
+    head, _ = humanproof.record_head_read(workspace, run)
+    if head is None and humanproof.record_head_state(workspace, run) != "present":
+        return
+    humanproof.record_head_try_write(workspace, run, dict(head or {"seq": 0}, pruned=now))
+
+
+def _retention_end(workspace, run, read, now):
+    """(when the run ended, whether its size counts toward max_mb), or None when retention must leave it.
+    A checked run ends with its checked core run.state. A true legacy run (made before protection: no head,
+    no sealed line, on the cutover list) ends when protection began, orch's own MACed time: it is pruned once
+    that is older than keep_days and its size never counts toward max_mb. Every other run orch cannot check
+    (tampered, unverified, removed, old key: made before a protection reset) is NEVER pruned by retention:
+    it stays and stays reported (only the person's delete-all removes it; a file's mtime is the agent's to
+    set, so it decides nothing here)."""
+    if read.status == "ok" and not read.legacy:
+        return _ended_run(run, _own(read.value), now), True
+    if read.status == "ok" and read.legacy:
+        listed = humanproof.record_cutover_read(workspace)
+        if isinstance(listed, set) and run in listed:
+            return humanproof.record_cutover_at(workspace), False
+    return None
+
+
+def _counted_mb(workspace, run, read, counted):
+    """What of a run counts toward max_mb: only bytes a verified line vouches for (the run file's verified
+    lines and the detail files its sealed lines point at, each at most _DETAIL_MAX). Anything else under
+    detail/<run> or jobs/<run> can be planted: it is removed with the run, never counted (it must not push
+    genuine runs out early)."""
+    if not counted:
+        return dict(detail_mb=0, file_mb=0)
+    names = {
+        e["detail"]
+        for e in read.value
+        if is_sealed(e) and isinstance(e.get("detail"), str) and e.get("detail_hash")
+    }
+    detail = 0
+    for point in sorted(names):
+        parts = point.split("/")
+        if len(parts) != 3 or parts[:2] != ["detail", run] or not re.fullmatch(_PART, parts[2]):
+            continue
+        try:  # an inflated file counts no more than the most orch ever writes there
+            detail += min(_file_size(workspace, tuple(parts)), _DETAIL_MAX)
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+    # the run file counts only its verified lines: junk appended to it is never counted
+    lines = sum(len(_json(e)) + 1 for e in read.value if is_sealed(e))
+    return dict(detail_mb=detail / 1024**2, file_mb=lines / 1024**2)
+
+
 def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list[dict]], Any]):
     """Apply retention; fold must be idempotent per run because skipped runs may retry."""
     result = dict(
@@ -1840,6 +2520,9 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
     )
 
     def failed(read):
+        if read.status == "ok":  # read, but changed outside orch: kept and reported
+            reason = read.reason if read.reason in ("content", "removed", "old_key") else "content"
+            read = ReadResult("tampered", reason=reason, message=_MESSAGES[reason])
         if result["status"] == "ok":
             result.update(status=read.status, reason=read.reason, message=read.message, alert=read.alert)
 
@@ -1850,17 +2533,23 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
     runs = []
     for run in listed.value:
         read = read_run(workspace, run, seen_by="retention")
-        if read.status != "ok":
+        try:
+            end = _retention_end(workspace, run, read, now)
+        except (RecordTampered, RecordUnavailable) as error:
+            failed(_report(workspace, error, "folder", run, "retention"))
+            continue
+        if (
+            end is None or read.changed - read.rejected > 0 or read.removed
+        ):  # changed outside orch: never pruned, stays reported
             failed(read)
             continue
         try:
             runs.append(
                 dict(
                     run=run,
-                    ended=_ended_run(run, read.value, now),
-                    detail_mb=_detail_parts(workspace, run, "retention")[1] / 1024**2,
-                    file_mb=(_size(workspace, ("runs", run + ".jsonl")) + _size(workspace, ("jobs", run)))
-                    / 1024**2,
+                    ended=end[0],
+                    counted=end[1],
+                    **_counted_mb(workspace, run, read, end[1]),
                 )
             )
         except (RecordTampered, RecordUnavailable) as error:
@@ -1870,28 +2559,32 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
     for run in dict.fromkeys(plan["fold_first"] + plan["delete_detail"]):
         try:
             with _lock(workspace, run) as check_lock:
+                _reject_bad_spool(workspace, run, check_lock)  # only entries orch made can block a run
                 read = read_run(workspace, run, seen_by="retention")
-                if read.status != "ok":
+                end = _retention_end(workspace, run, read, now)
+                if end is None or read.changed - read.rejected > 0 or read.removed:
                     failed(read)
                     continue
                 if read.pending:
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
                     continue
-                ended_now = _ended_run(run, read.value, now)
+                ended_now = end[0]
                 if not ended_now or ended_now != snapshots[run]:
                     continue
                 # Check every deletion target before invoking the irreversible fold. In detail/<run> only the
                 # run's folder can refuse; a planted file in it is skipped (delete_detail), never a veto.
                 check_lock()
                 _detail_parts(workspace, run, "retention")
-                for rel in (("pending", run), ("jobs", run), ("runs", run + ".jsonl")):
+                check_lock()
+                _pending_preflight(workspace, run)
+                for rel in (("jobs", run), ("runs", run + ".jsonl")):
                     check_lock()
                     _size(workspace, rel)
                 check_lock()
                 if _pending_count(workspace, run):
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
                     continue
-                fold(run, read.value)
+                fold(run, _own(read.value or []))
                 check_lock()
                 if _pending_count(workspace, run):
                     failed(ReadResult("unavailable", reason="pending", message=_MESSAGES["pending"]))
@@ -1903,6 +2596,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                 if run in plan["delete_run"]:
                     check_lock()
                     _rmtree(workspace, ("jobs", run))
+                    _tombstone(workspace, run, now)  # first: a run file that is gone without it is `removed`
                     check_lock()
                     _unlink(workspace, ("runs", run + ".jsonl"))
                     result["delete_run"].append(run)
@@ -2655,6 +3349,13 @@ _SCHEMA = {
                     "minimum": 0,
                     "description": ("How many key values were hidden in this file."),
                 },
+                "checked": {
+                    "type": "boolean",
+                    "description": (
+                        "Computed by the reader, never stored: false when the detail was made before orch "
+                        "checked it (not checked, before protection)."
+                    ),
+                },
             },
         },
         "record_alert": {
@@ -2719,6 +3420,8 @@ _SCHEMA = {
             "required": ["run", "status", "reason", "message"],
             "properties": {
                 "pending": {"type": "integer", "minimum": 0},
+                "changed": {"type": "integer", "minimum": 0},
+                "removed": {"type": "integer", "minimum": 0},
                 "run": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/run"}]},
                 "status": {"enum": ["ok", "unavailable", "tampered"]},
                 "reason": {
@@ -2738,6 +3441,7 @@ _SCHEMA = {
                         "removed",
                         "unverified",
                         "old_key",
+                        "unchecked",
                     ]
                 },
                 "message": {"type": "string", "maxLength": 500},
@@ -2758,6 +3462,9 @@ _SCHEMA = {
 }
 
 _VALIDATOR = Draft202012Validator(_SCHEMA, format_checker=FormatChecker())
+_BODY_VALIDATOR = Draft202012Validator(
+    {"$ref": "#/$defs/event_body", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
+)
 _DETAIL_VALIDATOR = Draft202012Validator(
     {"$ref": "#/$defs/detail_file", "$defs": _SCHEMA["$defs"]}, format_checker=FormatChecker()
 )

@@ -474,6 +474,17 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
 _COLLECTORS = {"claude-stream-json/1": "orch.collect_claude"}  # oneshot.events format -> its collector
 
 
+def can_deny(name: str, root: Path | None = None) -> bool | None:
+    """Whether orch can give this agent tool deny rules (its adapter's `deny.format` is not `none`): the
+    records of a run by a tool that cannot (codex, generic) can be forged by code the agent runs, so they
+    are marked "can't be fully checked" (record.UNPROTECTED_TEXT). None: no such adapter."""
+    try:
+        a = load(name, root)
+    except (KeyError, ValueError, OSError):
+        return None
+    return (a.get("deny") or {}).get("format", "none") != "none"
+
+
 def collector(name: str, root: Path | None = None):
     """The module that maps this agent's output to record events (its `oneshot.events` format, agents/
     capabilities.json): `collect(lines, writer, ctx)` for the oneshot stdout and `hook_line(payload)` for the

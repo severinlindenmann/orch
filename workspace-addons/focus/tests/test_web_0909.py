@@ -25,7 +25,9 @@ def test_agent_page_is_sandboxed_by_the_server_whoever_opens_it(server, ws):
 
 @pytest.mark.parametrize("origin", ["null", "http://evil.example"])
 def test_a_sandboxed_page_cannot_post_to_the_board(server, fake_orch, origin):
-    st, _, _ = req(server, "POST", "/api/act", {"op": "run.stop", "args": {"ticket": TID}}, {"Origin": origin})
+    st, _, _ = req(
+        server, "POST", "/api/act", {"op": "run.stop", "args": {"ticket": TID}}, {"Origin": origin}
+    )
     assert st == 403
 
 
@@ -40,8 +42,14 @@ def test_wont_do_board_emits_no_start_or_evidence():
     from orch_focus.board import TicketWatcher
 
     watcher = TicketWatcher("r_abc12345", TID)
-    step = {"id": "c1", "text": "Review", "done": False, "state": "doing", "wont_do": True,
-            "evidence": [{"type": "note", "text": "Old evidence"}]}
+    step = {
+        "id": "c1",
+        "text": "Review",
+        "done": False,
+        "state": "doing",
+        "wont_do": True,
+        "evidence": [{"type": "note", "text": "Old evidence"}],
+    }
     ticket = {"checklist": [step]}
     assert watcher.feed(ticket) == []
     step.pop("wont_do")

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import seal_append
 from jsonschema import Draft202012Validator, FormatChecker
 
 from orch import cli_record, config, hider, pageproof
@@ -1641,19 +1642,17 @@ def test_delete_detail_keeps_other_tickets_detail_in_a_shared_run(ws, rec, run, 
 
 
 def _plant(ws, run_id, line):
-    """An agent with file access appends a raw line to a run file (no writer, no hider)."""
-    path = record_dir(ws) / "runs" / f"{run_id}.jsonl"
-    # a planted line readers trust carries its physical line number as seq (G1 H2); a wrong seq is skipped
-    seq = len(path.read_bytes().splitlines()) + 1 if path.exists() else 1
-    with path.open("a") as f:
-        f.write(json.dumps(dict(line, seq=seq)) + "\n")
+    """A line that verifies but is wrong in content: sealed as code holding orch's key could (conftest). A raw
+    unsigned line is never shown at all (test_record_mac.py)."""
+    seal_append(ws, run_id, line)
 
 
 def _own_line(ws, run_id, n):
     path = record_dir(ws) / "runs" / f"{run_id}.jsonl"
-    return next(
+    line = next(
         e for e in map(json.loads, path.read_text().splitlines()) if e["id"] == f"toolu_{run_id[2:]}{n}"
     )
+    return {k: v for k, v in line.items() if k != "auth"}
 
 
 def _planted_b_line(ws, b):
@@ -1685,7 +1684,9 @@ def test_detail_names_differ_per_ticket_in_one_run(ws, rec):
     assert (mine["id"], mine["kind"]) == (theirs["id"], theirs["kind"]) and theirs["ticket"] == b
     assert mine["detail"] and theirs["detail"] and mine["detail"] != theirs["detail"]
     for line, ticket, output in ((mine, a, "a's own"), (theirs, b, "x" * 2000)):
-        got = record.read_detail(ws, RUN_C, Path(line["detail"]).stem, ticket=ticket).unwrap()
+        got = record.read_detail(
+            ws, RUN_C, Path(line["detail"]).stem, line_id=line["id"], ticket=ticket
+        ).unwrap()
         assert (got["ticket"], got["output"]) == (ticket, output)
 
 
@@ -1721,7 +1722,7 @@ def test_planted_line_of_another_ticket_does_not_block_delete(ws, rec, run, monk
 
     for n in (1, 2):  # B's own detail is untouched and still readable through B's own lines
         line = _own_line(ws, RUN_C, n)
-        got = record.read_detail(ws, RUN_C, Path(line["detail"]).stem, ticket=b).unwrap()
+        got = record.read_detail(ws, RUN_C, Path(line["detail"]).stem, line_id=line["id"], ticket=b).unwrap()
         assert (got["ticket"], got["output"]) == (b, "x" * 2000)
     code, out, _ = run("record", "query", "--run", RUN_C, "--detail", f"toolu_{RUN_C[2:]}2", "--json")
     assert code == 0 and json.loads(out)["output"] == "x" * 2000

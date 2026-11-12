@@ -1407,14 +1407,18 @@
     "via": "hook",
     "id": "toolu_01X",
     "run": "r_8k2m01",
-    "files": ["src/app.py"]
+    "files": [
+     "src/app.py"
+    ]
    },
    "stored": {
     "kind": "step",
     "via": "hook",
     "id": "toolu_01X",
     "run": "r_8k2m01",
-    "files": ["src/app.py"]
+    "files": [
+     "src/app.py"
+    ]
    }
   },
   {
@@ -1609,69 +1613,546 @@
  ],
  "files_about": "activity.md, Files. files: the event's `files` on the example `base`; schema: valid against activity.schema.json; stored: what the writer keeps (null = no files field; bad entries dropped, the line kept). NFC is checked by the writer, not the schema.",
  "files": [
-  {"name": "read one file", "base": "valid-step-started", "files": ["report-2025-11.pdf"], "schema": true, "stored": ["report-2025-11.pdf"]},
-  {"name": "edit two files", "base": "valid-step-hook", "files": ["src/app.py", "tests/test_app.py"], "schema": true, "stored": ["src/app.py", "tests/test_app.py"]},
-  {"name": "run command derived", "base": "valid-step-started", "files": ["out/invoices.csv", "scripts/export.sh", "data/2025-11/raw data.csv"], "schema": true, "stored": ["out/invoices.csv", "scripts/export.sh", "data/2025-11/raw data.csv"]},
-  {"name": "empty list", "base": "valid-step-started", "files": [], "schema": true, "stored": []},
-  {"name": "eight entries", "base": "valid-step-started", "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"], "schema": true, "stored": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"]},
-  {"name": "260 characters", "base": "valid-step-started", "files": ["d/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567"], "schema": true, "stored": ["d/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567"]},
-  {"name": "dots in names", "base": "valid-step-started", "files": [".github/workflows/ci.yml", "a..b/c.d", "..hidden"], "schema": true, "stored": [".github/workflows/ci.yml", "a..b/c.d", "..hidden"]},
-  {"name": "unicode nfc", "base": "valid-step-started", "files": ["docs/\u00dcbersicht.md"], "schema": true, "stored": ["docs/\u00dcbersicht.md"]},
-  {"name": "absolute", "base": "valid-step-started", "files": ["/etc/passwd"], "schema": false, "stored": []},
-  {"name": "dot dot first", "base": "valid-step-started", "files": ["../secret.txt"], "schema": false, "stored": []},
-  {"name": "dot dot inside", "base": "valid-step-started", "files": ["src/../../x"], "schema": false, "stored": []},
-  {"name": "dot dot last", "base": "valid-step-started", "files": ["src/.."], "schema": false, "stored": []},
-  {"name": "backslash", "base": "valid-step-started", "files": ["src\\app.py"], "schema": false, "stored": []},
-  {"name": "drive letter", "base": "valid-step-started", "files": ["C:/Users/x.txt"], "schema": false, "stored": []},
-  {"name": "unc backslash", "base": "valid-step-started", "files": ["\\\\server\\share\\x"], "schema": false, "stored": []},
-  {"name": "unc slashes", "base": "valid-step-started", "files": ["//server/share/x"], "schema": false, "stored": []},
-  {"name": "nine entries", "base": "valid-step-started", "files": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9"], "schema": false, "stored": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"]},
-  {"name": "261 characters", "base": "valid-step-started", "files": ["d/0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"], "schema": false, "stored": []},
-  {"name": "control character", "base": "valid-step-started", "files": ["a\tb.txt"], "schema": false, "stored": []},
-  {"name": "nul", "base": "valid-step-started", "files": ["a\u0000b"], "schema": false, "stored": []},
-  {"name": "delete character", "base": "valid-step-started", "files": ["a\u007fb"], "schema": false, "stored": []},
-  {"name": "empty string", "base": "valid-step-started", "files": [""], "schema": false, "stored": []},
-  {"name": "not a string", "base": "valid-step-started", "files": [42, null], "schema": false, "stored": []},
-  {"name": "bad entries dropped, good kept", "base": "valid-step-started", "files": ["src/ok.py", "/abs/x", "../y", "docs/fine.md"], "schema": false, "stored": ["src/ok.py", "docs/fine.md"]},
-  {"name": "not nfc", "base": "valid-step-started", "files": ["docs/U\u0308bersicht.md"], "schema": true, "stored": []},
-  {"name": "not a list", "base": "valid-step-started", "files": "src/app.py", "schema": false, "stored": null},
-  {"name": "on a run.state", "base": "valid-run-state-say", "files": ["src/app.py"], "schema": false, "stored": null},
-  {"name": "on a task.done", "base": "valid-task-done", "files": [], "schema": false, "stored": null},
-  {"name": "bidi override", "base": "valid-step-started", "files": ["src/\u202etxt.exe"], "schema": false, "stored": []},
-  {"name": "bidi isolate", "base": "valid-step-started", "files": ["a\u2066b"], "schema": false, "stored": []},
-  {"name": "zero width space", "base": "valid-step-started", "files": ["a\u200bb.py"], "schema": false, "stored": []},
-  {"name": "byte order mark", "base": "valid-step-started", "files": ["\ufeffa.py"], "schema": false, "stored": []},
-  {"name": "c1 control", "base": "valid-step-started", "files": ["a\u0085b"], "schema": false, "stored": []},
-  {"name": "line separator", "base": "valid-step-started", "files": ["a\u2028b"], "schema": false, "stored": []},
-  {"name": "home shortcut", "base": "valid-step-started", "files": ["~/x.txt"], "schema": false, "stored": []},
-  {"name": "shell variable", "base": "valid-step-started", "files": ["$HOME/x.txt"], "schema": false, "stored": []},
-  {"name": "url scheme", "base": "valid-step-started", "files": ["file:///etc/passwd"], "schema": false, "stored": []},
-  {"name": "colon after a folder is fine", "base": "valid-step-started", "files": ["notes/a:b.txt"], "schema": true, "stored": ["notes/a:b.txt"]}
+  {
+   "name": "read one file",
+   "base": "valid-step-started",
+   "files": [
+    "report-2025-11.pdf"
+   ],
+   "schema": true,
+   "stored": [
+    "report-2025-11.pdf"
+   ]
+  },
+  {
+   "name": "edit two files",
+   "base": "valid-step-hook",
+   "files": [
+    "src/app.py",
+    "tests/test_app.py"
+   ],
+   "schema": true,
+   "stored": [
+    "src/app.py",
+    "tests/test_app.py"
+   ]
+  },
+  {
+   "name": "run command derived",
+   "base": "valid-step-started",
+   "files": [
+    "out/invoices.csv",
+    "scripts/export.sh",
+    "data/2025-11/raw data.csv"
+   ],
+   "schema": true,
+   "stored": [
+    "out/invoices.csv",
+    "scripts/export.sh",
+    "data/2025-11/raw data.csv"
+   ]
+  },
+  {
+   "name": "empty list",
+   "base": "valid-step-started",
+   "files": [],
+   "schema": true,
+   "stored": []
+  },
+  {
+   "name": "eight entries",
+   "base": "valid-step-started",
+   "files": [
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8"
+   ],
+   "schema": true,
+   "stored": [
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8"
+   ]
+  },
+  {
+   "name": "260 characters",
+   "base": "valid-step-started",
+   "files": [
+    "d/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567"
+   ],
+   "schema": true,
+   "stored": [
+    "d/012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567"
+   ]
+  },
+  {
+   "name": "dots in names",
+   "base": "valid-step-started",
+   "files": [
+    ".github/workflows/ci.yml",
+    "a..b/c.d",
+    "..hidden"
+   ],
+   "schema": true,
+   "stored": [
+    ".github/workflows/ci.yml",
+    "a..b/c.d",
+    "..hidden"
+   ]
+  },
+  {
+   "name": "unicode nfc",
+   "base": "valid-step-started",
+   "files": [
+    "docs/Übersicht.md"
+   ],
+   "schema": true,
+   "stored": [
+    "docs/Übersicht.md"
+   ]
+  },
+  {
+   "name": "absolute",
+   "base": "valid-step-started",
+   "files": [
+    "/etc/passwd"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "dot dot first",
+   "base": "valid-step-started",
+   "files": [
+    "../secret.txt"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "dot dot inside",
+   "base": "valid-step-started",
+   "files": [
+    "src/../../x"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "dot dot last",
+   "base": "valid-step-started",
+   "files": [
+    "src/.."
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "backslash",
+   "base": "valid-step-started",
+   "files": [
+    "src\\app.py"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "drive letter",
+   "base": "valid-step-started",
+   "files": [
+    "C:/Users/x.txt"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "unc backslash",
+   "base": "valid-step-started",
+   "files": [
+    "\\\\server\\share\\x"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "unc slashes",
+   "base": "valid-step-started",
+   "files": [
+    "//server/share/x"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "nine entries",
+   "base": "valid-step-started",
+   "files": [
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9"
+   ],
+   "schema": false,
+   "stored": [
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8"
+   ]
+  },
+  {
+   "name": "261 characters",
+   "base": "valid-step-started",
+   "files": [
+    "d/0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "control character",
+   "base": "valid-step-started",
+   "files": [
+    "a\tb.txt"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "nul",
+   "base": "valid-step-started",
+   "files": [
+    "a\u0000b"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "delete character",
+   "base": "valid-step-started",
+   "files": [
+    "ab"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "empty string",
+   "base": "valid-step-started",
+   "files": [
+    ""
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "not a string",
+   "base": "valid-step-started",
+   "files": [
+    42,
+    null
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "bad entries dropped, good kept",
+   "base": "valid-step-started",
+   "files": [
+    "src/ok.py",
+    "/abs/x",
+    "../y",
+    "docs/fine.md"
+   ],
+   "schema": false,
+   "stored": [
+    "src/ok.py",
+    "docs/fine.md"
+   ]
+  },
+  {
+   "name": "not nfc",
+   "base": "valid-step-started",
+   "files": [
+    "docs/Übersicht.md"
+   ],
+   "schema": true,
+   "stored": []
+  },
+  {
+   "name": "not a list",
+   "base": "valid-step-started",
+   "files": "src/app.py",
+   "schema": false,
+   "stored": null
+  },
+  {
+   "name": "on a run.state",
+   "base": "valid-run-state-say",
+   "files": [
+    "src/app.py"
+   ],
+   "schema": false,
+   "stored": null
+  },
+  {
+   "name": "on a task.done",
+   "base": "valid-task-done",
+   "files": [],
+   "schema": false,
+   "stored": null
+  },
+  {
+   "name": "bidi override",
+   "base": "valid-step-started",
+   "files": [
+    "src/‮txt.exe"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "bidi isolate",
+   "base": "valid-step-started",
+   "files": [
+    "a⁦b"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "zero width space",
+   "base": "valid-step-started",
+   "files": [
+    "a​b.py"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "byte order mark",
+   "base": "valid-step-started",
+   "files": [
+    "﻿a.py"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "c1 control",
+   "base": "valid-step-started",
+   "files": [
+    "ab"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "line separator",
+   "base": "valid-step-started",
+   "files": [
+    "a b"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "home shortcut",
+   "base": "valid-step-started",
+   "files": [
+    "~/x.txt"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "shell variable",
+   "base": "valid-step-started",
+   "files": [
+    "$HOME/x.txt"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "url scheme",
+   "base": "valid-step-started",
+   "files": [
+    "file:///etc/passwd"
+   ],
+   "schema": false,
+   "stored": []
+  },
+  {
+   "name": "colon after a folder is fine",
+   "base": "valid-step-started",
+   "files": [
+    "notes/a:b.txt"
+   ],
+   "schema": true,
+   "stored": [
+    "notes/a:b.txt"
+   ]
+  }
  ],
  "files_normalise": [
-  {"name": "inside", "root": "/work/proj", "path": "/work/proj/notes.txt", "file": "notes.txt"},
-  {"name": "root slash refused", "root": "/", "path": "/etc/passwd", "file": null},
-  {"name": "home shortcut", "root": "/work/proj", "path": "~/x.txt", "file": null},
-  {"name": "url scheme", "root": "/work/proj", "path": "file:///etc/passwd", "file": null},
-  {"name": "dot segment", "root": "/work/proj", "path": "/work/proj/src/./app.py", "file": "src/app.py"},
-  {"name": "dot dot inside", "root": "/work/proj", "path": "/work/proj/src/../README.md", "file": "README.md"},
-  {"name": "root with slash", "root": "/work/proj/", "path": "/work/proj/src/app.py", "file": "src/app.py"},
-  {"name": "folder", "root": "/work/proj", "path": "/work/proj/src/", "file": "src"},
-  {"name": "escapes", "root": "/work/proj", "path": "/work/proj/../other/x.py", "file": null},
-  {"name": "sibling prefix", "root": "/work/proj", "path": "/work/projx/a.py", "file": null},
-  {"name": "outside", "root": "/work/proj", "path": "/etc/passwd", "file": null},
-  {"name": "the root itself", "root": "/work/proj", "path": "/work/proj", "file": null},
-  {"name": "the root with slash", "root": "/work/proj", "path": "/work/proj/", "file": null},
-  {"name": "relative", "root": "/work/proj", "path": "src/app.py", "file": "src/app.py"},
-  {"name": "relative dot", "root": "/work/proj", "path": "./src/app.py", "file": "src/app.py"},
-  {"name": "relative escapes", "root": "/work/proj", "path": "../x.py", "file": null},
-  {"name": "backslash", "root": "/work/proj", "path": "src\\app.py", "file": null},
-  {"name": "made nfc", "root": "/work/proj", "path": "/work/proj/docs/U\u0308bersicht.md", "file": "docs/\u00dcbersicht.md"},
-  {"name": "control character", "root": "/work/proj", "path": "/work/proj/a\nb.py", "file": null},
-  {"name": "empty", "root": "/work/proj", "path": "", "file": null},
-  {"name": "not a string", "root": "/work/proj", "path": 7, "file": null},
-  {"name": "absolute without a root", "root": null, "path": "/work/proj/notes.txt", "file": null},
-  {"name": "relative without a root", "root": null, "path": "src/a.py", "file": "src/a.py"}
+  {
+   "name": "inside",
+   "root": "/work/proj",
+   "path": "/work/proj/notes.txt",
+   "file": "notes.txt"
+  },
+  {
+   "name": "root slash refused",
+   "root": "/",
+   "path": "/etc/passwd",
+   "file": null
+  },
+  {
+   "name": "home shortcut",
+   "root": "/work/proj",
+   "path": "~/x.txt",
+   "file": null
+  },
+  {
+   "name": "url scheme",
+   "root": "/work/proj",
+   "path": "file:///etc/passwd",
+   "file": null
+  },
+  {
+   "name": "dot segment",
+   "root": "/work/proj",
+   "path": "/work/proj/src/./app.py",
+   "file": "src/app.py"
+  },
+  {
+   "name": "dot dot inside",
+   "root": "/work/proj",
+   "path": "/work/proj/src/../README.md",
+   "file": "README.md"
+  },
+  {
+   "name": "root with slash",
+   "root": "/work/proj/",
+   "path": "/work/proj/src/app.py",
+   "file": "src/app.py"
+  },
+  {
+   "name": "folder",
+   "root": "/work/proj",
+   "path": "/work/proj/src/",
+   "file": "src"
+  },
+  {
+   "name": "escapes",
+   "root": "/work/proj",
+   "path": "/work/proj/../other/x.py",
+   "file": null
+  },
+  {
+   "name": "sibling prefix",
+   "root": "/work/proj",
+   "path": "/work/projx/a.py",
+   "file": null
+  },
+  {
+   "name": "outside",
+   "root": "/work/proj",
+   "path": "/etc/passwd",
+   "file": null
+  },
+  {
+   "name": "the root itself",
+   "root": "/work/proj",
+   "path": "/work/proj",
+   "file": null
+  },
+  {
+   "name": "the root with slash",
+   "root": "/work/proj",
+   "path": "/work/proj/",
+   "file": null
+  },
+  {
+   "name": "relative",
+   "root": "/work/proj",
+   "path": "src/app.py",
+   "file": "src/app.py"
+  },
+  {
+   "name": "relative dot",
+   "root": "/work/proj",
+   "path": "./src/app.py",
+   "file": "src/app.py"
+  },
+  {
+   "name": "relative escapes",
+   "root": "/work/proj",
+   "path": "../x.py",
+   "file": null
+  },
+  {
+   "name": "backslash",
+   "root": "/work/proj",
+   "path": "src\\app.py",
+   "file": null
+  },
+  {
+   "name": "made nfc",
+   "root": "/work/proj",
+   "path": "/work/proj/docs/Übersicht.md",
+   "file": "docs/Übersicht.md"
+  },
+  {
+   "name": "control character",
+   "root": "/work/proj",
+   "path": "/work/proj/a\nb.py",
+   "file": null
+  },
+  {
+   "name": "empty",
+   "root": "/work/proj",
+   "path": "",
+   "file": null
+  },
+  {
+   "name": "not a string",
+   "root": "/work/proj",
+   "path": 7,
+   "file": null
+  },
+  {
+   "name": "absolute without a root",
+   "root": null,
+   "path": "/work/proj/notes.txt",
+   "file": null
+  },
+  {
+   "name": "relative without a root",
+   "root": null,
+   "path": "src/a.py",
+   "file": "src/a.py"
+  }
  ],
  "record_auth": {
   "about": "Record MAC (activity.md, Authenticated record). Keys are fixed TEST values, never real. `lines` are the exact bytes of each file line (newline included) as hex; a case's file is their concatenation. expect.shown lists the seq of the events a reader shows. Replayed by contracts/validate.py (stdlib hmac only) and workspace/tests/test_record_auth.py (orch.record_auth).",
@@ -1920,7 +2401,10 @@
      "changed": 2,
      "removed": 0,
      "reason": "old_key"
-    }
+    },
+    "old_kids": [
+     "bc5a268b"
+    ]
    },
    {
     "name": "duplicate key in the body",
@@ -1974,7 +2458,10 @@
      "changed": 2,
      "removed": 0,
      "reason": "old_key"
-    }
+    },
+    "old_kids": [
+     "bc5a268b"
+    ]
    },
    {
     "name": "planted unknown key id after a verified line",
@@ -2008,7 +2495,10 @@
      "changed": 1,
      "removed": 0,
      "reason": "old_key"
-    }
+    },
+    "old_kids": [
+     "00000000"
+    ]
    },
    {
     "name": "run file deleted, head ahead",
@@ -2060,6 +2550,87 @@
      "changed": 0,
      "removed": 2,
      "reason": "removed"
+    }
+   },
+   {
+    "name": "old key line, then a current line that is not seq 1 (a gap): the old line is planted",
+    "lines": [
+     "7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a226263356132363862222c2270223a222d3757472d664b3376504b42337143692d6d5567764b4b674844796f306847426b776d484d72552d355955222c226d223a222d5643354366696c6d6c30664b7231324e58707070626a43566256376d6831514c726756464b75675a3873227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d222c226d223a22335269316b5271744b457152324a49596562526b3566706a4c615473413175594e64394e79327957645863227d7d0a"
+    ],
+    "head": null,
+    "expect": {
+     "shown": [
+      2
+     ],
+     "changed": 1,
+     "removed": 1,
+     "reason": "content"
+    }
+   },
+   {
+    "name": "old key line, no current line verifies, head of the current key at seq 2: planted",
+    "lines": [
+     "7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a226263356132363862222c2270223a222d3757472d664b3376504b42337143692d6d5567764b4b674844796f306847426b776d484d72552d355955222c226d223a222d5643354366696c6d6c30664b7231324e58707070626a43566256376d6831514c726756464b75675a3873227d7d0a"
+    ],
+    "head": {
+     "kid": "741d36c4",
+     "seq": 2
+    },
+    "expect": {
+     "shown": [],
+     "changed": 1,
+     "removed": 2,
+     "reason": "content"
+    }
+   },
+   {
+    "name": "key rotation after a legacy prefix: the unsigned old line is changed, the old-key lines old_key, the new segment shown",
+    "lines": [
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a226263356132363862222c2270223a222d3757472d664b3376504b42337143692d6d5567764b4b674844796f306847426b776d484d72552d355955222c226d223a222d5643354366696c6d6c30664b7231324e58707070626a43566256376d6831514c726756464b75675a3873227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a226263356132363862222c2270223a222d5643354366696c6d6c30664b7231324e58707070626a43566256376d6831514c726756464b75675a3873222c226d223a2264776370493275574952796d4c4448686a6a49505969664564676532416c735870365478614259314a6d55227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d222c226d223a22335269316b5271744b457152324a49596562526b3566706a4c615473413175594e64394e79327957645863227d7d0a"
+    ],
+    "head": {
+     "kid": "741d36c4",
+     "seq": 2
+    },
+    "expect": {
+     "shown": [
+      1,
+      2
+     ],
+     "changed": 3,
+     "removed": 0,
+     "reason": "content"
+    }
+   },
+   {
+    "name": "a second foreign key id is planted when only the recorded old key id is history",
+    "lines": [
+     "7b2276223a312c226964223a22746f6f6c755f706c616e746564222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a22706c616e746564222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223030303030303030222c2270223a2241414141414141414141414141414141414141414141414141414141414141414141414141414141414141222c226d223a2242424242424242424242424242424242424242424242424242424242424242424242424242424242424242227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a226263356132363862222c2270223a222d3757472d664b3376504b42337143692d6d5567764b4b674844796f306847426b776d484d72552d355955222c226d223a222d5643354366696c6d6c30664b7231324e58707070626a43566256376d6831514c726756464b75675a3873227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a226263356132363862222c2270223a222d5643354366696c6d6c30664b7231324e58707070626a43566256376d6831514c726756464b75675a3873222c226d223a2264776370493275574952796d4c4448686a6a49505969664564676532416c735870365478614259314a6d55227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d222c226d223a22335269316b5271744b457152324a49596562526b3566706a4c615473413175594e64394e79327957645863227d7d0a"
+    ],
+    "head": {
+     "kid": "741d36c4",
+     "seq": 2
+    },
+    "old_kids": [
+     "bc5a268b"
+    ],
+    "expect": {
+     "shown": [
+      1,
+      2
+     ],
+     "changed": 3,
+     "removed": 0,
+     "reason": "content"
     }
    }
   ],
@@ -2178,6 +2749,26 @@
     "drained": [],
     "floor": "00000000000000000101",
     "drain": false
+   },
+   {
+    "name": "name proof valid",
+    "file": "01794480000123456789_2964f4ec2c39c50d3d0c3b1d7a283b91.json",
+    "name_ok": true
+   },
+   {
+    "name": "name proof wrong",
+    "file": "01794480000123456789_0964f4ec2c39c50d3d0c3b1d7a283b91.json",
+    "name_ok": false
+   },
+   {
+    "name": "name proof of another run",
+    "file": "01794480000123456789_895387902eae68a422888c74e67f547a.json",
+    "name_ok": false
+   },
+   {
+    "name": "name proof of another time",
+    "file": "01794480000123456790_2964f4ec2c39c50d3d0c3b1d7a283b91.json",
+    "name_ok": false
    }
   ],
   "job_streams": [
@@ -2302,6 +2893,138 @@
      "hm": "xnL6laRB4qiEqBgKll-uq_OHAApqRx5gl7FH8l8eHaQ"
     },
     "ok": false
+   }
+  ],
+  "legacy": [
+   {
+    "name": "no sealed line and no head: a legacy run",
+    "lines": [
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a"
+    ],
+    "head": "absent",
+    "expect": {
+     "mode": "legacy",
+     "unchecked": 2
+    }
+   },
+   {
+    "name": "sealed lines: verified as a whole",
+    "lines": [
+     "7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d222c226d223a22335269316b5271744b457152324a49596562526b3566706a4c615473413175594e64394e79327957645863227d7d0a"
+    ],
+    "head": "absent",
+    "expect": {
+     "mode": "sealed",
+     "unchecked": 0
+    }
+   },
+   {
+    "name": "unsigned lines and a head (stripped auth): never legacy",
+    "lines": [
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a"
+    ],
+    "head": "present",
+    "expect": {
+     "mode": "sealed",
+     "unchecked": 0
+    }
+   },
+   {
+    "name": "unsigned lines before a sealed line: sealed, the unsigned ones are changed",
+    "lines": [
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a",
+     "7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a"
+    ],
+    "head": "absent",
+    "expect": {
+     "mode": "sealed",
+     "unchecked": 0
+    }
+   },
+   {
+    "name": "unknown head state: never legacy",
+    "lines": [
+     "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a"
+    ],
+    "head": "unknown",
+    "expect": {
+     "mode": "unverified",
+     "unchecked": 0
+    }
+   }
+  ],
+  "legacy_prefix": [
+   {
+    "name": "the file starts with the recorded prefix",
+    "raw_hex": "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2277223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+    "head": {
+     "legacy_lines": 2,
+     "legacy_hash": "49474f121ddc8e2802186064caec6f10be173f1f0a5c3443bf7afcd8d16852d2"
+    },
+    "expect": {
+     "prefix_lines": 2,
+     "base": 2
+    }
+   },
+   {
+    "name": "a line prepended: the prefix does not match",
+    "raw_hex": "7b2277223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2277223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+    "head": {
+     "legacy_lines": 2,
+     "legacy_hash": "49474f121ddc8e2802186064caec6f10be173f1f0a5c3443bf7afcd8d16852d2"
+    },
+    "expect": {
+     "prefix_lines": 0,
+     "base": 2
+    }
+   },
+   {
+    "name": "a line edited: the prefix does not match",
+    "raw_hex": "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2277223a322c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+    "head": {
+     "legacy_lines": 2,
+     "legacy_hash": "49474f121ddc8e2802186064caec6f10be173f1f0a5c3443bf7afcd8d16852d2"
+    },
+    "expect": {
+     "prefix_lines": 0,
+     "base": 2
+    }
+   },
+   {
+    "name": "a line added behind the prefix is not part of it",
+    "raw_hex": "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2277223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+    "head": {
+     "legacy_lines": 2,
+     "legacy_hash": "49474f121ddc8e2802186064caec6f10be173f1f0a5c3443bf7afcd8d16852d2"
+    },
+    "expect": {
+     "prefix_lines": 2,
+     "base": 2
+    }
+   },
+   {
+    "name": "no legacy fields in the head",
+    "raw_hex": "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2277223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+    "head": {},
+    "expect": {
+     "prefix_lines": 0,
+     "base": 0
+    }
+   },
+   {
+    "name": "a sealed line inside the counted prefix",
+    "raw_hex": "7b2276223a312c226964223a22725f386b326d30313a32222c22736571223a322c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30325a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c227d0a7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a7b2276223a312c226964223a22725f386b326d30313a31222c22736571223a312c2272756e223a22725f386b326d3031222c2273657373696f6e223a6e756c6c2c226167656e74223a226d61696e222c22706172656e74223a6e756c6c2c226174223a22323032362d31312d31365430393a31323a30315a222c227469636b6574223a22745f696e76376332222c226861726e657373223a22636c61756465222c22766961223a226c6f67222c226b696e64223a2273746570222c2274657874223a2278222c2275736564223a7b226b696e64223a22746f6f6c222c226e616d65223a2252656164222c22616374696f6e223a6e756c6c2c22736f75726365223a226275696c74696e222c2276657273696f6e223a6e756c6c7d2c226f7574636f6d65223a7b226f6b223a747275652c226572726f72223a6e756c6c2c226d73223a357d2c2264657461696c223a6e756c6c2c22636f766572616765223a2266756c6c222c2261757468223a7b226b223a223734316433366334222c2270223a222d4e6576376e713347396a4d3855437139545f4f74387a557255584d386e6f4d4f32796b4e38414d50726b222c226d223a22484948416d5f32756f4944554d37466247367644473655584f385f697733694574533034484e754631664d227d7d0a",
+    "head": {
+     "legacy_lines": 2,
+     "legacy_hash": "a32b2a4cfe697d630d79ddd3945a53c219747088cacef9fa3f57227b8d841034"
+    },
+    "expect": {
+     "prefix_lines": 0,
+     "base": 2
+    }
    }
   ]
  }

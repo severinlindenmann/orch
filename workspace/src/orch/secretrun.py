@@ -137,9 +137,46 @@ def _write_record(root, ev):
     line = _record_event(root, ev)
     if _run_ids() is None:  # a script cannot grow the unattributed run without bound
         read = record.read_run(root, line["run"], seen_by="writer")
-        if read.status == "ok" and len(read.value) >= OUTSIDE_DAY_CAP:
-            raise Refused("Refused: too many key uses outside a run today.")
+        # verified lines only (a planted line can neither raise nor lower it); a legacy run is not counted
+        own = [e for e in read.value or [] if record.is_sealed(e)]
+        fresh = read.status == "unavailable" and read.reason == "missing"  # nothing recorded yet today
+        # a file with planted junk and no verified line counts zero verified lines (a junk line must not stop
+        # key uses for the day), but only while the key and the guarded home can be looked at
+        junk = (
+            read.status == "tampered"
+            and read.reason in ("unverified", "content", "removed", "old_key")
+            and hp.record_key(root) is not None
+            and hp.record_head_state(root, line["run"]) != "unknown"
+        )
+        # anything else that is not a clean read counts as the cap reached (fail closed)
+        # what orch's own chain head says was written counts too: cutting or deleting the file cannot reset it
+        head, _ = hp.record_head_read(root, line["run"])
+        seen = max(len(own), _head_lines(head))
+        if (read.status != "ok" and not fresh and not junk) or seen >= OUTSIDE_DAY_CAP:
+            raise Refused(_TOO_MANY)
+
+        def admit(lines, head):  # checked again under the run lock, where the line is written: atomic
+            own = [e for e in lines if record.is_sealed(e)]
+            if max(len(own), _head_lines(head)) >= OUTSIDE_DAY_CAP:
+                raise Refused(_TOO_MANY)
+            return True
+
+        try:
+            record_writer(root).append(line, admit=admit, spool=False)
+        except record.RecordBusy:
+            raise Refused("Refused: too many key uses outside a run right now (busy).") from None
+        return
     record_writer(root).append(line)
+
+
+_TOO_MANY = "Refused: too many key uses outside a run today."
+
+
+def _head_lines(head):
+    """Lines orch's chain head says it sealed: its seq without the lines it found there before (legacy)."""
+    if not head:
+        return 0
+    return max(0, int(head["seq"]) - int(head.get("legacy_lines") or 0))
 
 
 def record_writer(root):
