@@ -16,9 +16,9 @@ def run(root, *args):
 def test_settings(root, capsys):
     assert run(root, "status") == 0
     assert json.loads(capsys.readouterr().out)["mode"] == "off"
-    assert run(root, "set", "--mode", "local", "--interval", "5") == 0
+    assert run(root, "set", "--mode", "local") == 0
     settings = root / ".orch/run/sync/settings.json"
-    assert json.loads(settings.read_text()) == {"mode": "local", "interval": 5, "kind": "private"}
+    assert json.loads(settings.read_text()) == {"mode": "local", "interval": 15, "kind": "private"}
     (settings.parent / "state.json").write_text('{"last_error":"offline"}')
     capsys.readouterr()
     assert run(root, "status") == 0
@@ -97,12 +97,16 @@ def test_start_needs_the_addon_on_here(root, monkeypatch, capsys):
     from orch_sync import orchcli, service
 
     assert run(root, "set", "--mode", "local") == 0
+    monkeypatch.setattr(service, "start", lambda r: pytest.fail("not started"))
+    monkeypatch.setattr(orchcli, "is_active", lambda r: False)
+    capsys.readouterr()
+    assert run(root, "start") == 2
+    assert "orch addon add sync" in json.loads(capsys.readouterr().out)["error"]
+    monkeypatch.setattr(orchcli, "is_active", lambda r: None)  # orch did not answer: say so, not "it is off"
+    assert run(root, "start") == 2
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error.startswith("Could not check whether the sync add-on is on here") and "addon add" not in error
     monkeypatch.setattr(service, "start", lambda r: 4242)
-    for answer in (False, None):
-        monkeypatch.setattr(orchcli, "is_active", lambda r, a=answer: a)
-        capsys.readouterr()
-        assert run(root, "start") == 2
-        assert "orch addon add sync" in json.loads(capsys.readouterr().out)["error"]
     monkeypatch.setattr(orchcli, "is_active", lambda r: True)
     assert run(root, "start") == 0
     assert json.loads(capsys.readouterr().out) == {"running": True, "pid": 4242}
@@ -165,6 +169,39 @@ def test_now_wakes_a_running_loop(root, monkeypatch, capsys):
     assert (root / ".orch/run/sync/wake").exists()
 
 
+def test_direct_now_clears_an_old_loop_error(root, monkeypatch, capsys):
+    from orch_sync import step
+
+    assert run(root, "set", "--mode", "local") == 0
+    (root / ".orch/run/sync/loop.json").write_text(json.dumps({"last_error": "Sync stopped: KeyError"}))
+    monkeypatch.setattr(step, "run_once", lambda root, reason: {"last_error": None})
+    assert run(root, "now") == 0
+    capsys.readouterr()
+    assert run(root, "status") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["last_error"] is None and data["last_try"]
+
+
+def test_interval_is_refused_in_local_mode(root, capsys):
+    assert run(root, "set", "--mode", "local", "--interval", "60") == 2
+    assert "Local sync runs every 5 minutes at most" in json.loads(capsys.readouterr().out)["error"]
+    assert not (root / ".orch/run/sync/settings.json").exists()
+    assert run(root, "set", "--mode", "local") == 0
+    assert run(root, "set", "--interval", "5") == 2  # still local
+    assert json.loads((root / ".orch/run/sync/settings.json").read_text())["interval"] == 15
+
+
+def test_set_summary_never_shows_credentials(root, monkeypatch, capsys):
+    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
+    (root / ".orch/run/sync").mkdir(parents=True)
+    (root / ".orch/run/sync/settings.json").write_text(
+        json.dumps({"mode": "local", "remote": "https://me:pw@host/repo", "interval": 15, "kind": "private"}))
+    assert cli.main(["--dir", str(root), "set", "--mode", "remote"]) == 0
+    out = capsys.readouterr()
+    assert out.out.strip() == "Sync: remote, every 15 minutes, to https://host/repo"
+    assert "me:pw" not in out.out + out.err
+
+
 def test_turning_on_shows_what_where_how_often(root, capsys):
     assert cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0
     out = capsys.readouterr()
@@ -199,7 +236,7 @@ def test_set_plain_words(root, monkeypatch, capsys):
             ["--mode", "remote", "--remote", "https://host/repo"],
             "Sync: remote, every 15 minutes, to https://host/repo",
         ),
-        (["--mode", "local", "--interval", "5"], "Sync: local, every 5 minutes"),
+        (["--mode", "local"], "Sync: local, every 5 minutes"),
         (["--mode", "off"], "Sync is off"),
     ):
         assert cli.main(["--dir", str(root), "set", *args]) == 0

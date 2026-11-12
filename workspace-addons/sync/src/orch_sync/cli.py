@@ -11,8 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 from orch.errors import Refused as CoreRefused
 
 from . import repo
-
-DEFAULTS = {"mode": "off", "interval": 15, "kind": "private"}
+from .settings import DEFAULTS, minutes
 
 
 def remote_allowed():
@@ -35,8 +34,6 @@ def safe_address(url):
 
 def consent(settings):
     """What turning sync on means, in plain words: what, where, how often, and that it can be turned off."""
-    from .loop import minutes
-
     if settings["mode"] == "local":
         where, often = "on this computer only; nothing leaves it", "every 5 minutes at most, when something changed"
     else:
@@ -58,20 +55,32 @@ def status_line(s):
 
 
 def _run_loop(root):
-    """`orch sync run`: the loop in the foreground; `start` runs it in the background."""
+    """`orch sync run`: the loop in the foreground; `start` runs it in the background. One loop per folder: it holds
+    the loop lock for its whole life, and a second loop ends at once. Every end leaves one line (loop.log)."""
     import signal
+    import threading
+    import traceback
 
     from . import loop, service
 
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    nonce = service.announce(root)  # background run: record pid + start time in .orch/run/sync/
+    held = service.announce(root)  # the lock, then pid + start time in .orch/run/sync/
+    if held is None:
+        print("sync: another sync loop already runs for this folder; this one ends.", flush=True)
+        return 0
+    lp, code, why = loop.Loop(root), 0, "interrupted"
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, lambda *_: lp.stop())  # finish the current pass, then end
     try:
-        loop.Loop(root).run_forever()
+        why = lp.run_forever()
     except KeyboardInterrupt:
         pass
+    except Exception:  # noqa: BLE001 - logged with its traceback, never silent
+        traceback.print_exc(file=sys.stdout)
+        code, why = 2, "an error (traceback above)"
     finally:
-        service.forget(root, nonce)
-    return 0
+        service.forget(root, held)
+        print(f"sync: the loop ended: {why}", flush=True)
+    return code
 
 
 def main(argv=None):
@@ -134,6 +143,8 @@ def main(argv=None):
             if args.interval is not None and args.interval not in (5, 15, 60):
                 raise repo.Refused("Sync can run every 5, 15 or 60 minutes")
             asked, args.mode = args.mode, args.mode or settings["mode"]
+            if args.mode == "local" and args.interval is not None:
+                raise repo.Refused("Local sync runs every 5 minutes at most. --interval is only for remote sync")
             if args.kind != "private":
                 raise repo.Refused("Team sync is not available yet")
             if (args.mode == "remote" or args.remote is not None) and not remote_allowed():
@@ -199,6 +210,9 @@ def main(argv=None):
                 return 0
             loop.note(root, last_try=loop.iso(time.time()))
             result = run_once(root, "manual")
+            # status shows the loop's own error first: an old one must not outlive this pass (its error, if any,
+            # is in state.json now)
+            loop.note(root, last_error=None)
             print(json.dumps(result) if args.json else str(result))
             return 2 if result.get("last_error") else 0
         elif args.cmd == "status":
@@ -286,7 +300,10 @@ def main(argv=None):
 
             if settings["mode"] == "off":  # a normal state (orch start starts every add-on): quiet, not an error
                 result = {"running": False, "off": True, "message": "Sync is off here: nothing to start."}
-            elif orchcli.is_active(root) is not True:
+            elif (active := orchcli.is_active(root)) is None:
+                raise repo.Refused("Could not check whether the sync add-on is on here (orch did not answer). "
+                                   "Try again: orch sync start")
+            elif not active:
                 raise repo.Refused("The sync add-on is not on here. A person turns it on: orch addon add sync")
             else:
                 result = {"running": True, "pid": service.start(root)}
@@ -298,14 +315,12 @@ def main(argv=None):
             if res == "not verified":
                 result["note"] = "A file in .orch/run/sync/ names a process that is not the sync loop; nothing was stopped."
         if args.cmd == "set" and not args.json:
-            from .loop import minutes
-
             message = (
                 "Sync is off"
                 if settings["mode"] == "off"
                 else (
                     f"Sync: {settings['mode']}, every {minutes(settings)} minutes"
-                    + (f", to {settings['remote']}" if settings["mode"] == "remote" else "")
+                    + (f", to {safe_address(settings.get('remote') or '')}" if settings["mode"] == "remote" else "")
                 )
             )
             print(message)

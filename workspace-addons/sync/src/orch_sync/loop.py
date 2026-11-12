@@ -1,27 +1,21 @@
 """The background sync loop, the automation loop's shape: one step per interval, woken early by `orch sync now` or
-`orch sync set`. It ends by itself when the add-on is turned off here or sync is set to off.
+`orch sync set`. It ends by itself when the add-on is turned off here or sync is set to off, and after the current
+pass when it is asked to stop (SIGTERM or `orch sync stop`): never in the middle of a sync.
 
 Mode and interval come only from this machine's run/sync/settings.json (never synced, written by `orch sync set`)."""
 
 import threading
 import time
+import traceback
 from datetime import UTC, datetime
 
 from . import orchcli, repo, service
+from .settings import DEFAULTS, FILE, minutes
 
-LOCAL = 5  # minutes: local mode commits what changed, every 5 minutes at most
-INTERVALS = (5, 15, 60)  # minutes a remote sync may wait; anything else is 15
-DEFAULT = 15
-POLL = 2.0  # seconds: how often a waiting loop looks for a wake from another process
+POLL = 2.0  # seconds: how often a waiting loop looks for a wake or a stop request from another process
+RECHECK = 300.0  # seconds: while waiting, ask the core at most this often whether the add-on is still on here
 INFO = "run/sync/loop.json"  # last_try, next_run, last_error of the loop itself
 WAKE = "run/sync/wake"
-
-
-def minutes(settings):
-    if settings.get("mode") == "local":
-        return LOCAL
-    n = settings.get("interval")
-    return n if type(n) is int and n in INTERVALS else DEFAULT
 
 
 def iso(ts):
@@ -47,11 +41,43 @@ class Loop:
         self.clock = clock
         self.wake = threading.Event()
         self.failures = 0  # offline passes in a row
+        self.stopping = False
+        self.logged = None  # the last problem written to loop.log (not repeated while it lasts)
+
+    def stop(self):
+        """SIGTERM: finish the current pass, then end."""
+        self.stopping = True
+        self.wake.set()
+
+    def stop_asked(self):
+        if not self.stopping:
+            try:
+                self.stopping = repo.safe(self.root, service.STOP).is_file()  # `orch sync stop`, on every OS
+            except (OSError, ValueError):
+                pass
+        return self.stopping
 
     def settings(self):
-        from .cli import DEFAULTS
+        return DEFAULTS | service.read(self.root, FILE)  # unreadable = off
 
-        return DEFAULTS | service.read(self.root, "run/sync/settings.json")  # unreadable = off
+    def ended(self):
+        """Why the loop ends now (one plain line for loop.log), or None."""
+        if self.stop_asked():
+            return "stopped on request"
+        raw = service.read(self.root, FILE)
+        if not raw:
+            return "no readable sync settings here (counted as off)"
+        if (DEFAULTS | raw).get("mode") not in ("local", "remote"):
+            return "sync is set to off here"
+        if orchcli.is_active(self.root) is False:
+            return "the sync add-on is turned off here"
+        return None
+
+    def log(self, line, detail=""):
+        """One line (and a traceback) to loop.log; not again while the same problem repeats, so the log stays small."""
+        if line != self.logged:
+            self.logged = line
+            print(line + (f"\n{detail.rstrip()}" if detail else ""), flush=True)
 
     def delay(self, result, settings):
         """Seconds to the next pass. Offline: 1, 2, 4 ... minutes, never longer than the interval; reset on success."""
@@ -82,29 +108,36 @@ class Loop:
         return False
 
     def sleep(self, secs):
-        end = time.monotonic() + secs
-        while (left := end - time.monotonic()) > 0:
+        now = time.monotonic()
+        end, check = now + secs, now + RECHECK
+        while not self.stop_asked() and (left := end - time.monotonic()) > 0:
             if self.wake.wait(min(left, POLL)) or self.woken():
                 return
+            if time.monotonic() >= check:
+                check = time.monotonic() + RECHECK
+                if orchcli.is_active(self.root) is False:
+                    return  # turned off here: the next round ends the loop
 
     def run_forever(self, once=False, wait=None):
+        """Passes until the loop ends; returns why (one line for loop.log)."""
         wait = wait or self.sleep
         while True:
-            if orchcli.is_active(self.root) is False:
-                return  # turned off in this workspace: stop by ourselves
+            if why := self.ended():
+                return why
             settings = self.settings()
-            if settings.get("mode") not in ("local", "remote"):
-                return  # sync set to off here
             self.wake.clear()
             try:
                 result, error = self.tick(), None
             except Exception as e:  # noqa: BLE001 - like the step's catch-all: a failing pass never ends the loop
                 result, error = None, f"Sync stopped: {type(e).__name__}"
+                self.log(f"sync: {error}", traceback.format_exc())
             secs = self.delay(result, settings)
             try:
                 note(self.root, last_error=error, next_run=iso(self.clock() + secs))
+                if error is None:
+                    self.logged = None
             except Exception as e:  # noqa: BLE001 - a status file that can't be written never ends the loop
-                print(f"sync: the loop status was not saved ({type(e).__name__})", flush=True)  # to loop.log
+                self.log(f"sync: the loop status was not saved ({type(e).__name__})", traceback.format_exc())
             if once:
-                return
+                return "one pass done"
             wait(secs)

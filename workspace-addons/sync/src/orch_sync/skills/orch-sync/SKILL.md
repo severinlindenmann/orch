@@ -14,8 +14,8 @@ description: Check or change how this computer keeps a private copy of the works
 - Sync runs in the background once it is on: on this computer only it saves what changed every 5 minutes at most; with a remote every 5, 15 or 60 minutes. While the remote can't be reached it tries again after 1, 2, 4 minutes (never more often), and it does nothing while it waits for a person's choice.
 - See whether it runs, when it last synced and when it runs next: `orch sync status --json` (`running`, `last_ok`, `last_try`, `last_error`, `ahead`, `behind`, `paused`, `next_run`).
 - Run one sync now: `orch sync now --json` (wakes the background sync when it runs, else syncs once and prints the result).
-- Start or stop the background sync here: `orch sync start` / `orch sync stop` (`orch start` starts it with the other add-ons). Start is refused while sync is off.
-- Change how often a remote sync runs: `orch sync set --interval 15` (5, 15 or 60 minutes).
+- Start or stop the background sync here: `orch sync start` / `orch sync stop` (`orch start` starts it with the other add-ons). Start is refused while sync is off. Stop lets the sync that is running finish first, so it can take a moment.
+- Change how often a remote sync runs: `orch sync set --interval 15` (5, 15 or 60 minutes). Local sync always runs every 5 minutes at most, so `--interval` is refused there.
 - See decisions waiting for the person: `orch sync needs --json`.
 - After the person chooses a copy: `orch sync resolve <path> --keep mine` or `orch sync resolve <path> --keep theirs`. A changed remote asks for another review. Keeping theirs preserves the local artifact with a dated name, or records a ticket history summary.
 - Keeping their copy of a ticket is the person's decision: `orch sync resolve <path> --keep theirs --proof-stdin`. The proof is for `addon.act` and the target `sync:keep-theirs:<sha256>` (the sha256 of the path and the chosen bytes, joined by NUL). Agents are refused.
