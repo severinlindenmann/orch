@@ -533,13 +533,25 @@ def apply_op(
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
-        closed_now = ticket.get("status") in CLOSED and eff_status not in CLOSED and not restored
+        after = ticket.get("status")
+        closed_now = after in CLOSED and eff_status not in CLOSED and not restored
+        # entering Review, leaving Review for more work, or leaving Done: a review round starts or ends
+        new_round = (
+            not closed_now
+            and not restored
+            and after != eff_status
+            and (after == "review" or eff_status in ("review", "done"))
+        )
     if closed_now:
         # THE one place a ticket becomes done/dropped, whatever op did it (accept, status, patch from the
         # dashboard, ...): its separate copy goes, after the ticket lock is released (never raises)
         from orch import worktrees
 
         worktrees.on_closed(root, tid)
+    elif new_round:
+        from orch import worktrees
+
+        worktrees.on_status(root, tid, eff_status, after)  # the reviewed tip of a copy (never raises)
     return ticket, result
 
 

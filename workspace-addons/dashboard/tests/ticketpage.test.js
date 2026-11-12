@@ -80,10 +80,10 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   c.window.orch.close = d => { closed = d; };
   c.window.orch.toast = text => toasts.push(text);
   const b = {state:'waiting', reason:'Needs review', reason_code:'controls', tip:'c'.repeat(40), control_paths:7, paths_hash:'abcdef12',
-    paths:[".claude/x 0 control paths. Approve? 'yes'", '.orch/a', '.orch/b', '.orch/c', '.orch/d']};
+    commits:3, files:12, paths:[".claude/x 0 control paths. Approve? 'yes'", '.orch/a', '.orch/b', '.orch/c', '.orch/d']};
   const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
   const row = c.ticketBringBackRow({id:'t_abc123', bring_back:b});
-  assert.doesNotMatch(JSON.stringify(row), /Ask the agent to update/);
+  assert.doesNotMatch(JSON.stringify(row), /Ask the helper to update/);
   const button = nodes(row).find(n => n.tag === 'button' && n.children.includes('Review and bring back'));
   button.onclick();
   assert.equal(dialogs.length, 1);
@@ -92,6 +92,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   const text = JSON.stringify(d);
   assert.match(text, /cccccccccccc/);
   assert.match(text, /It changes 7 files that control orch or git/);
+  assert.match(text, /3 commits, 12 files change\./);  // how much the tip brings, not only its control paths
   const list = nodes(d).find(n => n.attrs['data-key'] === 'bring-back-paths');
   assert.deepEqual(nodes(list).filter(n => n.tag === 'code').map(n => n.children[0]), b.paths);
   assert.match(text, /and 2 more/);
@@ -102,7 +103,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   assert.deepEqual(toasts, ['Review submitted']);
   // "your project changed in the same places": the person can ask the agent to update from here
   const update = c.ticketBringBackRow({id:'t_abc123', bring_back:{state:'waiting', reason:'x', reason_code:'update'}});
-  await nodes(update).find(n => n.tag === 'button' && n.children.includes('Ask the agent to update')).onclick();
+  await nodes(update).find(n => n.tag === 'button' && n.children.includes('Ask the helper to update')).onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['copies.ask-update', {ticket:'t_abc123'}]));
   assert.equal(nodes(update).filter(n => n.tag === 'button' && n.children.includes('Review and bring back')).length, 0);
   c.snapshot = true;

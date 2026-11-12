@@ -67,6 +67,16 @@ def test_hostile_path_names_come_out_plain():
     assert view["paths_summary"].endswith("and 4 more")
 
 
+def test_review_size_is_shown_only_as_plain_counts():
+    """B13f (Fable #6): the dialog shows how much the tip brings (commits, files), never agent text."""
+    review = {"tip": "b" * 40, "control_paths": 0, "paths_hash": "abcdef12", "commits": 3, "files": 12}
+    view = data._bring_back_view({"state": "waiting", "reason": "x", "reason_code": "approval"}, review)
+    assert (view["commits"], view["files"]) == (3, 12)
+    for bad in ("3", True, -1, None, "<b>"):
+        view = data._bring_back_view({"state": "waiting"}, {**review, "commits": bad, "files": bad})
+        assert "commits" not in view and "files" not in view
+
+
 @pytest.mark.parametrize(
     "review",
     [

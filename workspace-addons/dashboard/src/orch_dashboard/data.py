@@ -204,6 +204,10 @@ def _bring_back_view(back: dict, review) -> dict:
         and re.fullmatch(r"[0-9a-f]{8}", digest)
     ):
         shown = [_plain(p) for p in paths[:5]]
+        for key in ("commits", "files"):  # how much the tip brings (shown next to the control paths)
+            n = review.get(key)
+            if type(n) is int and n >= 0:
+                view[key] = n
         view.update(
             tip=tip,
             control_paths=count,

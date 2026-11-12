@@ -44,8 +44,20 @@ def done_copy(repo, monkeypatch):
     return repo, repo.tids[0], copy
 
 
+def to_review(root, tid):
+    """The agent commits its work in the copy (when it can: a copy in the middle of a git operation or on
+    another branch stays as it is) and hands the ticket to Review with its run over. Entering Review records
+    the tip the person looks at (B13f)."""
+    copy = worktrees._want(root, tid)
+    if copy is not None and copy.is_dir():
+        worktrees._save_leftovers(copy, tid)
+    tickets.set_status(root, tid, "review", "human:test")
+
+
 def done_and_sweep(root, tid):
-    """A person's Done, then the detached sweep it schedules (run here in the test's own process)."""
+    """Review, a person's Done, then the detached sweep it schedules (run here in the test's own process)."""
+    if tickets.load(root, tid)["status"] != "review":
+        to_review(root, tid)
     tickets.set_status(root, tid, "done", "human:test", proven=True)
     worktrees.sweep(root)
 
@@ -260,6 +272,7 @@ def test_journal_recovery(done_copy, monkeypatch):
         return real(top, args)
 
     monkeypatch.setattr(worktrees, "_bb_merge", crash)
+    to_review(root, tid)
     before = project_hashes(root)
     head = git(root, "rev-parse", "HEAD")
     with monkeypatch.context() as m:
@@ -423,6 +436,7 @@ def test_branch_only_without_registry(done_copy, monkeypatch):
     assert worktrees._save_leftovers(copy, tid)[0]
     git(root, "worktree", "remove", "--force", str(copy))
     worktrees._save_registry(root, {})
+    to_review(root, tid)  # the branch alone is what the person reviews
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
         tickets.set_status(root, tid, "done", "human:test", proven=True)
@@ -540,6 +554,7 @@ def test_process_death_recovers_journal(done_copy, monkeypatch):
     if os.name == "nt":
         pytest.skip("process-death injection uses SIGKILL")
     root, tid, copy = done_copy
+    to_review(root, tid)
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
         tickets.set_status(root, tid, "done", "human:test", proven=True)
@@ -585,6 +600,7 @@ def test_b13e_killed_before_merge_head_keeps_journal_and_says_so(done_copy, monk
     """A kill while git writes files but before MERGE_HEAD exists: no undo is guessed, the signed journal
     stays (every later attempt says what happened) and nothing more is written to the folder."""
     root, tid, copy = done_copy
+    to_review(root, tid)
     with monkeypatch.context() as m:
         m.setattr(worktrees, "on_closed", lambda *a: None)
         tickets.set_status(root, tid, "done", "human:test", proven=True)
@@ -1295,12 +1311,17 @@ def test_b13d_real_merge_tree(done_copy, monkeypatch):
 
 
 def test_b13d_unsaved_done_never_reviews(done_copy, monkeypatch):
+    """Something that had to be saved at Done (it was not there when the review began) is never reviewed,
+    whether saving it works or not."""
     root, tid, copy = done_copy
+    to_review(root, tid)
+    (copy / "late").write_text("written after the review began\n")
     with monkeypatch.context() as m:
         m.setattr(worktrees, "_save_leftovers", lambda *a: (False, "could not save"))
         finish(root, tid)
     assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
     assert worktrees.bring_back(root, tid)["reason"] == worktrees.APPROVAL_NEEDED
+    assert (copy / "late").exists()
 
 
 def test_b13d_review_shows_first_five_paths(done_copy, run):
@@ -1322,8 +1343,10 @@ def test_b13d_review_shows_first_five_paths(done_copy, run):
 
 
 def test_b13e_done_only_records_and_schedules(done_copy, monkeypatch):
-    """#7: marking Done saves and records the reviewed tip; the bring-back runs in the detached sweep."""
+    """#7: marking Done records the tip reviewed when the review began; the bring-back runs in the detached
+    sweep."""
     root, tid, copy = done_copy
+    to_review(root, tid)
     scheduled = []
     monkeypatch.setattr(worktrees, "schedule_sweep", lambda r: scheduled.append(r))
     monkeypatch.setattr(worktrees, "_bring_back_locked", lambda *a: pytest.fail("bring-back inside Done"))
@@ -1664,7 +1687,7 @@ def test_b13e_review_paths_are_one_plain_line_each(done_copy, run):
     import json
 
     root, tid, copy = done_copy
-    name = '.claude/x\n0 control paths "approved"'
+    name = '.claude/x 0 control paths "approved"'
     (copy / ".claude").mkdir()
     (copy / name).write_text("x\n")
     assert finish(root, tid)["state"] == "waiting"
@@ -1675,6 +1698,12 @@ def test_b13e_review_paths_are_one_plain_line_each(done_copy, run):
     for text in [*review["paths"], review["paths_summary"]]:
         assert "\n" not in text and '"' not in text
     assert review["paths"] == [".claude/x 0 control paths 'approved'"]
+    # A line break in a name (B13f: an odd name) is not even offered for approval: nothing to fake.
+    (copy / ".claude/y\n1 more line").write_text("y\n")
+    assert worktrees._save_leftovers(copy, tid)[0]
+    code, out, err = run("copy", "review", tid, "--json")
+    assert code != 0
+    assert worktrees.bring_back(root, tid)["reason"] == worktrees.ODD_NAME
 
 
 def live_claim(root, tid, pid):
@@ -1718,3 +1747,512 @@ def test_b13e_agent_identity_comes_from_a_live_run(done_copy, monkeypatch, case)
         with pytest.raises(Refused):
             worktrees.ask_update(root, tid)
         assert not sent
+
+
+# ---------------------------------------------------------------- B13f (final reviews: Fable 5.2, Opus 5.5)
+
+
+def done_no_sweep(root, tid):
+    """A person's Done; the scheduled sweep does not run (the test runs it, or calls bring_back)."""
+    tickets.set_status(root, tid, "done", "human:test", proven=True)
+
+
+def commit_on_side(root, name, text):
+    """A commit with one more file on top of HEAD, made on a throwaway branch; the folder ends as before."""
+    own = git(root, "symbolic-ref", "--short", "HEAD")
+    git(root, "checkout", "-q", "-b", "side-tmp")
+    (root / name).write_text(text)
+    git(root, "add", name)
+    git(root, "commit", "-qm", "side")
+    sha = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", own)
+    git(root, "branch", "-q", "-D", "side-tmp")
+    return sha
+
+
+@pytest.mark.parametrize("move", ["ref", "copy_file", "copy_commit"])
+def test_b13f_change_after_review_needs_approval(done_copy, move):
+    """Fable #1 / Opus #3: between the review and the person's Done another agent moves the branch, or a
+    leftover process writes or commits into the copy: the Done approves only the tip the review showed."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    reviewed = git(copy, "rev-parse", "HEAD")
+    assert worktrees._copy_authority(root, tid)["review_tip"] == reviewed
+    if move == "ref":
+        evil = commit_on_side(root, "evil.py", "evil\n")
+        git(root, "update-ref", f"refs/heads/orch/{tid}", evil)
+    elif move == "copy_file":
+        (copy / "evil.py").write_text("evil\n")
+    else:
+        (copy / "evil.py").write_text("evil\n")
+        git(copy, "add", "evil.py")
+        git(copy, "commit", "-qm", "late")
+    before = project_hashes(root)
+    head = git(root, "rev-parse", "HEAD")
+    result = finish(root, tid)
+    assert result["state"] == "waiting" and result["reason"] == worktrees.APPROVAL_NEEDED
+    assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
+    assert git(root, "rev-parse", "HEAD") == head and project_hashes(root) == before
+    assert not (root / "evil.py").exists()
+
+
+def test_b13f_review_tip_needs_a_committed_copy_and_no_run(done_copy, monkeypatch):
+    """Main A: the tip is recorded only when nothing would have to be saved and no run holds the copy; a run
+    that ends while the ticket is in Review records it then."""
+    root, tid, copy = done_copy  # code.py is not committed in the copy
+    tickets.set_status(root, tid, "review", "human:test")
+    assert not worktrees._copy_authority(root, tid).get("review_tip")
+    tickets.set_status(root, tid, "ready", "human:test")
+    assert worktrees._save_leftovers(copy, tid)[0]
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_alive_here", lambda *a: {"live": True})
+        tickets.set_status(root, tid, "review", "human:test")
+    assert not worktrees._copy_authority(root, tid).get("review_tip")
+    worktrees.on_run_ended(root, tid)
+    assert worktrees._copy_authority(root, tid)["review_tip"] == git(copy, "rev-parse", "HEAD")
+    assert finish(root, tid)["state"] == "merged"
+
+
+def test_b13f_agent_done_after_review_is_no_approval(done_copy, monkeypatch):
+    """Fable #2 scenario 1: the person reviewed (or asked for changes); the agent then finishes the ticket
+    itself (agents may finish): its own Done is no person's approval of the tip."""
+    from orch import config
+
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    monkeypatch.setattr(config, "agents_may_finish", lambda *a: True)
+    tickets.set_status(root, tid, "done", "agent:test")
+    worktrees.sweep(root)
+    assert not worktrees._copy_authority(root, tid).get("reviewed_tip")
+    assert tickets.load(root, tid)["work"]["bring_back"]["reason"] == worktrees.APPROVAL_NEEDED
+    assert (root / "code.py").read_text() == "print(1)\n"
+
+
+def test_b13f_person_done_must_be_this_rounds(done_copy):
+    """Main A: only a current person verdict made at or after the review began counts."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    done_no_sweep(root, tid)
+    t = tickets.load(root, tid)
+    assert worktrees._person_done(root, t, "2000-01-01T00:00:00Z")
+    assert not worktrees._person_done(root, t, "2999-01-01T00:00:00Z")
+    forged = {**t, "verdicts": [{**t["verdicts"][0], "kind": "agent"}]}
+    assert not worktrees._person_done(root, forged, "2000-01-01T00:00:00Z")
+
+
+def test_b13f_reopened_round_forgets_the_old_review(done_copy):
+    """Fable #2 scenario 2: a ticket reopened for more work drops the reviewed tip, the Done marker and the
+    approvals of the round before; a later Done without a new review needs an approval."""
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("person dirty\n")
+    assert finish(root, tid)["reason"] == worktrees.OVERLAP
+    assert worktrees._copy_authority(root, tid).get("reviewed_tip")
+    tickets.set_status(root, tid, "ready", "human:test")
+    known = worktrees._copy_authority(root, tid)
+    assert not any(known.get(k) for k in worktrees.ROUND_KEYS)
+    assert known.get("origin_branch") and known.get("base")
+    (root / "code.py").write_text("print(1)\n")
+    done_no_sweep(root, tid)
+    worktrees.sweep(root)
+    assert tickets.load(root, tid)["work"]["bring_back"]["reason"] == worktrees.APPROVAL_NEEDED
+    assert (root / "code.py").read_text() == "print(1)\n"
+    assert copy.exists()
+
+
+def test_b13f_busy_done_click_is_judged_by_the_sweep(done_copy, monkeypatch):
+    """Fable #9 / Opus #7: the Done click waits at most SWEEP_WAIT for the copies lock; when it is busy, the
+    sweep judges the Done before it saves anything."""
+    from orch import runs
+
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    waits = []
+    real = runs.locked
+
+    def busy(r, name, wait=10.0):
+        if name == worktrees.LOCK_ID:
+            waits.append(wait)
+            raise worktrees.Refused("busy")
+        return real(r, name, wait)
+
+    with monkeypatch.context() as m:
+        m.setattr(runs, "locked", busy)
+        done_no_sweep(root, tid)
+    assert waits == [worktrees.SWEEP_WAIT]
+    assert not worktrees._copy_authority(root, tid).get("done_seen")
+    worktrees.sweep(root)
+    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
+
+
+def test_b13f_orphan_copy_of_another_project_is_still_saved(repo, tmp_path):
+    """Fable #3: the main-relative marker check is never run against the CURRENT workspace's repository for
+    a copy of another project: its changes are saved and it is removed (no --discard needed)."""
+    from test_worktrees_cleanup import remember_gone
+
+    from orch import addons
+
+    old = tmp_path / "old-project-repo"
+    old.mkdir()
+    git(old, "init", "-q")
+    git(old, "config", "user.email", "t@t")
+    git(old, "config", "user.name", "t")
+    (old / "a.txt").write_text("a\n")
+    git(old, "add", "a.txt")
+    git(old, "commit", "-qm", "init")
+    tid = "t_orphan01"
+    folder = addons.home(repo) / "worktrees" / "bbbbbbbb"
+    folder.mkdir(parents=True)
+    copy = folder / tid
+    git(old, "worktree", "add", "-q", "-b", f"orch/{tid}", str(copy))
+    (copy / "w.txt").write_text("work\n")
+    gone = tmp_path / "gone-project"
+    (folder / ".owner").write_text(str(gone) + "\n")
+    remember_gone(repo, folder, gone)
+    assert worktrees.remove_orphaned(repo, "bbbbbbbb") == []
+    assert git(old, "show", f"orch/{tid}:w.txt") == "work"
+    assert not copy.exists()
+
+
+def test_b13f_unreadable_branch_never_starts_a_new_round(done_copy, monkeypatch):
+    """Fable #4: a timeout reading the branch is not "no branch": nothing is cleared, nothing deleted; a
+    half-made copy deletes its branch only while it still points where it was made."""
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    tip = git(copy, "rev-parse", "HEAD")
+    worktrees._copy_authority(root, tid, lambda r: r.update(done_seen=True, reviewed_tip=tip))
+    git(root, "worktree", "remove", "--force", str(copy))
+    real = worktrees._git
+
+    def flaky(args, *a, **kw):
+        if args[:2] == ["rev-parse", "--verify"] and args[-1] == f"refs/heads/orch/{tid}":
+            return 124, "", "timed out"
+        return real(args, *a, **kw)
+
+    monkeypatch.setattr(worktrees, "_git", flaky)
+    entry, why = worktrees._create(root, tid)
+    monkeypatch.setattr(worktrees, "_git", real)
+    assert entry is None and "try again" in why
+    assert git(root, "rev-parse", f"orch/{tid}") == tip
+    assert worktrees._copy_authority(root, tid)["reviewed_tip"] == tip
+    worktrees._drop_partial(root, copy, f"orch/{tid}", True, git(root, "rev-parse", "HEAD"))
+    assert git(root, "rev-parse", f"orch/{tid}") == tip
+
+
+def test_b13f_agent_in_the_folder_spelled_through_a_link(done_copy, monkeypatch, tmp_path):
+    """Fable #5: a run whose folder is the project spelled through a link still blocks the merge."""
+    from orch import runs
+
+    root, tid, copy = done_copy
+    alias = tmp_path.parent / (tmp_path.name + "-link")
+    alias.symlink_to(root, target_is_directory=True)
+    runs._atomic(runs.record_path(root, root.tids[1]), "{}")
+    monkeypatch.setattr(runs, "read", lambda r, t: {"ticket": t} if t == root.tids[1] else None)
+    monkeypatch.setattr(runs, "state", lambda r: "alive")
+    monkeypatch.setattr(runs, "workdir_for", lambda *a: alias)
+    before = project_hashes(root)
+    result = finish(root, tid)
+    assert result["reason"] == "an agent is still working in your folder"
+    assert project_hashes(root) == before
+
+
+def test_b13f_run_state_is_never_approvable(done_copy):
+    """Fable #7a: a branch that writes orch's own run state (registry, run records, locks) is refused; no
+    approval lets it through."""
+    root, tid, copy = done_copy
+    p = copy / ".orch/run/worktrees-pending.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{}\n")
+    git(copy, "add", "-f", ".orch/run/worktrees-pending.json")
+    head = git(root, "rev-parse", "HEAD")
+    result = finish(root, tid)
+    assert result["reason"] == worktrees.RUN_STATE
+    with pytest.raises(worktrees.Refused):
+        worktrees.approval_target(root, tid)
+    assert git(root, "rev-parse", "HEAD") == head
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["SECRET~1.ENV", "notes.", ".clau\u200ede/settings.json", ".git\u202chub/workflows/x.yml", "a\u206ab"],
+)
+def test_b13f_odd_names_are_never_approvable(done_copy, name):
+    """Fable #7b / #11, Opus #9: names a file system may write as another name (8.3, trailing dot, every
+    ignorable format character HFS+ drops) wait for a person working by hand, never a one-click approval."""
+    root, tid, copy = done_copy
+    p = copy / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("x\n")
+    git(copy, "add", "-f", "--", name)
+    head = git(root, "rev-parse", "HEAD")
+    result = finish(root, tid)
+    assert result["reason"] == worktrees.ODD_NAME
+    with pytest.raises(worktrees.Refused):
+        worktrees.approval_target(root, tid)
+    assert git(root, "rev-parse", "HEAD") == head
+
+
+@pytest.mark.parametrize(
+    "name", [".cursorrules", ".npmrc", ".env.local", "GEMINI.md", ".pre-commit-config.yaml"]
+)
+def test_b13f_more_control_files(done_copy, name):
+    """Fable #11: more files that tools read and act on need a person's look."""
+    root, tid, copy = done_copy
+    (copy / name).write_text("x\n")
+    git(copy, "add", "-f", "--", name)
+    result = finish(root, tid)
+    assert "control orch or git" in result["reason"]
+    assert not (root / name).exists()
+
+
+def test_b13f_branch_moved_over_the_work_is_not_merged(done_copy):
+    """Fable #8: somebody moves the project's branch over the tip (the files stay as they were): orch never
+    certifies that as merged, keeps the copy and the branch."""
+    root, tid, copy = done_copy
+    assert worktrees._save_leftovers(copy, tid)[0]
+    tip = git(copy, "rev-parse", "HEAD")
+    done_no_sweep(root, tid)  # no review round: the tip was never approved
+    git(root, "update-ref", git(root, "symbolic-ref", "HEAD"), tip)
+    worktrees.sweep(root)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason_code"] == "outside"
+    assert copy.exists() and git(root, "branch", "--list", f"orch/{tid}")
+    assert (root / "code.py").read_text() == "print(1)\n"
+
+
+def test_b13f_branch_reappearing_after_bring_back_is_not_one_click(done_copy):
+    """Fable #6: a long-finished ticket's branch made again by an agent: no Need with a one-click approve."""
+    root, tid, copy = done_copy
+    assert finish(root, tid)["state"] == "merged"
+    assert not git(root, "branch", "--list", f"orch/{tid}")
+    git(root, "branch", f"orch/{tid}", commit_on_side(root, "evil.py", "evil\n"))
+    head = git(root, "rev-parse", "HEAD")
+    worktrees.sweep(root)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason_code"] == "foreign"
+    with pytest.raises(worktrees.Refused):
+        worktrees.approval_target(root, tid)
+    assert git(root, "rev-parse", "HEAD") == head and not (root / "evil.py").exists()
+
+
+def test_b13f_branch_not_grown_from_its_base_waits(repo):
+    """Opus #4: the branch must grow from the recorded base (not from older or unrelated history)."""
+    tid = repo.tids[0]
+    (repo / "second").write_text("2\n")
+    git(repo, "add", "second")
+    git(repo, "commit", "-qm", "second")
+    copy = make(repo)
+    git(copy, "reset", "-q", "--soft", git(repo, "rev-parse", "HEAD~1"))
+    (copy / "x.py").write_text("x\n")
+    head = git(repo, "rev-parse", "HEAD")
+    assert finish(repo, tid)["reason"] == worktrees.BASE_CHANGED
+    assert git(repo, "rev-parse", "HEAD") == head
+
+
+def crash_in_merge(monkeypatch, after):
+    real = worktrees._bb_merge
+
+    def crash(top, args):
+        if "--no-ff" in args:
+            half_merge(top, args)
+            after(top)
+            raise RuntimeError("killed in the middle of the merge")
+        return real(top, args)
+
+    monkeypatch.setattr(worktrees, "_bb_merge", crash)
+    return real
+
+
+def reviewed_done(root, tid, monkeypatch):
+    to_review(root, tid)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "on_closed", lambda *a: None)
+        done_no_sweep(root, tid)
+    worktrees._record_done_tip(root, tid)
+
+
+@pytest.mark.parametrize("case", ["stale", "resolved"])
+def test_b13f_stale_or_resolved_merge_is_never_aborted(done_copy, monkeypatch, case):
+    """Fable #10 / Opus #2: a merge orch started is undone only soon after, and only while the index is
+    what the merge wrote: a person's staged resolution (or anything later) is never thrown away."""
+    root, tid, copy = done_copy
+    real = crash_in_merge(monkeypatch, lambda top: None)
+    reviewed_done(root, tid, monkeypatch)
+    with pytest.raises(RuntimeError):
+        worktrees.bring_back(root, tid)
+
+    def no_abort(top, args):
+        if "--abort" in args:
+            pytest.fail("aborted")
+        return real(top, args)
+
+    monkeypatch.setattr(worktrees, "_bb_merge", no_abort)
+    if case == "stale":
+        worktrees._copy_authority(root, tid, lambda r: r["journal"].update(started_at="2000-01-01T00:00:00Z"))
+    else:
+        (root / "code.py").write_text("PERSON RESOLUTION\n")
+        git(root, "add", "code.py")
+    before = project_hashes(root)
+    staged = git(root, "diff", "--cached", "--name-only")
+    result = worktrees.bring_back(root, tid)
+    assert result["state"] == "waiting" and result["reason"] == worktrees.MERGING
+    assert (root / ".git/MERGE_HEAD").exists()
+    assert project_hashes(root) == before
+    assert git(root, "diff", "--cached", "--name-only") == staged
+
+
+def test_b13f_killed_clean_merge_is_rolled_back(done_copy, monkeypatch):
+    """Opus #10: a clean merge killed after writing index and files, before its commit (no MERGE_HEAD):
+    the index is exactly the checked tree, so orch undoes it exactly and brings the work back."""
+    root, tid, copy = done_copy
+
+    def no_state(top):
+        for name in ("MERGE_HEAD", "MERGE_MSG", "MERGE_MODE"):
+            (top / ".git" / name).unlink(missing_ok=True)
+
+    real = crash_in_merge(monkeypatch, no_state)
+    reviewed_done(root, tid, monkeypatch)
+    head = git(root, "rev-parse", "HEAD")
+    with pytest.raises(RuntimeError):
+        worktrees.bring_back(root, tid)
+    assert (root / "code.py").read_text() == "print(2)\n" and git(root, "rev-parse", "HEAD") == head
+    monkeypatch.setattr(worktrees, "_bb_merge", real)
+    result = worktrees.bring_back(root, tid)
+    assert result["state"] == "merged", result
+    assert git(root, "rev-parse", "HEAD^1") == head
+    assert (root / "code.py").read_text() == "print(2)\n"
+
+
+def test_b13f_ignored_folder_is_one_entry_and_still_overlaps(done_copy):
+    """Fable #9: an ignored folder is listed once (not file by file); a merge into it still waits."""
+    root, tid, copy = done_copy
+    with (root / ".git/info/exclude").open("a") as f:
+        f.write("\nbuild/\n")
+    for i in range(50):
+        (root / "build" / "deep").mkdir(parents=True, exist_ok=True)
+        (root / "build" / "deep" / f"f{i}").write_text("x\n")
+    status = worktrees._bb_status(root)
+    assert "build/deep/f1" not in status and "!! build/" in status
+    (copy / "build").mkdir()
+    (copy / "build" / "new").write_text("incoming\n")
+    git(copy, "add", "-f", "build/new")
+    assert finish(root, tid)["reason"] == worktrees.OVERLAP
+    assert not (root / "build" / "new").exists()
+
+
+def test_b13f_ref_moved_back_never_makes_reviewed_work_look_merged(done_copy):
+    """Opus #11: the signed reviewed tip keeps the branch when its ref is pointed back at merged history."""
+    root, tid, copy = done_copy
+    (root / "code.py").write_text("personal\n")
+    assert finish(root, tid)["state"] == "waiting"
+    assert worktrees._copy_authority(root, tid).get("reviewed_tip")
+    git(root, "worktree", "remove", "--force", str(copy))
+    git(root, "update-ref", f"refs/heads/orch/{tid}", git(root, "rev-parse", "HEAD"))
+    assert worktrees._unmerged_done_work(root, tid)
+    assert not worktrees._delete_branch(root, tid, force=True)
+
+
+def test_b13f_copy_update_merges_the_recorded_branch(done_copy, monkeypatch):
+    """Opus #8: `orch copy update` merges the branch the work goes back to, not whatever the project folder
+    has checked out (a private branch); a person cannot merge into a copy a live agent works in."""
+    root, tid, copy = done_copy
+    (root / "shared").write_text("main\n")
+    git(root, "add", "shared")
+    git(root, "commit", "-qm", "main advances")
+    git(root, "checkout", "-q", "-b", "experiment")
+    (root / "private-experiment").write_text("x\n")
+    git(root, "add", "private-experiment")
+    git(root, "commit", "-qm", "experiment")
+    monkeypatch.chdir(copy)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_alive_here", lambda *a: {"live": True})
+        with pytest.raises(worktrees.Refused):
+            worktrees.update_copy(root, tid)
+    worktrees.update_copy(root, tid)
+    assert (copy / "shared").exists() and not (copy / "private-experiment").exists()
+
+
+def test_b13f_one_broken_ticket_never_stops_the_sweep(done_copy, monkeypatch):
+    """Fable #13: one ticket that raises is kept (and said); the others are still brought back."""
+    root, tid, copy = done_copy
+    other = root.tids[1]
+    copy2 = make(root, 1)
+    (copy2 / "two.py").write_text("2\n")
+    to_review(root, tid)
+    to_review(root, other)
+    real = worktrees._bring_back_locked
+
+    def broken(r, t):
+        if t == tid:
+            raise RuntimeError("broken ticket")
+        return real(r, t)
+
+    monkeypatch.setattr(worktrees, "_bring_back_locked", broken)
+    done_no_sweep(root, tid)
+    done_no_sweep(root, other)
+    notes = worktrees.sweep(root)
+    assert tickets.load(root, other)["work"]["bring_back"]["state"] == "merged"
+    assert (root / "two.py").exists() and copy.exists()
+    assert any("broken ticket" in n for n in notes)
+
+
+def test_b13f_saving_is_never_cut_by_the_sweep_budget(done_copy, monkeypatch):
+    """Fable #14: add and commit start only with some budget left, and then run with their own timeout."""
+    import time
+
+    root, tid, copy = done_copy
+    seen = []
+    real = worktrees.safegit.run
+
+    def run(args, cwd, timeout, **kw):
+        if args and args[0] in ("add", "commit"):
+            seen.append(timeout)
+        return real(args, cwd, timeout, **kw)
+
+    monkeypatch.setattr(worktrees.safegit, "run", run)
+    before = getattr(worktrees._ctx, "deadline", None)
+    try:
+        worktrees._ctx.deadline = time.monotonic() + 2
+        assert worktrees._save_leftovers(copy, tid) == (False, BRING_TIME)
+        worktrees._ctx.deadline = time.monotonic() + 8
+        assert worktrees._save_leftovers(copy, tid)[0]
+    finally:
+        worktrees._ctx.deadline = before
+    assert seen == [worktrees.GIT_ADD_TIMEOUT, worktrees.GIT_ADD_TIMEOUT]
+
+
+BRING_TIME = "saving needs more time; the next sweep will try again"
+
+
+def test_b13f_title_cannot_add_commit_trailers(done_copy):
+    """Fable #16: the ticket title goes into the merge message as one line."""
+    root, tid, copy = done_copy
+    tickets.apply_op(root, tid, lambda t: t.update(title="Fix\nCo-authored-by: Evil <e@x>"))
+    assert finish(root, tid)["state"] == "merged"
+    message = git(root, "log", "-1", "--format=%B")
+    assert "\n" not in message and message.startswith(f"orch: {tid} Fix")
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [("merge.renormalize", "true"), ("merge.directoryRenames", "true"), ("submodule.recurse", "true")],
+)
+def test_b13f_merge_settings_wait(done_copy, setting):
+    """Opus #5: settings that make `git merge` write something else than merge-tree checked."""
+    root, tid, copy = done_copy
+    git(root, "config", *setting)
+    head = git(root, "rev-parse", "HEAD")
+    assert finish(root, tid)["reason"] == worktrees.SETTINGS
+    assert git(root, "rev-parse", "HEAD") == head
+
+
+def test_b13f_review_shows_commits_and_files(done_copy, run):
+    """Fable #6: the review says how much the tip brings, not only its control paths."""
+    import json
+
+    root, tid, copy = done_copy
+    (copy / ".gitignore").write_text("something\n")
+    assert finish(root, tid)["state"] == "waiting"
+    code, out, err = run("copy", "review", tid, "--json")
+    assert code == 0, err
+    review = json.loads(out)
+    assert review["commits"] == 1 and review["files"] == 2

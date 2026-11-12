@@ -661,6 +661,9 @@ function ticketBringBackDialog(t) {
   const more = Math.max(0, count - paths.length);
   const body = [
     h('p', {}, 'Tip ', h('code', {}, clean(String(b.tip || '').slice(0, 12)))),
+    Number.isInteger(b.commits) && Number.isInteger(b.files)
+      ? h('p', {'data-key':'bring-back-size'}, b.commits + (b.commits === 1 ? ' commit, ' : ' commits, ') + b.files + (b.files === 1 ? ' file changes.' : ' files change.'))
+      : null,
     h('p', {'data-key':'bring-back-count'}, count === 1 ? 'It changes 1 file that controls orch or git:' : count ? 'It changes ' + count + ' files that control orch or git:' : 'It changes no files that control orch or git.'),
     paths.length ? h('ul', {className:'bring-back-paths', 'data-key':'bring-back-paths'}, paths.map(p => h('li', {}, h('code', {}, p)))) : null,
     more ? h('p', {className:'meta'}, 'and ' + more + ' more') : null,
@@ -678,9 +681,9 @@ function ticketBringBackDialog(t) {
 function ticketBringBackRow(t) {
   const b = t.bring_back;
   if (b?.state !== 'waiting') return null;
-  const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask the agent to update', 'ghost sm', async () => {
+  const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask the helper to update', 'ghost sm', async () => {
     const r = await act('copies.ask-update', {ticket:t.id});
-    window.orch.toast(r.ok ? 'Asked the agent to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+    window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
   }) : null;
   return h('div', {className:'row', 'data-key':'bring-back'}, h('span', {}, 'Done · changes waiting'), h('span', {}, clean(b.reason)),
     !snapshot && b.tip ? ticketButton('Review and bring back', 'outline sm', () => ticketBringBackDialog(t)) : null, ask);

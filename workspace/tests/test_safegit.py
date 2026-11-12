@@ -120,7 +120,7 @@ def test_creating_preparing_and_dropping_a_copy_never_runs_repo_code(hostile, pr
     addons.workspace_id(r, create=True)
     e = worktrees.create(r, "t_abc123")
     assert e is not None and (Path(e["path"]) / "a.txt").read_text() == "hello\n"
-    worktrees._drop_partial(r, Path(e["path"]), e["branch"], True)
+    worktrees._drop_partial(r, Path(e["path"]), e["branch"], True, e["base"])
     assert marks(marker) == []
 
 

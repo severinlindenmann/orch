@@ -61,8 +61,14 @@ def make(repo, i=0):
 def close(repo, tid, status="dropped"):
     tickets.set_status(repo, tid, status, "human:test")
     if status == "done":
-        # Done records the reviewed tip and schedules a detached sweep (B13e); the tests run that sweep here.
+        # Done judges the tip reviewed when the review began and schedules a detached sweep (B13e/f); the
+        # tests run that sweep here. A Done without a review round waits for the person's approval of the
+        # saved tip: these tests are about removal, so the person approves what is shown.
         worktrees.sweep(repo)
+        back = (tickets.load(repo, tid).get("work") or {}).get("bring_back") or {}
+        if back.get("reason_code") == "approval":
+            worktrees.approve_copy(repo, tid, worktrees.approval_target(repo, tid)[0])
+            worktrees.sweep(repo)
 
 
 def branches(repo):

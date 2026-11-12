@@ -196,20 +196,26 @@ def _copy_clean(args, root: Path) -> None:
         # Path names are the agent's: each one is shown as one plain line (no newlines, no fake quotes).
         shown = [humanproof.part(p) for p in paths]
         summary = worktrees.control_summary(shown)
+        size = worktrees.change_counts(root, tip)
         result = {
             "target": target,
             "tip": tip,
+            **({"commits": size[0], "files": size[1]} if size else {}),
             "control_paths": len(paths),
             "paths_hash": target.rsplit(":", 1)[1],
             "paths": shown[:5],
             "paths_summary": summary,
         }
-        text = f"Tip {tip}: {len(paths)} orch or git control paths." + (f" {summary}" if summary else "")
+        brings = f"{size[0]} commits, {size[1]} files, " if size else ""
+        text = f"Tip {tip}: {brings}{len(paths)} orch or git control paths." + (
+            f" {summary}" if summary else ""
+        )
         _out(args, result, text)
         return
     if args.sub == "approve" or (args.sub == "retry" and getattr(args, "approve_tip", None)):
         target, tip, paths = worktrees.approval_view(root, args.ticket)
         count, digest = len(paths), target.rsplit(":", 1)[1]
+        size = worktrees.change_counts(root, tip)
         shown = getattr(args, "approve_tip", None)
         if (shown is not None or args.sub == "retry") and (
             shown != tip or args.control_paths != count or args.paths_hash != digest
@@ -235,6 +241,7 @@ def _copy_clean(args, root: Path) -> None:
             parts={
                 "title": humanproof.ticket_name(root, args.ticket),
                 "tip": tip,
+                "changes": "{} commits, {} files".format(*size) if size else "unknown",
                 "control_paths": count,
                 "paths": humanproof.part(worktrees.control_summary([humanproof.part(p) for p in paths])),
             },
