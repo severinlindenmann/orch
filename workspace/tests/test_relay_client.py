@@ -1261,6 +1261,255 @@ def test_allow_question_always_and_ignore(proj, run, rel):
     assert "Spam" not in run("relay", "inbox")[1], "an ignored message does not come back"
 
 
+def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
+    """Authority: once sync is on, an answered relay:allow question counts only when its answer was made on
+    this machine (history.answer_proven); a peer's synced answer allows (and ignores) nothing here."""
+    from conftest import ensure_signing
+
+    from orch import history, tickets
+
+    connect(run, rel)
+    local_mid, peer_mid, deny_mid = "m_deleg00000000011", "m_deleg00000000012", "m_deleg00000000013"
+    for mid in (local_mid, peer_mid, deny_mid):
+        rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
+    run("relay", "inbox")
+    ensure_signing(proj)
+    history.enable_sync(proj, adopt=True)  # as the sync add-on does
+    by_msg = {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
+    run("answer", by_msg[local_mid]["id"], "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+
+    def peer_answer(word):
+        def plant(t):  # what a sync apply writes: the answer and its line, core made neither here
+            t["questions"][0].update(answer=word, answered_by="human:Marco", via="phone")
+            t["history"].append(
+                {
+                    "at": "2026-11-09T09:00:00Z",
+                    "by": "human:Marco",
+                    "via": "phone",
+                    "text": f"Answered q1: {word}",
+                    "chat_message": False,
+                }
+            )
+            t["waiting_on"] = None
+
+        return plant
+
+    for mid, word in ((peer_mid, "Always"), (deny_mid, "Ignore")):
+        path = tickets.ticket_path(proj, by_msg[mid]["id"])
+        doc = json.loads(path.read_text())
+        peer_answer(word)(doc)
+        path.write_text(json.dumps(doc, indent=2))
+    run("relay", "inbox")
+    run("relay", "inbox")
+    sent = [m for m in rel.sent if m["type"] == "allow"]
+    assert [m["reply_to"] for m in sent] == [local_mid] and sent[0]["body"]["mode"] == "once"
+    given = json.loads((proj / ".orch/secrets/allows.json").read_text())["given"]
+    assert [g["message_id"] for g in given] == [local_mid]
+    for mid in (peer_mid, deny_mid):
+        shown = json.loads(run("ticket", "show", by_msg[mid]["id"], "--json")[1])
+        assert shown["status"] != "dropped" and "allow_applied" not in shown["ext"]["relay"]
+        assert shown["questions"][0]["answered_by"] == history.SYNC_BY  # shown as synced, not verified
+        notes = [h["text"] for h in shown["history"] if "not applied" in h["text"]]
+        assert len(notes) == 1 and f"orch relay allow {mid}" in notes[0]
+    assert not (proj / ".orch/inbox-notes.json").exists() or deny_mid not in json.loads(
+        (proj / ".orch/inbox-notes.json").read_text()
+    )
+    local = json.loads(run("ticket", "show", by_msg[local_mid]["id"], "--json")[1])
+    assert local["ext"]["relay"]["allow_applied"] == "q1"
+
+
+def _synced_allow_tickets(proj, run, rel, *mids):
+    from conftest import ensure_signing
+
+    from orch import history
+
+    connect(run, rel)
+    for mid in mids:
+        rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
+    run("relay", "inbox")
+    ensure_signing(proj)
+    history.enable_sync(proj, adopt=True)  # as the sync add-on does
+    return {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
+
+
+def _peer_edits(proj, tid, change):
+    from orch import tickets
+
+    path = tickets.ticket_path(proj, tid)
+    doc = json.loads(path.read_text())
+    change(doc)
+    path.write_text(json.dumps(doc, indent=2))  # what a sync apply writes
+
+
+def test_a_proven_answer_allows_only_the_message_its_question_was_asked_for(proj, run, rel):
+    """The peer swaps the synced allow_message of a locally answered question to another waiting message: the
+    proven answer allows neither (the binding made when the question was asked here names the first one)."""
+    asked, other = "m_deleg00000000021", "m_deleg00000000022"
+    by_msg = _synced_allow_tickets(proj, run, rel, asked, other)
+    tid = by_msg[asked]["id"]
+    from orch import humanproof
+
+    assert humanproof.relay_allow_get(proj, tid, "q1") == {"message": asked, "applied": False}
+    assert not humanproof.relay_allow_set(proj, tid, "q1", other)  # a recorded message is never replaced
+    _peer_edits(proj, tid, lambda d: d["ext"]["relay"].update(allow_message=other))
+    run("answer", tid, "q1", "Always", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    run("relay", "inbox")
+    assert not [m for m in rel.sent if m["type"] == "allow"]
+    assert (
+        not (proj / ".orch/secrets/allows.json").exists()
+        or not json.loads((proj / ".orch/secrets/allows.json").read_text())["given"]
+    )
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert "allow_applied" not in shown["ext"]["relay"]
+    assert sum("not asked on this computer for this message" in h["text"] for h in shown["history"]) == 1
+
+
+def test_a_reset_allow_applied_does_not_apply_an_answer_again(proj, run, rel):
+    from orch import relay
+
+    mid = "m_deleg00000000023"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    assert [m["reply_to"] for m in rel.sent if m["type"] == "allow"] == [mid]  # the local flow works
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert shown["ext"]["relay"]["allow_applied"] == "q1"
+    _peer_edits(proj, tid, lambda d: d["ext"]["relay"].pop("allow_applied"))  # the peer resets it
+    a = relay.allows(proj)
+    a["given"] = []  # and no earlier allow is found here either
+    relay._save_allows(proj, a)
+    run("relay", "inbox")
+    run("relay", "inbox")
+    assert [m["reply_to"] for m in rel.sent if m["type"] == "allow"] == [mid]  # applied once, not again
+    assert not relay.allows(proj)["given"]
+
+
+def test_a_decoy_question_with_the_same_id_proves_no_other_answer(proj, run, rel):
+    """Opus PR B #2: the person answered q1 "Allow once" here; a peer puts a plain decoy q1 with that answer
+    first and changes the real relay:allow q1 to "Always". The decoy's proof never lets "Always" act."""
+    from orch import humanproof, relay
+
+    mid = "m_deleg00000000024"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+
+    def decoy(d):
+        real = d["questions"][0]
+        d["questions"].insert(0, {**real, "kind": "plain", "action": None})
+        real["answer"] = "Always"
+
+    _peer_edits(proj, tid, decoy)
+    run("relay", "inbox")
+    run("relay", "inbox")
+    assert not [m for m in rel.sent if m["type"] == "allow"]
+    assert not relay.allows(proj)["given"]
+    assert humanproof.relay_allow_get(proj, tid, "q1")["applied"] is False
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert "allow_applied" not in shown["ext"]["relay"] and shown["status"] != "dropped"
+    assert sum("same id" in h["text"] for h in shown["history"]) == 1  # said once
+
+
+def test_the_same_place_answer_word_must_match_the_proven_one(proj, run, rel):
+    """No duplicate ids: the raw question at q's place must be the relay:allow one with the very answer."""
+    from orch import history, relay, tickets
+
+    mid = "m_deleg00000000025"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    raw = json.loads(tickets.ticket_path(proj, tid).read_text())
+    assert history.answer_proven(proj, raw, raw["questions"][0])
+    _peer_edits(proj, tid, lambda d: d["questions"][0].update(answer="Always"))
+    run("relay", "inbox")
+    assert not [m for m in rel.sent if m["type"] == "allow"] and not relay.allows(proj)["given"]
+
+
+@pytest.mark.parametrize("word", ["Always", "Ignore"])
+def test_an_allow_given_here_proves_no_synced_answer_word(proj, run, rel, word):
+    """Allowed here with `orch relay allow --once`; a peer then sets the answer to Always / Ignore. The allow
+    given here only marks the binding applied: the synced word neither widens nor drops anything."""
+    from orch import humanproof, relay
+
+    mid = "m_deleg00000000026"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("relay", "allow", mid, "--once")
+
+    def peer(d):
+        d["questions"][0].update(answer=word, answered_by="human:Marco", via="phone")
+        d["history"].append(
+            {
+                "at": "2026-11-09T09:00:00Z",
+                "by": "human:Marco",
+                "via": "phone",
+                "text": f"Answered q1: {word}",
+            }
+        )
+
+    _peer_edits(proj, tid, peer)
+    run("relay", "inbox")
+    run("relay", "inbox")
+    given = relay.allows(proj)["given"]
+    assert [(g["message_id"], g["mode"]) for g in given] == [(mid, "once")]
+    assert [m["body"]["mode"] for m in rel.sent if m["type"] == "allow"] == ["once"]
+    assert humanproof.relay_allow_get(proj, tid, "q1")["applied"] is True
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert shown["status"] != "dropped"
+    assert not (proj / ".orch/inbox-notes.json").exists() or mid not in json.loads(
+        (proj / ".orch/inbox-notes.json").read_text()
+    )
+
+
+def test_the_applied_binding_is_written_before_the_allow(proj, run, rel, monkeypatch):
+    from orch import humanproof, relay
+
+    mid = "m_deleg00000000027"
+    tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    states = []
+    real = relay.give_allow
+    monkeypatch.setattr(
+        relay,
+        "give_allow",
+        lambda root, *a, **k: (
+            states.append(humanproof.relay_allow_get(root, tid, "q1")["applied"]) or real(root, *a, **k)
+        ),
+    )
+    relay.apply_allow_answers(proj)
+    assert states == [True]
+    # a binding that cannot be written: nothing is applied (else it would be applied again on each pass)
+    mid2 = "m_deleg00000000028"
+    rel.inbox.append(msg(mid2, "delegate", {"title": "Task 28", "text": "x"}))
+    run("relay", "inbox")
+    tid2 = next(t["id"] for t in _tickets(run) if t["ext"]["relay"]["allow_message"] == mid2)
+    run("answer", tid2, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    monkeypatch.setattr(humanproof, "relay_allow_set", lambda *a, **k: False)
+    notes = relay.apply_allow_answers(proj)
+    assert any("could not record" in n for n in notes) and len(states) == 1
+
+
+def test_a_sync_free_allow_question_writes_no_binding(proj, run, rel):
+    from orch import addons, history, humanproof
+
+    def binding_file() -> bool:
+        ws = addons.workspace_id(proj, create=False)
+        return (
+            ws is not None and (humanproof.guarded_home(proj) / "keys" / ws / humanproof.RELAY_ALLOW).exists()
+        )
+
+    connect(run, rel)
+    rel.inbox.append(msg("m_deleg00000000029", "delegate", {"title": "T", "text": "x"}))
+    run("relay", "inbox")
+    tid = _allow_ticket_of(run)["id"]
+    assert not history.sync_enabled(proj)
+    assert humanproof.relay_allow_get(proj, tid, "q1") is None and not binding_file()
+    run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
+    run("relay", "inbox")
+    assert [m["reply_to"] for m in rel.sent if m["type"] == "allow"] == ["m_deleg00000000029"]  # as before
+    assert not binding_file()
+    shown = json.loads(run("ticket", "show", tid, "--json")[1])
+    assert shown["ext"]["relay"]["allow_applied"] == "q1"
+
+
 def test_phone_text_added_to_a_ticket_is_acked_once_on_rerun(proj, run, rel, new_ticket, monkeypatch):
     from orch import relay
 
@@ -1360,7 +1609,7 @@ def test_delegate_title_and_checklist_are_stored_as_framed_data(proj, run, rel):
     assert t["checklist"][1]["text"] == f"From {PEER}: plain"
     from orch import runs
 
-    prompt = runs.fresh_prompt(t, [])
+    prompt = runs.fresh_prompt(t, [], proj)
     assert f"From {PEER}:" in prompt
 
 
@@ -1699,3 +1948,14 @@ def test_shown_name_is_never_a_raw_workspace_id(monkeypatch):
     assert relay._shown_name(None, "ws_a1", "another workspace") == "Pilatus"
     assert relay._shown_name(None, "ws_u5k5wqp2a5", "another workspace") == "another workspace"
     assert relay._shown_name(None, "ws_u5k5wqp2a5", "") == ""
+
+
+def test_a_sync_free_workspace_keeps_applying_with_duplicate_question_ids(proj, run, rel):
+    """Requirement: sync-free workspaces are unaffected; the duplicate-id refusal only runs with sync on."""
+    from orch import history, relay
+
+    assert not history.sync_enabled(proj)
+    import pathlib
+
+    src = pathlib.Path(relay.__file__).read_text()
+    assert "if synced and len(ids) != len(set(ids)):" in src

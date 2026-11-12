@@ -19,7 +19,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, humanproof, net, procs, saferead, syncgate, term
+from orch import config, history, humanproof, net, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -116,6 +116,8 @@ def current_actor(explicit: str | None = None) -> str:
         who = "human:" + re.sub(r"[^A-Za-z0-9_.@ -]", "_", user)[:64]
     if not re.fullmatch(r"(agent|human):[A-Za-z0-9_.@ -]{1,64}", who):
         raise Refused(f"'{who}' is not a valid actor. Use agent:<tool> or human:<name>.")
+    if history.is_reserved_label(who):
+        raise Refused(f"'{who}' is reserved for orch's sync. Use agent:<tool> or human:<name>.")
     return who
 
 
@@ -397,14 +399,9 @@ class Conflict(Refused):
         self.extra = extra
 
 
-def _changed_by(ticket: dict) -> str:
-    h = ticket.get("history") or [{}]
-    return h[-1].get("by", "unknown")
-
-
-def _conflict(ticket: dict, what: str, current) -> Conflict:
-    by = _changed_by(ticket)
-    h = (ticket.get("history") or [{}])[-1]
+def _conflict(root: Path, ticket: dict, what: str, current) -> Conflict:
+    h = (history.lines(root, ticket) or [{}])[-1]  # the shown line: an unproven synced author is not named
+    by = h.get("by", "unknown")
     when = f" at {h['at'][11:16]}" if h.get("at") else ""
     return Conflict(
         f"{what} was changed by {by}{when}.",
@@ -447,6 +444,7 @@ def _write(root: Path, ticket: dict) -> None:
         raise Refused(humanproof.VERDICT_NEEDED)
     if not ok:  # left Done, or a Done whose state no longer matches its verdict (a step reopened and redone)
         humanproof.verdict_forget(root, ticket["id"])  # the old entry must never come back
+    history.register_written(root, ticket)  # the lines/evidence/refs core made for it (only once sync is on)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
     try:
@@ -519,10 +517,10 @@ def apply_op(
         if by is not None and eff_status in CLOSED and _agent_actor(by):
             raise Refused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
-            raise _conflict(ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
+            raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
         if expect is not None and _get(ticket, expect[0]) != expect[1]:
             parent, _, leaf = expect[0].rpartition(".")
-            raise _conflict(ticket, parent.split(".")[-1] or leaf, _get(ticket, parent or leaf))
+            raise _conflict(root, ticket, parent.split(".")[-1] or leaf, _get(ticket, parent or leaf))
         was_review = ticket.get("status") == "review"
         wont_before = _wont_view(ticket)
         result = fn(ticket)
@@ -650,8 +648,9 @@ def ensure_general(root: Path, by: str) -> str:
         "checklist": [],
         "refs": [],
         "questions": [],
-        "history": [{"at": t, "by": by, "via": "cli", "text": "Created", "chat_message": False}],
+        "history": [],
     }
+    add_history(ticket, by, "Created", "cli", at=t)
     save(root, ticket)
     harness.protect_local(root)
     return ticket["id"]
@@ -723,10 +722,26 @@ def _env_via() -> str:
     return v if re.fullmatch(r"[a-z][a-z0-9-]{1,23}", v) else "cli"
 
 
-def add_history(ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False) -> None:
-    """chat=True marks a real Chat or group message (`chat_message: true`): the only lines the Chat shows."""
-    entry = {"at": now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
+def add_history(
+    ticket: dict, by: str, text: str, via: str | None = None, chat: bool = False, *, at: str | None = None
+) -> None:
+    """THE one point where core appends a history line (contracts/history.md). chat=True marks a real Chat or
+    group message (`chat_message: true`): the only lines the Chat shows. The exact line object made here is
+    marked as core's own (history.created); _write records it when the ticket is written."""
+    entry = {"at": at or now(), "by": by, "via": via or _env_via(), "text": text, "chat_message": chat}
     ticket["history"].append(entry)
+    history.created("lines", entry)
+
+
+def add_evidence(item: dict, evs: list[dict], *, trim: bool = False) -> None:
+    """THE one point where core appends evidence to a step: each object made here is marked as core's own
+    (history.created), recorded when the ticket is written. trim: recorded runs are capped (trim_runs)."""
+    for ev in evs:
+        history.created("evidence", ev)
+    if trim:
+        item["evidence"] = trim_runs([*item["evidence"], *evs])
+    else:
+        item["evidence"].extend(evs)
 
 
 def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
@@ -786,16 +801,9 @@ def create(
         "checklist": [],
         "refs": [],
         "questions": [],
-        "history": [
-            {
-                "at": t,
-                "by": by,
-                "via": _env_via(),
-                "text": "Created" + (f" under {parent}" if parent else ""),
-                "chat_message": False,
-            }
-        ],
+        "history": [],
     }
+    add_history(ticket, by, "Created" + (f" under {parent}" if parent else ""), at=t)
     if parent is not None:
         ticket["parent"] = parent
     if title_auto:
@@ -1563,7 +1571,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
         for ev in evs:
             ev.setdefault("by", by)
             ev.setdefault("at", now())
-        item["evidence"].extend(evs)
+        add_evidence(item, evs)
         item["done"] = True
         _clear_doing(item)
         add_history(t, by, f"Check {cid} done")
@@ -1687,7 +1695,7 @@ def check_record(
 
     def op(t):
         item = _item(t, cid)
-        item["evidence"] = trim_runs([*item["evidence"], ev])
+        add_evidence(item, [ev], trim=True)
         add_history(
             t,
             by,
@@ -1830,6 +1838,7 @@ def check_start(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         for c in t["checklist"]:
             _clear_doing(c)
         item.update({"state": "doing", "by": by, "at": now()})
+        history.created("steps", item)  # the step-start point: this mark is core's own (like evidence)
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -1900,6 +1909,7 @@ def ref_add(
         else:
             result = {**value, "at": now(), "by": by}
             values.append(result)
+            history.created("refs", result)  # the ref-add point: this exact object is core's
             verb = "Added reference"
         if value.get("local"):
             refs.write_local(root, ticket["id"], values)

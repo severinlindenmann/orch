@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import phone_view, runs, tickets
+from orch import phone_results, phone_view, runs, tickets
 
 REVIEW_MESSAGE = (
     "When the ticket reaches Review, orch sends its summary and files to the person by itself: "
@@ -15,7 +15,7 @@ REVIEW_MESSAGE = (
 
 def test_fresh_prompt_plain_words(proj, new_ticket):
     tid = new_ticket()
-    prompt = runs.fresh_prompt(tickets.load(proj, tid), [])
+    prompt = runs.fresh_prompt(tickets.load(proj, tid), [], proj)
     assert ("one task per piece of the person's work, in plain words (no ids, paths or commands)") in prompt
     assert (f'orch ticket summary {tid} "<what was done and what is left>" in plain words.') in prompt
     assert REVIEW_MESSAGE.replace("`", "") in prompt
@@ -70,7 +70,8 @@ def test_phone_view_hides_delivery_task_and_counts(proj, new_ticket):
     assert view["total"] == 2
     assert view["done"] == 1
     assert view["summary"] == "Fish page done, checked."
-    assert phone_view.result_text(ticket) == "Ready for your review: Fish page\nFish page done, checked."
+    h = phone_results.value_hider(proj)
+    assert phone_view.result_text(ticket, h) == "Ready for your review: Fish page\nFish page done, checked."
     assert len(ticket["checklist"]) == 3
 
 

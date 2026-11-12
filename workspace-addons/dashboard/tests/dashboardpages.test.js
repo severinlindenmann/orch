@@ -267,3 +267,26 @@ test('General phone messages belong in Chat, not Home Messages', () => {
   assert.doesNotMatch(home, /What is still open this week|Make a ticket|home-message/);
   assert.equal(fixture.chat.messages[0].via, 'phone');
 });
+
+
+test('settings: the workspace folder is visible on the row without opening Details (owner fb11)', () => {
+  const c = context([], {snapshot:false, addons:() => []});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
+  const long = '/Users/someone/Documents/Projects/2026/customer-work/team-shared/pilatus-workspace';
+  for (const folder of ['/Users/me/pilatus', long]) {
+    c.state.settings = {folder, addons:[]};
+    const ws = nodes(c.settingsPage(), n => n.attrs?.['data-key'] === 'settings-workspace')[0];
+    const row = nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder')[0];
+    // on the row, not inside the closed <details>
+    assert.ok(row);
+    assert.equal(nodes(ws, n => n.tag === 'details' && nodes(n, m => m === row).length).length, 0);
+    assert.equal(row.attrs.title, folder);
+    if (folder === long) {
+      assert.ok(row.textContent.length <= 48 && row.textContent.includes('…'));
+      assert.ok(row.textContent.startsWith('/Users/someone') && row.textContent.endsWith('pilatus-workspace'));
+    } else assert.equal(row.textContent, folder);
+    const details = nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder-details')[0];
+    assert.match(JSON.stringify(details), /Stored on this computer/);
+    assert.ok(nodes(details, n => n.textContent === folder).length);
+  }
+});

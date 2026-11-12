@@ -328,7 +328,7 @@ def test_without_a_hider_nothing_is_written(live, monkeypatch):
     def off(root):
         raise record.RecordOff("Recording is off until key hiding is ready.")
 
-    monkeypatch.setattr("orch.record_hook._writer", off)
+    monkeypatch.setattr("orch.record_hook.record_writer", off)
     refused("hider_off", send, root, job, type="log", text="x")
     refused("hider_off", start, root)
     assert [e["type"] for e in stream(root, run, job)] == ["start"]

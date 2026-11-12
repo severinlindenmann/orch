@@ -67,9 +67,13 @@ def test_multiline_whitespace_and_clear(field):
     "checks",
     [[], [{"id": "c1", "text": "Export", "done": False}], [{"id": "c1", "text": "Export", "done": True}]],
 )
-def test_prompt_plans_criteria_until_tasks_cover_them(resume, checks):
+def test_prompt_plans_criteria_until_tasks_cover_them(resume, checks, tmp_path):
     ticket = {"id": "t_abcdef", "title": "Export", "done_when": TEXT, "checklist": checks}
-    prompt = runs.resume_prompt(ticket, [], None, "codex") if resume else runs.fresh_prompt(ticket, [])
+    prompt = (
+        runs.resume_prompt(ticket, [], None, "codex", tmp_path)
+        if resume
+        else runs.fresh_prompt(ticket, [], tmp_path)
+    )
     said = "what should be true when it is done: The export opens. Every invoice is included.."
     assert said in prompt
     assert "--covers" in prompt

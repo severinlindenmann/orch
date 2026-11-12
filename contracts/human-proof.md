@@ -351,6 +351,77 @@ differ in that one line's attribution; history is display only and never an auth
 swapped (vectors `ticket-merge-v1.json` rule `person-history`). No migration: a raw `done` from before this core has no entry and shows as Review once; the person's Looks good
 signs it.
 
+**What a machine shows as the person (PR B).** Once sync is enabled for a workspace, every person field of a ticket
+(history lines, evidence, Won't do and verdict persons, answers, references, plan and description authors) is shown
+through ONE rule, `orch.history.shown_ticket`: as written only when this core created that exact object here (its
+digest in the local1-MAC'd own-lines store, registered at core's single append points, never by diffing files) or a
+decision this core verifies binds it (the decision's line matched once); otherwise as `agent:sync` "(synced, not
+verified here)". A workspace that never enabled sync is shown exactly as before. Full rule: contracts/history.md.
+
+**Action records (PR B).** A record an add-on keeps in the agent-writable workspace about a person's decision carries
+this core's MAC: HMAC-SHA256(`human.key`, canonical JSON (sort_keys, `,` `:`, UTF-8, no NaN) of the array
+`["action1", workspace id, target, record]`), base64url (`humanproof.action_sign` / `action_is_human`). The array
+form leaves no delimiter a target or a record could forge. It is made right after the CLI's gate (`person_by` with
+the decision's proof target where the decision needs a person) and checked again EACH time the record is used; an
+edited, moved or planted record verifies for nobody. A record that may be used only once carries a random `id`
+(16 bytes, base64url); once applied, the id is spent in `<guarded orch home>/keys/<ws>/actions-used.json` (under the
+key lock, the newest 5000 kept, `humanproof.action_spend`), and a spent id never counts again, even planted back. An
+unreadable store counts every id as spent (fail closed).
+
+The sync add-on's records (`orch_sync.records`, each `{..., kind, target, id, mac}` with the action target
+`sync-record:<kind>:<target>`):
+
+| file in `.orch/run/sync/` | kind | target (what it is bound to) | used |
+|---|---|---|---|
+| `choices.json` `files[<path>]` (keep, at, `covers`, local, incoming, sha256 of the chosen bytes) | `choice` | `<reviewed remote commit>:<path>` | while the remote stays; the chosen bytes must hash to `sha256` |
+| `checked-files.json` `[<path>]` | `file` | `<path>:<sha256 of the allowed bytes>` | each scan of exactly those bytes |
+| `allow-delete.json` `[<ticket>]` | `delete` | `<ticket>` | once (spent when the removal is staged) |
+| `ignored.json` `[<ticket>][<add-on>]` | `ignore` | `<ticket>:<add-on>:<value sha256>` | while that value waits |
+| `approved.json` `[<ticket>][<add-on>]` | `allow` | `<ticket>:<add-on>:<value sha256>` | once: approve writes the value and spends the id at once; no merge ever reads it, so an approval is never replayed (#540) |
+
+**Local records.** A local integrity record no person signs carries the core's local1 MAC: HMAC-SHA256(`human.key`,
+canonical JSON of `["local1", workspace id, kind, record]`) (`humanproof.local_sign` / `local_ok`), a domain that can
+never pass as an action record. Kinds: `own-lines` (history.md), `sync-enabled` (the enabled record), `sync-held` (a
+held add-on change in `run/sync/held/<ticket>-<digest>.json`: read per ticket, at most 512 in all, an unverified file
+is removed and shows nothing; a candidate goes when the other computer goes back to this machine's value) and
+`sync-paused` (the pause in `run/sync/state.json`: files, reason, kind, remote; an edited or planted pause is no
+pause, so a reason that lowers what needs a proof never counts), `sync-local-ext` (`run/sync/local-ext.json`,
+`{schema: "orch.sync-local-ext/1", tickets: {<ticket>: {<add-on>: <value sha256>}}, mac}`: this machine's own
+add-on values of every ticket sync received; started empty only when sync is first turned on here, never again
+once removed or broken) and `automation-local-blocks` (`addons/automation/local-blocks.json`,
+`{schema: "orch.automation-local-blocks/1", tickets: {<ticket>: <block sha256>}, mac}`: blocks the automation
+add-on wrote here). The MAC covers the whole file but `mac`. **Pinned (no rollback):** both carry a `counter`, and
+the guarded home (`keys/<ws>/record-pins.json`, `humanproof.pin_next` / `pin_ok`) keeps per kind the current counter
+(only ever up) and the sha256 of the one current body; a body whose counter or digest is not the pinned one (an older
+signed copy, e.g. the empty first-start record; a crash between the pin and the write; a missing pin) does not
+count. `local-ext.json` is started only when neither the file nor a pin exists. **Fail closed:** once sync is on,
+automation treats a missing, edited, planted, rolled back or unreadable `local-ext.json` as "no synced value is
+approved" and starts nothing from an automation block; a ticket not in the current record counts as created here
+only when it shows no sync traces (ext.sync, a line by `agent:sync`); an unverified `local-blocks.json` blesses
+nothing.
+
+**Answers as authority.** Once sync is on, an answer acts on this machine (`relay.apply_allow_answers`: a
+relay:allow question) only when `history.answer_proven`: the "Answered <id>: <answer>" line of exactly
+`answered_by` and `via` is in this machine's own-lines store (made here by `tickets.answer`, which the dashboard,
+phone and relay paths use), for any label, an agent's too. The proof is for the stored question at the SAME place
+as the shown one, of kind relay:allow, with the very same answer word; a ticket with two questions of one id
+applies nothing (one note). An allow already given here for that message (`orch relay allow`) only marks the
+question applied: it never proves a (maybe synced) answer word. A synced answer is not applied (it shows as
+`agent:sync`); the ticket gets one note naming `orch relay allow` / `orch relay done`.
+The message an answer allows is never read from the synced `ext.relay`: when the question is asked here with sync
+on, the guarded home records `(ticket, question) → allow_message` (`keys/<ws>/relay-allow.json`,
+`humanproof.relay_allow_set`; a recorded message is never replaced; enabling sync adopts the questions already asked
+here, with the ticket's `allow_applied`) and the answer is applied only when the ticket's `allow_message` is that
+one; "applied" is recorded there too, BEFORE anything is applied (never reset; not recordable: nothing applied), so
+a peer that swaps `allow_message` or clears `allow_applied` applies nothing. Once sync is on, a question with no
+record here applies nothing. Sync-free: nothing is written to the guarded home; `allow_applied` decides, as before.
+
+**take-remote** (`orch sync take-remote --proof-stdin`, a person only, `addon.act`): the way out of a HISTORY pause
+(several merge bases, or none outside a machine's first join). It is the normal merge authority with this machine's
+HEAD as the base: per ticket `merge_document(head, head, theirs with this machine's key, Done and ext.sync)`, the
+counter only up, the reach gate, key renumbering, the tree checks and the deletion gate, ALL before the proof. The
+target is `sync:take-remote:<paused remote commit>:<tree>`, the exact tree then committed and applied.
+
 How the list was made (re-run before 1.0a closes): `grep -rnE 'require_human\(|agent_tool\(\)|startswith\("human:"\)|who.*people|Only a person|Only a human|only a person' workspace/src/orch workspace-addons/*/src`
 (every hit was reviewed; display-only uses such as labels and history parsing are not ops).
 

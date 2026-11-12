@@ -8,6 +8,7 @@ is a person's own decision (op `record.delete_detail`, invariant H1).
 import argparse
 import base64
 import binascii
+import contextlib
 import heapq
 import json
 import re
@@ -111,29 +112,42 @@ def _run_hook(find_root, strict: bool, before_write=lambda: None) -> int:
         return 0
     except BaseException as e:  # noqa: BLE001 - a tool's hook: exit 2 would block the tool call
         note = str(e) if isinstance(e, Refused) and str(e) else "nothing was recorded."
-    if strict:
-        print(f"Refused: {note}", file=sys.stderr)
-        return 2
-    sys.stderr.write(f"orch: {note}\n")
-    return 0
+    return _hook_end(note, strict)
+
+
+def _hook_end(note: str, strict: bool) -> int:
+    """One stderr line, nothing on stdout; 0, or 2 with --strict."""
+    with contextlib.suppress(BaseException):  # not even a closed stderr may change the exit code
+        sys.stderr.write(f"Refused: {note}\n" if strict else f"orch: {note}\n")
+    return 2 if strict else 0
 
 
 def hook_main(argv: list[str], watchdog=None) -> int:
-    """`orch record hook [--strict]`, called from cli.main before the parser, the chat guard and the notices:
-    a tool's hook runs before every tool call and exit 2 would block it. The wiring must call exactly
-    `orch record hook`; global flags before it (--json, --root) are not understood here and are ignored."""
-    from orch import workcheck
-
-    timer = workcheck.start_watchdog()  # a hung hook ends quietly (exit 0) after the hard timeout
-    if watchdog is not None:
-        watchdog.cancel()
+    """`orch record [flags] hook [anything]` (orch.is_record_hook), called from cli.main before the parser,
+    the chat guard and the notices: a tool's hook runs before every tool call and exit 2 would block it.
+    Flags (--json, --by, unknown ones) are not understood here and are ignored; the root comes from ORCH_ROOT
+    or the working folder. Never raises and never writes to stdout: 0 (2 only with --strict) and at most one
+    stderr line."""
+    strict = "--strict" in argv
+    timer = None
     try:
+        from orch import workcheck
+
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8")
+        timer = workcheck.start_watchdog()  # a hung hook ends quietly (exit 0) after the hard timeout
+        if watchdog is not None:
+            watchdog.cancel()
         from orch import cli
 
         # the timer is cancelled before the first write: os._exit never lands in the middle of one
-        return _run_hook(cli._find_root, "--strict" in argv, before_write=timer.cancel)
+        return _run_hook(cli._find_root, strict, before_write=timer.cancel)
+    except BaseException:  # noqa: BLE001 - _run_hook never raises; this is anything around it
+        return _hook_end("nothing was recorded.", strict)
     finally:
-        timer.cancel()
+        if timer is not None:
+            timer.cancel()
 
 
 def dispatch(args, root: Path) -> bool:
@@ -812,8 +826,14 @@ def run_model(run: str, events: list[dict]) -> dict:
             continue
         key = (e["kind"], e["id"])
         finished = e.get("outcome") is not None
-        if key in uses and uses[key]["finished"] and not finished:
-            continue
+        if key in uses:
+            old_via, via = uses[key]["event"].get("via"), e.get("via")
+            if old_via == "log" and via == "hook":
+                continue  # hook and log lines of one call kept with `conflict`: believe the log line
+            # a log line replaces the hook's, finished or not: a hook end (provisional, the agent's word)
+            # never hides the log's started line of that call
+            if not (old_via == "hook" and via == "log") and uses[key]["finished"] and not finished:
+                continue
         uses[key] = {"event": e, "finished": finished}
     items = []
     for u in uses.values():

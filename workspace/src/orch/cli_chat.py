@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orch import chat, tickets
+from orch import chat, history, tickets
 from orch.errors import Refused
 
 
@@ -26,6 +26,8 @@ def add_parsers(sub, common) -> None:
 
 
 def _out(args, data, text: str) -> None:
+    if args.json:
+        data = history.shown_json(history.args_root(args), data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 

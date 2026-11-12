@@ -687,7 +687,7 @@ def test_run_prompt_skips_wont_do_steps(proj, run, new_ticket):
 
     tid = with_checks(proj, run, new_ticket, n=2)
     run("check", "wont-do", tid, "c1", "--by", "human:tester")
-    text = runs.fresh_prompt(tickets.load(proj, tid), [])
+    text = runs.fresh_prompt(tickets.load(proj, tid), [], proj)
     assert "c2: step 2" in text and "c1: step 1" not in text
 
 
@@ -754,7 +754,7 @@ def test_prompt_names_declined_steps_and_cli_strips_control_chars(proj, run, new
     tickets.apply_op(  # a synced or hand-edited reason can carry control characters
         proj, tid, lambda t: t["checklist"][0].update(reason="Skip \x1b[31mred\x07")
     )
-    text = runs.fresh_prompt(tickets.load(proj, tid), [])
+    text = runs.fresh_prompt(tickets.load(proj, tid), [], proj)
     assert "Declined by a person" in text and "c1 (" in text and "c1: step 1" not in text
     _, out, _ = run("ticket", "show", tid)
     assert "\x1b" not in out and "\x07" not in out

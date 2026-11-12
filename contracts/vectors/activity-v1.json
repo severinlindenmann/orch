@@ -84,7 +84,7 @@
  ],
  "dedupe": [
   {
-   "name": "hook and log same step",
+   "name": "hook and log same step: the log lines win",
    "lines": [
     {
      "run": "r_8k2m01",
@@ -124,12 +124,12 @@
     }
    ],
    "keep": [
-    0,
-    2
+    1,
+    3
    ]
   },
   {
-   "name": "log first then hook wins",
+   "name": "log first, a later hook line is dropped",
    "lines": [
     {
      "run": "r_8k2m01",
@@ -155,7 +155,7 @@
     }
    ],
    "keep": [
-    1
+    0
    ]
   },
   {
@@ -321,6 +321,229 @@
    "keep": [
     0,
     1
+   ]
+  },
+  {
+   "name": "provisional hook end replaced by the log",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_5",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": null,
+      "error": null,
+      "ms": null
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_5",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": false,
+      "error": "Exit code 1",
+      "ms": 40
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_5",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": null,
+      "error": null,
+      "ms": null
+     }
+    }
+   ],
+   "keep": [
+    1
+   ]
+  },
+  {
+   "name": "provisional hook end after the log is dropped",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_6",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 12
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_6",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": null,
+      "error": null,
+      "ms": null
+     }
+    }
+   ],
+   "keep": [
+    0
+   ]
+  },
+  {
+   "name": "a hook started line that names something else is kept, the log line carries conflict",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_7",
+     "kind": "step",
+     "via": "hook",
+     "text": "Read notes.txt",
+     "outcome": null
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_7",
+     "kind": "step",
+     "via": "log",
+     "text": "Run rm -rf build/",
+     "outcome": null
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_7",
+     "kind": "step",
+     "via": "hook",
+     "text": "Read notes.txt",
+     "outcome": null
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "a hook end after the log's started line of that call is dropped",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_8",
+     "kind": "step",
+     "via": "log",
+     "text": "Run rm -rf build/",
+     "outcome": null
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_8",
+     "kind": "step",
+     "via": "hook",
+     "text": "Read notes.txt",
+     "outcome": {
+      "ok": null,
+      "error": null,
+      "ms": null
+     }
+    }
+   ],
+   "keep": [
+    0
+   ]
+  },
+  {
+   "name": "a hook failure (fixed code) and the log's failure agree: the log line replaces it",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_9",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": "tool_failed",
+      "ms": null
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_9",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": false,
+      "error": "Exit code 1",
+      "ms": 40
+     }
+    }
+   ],
+   "keep": [
+    1
+   ]
+  },
+  {
+   "name": "a hook failure against the log's success: both kept, the log line carries conflict",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_10",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": "interrupted",
+      "ms": null
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_10",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 12
+     }
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "a hook failure after the log's line of that call is dropped",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_11",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 12
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_11",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": "tool_failed",
+      "ms": null
+     }
+    }
+   ],
+   "keep": [
+    0
    ]
   }
  ],
@@ -1195,18 +1418,113 @@
    }
   },
   {
-   "name": "usage stored",
+   "name": "usage refused (numbers no log line checks)",
    "line": {
     "kind": "usage",
     "via": "hook",
     "id": "toolu_01X",
     "run": "r_8k2m01"
    },
-   "stored": {
-    "kind": "usage",
+   "stored": "refused"
+  },
+  {
+   "name": "denial refused (it says how a call ended)",
+   "line": {
+    "kind": "denial",
     "via": "hook",
     "id": "toolu_01X",
     "run": "r_8k2m01"
+   },
+   "stored": "refused"
+  },
+  {
+   "name": "helper.start stored as hook",
+   "line": {
+    "kind": "helper.start",
+    "via": "log",
+    "id": "toolu_01H",
+    "run": "r_8k2m01"
+   },
+   "stored": {
+    "kind": "helper.start",
+    "via": "hook",
+    "id": "toolu_01H",
+    "run": "r_8k2m01"
+   }
+  },
+  {
+   "name": "a claimed success is stored provisional (a hook never says a call ended well)",
+   "line": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": true,
+     "error": null,
+     "ms": 5
+    }
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": null,
+     "error": null,
+     "ms": null
+    }
+   }
+  },
+  {
+   "name": "a claimed failure stays a failure with its fixed code, ms null",
+   "line": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": false,
+     "error": "interrupted",
+     "ms": 40
+    }
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": false,
+     "error": "interrupted",
+     "ms": null
+    }
+   }
+  },
+  {
+   "name": "a failure's own text is never kept: the fixed code tool_failed instead",
+   "line": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": false,
+     "error": "Exit code 1: rm: build: Permission denied",
+     "ms": null
+    }
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": false,
+     "error": "tool_failed",
+     "ms": null
+    }
    }
   }
  ],

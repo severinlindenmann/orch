@@ -56,6 +56,11 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
     pending/<ticket id>.jsonl     input waiting for a busy run, one line each (run-pending.schema.json)
     logs/<ticket id>-<run>.log    output of a oneshot run
     hooks-<run>.json              tool hook settings written for one live run ({orch_hooks_file} in agent-adapter.schema.json)
+    own-lines/<ticket id>.json    only once sync is enabled: digests of the history lines, evidence and refs THIS core made for
+                                  the ticket, with this core's local1 MAC (history.md). Unreadable or wrong MAC = nothing proven
+    sync/                         the sync add-on's records: every decision entry (choices, approved, ignored, checked-files,
+                                  allow-delete) is a signed action record, held/* and the pause in state.json carry a local1 MAC
+                                  (human-proof.md "Action records"); an entry that does not verify counts for nothing
     <add-on name>/                runtime files of an add-on's background process (pid, port, nonce, log).
                                   Never trusted alone: a pid is used only when > 1 and its identity is checked (addon-manifest.md, Background)
   record/                         GITIGNORED. What agents did: runs/<run>.jsonl, detail/, jobs/, counts/, proposals/, outbox-usage/
