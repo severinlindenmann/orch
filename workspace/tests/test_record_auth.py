@@ -90,6 +90,12 @@ def test_legacy_vectors(c):
     assert {"mode": mode, "unchecked": unchecked} == c["expect"]
 
 
+@pytest.mark.parametrize("c", VEC["legacy_prefix"], ids=_ids(VEC["legacy_prefix"]))
+def test_legacy_prefix_vectors(c):
+    pre, base = ra.legacy_prefix(bytes.fromhex(c["raw_hex"]), c["head"])
+    assert {"prefix_lines": len([x for x in pre.split(b"\n") if x]), "base": base} == c["expect"]
+
+
 @pytest.mark.parametrize("c", VEC["job_streams"], ids=_ids(VEC["job_streams"]))
 def test_job_vectors(c):
     got = ra.verify_run(_raw(c["lines"]), RUN, WS, RK, KID, c["head"], job=c["job"])

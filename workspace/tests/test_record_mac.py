@@ -435,7 +435,7 @@ def test_a_rejected_spool_entry_keeps_a_count_only_where_a_head_exists(store, mo
     (d2 / ("0" * 19 + "1_" + "b" * 32 + ".json")).write_text("{}")
     writer.drain(RUN, check_lock=lambda: None)
     assert hp.record_head_read(ws, RUN)[0]["rejected"] == 1
-    # a sealed run whose head is missing (a crash before the first head write): the head is made, with the count
+    # a sealed run whose head is missing (a crash before the first head write): the head is made, with it
     (hp.key_dir(ws, create=False) / "record-heads" / f"{RUN}.json").unlink()
     (d2 / ("0" * 19 + "2_" + "c" * 32 + ".json")).write_text("{}")
     writer.drain(RUN, check_lock=lambda: None)

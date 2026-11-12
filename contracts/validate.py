@@ -547,6 +547,26 @@ def ra_legacy(raw, head):
     return {"mode": "sealed", "unchecked": 0}
 
 
+def ra_legacy_prefix(raw, head):
+    """Reference of record_auth.legacy_prefix: {prefix_lines, base}."""
+    n, want = head.get("legacy_lines"), head.get("legacy_hash")
+    if type(n) is not int or n <= 0 or not isinstance(want, str):
+        return {"prefix_lines": 0, "base": 0}
+    cut = seen = 0
+    while seen < n:
+        end = raw.find(b"\n", cut)
+        if end < 0:
+            return {"prefix_lines": 0, "base": n}
+        seen += end > cut
+        cut = end + 1
+    pre = raw[:cut]
+    lines = [x for x in pre.split(b"\n") if x]
+    sealed = [x for x in lines if len(x) > 125 and _RA_TAIL.search(x) and _RA_TAIL.search(x).start() == len(x) - 125]
+    if hashlib.sha256(pre).hexdigest() == want and not sealed:
+        return {"prefix_lines": len(lines), "base": n}
+    return {"prefix_lines": 0, "base": n}
+
+
 def ra_check(vec):
     """Replay vectors/activity-v1.json record_auth."""
     r = vec["record_auth"]
@@ -567,6 +587,8 @@ def ra_check(vec):
     for c in r["legacy"]:
         raw = b"".join(bytes.fromhex(x) + b"\n" if not bytes.fromhex(x).endswith(b"\n") else bytes.fromhex(x) for x in c["lines"])
         _expect(f"activity record_auth legacy {c['name']}", ra_legacy(raw, c["head"]), c["expect"])
+    for c in r["legacy_prefix"]:
+        _expect(f"activity record_auth legacy_prefix {c['name']}", ra_legacy_prefix(bytes.fromhex(c["raw_hex"]), c["head"]), c["expect"])
     for c in r["job_streams"]:
         raw = b"".join(bytes.fromhex(x) for x in c["lines"])
         _expect(f"activity record_auth job {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], c["job"]), c["expect"])

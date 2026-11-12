@@ -461,7 +461,7 @@ authenticates its detail file. Schema: `$defs/event_body` (what the writer valid
 number, so a planted junk line cannot shift later lines. The head (authority for rollback) is
 `<guarded home>/keys/<ws>/record-heads/<run>.json`, 0600, written under the run lock after the line:
 `{"schema": "orch.record-head/1", "run", "kid", "seq", "mac", "jobs": {"<job>": {"seq", "mac"}}, "rejected", "drained",
-"drained_floor", "pruned", "hm"}` where `hm = b64u(HMAC(rk, "orch.record.head/1\0" + ws + 0 + canonical JSON of the head
+"drained_floor", "pruned", "legacy_lines", "legacy_hash", "hm"}` where `hm = b64u(HMAC(rk, "orch.record.head/1\0" + ws + 0 + canonical JSON of the head
 without hm))` (sorted keys, compact). A crash between line and head leaves verified lines beyond the head; readers
 accept them and the next commit moves the head. The head is bound to its run (`run` is inside `hm` and a reader requires
 it to equal the run it reads, so one run's head copied over another's never verifies). A head with a wrong `hm`, `run`
@@ -532,9 +532,16 @@ orch checked them." (`record.UNCHECKED_TEXT`); they are never counted as orch-ch
 say `complete: false`), never used for permissions, retention or shared counts. Any other state is never legacy:
 a run with a head or a sealed line is verified as a whole and its unsigned lines (stripped, prepended, appended) are
 `changed`, reason `content`, and not shown; an unknown state of the guarded home (a missing or forged local id, a
-key folder that is missing, linked, loose or unreadable) is `tampered`, reason `unverified`, for every run. A legacy
-run that gets a new line becomes a sealed run: its old lines are then `changed` (no migration). Vectors
-`record_auth.legacy`.
+key folder that is missing, linked, loose or unreadable) is `tampered`, reason `unverified`, for every run. When the
+writer FIRST seals a run that already has legacy lines, it records them once in the chain head (guarded store,
+covered by the head MAC): `legacy_lines` = n (the non-empty lines it found, a cut-off last line completed) and
+`legacy_hash` = sha256 hex of the exact bytes up to and including the newline of the n-th line. The chain then
+numbers on after them (the first sealed line is seq n + 1, `p` = the genesis). A reader shows those lines when the
+file still starts with exactly that prefix (same count, same hash, none of its lines sealed): `checked: false`,
+`before_protection: true`, reason `unchecked`, never counted as orch-checked, never believed by permissions,
+retention, run state or caps. Anything else unsigned (prepended, edited, removed or added behind the prefix, a
+prefix whose hash differs) is `changed`, reason `content`, not shown. Vectors `record_auth.legacy` and
+`record_auth.legacy_prefix`.
 
 **Readers (S2).** `orch record tail` shows the events of the verified view with a computed `checked` (false for
 `via: hook` and for every line of a legacy run, true otherwise; never stored), the cursor is the verified seq, and
