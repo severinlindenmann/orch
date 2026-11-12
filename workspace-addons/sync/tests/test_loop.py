@@ -326,7 +326,7 @@ def test_a_foreground_run_blocks_a_second_loop(root, core_unknown, spawned, tmp_
         started, still = service.start(root), service.running_pid(root)
     finally:
         stopped = service.stop(root, wait=30)
-        try:  # stop() returns once the loop let go of its lock; the process exits right after
+        try:  # stop() returns once the loop let go of its lock; the process exits right after: wait for that exit
             fg.wait(15)
         except subprocess.TimeoutExpired:
             fg.kill()
