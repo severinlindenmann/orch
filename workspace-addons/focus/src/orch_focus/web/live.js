@@ -68,7 +68,7 @@
   }
 
   function renderFeed(v) {
-    const key = keyOf([v.record_notes, v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.board.step, v.events, v.ticket.history, S.state.agentFilter || null, S.state.agentFilter ? [v.board.helper_tree, v.board.agent_now] : null]);
+    const key = keyOf([v.record_notes, v.ticket.checklist, v.state, v.run.running, v.run.run, v.ticket.started, v.ticket.status, v.ticket.questions, v.board.step, v.events, v.ticket.history, S.state.agentFilter || null, S.state.agentFilter ? [v.board.helper_tree, v.board.agent_now] : null]);
     if (key === S.state.lastFeedKey) return;
     S.state.lastFeedKey = key;
     const helper = S.state.agentFilter && S.state.agentFilter !== 'main' && ((v.board && v.board.helper_tree) || []).some(x => x.agent === S.state.agentFilter);
@@ -87,18 +87,18 @@
       return;
     }
     const story = checks.filter(c => !c.wont_do && (c.done || c.state === 'doing'));
-    const heading = asking ? 'Before the question' : v.state === 'done' ? 'Work completed' : v.run.running ? 'The work is taking shape' : 'Work so far';
-    const nodes = [h('h2', {text: heading}), ...recordNotes(v)];
+    const st = window.FocusHelpers.sessionState(v), active = st.active;
+    const nodes = [h('h2', {text: st.headline}), ...recordNotes(v)];
     if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
     let now = null;
     for (const c of story) {
-      const node = h('article', {class: 'fx-story' + (!c.done && v.run.running ? ' now' : '')},
-        h('h3', {}, h('span', {text: (c.done ? '✓ ' : v.run.running ? 'Now: ' : '') + c.text})),
-        h('p', {text: evText(c) || (!c.done && v.run.running ? v.board.step || 'Working on this task.' : '')}));
-      if (!c.done && v.run.running && !now) now = node;
+      const node = h('article', {class: 'fx-story' + (!c.done && active ? ' now' : '')},
+        h('h3', {}, h('span', {text: (c.done ? '✓ ' : active ? 'Now: ' : '') + c.text})),
+        h('p', {text: evText(c) || (!c.done && active ? v.board.step || 'Working on this task.' : '')}));
+      if (!c.done && active && !now) now = node;
       nodes.push(node);
     }
-    if (v.run.running && !now) nodes.push(now = h('article', {class: 'fx-story now'}, h('h3', {}, h('span', {text: v.board.step || 'Waiting for the first step…'}))));
+    if (active && !now) nodes.push(now = h('article', {class: 'fx-story now'}, h('h3', {}, h('span', {text: v.board.step || 'Waiting for the first step…'}))));
     /* the step lines sit right under the task they belong to; while the agent rests, after the last task */
     const steps = stepList(v, 'main', 6);
     if (steps && now) now.append(steps);
