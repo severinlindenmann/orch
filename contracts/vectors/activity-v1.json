@@ -454,6 +454,97 @@
    "keep": [
     0
    ]
+  },
+  {
+   "name": "a hook failure (fixed code) and the log's failure agree: the log line replaces it",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_9",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": "tool_failed",
+      "ms": null
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_9",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": false,
+      "error": "Exit code 1",
+      "ms": 40
+     }
+    }
+   ],
+   "keep": [
+    1
+   ]
+  },
+  {
+   "name": "a hook failure against the log's success: both kept, the log line carries conflict",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_10",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": "interrupted",
+      "ms": null
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_10",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 12
+     }
+    }
+   ],
+   "keep": [
+    0,
+    1
+   ]
+  },
+  {
+   "name": "a hook failure after the log's line of that call is dropped",
+   "lines": [
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_11",
+     "kind": "step",
+     "via": "log",
+     "outcome": {
+      "ok": true,
+      "error": null,
+      "ms": 12
+     }
+    },
+    {
+     "run": "r_8k2m01",
+     "id": "toolu_11",
+     "kind": "step",
+     "via": "hook",
+     "outcome": {
+      "ok": false,
+      "error": "tool_failed",
+      "ms": null
+     }
+    }
+   ],
+   "keep": [
+    0
+   ]
   }
  ],
  "retention": [
@@ -1359,6 +1450,81 @@
     "via": "hook",
     "id": "toolu_01H",
     "run": "r_8k2m01"
+   }
+  },
+  {
+   "name": "a claimed success is stored provisional (a hook never says a call ended well)",
+   "line": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": true,
+     "error": null,
+     "ms": 5
+    }
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": null,
+     "error": null,
+     "ms": null
+    }
+   }
+  },
+  {
+   "name": "a claimed failure stays a failure with its fixed code, ms null",
+   "line": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": false,
+     "error": "interrupted",
+     "ms": 40
+    }
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": false,
+     "error": "interrupted",
+     "ms": null
+    }
+   }
+  },
+  {
+   "name": "a failure's own text is never kept: the fixed code tool_failed instead",
+   "line": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": false,
+     "error": "Exit code 1: rm: build: Permission denied",
+     "ms": null
+    }
+   },
+   "stored": {
+    "kind": "step",
+    "via": "hook",
+    "id": "toolu_01X",
+    "run": "r_8k2m01",
+    "outcome": {
+     "ok": false,
+     "error": "tool_failed",
+     "ms": null
+    }
    }
   }
  ],
