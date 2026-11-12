@@ -2528,3 +2528,19 @@ def test_b13j_overwritten_object_of_the_reviewed_tip_is_refused(done_copy):
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting" and back["reason"] == worktrees.OBJECTS_BAD
     assert git(root, "rev-parse", "HEAD") == head and (root / "code.py").read_text() != "EVIL\n"
+
+
+def test_b13k_old_history_with_format_errors_still_comes_back(done_copy, monkeypatch):
+    """fsck exits 1 for a bad timezone in an old commit: that is not a damaged object, the Done goes on."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    real = worktrees._git
+
+    def fake(args, cwd, *a, **k):
+        if args and args[0] == "fsck":
+            return 1, "", "error in commit 1234: badTimezone: invalid author/committer line - bad time zone"
+        return real(args, cwd, *a, **k)
+
+    monkeypatch.setattr(worktrees, "_git", fake)
+    done_and_sweep(root, tid)
+    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
