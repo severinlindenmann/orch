@@ -3055,3 +3055,27 @@ def test_b13x_an_assume_unchanged_entry_blocks_a_hard_rollback(done_copy):
     assert worktrees._index_flagged(root) is False
     git(root, "update-index", "--assume-unchanged", "code.py")
     assert worktrees._index_flagged(root) is True
+
+
+def test_b13y_a_reopen_and_done_bounce_during_the_check_revokes_the_approval(done_copy, monkeypatch):
+    """The ticket is Done again by the time the check ends, but the person's approval was cleared by the
+    reopen: the merge is rolled back, not certified."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    head = git(root, "rev-parse", "HEAD")
+    real = worktrees._after_merge
+
+    def bounce(top, touched, commit):
+        tickets.set_status(root, tid, "active", "human:test")
+        tickets.set_status(root, tid, "done", "agent:x")
+        return real(top, touched, commit)
+
+    monkeypatch.setattr(worktrees, "_after_merge", bounce)
+    done_and_sweep(root, tid)
+    assert git(root, "rev-parse", "HEAD") == head
+    assert not worktrees._copy_authority(root, tid).get("merged")
+
+
+def test_b13y_binary_files_get_no_crlf_tolerance():
+    sha = worktrees._blob_id(b"a\0\nb\n", "0" * 40)
+    assert not worktrees._bytes_match_blob(b"a\0\r\nb\r\n", sha, True)

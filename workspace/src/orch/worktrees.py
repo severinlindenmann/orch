@@ -1047,13 +1047,13 @@ def _crlf_checkout(top: Path) -> bool:
 
 
 def _bytes_match_blob(data: bytes, sha: str, crlf: bool = False) -> bool:
-    """`data` is the content of blob `sha`, or (`crlf`: the checkout writes CRLF) EXACTLY what git's checkout
+    """`data` is the content of blob `sha`, or (`crlf`: core.autocrlf=true) EXACTLY what git's checkout
     makes of it: a blob without any CR, every LF turned into CRLF. A file with CRs added to some lines only,
     or any other CR, does not match (a partial conversion would change what a script means). The ONE
     comparison for every check of files against blob ids (before and after the merge)."""
     if _blob_id(data, sha) == sha:
         return True
-    if not crlf or b"\r\n" not in data:
+    if not crlf or b"\r\n" not in data or b"\0" in data:  # (git never converts a binary file)
         return False
     blob = data.replace(b"\r\n", b"\n")
     return b"\r" not in blob and blob.replace(b"\n", b"\r\n") == data and _blob_id(blob, sha) == sha
@@ -1841,6 +1841,18 @@ def _index_flagged(top: Path) -> bool:
     return any(f and not f.startswith("H ") for f in listing.split("\0"))
 
 
+def _still_approved(root: Path, ticket: str, tip: str) -> bool:
+    """The ticket is Done AND the person's approval of `tip` is still the current signed one (a reopen clears
+    it, also when the ticket is Done again by the time this looks)."""
+    try:
+        return (
+            tickets.load(root, ticket).get("status") == "done"
+            and _copy_authority(root, ticket).get("reviewed_tip") == tip
+        )
+    except (OSError, ValueError, KeyError, Refused):
+        return False
+
+
 def _roll_back(top: Path, prep, touched, pre: dict, merge_commit: str, written: dict) -> str:
     """Put the project back to `pre` after orch's own merge commit. "verified": back, and the restored files
     and the pre-merge history check out; "unverified": back, but that check failed; "kept": not rolled back.
@@ -2286,7 +2298,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         # Recorded in the signed journal BEFORE the check (it can take minutes and orch may be stopped in it):
         # ancestry alone never certifies this merge; _recover re-runs the check for "pending" and keeps "bad".
         _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": parents[0]})
-        if tickets.load(root, ticket).get("status") != "done":
+        if not _still_approved(root, ticket, tip):
             # reopened while the merge ran (the reopen waits for this lock only briefly): the Done that
             # approved it is withdrawn, orch's own fresh merge goes back
             if _roll_back(top, prep, touched, pre, parents[0], written) == "verified":
@@ -2294,7 +2306,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 return None
             return wait(UNVERIFIED)
         problem = _after_merge(top, touched, parents[0])
-        if not problem and tickets.load(root, ticket).get("status") != "done":
+        if not problem and not _still_approved(root, ticket, tip):
             problem = "reopened"  # the check takes minutes: a reopen during it withdraws the Done as well
         if problem == "bad":
             _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": parents[0]})
