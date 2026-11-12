@@ -39,10 +39,12 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     rem = json.loads((agentsdata.agents_dir() / "reminder.json").read_bytes())["adapters"]["claude"]
     assert merged["adapters"]["claude"]["reminder_hooks"] == rem["reminder_hooks"]
     assert merged["adapters"]["claude"]["oneshot"]["settings_args"] == rem["oneshot"]["settings_args"]
-    # W2b 1.7: the record hook, before and after every tool call, in the same blob as the reminder hooks
+    # W2b 1.7: the record hook, before and after every tool call (a failed one too), in the same blob as the
+    # reminder hooks
     assert merged["adapters"]["claude"]["record_hooks"] == {
         "PreToolUse": "orch record hook",
         "PostToolUse": "orch record hook",
+        "PostToolUseFailure": "orch record hook",
     }
     for adapter in merged["adapters"].values():
         adapter.pop("mcp_settings", None)

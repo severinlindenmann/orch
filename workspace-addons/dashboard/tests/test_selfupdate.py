@@ -2,8 +2,10 @@
 same pid, same port, new code (the new page's files are served, no 404 blank page)."""
 
 import contextlib
+import http.client
 import os
 import shutil
+import socket
 import sys
 import time
 import urllib.request
@@ -25,6 +27,28 @@ def get(port, path):
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, b""
+
+
+def wait_serving(port, path, want, deadline=120.0):
+    """Wait for the server's own ready signal, not a fixed sleep: the port accepts a connection AND a GET of `path`
+    answers 200 with `want` in the body. Connect errors (the exec briefly closes the listener, a busy machine is
+    slow to bind) and the old process's answers are retried until a generous deadline. Returns the last
+    (code, body, error) so a failure says what was seen."""
+    end = time.monotonic() + deadline
+    code, body, err, pause = 0, b"", None, 0.02
+    while True:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=5).close()
+            code, body = get(port, path)
+            err = None
+            if code == 200 and want in body:
+                return code, body, None
+        except (OSError, http.client.HTTPException) as exc:  # refused, reset, timeout, closed mid-answer
+            code, body, err = 0, b"", exc
+        if time.monotonic() >= end:
+            return code, body, err
+        time.sleep(pause)  # back off between attempts; the deadline, not this, bounds the wait
+        pause = min(pause * 2, 0.5)
 
 
 @pytest.fixture
@@ -68,23 +92,53 @@ def test_old_server_restarts_itself_and_serves_the_new_files(tmp_path, build, mo
             info = started[r]
             code, body = get(info["port"], "/")
             assert code == 200 and b"restarting" in body  # the update is noticed on the page request
-            end = time.time() + 40
-            while time.time() < end:
-                try:
-                    code, body = get(info["port"], NEW)
-                except urllib.error.URLError as exc:
-                    if not isinstance(exc.reason, ConnectionRefusedError):
-                        raise
-                    code, body = 0, b""  # exec briefly closes the listener; keep polling until the deadline
-                if code == 200:
-                    break
-                time.sleep(0.3)
-            assert code == 200 and b"window.NEW" in body
+            code, body, err = wait_serving(info["port"], NEW, b"window.NEW")
+            log = r / ".orch" / "run" / "dashboard" / "server.log"
+            tail = log.read_text()[-2000:] if log.exists() else ""
+            assert code == 200 and b"window.NEW" in body, (code, err, tail)
             now = service.running(r)  # still verified as ours: same pid, same port, same nonce
             assert now == {"pid": info["pid"], "port": info["port"]}
     finally:
         for r in roots:
             stop(r)
+
+
+def test_wait_serving_retries_until_the_new_answer_and_gives_up_at_the_deadline():
+    import http.server
+    import threading
+
+    with socket.socket() as s:  # a port nobody listens on: refused until the deadline, no exception
+        s.bind(("127.0.0.1", 0))
+        dead = s.getsockname()[1]
+    code, body, err = wait_serving(dead, "/", b"x", deadline=0.3)
+    assert (code, body) == (0, b"") and isinstance(err, OSError)
+
+    hits = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # the old build first (404, then a dropped connection), then the new one
+            hits.append(1)
+            if len(hits) == 2:
+                self.connection.close()
+                return
+            body = b"window.NEW" if len(hits) > 3 else b""
+            self.send_response(200 if body else 404)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        got = wait_serving(srv.server_address[1], "/n", b"window.NEW", deadline=60)
+        assert got == (200, b"window.NEW", None)
+        assert len(hits) == 4
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_stamp_is_cached_and_changes_with_the_files(tmp_path, monkeypatch):
