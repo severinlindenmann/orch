@@ -282,7 +282,8 @@ impl Settings {
         let v = crate::store::phone_settings(c, phone);
         Settings {
             speak: v["speak"].as_str().unwrap_or("auto").to_string(),
-            tts_cap_usd: v["tts_cap_usd"].as_f64().unwrap_or(10.0),
+            // older saved values may exceed the 50 the phone settings now allow
+            tts_cap_usd: v["tts_cap_usd"].as_f64().unwrap_or(10.0).clamp(0.0, 50.0),
         }
     }
 }
