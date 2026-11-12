@@ -586,6 +586,10 @@ _LOCKS = threading.local()
 _RESETS = 0  # count of reset_protection runs in this process: a verify that saw one is refused
 
 
+def _lock_held(d: Path, name: str = "keys.lock") -> bool:
+    return getattr(_LOCKS, "held", {}).get((str(d), name), 0) > 0
+
+
 @contextlib.contextmanager
 def _key_lock(d: Path):
     """keys.lock (O_EXCL) around read-modify-write of the nonce store, delivered ids, settings and resets.
