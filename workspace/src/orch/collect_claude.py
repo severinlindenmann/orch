@@ -26,7 +26,7 @@ from .record_files import workspace_files
 _FILE_TOOLS = ("Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep")
 HELPER_TOOLS = ("Task", "Agent")  # a call starts a helper (helper.start/end, numbered h_<n> by the log)
 # the hook events wired to `orch record hook` (agents/reminder.json, record_hooks; a test keeps them equal)
-HOOK_EVENTS = ("PreToolUse", "PostToolUse")
+HOOK_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure")
 # What a hook keeps of the tool's own result (tool_response): plain fields only, never the tool's internal
 # copies (Edit/Write `originalFile`, `structuredPatch`); each text is cut, the log's line brings the full one.
 _OUTPUT_KEYS = (
@@ -149,12 +149,14 @@ def hook_input(value: Any, depth: int = 0) -> Any:
 
 def hook_line(raw: dict) -> dict | None:
     """The tool's own hook payload (hook_event_name, tool_name, tool_input, tool_use_id; PostToolUse adds
-    tool_response) as the event line `orch record hook` takes: a step whose id is the tool-call id, so the
-    hook line and the collector's line of one tool call dedupe. PreToolUse: no outcome, no detail;
-    PostToolUse: finished with `ok: null` (provisional: a hook line comes from inside the agent's trust
-    boundary, so it never says how the call ended; the log's line replaces it, contracts/activity.md), with
-    hook_input and hook_output as the detail. None: a helper start (Task/Agent), left to the log (only the log
-    knows the helper's number). ValueError: not a tool-call payload."""
+    tool_response, PostToolUseFailure error and is_interrupt) as the event line `orch record hook` takes: a
+    step whose id is the tool-call id, so the hook line and the collector's line of one tool call dedupe.
+    PreToolUse: no outcome, no detail; PostToolUse: finished with `ok: null` (provisional: a hook line comes
+    from inside the agent's trust boundary, so it never says a call ended well; the log's line replaces it,
+    contracts/activity.md); PostToolUseFailure: finished with `ok: false` and a fixed code (`interrupted` when
+    is_interrupt, else `tool_failed`; never the error text), `ms: null`. Both ends carry hook_input and
+    hook_output (of tool_response, or of the error text) as the detail. None: a helper start (Task/Agent),
+    left to the log (only the log knows the helper's number). ValueError: not a tool-call payload."""
     event = raw.get("hook_event_name")
     tid = raw.get("tool_use_id")
     if event not in HOOK_EVENTS or not isinstance(tid, str) or not tid:
@@ -176,6 +178,12 @@ def hook_line(raw: dict) -> dict | None:
     if event == "PostToolUse":
         line["outcome"] = dict(ok=None, error=None, ms=None)
         line["payload"] = {"input": hook_input(inp), "output": hook_output(raw.get("tool_response"))}
+    elif event == "PostToolUseFailure":
+        # a fixed code only (record.HOOK_ERRORS): the tool's error text is the agent's word, it goes to the
+        # detail (hidden and cut like any output), never to the line
+        error = "interrupted" if raw.get("is_interrupt") is True else "tool_failed"
+        line["outcome"] = dict(ok=False, error=error, ms=None)
+        line["payload"] = {"input": hook_input(inp), "output": hook_output(raw.get("error"))}
     return line
 
 

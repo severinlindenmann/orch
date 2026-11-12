@@ -10,8 +10,10 @@ says in one plain stderr line why nothing was recorded. What it never does:
   that claim's process (the wrapper or the agent), so a process outside the run cannot write into it by
   setting the same variables (the pid must match the recorded start time, never just "not different"); a line
   naming another run is dropped;
-- say how a call ended: on every path (the tool's payload or an event-shaped line) any line with an outcome
-  is written provisional (`ok`, `error`, `ms` null); the log's line of that call replaces it;
+- say a call ended well: on every path (the tool's payload or an event-shaped line) a line with an outcome
+  is written provisional (`ok`, `error`, `ms` null), unless it claims a failure: then `ok: false` with a
+  fixed code only (record.HOOK_ERRORS: `tool_failed`, `interrupted`; never the tool's error text, which goes
+  to the detail), `ms` null (record.hook_outcome). The log's line of that call wins either way;
 - write when key hiding is not ready (no registered hider: nothing is written, never raw);
 - read anything but the one run file (the writer's per-run strict read; no scan of other runs).
 A hook line that cannot be written leaves a short trace: under the run (record.note_lost) only for a proven
@@ -175,7 +177,7 @@ def _event(raw: dict, ids, tool, root=None) -> tuple[dict, dict | None]:
         if key in raw and raw[key] != mine:
             raise NotRecorded("That entry belongs to another run; nothing was recorded.", "other_run")
     try:
-        filtered = record.hook_entry_filter(raw)  # kind allowed, via forced to hook
+        filtered = record.hook_entry_filter(raw)  # kind allowed, via forced to hook, outcome narrowed
     except record.RecordRefused:
         raise NotRecorded(
             "This kind of record is not allowed here; nothing was recorded.", "invalid"
@@ -198,9 +200,10 @@ def _event(raw: dict, ids, tool, root=None) -> tuple[dict, dict | None]:
         "detail": None,
     }
     if isinstance(event["outcome"], dict):  # every hook kind (record.HOOK_KINDS)
-        # whatever the caller sent: a hook line is the agent's word and never says how a call ended (no `ok`,
-        # `error` or `ms`); the log's line of that call does (contracts/activity.md, Precedence and dedupe)
-        event["outcome"] = {"ok": None, "error": None, "ms": None}
+        # whatever the caller sent: a hook line is the agent's word and never says a call ended well (`ok`,
+        # `error`, `ms` null); a claimed failure is kept with a fixed code only (it narrows trust, never the
+        # tool's text); the log's line of that call wins (contracts/activity.md, Precedence and dedupe)
+        event["outcome"] = record.hook_outcome(event["outcome"])
     if filtered["kind"] != "step":
         event.setdefault("used", None)  # only a step names the thing it used
     files = filtered.get(

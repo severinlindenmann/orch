@@ -232,7 +232,8 @@ def act_dedupe(lines):
     """Only hook/log share an origin. For one key the log line wins, started and finished alike: it replaces
     the hook line, and a hook line after any log line of that call (run, id, kind; started or finished) is
     dropped. When the two disagree (`used`, `text`, `files`, or both finished and the hook's not provisional:
-    `ok`/`error`) both are kept (the log line carries `conflict`). Repeats of one origin keep the first."""
+    `ok`, and `error` unless the hook's is a fixed code) both are kept (the log line carries `conflict`).
+    Repeats of one origin keep the first."""
     kept = []
     def key(line):
         via = line["via"]
@@ -246,7 +247,9 @@ def act_dedupe(lines):
             return False
         if hook.get("outcome") is None or log.get("outcome") is None or provisional(hook):
             return True
-        return all(hook["outcome"].get(k) == log["outcome"].get(k) for k in ("ok", "error"))
+        # a hook's fixed failure code is never the log's text: against it only `ok` counts
+        keys = ("ok",) if hook["outcome"].get("error") in HOOK_ERRORS else ("ok", "error")
+        return all(hook["outcome"].get(k) == log["outcome"].get(k) for k in keys)
     for i, line in enumerate(lines):
         matches = [j for j in kept if key(lines[j]) == key(line)]
         if any(lines[j]["via"] == line["via"] for j in matches):
@@ -264,13 +267,24 @@ def _t(s):
 
 
 HOOK_KINDS = ("step", "helper.start", "helper.end")  # only kinds whose line can be provisional
+HOOK_ERRORS = ("tool_failed", "interrupted")  # the only `error` of a hook end: a fixed code, never the tool's text
 
 
 def act_hook_accept(line):
-    """What the out-of-process hook entry (orch run event) stores: only hook kinds, always via hook."""
+    """What the out-of-process hook entry (orch record hook) stores: only hook kinds, always via hook. An
+    outcome never says the call ended well: a claimed failure stays `ok: false` with a fixed code (any other
+    error is `tool_failed`), anything else (`ok: true` included) is provisional; `ms` is always null."""
     if line.get("kind") not in HOOK_KINDS:
         return "refused"
-    return {**line, "via": "hook"}
+    stored = {**line, "via": "hook"}
+    outcome = line.get("outcome")
+    if isinstance(outcome, dict):
+        if outcome.get("ok") is False:
+            error = outcome.get("error")
+            stored["outcome"] = {"ok": False, "error": error if error in HOOK_ERRORS else "tool_failed", "ms": None}
+        else:
+            stored["outcome"] = {"ok": None, "error": None, "ms": None}
+    return stored
 
 
 def act_retention(case):
