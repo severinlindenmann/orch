@@ -1630,3 +1630,13 @@ def test_fsck_runs_only_in_its_checking_form_and_a_symlinked_git_folder_is_refus
     (r / ".git").rename(moved)
     (r / ".git").symlink_to(moved)
     assert safegit.hostile_history(r) == safegit.HISTORY_REFUSAL
+
+
+def test_every_fsck_format_id_can_really_be_ignored(tmp_path):
+    """git refuses to demote some ids ('Cannot demote ... to ignore'): the allowlist holds only ones it accepts."""
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    for i in safegit.FSCK_FORMAT_OK:
+        p = subprocess.run(["git", "-c", f"fsck.{i}=ignore", "fsck"], cwd=r, capture_output=True, text=True)
+        assert "Cannot demote" not in p.stderr, i

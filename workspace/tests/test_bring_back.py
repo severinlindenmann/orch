@@ -2530,17 +2530,43 @@ def test_b13j_overwritten_object_of_the_reviewed_tip_is_refused(done_copy):
     assert git(root, "rev-parse", "HEAD") == head and (root / "code.py").read_text() != "EVIL\n"
 
 
-def test_b13k_old_history_with_format_errors_still_comes_back(done_copy, monkeypatch):
-    """fsck exits 1 for a bad timezone in an old commit: that is not a damaged object, the Done goes on."""
+def test_b13k_old_history_with_format_errors_still_comes_back(done_copy):
+    """An old commit with a bad timezone (fsck exit 1 without the allowlist) is no damaged object."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    ident = "orch <o@x> 1500000000 +05"  # a malformed zone, as old CVS/SVN imports have
+    tree = git(copy, "rev-parse", "HEAD^{tree}")
+    parent = git(copy, "rev-parse", "HEAD")
+    obj = f"tree {tree}\nparent {parent}\nauthor {ident}\ncommitter {ident}\n\nold\n"
+    new = subprocess.run(
+        ["git", "hash-object", "-t", "commit", "-w", "--stdin", "--literally"],
+        input=obj, cwd=copy, capture_output=True, text=True, check=True,
+    ).stdout.strip()  # fmt: skip
+    git(copy, "reset", "-q", "--hard", new)
+    assert (
+        subprocess.run(["git", "fsck", "--no-dangling", new], cwd=copy, capture_output=True).returncode == 1
+    )
+    tickets.set_status(root, tid, "active", "human:test")
+    to_review(root, tid)
+    done_and_sweep(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "merged", back
+
+
+def test_b13k_any_other_fsck_failure_refuses(done_copy, monkeypatch):
+    """Fail closed: a non-zero fsck whose message is not in any list still refuses (no keyword matching)."""
     root, tid, copy = done_copy
     to_review(root, tid)
     real = worktrees._git
-
-    def fake(args, cwd, *a, **k):
-        if args and args[0] == "fsck":
-            return 1, "", "error in commit 1234: badTimezone: invalid author/committer line - bad time zone"
-        return real(args, cwd, *a, **k)
-
-    monkeypatch.setattr(worktrees, "_git", fake)
+    monkeypatch.setattr(
+        worktrees,
+        "_git",
+        lambda args, cwd, *a, **k: (
+            (1, "", "something new git says") if args[:1] == ["fsck"] else real(args, cwd, *a, **k)
+        ),
+    )
+    head = git(root, "rev-parse", "HEAD")
     done_and_sweep(root, tid)
-    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.OBJECTS_BAD
+    assert git(root, "rev-parse", "HEAD") == head

@@ -55,9 +55,6 @@ REGISTRY = Path(".orch") / "run" / "worktrees.json"
 LOCK_ID = "_copies"  # runs.locked(root, LOCK_ID): the workspace-level "decide + create + claim" lock
 LOCK_WAIT = 150.0  # a worktree of a big repo can take a while; the lock timeout must outlast GIT_ADD_TIMEOUT
 GIT_TIMEOUT = 20
-_FSCK_SERIOUS = re.compile(
-    r"mismatch|missing (blob|tree|commit|tag)|corrupt|unable to|broken link|invalid sha1|inflate|cannot|fatal"
-)
 FSCK_TIMEOUT = 900  # the object check before a merge reads the whole history of both sides
 GIT_ADD_TIMEOUT = 60
 CREATE_BUDGET = 100.0  # all git time of one _create; LOCK_WAIT must stay above it
@@ -1931,13 +1928,13 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         # Git does not re-hash objects while it merges, and the copy shares the project's object folder: check
         # that what the merge reads is what its ids say, in this same locked section, right before it.
         # (Residual: a process the agent left running after its run ended is not covered by _alive_here.)
-        # (No --strict. Old imported history can carry format errors (badTimezone, missingEmail ...) that
-        # make fsck exit 1: only an object that differs from its id, is missing or cannot be read refuses.
-        # The sweep is detached, so the check gets its full time, like the merge.)
+        # (No --strict. orch's fsck call ignores only a listed set of format-only messages of old imported
+        # history (safegit.FSCK_FORMAT_OK); ANY other non-zero result refuses. The sweep is detached, so the
+        # check gets its full time, like the merge.)
         before = getattr(_ctx, "deadline", None)
         _ctx.deadline = None
         try:
-            rc, fout, ferr = _git(
+            rc, _, _ = _git(
                 ["fsck", "--no-dangling", "--no-reflogs", "--no-progress", tip, pre["head"]],
                 top,
                 FSCK_TIMEOUT,
@@ -1947,10 +1944,8 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             _ctx.deadline = before
         if rc == 124:
             return wait("checking the stored history needs more time; the next sweep will try again")
-        if rc and _FSCK_SERIOUS.search(f"{fout}\n{ferr}"):
+        if rc:
             return wait(OBJECTS_BAD)
-        if rc and not (fout or ferr).strip():
-            return wait(OBJECTS_BAD)  # failed without saying why: not proven fine
         merge_started = True
         rc, _, _ = _bb_merge(
             top,

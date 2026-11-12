@@ -779,6 +779,17 @@ def hostile_history(cwd: Path) -> str | None:
     return None
 
 
+# Format-only fsck messages of old imported history (CVS/SVN conversions): ignored for orch's own fsck call so
+# that ANY other non-zero result (a differing, missing or unreadable object, or a message not listed here)
+# is a refusal. Hash mismatches are not message ids and can never be switched off.
+FSCK_FORMAT_OK = (
+    "badTimezone", "badDate", "badDateOverflow", "missingEmail", "missingNameBeforeEmail",
+    "badEmail", "badName", "zeroPaddedDate", "zeroPaddedFilemode", "badFilemode", "emptyName",
+    "missingSpaceBeforeDate", "missingSpaceBeforeEmail", "badTagName", "extraHeaderEntry",
+    "multipleAuthors", "missingTaggerEntry",
+)  # fmt: skip
+
+
 def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
     """(argv, config) for git `args`, or (None, (rc, reason)) when orch refuses to run it."""
     why = refusal(args) or unusable_root(guard if guard is not None else root) or hostile_history(cwd)
@@ -820,7 +831,12 @@ def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
             REFUSED,
             "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
         )
-    return ["git", *top, *base_args(true, read_only, _no_hooks(cwd, root)), *sub], extra
+    fsck = (
+        [x for i in FSCK_FORMAT_OK for x in ("-c", f"fsck.{i}=ignore")]
+        if k < len(sub) and sub[k] == "fsck"
+        else []
+    )
+    return ["git", *top, *base_args(true, read_only, _no_hooks(cwd, root)), *fsck, *sub], extra
 
 
 def run(
