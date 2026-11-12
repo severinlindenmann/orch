@@ -485,6 +485,32 @@ def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_tic
     assert (q["answer"], q["answered_by"], q["via"]) == ("Y", "human:ph_iphone0001", "phone")
 
 
+def test_a_phone_answer_to_a_question_changed_after_it_was_sent_is_not_applied(proj):
+    from orch import relay, tickets
+
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
+    shown = tickets.question_digest(tickets.load(proj, tid)["questions"][0])
+    rec = {"ticket": tid, "question_id": "q1", "to": "phones", "question_digest": shown}
+    relay._asked_path(proj).parent.mkdir(parents=True, exist_ok=True)
+    relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+    path = tickets.ticket_path(proj, tid)
+    t = json.loads(path.read_text())
+    t["questions"][0]["text"] = "Deploy to production?"
+    path.write_text(json.dumps(t))
+    body = {"question_id": "q1", "answer": "yes", "answered_by": "human:a"}
+    ans = msg(
+        "m_ans5000000000005", "answer", body, frm="ph_iphone0001", ticket=tid, reply_to="m_q00000000000001"
+    )
+    note, applied = relay._apply_answer(proj, ans)
+    assert applied is None and "changed after it was shown" in note
+    assert tickets.load(proj, tid)["questions"][0]["answer"] is None
+    del rec["question_digest"]  # a record from before digests: answered as before
+    relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+    assert relay._apply_answer(proj, ans)[1] == tid
+    assert tickets.load(proj, tid)["questions"][0]["answer"] == "yes"
+
+
 def out_count(text):
     return text.count("ignored:")
 

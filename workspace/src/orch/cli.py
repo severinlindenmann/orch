@@ -1071,7 +1071,7 @@ def run(args: argparse.Namespace) -> None:
             (x for x in tickets.load(root, args.id).get("questions") or [] if x.get("id") == args.question),
             None,
         )
-        shown_digest = tickets.question_digest(shown_q) if shown_q is not None else None
+        shown_digest = tickets.question_digest(shown_q)  # no question shown: any answer is refused
         who = humanproof.person_by(
             root,
             args,
@@ -1079,7 +1079,7 @@ def run(args: argparse.Namespace) -> None:
             f"{args.id}:{args.question}",
             parts={
                 "title": humanproof.ticket_name(root, args.id),
-                "question": humanproof.question_text(root, args.id, args.question),
+                "question": humanproof.question_text(root, args.id, args.question, shown_q),
             },
             value=args.answer,
         )

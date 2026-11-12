@@ -2401,11 +2401,13 @@ def ticket_name(root: Path, tid: str) -> str:
     return part(t) or "this ticket"
 
 
-def question_text(root: Path, tid: str, qid: str) -> str:
+def question_text(root: Path, tid: str, qid: str, q: dict | None = None) -> str:
+    """q: the question already read by the caller (shown as is, not read again); None: read it here."""
     from orch import tickets
 
     try:
-        q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
+        if q is None:
+            q = next((x for x in tickets.load(root, tid).get("questions") or [] if x.get("id") == qid), None)
         t = str((q or {}).get("text", ""))
     except (Refused, OSError, ValueError, AttributeError):
         t = ""

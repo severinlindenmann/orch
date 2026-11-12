@@ -1779,10 +1779,6 @@ def check_edit(
             _undo_guard(by, item, tid, cid, proven)
         else:
             _person_only(by, item, tid, cid)
-        # a person's own rename keeps what was proven theirs just before it (never an agent's rename)
-        kept_evs, kept_doing = history.proven_step_parts(root, t, item) if _is_person(by) else ([], False)
-        kept_evs = [e for e in kept_evs if e.get("by") == by]
-        kept_doing = kept_doing and item.get("by") == by
         if text is not None:
             item["text"] = text.strip()
             add_history(t, by, f"Renamed {cid}")
@@ -1794,10 +1790,6 @@ def check_edit(
             _sign_wont(
                 root, tid, item
             )  # a proven edit of a Won't do step re-signs it for the new text/covers
-        for ev in kept_evs:
-            history.created("evidence", ev)
-        if kept_doing:
-            history.created("steps", item)
         return item
 
     expect = (f"checklist.{cid}.text", was) if was is not None else None
@@ -2292,16 +2284,20 @@ def ask(
     return apply_op(root, tid, op, by=by)
 
 
-def question_digest(q) -> str | None:
-    """sha256 of what a person is shown of a question (id, text, options, kind, action)."""
+QUESTION_UNENCODABLE = "unencodable"  # never equal to a sha256 hex: an answer expecting it is always refused
+
+
+def question_digest(q) -> str:
+    """sha256 of what a person is shown of a question (id, text, options, kind, action, recommended).
+    A question that cannot be encoded gives QUESTION_UNENCODABLE, which no answer is accepted against."""
     if not isinstance(q, dict):
-        return None
-    shown = {k: q.get(k) for k in ("id", "text", "options", "kind", "action")}
+        return QUESTION_UNENCODABLE
+    shown = {k: q.get(k) for k in ("id", "text", "options", "kind", "action", "recommended")}
     try:
         canon = json.dumps(shown, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    except (TypeError, ValueError):
-        return None
-    return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+        return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+    except (TypeError, ValueError, UnicodeError):
+        return QUESTION_UNENCODABLE
 
 
 def answer(
@@ -2315,7 +2311,8 @@ def answer(
     expected_question_digest: str | None = None,
 ) -> tuple[dict, dict]:
     """expected_question_digest: question_digest of the question as the person was shown it; the answer is
-    refused when the question is no longer that one. None: not checked (a caller that kept no digest)."""
+    refused when the question is no longer that one, or could not be encoded. None: not checked (a caller that
+    kept no digest, e.g. a relay record from before digests)."""
     if not VIA_RE.fullmatch(via):
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
     if not text.strip():
@@ -2329,7 +2326,9 @@ def answer(
             raise Refused(f"Ticket {tid} has no question {qid}.")
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
-        if expected_question_digest is not None and question_digest(q) != expected_question_digest:
+        if expected_question_digest is not None and (
+            expected_question_digest == QUESTION_UNENCODABLE or question_digest(q) != expected_question_digest
+        ):
             raise Refused(f"{qid} changed after it was shown. Look at the question again, then answer.")
         ans = text
         for opt in q["options"]:  # an option matches case-insensitively: store its spelling; else free text
