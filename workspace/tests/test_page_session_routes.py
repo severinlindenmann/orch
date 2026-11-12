@@ -46,8 +46,10 @@ def _gates(path: Path) -> tuple[set, list[str]]:
             if is_attr and node.attr in GATES and node.value.attr == "session":
                 found.add((fn.name, node.attr))
             # nobody compares the cookie by hand or reads the session secret/cookie outside the core
-            if isinstance(node, ast.Attribute) and node.attr in ("cookie", "secret") and (
-                isinstance(node.value, ast.Attribute) and node.value.attr == "session"
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr in ("cookie", "secret")
+                and (isinstance(node.value, ast.Attribute) and node.value.attr == "session")
             ):
                 bad.append(f"{fn.name}:{node.lineno} reads session.{node.attr}")
             if isinstance(node, ast.Constant) and node.value in ("Cookie", "X-Orch-Page"):
