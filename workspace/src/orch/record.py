@@ -636,6 +636,15 @@ def _json(obj):
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
+def _hidden_line(hider, obj) -> bytes:
+    """The compact JSON of `obj`, refused when a form of a hidden value is in the serialized text or in any
+    decoded string or key (a reader json-decodes, so escaped bytes alone prove nothing)."""
+    line = _json(obj)
+    if hider.hide_text(line) != line or hider.leaks(obj):
+        raise RecordInvalid("This record cannot be hidden safely.")
+    return line.encode("utf-8")
+
+
 def _validate(event, *, detail=False):
     if not (_DETAIL_VALIDATOR if detail else _VALIDATOR).is_valid(event):
         raise RecordInvalid()
@@ -728,8 +737,8 @@ def _parse(fd, run):
             _validate(event)
             if event["run"] != run:
                 raise RecordInvalid()
-            # the writer guarantees seq == the 1-based physical line number; a line that disagrees was planted
-            # (a huge or repeated seq would freeze a tail cursor or break paging), so it is skipped and counted
+            # the writer guarantees seq == the 1-based physical line number; a line that disagrees was
+            # planted (a huge or repeated seq freezes a tail cursor or breaks paging): skipped and counted
             if event["seq"] != lineno or isinstance(event["seq"], bool):
                 raise RecordInvalid()
             events.append(event)
@@ -928,14 +937,20 @@ def list_jobs(workspace, run=None, *, seen_by="reader") -> ReadResult[list[tuple
         return _report(workspace, error, "folder", run, seen_by)
 
 
-def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
+def append_job(workspace, run, job, decide, *, valid, hider, max_jobs=None):
     """Append one line to a job stream under the run's lock (one writer per job). `decide(events, size)` runs
     inside the lock on the strictly read stream and returns (line_dict | None, replace_last, result); the line
     is stored only after the caller's own checks passed (every string already hidden). A cut-off last line (a
     crash) is dropped under the lock. Caps are checked here, under the lock: the stream, the run's streams,
-    and (at the first line) the number of jobs of the run. Returns result."""
+    and (at the first line) the number of jobs of the run. `hider` is required: the line passes the same
+    fail-closed backstop as a run line (RecordInvalid when a form of a hidden value is still in it). Returns
+    result."""
     _name(run, _RUN)
     _name(job, _JOB)
+    try:
+        hiding._check(hider)
+    except (ValueError, TypeError):
+        raise RecordOff(_OFF) from None
     rel = ("jobs", run, job + ".jsonl")
     try:
         with _lock(workspace, run) as check_lock:
@@ -965,7 +980,7 @@ def append_job(workspace, run, job, decide, *, valid, max_jobs=None):
                 event, replace_last, result = decide(events, len(raw))
                 if event is None:
                     return result
-                data = (_json(event) + "\n").encode()
+                data = _hidden_line(hider, event) + b"\n"
                 if len(data) > 16384:
                     raise RecordInvalid("The job entry is too large.")
                 if len(raw) + len(data) > JOB_BYTES or (
@@ -1158,10 +1173,7 @@ class RecordWriter:
         self.workspace, self.hider = Path(workspace), hider
 
     def _serialized(self, obj):
-        line = _json(obj)
-        if self.hider.hide_text(line) != line:
-            raise RecordInvalid("This record cannot be hidden safely.")
-        return line.encode("utf-8")
+        return _hidden_line(self.hider, obj)
 
     def _prepare_detail(self, event, detail, hidden=0):
         if detail is None or not event.get("ticket"):

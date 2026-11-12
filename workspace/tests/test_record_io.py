@@ -168,6 +168,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "self.hider.hide_cut",
     "self.hider.hide_json",
     "self.hider.hide_text",
+    "hider.hide_text",
+    "hider.leaks",
     "stored.get",
     "super().__init__",
     "time.time_ns",
