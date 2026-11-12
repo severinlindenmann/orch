@@ -1,5 +1,6 @@
 import contextlib
 import json
+import re
 import subprocess
 
 import pytest
@@ -997,7 +998,7 @@ def test_unapplied_path_is_a_needs_row_until_it_applies(machines):
         (need,) = [r for r in needs.rows(b) if r["kind"] == "sync:unapplied"]
         assert need["text"] == "A file couldn't be updated: t_abc123.json. orch will try again."
         assert need["cli"] == "orch sync status --json" and need["ticket"] == "t_abc123"
-        assert need["tone"] == "warn" and "answer" not in need and need["since"] == state["unapplied"][TICKET]
+        assert need["tone"] == "warn" and "answer" not in need and need["since"] == re.sub(r"\.\d+(?=Z$)", "", state["unapplied"][TICKET])  # whole seconds, as the core takes them
         schema = json.loads((Path(__file__).resolve().parents[3] / "contracts/needs.schema.json").read_text())
         Draft202012Validator(schema).validate(needs.rows(b))
     # the file can be synced again: it applies (as a local edit)

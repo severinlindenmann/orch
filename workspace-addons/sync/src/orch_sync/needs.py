@@ -86,6 +86,7 @@ def _unconfirmed(root):
 
 
 def row(kind, key, text, since, command, options, ticket=None, title="Sync needs you", tone="needs-you", actions=None):
+    since = re.sub(r"\.\d+(?=Z$)", "", since)  # the core's collector drops a row whose time has fractions of a second
     out = {
         "id": f"sync:{kind}:{key}",
         "source": "sync",

@@ -74,5 +74,8 @@ Format: steps → expected result.
 - LOOK-1 `orch look list|show|set` and the relay look (core side).
 - LOOK-2 Dashboard: Settings > General picks Wallet/Amber (config + relay), the description edit is a pending proposal, the shared-pages switch turns off, the sidebar switcher lists both workspaces with badges (Playwright, 1280 and 720; skipped without node + playwright).
 
+## Sync (git-sync)
+- git-sync (local, ~25 s, `e2e/run.sh git-sync`; the scenario turns the remote preview on for itself) Workspaces A and B (test workspaces under `~/.orch-test`) and a local bare remote: A turns sync on (local, then remote with the test human's signed choice) and syncs, the remote has `orch-state`; B joins and sees A's ticket; both edit different fields → merged on both; remote away → A reports offline and its commits pile up (`ahead` > 0), remote back → pushed, B receives it; the same file changed on both sides → pause with a Needs row, Keep theirs → both converge; workspace C whose team repository tracks `.orch` files → sync refuses with the "Move your orch files" row, nothing is written; Move without a proof is refused, with the person's proof `.orch` leaves the team repository's index (nothing committed, other files untouched) and sync starts.
+
 ## Whole flow (F)
 - F1 Fresh machine: GitHub install → `orch init` → publish + relay connect → ticket with evidence → question answered on the phone → report published → link opens. Runs in under 15 min.
