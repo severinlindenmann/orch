@@ -191,3 +191,25 @@ def test_an_unconfirmed_address_is_never_shown_as_the_persons(root, tmp_path, pr
     assert set_remote(root, remote) == 0
     st = act.status(root, cli.DEFAULTS | cli.read(root, "settings"))
     assert st["remote"] == cli.safe_address(str(remote)) and st["confirmed"] is True and st["unconfirmed"] is False
+
+
+def test_a_failed_revocation_stops_sync_and_says_so(root, tmp_path, monkeypatch, preview):
+    """N-1: when the guarded pin can't move, leaving remote is not reported as done, and sync stops anyway."""
+    from orch import humanproof
+
+    remote = bare(tmp_path)
+    assert set_remote(root, remote) == 0
+    save(root)
+    monkeypatch.setattr(humanproof, "pin_next", lambda *a, **k: None)
+    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) != 0
+    assert not (root / ".orch" / cli.ADDRESS).exists()
+    assert cli.read(root, "settings")["mode"] == "local"  # stopped using the address before the refusal
+
+
+def test_moving_to_local_is_no_false_alarm(root, tmp_path, preview):
+    """N-3: a person who chose an address and moved to local is not told about an address they did not choose."""
+    remote = bare(tmp_path)
+    assert set_remote(root, remote) == 0
+    assert cli.main(["--dir", str(root), "set", "--mode", "local"]) == 0
+    st = act.status(root, cli.DEFAULTS | cli.read(root, "settings"))
+    assert st["unconfirmed"] is False and st["remote"] is None

@@ -148,7 +148,7 @@ def status(root, settings):
         "mode": settings["mode"],
         "remote": cli.safe_address(settings["remote"]) if confirmed else None,
         "confirmed": confirmed,
-        "unconfirmed": bool(settings.get("remote")) and not confirmed,
+        "unconfirmed": settings["mode"] == "remote" and bool(settings.get("remote")) and not confirmed,
         "interval": result["interval"],
         "shown": shown,
         "last_ok": result["last_ok"],
@@ -362,7 +362,23 @@ def _deleted_review(root, tid):
                                     "body": "It is removed on every computer that syncs.", "value": shown}
 
 
+REVIEW_TOTAL = 3800  # UTF-16 units of all shown review fields together (the dashboard shows 4000 per review)
+
+
+def _units(text):
+    return len(str(text).encode("utf-16-le")) // 2  # what the dashboard's JS .length counts
+
+
 def proof_target(root, verb, target, value=None):
+    """(target, review) of _proof_target, refused when the WHOLE review would not fit what the sign step shows
+    (N-2: never a review the dashboard would clip; the person signs only what they see)."""
+    target_out, review = _proof_target(root, verb, target, value)
+    if review and sum(_units(v) for v in review.values() if isinstance(v, str)) > REVIEW_TOTAL:
+        raise repo.Refused(TOO_LARGE)
+    return target_out, review
+
+
+def _proof_target(root, verb, target, value=None):
     """(target, review): the target the proof of this click must name (None when it needs none) and what the sign
     step shows (None when there is none), both from the same read of the same bytes the target hashes. Changes
     nothing."""

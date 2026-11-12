@@ -454,3 +454,25 @@ def test_rows_keep_the_needs_shape(root):
     from jsonschema import Draft202012Validator
 
     Draft202012Validator(schema).validate(needs.rows(root))
+
+
+def test_a_two_sided_review_too_large_as_a_whole_is_refused(root, monkeypatch):
+    """N-2: each side fits (< REVIEW_MAX), but the whole review would not fit the sign step: refused, never
+    clipped; a review that fits is returned as it is."""
+    side = "k: " + "x" * 2000
+    assert len(side) < act.REVIEW_MAX
+    monkeypatch.setattr(act, "_proof_target", lambda *a: ("sync:keep-theirs:" + "0" * 64,
+                                                         {"title": "Keep?", "here": side, "there": side}))
+    with pytest.raises(repo.Refused, match="too large to review here"):
+        act.proof_target(root, "keep-theirs", "tickets/t_abc123.json")
+    small = {"title": "Keep?", "here": "a", "there": "\U0001F600" * 1800}  # 3600 UTF-16 units + 6: fits
+    monkeypatch.setattr(act, "_proof_target", lambda *a: ("t", small))
+    assert act.proof_target(root, "keep-theirs", "tickets/t_abc123.json") == ("t", small)
+    big = {"title": "Keep?", "here": "a", "there": "\U0001F600" * 1950}  # 1950 characters but 3900 units
+    monkeypatch.setattr(act, "_proof_target", lambda *a: ("t", big))
+    with pytest.raises(repo.Refused, match="too large to review here"):
+        act.proof_target(root, "keep-theirs", "tickets/t_abc123.json")
+
+
+def test_review_size_counts_utf16_units():
+    assert act._units("a") == 1 and act._units("\U0001F600") == 2  # an astral character is 2 in the dashboard

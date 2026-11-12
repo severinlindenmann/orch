@@ -62,11 +62,12 @@ def test_the_plain_set_path_is_gated_too(root, monkeypatch, capsys):
     capsys.readouterr()
     assert run(root, "set", "--interval", "60") == 0  # how often: unsigned
     assert run(root, "set", "--mode", "local") == 0  # unsigned
-    # turning remote on again with the stored address is choosing it again
+    # local keeps no address (N-3): turning remote on again means choosing an address again, signed
+    assert "remote" not in json.loads((root / ".orch/run/sync/settings.json").read_text())
     assert run(root, "set", "--mode", "remote") == 2
     assert json.loads((root / ".orch/run/sync/settings.json").read_text())["mode"] == "local"
     proof(root, cli.remote_target(address), monkeypatch)
-    assert run(root, "set", "--mode", "remote", "--proof-stdin") == 0
+    assert run(root, "set", "--mode", "remote", "--remote", address, "--proof-stdin") == 0
     assert run(root, "set", "--mode", "off") == 0  # unsigned
 
 

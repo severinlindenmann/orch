@@ -116,8 +116,12 @@ def revoke_address(root):
     so a restored copy confirms nothing) and remove the file. Fails closed: without a pin the file still goes."""
     from orch import humanproof
 
-    humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None})
-    repo.safe(root, ADDRESS).unlink(missing_ok=True)
+    repo.safe(root, ADDRESS).unlink(missing_ok=True)  # stops sync now either way (address_confirmed is false)
+    if not humanproof.record_pin(root, ADDRESS_KIND):
+        return  # no pin ever made ({}) or none readable (None): pin_ok refuses every copy already
+    moved = humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None})
+    if not moved:  # the guarded pin still names the old record: a restored copy would count again (N-1)
+        raise repo.Refused("orch could not record that sync left this address. Sync is stopped; try again.")
 
 
 def address_confirmed(root, address):
@@ -226,9 +230,9 @@ def apply_set(root, settings, mode=None, remote=None, interval=None, kind="priva
     elif mode in ("off", "local"):
         # leaving remote revokes the signed address: planting mode=remote in settings.json later can't bring the old
         # approval back (nor can a restored copy: the pin moved on); turning remote on again is a new signed choice
+        settings.pop("remote", None)  # off or local: no stored address that could look unconfirmed later (N-3)
+        save_settings(root, {**settings, "mode": mode})  # stop using the address first, then revoke (fails closed)
         revoke_address(root)
-        if mode == "off":
-            settings.pop("remote", None)
     settings.update(mode=mode, kind=kind, interval=interval or settings["interval"])
     save_settings(root, settings)
     from . import loop, service
