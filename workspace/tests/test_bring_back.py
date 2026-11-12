@@ -3026,3 +3026,15 @@ def test_b13w_history_check_reads_only_per_object_lines(monkeypatch):
     assert worktrees._history_ok_below(top, h) is True  # a named object, unreachable from the commit
     calls["fsck"] = "something new git says"
     assert worktrees._history_ok_below(top, h) is False
+
+
+def test_b13x_a_new_folder_where_the_merge_deleted_a_file_is_never_hard_reset(done_copy):
+    """_written_hashes tells absent from a folder; and untracked files stop a --hard."""
+    root, tid, copy = done_copy
+    (root / "gone.txt").write_text("x\n")
+    (root / "dir").mkdir()
+    (root / "dir" / "notes").write_text("n\n")
+    (root / "ln").symlink_to("gone.txt")
+    got = worktrees._written_hashes(root, ["gone.txt", "dir", "ln", "missing"])
+    assert got["gone.txt"].startswith("file:") and got["dir"] == "other"
+    assert got["ln"] == "link" and got["missing"] == "absent"

@@ -1822,8 +1822,8 @@ def _history_ok_below(top: Path, commit: str) -> bool:
                 ids.append(g["e"] + g["f"])
             if g["g"] and g["h"]:
                 ids.append(g["g"] + g["h"])
-            if not ids and not ln.startswith(("inflate", "unable to unpack")):
-                return False
+            if not ids:
+                return False  # a line that names no object proves nothing about the commit's own objects
             bad.update(ids)
         if not bad:
             return False  # nothing named: not proven fine
@@ -1856,8 +1856,10 @@ def _roll_back(top: Path, prep, touched, pre: dict, merge_commit: str, written: 
     ):
         return "kept"
     if _git(["reset", "--keep", pre["head"]], top)[0] != 0:
-        if _written_hashes(top, touched) != written:
-            return "kept"
+        if _written_hashes(top, touched) != written or any(
+            f.startswith("?? ") for f in _bb_status(top).split("\0")
+        ):
+            return "kept"  # (untracked files are never in the way of a --hard: they would be deleted)
         if _git(["reset", "--hard", pre["head"]], top)[0] != 0:
             return "kept"
     if _files_match(top, touched, pre["head"]) and _history_ok_below(top, pre["head"]):
@@ -1873,10 +1875,14 @@ def _written_hashes(top: Path, touched) -> dict:
     for name in touched:
         path = top / name
         try:
-            if path.is_symlink() or not path.is_file():
-                out[name] = None
+            if path.is_symlink():
+                out[name] = "link"
+            elif not os.path.lexists(path):
+                out[name] = "absent"
+            elif path.is_file():
+                out[name] = "file:" + hashlib.sha256(path.read_bytes()).hexdigest()
             else:
-                out[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+                out[name] = "other"  # a folder or anything else: never part of what the merge wrote
         except OSError:
             out[name] = "unreadable"
     return out
@@ -2001,8 +2007,10 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
             if problem:
                 return VERIFY_TIME if problem == "later" else UNVERIFIED
             # passed on this very commit: it is orch's merge, recorded as such (the normal checks follow)
-            if tickets.load(root, ticket).get("status") != "done":
-                return UNVERIFIED  # reopened meanwhile: the Done that approved this merge is withdrawn
+            if tickets.load(root, ticket).get("status") != "done" or (
+                _copy_authority(root, ticket).get("reviewed_tip") != journal.get("tip")
+            ):
+                return UNVERIFIED  # reopened meanwhile (or not approved again): the Done is withdrawn
             _copy_authority(root, ticket, lambda r: r.update(merged=mine))
         _set_journal(root, ticket, None)  # orch's merge finished, or the person moved on: checks run again
         return None
