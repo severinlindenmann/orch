@@ -3079,3 +3079,25 @@ def test_b13y_a_reopen_and_done_bounce_during_the_check_revokes_the_approval(don
 def test_b13y_binary_files_get_no_crlf_tolerance():
     sha = worktrees._blob_id(b"a\0\nb\n", "0" * 40)
     assert not worktrees._bytes_match_blob(b"a\0\r\nb\r\n", sha, True)
+
+
+def test_b13y_done_reopen_done_by_the_person_during_the_merge_is_a_different_done(done_copy, monkeypatch):
+    """ABA: the ticket is reopened and the person marks it Done again while the merge runs. The merge was
+    approved by the first Done: it is rolled back; the new Done judges everything afresh."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    head = git(root, "rev-parse", "HEAD")
+    real = worktrees._bb_merge
+
+    def bounce_then_merge(top, args):
+        tickets.set_status(root, tid, "active", "human:test")
+        to_review(root, tid)
+        tickets.set_status(root, tid, "done", "human:test", proven=True)
+        return real(top, args)
+
+    monkeypatch.setattr(worktrees, "_bb_merge", bounce_then_merge)
+    done_and_sweep(root, tid)
+    assert worktrees._done_round(root, tid) >= 1
+    # the in-flight merge belonged to the first Done: rolled back, nothing certified for it
+    assert git(root, "rev-parse", "HEAD") == head
+    assert not worktrees._copy_authority(root, tid).get("merged")

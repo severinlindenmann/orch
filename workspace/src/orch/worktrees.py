@@ -1841,12 +1841,23 @@ def _index_flagged(top: Path) -> bool:
     return any(f and not f.startswith("H ") for f in listing.split("\0"))
 
 
-def _still_approved(root: Path, ticket: str, tip: str) -> bool:
-    """The ticket is Done AND the person's approval of `tip` is still the current signed one (a reopen clears
-    it, also when the ticket is Done again by the time this looks)."""
+def _done_round(root: Path, ticket: str) -> int:
+    """Which Done this is: a counter in the signed record that leaving Done (a reopen) raises, in the same
+    step that clears the approval. A Done -> reopen -> Done bounce is a different Done."""
+    try:
+        return int(_copy_authority(root, ticket).get("done_round") or 0)
+    except (OSError, ValueError, TypeError, Refused):
+        return -1
+
+
+def _still_approved(root: Path, ticket: str, tip: str, round_: int) -> bool:
+    """The ticket is Done, in the SAME Done as when the merge started (no reopen in between, also when it is
+    Done again by now), and the person's approval of `tip` is still the current signed one."""
     try:
         return (
-            tickets.load(root, ticket).get("status") == "done"
+            round_ >= 0
+            and _done_round(root, ticket) == round_
+            and tickets.load(root, ticket).get("status") == "done"
             and _copy_authority(root, ticket).get("reviewed_tip") == tip
         )
     except (OSError, ValueError, KeyError, Refused):
@@ -2245,6 +2256,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             # one line: a title cannot add trailers (Co-authored-by: ...) to a commit on the person's branch
             "message": " ".join(f"orch: {ticket} {t.get('title', '')}".split())[:200],
         }
+        round_at_start = _done_round(root, ticket)  # this Done's identity, taken with the approval just read
         _set_journal(root, ticket, journal)
         journal_written = True
         if _bb_snapshot(top) != pre:
@@ -2294,11 +2306,12 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
             return wait(CHANGED)
         if _bb_read(top, ["rev-parse", "HEAD^{tree}"]) != tree:
             return wait(CHANGED)  # the journal stays: this merge commit is not what was checked
+        done_round = round_at_start
         written = _written_hashes(top, touched)  # in memory, right after the merge (see _roll_back)
         # Recorded in the signed journal BEFORE the check (it can take minutes and orch may be stopped in it):
         # ancestry alone never certifies this merge; _recover re-runs the check for "pending" and keeps "bad".
         _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": parents[0]})
-        if not _still_approved(root, ticket, tip):
+        if not _still_approved(root, ticket, tip, done_round):
             # reopened while the merge ran (the reopen waits for this lock only briefly): the Done that
             # approved it is withdrawn, orch's own fresh merge goes back
             if _roll_back(top, prep, touched, pre, parents[0], written) == "verified":
@@ -2306,7 +2319,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 return None
             return wait(UNVERIFIED)
         problem = _after_merge(top, touched, parents[0])
-        if not problem and not _still_approved(root, ticket, tip):
+        if not problem and not _still_approved(root, ticket, tip, done_round):
             problem = "reopened"  # the check takes minutes: a reopen during it withdraws the Done as well
         if problem == "bad":
             _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": parents[0]})
@@ -3146,6 +3159,8 @@ def on_status(root: Path, ticket: str, before: str | None, after: str | None) ->
             def forget(r):
                 for k in ROUND_KEYS if before == "done" else REVIEW_KEYS:
                     r.pop(k, None)
+                if before == "done":
+                    r["done_round"] = int(r.get("done_round") or 0) + 1  # leaving Done ends that Done's round
 
             if before == "done":
                 # a reopen must not interleave with a running bring-back (it re-checks the status)
