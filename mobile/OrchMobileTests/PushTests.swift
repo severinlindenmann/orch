@@ -1,4 +1,5 @@
 import XCTest
+import UserNotifications
 @testable import OrchMobile
 
 @MainActor
@@ -69,5 +70,33 @@ final class TextPushTests: XCTestCase {
         XCTAssertNil(AppDelegate.pendingText)
         XCTAssertEqual(model.path, [.workspace(MockRelay.reports)])
         AppDelegate.model = nil
+    }
+}
+
+final class SettingsBugFixTests: XCTestCase {
+    func testSignOutTextNamesWaitingWork() {
+        XCTAssertEqual(SignOutWording.text(messages: 0, answers: 0), SignOutWording.base)
+        XCTAssertEqual(SignOutWording.text(messages: 2, answers: 0), SignOutWording.base + " 2 messages are still waiting to be sent and will be lost.")
+        XCTAssertEqual(SignOutWording.text(messages: 0, answers: 1), SignOutWording.base + " 1 answer is still waiting to be sent and will be lost.")
+        XCTAssertEqual(SignOutWording.text(messages: 1, answers: 2), SignOutWording.base + " 1 message and 2 answers are still waiting to be sent and will be lost.")
+    }
+
+    func testSignOutTextCountsOnlyUnsentItems() {
+        let waiting = OutboxItem(clientId: "a", phone: "p", kind: .send, workspace: "w", createdAt: "2026-11-12T10:00:00Z")
+        var stored = OutboxItem(clientId: "b", phone: "p", kind: .send, workspace: "w", createdAt: "2026-11-12T10:00:00Z")
+        stored.sentMessageId = "m_1"
+        var refused = OutboxItem(clientId: "c", phone: "p", kind: .answer, workspace: "w", createdAt: "2026-11-12T10:00:00Z")
+        refused.failure = "Not sent"
+        XCTAssertEqual(SignOutWording.text(for: []), SignOutWording.base)
+        XCTAssertEqual(SignOutWording.text(for: [stored]), SignOutWording.base)
+        XCTAssertEqual(SignOutWording.text(for: [waiting, stored, refused]), SignOutWording.base + " 1 message and 1 answer are still waiting to be sent and will be lost.")
+    }
+
+    func testNotificationAccessFromSystemStatus() {
+        XCTAssertEqual(NotificationAccess.from(.denied), .denied)
+        XCTAssertEqual(NotificationAccess.from(.notDetermined), .notAsked)
+        XCTAssertEqual(NotificationAccess.from(.authorized), .allowed)
+        XCTAssertEqual(NotificationAccess.from(.provisional), .allowed)
+        XCTAssertEqual(NotificationAccess.from(.ephemeral), .allowed)
     }
 }

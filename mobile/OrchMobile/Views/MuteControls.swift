@@ -53,6 +53,7 @@ struct MuteAllSettings: View {
                 Toggle("Mute all", isOn: Binding(get: { model.isMutedAll(now: context.date) }, set: { on in
                     if on { choosing = true } else { Task { await model.muteAll(.off) } }
                 })).themeFont(17).tint(Theme.brand).accessibilityIdentifier("mute-all")
+                Text("Silences notifications inside the app").themeFont(13).foregroundStyle(Theme.muted)
                 if model.isMutedAll(now: context.date) {
                     Text(MuteRules.endLabel(model.settings.muteAllUntil)).themeFont(13).foregroundStyle(Theme.muted)
                 }
