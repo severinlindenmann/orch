@@ -3003,3 +3003,26 @@ def test_b13w_a_done_judged_while_git_was_unreadable_is_judged_again(done_copy):
     worktrees.sweep(root)
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "merged", back
+
+
+def test_b13w_history_check_reads_only_per_object_lines(monkeypatch):
+    """A pack/checksum line (no object named, or a pack file name hash) never counts as 'unreachable'."""
+    from pathlib import Path
+
+    top = Path(".")
+    calls = {}
+
+    def fake(args, cwd, *a, **k):
+        if args[0] == "fsck":
+            return 1, "", calls["fsck"]
+        return 0, "", ""
+
+    monkeypatch.setattr(worktrees, "_git", fake)
+    monkeypatch.setattr(worktrees, "_bb_read", lambda *a, **k: "")
+    h = "a" * 40
+    calls["fsck"] = f"error: .git/objects/pack/pack-{h}.pack SHA1 checksum mismatch"
+    assert worktrees._history_ok_below(top, h) is False
+    calls["fsck"] = f"error: {'b' * 40}: object corrupt or missing: .git/objects/bb/{'b' * 38}"
+    assert worktrees._history_ok_below(top, h) is True  # a named object, unreachable from the commit
+    calls["fsck"] = "something new git says"
+    assert worktrees._history_ok_below(top, h) is False
