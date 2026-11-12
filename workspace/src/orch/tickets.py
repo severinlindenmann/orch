@@ -2263,6 +2263,7 @@ def answer(root: Path, tid: str, qid: str, text: str, by: str, via: str) -> tupl
                     chat = ticket.get("general") is True  # the Chat ticket is never Working
                     ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
+        history.created("answers", q)  # the answer point: this question, as answered, is core's own
         return q
 
     return apply_op(root, tid, op, by=SYSTEM)
