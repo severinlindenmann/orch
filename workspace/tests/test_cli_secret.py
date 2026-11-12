@@ -2101,3 +2101,34 @@ def test_h2_a_script_given_as_an_argument_to_a_system_interpreter_is_pinned_and_
     script.write_text('#!/usr/bin/awk -f\nBEGIN { print "planted" }\n')
     code, out, err = run("secret", "exec", "mine")
     assert code == 2 and "planted" not in out and "has changed" in err
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file modes")
+def test_h2_a_pinned_argument_copy_is_never_executable(store, run, ws, monkeypatch, tmp_path):
+    """A launcher (nice, timeout, env) given a pinned script argument cannot run it: permission denied."""
+    import subprocess
+
+    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
+    exe = _user_prog(tmp_path, "/usr/bin/true")
+    script = tmp_path / "bin" / "job"
+    script.write_text("#!/bin/sh\necho ran\n")
+    script.chmod(0o755)
+    code, out, err = _set(
+        run, monkeypatch, ws, "mine", "--run", str(exe), "--run", str(script), "--allow-user-owned"
+    )
+    assert code == 0, out + err
+    real = secretrun._pinned_copy
+    modes, tried = {}, []
+
+    def spy(path, want, temp, name, *, program):
+        copy = real(path, want, temp, name, program=program)
+        modes[name] = os.stat(copy).st_mode & 0o777
+        if not program:
+            with pytest.raises(PermissionError):
+                subprocess.run([copy], check=False)
+            tried.append(1)
+        return copy
+
+    monkeypatch.setattr(secretrun, "_pinned_copy", spy)
+    assert run("secret", "exec", "mine")[0] == 0
+    assert tried and modes["~program"] == 0o700 and modes["~arg0"] == 0o600

@@ -373,7 +373,7 @@ def _pinned_copy(path, want, temp, name, *, program):
         raise Refused(SCRIPT_PROGRAM)
     copy = temp / name
     keystore._write_private_bytes(copy, data)
-    os.chmod(copy, 0o700)
+    os.chmod(copy, 0o700 if program else 0o600)  # an argument file is data: never executable
     return str(copy)
 
 
