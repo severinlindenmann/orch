@@ -267,7 +267,9 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
 
 test('task proof chips: only plain evidence files and http(s) links get a chip, and the summary is the task line', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false)});
-  const c = context({h, snapshot:false, safeHref:u => u, array:v => Array.isArray(v) ? v : [], clean:String, previewFile(){}, proofLabel:ev => ev.ref});
+  const opened = [];
+  const button = (text, cls, click) => ({tag:'button', text, cls, click});
+  const c = context({h, button, snapshot:false, safeHref:u => u, array:v => Array.isArray(v) ? v : [], clean:String, previewFile:(...a) => opened.push(a), proofLabel:ev => ev.ref});
   vm.runInContext(source.slice(source.indexOf('const KIND_WORD'), source.indexOf('function ticketResultCard')), c);
   vm.runInContext(source.slice(source.indexOf('// A small chip per proof'), source.indexOf('function taskRows')), c);
   vm.runInContext('globalThis.evidenceFile = evidenceFile', c);
@@ -281,6 +283,12 @@ test('task proof chips: only plain evidence files and http(s) links get a chip, 
   assert.equal(row({type:'url', ref:'data:text/html,x'}), 'null');
   assert.match(row({type:'url', ref:'HTTPS://example.com/x'}), /example\.com/);
   assert.equal(row({type:'file', ref:base + '../x'}), 'null');
+  // a proof file chip is a real button: clicking it opens the file's preview (it was a dead onclick attribute)
+  const chip = c.taskProofChips(t, {evidence:[{type:'file', ref:base + 'ok/plan.md', title:'Plan'}]}).children[0];
+  assert.equal(typeof chip.click, 'function');
+  assert.equal(chip.title, 'Open');
+  chip.click();
+  assert.deepEqual(opened, [['t_a', 'evidence', 'ok/plan.md']]);
   // the summary of the proof is the task line, even when a later proof has none
   const task = {done:true, evidence:[{type:'file', ref:base + 'a.md', summary:'Connected as Dev Team.'}, {type:'file', ref:base + 'b.png'}]};
   assert.equal(helpers.outcome(task), 'Connected as Dev Team.');
@@ -298,14 +306,57 @@ test('agent bar shows the hold reason as plain text and hides it when absent', (
   assert.doesNotMatch(bare, /Waiting:/);
 });
 
+test('an open task menu and its typed reason survive render() until submit, Escape or close', async () => {
+  const calls = [];
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
+  const t = {id:'t_test', checklist:[{id:'c1', text:'Try this', done:false}]};
+  const locks = new Set();
+  const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks, ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
+  vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
+  const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
+  const draw = () => { const all = c.taskRows(t).flatMap(nodes); return {more:all.find(n => n.attrs['aria-label'] === 'More'), form:all.find(n => n.tag === 'form'), input:all.find(n => n.tag === 'input')}; };
+  let ui = draw();
+  assert.equal(ui.form.hidden, true);
+  ui.more.onclick();
+  ui.input.value = 'Not needed any more';
+  ui.input.listeners.input();
+  ui.form.listeners.focusin();
+  assert.ok(locks.has('task-menu-c1'), 'the row is not redrawn while focus is inside its form');
+  // the background refresh redraws the row: the menu is still open and the text is still there
+  ui = draw();
+  assert.equal(ui.form.hidden, false);
+  assert.equal(ui.more.attrs['aria-expanded'], 'true');
+  assert.equal(ui.input.value, 'Not needed any more');
+  // Escape closes it and forgets the draft
+  ui.form.listeners.keydown({key:'Escape', preventDefault(){}});
+  assert.equal(draw().form.hidden, true);
+  assert.equal(draw().input.value, '');
+  assert.ok(!locks.has('task-menu-c1'));
+  // a task removed while its menu was open leaves no lock or draft behind
+  ui = draw(); ui.more.onclick(); ui.input.value = 'draft'; ui.input.listeners.input(); ui.form.listeners.focusin();
+  assert.ok(locks.has('task-menu-c1'));
+  t.checklist = [];
+  c.taskRows(t);
+  assert.ok(!locks.has('task-menu-c1'));
+  t.checklist = [{id:'c1', text:'Try this', done:false}];
+  assert.equal(draw().form.hidden, true);
+  // submit clears it too
+  ui = draw(); ui.more.onclick(); ui.input.value = 'Changed plans'; ui.input.listeners.input();
+  await ui.form.onsubmit({preventDefault(){}});
+  const sent = calls.pop();
+  assert.equal(sent[0], 'check.wont_do');
+  assert.equal(sent[1].reason, 'Changed plans');
+  assert.equal(draw().form.hidden, true);
+});
+
 test("won't-do tasks render resolved, hide activity and reasons, and reopen", async () => {
   const calls = [], errors = [];
-  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), setAttribute(k,v){this.attrs[k]=v;}});
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, hidden:!!attrs.hidden, children:kids.flat(Infinity).filter(x => x != null && x !== false), listeners:{}, setAttribute(k,v){this.attrs[k]=v;}, addEventListener(type, fn){this.listeners[type] = fn;}, focus(){}, contains(){return false;}});
   const t = {id:'t_test', checklist:[{id:'c1', text:'Skip this', done:false, wont_do:true, state:'doing', reason:'No longer needed'}]};
   const c = context({h, clean:String, ticketActor:() => '', taskProofChips:() => null, ticketTaskOutcome:helpers.outcome, state:{runs:{}}, locks:new Set(), ticketOf:() => t, render(){}, act:async (op,args) => {calls.push([op,args]); return {ok:true};}});
   c.window.orch.toast = (text) => errors.push(text);
   vm.runInContext(source.slice(source.indexOf('async function toggleTask'), source.indexOf('function localUrl')), c);
-  vm.runInContext(source.slice(source.indexOf('function taskRows'), source.indexOf('// "+ Add task"')), c);
+  vm.runInContext(source.slice(source.indexOf('// Open task menus and their typed reason'), source.indexOf('// "+ Add task"')), c);
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   let all = c.taskRows(t).flatMap(nodes);
   assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
@@ -467,4 +518,42 @@ test('the Accept button is keyed by the shown tip, so a refresh never keeps a st
   const key = tip => nodes(c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:tip})).find(n => n.tag === 'button' && n.children.includes('Accept')).attrs['data-key'];
   assert.notEqual(key(undefined), key('a'.repeat(40)));
   assert.notEqual(key('a'.repeat(40)), key('b'.repeat(40)));
+});
+
+test('a file is listed once per list, and Overview chips skip the file already in the review card', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), append(...more){this.children.push(...more);},
+    setAttribute(k, v){this.attrs[k] = v;}, addEventListener(){}, focus(){}, contains(){return false;}});
+  const shot = {type:'file', ref:'.orch/tickets/t_dup/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
+  const t = {id:'t_dup', title:'Dup', status:'review', checklist:[{id:'a', text:'One', done:true, evidence:[shot, {...shot}]}, {id:'b', text:'Two', done:true, evidence:[{...shot}]}]};
+  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h,
+    array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '', route:() => ({kind:'ticket'}), render(){},
+    el:(tag, cls, text) => h(tag,{className:cls},text), fragment:(...kids) => h('fragment',{},kids), button:(label, cls) => h('button',{className:cls},label),
+    card:(key,title,suffix,kids) => h('section',{'data-key':key},title,suffix,kids), emptyRow:text => h('p',{},text),
+    questions:() => [], capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [t], ticketOf:() => t,
+    statusChip:() => h('span',{},'Review'), chip:text => h('span',{},text), href:id => '#ticket/'+id, MOVE_CHOICES:[], locks:new Set()};
+  vm.createContext(ctx); vm.runInContext(source,ctx);
+  ctx.snapshot=false; ctx.state={settings:{agents:[]}};
+  vm.runInContext("loadArtifacts = () => {}; inlineField = (t,f) => t[f]; addTaskRow = () => null; agentBar = () => null;" +
+    "artifactData.set('t_dup', {at:Date.now(), data:{files:[{name:'report.pdf', size:10}, {name:'report.pdf', size:10}, {name:'notes.pdf', size:5}]}});", ctx);
+  const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
+  const tree = nodes(ctx.detail(t));
+  const fileChips = tree.filter(n => n.attrs.className === 'ticket-file-chips').flatMap(n => n.children.map(c => c.children.find(k => k.tag === 'span').children[0]));
+  assert.deepEqual(fileChips, ['notes.pdf'], 'the review card already shows report.pdf');
+  assert.deepEqual(tree.filter(n => n.attrs.className === 'task-proofs row').map(n => n.children.length), [1, 1, 1, 1], 'one chip per file per task (Overview and Tasks tab)');
+  const filesTab = tree.find(n => n.attrs.id === 'ticket-panel-artifacts');
+  assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'card ticket-result').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
+  assert.ok(nodes(filesTab).some(n => n.tag === 'h2' && n.children.includes('Files')));
+  assert.ok(tree.some(n => n.attrs.id === 'ticket-tab-artifacts' && n.children.includes('Files 3')));
+});
+
+test('a file that is both an artifact and a proof shows once in the Files tab and counts once', () => {
+  const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), append(...more){this.children.push(...more);}});
+  const shot = {type:'file', ref:'.orch/tickets/t_both/evidence/shot.pdf', title:'Shot', at:'2026-11-01T10:00:00Z'};
+  const t = {id:'t_both', title:'Both', status:'doing', checklist:[{id:'a', text:'One', done:true, evidence:[shot]}]};
+  const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers, orch:{toast(){}}}, document:{addEventListener(){}}, addEventListener(){}, h, array:v => Array.isArray(v) ? v : []};
+  vm.createContext(ctx); vm.runInContext(source, ctx);
+  ctx.snapshot = false;
+  vm.runInContext("artifactData.set('t_both', {at:Date.now(), data:{files:[{name:'shot.pdf', size:10}]}});", ctx);
+  ctx.tt = t;
+  assert.deepEqual(Array.from(vm.runInContext('[artifactEntries(tt).length, artifactCount(tt)]', ctx)), [1, 1]);
 });

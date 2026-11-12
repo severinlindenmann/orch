@@ -56,11 +56,38 @@ test('home renders one need card per ticket with question count and yellow chip'
   const c = context([t], {needsList:() => needs});
   const home = c.home(), text = JSON.stringify(home);
   assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
-  assert.match(text, /2 questions/); assert.match(text, /Needs you \(1\)/); assert.match(text, /2 questions for you/);
+  assert.match(text, /2 questions/); assert.match(text, /Needs you \(1\)/); assert.match(text, /· 1 question for you ·/);
   assert.match(text, /First\?/); assert.doesNotMatch(text, /Second\?/);
   assert.equal(nodes(home, n => n.attrs?.className === 'chip attn').length, 1);
   needs.shift();
   assert.match(JSON.stringify(c.home()), /Second\?/);
+});
+test('home: the greeting and the Needs you heading show the same count (one per ticket plus failed starts)', () => {
+  const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'active', questions:[{id:id + '1', text:'One?'}, {id:id + '2', text:'Two?'}]}));
+  const needs = items.flatMap(t => t.questions.map(q => ({id:q.id, ticket:t.id, title:q.text, answer:{question:q.id}})));
+  const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
+  assert.match(text, /Needs you \(3\)/); assert.match(text, /· 3 questions for you ·/);
+  assert.equal(helpers.needsYouCount(needs, []), 3);
+  assert.equal(helpers.needsYouCount([{id:'x'}, {id:'y', ticket:'a'}, {id:'z', ticket:'a'}], [['b']]), 3);
+  assert.equal(helpers.needsYouCount([], []), 0);
+});
+test('home: the badge and Menu count (needsToday) equal the heading and skip rows put off until later today', () => {
+  const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'waiting'}));
+  const needs = items.flatMap(t => [1, 2].map(n => ({id:t.id + n, ticket:t.id, title:'Q?', answer:{question:t.id + n}, actions:[{later:true}]})));
+  const later = {a1:'2026-11-12', a2:'2026-11-12'};
+  const c = context(items, {needsList:() => needs, today:() => '2026-11-12', localStorage:{getItem:() => JSON.stringify(later)}, button:label => ({tag:'button', children:[label]})});
+  const text = JSON.stringify(c.home());
+  assert.equal(c.needsToday().count, 2);
+  assert.match(text, /Needs you \(2\)/); assert.match(text, /· 2 questions for you ·/);
+  const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
+  assert.match(app, /const needCount = needsToday\(\)\.count/); assert.doesNotMatch(app, /needsList\(\)\.length/);
+});
+test('home: the greeting counts a failed start on the page', () => {
+  const items = [{id:'a', title:'T a', status:'active'}, {id:'f', title:'T f', status:'waiting', waiting_on:{start:true, ref:'x'}}];
+  const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
+  const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
+  assert.match(text, /could not start/);
+  assert.match(text, /Needs you \(2\)/); assert.match(text, /· 2 questions for you ·/);
 });
 
 // Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.

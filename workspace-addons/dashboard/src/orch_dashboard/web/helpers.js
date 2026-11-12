@@ -161,6 +161,11 @@
     return out;
   }
 
+  /* The one "Needs you" number (greeting, heading, fold): one per ticket (or per row without a ticket) plus failed starts. */
+  function needsYouCount(rows, failed) {
+    return new Set(arr(rows).filter(Boolean).map(r => r.ticket || r.id)).size + arr(failed).length;
+  }
+
   /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
   function inNeeds(rows, ticketId) {
     return arr(rows).some(r => r && r.ticket === ticketId && r.answer && r.answer.question);
@@ -461,5 +466,5 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
 
-  return {resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, needsYouCount, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

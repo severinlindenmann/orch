@@ -271,7 +271,7 @@ def test_many_parallel_loads_never_reset(server):
     assert set(codes) == {200}
 
 
-# ---- Artifacts tab: file list and safe file reads
+# ---- Files tab: file list and safe file reads
 
 
 def _get(base, path, headers=None):

@@ -372,7 +372,7 @@ def test_ticket_rows_use_one_status_chip_and_inline_next_step():
 def test_home_counts_a_starting_ticket_and_the_sidebar_badge_has_words():
     src = webjs.all_js()
     assert "working-now" in src and "Getting started…" in src
-    assert "needsYou(needsList().length)" in src  # 5A: the badge says what it counts
+    assert "needsYou(needCount)" in src  # 5A: the badge says what it counts
 
 
 @node

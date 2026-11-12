@@ -116,7 +116,7 @@ test('overview file chips preview artifacts and are absent in snapshots or witho
   s.c.window.DashHelpers.plainFileName = x => x.split('/').pop();
   s.c.previewFile = (...args) => previews.push(args);
   const ticket = read('pages/ticket.js');
-  vm.runInContext('const artifactData = new Map();\n' + ticket.slice(ticket.indexOf('function ticketFiles('), ticket.indexOf('async function previewFile(')), s.c);
+  vm.runInContext('const artifactData = new Map();\n' + ticket.slice(ticket.indexOf('// One file = one entry'), ticket.indexOf('function ticketResultCard(')) + ticket.slice(ticket.indexOf('function ticketFiles('), ticket.indexOf('async function previewFile(')), s.c);
   assert.equal(s.c.ticketFiles({id:'t'}), null);
   vm.runInContext("artifactData.set('t', {data:{files:[{name:'folder/note.md',size:20000}]}})", s.c);
   const section = s.c.ticketFiles({id:'t'});
@@ -148,7 +148,19 @@ test('the agent writes the title for long or multi-line text, a short one-liner 
   const b = setup(); b.input.value = 'Fix the login page'; await b.input.fire('input'); await b.form.fire('submit');
   assert.equal(b.calls[0].args.title_auto, false);
   const c = setup(); c.input.value = 'Fix it\nand more'; await c.input.fire('input'); await c.form.fire('submit');
-  assert.equal(c.calls[0].args.title_auto, true);
+  assert.equal(c.calls[0].args.title_auto, false);  // the first line is the title the person typed
+  assert.equal(c.calls[0].args.title, 'Fix it');
+  const d = setup(); d.input.value = 'y'.repeat(120); await d.input.fire('input'); await d.form.fire('submit');
+  assert.equal(d.calls[0].args.title_auto, true);  // a long first line is clipped: the agent may write a title
+});
+test('a typed title stays: with a 20 KB paste or files title_auto is false and the title is kept', async () => {
+  const s = setup(); s.input.value = 'Fix the login page'; await s.input.fire('input'); await s.paste('p'.repeat(20000));
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].args.title, 'Fix the login page');
+  assert.equal(s.calls[0].args.title_auto, false);
+  assert.equal(s.calls[0].args.long_text.length >= 20000, true);
+  const u = setup(); await u.paste('p'.repeat(20000)); await u.form.fire('submit');  // nothing typed: the title comes from the paste
+  assert.equal(u.calls[0].args.title_auto, true);
 });
 
 test('Show plan first creates a plan-first ticket and starts its agent', async () => {
