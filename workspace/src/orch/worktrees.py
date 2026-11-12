@@ -1903,7 +1903,7 @@ def _roll_back(top: Path, prep, touched, pre: dict, merge_commit: str, written: 
     return "unverified"
 
 
-def _written_hashes(top: Path, touched) -> dict:
+def _written_hashes(top: Path, touched, merge_end_ns: int | None = None) -> dict:
     """What the merged files hold on disk right after the merge, as Python hashes taken HERE (in memory, out
     of the agent's reach): the folder is untouched since the merge exactly while it still hashes to this.
     A person's edit differs from it; so does anything written to the folder later."""
@@ -1917,6 +1917,8 @@ def _written_hashes(top: Path, touched) -> dict:
                 out[name] = "absent"
             elif path.is_file():
                 out[name] = "file:" + hashlib.sha256(path.read_bytes()).hexdigest()
+                if merge_end_ns is not None and path.stat().st_mtime_ns > merge_end_ns:
+                    out[name] = "other"  # written after the merge ended: not the merge's output
             else:
                 out[name] = "other"  # a folder or anything else: never part of what the merge wrote
         except OSError:
@@ -2300,6 +2302,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 tip,
             ],
         )
+        merge_end_ns = time.time_ns()  # a file stamped later than this was not written by the merge
         if rc:
             # Never a blind abort: only a merge the signed journal proves is orch's own is undone.
             return wait(_recover(root, top, ticket, journal) or UPDATE)
@@ -2309,7 +2312,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         if _bb_read(top, ["rev-parse", "HEAD^{tree}"]) != tree:
             return wait(CHANGED)  # the journal stays: this merge commit is not what was checked
         done_round = round_at_start
-        written = _written_hashes(top, touched)  # in memory, right after the merge (see _roll_back)
+        written = _written_hashes(top, touched, merge_end_ns)  # in memory, right after the merge
         # Recorded in the signed journal BEFORE the check (it can take minutes and orch may be stopped in it):
         # ancestry alone never certifies this merge; _recover re-runs the check for "pending" and keeps "bad".
         _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": parents[0]})

@@ -3121,3 +3121,13 @@ def test_b13y_the_round_comes_from_the_same_snapshot_as_the_approval(done_copy, 
         worktrees._still_approved(root, tid, tip, 0, control=True) is False
     )  # no controls_tip: not approved
     assert worktrees._still_approved(root, tid, tip, 1) is False  # another Done
+
+
+def test_b13y_a_file_stamped_after_the_merge_ended_is_not_the_merges_output(tmp_path):
+    f = tmp_path / "a.txt"
+    f.write_text("x\n")
+    now = f.stat().st_mtime_ns
+    assert worktrees._written_hashes(tmp_path, ["a.txt"], now + 1)["a.txt"].startswith("file:")
+    assert (
+        worktrees._written_hashes(tmp_path, ["a.txt"], now - 1)["a.txt"] == "other"
+    )  # edited after: no --hard
