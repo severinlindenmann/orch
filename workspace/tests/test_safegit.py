@@ -1683,6 +1683,7 @@ def test_filters_off_allowlist_is_only_what_callers_need():
         "check-attr",
         "worktree",
         "ls-files",
+        "for-each-ref",  # names of the work branches, listed once per dashboard load (B13 follow-up)
     }
 
 
