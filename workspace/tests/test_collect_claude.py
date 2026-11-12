@@ -303,7 +303,9 @@ def test_collect_into_writer_hides_secrets_and_replay_dedupes(store):
     assert SECRET not in blob and "[hidden: deploy-key]" in blob
     finished = [e for e in events if e["kind"] == "step" and e["outcome"]]
     assert len(finished) == 1 and finished[0]["detail"]
-    detail = read_detail(ws, CTX["run"], finished[0]["detail"].rsplit("/", 1)[1][:-5])
+    detail = read_detail(
+        ws, CTX["run"], finished[0]["detail"].rsplit("/", 1)[1][:-5], line_id=finished[0]["id"]
+    )
     text = json.dumps(detail.unwrap())
     assert SECRET not in text and "[hidden: deploy-key]" in text
     for path in (ws / ".orch").rglob("*"):

@@ -84,7 +84,12 @@ def test_launch_token_bootstraps_the_cookie_once(live):
     root, port = live
     tok = hp.write_launch_token(root, "focus")
     st, ck, _ = post(port, "/session", {"token": tok})
-    assert st == 200 and "HttpOnly" in ck and "SameSite=Strict" in ck and ck.startswith(f"orch_page_focus_{port}=")
+    assert (
+        st == 200
+        and "HttpOnly" in ck
+        and "SameSite=Strict" in ck
+        and ck.startswith(f"orch_page_focus_{port}=")
+    )
     assert post(port, "/session", {"token": tok})[0] == 403  # single use
     assert post(port, "/session", {"token": "x" * 30})[0] == 403
 
@@ -101,7 +106,7 @@ def test_click_without_a_session_is_watch_only(live, monkeypatch):
     ran = []
     monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
     st, _, _body = post(
-        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+        port, "/api/act", {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
     )
     assert st == 403 and ran == []
 
@@ -122,13 +127,13 @@ def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
     st, _, _ = post(
         port,
         "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
         {"Cookie": ck},
     )
     assert st == 200, seen
     assert "--proof-stdin" not in seen["argv"] and "x" in seen["argv"]  # run_with_proof adds the flag itself
     payload = json.loads(__import__("base64").urlsafe_b64decode(seen["proof"].split(".")[1] + "=="))
-    assert payload["op"] == "ticket.answer" and payload["target"] == "t_abc123:q1"
+    assert payload["op"] == "ticket.answer" and payload["target"] == "t_abc123:q1:" + "a" * 64
     assert seen["kw"]["orch_bin"] == pageproof.SELF
     assert "ORCH_BIN" not in seen["kw"]["env"]
 
@@ -139,7 +144,7 @@ def test_click_with_session_but_forwarded_is_refused(live):
     st, _, _ = post(
         port,
         "/api/act",
-        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}},
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
         {"Cookie": ck, "X-Forwarded-Host": "evil"},
     )
     assert st == 403
@@ -172,7 +177,7 @@ def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session_proof(live):
 
 # ---- #539: the cookie alone is never a session (browsers send it to every loopback port) -------------------------
 
-ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "answer": "x"}}
+ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
 
 
 def test_session_answer_hands_over_the_secret_in_the_body_not_in_a_cookie(live):
@@ -183,7 +188,9 @@ def test_session_answer_hands_over_the_secret_in_the_body_not_in_a_cookie(live):
     assert st == 200 and len(secret) >= 40 and secret not in ck
 
 
-@pytest.mark.parametrize("body", [ANSWER, {"op": "area.accept", "args": {"area": "x"}}], ids=lambda b: b["op"])
+@pytest.mark.parametrize(
+    "body", [ANSWER, {"op": "area.accept", "args": {"area": "x"}}], ids=lambda b: b["op"]
+)
 def test_every_mint_route_refuses_the_cookie_alone(live, monkeypatch, body):
     root, port = live
     ck = session(root, port)
@@ -257,7 +264,9 @@ def test_session_refused_for_foreign_origin_missing_origin_or_wrong_host(live, e
     st, hdr, body = _raw(port, "POST", "/session", {"token": tok}, {**base, **extra})
     assert st == 403 and b"secret" not in body and "set-cookie" not in hdr
     assert not any(k.startswith("access-control-") for k in hdr)
-    st, _, body = _raw(port, "POST", "/session", {"token": tok}, base)  # the token was not spent by the refusals
+    st, _, body = _raw(
+        port, "POST", "/session", {"token": tok}, base
+    )  # the token was not spent by the refusals
     assert st == 200 and json.loads(body)["secret"]
 
 
@@ -316,5 +325,9 @@ def test_secret_compare_is_constant_time_and_rotates_with_the_session(live):
     assert st == 200 and new_secret and new_secret != old_secret
     new_ck = hdr["set-cookie"].split(";")[0]
     assert new_ck != old_ck
-    assert post(port, "/api/act", ANSWER, {"Cookie": old_ck, "X-Orch-Page": old_secret})[0] == 403  # old pair dead
-    assert post(port, "/api/act", ANSWER, {"Cookie": new_ck, "X-Orch-Page": old_secret})[0] == 403  # old secret dead
+    assert (
+        post(port, "/api/act", ANSWER, {"Cookie": old_ck, "X-Orch-Page": old_secret})[0] == 403
+    )  # old pair dead
+    assert (
+        post(port, "/api/act", ANSWER, {"Cookie": new_ck, "X-Orch-Page": old_secret})[0] == 403
+    )  # old secret dead

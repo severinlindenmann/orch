@@ -39,6 +39,7 @@ def test_card_shape_steps_newest_first_and_plain_words():
         "Read the budget",
         "Task done: Outline",
     ]
+    assert len(c["question"].pop("digest")) == 64  # the question as shown: sent back with the answer
     assert c["question"] == {
         "id": "q1",
         "text": "Day 1 or day 2?",

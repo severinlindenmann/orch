@@ -98,6 +98,7 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
                         "question": q["id"],
                         "options": list(q.get("options") or []),
                         "recommended": q.get("recommended"),
+                        "digest": tickets.question_digest(q),  # the question as shown: bound into the proof
                     },
                 }
             )

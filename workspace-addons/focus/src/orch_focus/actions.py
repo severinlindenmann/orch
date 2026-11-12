@@ -50,7 +50,7 @@ except ImportError:  # no orch: nothing runs
 
 # page op -> (core op, target): the clicks that are a person's (H1, contracts/human-proof.md)
 PROOF_OPS = {
-    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}"),
+    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}:{_question_digest(a)}"),
     "ticket.done": ("ticket.verdict", lambda a: a.get("ticket")),
     "run.send": ("run.human_input", lambda a: a.get("ticket")),
     "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
@@ -120,11 +120,19 @@ def _t(a):
     return _id(TID, a.get("ticket"), "ticket")
 
 
+def _question_digest(a):
+    """The digest of the question as the page showed it (sent back with the answer): no digest, no answer."""
+    d = a.get("digest")
+    if not (isinstance(d, str) and re.fullmatch(r"[0-9a-f]{64}", d)):
+        raise BadRequest("This question changed or can't be checked. Ask again.")
+    return d
+
+
 def _answer(a):
-    _only(a, ("ticket", "question", "answer"))
+    _only(a, ("ticket", "question", "answer", "digest"))
     return (
         ["answer", _t(a), _id(QID, a.get("question"), "question")],
-        ["--via", "focus"],
+        ["--via", "focus", "--question-digest", _question_digest(a)],
         [_text(a.get("answer"), "answer")],
     )
 
@@ -175,7 +183,12 @@ def _check_wont_do(a):
     flags = []
     if "reason" in a:
         reason = a["reason"]
-        if not isinstance(reason, str) or len(reason) > 200 or any(ch in reason for ch in "\r\n") or _CONTROL.search(reason):
+        if (
+            not isinstance(reason, str)
+            or len(reason) > 200
+            or any(ch in reason for ch in "\r\n")
+            or _CONTROL.search(reason)
+        ):
             raise BadRequest("The reason must be one line, at most 200 characters.")
         flags.append(f"--reason={reason}")
     return ["check", "wont-do", t, c], flags, []
@@ -223,7 +236,10 @@ OPS = {
     "check.remove": _check_plain("remove"),
     "check.reopen": _check_plain("reopen"),
 }
-BY = {"run.start": "focus", "mobile.set": "focus"}  # who a start is recorded as (the page is the starter); other ops: the person
+BY = {
+    "run.start": "focus",
+    "mobile.set": "focus",
+}  # who a start is recorded as (the page is the starter); other ops: the person
 
 
 def actor() -> str:
@@ -261,7 +277,9 @@ def _without_agent(environ) -> dict:
         fn = getattr(e, "filename", None)
         where = Path(fn).name if isinstance(fn, str) and fn else ""  # never a full path or file content
         why = e.__class__.__name__ + (f" in {where}" if where else "")
-        raise Unavailable(f"orch could not check who is acting here ({why}). Fix that and try again.") from None
+        raise Unavailable(
+            f"orch could not check who is acting here ({why}). Fix that and try again."
+        ) from None
 
 
 def human_env(root: Path, orch_bin: str) -> dict:
@@ -277,7 +295,9 @@ def orch(
         raise Unavailable("The orch command is not available here.")
     try:
         if proof:
-            r = run_with_proof(argv, proof, orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=timeout)
+            r = run_with_proof(
+                argv, proof, orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=timeout
+            )
         else:
             r = _run(
                 [*argv0(orch_bin), *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,

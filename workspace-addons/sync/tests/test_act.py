@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shlex
 import subprocess
 from types import SimpleNamespace
 
@@ -386,6 +387,18 @@ def test_review_text_never_hides_a_character():
     assert act.plain("a\u202eb\u2066c\u200bd\x9be\x07f\ufeffg") == "a\ufffdb\ufffdc\ufffdd\ufffde\ufffdf\ufffdg"
     assert act.plain("one\ntwo   three\x85four") == "one two three four"  # line breaks (also NEL): one space
     assert act.plain("x" * 10, 5) == "xxxx…"
+    assert act.plain("plain text, ünïcode 日本 é") == "plain text, ünïcode 日本 é"  # ordinary text is untouched
+    for hidden in ("\xad", "\u180e", "\ufe00", "\ufe0f", "\U000e0000", "\U000e0041", "\U000e007f",
+                   "\U000e0100", "\U000e01ef", "\u180b", "\u115f", "\u1160", "\u3164", "\uffa0", "\ue000",
+                   "\ud800", "\u0378", "\U000f0000"):
+        assert act.plain(f"a{hidden}b") == "a\ufffdb"
+
+
+def test_needs_rows_never_hide_a_character():
+    row = needs.row("paused", "k", "x\U000e0041y", "now", "cmd", ["a\xadb"], title="t\ufe0fz",
+                    actions=[needs.action("Keep", "keep-mine", "p", review={"title": "r\u180es"})])
+    assert (row["text"], row["title"], row["answer"]["options"]) == ("x\ufffdy", "t\ufffdz", ["a\ufffdb"])
+    assert row["actions"][0]["review"]["title"] == "r\ufffds"
 
 
 def test_a_planted_saved_copy_is_never_offered_for_signing(machines, monkeypatch):
@@ -409,6 +422,40 @@ def test_a_planted_saved_copy_is_never_offered_for_signing(machines, monkeypatch
     with pytest.raises(repo.Refused, match="Saved copy does not match the checked version"):
         pause.resolve(b, TICKET, "theirs", SimpleNamespace(proof_stdin=True, by=None))
     assert json.loads(repo.safe(b, TICKET).read_text())["title"] == "Mine"
+
+
+@pytest.mark.parametrize("remote", [None, "", 0, ["x"]])
+def test_a_pause_without_a_checked_version_offers_no_saved_copy(machines, remote):
+    """L-3: a signed pause whose remote_sha is empty or not a string, or None with a saved copy, takes no saved copy."""
+    a, b, _ = both(machines)
+    edit(a, title="Theirs")
+    edit(b, title="Mine")
+    success(a)
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(step.merge, "merge_ticket", lambda *a, **k: None)
+        state = run(b)
+    state["paused"] = pause.sign(b, {**{k: v for k, v in state["paused"].items() if k != "mac"}, "remote_sha": remote})
+    step.write(b, "run/sync/state.json", step.encoded(state))
+    with pytest.raises(repo.Refused, match="Saved copy does not match the checked version"):
+        pause.resolve_sides(b, TICKET)
+
+
+def test_a_pause_with_no_remote_version_and_no_saved_copy_still_resolves(machines):
+    """A pause before any remote version (first push, local mode) has no saved copy: Keep mine still works."""
+    a, b, _ = both(machines)
+    edit(a, title="Theirs")
+    edit(b, title="Mine")
+    success(a)
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(step.merge, "merge_ticket", lambda *a, **k: None)
+        state = run(b)
+    state["paused"] = pause.sign(b, {**{k: v for k, v in state["paused"].items() if k != "mac"}, "remote_sha": None})
+    step.write(b, "run/sync/state.json", step.encoded(state))
+    saved = repo.safe(b, "run/sync/theirs/" + TICKET)
+    if saved.exists():
+        saved.unlink()
+    _paused, remote, _, theirs = pause.resolve_sides(b, TICKET)
+    assert remote is None and theirs is None
 
 
 def test_leave_deleted_review_names_the_ticket(machines):
@@ -440,7 +487,10 @@ def test_check_sends_no_login_and_never_echoes_the_address(root, tmp_path, monke
     assert answer(capsys) == {"ok": True}
     cmd, kw = next((c, k) for c, k in calls if "ls-remote" in c)
     assert kw["env"]["GIT_TERMINAL_PROMPT"] == "0"
-    assert kw["env"]["GIT_SSH_COMMAND"] == "ssh -o BatchMode=yes" and "GIT_SSH" not in kw["env"]
+    assert kw["env"]["GIT_SSH_COMMAND"] == repo.TYPED_SSH and "GIT_SSH" not in kw["env"]
+    assert shlex.split(repo.TYPED_SSH) == [  # none of the person's config, keys or agent identities (L-1)
+        "ssh", "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "IdentityFile=/dev/null",
+        "-o", "IdentityAgent=none", "-o", "PubkeyAuthentication=no"]
     helpers = [cmd[i + 1] for i, v in enumerate(cmd[:-1]) if v == "-c" and cmd[i + 1].startswith("credential.helper")]
     assert helpers == ["credential.helper="]
 

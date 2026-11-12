@@ -56,7 +56,7 @@
             buttons.forEach(button => { button.disabled = true; });
             options.setAttribute('aria-busy', 'true');
             try {
-              const r = await S.act('answer', {ticket: card.ticket, question: question.id, answer: option});
+              const r = await S.act('answer', {ticket: card.ticket, question: question.id, digest: question.digest, answer: option});
               if (!r.ok) toast(text(r.message), 'error');
             } catch (e) { toast('Could not send your answer. Try again.', 'error'); }
             finally {

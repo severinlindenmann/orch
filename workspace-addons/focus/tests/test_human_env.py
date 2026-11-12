@@ -6,8 +6,15 @@ from orch_focus import actions
 
 
 def test_orch_calls_leave_the_agent_variables_out(monkeypatch, tmp_path):
-    for k, v in {"CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "CODEX_HOME": "/x", "ORCH_AGENT": "claude",
-                 "ORCH_RUN": "r_abcdefgh", "ORCH_TICKET": "t_abcdef", "KEEP_ME": "yes"}.items():
+    for k, v in {
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_ENTRYPOINT": "cli",
+        "CODEX_HOME": "/x",
+        "ORCH_AGENT": "claude",
+        "ORCH_RUN": "r_abcdefgh",
+        "ORCH_TICKET": "t_abcdef",
+        "KEEP_ME": "yes",
+    }.items():
         monkeypatch.setenv(k, v)
     got = {}
 
@@ -37,4 +44,6 @@ def test_without_orchs_list_the_action_is_refused(monkeypatch, tmp_path):
     monkeypatch.setattr(orch.adapters, "human_environ", broken)
     with pytest.raises(actions.Unavailable) as e:
         actions.human_env(Path(tmp_path), "/bin/orch")
-    assert "RuntimeError" in str(e.value) and "sk-secret" not in str(e.value) and "/Users/x" not in str(e.value)
+    assert (
+        "RuntimeError" in str(e.value) and "sk-secret" not in str(e.value) and "/Users/x" not in str(e.value)
+    )

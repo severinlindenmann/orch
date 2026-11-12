@@ -323,7 +323,7 @@ checked address; redirects are never followed; connect timeout 5 s, total 10 s; 
 
 | Method | Path | What |
 |---|---|---|
-| GET, POST, PUT | `/webhook/<id>?token=whk_…` | Stored as a `webhook` message to the owning workspace → `202`. A `once` webhook is used up in the same database transaction that stores the message; later calls → `410`. Wrong token `401`. Body max 1 MB, stored as text |
+| GET, POST, PUT | `/webhook/<id>?token=whk_…` | Stored as a `webhook` message to the owning workspace → `202`. A `once` webhook is used up in the same database transaction that stores the message; later calls → `410`. Wrong token `401`. Body max 1 MB, stored as text. Per-webhook limit, counted only after the token is checked and before anything is stored or a `once` webhook is used up: at most 60 accepted calls per minute and 20 MB of payload per UTC day; over it → `429` `rate_limited` with `Retry-After` (seconds), nothing stored |
 | GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add relay --yes` and `orch relay connect` |
 | GET | `/health` | `200 ok` |
 | GET | `/`, any unknown non-`/v1` path | Dark HTML page "This page isn't available" (`200` for `/`, `404` otherwise; no product name). Unknown `/v1/…` paths answer JSON `404 not_found` |

@@ -470,7 +470,7 @@ def _ra_nodup(pairs):
     return d
 
 
-def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
+def ra_verify(raw, run, ws, rk, kid, head=None, job=None, old_kids=None):
     """Reference of record_auth.verify_run: {shown, changed, removed, reason}."""
     start = ra_genesis(rk, ws, run, job)
     shown, last_seq, last_mac = [], 0, None
@@ -488,8 +488,10 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
         if k != kid:
             if shown:
                 bad += 1
+            elif old_kids is not None and k in old_kids:  # only the recorded old key ids are history
+                oldkey += 1  # held: becomes `bad` at the end unless the rotation shape holds (below)
             else:
-                oldkey += 1
+                bad += 1
             continue
         try:
             o = json.loads(body.decode(), object_pairs_hook=_ra_nodup)
@@ -520,6 +522,12 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
                 gaps.append((last_seq + 1, last_seq + gap))
         shown.append(seq)
         last_seq, last_mac = seq, mac
+    if oldkey:
+        # rotation shape: the current key's first line is seq 1, or nothing of it exists and no head of it says so
+        has_head = bool(head and head.get("kid") == kid and type(head.get("seq")) is int and head["seq"] >= 1)
+        if not (shown[0] == 1 if shown else not has_head):
+            bad += oldkey
+            oldkey = 0
     if head and head.get("kid") == kid and type(head.get("seq")) is int:
         removed += max(0, head["seq"] - last_seq)
     changed = bad + noauth + oldkey
@@ -528,6 +536,37 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None):
     else:
         reason = "removed" if removed else None
     return {"shown": shown, "changed": changed, "removed": removed, "reason": reason}
+
+
+def ra_legacy(raw, head):
+    """Reference of record_auth.legacy_split + the head state: {mode, unchecked}. "unknown" is never legacy."""
+    if head == "unknown":
+        return {"mode": "unverified", "unchecked": 0}
+    lines = [x for x in raw.split(b"\n") if x]
+    sealed = [x for x in lines if len(x) > 125 and _RA_TAIL.search(x) and _RA_TAIL.search(x).start() == len(x) - 125]
+    if not sealed and head == "absent":
+        return {"mode": "legacy", "unchecked": len(lines)}
+    return {"mode": "sealed", "unchecked": 0}
+
+
+def ra_legacy_prefix(raw, head):
+    """Reference of record_auth.legacy_prefix: {prefix_lines, base}."""
+    n, want = head.get("legacy_lines"), head.get("legacy_hash")
+    if type(n) is not int or n <= 0 or not isinstance(want, str):
+        return {"prefix_lines": 0, "base": 0}
+    cut = seen = 0
+    while seen < n:
+        end = raw.find(b"\n", cut)
+        if end < 0:
+            return {"prefix_lines": 0, "base": n}
+        seen += end > cut
+        cut = end + 1
+    pre = raw[:cut]
+    lines = [x for x in pre.split(b"\n") if x]
+    sealed = [x for x in lines if len(x) > 125 and _RA_TAIL.search(x) and _RA_TAIL.search(x).start() == len(x) - 125]
+    if hashlib.sha256(pre).hexdigest() == want and not sealed:
+        return {"prefix_lines": len(lines), "base": n}
+    return {"prefix_lines": 0, "base": n}
 
 
 def ra_check(vec):
@@ -546,11 +585,24 @@ def ra_check(vec):
         _expect(f"activity record_auth seal {c['seq']}", ra_seal(rk, kid, ws, run, c["seq"], c["prev"], body).hex(), c["line_hex"])
     for c in r["verify"]:
         raw = b"".join(bytes.fromhex(x) for x in c["lines"])
-        _expect(f"activity record_auth verify {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"]), c["expect"])
+        _expect(f"activity record_auth verify {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], None, c.get("old_kids")), c["expect"])
+    for c in r["legacy"]:
+        raw = b"".join(bytes.fromhex(x) + b"\n" if not bytes.fromhex(x).endswith(b"\n") else bytes.fromhex(x) for x in c["lines"])
+        _expect(f"activity record_auth legacy {c['name']}", ra_legacy(raw, c["head"]), c["expect"])
+    for c in r["legacy_prefix"]:
+        _expect(f"activity record_auth legacy_prefix {c['name']}", ra_legacy_prefix(bytes.fromhex(c["raw_hex"]), c["head"]), c["expect"])
     for c in r["job_streams"]:
         raw = b"".join(bytes.fromhex(x) for x in c["lines"])
         _expect(f"activity record_auth job {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], c["job"]), c["expect"])
     for c in r["spool"]:
+        if "name_ok" in c:
+            # the name proves itself: <20-digit time>_<first 16 bytes of HMAC(rk, domain ws 0 run 0 time), hex>.json
+            nm = re.fullmatch(r"(\d{20})_([0-9a-f]{32})\.json", c["file"])
+            ok = nm is not None and _hmac.compare_digest(
+                _hmac.new(rk, b"orch.record.spoolname/1\0" + ws.encode() + b"\0" + run.encode() + b"\0"
+                          + nm.group(1).encode(), hashlib.sha256).digest()[:16].hex(), nm.group(2))
+            _expect(f"activity record_auth spool {c['name']}", ok, c["name_ok"])
+            continue
         entry = c["entry"]
         ok = (c["sm"] is not None and set(entry) <= {"event", "payload", "default_id"} and re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", c["file"]) is not None
               and c["file"] not in c["drained"] and c["file"][:20] >= c["floor"]

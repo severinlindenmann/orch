@@ -307,7 +307,6 @@ def _check_filters(ticket, run) -> None:
         raise RecordError("That run is not valid.")
 
 
-_SKIPPED = "Some lines of this run could not be read and are not shown."
 _RECOVERED = "The records of this run can be read again."
 _MISSING = "There are no records for this run."
 _REWOUND = "The records of this run were rewritten. Its steps are sent again from the start."
@@ -324,6 +323,7 @@ class _Problem(dict):
     """One thing a person must be told about a read; `alert` is shown with it, never on its own."""
 
     alert = None
+    legacy = False
 
 
 def _known(root: Path) -> list[str]:
@@ -355,10 +355,29 @@ def _problems(run: str, result) -> list[dict]:
         found[0].alert = result.alert
         return found
     out = []
-    if result.skipped:
-        out.append(_Problem(run=run, status="ok", reason="skipped", message=_SKIPPED))
+    # one problem for each thing that is wrong, so that one never hides another: lines changed outside orch,
+    # lines that are gone, lines made before orch checked them
+    for reason, changed, removed in (
+        ("content", result.changed, 0),
+        ("removed", 0, result.removed),
+        ("unchecked", 0, 0),
+    ):
+        if not (changed or removed or (reason == "unchecked" and (result.unchecked or result.legacy))):
+            continue
+        found = _Problem(
+            run=run,
+            status="ok",
+            reason=reason,
+            message=record.problem_message(reason),
+            changed=changed,
+            removed=removed,
+        )
+        found.legacy = reason == "unchecked" and result.legacy  # decided once, by the read status
+        out.append(found)
     if result.pending:
-        out.append(_Problem(run=run, status="ok", reason="pending", message=result.message))
+        out.append(
+            _Problem(run=run, status="ok", reason="pending", message=record.problem_message("pending"))
+        )
     return out
 
 
@@ -374,7 +393,13 @@ def _events(root: Path, runs: list[str], ticket, *, explicit: bool = False, tell
                 raise _fail(result)
             out[run] = []
         else:
-            out[run] = [e for e in result.value if ticket is None or e.get("ticket") == ticket]
+            # `checked` is computed, never stored: a hook line is the agent's word, and every line of a run
+            # made before orch checked it is unchecked too
+            out[run] = [
+                {**e, "checked": record.is_checked(e)}
+                for e in result.value
+                if ticket is None or e.get("ticket") == ticket
+            ]
         found = _problems(run, result)
         if tell:
             for problem in found:
@@ -455,7 +480,9 @@ def tail_lines(
         for problem in problems:
             now_marks.setdefault(problem["run"], []).append(problem)
         for name, found in now_marks.items():
-            marks = tuple(sorted((p["status"], p["reason"]) for p in found))
+            marks = tuple(
+                sorted((p["status"], p["reason"], p.get("changed", 0), p.get("removed", 0)) for p in found)
+            )
             if marks == told.get(name, ()):
                 continue
             told[name] = marks
@@ -590,7 +617,7 @@ def _detail(root: Path, args) -> dict:
     line = pointers[-1]
     file_id = line["detail"].rsplit("/", 1)[-1].removesuffix(".json")
     # the file must belong to the line's own ticket (I4): a line of ticket B naming A's file is refused
-    detail = record.read_detail(root, args.run, file_id, ticket=line.get("ticket"))
+    detail = record.read_detail(root, args.run, file_id, line_id=line["id"], ticket=line.get("ticket"))
     _show_alert(detail.alert)
     if detail.status != "ok":
         raise _fail(detail)
@@ -599,7 +626,10 @@ def _detail(root: Path, args) -> dict:
     stored = (detail.value.get("ticket"), detail.value.get("id"))
     if stored != (line.get("ticket"), line["id"]) or line["id"] != args.detail:
         raise RecordError(str(record.RecordTampered("swapped")), "tampered")
-    return detail.value
+    # computed in this one place, never stored: a detail of a line made before orch checked it is not checked
+    # (the line's own marker too: a detail written by the hook entry is the agent's word)
+    own = record.is_checked(line) and detail.reason != "unchecked"
+    return {**detail.value, "checked": own}
 
 
 # --- settings (read only) ---
@@ -810,8 +840,13 @@ def _window(args) -> tuple[str, str]:
     return (end - timedelta(days=days - 1)).strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
-def run_model(run: str, events: list[dict]) -> dict:
-    """One run as counts.md sees it: ticket, day started, what its agent tool can report, uses."""
+def run_model(run: str, events: list[dict], *, root=None, problem: bool = False) -> dict:
+    """One run as counts.md sees it: ticket, day started, what its agent tool can report, uses. `complete` is
+    false when the run had lines changed, removed or unchecked (activity.md, Authenticated record);
+    `protected` is false for a run by a tool orch cannot give deny rules (record.UNPROTECTED_TEXT is shown
+    for it) and when the tool is not known from a verified line."""
+    from orch import adapters
+
     uses: dict[tuple, dict] = {}
     sees = None
     partial = False
@@ -841,8 +876,8 @@ def run_model(run: str, events: list[dict]) -> dict:
         outcome = e.get("outcome") or {}
         if e["kind"] == "denial" or (e["kind"] == "key.use" and (e.get("data") or {}).get("refused")):
             result = "refused"
-        elif outcome.get("ok") is True:
-            result = "ok"
+        elif outcome.get("ok") is True and record.is_checked(e):
+            result = "ok"  # only a line orch checked can say a call went well
         elif outcome.get("ok") is False:
             result = "failed"
         else:
@@ -851,8 +886,17 @@ def run_model(run: str, events: list[dict]) -> dict:
     if sees is None:  # no capability list was written: only what the run actually used is known to be seen
         sees = sorted({i["kind"] for i in items})
     first = events[0]["at"] if events else None
+    # the tool only from a checked line orch's own collector wrote (via log, sealed, not a hook line): a hook
+    # line or a claim file is the agent's word and could claim another tool. Unknown means "not protected":
+    # the marker is shown.
+    harness = next(
+        (e.get("harness") for e in events if e.get("via") == "log" and record.is_checked(e)),
+        None,
+    )
     return {
         "run": run,
+        "complete": not problem,
+        "protected": bool(adapters.can_deny(harness, root)) if isinstance(harness, str) else False,
         "ticket": events[0].get("ticket") if events else None,
         "day": first[:10] if first else None,
         "sees": sees,
@@ -945,10 +989,15 @@ def counts(root: Path, args) -> dict:
     day_from, day_to = _window(args)
     models = []
     by_run, unavailable = _events(root, _known(root), args.ticket)
+    unchecked = {p["run"] for p in unavailable if p.legacy}
+    flagged = {p["run"] for p in unavailable}
     for run, events in by_run.items():
+        if run in unchecked:  # a run made before orch checked it is never counted
+            continue
+        events = [e for e in events if record.is_sealed(e)]  # nor its lines from before protection
         if not events:
             continue
-        model = run_model(run, events)
+        model = run_model(run, events, root=root, problem=run in flagged)
         model["first"] = events[0]["at"]
         models.append(model)
     since, meta_problem = _since(root, models)
@@ -982,6 +1031,11 @@ def counts(root: Path, args) -> dict:
             "last_sent": None,
             "queued": 0,
         },
+        "per_run": [
+            {"run": m["run"], "protected": m["protected"]}
+            | ({} if m["protected"] else {"note": record.UNPROTECTED_TEXT})
+            for m in runs
+        ],
         "unavailable": unavailable,
         "complete": not unavailable,
     }

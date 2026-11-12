@@ -268,7 +268,10 @@ def hook(root, text: str, environ=None, *, too_large: bool = False, before_write
             writer = record_writer(root)
         except record.RecordOff:
             raise NotRecorded("Recording is off until key hiding is ready.", "hider_off") from None
-        return writer.append(event, detail=payload, lock_wait=LOCK_WAIT)
+        try:
+            return writer.append(event, detail=payload, lock_wait=LOCK_WAIT)
+        except record.RecordOff:  # no record key either: recording is off, with the same trace
+            raise NotRecorded("Recording is off until orch's protection is ready.", "hider_off") from None
     except NotRecorded as e:
         if e.reason:
             before_write()

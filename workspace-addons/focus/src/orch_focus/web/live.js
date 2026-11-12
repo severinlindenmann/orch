@@ -128,7 +128,7 @@
       const question = {ticket: TID, key: typeof v.ticket.key === 'string' ? v.ticket.key : undefined, id: q.id, title: q.text, oneTap: true, kind: q.kind, text: els.agent.textContent + ' waits for you. After you answer it continues in the same conversation.', options};
       if (window.QuestionCard) {
         window.QuestionCard.mount(node, question, {send: async (answer) => {
-          const r = await act('answer', {ticket: TID, question: q.id, answer});
+          const r = await act('answer', {ticket: TID, question: q.id, digest: q.digest, answer});
           return r.ok ? {status: 200, who: 'you', via: 'focus'} : {status: r.status === 409 ? 409 : (r.status || 0), message: r.message};
         }});
       }

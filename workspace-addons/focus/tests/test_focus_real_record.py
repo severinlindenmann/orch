@@ -57,6 +57,8 @@ def real(request):
         from pathlib import Path
         from orch import hider
         from orch.record import RecordWriter
+        from orch import humanproof
+        humanproof.ensure_record_key(Path({str(ws)!r}))  # a claim makes the record key: no key, no recording
         w = RecordWriter(Path({str(ws)!r}), hider=hider.Hider({{"k": "KEYVALUE-abc123XYZ-secret"}}))
         for i, (sid, name, text, files) in enumerate(json.loads(sys.argv[1]), 1):
             base = {{"v": 1, "seq": i, "run": {RUN!r}, "session": None, "agent": "main", "parent": None,

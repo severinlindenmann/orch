@@ -48,6 +48,16 @@ def _steps(events: list[dict]) -> list[dict]:
     return out
 
 
+def question_digest(q: dict) -> str | None:
+    """The core's digest of a question as shown (an answer sends it back; the person's proof binds it).
+    Without the core: None, and an answer without a digest is refused (fail closed)."""
+    try:
+        from orch.tickets import question_digest as digest
+    except ImportError:
+        return None
+    return digest(q)
+
+
 def _question(ticket: dict) -> dict | None:
     for q in ticket.get("questions") or []:
         if isinstance(q, dict) and q.get("answer") is None and isinstance(q.get("id"), str):
@@ -55,7 +65,7 @@ def _question(ticket: dict) -> dict | None:
             rec = _one_line(q.get("recommended"), 120) if isinstance(q.get("recommended"), str) else None
             return {
                 "id": q["id"], "text": _one_line(q.get("text"), 400), "options": opts[:MAX_OPTIONS],
-                "recommended": rec if rec in opts else None,
+                "recommended": rec if rec in opts else None, "digest": question_digest(q),
             }  # fmt: skip
     return None
 

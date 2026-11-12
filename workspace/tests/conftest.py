@@ -377,9 +377,16 @@ def stray_tmux(under: str) -> list[str]:
 def seed_profiles(root, profiles):
     """Test setup only: like a person's `profile set` of every new or body-changed profile (the production
     write_profiles signs only the names it is told to)."""
-    from orch import humanproof as hp
-    from orch import keystore
+    import os
 
+    from orch import humanproof as hp
+    from orch import keystore, secretrun
+
+    for p in profiles.values():  # like `profile set`: the kind from the real file; "any command" for others
+        if p.get("run") and "kind" not in p and os.path.isabs(p["run"][0]):
+            p["kind"] = secretrun.program_kind(os.path.realpath(p["run"][0]))
+            if p["kind"] == "other" or p.get("real_home"):
+                p["any_command"] = True
     try:
         old = keystore.read_profiles(root)
     except Exception:  # noqa: BLE001
@@ -388,3 +395,79 @@ def seed_profiles(root, profiles):
         n for n, p in profiles.items() if n not in old or hp.profile_body(old[n]) != hp.profile_body(p)
     )
     keystore.write_profiles(root, profiles, sign=changed)
+
+
+# ---------------------------------------------------------------------------------------------- record MAC
+
+_RECORD_MODULES = re.compile(
+    r"tests\.test_(record|cli_record|cli_job|collect_|insights_settings|cli_secret|run_wrap|run_live|phone_|"
+    r"run_record|jobs)|test_(record|cli_record|cli_job|collect_|insights_settings|cli_secret|run_wrap|"
+    r"run_live|phone_|run_record|jobs)"
+)
+
+
+@pytest.fixture(autouse=True)
+def _record_keys(request, monkeypatch, tmp_path_factory, _legacy_trust):
+    """The record writer is fail closed: no human key, no recording (record_auth, activity.md). The record
+    test modules write in plain tmp folders that are no guarded workspace, so for them the guarded home falls
+    back to a test folder and the record key is made on first use. This is this test package's fixture only:
+    no product code has a switch for it. A test of the missing key (or of a real guarded home) opts out with
+    `@pytest.mark.no_record_key`."""
+    if request.node.get_closest_marker("no_record_key") or not _RECORD_MODULES.search(
+        request.module.__name__
+    ):
+        yield
+        return
+    from orch import humanproof as hp
+
+    orig_home, orig_key = hp.guarded_home, hp.record_key
+    fallback = tmp_path_factory.mktemp("recordhome")
+
+    def home(root):
+        try:
+            return orig_home(root)
+        except hp.HomeRefused:
+            return fallback
+
+    # the shared monkeypatch, set up after `_legacy_trust` (so undone before it): every patch of
+    # humanproof.guarded_home is undone in the reverse order, none leaks into the next test (test_winacl)
+    monkeypatch.setattr(hp, "guarded_home", home)
+    monkeypatch.setattr(hp, "record_key", lambda root, create=False: orig_key(root, create=True))
+    yield
+
+
+def seal_lines(root, run, events, *, start=1, link=None):
+    """Raw bytes of sealed lines for `events` (the writer's own seal, for tests that write run files by hand):
+    seq `start`.. in order, chained from `link` (genesis for seq 1). The events are used as given (write
+    them as the writer would: compact JSON, no `auth`)."""
+    from orch import humanproof as hp
+    from orch import record_auth as ra
+
+    ws, kid, rk = hp.record_key(root)
+    prev = link or ra.genesis(rk, ws, run)
+    out = b""
+    for n, ev in enumerate(events, start):
+        body = json.dumps(dict(ev, seq=n), separators=(",", ":"), ensure_ascii=False).encode()
+        line = ra.seal(rk, kid, ws, run, n, prev, body)
+        out += line
+        prev = ra.split(line)[3]
+    return out
+
+
+def seal_append(root, run, event):
+    """Append ONE sealed line to the run file as code that holds orch's key could (the Level 1 residual of the
+    record MAC): the next seq after the file's last sealed line, chained to it. For tests of what the readers
+    do with a line that verifies but is wrong in content (a pointer to another ticket's detail file, ...)."""
+    from orch import record
+    from orch import record_auth as ra
+
+    path = record.record_dir(root) / "runs" / f"{run}.jsonl"
+    raw = path.read_bytes() if path.exists() else b""
+    last = [x for x in raw.splitlines() if x][-1:]
+    if last:
+        body, _kid, _p, mac = ra.split(last[0])
+        seq, link = json.loads(body)["seq"] + 1, mac
+    else:
+        seq, link = 1, None
+    with path.open("ab") as f:
+        f.write(seal_lines(root, run, [event], start=seq, link=link))

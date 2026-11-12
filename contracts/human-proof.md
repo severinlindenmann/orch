@@ -244,7 +244,7 @@ rows add a named case.
 | `conn.allow` | Allow in the Used tab / Insights | connection | page, terminal | `verify` conn allow, inventory `allowed` |
 | `checkup.accept`, `checkup.rollback`, `checkup.send_to_admin`, `checkup.reject` | proposal buttons | `<id>@<hash>` (proposal.md) / id | page | proposal `steps` |
 | `ticket.verdict` | Looks good / Send back (dashboard, Focus); phone review; `orch ticket status <id> done` and `ticket patch` with a status (cli.py `_is_verdict` is the one decision, `_verdict_who` the one gate) | ticket | page, terminal, phone | `verify` ticket verdict; `verdict` (what makes it Done) |
-| `ticket.answer` | answering a Needs-you question | `<ticket>:<question>` | page, phone | `verify` ticket answer |
+| `ticket.answer` | answering a Needs-you question | `<ticket>:<question>:<digest>` (digest: sha256 hex of the question as shown, `tickets.question_digest`) | page, phone | `verify` ticket answer |
 | `relay.connect` | `orch relay connect`, changing the relay address | relay host | page, terminal | `verify` relay connect |
 | `private.allow` | `orch private allow <name> --key <hash>` (approves an agent command on this machine) | `<name>:<hash>` (the key covers adapter, command, live command, prompt; the card's exact block shows all four, and a hand-off is refused at take time if the entry no longer hashes to the key) | page, terminal | `verify` private allow |
 | `private.move` | `orch private move` | `move` | page, terminal | – (same class) |

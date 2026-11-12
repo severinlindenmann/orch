@@ -678,6 +678,9 @@ def claim(
     folder: where the agent works when that is not the workspace root (a separate copy); it goes in the
     record."""
     ticket = tickets.load(root, tid)
+    from orch import humanproof
+
+    humanproof.ensure_record_key(root)  # the record is sealed with a key made here (activity.md); idempotent
     with locked(root, tid):
         cur = read(root, tid)
         if cur:

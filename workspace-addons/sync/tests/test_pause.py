@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from orch import humanproof
 from orch.errors import Refused
-from test_step import ART, NOW, TICKET, configure, run, save, success, ticket, tracked
+from test_step import ART, NOW, TICKET, at, configure, run, save, success, ticket, tracked
 from test_two_machines import both, edit, hostile, load, machines, remote_sha
 
 from orch_sync import approval, cli, needs, pause, records, repo, step
@@ -42,7 +42,7 @@ def test_artifact_keep_both(machines, keep, monkeypatch):
     assert not result.get("paused") and not result.get("last_error"), result
     assert repo.safe(b, ART).read_bytes() == (b"local" if keep == "mine" else b"remote")
     if keep == "theirs":
-        assert repo.safe(b, ART).with_name("a (mine 2026-11-11).txt").read_bytes() == b"local"
+        assert repo.safe(b, ART).with_name(f"a (mine {NOW[:10]}).txt").read_bytes() == b"local"
     success(a)
     success(b)
 
@@ -167,7 +167,7 @@ def test_allow_and_ignore_need_distinct_proofs(machines, monkeypatch, decision):
 def test_rewritten_pause_resolves(machines, keep):
     a, b, _ = both(machines)
     tree = step.oid(a, "HEAD^{tree}")
-    new = step.commit(a, tree, [], "2026-11-11T13:00:00Z")
+    new = step.commit(a, tree, [], at(13))
     repo.git(a, "push", "--force", "origin", f"{new}:orch-state")
     assert run(b)["paused"]["reason"] == "The remote history was rewritten"
     result = pause.resolve(b, TICKET, keep, now=NOW)
@@ -395,7 +395,7 @@ def test_inert_manifest_is_local_authority(machines, monkeypatch):
     assert not approval.held(b)
 
 
-@pytest.mark.parametrize("incoming_at", ["2001-01-01T00:00:00Z", "2026-11-11T13:00:00Z"])
+@pytest.mark.parametrize("incoming_at", ["2001-01-01T00:00:00Z", at(13)])
 def test_concurrent_keys_pause_identically_without_moving_local_keys(machines, incoming_at, tmp_path):
     from test_step import ticket
 

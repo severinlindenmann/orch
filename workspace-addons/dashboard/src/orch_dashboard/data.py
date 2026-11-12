@@ -301,6 +301,18 @@ def _review_tip(root: Path, tid: str) -> str | None:
     return tip if isinstance(tip, str) and re.fullmatch(r"[0-9a-f]{40,64}", tip) else None
 
 
+def _add_question_digests(t: dict) -> None:
+    """Each question gets the digest of what the page shows of it: an answer sends it back and the person's
+    proof binds it, so an answer to a question changed since is refused (core tickets.question_digest)."""
+    try:
+        from orch.tickets import question_digest
+    except ImportError:  # standalone, without the core: no digest, so no answer can be sent (fail closed)
+        return
+    for q in t["questions"]:
+        if isinstance(q, dict):
+            q["digest"] = question_digest(q)
+
+
 def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], int]:
     """Valid-looking tickets (schema orch.ticket/1, id, title, status). Returns (tickets, skipped).
     Read through `$ORCH_BIN ticket list --all --json` (without --all, done and dropped tickets would vanish); without the orch command (standalone use) from .orch/tickets."""
@@ -325,6 +337,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
         for k in ("checklist", "refs", "questions", "history"):
             if not isinstance(t.get(k), list):
                 t[k] = []
+        _add_question_digests(t)
         t.pop("review_tip", None)  # only ever from the core's signed record (the ticket file is not)
         if t["status"] == "review":
             tip = _review_tip(root, t["id"])
@@ -973,6 +986,13 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
         return {"links": []}
     raw = run_orch(orch_bin, ["publish", "list", "--json"], root)
     files = raw.get("files", []) if isinstance(raw, dict) else []
+    # The server's file list carries no link: rebuild it here from the saved publish address, the file id and
+    # the key saved on this computer (publish list merges it in). The key is never sent to the server.
+    # Never an address the server supplies: a compromised server could steer copied links (with the key) to itself.
+    saved = _load(root / ".orch" / "secrets" / "publish.json")
+    base = str(saved.get("url") or "").rstrip("/") if isinstance(saved, dict) else ""
+    if not re.fullmatch(r"https?://[A-Za-z0-9.:\[\]-]+(/[A-Za-z0-9._~-]+)*", base):
+        base = ""
     links = []
     for f in files if isinstance(files, list) else []:
         if (
@@ -987,12 +1007,12 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
             expired = (when if when.tzinfo else when.replace(tzinfo=UTC)) <= datetime.now(UTC)
         except (ValueError, TypeError, AttributeError):
             expired = False
-        key, url = f.get("key"), f.get("url")
+        key, url = f.get("key"), f"{base}/f/{f['id']}" if base else None
         ok = (
             isinstance(key, str)
             and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key)
             and isinstance(url, str)
-            and re.fullmatch(r"https://[A-Za-z0-9.:\[\]-]+/[!-~]*", url.split("#", 1)[0])
+            and re.fullmatch(r"https?://[A-Za-z0-9.:\[\]-]+/[!-~]*", url.split("#", 1)[0])
         )
         link = url.split("#", 1)[0] + "#k=" + key if ok else None
         links.append(
