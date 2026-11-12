@@ -10,7 +10,7 @@
   window.fetch = function (input, init) {
     var secret = stored();
     if (secret) {
-      var url = typeof input === "string" ? input : (input && input.url) || "";
+      var url = (typeof Request !== "undefined" && input instanceof Request) ? input.url : String(input);
       var local = false;
       try { local = new URL(url, location.href).origin === location.origin; } catch (e) { local = false; }
       if (local) {

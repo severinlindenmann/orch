@@ -846,20 +846,27 @@ def test_the_secret_never_appears_in_logs_urls_redirects_or_gets(live, capfd):
     assert secret not in out.out and secret not in out.err and ck.split("=", 1)[1] not in out.err
 
 
-def test_secret_compare_is_constant_time_and_rotates_with_the_session(live, monkeypatch):
+def test_secret_compare_is_constant_time_and_rotates_with_the_session(live):
     import inspect
 
     src = inspect.getsource(pageproof.PageSession.authed)
     assert "compare_digest" in src and "self.secret" in src and "== self.secret" not in src
     root, port = live
     tok = hp.write_launch_token(root, "dashboard")
-    _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
+    st, hdr, body = _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
+    old_ck, old_secret = hdr["set-cookie"].split(";")[0], json.loads(body)["secret"]
+    SECRETS[old_ck] = old_secret
     # a reused link revokes the session: the old cookie AND the old secret are dead, a new link gets a new secret
     st, hdr, _ = _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
     assert st == 403 and "set-cookie" not in hdr
     tok2 = hp.write_launch_token(root, "dashboard")
     st, hdr, body = _raw(port, "POST", "/session", {"token": tok2}, {"Origin": f"http://127.0.0.1:{port}"})
-    assert st == 200 and json.loads(body)["secret"]
+    new_secret = json.loads(body)["secret"]
+    assert st == 200 and new_secret and new_secret != old_secret
+    new_ck = hdr["set-cookie"].split(";")[0]
+    assert new_ck != old_ck
+    assert post(port, "/api/act", ANSWER, {"Cookie": old_ck, "X-Orch-Page": old_secret})[0] == 403  # old pair dead
+    assert post(port, "/api/act", ANSWER, {"Cookie": new_ck, "X-Orch-Page": old_secret})[0] == 403  # old secret dead
 
 
 def test_every_dashboard_answer_forbids_framing_by_other_sites(live):
