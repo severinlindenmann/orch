@@ -1,6 +1,5 @@
 """The Move flow: the outer (team) repository tracks .orch files, so sync does not start until a person's click
 untracks them (the core's private.move, the only outer-repository write) and the state repository takes over."""
-import contextlib
 import re
 import subprocess
 
@@ -52,15 +51,13 @@ def test_the_move_row_asks_the_core_op_with_a_sign_step_and_later(team):
     assert "git" not in row["text"].lower() and "git" not in move["review"]["body"].lower()
 
 
-def test_every_row_time_is_one_the_core_accepts(machines_free):
+def test_every_row_time_is_one_the_core_accepts():
     # the core's collector drops a row whose time has fractions of a second (the pause row vanished from `orch needs`)
     out = needs.row("paused", "k", "text", "2026-11-12T05:28:01.460324Z", "orch sync status", None)
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", out["since"])
+    odd = needs.row("paused", "k", "text", 12345, "orch sync status", None)  # a planted non-text time
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", odd["since"])
 
-
-@pytest.fixture
-def machines_free():
-    return None
 
 
 def test_move_untracks_orch_only_commits_nothing_then_sync_starts(team):
@@ -81,7 +78,9 @@ def test_move_untracks_orch_only_commits_nothing_then_sync_starts(team):
 
 def test_an_agent_cannot_move(team, monkeypatch, capsys):
     before = snapshot(team)
-    with pytest.raises(Exception):  # noqa: B017 - core refuses with its own error type
+    from orch.errors import Refused
+
+    with pytest.raises(Refused):
         harness.move_to_private(team, "agent:claude")
     # the command line: no proof from a person, or an agent's name on it, is refused before git runs
     from orch import cli as orch_cli
@@ -104,8 +103,8 @@ def test_outer_hooks_and_config_never_run(team):
     config = team / ".git" / "config"
     config.write_text(config.read_text() + f'[core]\n\tfsmonitor = {script}\n\thooksPath = {hooks}\n'
                       f'[alias]\n\trm = !{script}\n')
-    with contextlib.suppress(Exception):  # refusing the hostile config is fine too; only a run is not
-        harness.move_to_private(team, "human:Pat")
+    moved = harness.move_to_private(team, "human:Pat")  # the Move really runs, with the hostile config neutralised
+    assert moved and harness.tracked_private(team) == []
     assert not canary.exists()
 
 
