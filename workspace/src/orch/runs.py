@@ -1320,6 +1320,8 @@ def start(
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
     from orch import runs_live, worktrees
 
+    if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
+        runs_live.clear_held(root, tid)
     worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run; never waits, never raises
     name = agent or adapters.chosen(root)
     adapters.load(name, root)  # refuses a name nobody knows

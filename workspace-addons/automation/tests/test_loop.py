@@ -288,6 +288,29 @@ def test_a_ready_ticket_with_queued_input_gets_exactly_one_run(ws):
     assert len(starts) == 2 and all("--mode" not in a for a in starts)
 
 
+def test_input_held_by_a_person_stop_starts_no_run_until_new_input_arrives(ws):
+    """`orch run stop` while a person's input waits: core holds those ids (stop_held_ids); the loop does not
+    restart the ticket for them. A new input id (not held) starts one run as usual."""
+    add_ticket(ws, "t_queue020", status="ready")
+    (ws / "ended-t_queue020").write_text("")
+    (ws / "pending-t_queue020").write_text(json.dumps(["p_answer0020"]))
+    (ws / "stop-held-t_queue020").write_text(json.dumps(["p_answer0020"]))
+    assert Scheduler(ws).tick(T(8)) == [] and Scheduler(ws).tick(T(8, 1)) == []
+    assert runs_started(ws) == []
+    (ws / "pending-t_queue020").write_text(json.dumps(["p_answer0020", "p_message021"]))
+    assert Scheduler(ws).tick(T(8, 2)) == ["t_queue020"]
+    assert runs_started(ws) == ["t_queue020"]
+
+
+def test_held_ids_that_are_not_a_list_of_strings_hold_nothing(ws):
+    """A stop_held_ids that is not a list (a string would match by substring) is no hold: the input starts."""
+    add_ticket(ws, "t_queue030", status="ready")
+    (ws / "ended-t_queue030").write_text("")
+    (ws / "pending-t_queue030").write_text(json.dumps(["p_answer0030"]))
+    (ws / "stop-held-t_queue030").write_text(json.dumps("p_answer0030 p_other"))
+    assert Scheduler(ws).tick(T(8)) == ["t_queue030"]
+
+
 def test_a_text_in_chat_starts_the_helper_once(ws):
     """The Chat's hidden ticket is in no list: core names it (orch chat status); the same queued-input rules
     apply (a person's text only, once per item, nothing while a run holds it)."""
@@ -472,3 +495,12 @@ def test_an_answer_and_a_change_note_start_one_run(ws):
     assert Scheduler(ws).tick(T(8, 1)) == []
     starts = [c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"]]
     assert len(starts) == 1
+
+
+def test_the_automation_actor_name_is_the_one_core_never_holds_for():
+    """N4: core's runs_live.AUTOMATION_BY (no hold, no hold clear) is this host's own actor."""
+    from orch import runs_live
+
+    from orch_automation import orchcli
+
+    assert orchcli.BY == runs_live.AUTOMATION_BY
