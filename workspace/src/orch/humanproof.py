@@ -390,34 +390,69 @@ def _private_dir(p: Path, stop: Path) -> None:
         _check_dir(c)
 
 
+def _decide(home: Path, ws: str | None, bound: list[str]) -> tuple[str | None, bool]:
+    """(id to use, healed) from the .local-id `ws` (valid or None) and the folders bound to this path.
+    A valid id is kept unless it names no existing folder while exactly ONE other folder is bound (then the
+    bound id is put back). Refused: two or more bound folders, or an id naming a DIFFERENT EXISTING folder."""
+    others = [n for n in bound if n != ws]
+    if ws is None:
+        if len(bound) > 1:
+            raise Refused(SECOND_FOLDER)
+        return (bound[0], True) if bound else (None, False)
+    if not others:
+        return ws, False
+    keys = home / "keys" / ws
+    if len(others) == 1 and ws not in bound and not keys.exists() and not keys.is_symlink():
+        return others[0], True
+    raise Refused(SECOND_FOLDER)
+
+
+def _resolve(root: Path, home: Path) -> tuple[str | None, list[str]]:
+    """The workspace id and the bound folders, healing a lost, damaged or stale .local-id from the trusted
+    home. Creates no folder and no fresh id."""
+    from orch import addons
+
+    own = addons.read_local_id(root)
+    bound = _bound_folders(root, home, own)
+    ws, healed = _decide(home, own, bound)
+    if healed:
+        addons.put_local_id(root, ws, replace=True)
+    return ws, bound
+
+
 def key_dir(root: Path, create: bool = True) -> Path:
-    """<guarded home>/keys/<workspace local id>/ (0700)."""
+    """<guarded home>/keys/<workspace local id>/ (0700). A real path has exactly one key folder."""
     from orch import addons
 
     home = guarded_home(root)
     winacl.no_reparse(home)  # a symlink or junction below the profile folder (Windows)
-    ws = addons.workspace_id(root, create=create)
-    if ws is None:
+    ws, bound = _resolve(root, home)
+    if ws is None and not create:
         raise Refused("This folder has no local id yet.")
-    d = home / "keys" / ws
     if create:
         fresh = not home.exists()
         home.mkdir(parents=True, exist_ok=True)
         if fresh:
             winacl.set_private(home, True)
         _check_dir(home)
-        _private_dir(d.parent, home)
-        try:
-            d.mkdir(mode=0o700)
-            if POSIX:
-                d.chmod(0o700)
-            fresh = True
-        except FileExistsError:
-            fresh = False
-        _check_dir(d)
-        if fresh or not any(d.iterdir()):  # the binding is made only while the folder is new or empty
-            _bind_new(root, d)
+        _private_dir(home / "keys", home)
+        with _folders_lock(home / "keys"):  # id, check, mkdir and bind are one step: two first starts cannot
+            ws, bound = _resolve(root, home)  # both bind (read again under the lock)
+            if ws is None:
+                ws = addons.put_local_id(root, secrets.token_hex(16))
+            d = home / "keys" / ws
+            try:
+                d.mkdir(mode=0o700)
+                if POSIX:
+                    d.chmod(0o700)
+                fresh = True
+            except FileExistsError:
+                fresh = False
+            _check_dir(d)
+            if fresh or not any(d.iterdir()):  # the binding is made only while the folder is new or empty
+                _bind_new(root, d)
     else:
+        d = home / "keys" / ws
         _check_dir(home)
         _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
@@ -429,6 +464,56 @@ BINDING_MISMATCH = (
     "Refused: this folder's key id belongs to another folder (it was copied or moved). "
     "Its keys stay where they are."
 )
+SECOND_FOLDER = (
+    "Refused: this workspace's id was changed; its keys are in another key folder. "
+    "Put back the workspace id, or ask the owner."
+)
+TRY_AGAIN = "orch could not check the key folders just now. Try again; if it keeps happening, ask the owner."
+
+
+def _try_again(name: str) -> str:
+    return (
+        f"orch could not read the binding of key folder {name} just now. "
+        "Try again; if it keeps happening, ask the owner."
+    )
+
+
+def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
+    """Names of the key folders in `home` whose binding.json names this workspace's real path (identity by
+    samefile where both exist, else equal real paths). A folder with no or a damaged binding names nothing."""
+    keys = home / "keys"
+    here = os.path.realpath(root)
+    out: list[str] = []
+    if keys.is_symlink() or keys.exists():
+        _check_dir(keys)  # a link or a foreign keys/ is refused here, before anything is listed through it
+    try:
+        names = sorted(os.listdir(keys))
+    except FileNotFoundError:
+        return out
+    except OSError:
+        raise Refused(TRY_AGAIN) from None
+    for name in names:
+        try:
+            if not stat.S_ISDIR((keys / name).lstat().st_mode):  # keys.lock and the like
+                continue
+            stored = json.loads(_read_guarded(keys / name / "binding.json").decode("utf-8")).get("realpath")
+        except FileNotFoundError:  # no binding.json: bound to nothing
+            continue
+        except (ValueError, AttributeError):  # garbage JSON: bound to nothing
+            continue
+        except (winacl.Unknown, OSError, Refused):  # cannot be told: fail closed, never "not bound"
+            if name == own:
+                continue  # this workspace's own folder: _check_binding refuses it with its own words below
+            raise Refused(_try_again(name)) from None
+        if not isinstance(stored, str):
+            continue
+        try:
+            same = stored == here or os.path.samefile(stored, here)
+        except OSError:
+            same = os.path.realpath(stored) == here
+        if same:
+            out.append(name)
+    return out
 
 
 def _bind_new(root: Path, d: Path) -> None:
@@ -503,6 +588,21 @@ def _lock_held(d: Path) -> bool:
 def _key_lock(d: Path):
     """keys.lock (O_EXCL) around read-modify-write of the nonce store, delivered ids, settings and resets.
     Re-entrant in the same thread (reset_protection runs inside readers that already hold it)."""
+    with _file_lock(d, "keys.lock"):
+        yield
+
+
+@contextlib.contextmanager
+def _folders_lock(keys: Path):
+    """folders.lock in keys/ around "one key folder per path": id, check, mkdir and bind are one step, so two
+    first starts cannot both bind. A different lock from a key folder's own keys.lock."""
+    with _file_lock(keys, "folders.lock"):
+        yield
+
+
+@contextlib.contextmanager
+def _file_lock(d: Path, name: str):
+    """The O_EXCL lock file `name` in `d`, re-entrant in the same thread."""
     held = _LOCKS.__dict__.setdefault("held", {})
     if held.get(str(d), 0) > 0:
         held[str(d)] += 1
@@ -511,7 +611,7 @@ def _key_lock(d: Path):
         finally:
             held[str(d)] -= 1
         return
-    lock = d / "keys.lock"
+    lock = d / name
     end = time.monotonic() + 10
     while True:
         try:
@@ -1163,15 +1263,10 @@ def reset_protection(root: Path, reason: str) -> None:
     log a line with no secret and queue a one-time notice for the dashboard. Never a silent chmod of a
     secret file. Takes keys.lock itself (re-entrant: callers may already hold it). A reset never widens
     and never accepts a proof."""
-    from orch import addons
-
     global _RESETS
     home = guarded_home(root)
-    ws = addons.workspace_id(root, create=True)
-    home.mkdir(parents=True, exist_ok=True)
-    _check_dir(home)
-    d = home / "keys" / ws
-    _private_dir(d, home)
+    d = key_dir(root)  # never a folder of its own: one key folder per real path
+    ws = d.name
     with _key_lock(d):
         _RESETS += 1
         _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
