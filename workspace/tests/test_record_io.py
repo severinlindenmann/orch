@@ -585,6 +585,10 @@ def test_03_symlink_each_level(store, part):
     if "/detail/" in part:
         kept = writer.append(event(), detail=DETAIL)
         assert kept["detail"] is None and kept["detail_lost"]
+    elif part == ".orch":
+        # a linked .orch folder holds no local id orch may read: no key, no recording, nothing written
+        with pytest.raises(record.RecordOff):
+            writer.append(event(), detail=DETAIL)
     else:
         with pytest.raises(record.RecordTampered) as caught:
             writer.append(event(), detail=DETAIL)
@@ -637,7 +641,9 @@ def test_05_foreign_owner(store, monkeypatch, target):
     result = record.read_run(ws, RUN)
     assert result.reason == "foreign_owner"
     assert result.message == record._MESSAGES["tampered"] and result.alert
-    with pytest.raises(record.RecordTampered):
+    # refused either way: the run file is untrusted, and with the owner faked the key folder is too (no key,
+    # no recording: fail closed)
+    with pytest.raises((record.RecordTampered, record.RecordOff)):
         writer.append(event(id="new"))
 
 

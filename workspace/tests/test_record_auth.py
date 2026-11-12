@@ -511,7 +511,9 @@ def test_writer_is_off_without_a_key_and_nothing_is_written(tws):
     assert not (tws / ".orch/record").exists()
 
 
-@pytest.mark.parametrize("damage", ["id_removed", "id_forged", "key_folder_unreadable", "key_removed"])
+@pytest.mark.parametrize(
+    "damage", ["id_removed", "id_forged", "key_folder_unreadable", "key_removed", "second_folder"]
+)
 def test_a_damaged_guarded_home_never_downgrades_a_sealed_run_to_legacy(tws, capsys, monkeypatch, damage):
     from orch import record
 
@@ -527,13 +529,23 @@ def test_a_damaged_guarded_home_never_downgrades_a_sealed_run_to_legacy(tws, cap
         (tws / ".orch/.local-id").unlink()
     elif damage == "id_forged":
         (tws / ".orch/.local-id").write_text("ab" * 16 + "\n")
+    elif damage == "second_folder":  # an attacker-made second folder bound to this path (SECOND_FOLDER)
+        other = kd.parent / ("ab" * 16)
+        other.mkdir(mode=0o700)
+        (other / "binding.json").write_text(
+            json.dumps({"schema": "orch.binding/1", "realpath": os.path.realpath(tws)}) + "\n"
+        )
+        (tws / ".orch/.local-id").write_text("cd" * 16 + "\n")
     elif damage == "key_folder_unreadable":
         kd.chmod(0)
     else:
         (kd / "human.key").unlink()
     try:
         read = record.read_run(tws, "r_8k2m01")
-        assert (read.status, read.reason) == ("tampered", "unverified") and read.value is None
+        # a lost or forged local id is healed from the one bound key folder (#587): the stripped lines are
+        # then judged against the head that is there. Never shown as a legacy run either way.
+        assert read.status == "tampered" and read.value is None and not read.legacy
+        assert read.reason in ("unverified", "removed")
         code, lines = _tail(capsys, tws, monkeypatch)
         assert code == 2 and lines[0]["code"] == "tampered"
         assert "orch cannot check these records" in lines[0]["error"]
@@ -587,6 +599,11 @@ def test_an_unknown_home_state_with_no_run_file_is_unverified_not_missing(tws):
 
     _sealed_ws(tws)
     assert record.read_run(tws, "r_nofile01").reason == "missing"  # clean home, no such run
-    (tws / ".orch/.local-id").write_text("cd" * 16 + "\n")  # forged id: the home cannot be looked at
+    kd = hp.key_dir(tws, create=False)
+    other = kd.parent / ("ab" * 16)  # a second key folder bound to the same path: the home cannot be trusted
+    other.mkdir(mode=0o700)
+    (other / "binding.json").write_text(
+        json.dumps({"schema": "orch.binding/1", "realpath": os.path.realpath(tws)}) + "\n"
+    )
     read = record.read_run(tws, "r_nofile01")
     assert (read.status, read.reason) == ("tampered", "unverified")
