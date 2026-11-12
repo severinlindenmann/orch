@@ -8,6 +8,7 @@ struct WorkspaceView: View {
     @State private var newTopic = false
     @State private var deleting: ConversationID?
     @State private var toast: ArchiveToast?
+    @Environment(\.dynamicTypeSize) private var typeSize
     private var summary: WorkspaceSummary? { model.workspaceSummaries.first { $0.id == workspaceId } }
     private var name: String { summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? "Workspace" }
     private var topics: [TopicSummary] {
@@ -16,9 +17,11 @@ struct WorkspaceView: View {
 
     static let activeOrder: [TopicStatus] = [.waitingOnYou, .review, .working, .paused, .backlog]
 
-    static func helperStatus(name: String, anyWorking: Bool, hasMessages: Bool) -> String? {
-        if anyWorking { return "\(name) is working" }
-        return hasMessages ? "\(name) is ready" : nil
+    /// The Chat card's one status line: working beats the last message; nothing yet invites a first message.
+    static func helperLine(name: String, anyWorking: Bool, lastLine: String) -> String {
+        if anyWorking { return "\(name) is working…" }
+        let line = lastLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        return line.isEmpty ? "Talk to \(name)" : line
     }
 
     private var runningCount: Int {
@@ -48,9 +51,11 @@ struct WorkspaceView: View {
             Group {
                 ModelMessage()
                 MobileModeBanner(workspaceId: workspaceId)
-                if parts?.general ?? true { generalCard }
-                NowLine(running: runningCount, newCount: summary?.topics.reduce(0) { $0 + $1.unread } ?? 0, scoped: true)
             }.listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
+            // Same card margins as the topic sections below (P14).
+            if parts?.general ?? true {
+                Section { generalCard.listRowBackground(Theme.surface).listRowInsets(EdgeInsets()) }
+            }
             if topics.isEmpty { emptyState.listRowBackground(Color.clear).listRowSeparator(.hidden) }
             ForEach(activeGroups(topics), id: \.status) { group in
                 Section {
@@ -65,13 +70,17 @@ struct WorkspaceView: View {
             if !finished.isEmpty {
                 Section {
                     Button { showDone.toggle() } label: {
+                        // A plain disclosure row, not a topic card (P14).
                         HStack {
-                            Text("Done (\(finished.reduce(0) { $0 + $1.topics.count }))").themeFont(17, .semibold)
+                            Text("Done").themeFont(17).foregroundStyle(Theme.text).accessibilityHidden(true)
                             Spacer()
-                            Image(systemName: showDone ? "chevron.down" : "chevron.right").accessibilityHidden(true)
-                        }.frame(minHeight: 44)
+                            Text("\(finished.reduce(0) { $0 + $1.topics.count })").themeFont(15).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                            Image(systemName: showDone ? "chevron.down" : "chevron.right").themeFont(13, .semibold)
+                                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        }.frame(minHeight: 44).contentShape(Rectangle()).accessibilityElement(children: .ignore)
                     }
-                    .foregroundStyle(Theme.muted).listRowBackground(Theme.surface)
+                    .buttonStyle(.plain).listRowBackground(Theme.surface)
+                    .accessibilityLabel("Done (\(finished.reduce(0) { $0 + $1.topics.count }))")
                     .accessibilityIdentifier("done-toggle")
                     .accessibilityValue(showDone ? "Expanded" : "Collapsed")
                     // The finished chats sit directly under the toggle, no second "Done" header (owner 2A).
@@ -90,8 +99,10 @@ struct WorkspaceView: View {
                                 Text("Archived").themeFont(17, .semibold)
                                 Text("\(count) chat\(count == 1 ? "" : "s")").themeFont(13).foregroundStyle(Theme.muted)
                             }
+                            Spacer()
+                            ShellChevron()
                         }.frame(minHeight: 44)
-                    }.foregroundStyle(Theme.text).accessibilityIdentifier("archived-row")
+                    }.foregroundStyle(Theme.text).accessibilityIdentifier("archived-row").navigationLinkIndicatorVisibility(.hidden)
                         .accessibilityLabel("Archived").accessibilityValue("\(count) chat\(count == 1 ? "" : "s")")
                         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                         .listRowBackground(Theme.surface).listRowSeparator(.hidden)
@@ -156,18 +167,13 @@ struct WorkspaceView: View {
                         Text("Your helper").themeFont(17, .semibold)
                         Image(systemName: "bubble.right").themeFont(12).foregroundStyle(Theme.muted).accessibilityHidden(true)
                     }
-                    let preview = summary?.general.lastLine ?? ""
-                    Text(preview.isEmpty ? "Talk to \(name)" : preview)
+                    Text(Self.helperLine(name: name, anyWorking: runningCount > 0, lastLine: summary?.general.lastLine ?? ""))
                         .themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
-                    if let status = Self.helperStatus(name: name, anyWorking: runningCount > 0, hasMessages: summary?.general.lastAt != nil) {
-                        Text(status).themeFont(13).foregroundStyle(Theme.brand)
-                    }
                 }
                 Spacer(minLength: 4)
                 ShellBadge(count: summary?.general.unread ?? 0)
                 ShellChevron()
-            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            }.padding(.horizontal, 16).padding(.vertical, 14).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("general-\(workspaceId)").navigationLinkIndicatorVisibility(.hidden)
             .swipeActions(edge: .trailing, allowsFullSwipe: true) { chatMenu(.general(workspace: workspaceId), status: nil) }
             .contextMenu { chatMenu(.general(workspace: workspaceId), status: nil) }
@@ -189,7 +195,7 @@ struct WorkspaceView: View {
                 .themeFont(20).foregroundStyle(color(topic.status)).frame(width: 24).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(topic.title)
-                    .themeFont(17, .semibold).lineLimit(3).multilineTextAlignment(.leading)
+                    .themeFont(17, .semibold).lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize)).multilineTextAlignment(.leading)
                 Text(subtitle(topic)).themeFont(13).foregroundStyle(Theme.muted)
             }.frame(maxWidth: .infinity, alignment: .leading)
             ShellBadge(count: topic.unread)
