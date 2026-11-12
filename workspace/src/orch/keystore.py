@@ -576,8 +576,6 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
                 "agents_may_env",
                 "skills",
                 "extra",
-                "run_sha256",
-                "run_pins",
                 "real_home",
             }
         ):
@@ -633,24 +631,6 @@ def _profile_check(profiles: dict, key_values: set[str]) -> None:
             or not all(isinstance(x, str) and 1 <= len(x) <= 300 for x in run)
         ):
             raise Refused(f"The profile {pn} has a bad command.")
-        sha = p.get("run_sha256")
-        if sha is not None and (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)):
-            raise Refused(f"The profile {pn} has a bad program fingerprint.")
-        pins = p.get("run_pins")
-        if pins is not None and (
-            not isinstance(pins, dict)
-            or len(pins) > 16
-            or not all(
-                isinstance(k, str)
-                and 1 <= len(k) <= 300
-                and isinstance(v, str)
-                and re.fullmatch(r"[0-9a-f]{64}", v)
-                for k, v in pins.items()
-            )
-        ):
-            raise Refused(f"The profile {pn} has bad pinned files.")
-        if sha is not None and not run:
-            raise Refused(f"The profile {pn} has a program fingerprint but no command.")
         for flag in ("allow_get", "agents_may_env", "real_home"):
             if flag in p and not isinstance(p[flag], bool):
                 raise Refused(f"The profile {pn} has a bad {flag.replace('_', ' ')} setting.")
@@ -681,12 +661,6 @@ def _toml(profiles: dict) -> str:
             out.append("run = [" + ", ".join(_q(x) for x in p["run"]) + "]")
         if p.get("skills"):
             out.append("skills = [" + ", ".join(_q(x) for x in p["skills"]) + "]")
-        if p.get("run_sha256"):
-            out.append(f"run_sha256 = {_q(p['run_sha256'])}")
-        if p.get("run_pins"):
-            out.append(
-                "run_pins = { " + ", ".join(f"{_q(k)} = {_q(v)}" for k, v in p["run_pins"].items()) + " }"
-            )
         for flag in ("allow_get", "agents_may_env", "real_home"):
             if p.get(flag):
                 out.append(f"{flag} = true")

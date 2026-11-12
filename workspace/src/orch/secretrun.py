@@ -10,7 +10,6 @@ set_recorder() replaces the writer (tests).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -218,20 +217,10 @@ def record_change(root, action, profile, by):
         pass
 
 
-# A pinned (user-owned) program must not be an interpreter: its script arguments are not covered by the pin.
-# Tests switch this off (and then the hash is only checked, the file is not copied) to use the test
-# interpreter, which cannot run from a copy, as the pinned program.
-PIN_STRICT = True
-PINNED_INTERPRETER = (
-    "Refused: this program runs scripts or any code you give it, so pinning its file would not protect "
-    "anything. Choose a program that does one fixed job."
-)
-PIN_TEXT = (
-    "The fingerprint covers this program file (and any file you named as an argument), not the "
-    "libraries or settings it loads (for example libraries you own under Homebrew), so prefer programs from "
-    "system folders. orch starts private copies of the approved files. "
-    "A script cannot be approved from a folder you own: approve the program that runs it and give the "
-    "script as an argument."
+SHEBANG_REFUSED = (
+    "Refused: this program is a script whose interpreter orch cannot approve (env, a relative path, or a "
+    "program in a folder you own). Approve the interpreter itself as the command and give the script as an "
+    "argument."
 )
 USER_OWNED = (
     "Refused: the program or a folder above it belongs to your own user, so an agent running as you could "
@@ -253,7 +242,6 @@ XCODE_SELECT_LINK = (
     "/var/db/xcode_select_link"  # macOS: where /usr/bin/git, make, python3 ... really run from
 )
 WINDOWS = "Refused: orch secret commands that start programs are not available on Windows yet."
-MAX_PROGRAM = 64 * 1024 * 1024  # a program or pinned file can be at most this large
 
 
 def _windows() -> bool:
@@ -278,7 +266,7 @@ def _chain(real: str) -> list[str]:
         here = up
 
 
-def _check_chain(real: str, ws: str, allow_user_owned: bool) -> None:
+def _check_chain(real: str, ws: str) -> None:
     chain = _chain(real)
     for p in chain:
         if _under(p, ws):
@@ -287,7 +275,7 @@ def _check_chain(real: str, ws: str, allow_user_owned: bool) -> None:
         group_open = st.st_mode & 0o020 and st.st_gid != 0
         if st.st_mode & 0o002 or (group_open and (st.st_uid == os.getuid() or not _user_can_write(p))):
             raise Refused("Refused: the program or a folder above it can be changed by other users.")
-    if not allow_user_owned and any(_user_can_write(p) for p in chain):
+    if any(_user_can_write(p) for p in chain):
         raise Refused(USER_OWNED)
 
 
@@ -310,11 +298,10 @@ def _xcode_shims(path: str) -> list[str]:
     return [os.path.realpath(c) for c in out if os.path.isfile(c)]
 
 
-def approve_program(root, name, *, allow_user_owned=False, _depth=0):
+def approve_program(root, name, *, _depth=0):
     """What a person approves as a profile's `run` program: (real path, warnings). Refused: a relative path;
     the program or a folder above it inside the workspace, changeable by other users, or changeable by the
-    current user (owner, group such as admin, or ACL: an agent running as that user can rewrite it) unless
-    `allow_user_owned` (a person's override, whose sha256 is then checked right before every spawn). On macOS
+    current user (owner, group such as admin, or ACL: an agent running as that user can rewrite it). On macOS
     a /usr/bin stub whose real tool lives in a user-writable developer folder is refused too. A program that
     starts with #! needs a system interpreter (env is refused). Interpreters and tools that run arbitrary code
     (sh, python, node, env, git, npm, curl, and database clients that read commands from stdin or run shell
@@ -327,17 +314,10 @@ def approve_program(root, name, *, allow_user_owned=False, _depth=0):
     path = resolve_program(root, name)
     real = os.path.realpath(path)
     ws = os.path.realpath(root)
-    _check_chain(real, ws, allow_user_owned)
-    for target in _xcode_shims(path):  # the pin (a hash of the stub) cannot cover the real tool: no override
-        _check_chain(target, ws, False)
-    if (
-        allow_user_owned
-        and PIN_STRICT
-        and (RISKY_PROGRAMS.match(os.path.basename(real)) or RISKY_PROGRAMS.match(os.path.basename(name)))
-    ):
-        raise Refused(PINNED_INTERPRETER)
-    if not allow_user_owned:
-        _check_shebang(root, real, _depth)
+    _check_chain(real, ws)
+    for target in _xcode_shims(path):
+        _check_chain(target, ws)
+    _check_shebang(root, real, _depth)
     warnings = []
     if RISKY_PROGRAMS.match(os.path.basename(real)) or RISKY_PROGRAMS.match(os.path.basename(name)):
         warnings.append(
@@ -359,7 +339,7 @@ def _check_shebang(root, real: str, depth: int) -> None:
         return
     parts = head[2:].split(b"\n", 1)[0].decode("utf-8", "replace").split()
     if depth >= 2 or not parts or not os.path.isabs(parts[0]) or os.path.basename(parts[0]) == "env":
-        raise Refused(PINNED_INTERPRETER)
+        raise Refused(SHEBANG_REFUSED)
     approve_program(root, parts[0], _depth=depth + 1)
 
 
@@ -415,57 +395,6 @@ def _program(name, dirs, h):
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path
     raise Refused(h.hide_text(f"Refused: the program {name} was not found."))
-
-
-SCRIPT_PROGRAM = (
-    "Refused: a script cannot be approved from a folder you own. Approve the program that runs it (for "
-    "example from a system folder) as the command and give the script as an argument: orch then checks and "
-    "uses a private copy of the script."
-)
-
-
-def _pinned_copy(path, want, temp, name, *, program):
-    """Read a user-owned file once, check its hash, write exactly those bytes to a private file and return it.
-    A program (not an argument) that starts with #! is refused outright: no analysis of its interpreter."""
-    data = _read_regular(path)
-    if hashlib.sha256(data).hexdigest() != want:
-        raise Refused("Refused: the program is not the one the person approved (it has changed).")
-    if program and data.startswith(b"#!"):
-        raise Refused(SCRIPT_PROGRAM)
-    copy = temp / name
-    keystore._write_private_bytes(copy, data)
-    os.chmod(copy, 0o700 if program else 0o600)  # an argument file is data: never executable
-    return str(copy)
-
-
-def _pinned_command(command, program_sha, pins, temp):
-    """The command with the pinned program (when the person pinned it) and every pinned file replaced by
-    private copies of the approved bytes."""
-    out = [command[0]]
-    if program_sha is not None:
-        out = [_pinned_copy(command[0], program_sha, temp, "~program", program=True)]
-    for i, arg in enumerate(command[1:]):
-        out.append(_pinned_copy(arg, pins[arg], temp, f"~arg{i}", program=False) if arg in pins else arg)
-    return out
-
-
-def _read_regular(path) -> bytes:
-    """The bytes of a regular file of at most MAX_PROGRAM (no pipe, device or link target tricks)."""
-    try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
-        with os.fdopen(fd, "rb") as f:
-            info = os.fstat(f.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_PROGRAM:
-                raise Refused("Refused: the program or a pinned file is not a regular file of a usual size.")
-            return f.read(MAX_PROGRAM + 1)
-    except OSError:
-        raise Refused("Refused: could not read the program to check it.") from None
-
-
-def _check_sha(path, want, h):
-    """The program about to be started is the exact file a person approved (hash of the bytes just read)."""
-    if hashlib.sha256(_read_regular(path)).hexdigest() != want:
-        raise Refused("Refused: the program is not the one the person approved (it has changed).")
 
 
 def _pid_alive(pid: int) -> bool:
@@ -690,21 +619,13 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
             command = profile["run"] + command
         if not command:
             raise Refused("Refused: give a command to run.")
-        program_sha = None
         run0 = (profile.get("run") or [None])[0]
         if run0 is not None and command[0] == run0:  # the profile's own program, in every mode
             if not os.path.isabs(run0):
                 raise Refused(
                     "Refused: this profile's command is not a full path. Ask the person to set it again."
                 )
-            # still a safe, existing program now; a user-owned one only with the person's stored fingerprint
-            approve_program(root, run0, allow_user_owned=bool(profile.get("run_sha256")))
-            program_sha = profile.get("run_sha256")
-            if program_sha is not None:
-                _check_sha(run0, program_sha, None)  # before anything is recorded
-        for path, want in (profile.get("run_pins") or {}).items():  # every file named in the command
-            if path in command[1:]:
-                _check_sha(path, want, None)
+            approve_program(root, run0)  # still a safe, existing program now
         if mode == "env" and not profile.get("env") and profile.get("files"):
             raise Refused("Refused: this profile needs files. Use orch secret file.")
         needles = keystore.all_needles(root)
@@ -745,11 +666,6 @@ def run(root, mode, profile_name, argv, *, stdout, stderr, agent) -> int:
         hp.winacl.set_private(temp, True)
         hp._private_dir(temp, parent)
         private.mkdir(mode=0o700)
-        pins = {k: v for k, v in (profile.get("run_pins") or {}).items() if k in command[1:]}
-        if PIN_STRICT and (program_sha is not None or pins):  # private copies of the exact hashed bytes
-            command = _pinned_command(command, program_sha, pins, temp)
-        elif program_sha is not None:
-            _check_sha(command[0], program_sha, h)
         if files:
             paths = {}
             for var, name in files.items():

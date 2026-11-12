@@ -1,7 +1,6 @@
 """Secret commands: proof-gated changes and direct delivery to child commands."""
 
 import argparse
-import hashlib
 import json
 import os
 import stat
@@ -41,7 +40,6 @@ def add_parsers(sub, common) -> None:
                 if action == "set":
                     for option in ("env", "files", "set", "run", "skill", "extra"):
                         q.add_argument("--" + option, action="append", default=[])
-                    q.add_argument("--allow-user-owned", action="store_true")  # person: pin this exact binary
                     q.add_argument(
                         "--real-home", action="store_true"
                     )  # person: the command may see your home
@@ -98,43 +96,26 @@ def _file_bytes(path):
         raise Refused("Refused: could not read the key file.") from None
 
 
-def _candidate_paths(arg: str) -> list[str]:
-    """Where a command-line argument may name a file: the whole argument, the part after = or @, or after a
-    two-character option (-f/path)."""
-    out = [arg]
-    for sep in ("=", "@"):
-        if sep in arg:
-            out.append(arg.split(sep, 1)[1])
-    if arg.startswith("-") and not arg.startswith("--") and len(arg) > 2:
-        out.append(arg[2:])
-    return out
-
-
-def _pin_arguments(arguments) -> dict:
-    """The files named in the profile's command, with their hashes (checked and copied at every start).
-    A file must be its own argument and a regular file; a folder the user can write to, a path inside an
-    option, a relative path or an absolute path that does not exist yet is refused."""
-    pins = {}
+def _check_arguments(arguments, root) -> None:
+    """One fail-closed rule for the arguments of a profile's command: an argument with a path separator
+    must be an absolute path as a whole (no -xVALUE, --opt=/path, @/path or relative path), must not go
+    through a link, and neither it nor any parent may be inside the workspace or changeable by you (an agent
+    running as you could change it)."""
+    ws = os.path.realpath(root)
     for arg in arguments:
-        for cand in _candidate_paths(arg):
-            if not cand or "\0" in cand or not (os.path.isabs(cand) or os.path.exists(cand)):
-                continue
-            if not os.path.exists(cand):
-                raise Refused("Refused: a file named in the command does not exist yet. Create it first.")
-            if cand != arg:
-                raise Refused("Refused: give a file as a separate argument, not inside an option.")
-            if not os.path.isabs(cand):
-                raise Refused("Refused: name files in the command with their full path.")
-            if os.path.isdir(cand):
-                if os.access(cand, os.W_OK):
-                    raise Refused(
-                        "Refused: a folder in the command can be changed by you, and so by an agent."
-                    )
-            elif os.path.isfile(cand):
-                pins[arg] = hashlib.sha256(secretrun._read_regular(cand)).hexdigest()
-            else:
-                raise Refused("Refused: a file named in the command must be a regular file.")
-    return pins
+        if "/" not in arg and "\\" not in arg and not (os.altsep and os.altsep in arg):
+            continue
+        if not os.path.isabs(arg) or "\0" in arg or "\\" in arg:
+            raise Refused(
+                "Refused: an argument with a path must be a full path on its own, "
+                "not inside an option and not relative."
+            )
+        real = os.path.realpath(arg)
+        if real != os.path.normpath(arg):
+            raise Refused("Refused: a path in the command goes through a link; give the real path.")
+        if not os.path.exists(real):
+            raise Refused("Refused: a file named in the command does not exist.")
+        secretrun._check_chain(real, ws)
 
 
 def _change_profile(root, args, who):
@@ -156,17 +137,9 @@ def _change_profile(root, args, who):
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
             if args.run:  # found once, here: stored as the real full path, never searched later
-                path, warnings = secretrun.approve_program(
-                    root, args.run[0], allow_user_owned=args.allow_user_owned
-                )
+                path, warnings = secretrun.approve_program(root, args.run[0])
                 profile["run"] = [path, *args.run[1:]]
-                if args.allow_user_owned:  # the person pins this exact file; checked before every start
-                    with open(path, "rb") as f:
-                        profile["run_sha256"] = hashlib.sha256(f.read()).hexdigest()
-                    warnings = [*warnings, secretrun.PIN_TEXT]
-                pins = _pin_arguments(args.run[1:])
-                if pins:
-                    profile["run_pins"] = pins
+                _check_arguments(args.run[1:], root)
                 extra = {"command": path, **({"warnings": warnings} if warnings else {})}
             if args.real_home:
                 profile["real_home"] = True

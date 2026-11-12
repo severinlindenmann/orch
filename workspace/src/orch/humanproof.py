@@ -1619,12 +1619,7 @@ def profile_body(profile: dict) -> dict:
         "run": list(profile["run"]) if profile.get("run") else None,
         "extra": sorted(profile.get("extra") or []),
     }
-    # Person-approved exceptions (user-owned program: its fingerprint; the real HOME): covered by the MAC only
-    # when present, so profiles saved before they existed keep their MAC.
-    if profile.get("run_sha256"):
-        body["run_sha256"] = profile["run_sha256"]
-    if profile.get("run_pins"):
-        body["run_pins"] = dict(profile["run_pins"])
+    # The person-approved real HOME is covered by the MAC only when present (older profiles keep theirs).
     if profile.get("real_home") is True:
         body["real_home"] = True
     return body

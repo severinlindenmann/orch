@@ -55,10 +55,13 @@ def _use_as_person(argv, unproven):
 
 
 @pytest.fixture(autouse=True)
-def _pin_the_test_interpreter(monkeypatch):
-    """The test interpreter is the pinned program of many tests; the refusal of pinned interpreters has its
-    own tests (they switch it back on). The tests of the private copy use a small shell script."""
-    monkeypatch.setattr(secretrun, "PIN_STRICT", False)
+def _trust_the_test_interpreter(monkeypatch):
+    """The test interpreter lives in folders the test user owns, so it could never be approved as a command.
+    For these tests only, those exact paths (the interpreter and its parents) count as not user-writable;
+    every other path (the tests' own programs) keeps the real answer."""
+    trusted = set(secretrun._chain(os.path.realpath(PY)))
+    real = secretrun._user_can_write
+    monkeypatch.setattr(secretrun, "_user_can_write", lambda p: False if p in trusted else real(p))
 
 
 @pytest.fixture
@@ -808,7 +811,7 @@ def test_profile_set_turns_the_switch_off_again(lock, run, ws, monkeypatch):
     _enable_agents(run, monkeypatch, ws)
     code, out, err = _as_person(
         run, monkeypatch, ws, ("set", "lock"), "lock",
-        "--env", "LOCK_TOKEN=other-token", "--run", PY, "--allow-user-owned", "--run=-c", "--run", "pass",
+        "--env", "LOCK_TOKEN=other-token", "--run", PY, "--run=-c", "--run", "pass",
     )  # fmt: skip
     assert code == 0, out + err
     _refused(run, "/bin/sh", "-c", "echo hi")
@@ -1090,14 +1093,7 @@ def test_agent_is_a_required_argument(store, ws):
         secretrun.run(ws, "env", "plain", [PY], stdout=_Sink(), stderr=_Sink())
 
 
-def _pin(extra):
-    """The test interpreter lives in a user-owned folder: the person pins its hash (--allow-user-owned)."""
-    pinned = "--run" in extra and extra[extra.index("--run") + 1] == PY
-    return (*extra, "--allow-user-owned") if pinned else extra
-
-
 def _set(run, monkeypatch, ws, name, *extra):
-    extra = _pin(extra)
     return _cli(
         run, monkeypatch, _proof(ws, "secret.profile", name), "secret", "profile", "set", name,
         "--env", "T=other-token", *extra,
@@ -1480,7 +1476,6 @@ def _edit_file(ws, old, new):
 
 
 def _set_ok(run, monkeypatch, ws, name, *extra, proof_name=None):
-    extra = _pin(extra)
     code, out, err = _cli(
         run, monkeypatch, _proof(ws, "secret.profile", proof_name or name), "secret", "profile", "set", name,
         "--env", "T=other-token", *extra,
@@ -1856,70 +1851,7 @@ def test_h1_an_agent_marker_with_a_valid_proof_stays_an_agent(store, run, ws, mo
     assert code == 2
 
 
-def _user_prog(tmp_path, source="/usr/bin/true"):
-    """A user-owned copy of a small system binary (a script would need an approved interpreter)."""
-    import shutil
-
-    exe = tmp_path / "bin" / "tool"
-    exe.parent.mkdir(exist_ok=True)
-    shutil.copy(source, exe)
-    exe.chmod(0o755)
-    return exe
-
-
-def _replace(exe, source="/usr/bin/false"):
-    """What the agent can do to a user-owned file: overwrite it."""
-    import shutil
-
-    exe.unlink()
-    shutil.copy(source, exe)
-    exe.chmod(0o755)
-
-
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_program_owned_by_the_user_is_refused_unless_the_person_pins_it(
-    store, run, ws, monkeypatch, tmp_path
-):
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path)
-    code, _, err = _set(run, monkeypatch, ws, "mine", "--run", str(exe))
-    assert code == 2 and "belongs to your own user" in err and "mine" not in keystore.read_profiles(ws)
-    code, out, err = _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")
-    assert code == 0, out + err
-    prof = keystore.read_profiles(ws)["mine"]
-    assert len(prof["run_sha256"]) == 64 and hp.profile_verified(ws, "mine", prof)
-
-
-@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_pinned_program_replaced_after_approval_is_refused_in_every_mode(
-    store, run, ws, monkeypatch, tmp_path
-):
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path)
-    assert _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")[0] == 0
-    assert run("secret", "exec", "mine")[0] == 0
-    _replace(exe)  # the agent rewrites the approved binary
-    for argv in (("exec", "mine"), ("env", "mine", "--", str(exe)), ("file", "mine", "--", str(exe))):
-        code, out, err = run("secret", *argv)
-        assert code == 2 and "planted" not in out and "has changed" in err, argv
-
-
-@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_the_stored_fingerprint_cannot_be_edited_without_a_person(store, run, ws, monkeypatch, tmp_path):
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path)
-    assert _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--allow-user-owned")[0] == 0
-    _replace(exe)
-    import hashlib
-
-    new = hashlib.sha256(exe.read_bytes()).hexdigest()
-    old = keystore.read_profiles(ws)["mine"]["run_sha256"]
-    f = _pfile(ws)  # an agent edits profiles.toml: the MAC no longer matches
-    f.write_text(f.read_text().replace(old, new))
-    code, out, err = run("secret", "exec", "mine")
-    assert code == 2 and "planted" not in out
-
-
 def test_h2_a_plain_name_is_searched_only_in_system_folders_never_the_callers_path(
     store, ws, monkeypatch, tmp_path
 ):
@@ -1973,170 +1905,7 @@ def test_h3_the_real_home_only_with_the_persons_real_home_setting(store, run, ws
     assert code == 2  # the body no longer matches its MAC
 
 
-def test_h2_an_interpreter_cannot_be_pinned(store, run, ws, monkeypatch):
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    code, _, err = _set(run, monkeypatch, ws, "py", "--run", PY)
-    assert code == 2 and "runs scripts" in err and "py" not in keystore.read_profiles(ws)
-
-
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_pinned_data_file_swapped_after_approval_is_refused(store, run, ws, monkeypatch, tmp_path):
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path, "/usr/bin/true")
-    data = tmp_path / "bin" / "conf.txt"
-    data.write_text("one\n")
-    code, out, err = _set(
-        run, monkeypatch, ws, "mine", "--run", str(exe), "--run", str(data), "--allow-user-owned"
-    )
-    assert code == 0, out + err
-    assert "not the libraries" in err or "not the libraries" in out
-    assert str(data) in keystore.read_profiles(ws)["mine"]["run_pins"]
-    started = []
-    child = secretrun._child
-    monkeypatch.setattr(
-        secretrun, "_child", lambda command, *a, **k: started.append(command) or child(command, *a, **k)
-    )
-    code, out, err = run("secret", "exec", "mine")
-    assert code == 0, err
-    assert "~program" in started[0][0] and "~arg0" in started[0][1] and str(data) not in started[0]  # copies
-    data.write_text("planted\n")
-    code, out, err = run("secret", "exec", "mine")
-    assert code == 2 and "has changed" in err and "planted" not in out
-
-
-@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_files_swapped_after_the_hash_run_the_approved_bytes(store, run, ws, monkeypatch, tmp_path):
-    """Program and pinned argument are read once; the command runs private copies of those bytes."""
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path, "/usr/bin/true")
-    data = tmp_path / "bin" / "conf.txt"
-    data.write_text("approved\n")
-    assert (
-        _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--run", str(data), "--allow-user-owned")[0]
-        == 0
-    )
-    real = secretrun._pinned_copy
-    swapped, seen = [], {}
-
-    def swap_after_copy(path, want, temp, name, *, program):
-        copy = real(path, want, temp, name, program=program)
-        seen[name] = Path(copy).read_bytes()
-        if name == "~arg0":
-            Path(path).write_text("planted\n")  # swapped right after the bytes were read
-            swapped.append(1)
-        else:
-            _replace(Path(path))
-        return copy
-
-    monkeypatch.setattr(secretrun, "_pinned_copy", swap_after_copy)
-    code, out, err = run("secret", "exec", "mine")
-    assert swapped and code == 0, (code, out, err)  # the private copies ran
-    assert seen["~arg0"] == b"approved\n" and data.read_text() == "planted\n"
-    assert seen["~program"] == Path("/usr/bin/true").read_bytes()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_binary_swapped_before_the_copy_is_not_started(store, run, ws, monkeypatch, tmp_path):
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path, "/bin/echo")
-    assert (
-        _set(run, monkeypatch, ws, "mine", "--run", str(exe), "--run", "approved", "--allow-user-owned")[0]
-        == 0
-    )
-    prog = secretrun._program
-
-    def swap_before_copy(name, dirs, h):
-        found = prog(name, dirs, h)
-        _replace(Path(found))
-        return found
-
-    monkeypatch.setattr(secretrun, "_program", swap_before_copy)
-    code, out, err = run("secret", "exec", "mine")
-    assert code == 2 and "has changed" in err
-
-
-@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-@pytest.mark.parametrize(
-    "head",
-    [
-        b"#!/bin/sh\n",
-        b"#!/usr/bin/awk -f\n",
-        b"#!/usr/bin/env awk\n",
-        b"#!/usr/bin/python3.13\n",
-        b"#!/usr/bin/nice -n 5 /usr/bin/awk\n",
-        b"#!/bin/sh\r\n",
-        b"#!awk",
-    ],
-)
-def test_h2_a_script_cannot_be_approved_from_a_user_owned_place(store, run, ws, monkeypatch, tmp_path, head):
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    script = tmp_path / "bin" / "job"
-    script.parent.mkdir()
-    script.write_bytes(head + b"BEGIN{}\n")
-    script.chmod(0o755)
-    _set(run, monkeypatch, ws, "mine", "--run", str(script), "--allow-user-owned")
-    if "mine" in keystore.read_profiles(ws):  # (saved only if the set-time check is not the one that refuses)
-        code, out, err = run("secret", "exec", "mine")
-        assert code == 2 and "script cannot be approved" in err
-    else:
-        assert "mine" not in keystore.read_profiles(ws)
-
-
-@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
-def test_h2_a_script_given_as_an_argument_to_a_system_interpreter_is_pinned_and_copied(
-    store, run, ws, monkeypatch, tmp_path
-):
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    script = tmp_path / "bin" / "job.awk"
-    script.parent.mkdir()
-    script.write_text('#!/usr/bin/awk -f\nBEGIN { print "approved" }\n')
-    code, out, err = _set(
-        run, monkeypatch, ws, "mine", "--run", "/usr/bin/awk", "--run=-f", "--run", str(script)
-    )
-    assert code == 0, out + err
-    prof = keystore.read_profiles(ws)["mine"]
-    assert str(script) in prof["run_pins"] and "run_sha256" not in prof
-    code, out, err = run("secret", "exec", "mine")
-    assert code == 0 and "approved" in out, err
-    script.write_text('#!/usr/bin/awk -f\nBEGIN { print "planted" }\n')
-    code, out, err = run("secret", "exec", "mine")
-    assert code == 2 and "planted" not in out and "has changed" in err
-
-
-@pytest.mark.skipif(os.name == "nt", reason="file modes")
-def test_h2_a_pinned_argument_copy_is_never_executable(store, run, ws, monkeypatch, tmp_path):
-    """A launcher (nice, timeout, env) given a pinned script argument cannot run it: permission denied."""
-    import subprocess
-
-    monkeypatch.setattr(secretrun, "PIN_STRICT", True)
-    exe = _user_prog(tmp_path, "/usr/bin/true")
-    script = tmp_path / "bin" / "job"
-    script.write_text("#!/bin/sh\necho ran\n")
-    script.chmod(0o755)
-    code, out, err = _set(
-        run, monkeypatch, ws, "mine", "--run", str(exe), "--run", str(script), "--allow-user-owned"
-    )
-    assert code == 0, out + err
-    real = secretrun._pinned_copy
-    modes, tried = {}, []
-
-    def spy(path, want, temp, name, *, program):
-        copy = real(path, want, temp, name, program=program)
-        modes[name] = os.stat(copy).st_mode & 0o777
-        if not program:
-            with pytest.raises(PermissionError):
-                subprocess.run([copy], check=False)
-            tried.append(1)
-        return copy
-
-    monkeypatch.setattr(secretrun, "_pinned_copy", spy)
-    assert run("secret", "exec", "mine")[0] == 0
-    assert tried and modes["~program"] == 0o700 and modes["~arg0"] == 0o600
-
-
-# --------------------------------------------------------------------------- Opus review of #568
-
-
 @pytest.mark.skipif(sys.platform != "darwin", reason="Xcode shims are a macOS thing")
 def test_xcode_shims_are_checked_where_they_really_run(ws, monkeypatch, tmp_path):
     dev = tmp_path / "Developer"
@@ -2148,8 +1917,6 @@ def test_xcode_shims_are_checked_where_they_really_run(ws, monkeypatch, tmp_path
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
     with pytest.raises(Refused, match="belongs to your own user"):
         secretrun.approve_program(ws, "/usr/bin/true")
-    with pytest.raises(Refused, match="belongs to your own user"):  # the pin cannot cover the real tool
-        secretrun.approve_program(ws, "/usr/bin/true", allow_user_owned=True)
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(tmp_path / "missing"))
     assert secretrun.approve_program(ws, "/usr/bin/true")[0]
 
@@ -2159,7 +1926,6 @@ def test_a_system_folder_the_user_can_write_through_a_group_counts_as_user_owned
     monkeypatch.setattr(secretrun, "_user_can_write", lambda p: p == "/usr/bin" or real(p))
     with pytest.raises(Refused, match="belongs to your own user"):
         secretrun.approve_program(ws, "/usr/bin/true")
-    assert secretrun.approve_program(ws, "/usr/bin/true", allow_user_owned=True)[0]
 
 
 def test_nothing_that_starts_programs_runs_on_windows(store, run, ws, monkeypatch):
@@ -2168,30 +1934,6 @@ def test_nothing_that_starts_programs_runs_on_windows(store, run, ws, monkeypatc
     assert code == 2 and "not available on Windows" in err
     with pytest.raises(Refused, match="not available on Windows"):
         secretrun.approve_program(ws, "/usr/bin/true")
-
-
-@pytest.mark.parametrize(
-    "arg,message",
-    [
-        ("--conf=/etc/hosts", "separate argument"),
-        ("@/etc/hosts", "separate argument"),
-        ("-f/etc/hosts", "separate argument"),
-        ("/nonexistent/place/file.txt", "does not exist yet"),
-    ],
-)
-def test_file_paths_inside_an_argument_are_not_accepted(store, run, ws, monkeypatch, arg, message):
-    code, out, err = _set(run, monkeypatch, ws, "pathy", "--run", "/usr/bin/true", f"--run={arg}")
-    assert code == 2 and message in err and "pathy" not in keystore.read_profiles(ws)
-
-
-def test_a_user_writable_folder_argument_is_refused_and_a_system_file_is_pinned(
-    store, run, ws, monkeypatch, tmp_path
-):
-    code, out, err = _set(run, monkeypatch, ws, "dirs", "--run", "/usr/bin/true", "--run", str(tmp_path))
-    assert code == 2 and "folder in the command" in err
-    code, out, err = _set(run, monkeypatch, ws, "dirs", "--run", "/usr/bin/true", "--run", "/etc/hosts")
-    assert code == 0, out + err
-    assert "/etc/hosts" in keystore.read_profiles(ws)["dirs"]["run_pins"]
 
 
 def test_an_agent_level_get_is_refused_even_with_allow_get_on(store, run, ws, in_run, monkeypatch, events):
@@ -2219,26 +1961,65 @@ def test_a_program_that_starts_with_a_shebang_needs_a_system_interpreter(ws, tmp
     secretrun._check_shebang(ws, script(b"not a script"), 0)
 
 
-def test_pinned_files_must_be_regular_and_of_a_usual_size(tmp_path, monkeypatch):
-    fifo = tmp_path / "pipe"
-    os.mkfifo(fifo)
-    with pytest.raises(Refused, match="regular file"):
-        secretrun._read_regular(str(fifo))  # does not block
-    big = tmp_path / "big"
-    big.write_bytes(b"x" * 10)
-    monkeypatch.setattr(secretrun, "MAX_PROGRAM", 5)
-    with pytest.raises(Refused, match="regular file"):
-        secretrun._read_regular(str(big))
+def _user_program(tmp_path):
+    import shutil
+
+    exe = tmp_path / "bin" / "tool"
+    exe.parent.mkdir(exist_ok=True)
+    shutil.copy("/usr/bin/true", exe)
+    exe.chmod(0o755)
+    return exe
 
 
-def test_the_strict_pin_rules_are_on_by_default():
-    import subprocess
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_program_in_a_folder_the_user_owns_cannot_be_approved(store, run, ws, monkeypatch, tmp_path):
+    code, _, err = _set(run, monkeypatch, ws, "mine", "--run", str(_user_program(tmp_path)))
+    assert code == 2 and "belongs to your own user" in err and "mine" not in keystore.read_profiles(ws)
 
-    out = subprocess.run(
-        [PY, "-I", "-c", "from orch import secretrun; print(secretrun.PIN_STRICT)"],
-        capture_output=True,
-        text=True,
-        cwd=str(Path(__file__).resolve().parents[1]),
-        env={"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
-    )
-    assert out.stdout.strip() == "True", out.stderr[-300:]
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_forged_profile_pointing_at_a_user_program_is_refused_in_every_mode(
+    store, run, ws, monkeypatch, tmp_path
+):
+    """Even a body that carries a valid MAC is checked again at every start, in env, file and exec mode."""
+    exe = _user_program(tmp_path)
+    prof = keystore.read_profiles(ws)
+    prof["mine"] = {"env": {"T": "other-token"}, "files": {}, "run": [str(exe)]}
+    seed_profiles(ws, prof)
+    for argv in (("exec", "mine"), ("env", "mine", "--", str(exe)), ("file", "mine", "--", str(exe))):
+        code, out, err = run("secret", *argv)
+        assert code == 2 and "belongs to your own user" in err, argv
+
+
+@pytest.mark.parametrize("arg", ["-f/etc/hosts", "--conf=/etc/hosts", "@/etc/hosts", "../x", "a/b", "./x"])
+def test_h2_arguments_with_a_path_must_be_a_full_path_on_their_own(store, run, ws, monkeypatch, arg):
+    code, out, err = _set(run, monkeypatch, ws, "pathy", "--run", "/usr/bin/true", f"--run={arg}")
+    assert code == 2 and "full path" in err and "pathy" not in keystore.read_profiles(ws)
+
+
+def test_h2_a_full_path_argument_in_a_safe_place_is_accepted(store, run, ws, monkeypatch):
+    code, out, err = _set(run, monkeypatch, ws, "safe", "--run", "/usr/bin/true", "--run", "/usr/bin/false")
+    assert code == 0, out + err
+    assert keystore.read_profiles(ws)["safe"]["run"][1:] == ["/usr/bin/false"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uid ownership")
+def test_h2_a_user_writable_or_linked_or_missing_path_argument_is_refused(
+    store, run, ws, monkeypatch, tmp_path
+):
+    mine = tmp_path / "data.txt"
+    mine.write_text("x")
+    link = tmp_path / "link"
+    link.symlink_to("/usr/bin/false")
+    for arg, message in (
+        (str(mine), "belongs to your own user"),
+        (str(link), "through a link"),
+        ("/nonexistent/place", "does not exist"),
+        (str(tmp_path), "belongs to your own user"),
+    ):
+        code, out, err = _set(run, monkeypatch, ws, "args", "--run", "/usr/bin/true", "--run", arg)
+        assert code == 2 and message in err, (arg, err)
+
+
+def test_h2_the_stored_command_is_checked_again_for_argument_less_system_programs(store, ws):
+    assert secretrun.approve_program(ws, "/usr/bin/true")[0]
