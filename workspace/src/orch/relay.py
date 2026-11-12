@@ -963,6 +963,7 @@ def send_question(
         "to": "phones",
         "question_digest": tickets.question_digest(q),  # the question as the phones were shown it
     }
+    sign_asked(root, msg["id"], rec)
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
@@ -1316,6 +1317,39 @@ def _applied_ticket(root: Path, msg: dict) -> str | None:
 
 QUESTION_UNCHECKABLE = "This question changed or can't be checked. Ask again."
 
+# questions-sent.json lives in the workspace, so an agent can rewrite a record's question_digest together with
+# the ticket's question. The digest only counts with question_mac: the local1 MAC (human key, which the agent
+# cannot read) over the message id and the record's fields. No key at send time: the question still goes out,
+# but its record carries no MAC and any answer to it is refused (fail closed, never unchecked).
+QUESTION_MAC_KIND = "question-sent"
+
+
+def _asked_signed_fields(mid: str, rec: dict) -> list:
+    return [
+        mid,
+        rec.get("ticket"),
+        rec.get("question_id"),
+        rec.get("to"),
+        rec.get("group"),
+        rec.get("question_digest"),
+    ]
+
+
+def sign_asked(root: Path, mid: str, rec: dict) -> dict:
+    """Adds question_mac to the record of an answerable question sent as `mid` (when it can be signed)."""
+    mac = humanproof.local_sign(root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec))
+    if mac:
+        rec["question_mac"] = mac
+    else:
+        rec.pop("question_mac", None)
+    return rec
+
+
+def asked_mac_ok(root: Path, mid: str, rec: dict) -> bool:
+    return humanproof.local_ok(
+        root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec), rec.get("question_mac")
+    )
+
 
 def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
@@ -1330,6 +1364,8 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     try:
         digest = asked.get("question_digest")
         if not isinstance(digest, str) or not digest:  # no digest of the question as sent: never unchecked
+            raise Refused(QUESTION_UNCHECKABLE)
+        if not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # digest not provably ours as sent
             raise Refused(QUESTION_UNCHECKABLE)
         t, q = tickets.answer(
             root,
