@@ -664,9 +664,14 @@ def _child(command, env, h, stdout, stderr, cwd=None):
     # (a child can still open /dev/tty: known limit).
     own_session = not interactive and os.name == "posix"
 
+    def ignore(signum, frame):
+        pass
+
     def stop(signum, frame):
-        for s in sigs:  # the first signal wins; the cleanup below is not interrupted by more
-            signal.signal(s, signal.SIG_IGN)
+        # The first signal wins; the cleanup below is not interrupted by more. A Python no-op rather than
+        # SIG_IGN: a signal already pending would otherwise be reported as "ignored due to race condition".
+        for s in sigs:
+            signal.signal(s, ignore)
         if state["spawning"]:  # between starting the child and knowing it: act on it right after
             state["sig"] = signum
             return
