@@ -2761,3 +2761,18 @@ def test_b13r_orch_stopped_inside_the_check_then_a_commit_on_top_is_checked_not_
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
     assert not worktrees._copy_authority(root, tid).get("merged")
+
+
+def test_b13t_a_merged_file_changed_since_the_merge_is_never_passed_unchecked(done_copy):
+    """_files_match skips nothing: a merged file whose blob in the index is no longer the merge's (a later
+    `git add` of swapped bytes) makes the check fail, so a person looks."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    done_and_sweep(root, tid)
+    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "merged"
+    top = root
+    merge = git(top, "rev-parse", "HEAD")
+    assert worktrees._files_match(top, ["code.py"], merge)
+    (top / "code.py").write_text("swapped\n")
+    git(top, "add", "code.py")
+    assert not worktrees._files_match(top, ["code.py"], merge)

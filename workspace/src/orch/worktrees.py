@@ -1677,8 +1677,8 @@ def _fsck(top: Path, *ids: str) -> int:
 def _files_match(top: Path, touched, commit: str) -> bool:
     """Every touched file in the folder hashes (in Python: git's stat shortcut is not trusted) to the blob id
     of `commit` (mode 100644/100755 only; a missing file, link or gitlink is skipped: refused before the
-    merge already). A file that changed since `commit` (the person's later commit: its blob differs from the
-    index) is theirs and not checked."""
+    merge already). A file that changed since `commit` (its blob differs from the index) cannot be checked
+    against it: the check does not pass, so a swapped file cannot hide behind a later `git add`."""
     listing = _bb_read(top, ["ls-files", "-s", "-z"], strip=False)
     index = {}
     for entry in listing.split("\0"):
@@ -1693,7 +1693,7 @@ def _files_match(top: Path, touched, commit: str) -> bool:
         if commit != "HEAD":
             rc, there, _ = _git(["rev-parse", "--verify", "-q", f"{commit}:{name}"], top, read_only=True)
             if rc or there != blob:
-                continue
+                return False  # changed since (or unreadable): never passed unchecked, a person looks
         path = top / name
         try:
             if path.is_symlink() or not path.is_file():
