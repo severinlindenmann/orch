@@ -653,6 +653,41 @@ function ticketButton(label, cls, click, attrs = {}) {
   node.onclick = click;
   return node;
 }
+// "Review and bring back": a dialog shows exactly what the click approves (the tip, the count, the first
+// control paths; all made plain on the server) and sends back that same tip, count and path hash.
+function ticketBringBackDialog(t) {
+  const b = t.bring_back || {}, paths = array(b.paths).map(p => clean(p)), count = Number(b.control_paths) || 0;
+  const {d, actions} = dialog('Bring back this work?');
+  const more = Math.max(0, count - paths.length);
+  const body = [
+    h('p', {}, 'Tip ', h('code', {}, clean(String(b.tip || '').slice(0, 12)))),
+    Number.isInteger(b.commits) && Number.isInteger(b.files)
+      ? h('p', {'data-key':'bring-back-size'}, b.commits + (b.commits === 1 ? ' commit, ' : ' commits, ') + b.files + (b.files === 1 ? ' file changes.' : ' files change.'))
+      : null,
+    h('p', {'data-key':'bring-back-count'}, count === 1 ? 'It changes 1 file that controls orch or git:' : count ? 'It changes ' + count + ' files that control orch or git:' : 'It changes no files that control orch or git.'),
+    paths.length ? h('ul', {className:'bring-back-paths', 'data-key':'bring-back-paths'}, paths.map(p => h('li', {}, h('code', {}, p)))) : null,
+    more ? h('p', {className:'meta'}, 'and ' + more + ' more') : null,
+  ].filter(Boolean);
+  const go = ticketButton('Bring back', 'primary', async () => {
+    if (go.disabled) return;
+    go.disabled = true;
+    const r = await act('copies.approve', {ticket:t.id, tip:b.tip, control_paths:b.control_paths, paths_hash:b.paths_hash});
+    window.orch.close(d);
+    window.orch.toast(r.ok ? 'Review submitted' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+  });
+  actions.append(go); d.append(...body, actions); window.orch.open(d);
+  return d;
+}
+function ticketBringBackRow(t) {
+  const b = t.bring_back;
+  if (b?.state !== 'waiting') return null;
+  const ask = !snapshot && b.reason_code === 'update' ? ticketButton('Ask the helper to update', 'ghost sm', async () => {
+    const r = await act('copies.ask-update', {ticket:t.id});
+    window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
+  }) : null;
+  return h('div', {className:'row', 'data-key':'bring-back'}, h('span', {}, 'Done · changes waiting'), h('span', {}, clean(b.reason)),
+    !snapshot && b.tip ? ticketButton('Review and bring back', 'outline sm', () => ticketBringBackDialog(t)) : null, ask);
+}
 let ticketHistoryTechnical = false;
 let ticketHistoryActor = 'All';
 function ticketHistoryWho(entry) {
@@ -725,8 +760,12 @@ async function ticketSendChanges(t, note) {
 function ticketChangesEditor(t) {
   const key = 'ticket-changes-' + t.id;
   const host = h('div', {'data-key':key});
-  const done = ticketButton('Accept', 'primary', () => moveTicket(t.id, 'done'));
+  // B13g: the tip recorded for this review is shown, and Accept sends that same tip: the core tells when
+  // new changes arrived after you looked (the Done still happens; bringing them back then needs your OK).
+  const tip = typeof t.review_tip === 'string' && /^[0-9a-f]{40,64}$/.test(t.review_tip) ? t.review_tip : '';
+  const done = ticketButton('Accept', 'primary', () => moveTicket(t.id, 'done', false, tip ? {review_tip:tip} : {}), {'data-key':'ticket-button-Accept-' + (tip ? tip.slice(0, 20) : 'none')}); // keyed by the tip: a refresh never keeps a handler with a stale one
   const row = h('div', {className:'row ticket-review-actions'});
+  const shown = tip ? h('span', {className:'meta', 'data-key':'ticket-review-tip'}, 'Changes up to ', h('code', {}, tip.slice(0, 12))) : null;
   const open = ticketButton('Ask for changes', 'outline', () => {
     locks.add(key);
     let sending = false;
@@ -749,7 +788,7 @@ function ticketChangesEditor(t) {
     };
     host.replaceChildren(h('div', {className:'ticket-ask-line'}, input, send, cancel)); input.focus();
   });
-  row.append(done, open); host.append(row); return host;
+  row.append(...[done, open, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},
@@ -905,6 +944,7 @@ function detail(t) {
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id}, h('header', {className:'stack ticket-heading'},
     parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
     typeof t.key === 'string' ? h('span', {className:'meta'}, t.key) : null,
+    ticketBringBackRow(t),
     h('div', {className:'row'}, h('h1', {className:'grow'}, inlineField(t, 'title')), planQ ? null : openQuestions.length && t.status !== 'done' ? chip('Needs you', 'attn') : statusChip(t), !snapshot && !planQ && openQuestions.length && t.status !== 'done' ? ticketButton('Answer', 'primary', focusTicketAnswer) : null, menu),
     ticketStepper(t, run), ticketDoneLine(t), headerProof(t)),
     h('div', {className:'columns ticket-columns'}, h('div', {className:'stack ticket-main'}, next,

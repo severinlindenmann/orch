@@ -2183,6 +2183,25 @@ def test_copies_identity_key_survives_workspace_deletion(ws, monkeypatch):
     assert not folder.exists()
 
 
+def test_copy_approve_binds_tip_and_refuses_agents(ws, run, monkeypatch):
+    from orch import worktrees
+
+    tid = _review_ticket(ws, run)
+    target = f"approve:{tid}:{'a' * 40}:2:12345678"
+    called = []
+    monkeypatch.setattr(worktrees, "approval_view", lambda *a: (target, "a" * 40, [".orch/a", ".orch/b"]))
+    monkeypatch.setattr(worktrees, "approve_copy", lambda *a: called.append(a) or {"state": "merged"})
+    assert run("copy", "approve", tid, "--by", "agent:x")[0] == 2
+    assert not called
+    stale = _proof(ws, "copy.retry", f"approve:{tid}:{'b' * 40}:2:12345678")
+    assert _cli(run, monkeypatch, stale, "copy", "approve", tid, "--json")[0] == 2
+    assert not called
+    proof = _proof(ws, "copy.retry", target)
+    code, out, err = _cli(run, monkeypatch, proof, "copy", "approve", tid, "--json")
+    assert code == 0, out + err
+    assert called[0][-1] == target
+
+
 @pytest.mark.parametrize("result", ["ok", "fail", "missing"])
 def test_runner_waits_for_windows_result(ws, monkeypatch, result):
     from orch import addons, winfinish

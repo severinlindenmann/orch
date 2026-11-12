@@ -20,8 +20,9 @@ sandbox and permission mode. So every call here:
   `working-tree-encoding` attribute applies on git >= 2.40: a copy holds the committed bytes (tests check a
   CRLF `text=auto` repo); older git reads the attributes (filters stay neutralized).
   FAIL CLOSED: if the enumeration fails or times out, the operation is refused
-  (rc 125), never run with the repository's own drivers. `filters=False` is only for calls that touch no file
-  content (rev-parse, config, worktree list);
+  (rc 125), never run with the repository's own drivers. `filters=False` is only for the subcommands in
+  FILTERS_OFF_OK, which never hash, clean, smudge or check out file content; any other subcommand with
+  filters=False is refused before git starts (this covers run_bytes, whose default is filters off);
 * adds `--no-optional-locks` to read-only calls, takes an argv list and a timeout, never a shell;
 * runs one absolute `git` found on the PATH (no current folder, nothing inside the workspace, the copy or any
   orch worktrees folder), cached per set of such folders.
@@ -69,17 +70,14 @@ _DIFFLIKE = {
     "whatchanged",
     "range-diff",
 }  # (`git cherry` takes none of these flags and runs no diff driver)
-_GLOBAL_WITH_VALUE = {
-    "-C",
-    "-c",
-    "--git-dir",
-    "--work-tree",
-    "--namespace",
-    "--exec-path",
-    "--attr-source",
-    "--config-env",
-    "--super-prefix",
-}
+# The ONLY options safegit lets stand before the subcommand (a CLOSED list: git has options that take the next
+# word as a value, e.g. --shallow-file, and a parser that guesses differently from git can be made to see
+# `rev-parse` where git runs `rm`). -C takes a value; the rest are plain switches.
+_GLOBAL_WITH_VALUE = {"-C"}
+_GLOBAL_PLAIN = {
+    "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs",
+    "--no-optional-locks", "--no-replace-objects", "-P", "--no-pager", "--version",
+}  # fmt: skip
 
 # a value that runs nothing, for the read-only questions orch asks first (no editor is ever involved there)
 _NOOP = ""
@@ -278,6 +276,10 @@ def env(cwd: Path, root: Path | None, true: str, config: list[tuple[str, str]] |
     e["PATH"] = safe_path(cwd, root)
     e["GIT_TERMINAL_PROMPT"] = "0"
     e["GIT_EDITOR"] = e["GIT_SEQUENCE_EDITOR"] = e["GIT_ASKPASS"] = true
+    # refs/replace/* and the grafts file live in the shared repository and an agent can write them: with them
+    # on, a commit id stays the same while its content or parents change (tip and ancestor checks would lie)
+    e["GIT_NO_REPLACE_OBJECTS"] = "1"
+    e["GIT_GRAFT_FILE"] = os.devnull
     if config:
         e["GIT_CONFIG_COUNT"] = str(len(config))
         for i, (k, v) in enumerate(config):
@@ -303,8 +305,27 @@ def base_args(true: str, read_only: bool = False, hooks: str | None = None) -> l
         "-c", "core.untrackedCache=false",
         "-c", "protocol.allow=never",
         "-c", "core.longpaths=true",
+        "-c", "merge.autoStash=false",
+        "-c", "rerere.enabled=false",
         "-c", "commit.gpgSign=false",
         "-c", "tag.gpgSign=false",
+        # a repo's own .git/config (an agent can write it) must never make git run a signature program as the
+        # person: no verification at all, and every gpg program is the trusted no-op
+        "-c", "merge.verifySignatures=false",
+        "-c", "core.useReplaceRefs=false",
+        # .git/objects/info/commit-graph is agent-writable and git trusts the parents stored in it
+        "-c", "core.commitGraph=false",
+        "-c", "gc.writeCommitGraph=false",
+        "-c", "fetch.writeCommitGraph=false",
+        "-c", "diff.ignoreSubmodules=none",
+        "-c", "status.submoduleSummary=false",
+        "-c", f"gpg.program={true}",
+        "-c", f"gpg.openpgp.program={true}",
+        "-c", f"gpg.x509.program={true}",
+        "-c", f"gpg.ssh.program={true}",
+        "-c", "gpg.ssh.defaultKeyCommand=",
+        "-c", "core.gitProxy=",
+        "-c", "core.askPass=",
         "-c", "core.sshCommand=",
         "-c", "credential.helper=",
         "-c", "diff.external=",
@@ -558,11 +579,27 @@ def empty_tree(cwd: Path, root: Path | None = None) -> str | None:
 ALLOWED = {
     "worktree", "read-tree", "update-index", "checkout-index", "ls-files", "rev-parse", "config", "branch",
     "symbolic-ref", "cat-file", "merge-base", "show-ref", "for-each-ref", "status", "diff", "log", "show",
-    "merge", "commit", "add", "rm", "reset", "stash", "check-ignore",
+    "merge", "commit", "add", "rm", "reset", "stash", "check-ignore", "rev-list", "check-attr", "merge-tree",
+    "fsck",
 }  # fmt: skip
 # (check-ignore reads ignore rules only: no content, no filters; --stdin is refused below)
+# (rev-list and check-attr only read: commit graph / attribute names. B13 uses them for ancestry counts and to
+# refuse files that need filters. Neither runs a filter, textconv or external program.)
 _CHECK_IGNORE_OK = {"-q", "--quiet", "-v", "--verbose", "-n", "--non-matching", "--no-index"}
 _WORKTREE_OK = {"add", "remove", "prune", "list"}
+# rev-list and check-attr only read: exact flag sets (no --output=<file>, no abbreviations, no bundles)
+_REV_LIST_OK = {
+    "--count", "--parents", "--first-parent", "--no-merges", "--merges", "--reverse", "-q", "--quiet", "-n",
+}  # fmt: skip
+_CHECK_ATTR_OK = {"-z", "--cached"}
+_FSCK_OK = {"--strict", "--no-dangling", "--no-reflogs", "--no-progress"}  # re-hashes what it reads
+_MERGE_TREE_OK = {
+    "--write-tree",
+    "--name-only",
+    "-z",
+    "--no-messages",
+}  # computes a result tree, touches no work tree
+_ATTR_SOURCE = re.compile(r"--source=[0-9a-fA-F]{7,64}")
 _CONFIG_READ = {"--get", "--get-all", "--get-regexp", "--list", "-l"}
 _NO_MODES = {"add", "commit", "reset", "stash"}  # (checkout/restore/clean/rebase are not allowed at all)
 _BAD_GLOBALS = (
@@ -585,9 +622,11 @@ def refusal(args: list[str]) -> str | None:
     config: reading only). Never an interactive mode: -p/-i/-e and
     every abbreviation of --patch/--interactive/--edit (git accepts `--patc`, `--inter`)."""
     k = subcommand_index(args)
-    for g in args[:k]:
+    if k < len(args) and args[k].startswith("-"):  # any option that is not on the closed list
+        g = args[k]
         if g in _BAD_GLOBALS or any(g.startswith(b + "=") for b in _BAD_GLOBALS if b.startswith("--")):
             return f"git option {g} before the command is not allowed: orch sets git's configuration itself"
+        return f"git option {g} before the command is not allowed: orch passes only its own, known options"
     if k >= len(args):
         return None
     cmd, rest = args[k], args[k + 1 :]
@@ -607,6 +646,29 @@ def refusal(args: list[str]) -> str | None:
         set(flags) <= _CHECK_IGNORE_OK
     ):  # exact names: no abbreviations, bundles
         return "git check-ignore: only -q, -v, -n, --no-index and paths from the argument list are run"
+    if cmd == "rev-list":
+        for a in flags:
+            if a.startswith("-") and a not in _REV_LIST_OK and not re.fullmatch(r"--max-count=\d+", a):
+                return (
+                    "git rev-list: only --count, --parents, --first-parent, -n and similar read flags are run"
+                )
+    if cmd == "fsck":
+        if any(a.startswith("-") and a not in _FSCK_OK for a in rest) or "--" in rest:
+            return "git fsck: only --strict, --no-dangling, --no-reflogs and commit ids are run"
+        if any(not a.startswith("-") and not re.fullmatch(r"[0-9a-f]{40,64}", a) for a in rest):
+            return "git fsck: only full commit ids are run"
+    if cmd == "merge-tree":
+        for a in flags:
+            if a.startswith("-") and a not in _MERGE_TREE_OK:
+                return "git merge-tree: only --write-tree, --name-only, -z and --no-messages are run"
+    if cmd == "check-attr":
+        for a in flags:
+            if (
+                a.startswith("-")
+                and a not in _CHECK_ATTR_OK
+                and not re.fullmatch(r"--source=[0-9a-fA-F]{7,64}", a)
+            ):
+                return "git check-attr: only -z, --cached and --source=<commit> are run"
     if cmd == "config" and not any(a in _CONFIG_READ for a in flags):
         return "git config: orch only reads the configuration"
     if cmd in _NO_MODES or cmd == "add":
@@ -629,7 +691,8 @@ _LS_FILES_OK = {"-z", "-s", "--stage", "-o", "--others", "--exclude-standard", "
 FILTERS_OFF_OK = {
     "rev-parse": None,  # resolves names and paths; reads refs only
     "symbolic-ref": None,  # reads / writes HEAD
-    "branch": None,  # refs only
+    "branch": {"-D", "-d", "--list"},  # refs only
+    "check-attr": None,  # attribute lookup only; refusal() limits it to -z, --cached, --source=<commit>
     "check-ignore": None,  # ignore rules only (already limited by refusal())
     "worktree": None,  # only prune, list, add --no-checkout (no checkout: no content is written)
     "ls-files": _LS_FILES_OK,  # names from the index / directory walk; never -m/-d/--eol (stat + hash)
@@ -649,22 +712,33 @@ def filters_off_refusal(args: list[str]) -> str | None:
         return why
     if cmd == "worktree":
         sub = rest[0] if rest else ""
-        if sub in ("prune", "list") or (sub == "add" and "--no-checkout" in flags):
+        if sub in ("prune", "list"):
             return None
+        if sub == "add" and "--no-checkout" in flags:
+            # git takes the LAST of --checkout / --no-checkout (and any abbreviation of --checkout)
+            after = flags[len(flags) - flags[::-1].index("--no-checkout") :]
+            if not any(len(a) >= 3 and a.startswith("--") and "--checkout".startswith(a) for a in after):
+                return None
         return why
     ok = FILTERS_OFF_OK[cmd]
-    if ok is not None and not set(flags) <= ok:
+    if ok is not None and not {a for a in flags if a.startswith("-")} <= ok:  # (names are not options)
         return why
     return None
 
 
 def subcommand_index(args: list[str]) -> int:
-    """Index of the git subcommand in `args`, past leading global options (-C x, -c k=v, --literal-pathspecs,
-    --opt=value ...); len(args) when there is none."""
+    """Index of the git subcommand in `args`, past the leading global options of the CLOSED list above (-C x,
+    --literal-pathspecs, ...). Stops at the first other word: refusal() refuses it when it is an option, so an
+    unknown option that takes a value can never hide the real subcommand. len(args) when there is none."""
     i = 0
-    while i < len(args) and args[i].startswith("-"):
-        i += 2 if args[i] in _GLOBAL_WITH_VALUE else 1
-    return i
+    while i < len(args):
+        if args[i] in _GLOBAL_WITH_VALUE:
+            i += 2
+        elif args[i] in _GLOBAL_PLAIN:
+            i += 1
+        else:
+            break
+    return min(i, len(args))
 
 
 def driver_args(
@@ -707,10 +781,68 @@ def driver_args(
     return pairs
 
 
+HISTORY_FILES = ("shallow", "objects/info/alternates", "objects/info/grafts", "info/grafts")
+HISTORY_REFUSAL = (
+    "this repository has a shallow, alternates or grafts file, which can change what its history says: "
+    "orch did not run git here"
+)
+
+
+def _git_dirs(cwd: Path) -> list[Path]:
+    """The git folder of `cwd` and its common folder (a work copy points at the project's), found without
+    running git; [] when none is found (git itself then fails or finds nothing)."""
+    here = Path(cwd).absolute()
+    for d in (here, *here.parents):
+        dot = d / ".git"
+        try:
+            if dot.is_symlink():
+                return [dot]  # git follows it; hostile_history refuses it (the control folder is not ours)
+            if dot.is_dir():
+                return [dot]
+            if dot.is_file():
+                line = dot.read_text(errors="replace").splitlines()[0:1]
+                if line and line[0].startswith("gitdir:"):
+                    gd = Path(line[0][7:].strip())
+                    gd = gd if gd.is_absolute() else d / gd
+                    out = [gd]
+                    common = gd / "commondir"
+                    if common.is_file():
+                        c = Path(common.read_text(errors="replace").strip())
+                        out.append(c if c.is_absolute() else gd / c)
+                    return out
+                return []
+        except (OSError, ValueError):
+            return []
+    return []
+
+
+def hostile_history(cwd: Path) -> str | None:
+    """A reason when the repository carries a file git trusts for history that an agent can write (shallow
+    boundary, alternates, grafts): they fake ancestry, merge bases and what a commit id contains."""
+    for g in _git_dirs(cwd):
+        if g.is_symlink():
+            return HISTORY_REFUSAL
+        for f in HISTORY_FILES:
+            if os.path.lexists(g / f):
+                return HISTORY_REFUSAL
+    return None
+
+
+# Format-only fsck messages of old imported history (CVS/SVN conversions): ignored for orch's own fsck call so
+# that ANY other non-zero result (a differing, missing or unreadable object, or a message not listed here)
+# is a refusal. Hash mismatches are not message ids and can never be switched off.
+FSCK_FORMAT_OK = (
+    "badTimezone", "badDate", "badDateOverflow", "missingEmail", "missingNameBeforeEmail",
+    "badEmail", "badName", "zeroPaddedDate", "zeroPaddedFilemode", "badFilemode", "emptyName",
+    "missingSpaceBeforeDate", "missingSpaceBeforeEmail", "badTagName", "extraHeaderEntry",
+    "multipleAuthors", "missingTaggerEntry",
+)  # fmt: skip
+
+
 def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
     """(argv, config) for git `args`, or (None, (rc, reason)) when orch refuses to run it."""
     why = refusal(args) or (None if filters else filters_off_refusal(args))
-    why = why or unusable_root(guard if guard is not None else root)
+    why = why or unusable_root(guard if guard is not None else root) or hostile_history(cwd)
     if why:
         return None, (REFUSED, why)
     top: list[str] = []  # options before the subcommand
@@ -749,7 +881,12 @@ def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
             REFUSED,
             "orch could not find a trusted `true` program, so it did not run git here." + _TRUE_HINT,
         )
-    return ["git", *top, *base_args(true, read_only, _no_hooks(cwd, root)), *sub], extra
+    fsck = (
+        [x for i in FSCK_FORMAT_OK for x in ("-c", f"fsck.{i}=ignore")]
+        if k < len(sub) and sub[k] == "fsck"
+        else []
+    )
+    return ["git", *top, *base_args(true, read_only, _no_hooks(cwd, root)), *fsck, *sub], extra
 
 
 def run(

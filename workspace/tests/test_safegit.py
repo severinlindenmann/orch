@@ -127,7 +127,7 @@ def test_creating_preparing_and_dropping_a_copy_never_runs_repo_code(hostile, pr
     addons.workspace_id(r, create=True)
     e = worktrees.create(r, "t_abc123")
     assert e is not None and (Path(e["path"]) / "a.txt").read_text() == "hello\n"
-    worktrees._drop_partial(r, Path(e["path"]), e["branch"], True)
+    worktrees._drop_partial(r, Path(e["path"]), e["branch"], True, e["base"])
     assert marks(marker) == []
 
 
@@ -247,6 +247,8 @@ def test_diff_like_calls_get_no_ext_diff_and_the_future_defaults(tmp_path, monke
     for want in (
         "diff.external=",
         "commit.gpgSign=false",
+        "merge.autoStash=false",
+        "rerere.enabled=false",
         "tag.gpgSign=false",
         "core.sshCommand=",
         "credential.helper=",
@@ -599,7 +601,7 @@ def test_nothing_that_prepares_a_copy_runs_git_with_a_copy_as_cwd():
 @pytest.mark.usefixtures("filters_gate_off")
 def test_subcommand_is_found_past_global_options(tmp_path, monkeypatch):
     monkeypatch.setattr(safegit, "ALLOWED", safegit.ALLOWED | safegit._DIFFLIKE)  # flag handling only
-    assert safegit.subcommand_index(["-C", "x", "--literal-pathspecs", "-c", "a=b", "diff"]) == 5
+    assert safegit.subcommand_index(["-C", "x", "--literal-pathspecs", "--no-pager", "diff"]) == 4
     assert safegit.subcommand_index(["status"]) == 0
     seen = []
     monkeypatch.setattr(
@@ -728,8 +730,11 @@ def test_find_exe_never_returns_a_committed_program(tmp_path, monkeypatch):
 
 
 def test_global_options_with_a_value_are_skipped():
-    for opt in ("--config-env", "--super-prefix", "-C", "-c", "--attr-source"):
-        assert safegit.subcommand_index([opt, "v", "whatchanged"]) == 2
+    assert safegit.subcommand_index(["-C", "v", "whatchanged"]) == 2
+    # every other option stops the scan AT the option: it is refused, it never swallows the next word
+    for opt in ("--config-env", "--super-prefix", "-c", "--attr-source", "--shallow-file", "--exec-path"):
+        assert safegit.subcommand_index([opt, "v", "whatchanged"]) == 0
+        assert safegit.refusal([opt, "v", "whatchanged"])
 
 
 @pytest.mark.parametrize(
@@ -761,6 +766,9 @@ def test_external_tools_and_interactive_modes_are_refused(args, tmp_path):
         ["stash", "list"],
         ["commit", "-m", "msg"],
         ["worktree", "add", "p"],
+        ["rev-list", "--count", "a..b"],
+        ["merge-tree", "--write-tree", "--name-only", "-z", "a", "b"],
+        ["check-attr", "filter", "diff", "text", "--", "f.txt"],
     ],
 )
 def test_ordinary_calls_are_not_refused(args):
@@ -827,8 +835,40 @@ def test_literal_pathspecs_and_the_hardening_apply_to_every_allowed_subcommand(t
             assert want in argv, (cmd, want)
         assert any(a.startswith("core.editor=/") for a in argv), cmd
         assert any(a == "core.hooksPath=/dev/null" for a in argv), cmd
+        # a repo-writable config can never make git run a signature program (every git call of orch)
+        true = next(a.split("=", 1)[1] for a in argv if a.startswith("core.editor="))
+        for want in (
+            "merge.verifySignatures=false",
+            "core.useReplaceRefs=false",
+            "diff.ignoreSubmodules=none",
+            f"gpg.program={true}",
+            f"gpg.openpgp.program={true}",
+            f"gpg.x509.program={true}",
+            f"gpg.ssh.program={true}",
+            "gpg.ssh.defaultKeyCommand=",
+            "core.gitProxy=",
+            "core.askPass=",
+        ):
+            assert want in argv, (cmd, want)
     safegit.run(["--literal-pathspecs", "ls-files"], tmp_path, filters=False)
     assert safegit.refusal(["--literal-pathspecs", "ls-files"]) is None
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["merge-tree", "--write-tree", "--merge-base=x", "a", "b"],
+        ["merge-tree", "--trivial-merge", "a", "b", "c"],
+        ["rev-list", "--output=/tmp/x", "HEAD"],
+        ["rev-list", "--exec=x", "HEAD"],
+        ["rev-list", "--count", "--objects", "HEAD"],
+        ["check-attr", "--source", "x", "filter", "--", "f"],
+        ["check-attr", "--all", "--", "f"],
+        ["check-attr", "-z", "--stdin", "filter"],
+    ],
+)
+def test_rev_list_and_check_attr_run_only_exact_read_flags(args):
+    assert safegit.refusal(args) is not None
 
 
 def test_flags_that_are_not_bad_words_still_pass():
@@ -1527,6 +1567,11 @@ FILTERS_OFF_CALLS = [
     ["ls-files", "-z", "--others", "--exclude-standard", "--", "."],
     ["--literal-pathspecs", "ls-files", "-z", "--", ".orch"],
     ["-C", ".", "ls-files", "--error-unmatch", "--", "a.txt"],
+    ["check-attr", "-z", "filter", "eol", "--", "a.txt"],
+    ["check-attr", "-z", "--source=" + "a" * 40, "filter", "--", "a.txt"],
+    ["check-attr", "-z", "--cached", "filter", "--", "a.txt"],
+    ["worktree", "add", "--no-checkout", "-b", "zz", "../zz", "HEAD"],
+    ["branch", "-d", "--", "nothere"],
 ]
 FILTERS_OFF_REFUSED = [
     ["rm", "--cached", "-f", "-q", "--", "a.txt"],
@@ -1547,6 +1592,24 @@ FILTERS_OFF_REFUSED = [
     ["-c", "core.pager=x", "status"],  # refused anyway
     ["-C", ".", "rm", "--cached", "a.txt"],
     ["--no-optional-locks", "add", "-A"],
+    [
+        "--shallow-file",
+        "rev-parse",
+        "rm",
+        "--cached",
+        "a.txt",
+    ],  # git reads --shallow-file's value as the next word
+    ["--paginate", "rev-parse", "HEAD"],
+    ["-p", "rev-parse", "HEAD"],
+    ["--bare", "rev-parse", "HEAD"],
+    ["--exec-path", "rev-parse", "HEAD"],
+    ["--unknown-global", "x", "rev-parse"],
+    ["worktree", "add", "--no-checkout", "--checkout", "-b", "zz", "../zz", "HEAD"],  # the last one wins
+    ["worktree", "add", "--no-checkout", "--check", "-b", "zz", "../zz", "HEAD"],  # an abbreviation of it
+    ["branch", "-m", "a", "b"],
+    ["branch", "--set-upstream-to=x"],
+    ["branch", "-f", "a", "HEAD"],
+    ["check-attr", "--all", "a.txt"],
 ]
 
 
@@ -1585,6 +1648,15 @@ def test_filters_off_allowlist_runs_and_never_runs_the_clean_filter(canary_repo,
     assert not canary.exists()
 
 
+def test_the_gate_is_what_stops_the_canary(canary_repo, monkeypatch):
+    """Positive control: with the gate switched off, `status` (stat-dirty files) does run the clean filter."""
+    r, canary = canary_repo
+    monkeypatch.setattr(safegit, "filters_off_refusal", lambda args: None)
+    monkeypatch.setattr(safegit, "refusal", lambda args: None)
+    safegit.run(["status", "--porcelain"], r, read_only=False, filters=False)
+    assert canary.exists()
+
+
 @pytest.mark.parametrize("args", FILTERS_OFF_REFUSED, ids=lambda a: " ".join(a))
 def test_filters_off_for_anything_else_is_refused_before_git_starts(canary_repo, monkeypatch, args):
     r, canary = canary_repo
@@ -1603,6 +1675,148 @@ def test_filters_off_allowlist_is_only_what_callers_need():
         "symbolic-ref",
         "branch",
         "check-ignore",
+        "check-attr",
         "worktree",
         "ls-files",
     }
+
+
+def test_replace_refs_and_grafts_never_change_what_orch_sees(tmp_path):
+    """The shared repository's refs/replace/* (an agent can write them) must not alter commit content or
+    ancestry for any orch git call: the reviewed-tip and ancestor checks depend on it."""
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("one\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "one")
+    plain_git(r, "checkout", "-qb", "side")
+    (r / "a.txt").write_text("two\n")
+    plain_git(r, "commit", "-qam", "two")
+    side = plain_git(r, "rev-parse", "HEAD")
+    plain_git(r, "checkout", "-q", "-")
+    (r / "a.txt").write_text("evil\n")
+    plain_git(r, "commit", "-qam", "evil")
+    evil = plain_git(r, "rev-parse", "HEAD")
+    plain_git(r, "replace", side, evil)  # same id, other content
+    plain_git(r, "replace", "--graft", plain_git(r, "rev-parse", "HEAD"), side)  # side becomes an ancestor
+    rc, out, _ = safegit.run(["cat-file", "-p", f"{side}:a.txt"], r, read_only=True)
+    assert rc == 0 and out.strip() == "two"
+    rc, _, _ = safegit.run(["merge-base", "--is-ancestor", side, "HEAD"], r, read_only=True)
+    assert rc != 0
+
+
+def test_ignore_submodules_in_the_repo_config_does_not_hide_a_gitlink(tmp_path):
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("x\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "base")
+    plain_git(r, "update-index", "--add", "--cacheinfo", "160000", "a" * 40, "sub")
+    plain_git(r, "commit", "-qm", "gitlink")
+    plain_git(r, "config", "diff.ignoreSubmodules", "all")
+    rc, out, _ = safegit.run(["diff", "--raw", "-z", "--no-renames", "HEAD~1", "HEAD"], r, read_only=True)
+    assert rc == 0 and ":000000 160000" in out
+
+
+def test_history_files_an_agent_can_write_are_not_trusted(tmp_path, monkeypatch):
+    """B13: the commit-graph is switched off for every call; a shallow, alternates or grafts file in the
+    repository (or the project a work copy belongs to) makes orch refuse to run git there."""
+    seen = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
+    )
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    safegit.run(["rev-parse", "HEAD"], r, read_only=True, filters=False)
+    assert "core.commitGraph=false" in seen[-1] and "gc.writeCommitGraph=false" in seen[-1]
+    for rel in ("shallow", "objects/info/alternates", "objects/info/grafts", "info/grafts"):
+        f = r / ".git" / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("0" * 40 + "\n")
+        n = len(seen)
+        rc, _, err = safegit.run(["rev-parse", "HEAD"], r, read_only=True, filters=False)
+        assert rc == safegit.REFUSED and err == safegit.HISTORY_REFUSAL and len(seen) == n, rel
+        f.unlink()
+    assert safegit.run(["rev-parse", "HEAD"], r, read_only=True, filters=False)[0] == 0
+
+
+def test_a_work_copy_of_a_shallow_project_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(safegit, "_raw", lambda *a, **k: (0, "", ""))
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    plain_git(r, "config", "user.email", "t@t")
+    plain_git(r, "config", "user.name", "t")
+    (r / "a").write_text("x\n")
+    plain_git(r, "add", "-A")
+    plain_git(r, "commit", "-qm", "i")
+    wt = tmp_path / "wt"
+    plain_git(r, "worktree", "add", "-q", "-b", "q", str(wt))
+    assert safegit.run(["rev-parse", "HEAD"], wt, read_only=True, filters=False)[0] == 0
+    (r / ".git" / "shallow").write_text("0" * 40 + "\n")
+    assert safegit.run(["rev-parse", "HEAD"], wt, read_only=True, filters=False)[0] == safegit.REFUSED
+
+
+def test_fsck_runs_only_in_its_checking_form_and_a_symlinked_git_folder_is_refused(tmp_path):
+    ok = ["fsck", "--strict", "--no-dangling", "--no-reflogs", "a" * 40, "b" * 40]
+    assert safegit.refusal(ok) is None
+    for bad in (["fsck", "--lost-found"], ["fsck", "--name-objects"], ["fsck", "HEAD"], ["fsck", "--", "x"]):
+        assert safegit.refusal(bad), bad
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    moved = tmp_path / "elsewhere"
+    (r / ".git").rename(moved)
+    (r / ".git").symlink_to(moved)
+    assert safegit.hostile_history(r) == safegit.HISTORY_REFUSAL
+
+
+def test_every_fsck_format_id_can_really_be_ignored(tmp_path):
+    """git refuses to demote some ids ("Cannot demote ... to ignore"): only accepted ids are listed."""
+    r = tmp_path / "r"
+    r.mkdir()
+    plain_git(r, "init", "-q")
+    for i in safegit.FSCK_FORMAT_OK:
+        p = subprocess.run(["git", "-c", f"fsck.{i}=ignore", "fsck"], cwd=r, capture_output=True, text=True)
+        assert "Cannot demote" not in p.stderr, i
+
+
+UNKNOWN_GLOBALS = [
+    ["--shallow-file", "x", "rev-parse", "HEAD"],
+    ["--shallow-file", "rev-parse", "rm", "--cached", "a.txt"],
+    ["--bare", "rev-parse", "HEAD"],
+    ["-p", "rev-parse", "HEAD"],
+    ["--paginate", "rev-parse", "HEAD"],
+    ["--exec-path=/x", "rev-parse", "HEAD"],
+    ["--super-prefix=x", "rev-parse", "HEAD"],
+    ["--frobnicate", "rev-parse", "HEAD"],
+    ["-C", "x", "--frobnicate", "rev-parse", "HEAD"],  # after a known one too
+]
+
+
+@pytest.mark.parametrize("filters", [True, False], ids=["filters-on", "filters-off"])
+@pytest.mark.parametrize("args", UNKNOWN_GLOBALS, ids=lambda a: " ".join(a))
+def test_unknown_leading_options_are_refused_before_git_starts(canary_repo, monkeypatch, args, filters):
+    """Only the closed list of leading options (with its exact arity) is accepted; no denylist."""
+    r, _ = canary_repo
+    started = []
+    monkeypatch.setattr(safegit, "_raw", lambda *a, **k: started.append(a) or (0, "", ""))
+    monkeypatch.setattr(safegit, "_raw_bytes", lambda *a, **k: started.append(a) or (0, b"", ""))
+    assert safegit.run(args, r, filters=filters)[0] == safegit.REFUSED
+    assert safegit.run_bytes(args, r, filters=filters)[0] == safegit.REFUSED
+    assert started == []
+
+
+def test_the_closed_list_of_leading_options_has_exact_arity():
+    assert safegit.subcommand_index(["-C", "x", "rev-parse"]) == 2  # exactly one value
+    assert safegit.subcommand_index(["--no-optional-locks", "--literal-pathspecs", "rev-parse"]) == 2
+    assert safegit.subcommand_index(["-C", "rev-parse"]) == 2  # -C swallows one word, as git does

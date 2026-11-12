@@ -473,6 +473,7 @@ def test_git_click_with_a_session_is_one_step_with_a_proof(live, monkeypatch, op
 
 TID = "t_abcdef"
 ACT_ARGS = {
+    "copies.ask-update": {"ticket": "t_abcdef"},
     "link.extend": {"id": "f_abc", "days": 3},
     "link.stop": {"id": "f_abc"},
     "answer": {"ticket": TID, "question": "q1", "answer": "x"},
@@ -501,6 +502,7 @@ ACT_ARGS = {
     "copies.clean": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},
+    "copies.approve": {"ticket": TID, "tip": "a" * 40, "control_paths": 0, "paths_hash": "12345678"},
     "look.set": {"icon": "bolt", "color": "auto"},
     "look.shared": {"on": False},
     "mobile.set": {"on": True},

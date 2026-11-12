@@ -7,8 +7,8 @@ Words for people are "copy"; underneath it is `git worktree add`. What this modu
   ticket id pattern and the resolved path must stay inside <orch home>/worktrees/<ws8>/ (path_for). Copies are
   never inside the project, so the project's `git status` never shows them.
 * WHAT git is asked: only argv lists, never a shell, always `-c core.longpaths=true` (Windows) and a timeout.
-  The branch is `orch/<ticket>`. Nothing here commits or merges (bring-back is a later step; ID_ARGS is the
-  identity that step uses when the person has none).
+  The branch is `orch/<ticket>`. Done work is saved and brought back under the copies lock;
+  deletion verifies ancestry independently of the recorded bring-back state.
 * THE SPLIT STORE: the tracked `.orch/` of the project (tickets, config) is never written into a copy: the
   copy is checked out with `.orch` marked skip-worktree and left out of the working tree, so an agent's
   `git add -A` in the copy can never commit ticket JSON, and `git status` there stays clean. Every orch
@@ -55,12 +55,14 @@ REGISTRY = Path(".orch") / "run" / "worktrees.json"
 LOCK_ID = "_copies"  # runs.locked(root, LOCK_ID): the workspace-level "decide + create + claim" lock
 LOCK_WAIT = 150.0  # a worktree of a big repo can take a while; the lock timeout must outlast GIT_ADD_TIMEOUT
 GIT_TIMEOUT = 20
+FSCK_TIMEOUT = 900  # the object check before a merge reads the whole history of both sides
 GIT_ADD_TIMEOUT = 60
 CREATE_BUDGET = 100.0  # all git time of one _create; LOCK_WAIT must stay above it
 SETUP_TIMEOUT = 600
 ID_ARGS = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits made by orch (bring-back)
 _TID = re.compile(r"t_[a-z0-9]{6,16}")
 _WS8 = re.compile(r"[0-9a-f]{8}")
+_SHA = re.compile(r"[0-9a-f]{40,64}")
 
 
 # ---------------------------------------------------------------- git, as argv lists only
@@ -317,8 +319,25 @@ def _remember_copies(root: Path, folder: Path) -> None:
                 raise Refused("Another workspace uses the same copy folder.")
         if old is not None and old != main:
             _write_copies_owner(folder, main)
-        known[folder.name] = {"main": main, "workspace_id": wid}
+        known[folder.name] = {**(entry or {}), "main": main, "workspace_id": wid}
         _save_copies_store(home, key, counter, known)
+
+
+def _copy_authority(root: Path, ticket: str, update=None) -> dict:
+    """Ticket authority lives only in the guarded, authenticated machine store."""
+    home = addons.home(root)
+    with runs.locked(home / ".copies-state", "_known_copies"):
+        key = _copies_key(home)
+        counter, entries = _copies_store(home, key)
+        wid = addons.workspace_id(root)
+        entry = entries.get((wid or "")[:8], {})
+        if entry.get("workspace_id") != wid or entry.get("main") != str(root.resolve()):
+            raise Refused("The copies identity does not match this project.")
+        record = entry.setdefault("tickets", {}).setdefault(ticket, {})
+        if update is not None:
+            update(record)
+            _save_copies_store(home, key, counter, entries)
+        return dict(record)
 
 
 def _known_gone(d: Path, known: dict | None = None) -> bool:
@@ -509,15 +528,21 @@ def _repo(root: Path) -> tuple[Path, str, str] | None:
     return top, ("" if rel == "." else rel), head
 
 
-def _drop_partial(top: Path, dest: Path, branch: str, made_branch: bool) -> None:
-    """A copy that did not get finished: take back exactly what this call made (this path, this branch)."""
+def _drop_partial(top: Path, dest: Path, branch: str, made_branch: bool, head: str | None = None) -> None:
+    """A copy that did not get finished: take back exactly what this call made (this path, this branch).
+    The branch goes only while it still points at the commit it was made from (`head`): a branch that
+    holds anything else (it was there already, or got a commit meanwhile) is never deleted here."""
     # filters stay ON here: `remove` looks at file content (is it dirty?) and must not run a driver either
     _git(["worktree", "remove", "--force", str(dest)], top)
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)  # dest is the path_for() path we just made, nothing else
     _git(["worktree", "prune"], top, filters=False)
-    if made_branch:
-        _git(["branch", "-D", branch], top, filters=False)
+    if made_branch and head:
+        rc, tip, _ = _git(
+            ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], top, read_only=True, filters=False
+        )
+        if rc == 0 and tip == head:
+            _git(["branch", "-D", branch], top, filters=False)
 
 
 def _create(root: Path, ticket: str) -> tuple[dict | None, str]:
@@ -572,7 +597,25 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     rc, _, _ = _git(
         ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], top, read_only=True, filters=False
     )
-    made_branch = rc != 0
+    if rc not in (0, 1):  # a timeout or a git that failed is not "no branch": never start a new round on it
+        return None, "git could not read the copy's branch; try again"
+    made_branch = rc == 1
+    # The branch the work goes back to and the commit it starts from are recorded (signed) BEFORE anything
+    # is made: a detached HEAD or an unusable store is a plain reason, never a half-made copy.
+    rc, origin, _ = _git(["symbolic-ref", "-q", "HEAD"], top, read_only=True, filters=False)
+    if rc != 0 or not origin.startswith("refs/heads/"):
+        return None, "Your project is not on a branch right now: switch to a branch first."
+
+    def record(r):
+        if made_branch:
+            r.clear()  # a new branch starts a new round: nothing of an earlier one applies
+        r.setdefault("origin_branch", origin)
+        r.setdefault("base", head)
+
+    try:
+        _copy_authority(root, ticket, record)
+    except (OSError, ValueError, Refused) as e:
+        return None, f"orch cannot record the copy: {e}"
     add = [
         "worktree",
         "add",
@@ -581,7 +624,7 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     add += ["-b", branch, str(dest), "HEAD"] if made_branch else [str(dest), branch]
     rc, _, err = _git(add, top, GIT_ADD_TIMEOUT, filters=False)
     if rc != 0:
-        _drop_partial(top, dest, branch, made_branch)
+        _drop_partial(top, dest, branch, made_branch, head)
         return None, f"git could not make the copy: {err.splitlines()[-1] if err else 'unknown error'}"
     steps = [
         (["read-tree", "HEAD"], None),
@@ -610,7 +653,7 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
         if rc != 0:
             break
     if rc != 0:
-        _drop_partial(top, dest, branch, made_branch)
+        _drop_partial(top, dest, branch, made_branch, head)
         return None, f"git could not fill the copy: {err.splitlines()[-1] if err else 'unknown error'}"
     start = dest / rel if rel else dest
     start.mkdir(parents=True, exist_ok=True)
@@ -621,7 +664,7 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
         mine["paths"] = [p for p in mine["paths"] if p.get("path") != entry["path"]] + [entry]
         _save_registry(root, reg)
     except OSError as e:
-        _drop_partial(top, dest, branch, made_branch)
+        _drop_partial(top, dest, branch, made_branch, head)
         return None, f"orch cannot write its list of copies: {e}"
     return entry, ""
 
@@ -748,6 +791,1424 @@ def _record_on_ticket(root: Path, ticket: str, entry: dict) -> None:
     tickets.apply_op(root, ticket, fn, by=tickets.SYSTEM)
 
 
+# ---------------------------------------------------------------- bring-back
+
+BRING_BACK_TIMEOUT = None  # git is never killed in the middle of a merge (design fix 7)
+
+
+APPROVAL_NEEDED = (
+    "These changes are not the ones you reviewed before marking this done: they need your approval"
+)
+NO_TIP = "none"  # --shown-tip value: the page showed no review tip
+OBJECTS_BAD = "The stored history does not check out (an object differs from its id): a person needs to look"
+NEW_CHANGES = "New changes arrived after you looked; approve them to bring them back"
+CONFLICT_PENDING = "The agent has not finished resolving a conflict"
+CRISS_CROSS = "bring it back by hand"
+BASE_CHANGED = "Your project's history changed since the copy was made. A person needs to check it."
+NAME_CLASH = "two file names differ only in upper and lower case: bring them back by hand"
+STAGED = "you have staged changes in your folder: commit or unstage them first"
+INTERRUPTED_BB = (
+    "orch was stopped while bringing your work back. Check your folder (git status), "
+    "then use Review and bring back."
+)
+MERGING = "a merge is in progress in your folder"
+FILES_CHANGED = "The copy's files changed during the merge; nothing was merged"
+CHANGED = "your folder changed while saving - nothing was removed"
+OVERLAP = "your folder has changes in the same places"
+UPDATE = "your project changed in the same places; ask the agent to update"
+UNREADABLE = "git could not read your folder"
+MERGED_OUTSIDE = "the work is in your branch, but orch did not bring it back: check your folder"
+FOREIGN = "a branch appeared that orch did not make: check it by hand"
+SETTINGS = "a git setting changes how the merge works: bring it back by hand"
+ODD_NAME = "a file name needs a careful look: bring it back by hand"
+RUN_STATE = "the work changes orch's own run files: bring it back by hand"
+RECOVER_SECONDS = 600  # an interrupted merge is undone only this soon after it started
+# git settings that make `git merge` (or its checkout) differ from merge-tree's answer: only their defaults
+MERGE_SETTINGS = r"^(merge\.(renames|directoryrenames|renormalize)|core\.sparsecheckout|submodule\.recurse)$"
+MERGE_DEFAULTS = {
+    "merge.renames": ("true",),
+    "merge.directoryrenames": ("conflict",),
+    "merge.renormalize": ("false",),
+    "core.sparsecheckout": ("false",),
+    "submodule.recurse": ("false",),
+}
+# The Need row shows text from THIS table only (by code); the free reason text is never displayed from the
+# unsigned pending file. Unknown codes show the generic "waiting" text.
+BRING_BACK_REASONS = {
+    "approval": APPROVAL_NEEDED,
+    "newer": NEW_CHANGES,
+    "conflict": CONFLICT_PENDING,
+    "manual": CRISS_CROSS,
+    "base": BASE_CHANGED,
+    "names": NAME_CLASH,
+    "staged": STAGED,
+    "interrupted": INTERRUPTED_BB,
+    "controls": "Your work touches control files. A person has to review it before it is brought back.",
+    "agent": "an agent is still working in the copy",
+    "agent-folder": "an agent is still working in your folder",
+    "not-copy": "git could not confirm this is your copy",
+    "unreadable": "git could not read your folder",
+    "journal": "the recovery record is not safe to use",
+    "merging": "a merge is in progress in your folder",
+    "busy": "a merge or another git operation is in progress in your folder",
+    "changed": "your folder changed while saving - nothing was removed",
+    "origin": "The original project branch was not recorded. A person needs to check it.",
+    "branch": "your project is on another branch",
+    "filename": "git could not read a changed filename",
+    "overlap": "your folder has changes in the same places",
+    "attributes": "files need special handling: bring them back by hand",
+    "time": "saving needs more time; the next sweep will try again",
+    "update": "your project changed in the same places; ask the agent to update",
+    "more": "the agent added more changes while saving; nothing was removed",
+    "outside": MERGED_OUTSIDE,
+    "foreign": FOREIGN,
+    "settings": SETTINGS,
+    "oddname": ODD_NAME,
+    "runstate": RUN_STATE,
+    "waiting": "Your work is waiting to be brought back.",
+}
+
+
+def _reason_code(reason: str) -> str:
+    if reason.startswith("Your work touches files that control"):
+        return "controls"
+    return next((k for k, v in BRING_BACK_REASONS.items() if v == reason), "waiting")
+
+
+def _copy_conflict(want: Path) -> bool:
+    for marker in ("MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+        path = _bb_read(want, ["rev-parse", "--git-path", marker])
+        if (want / path).exists():
+            return True
+    return bool(_bb_read(want, ["ls-files", "--unmerged", "-z"], strip=False))
+
+
+def _preview(top: Path, tip: str) -> tuple[str | None, bool]:
+    """(tree, clean): the tree a merge of `tip` into HEAD would write, from `merge-tree --write-tree`
+    (git >= 2.38; nothing is written to the folder or the index). (None, False) when this git cannot tell.
+    Criss-cross history (more than one merge base) is refused: the virtual base could revert files no
+    single-base diff shows. Inside one bring-back the answer is computed once (_ctx.preview)."""
+    head = _bb_read(top, ["rev-parse", "HEAD"])
+    cache = getattr(_ctx, "preview", None)
+    key = (str(top), head, tip)
+    if cache is not None and key in cache:
+        return cache[key]
+    bases = _bb_read(top, ["merge-base", "--all", head, tip]).splitlines()
+    if len(bases) > 1:
+        raise Refused(CRISS_CROSS)
+    rc, out, _ = _git(["merge-tree", "--write-tree", head, tip], top, read_only=True)
+    if rc in (0, 1) and out:
+        tree = out.splitlines()[0]
+        if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
+            raise Refused(UNREADABLE)
+        result = (tree, rc == 0)
+    elif rc in (125, 129):  # an older git without --write-tree: the criss-cross refusal above stands
+        result = (None, False)
+    else:
+        raise Refused(UNREADABLE)
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def _safety_ranges(top: Path, tip: str) -> list[tuple[list[str], bool]]:
+    """What the merge would really change, as diff ranges: `HEAD...tip` and HEAD against the tree the merge
+    would write. Every safety check reads ALL ranges. Each range carries whether its added lines are real
+    content (a conflicted merge-tree result contains markers git generated itself: only its paths count)."""
+    tree, clean = _preview(top, tip)
+    ranges = [([f"HEAD...{tip}"], True)]
+    if tree:
+        ranges.append((["HEAD", tree], clean))
+    return ranges
+
+
+def _touched(top: Path, tip: str) -> list[str]:
+    """Every path the merge would change, from all ranges."""
+    names: set[str] = set()
+    for revs, _ in _safety_ranges(top, tip):
+        out = _bb_read(top, ["diff", "--name-only", "--no-renames", "-z", *revs], strip=False)
+        names.update(p for p in out.split("\0") if p)
+    return sorted(names)
+
+
+def _norm(p: str) -> str:
+    import unicodedata
+
+    return unicodedata.normalize("NFC", p.replace("\\", "/")).casefold().rstrip("/")
+
+
+def _prep(paths) -> tuple[set[str], set[str]]:
+    """Normalised paths and all their parent folders, computed once (overlap checks stay linear)."""
+    exact: set[str] = set()
+    parents: set[str] = set()
+    for p in paths:
+        n = _norm(p)
+        exact.add(n)
+        parts = n.split("/")
+        parents.update("/".join(parts[:i]) for i in range(1, len(parts)))
+    return exact, parents
+
+
+def _hits(prep: tuple[set[str], set[str]], name: str) -> bool:
+    """`name` is one of the prepared paths, a folder above one, or inside one (case and NFC folded)."""
+    exact, parents = prep
+    n = _norm(name)
+    if n in exact or n in parents:
+        return True
+    parts = n.split("/")
+    return any("/".join(parts[:i]) in exact for i in range(1, len(parts)))
+
+
+def _name_clash(touched: list[str], tracked) -> bool:
+    """A touched path (or a folder above it) is spelled differently from a tracked one or another touched
+    one but folds to the same name (case, NFC): on a case-insensitive disk the merge would write through to
+    the other file."""
+    spelled: dict[str, set[str]] = {}
+
+    def prefixes(p):
+        parts = p.replace("\\", "/").split("/")
+        return ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+
+    for p in tracked:
+        for s in prefixes(p):
+            spelled.setdefault(_norm(s), set()).add(s)
+    for p in touched:
+        for s in prefixes(p):
+            known = spelled.setdefault(_norm(s), set())
+            if known and s not in known:
+                return True
+            known.add(s)
+    return False
+
+
+def _chunks(paths: list[str], limit: int = 16000):
+    """Paths in groups whose command line stays short (Windows: about 32k characters in all)."""
+    chunk: list[str] = []
+    size = 0
+    for p in paths:
+        if chunk and size + len(p) + 1 > limit:
+            yield chunk
+            chunk, size = [], 0
+        chunk.append(p)
+        size += len(p) + 1
+    if chunk:
+        yield chunk
+
+
+SPECIAL_ATTRIBUTES = ("filter", "eol", "working-tree-encoding", "ident", "merge")
+
+
+def _special_attributes(top: Path, tip: str, touched: list[str]) -> bool:
+    """Any touched path with a filter, eol, encoding, ident or merge attribute (work tree, index, and the
+    tip's own .gitattributes where git >= 2.40 can read it)."""
+    sources: list[list[str]] = [[], ["--cached"]]
+    if safegit.version(top, getattr(_ctx, "root", None)) >= (2, 40):
+        sources.append([f"--source={tip}"])
+    for chunk in _chunks(touched):
+        for source in sources:
+            attrs = _bb_read(
+                top,
+                ["check-attr", "-z", *source, *SPECIAL_ATTRIBUTES, "--", *chunk],
+                filters=False,
+                strip=False,
+            ).split("\0")
+            if any(v not in ("unspecified", "unset", "") for v in attrs[2::3]):
+                return True
+    return False
+
+
+def _index_mismatch(top: Path, touched: list[str]) -> bool:
+    """The project's index (shared with every agent) is not trusted for the paths the merge writes: each
+    touched entry must be a plain cached entry (no assume-unchanged, skip-worktree, unmerged) whose bytes
+    on disk hash to the recorded blob. A forged index or stat cache that hides a person's edit is caught."""
+    for chunk in _chunks(touched):
+        tags = _bb_read(top, ["--literal-pathspecs", "ls-files", "-v", "-z", "--", *chunk], strip=False)
+        if any(f and not f.startswith("H ") for f in tags.split("\0")):
+            return True
+        staged = _bb_read(top, ["--literal-pathspecs", "ls-files", "-s", "-z", "--", *chunk], strip=False)
+        for rec in staged.split("\0"):
+            if not rec:
+                continue
+            meta, _, path = rec.partition("\t")
+            fields = meta.split()
+            if len(fields) != 3 or fields[2] != "0":
+                return True
+            mode, sha = fields[0], fields[1]
+            if mode == "160000":
+                continue  # a submodule link is a control path anyway
+            p = top / path
+            try:
+                st = os.lstat(p)
+                if mode == "120000":
+                    if not p.is_symlink():
+                        return True
+                    data = os.readlink(p).encode("utf-8", "surrogateescape")
+                elif not stat_is_file(st) or st.st_size > 8 * 1024 * 1024:
+                    return True
+                else:
+                    data = p.read_bytes()
+            except OSError:
+                return True
+            algo = hashlib.sha1 if len(sha) == 40 else hashlib.sha256
+
+            def blob(b: bytes, algo=algo) -> str:
+                return algo(b"blob %d\0" % len(b) + b).hexdigest()
+
+            if blob(data) != sha and not (b"\r\n" in data and blob(data.replace(b"\r\n", b"\n")) == sha):
+                return True
+    return False
+
+
+def _fold(path: str) -> tuple[list[str], bool]:
+    """(the path's components as a file system may see them, odd). Odd: a character a file system may drop
+    or treat specially (every format/control character, e.g. HFS+ ignores U+200B-200F, U+202A-202E,
+    U+206A-206F, U+FEFF), an 8.3 short name (`~1`), a trailing dot or space, a `:` (a Windows stream)."""
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFC", path.replace("\\", "/"))
+    hidden = {c for c in normalized if unicodedata.category(c) in ("Cf", "Cc", "Zl", "Zp")}
+    normalized = "".join(c for c in normalized if c not in hidden)
+    parts = normalized.casefold().split("/")
+    odd = bool(hidden) or any(re.search(r"~\d", p) or p.endswith((".", " ")) or ":" in p for p in parts)
+    return parts, odd
+
+
+def _hard_refusal(root: Path, top: Path, control: list[str]) -> str | None:
+    """Control paths no approval lets through: an odd name (what lands on the disk may be another name:
+    the overlap checks could not see what it overwrites) or orch's own run state (registry, run records,
+    locks: git would overwrite the ignored files silently)."""
+    run = _norm(_rel_posix(top, root / ".orch" / "run"))
+    for p in control:
+        if _fold(p)[1]:
+            return ODD_NAME
+        n = _norm(p)
+        if n == run or n.startswith(run + "/"):
+            return RUN_STATE
+    return None
+
+
+def _paths_differ(top: Path, base: str | None, tip: str) -> bool:
+    """The project's files at the paths the branch changed are not exactly HEAD's (status, index flags,
+    bytes): a branch ref moved over the work without the files is no merge."""
+    if not base:
+        return True
+    out = _bb_read(top, ["diff", "--name-only", "--no-renames", "-z", base, tip], strip=False)
+    names = [p for p in out.split("\0") if p]
+    for chunk in _chunks(names):
+        if _bb_read(top, ["--literal-pathspecs", "status", "--porcelain", "-z", "--", *chunk], strip=False):
+            return True
+    return _index_mismatch(top, names)
+
+
+def _control_paths(top: Path, tip: str) -> list[str]:
+    controls = {
+        ".orch",
+        ".git",
+        ".gitattributes",
+        ".gitmodules",
+        ".gitignore",
+        ".githooks",
+        ".husky",
+        ".agents",
+        ".mcp.json",
+        ".envrc",
+        ".github",
+        ".vscode",
+        ".devcontainer",
+        "agents.md",
+        "agents.orch.md",
+        ".cursor",
+        ".windsurf",
+        # other files agent tools, git helpers and package managers read and act on
+        ".cursorrules",
+        ".windsurfrules",
+        ".clinerules",
+        ".roo",
+        ".continue",
+        ".gemini",
+        "gemini.md",
+        ".idea",
+        ".pre-commit-config.yaml",
+        "lefthook.yml",
+        ".yarnrc.yml",
+        ".npmrc",
+        "mise.toml",
+        ".tool-versions",
+        *adapters.AGENT_CONTROL_NAMES,
+    }
+    found = set()
+    for revs, _ in _safety_ranges(top, tip):
+        raw = _bb_read(top, ["diff", "--raw", "--no-renames", "-z", *revs], strip=False)
+        fields = raw.split("\0")
+        for meta, path in zip(fields[0::2], fields[1::2], strict=False):
+            parts, odd = _fold(path)
+            modes = meta.split()[:2]
+            if (
+                odd
+                or controls.intersection(parts)
+                or any(p.startswith((".aider", ".env")) for p in parts)
+                or any(m.lstrip(":") in ("120000", "160000") for m in modes)
+            ):
+                found.add(path)
+    return sorted(found)
+
+
+def _committed_conflict(top: Path, tip: str) -> bool:
+    """Committed conflict markers: a `<<<<<<< ` line, a `=======` line and a `>>>>>>> ` line, in that order,
+    among one file's added lines (a bare `=======` is a Markdown underline, not a conflict). git itself
+    picks the few files with a `<<<<<<< ` line (-G); only their diffs are read, one file at a time."""
+    for revs, content in _safety_ranges(top, tip):
+        if not content:
+            continue
+        found = _bb_read(
+            top, ["diff", "--no-renames", "-a", "--name-only", "-z", "-G", "^<<<<<<< ", *revs], strip=False
+        )
+        for path in filter(None, found.split("\0")):
+            diff = _bb_read(
+                top,
+                ["--literal-pathspecs", "diff", "--no-renames", "-a", "--unified=0", *revs, "--", path],
+                strip=False,
+            )
+            state = 0
+            for line in diff.splitlines():
+                if line.startswith("diff --git "):
+                    state = 0
+                elif line.startswith("+<<<<<<< "):
+                    state = 1
+                elif state == 1 and line == "+=======":
+                    state = 2
+                elif state == 2 and line.startswith("+>>>>>>> "):
+                    return True
+    return False
+
+
+def control_summary(paths: list[str]) -> str:
+    return ", ".join(paths[:5]) + (f" and {len(paths) - 5} more" if len(paths) > 5 else "")
+
+
+def approval_view(root: Path, ticket: str) -> tuple[str, str, list[str]]:
+    """(target, tip, control paths). The target binds the tip, the count and a hash of the full sorted
+    path list: approve:<ticket>:<sha>:<count>:<hash8>."""
+    if not _TID.fullmatch(ticket):
+        raise Refused("That is not a ticket id.")
+    with _scoped(root):
+        top = _top_of(root)
+        if top is None:
+            raise Refused("git could not read your folder")
+        tip = _bb_read(top, ["rev-parse", "--verify", f"refs/heads/orch/{ticket}"])
+        finished = False
+        with contextlib.suppress(OSError, ValueError, Refused):
+            finished = bool(_copy_authority(root, ticket).get("finished"))
+        if finished:
+            raise Refused(FOREIGN)  # nothing of this round is left to approve: never a one-click merge
+        paths = sorted(_control_paths(top, tip))
+        hard = _hard_refusal(root, top, paths)
+        if hard:
+            raise Refused(hard)
+        digest = hashlib.sha256(json.dumps(paths, ensure_ascii=True).encode()).hexdigest()[:8]
+        return f"approve:{ticket}:{tip}:{len(paths)}:{digest}", tip, paths
+
+
+def change_counts(root: Path, tip: str) -> tuple[int, int] | None:
+    """(commits, files) the bring-back of `tip` adds to the project: what the approval dialog shows next to
+    the control paths (the tip in the target binds them). None when git cannot tell (shown as unknown)."""
+    try:
+        with _scoped(root):
+            top = _top_of(root)
+            if top is None:
+                return None
+            commits = int(_bb_read(top, ["rev-list", "--count", f"HEAD..{tip}"]))
+            return commits, len(_touched(top, tip))
+    except (OSError, ValueError, Refused):
+        return None
+
+
+def approval_target(root: Path, ticket: str) -> tuple[str, str, int]:
+    target, tip, paths = approval_view(root, ticket)
+    return target, tip, len(paths)
+
+
+def approve_copy(root: Path, ticket: str, target: str) -> dict:
+    """Caller has consumed a person proof for this exact target; recheck under lock. A copy made before the
+    original branch and base were recorded gets them from this approval (the branch the project is on
+    now). An interrupted attempt's record is cleared when no merge is in progress: every check runs again."""
+    with _scoped(root), runs.locked(root, LOCK_ID, wait=LOCK_WAIT):
+        current, tip, count = approval_target(root, ticket)
+        if current != target:
+            raise Refused("The copy changed after it was shown. Review it again.")
+        if tickets.load(root, ticket).get("status") != "done":
+            raise Refused("Mark this ticket done before bringing it back.")
+        top = _top_of(root)
+        if top is None:
+            raise Refused(UNREADABLE)
+        rc, branch, _ = _git(["symbolic-ref", "-q", "HEAD"], top, read_only=True)
+        merging = _git(["rev-parse", "--verify", "-q", "MERGE_HEAD"], top, read_only=True)[0] == 0
+        known = _copy_authority(root, ticket)
+        if not known.get("origin_branch") and (rc != 0 or not branch.startswith("refs/heads/")):
+            raise Refused("Switch your project to its branch first, then review again.")
+        base = known.get("base") or _bb_read(top, ["merge-base", "HEAD", tip])
+
+        def record(r):
+            r.update(reviewed_tip=tip, reviewed_at=tickets.now(), controls_tip=tip)
+            if not r.get("origin_branch"):
+                r["origin_branch"] = branch
+            if not r.get("base"):
+                r["base"] = base
+            if not merging:
+                r.pop("journal", None)
+
+        _copy_authority(root, ticket, record)
+        return _bring_back_locked(root, ticket)
+
+
+# What belongs to one review round in the signed record: a reopened ticket (it leaves Done) forgets all of
+# it. origin_branch, base, the journal of a merge attempt and orch's own merge commit stay.
+ROUND_KEYS = (
+    "review_tip",
+    "review_at",
+    "review_void",
+    "shown_stale",
+    "done_shown",
+    "done_seen",
+    "reviewed_tip",
+    "reviewed_at",
+    "controls_tip",
+    "finished",
+)
+# What one review (entering Review) records; any status change forgets it.
+REVIEW_KEYS = ("review_tip", "review_at", "review_void", "shown_stale")
+
+
+def _branch_tip(top: Path, ticket: str) -> str | None:
+    rc, tip, _ = _git(["rev-parse", "--verify", "-q", f"refs/heads/orch/{ticket}"], top, read_only=True)
+    return tip if rc == 0 and re.fullmatch(r"[0-9a-f]{40,64}", tip) else None
+
+
+def _copy_holds_tip(root: Path, top: Path, ticket: str, tip: str) -> bool:
+    """The copy (when there is one) holds exactly `tip`, committed: on its branch, nothing uncommitted or
+    untracked, no git operation in progress. Nothing is saved here: a tip orch would have to make first is
+    never what a person looked at."""
+    want = _want(root, ticket)
+    if want is None or not os.path.lexists(want):
+        return True
+    if _is_link(want) or not _owned(root, want) or not _is_our_worktree(top, want) or _copy_conflict(want):
+        return False
+    rc, cur, _ = _git(["symbolic-ref", "-q", "HEAD"], want, read_only=True, filters=False)
+    rc2, head, _ = _git(["rev-parse", "--verify", "-q", "HEAD"], want, read_only=True, filters=False)
+    return (
+        rc == 0
+        and cur == f"refs/heads/orch/{ticket}"
+        and rc2 == 0
+        and head == tip
+        and (_clean_status(want) is True)
+    )
+
+
+def _forget_review(r: dict) -> None:
+    """The recorded review tip no longer is what the branch holds: forget it for the rest of this round (a
+    later run end never records again), so the Done needs an explicit approval of the tip it brings."""
+    r.pop("review_tip", None)
+    r.pop("review_at", None)
+    r["review_void"] = True
+
+
+def _record_review_locked(root: Path, ticket: str, new_round: bool = True) -> None:
+    """The ticket entered Review (`new_round`), or its run ended while it is in Review: record the tip the
+    person is shown now (signed store). Only when no run holds the copy and everything in it is committed;
+    otherwise there is no review tip and the Done needs an explicit approval. A run end never MOVES a tip
+    recorded in this round (the person may have looked at it already): it only records one when none was
+    (the agent's own move to Review while its run was alive), and forgets the recorded one when the branch
+    moved on since. The copies lock is held."""
+    known = _copy_authority(root, ticket)
+    if new_round:
+        _copy_authority(root, ticket, lambda r: [r.pop(k, None) for k in REVIEW_KEYS])
+    elif known.get("review_void"):
+        return
+    elif known.get("review_tip"):
+        top = _top_of(root)
+        if (_branch_tip(top, ticket) if top is not None else None) != known["review_tip"]:
+            _copy_authority(root, ticket, _forget_review)
+        return
+    if tickets.load(root, ticket).get("status") != "review" or _alive_here(root, ticket):
+        return
+    top = _top_of(root)
+    tip = _branch_tip(top, ticket) if top is not None else None
+    if tip is None or not _copy_holds_tip(root, top, ticket, tip):
+        return
+
+    def record(r):  # decided inside the store update: a void set meanwhile (a Done that saw no tip) wins
+        if not r.get("review_void") and not r.get("review_tip"):
+            r.update(review_tip=tip, review_at=tickets.now())
+
+    _copy_authority(root, ticket, record)
+
+
+def _person_done(root: Path, t: dict, since: str) -> bool:
+    """THIS Done was signed by a person, at or after the review began. A verdict entry is only ever a Done
+    approval ("changes requested" moves the ticket back and signs nothing); the ledger keeps exactly one
+    current entry per ticket and tombstones it whenever the ticket leaves Done, so a current entry is the
+    signature of the transition that made the ticket Done now, never one of an earlier round. An agent's
+    own Done (agents_may_finish) is kind "agent"."""
+    checker = humanproof.VerdictChecker(root)
+    start = _parse_at(since)
+    for v in t.get("verdicts") or []:
+        if isinstance(v, dict) and v.get("kind") == "person" and checker.state(v, t) == "current":
+            at = _parse_at(v.get("at"))
+            return start is not None and at is not None and at >= start
+    return False
+
+
+def _judge_done_locked(root: Path, ticket: str) -> None:
+    """The first look at a Done ticket (the Done click, or the sweep when the click found the lock busy):
+    the person's Done approves the tip they reviewed only when it IS that tip and nothing had to be saved
+    since. Never saves, never merges. The copies lock is held."""
+    known = _copy_authority(root, ticket)
+    if known.get("done_seen"):
+        return
+    _copy_authority(root, ticket, lambda r: r.update(done_seen=True))  # a retry is never a fresh review
+    review_tip, review_at = known.get("review_tip"), known.get("review_at")
+    if known.get("review_void") or not review_tip or not isinstance(review_at, str):
+        return
+    # What the person's page showed at the Done (set by bind_shown, kept across a status bounce): only that
+    # very tip can be approved, never "none", never one an agent recorded after it.
+    if known.get("done_shown") is not None and known["done_shown"] != review_tip:
+        return
+    t = tickets.load(root, ticket)
+    if t.get("status") != "done" or _alive_here(root, ticket) or not _person_done(root, t, review_at):
+        return
+    top = _top_of(root)
+    tip = _branch_tip(top, ticket) if top is not None else None
+    if tip is None or tip != review_tip or not _copy_holds_tip(root, top, ticket, tip):
+        return
+    _copy_authority(root, ticket, lambda r: r.update(reviewed_tip=tip, reviewed_at=tickets.now()))
+
+
+def review_tip(root: Path, ticket: str) -> str | None:
+    """The tip recorded for the review shown now (the person's page shows it and sends it back with the
+    Done), or None. Read only; never raises."""
+    try:
+        if not _has_work(root, ticket):
+            return None
+        tip = _copy_authority(root, ticket).get("review_tip")
+    except Exception:  # noqa: BLE001 - nothing to show: the Done is judged as without a shown tip
+        return None
+    return tip if isinstance(tip, str) and _SHA.fullmatch(tip) else None
+
+
+def bind_shown(root: Path, ticket: str, shown) -> bool:
+    """A person's Done names the review tip their page showed (`shown`, 40-64 lowercase hex; anything else
+    is ignored and the Done is judged as before). Called BEFORE the Done is written: when the branch or the
+    recorded review tip is no longer that tip, new changes arrived after they looked, so the recorded tip is
+    forgotten (the Done still happens; bringing the work back then waits for their approval of the new tip)
+    and False is returned. True otherwise."""
+    unbound = shown is None  # a Done without a shown tip (terminal, older clients): as before
+    if shown == NO_TIP:
+        # The page showed no tip: any tip recorded since (a run ended later) was never seen.
+        shown = None
+    elif not unbound and (not isinstance(shown, str) or not _SHA.fullmatch(shown)):
+        return True
+
+    def stale(r):
+        _forget_review(r)
+        r["shown_stale"] = True
+
+    def judge(r):  # one store update: what is recorded and what is voided cannot interleave with a run end
+        if unbound:
+            r.pop("done_shown", None)
+            return
+        r["done_shown"] = (
+            shown or "none"
+        )  # kept until the ticket leaves Done: a status bounce cannot clear it
+        if shown is None:
+            if r.get("review_tip"):
+                stale(r)
+                result.append(False)
+            else:
+                r["review_void"] = True
+        elif r.get("review_tip") == shown and not r.get("review_void"):
+            result.append(None)  # the branch tip is compared below
+        else:
+            stale(r)
+            result.append(False)
+
+    result: list = []
+    try:
+        if not _has_work(root, ticket):
+            return True
+        with _scoped(root):
+            _copy_authority(root, ticket, judge)
+            if result == [None]:
+                top = _top_of(root)
+                tip = _branch_tip(top, ticket) if top is not None else None
+                if tip == shown:
+                    return True
+                _copy_authority(root, ticket, stale)
+                return False
+            return not result
+    except (OSError, ValueError, Refused):
+        return True  # no readable store: nothing recorded there can approve the Done either
+
+
+def _record_done_tip(root: Path, ticket: str) -> None:
+    """The Done click: cheap and never long blocked (a busy lock leaves the judgement to the sweep)."""
+    with _scoped(root), runs.locked(root, LOCK_ID, wait=SWEEP_WAIT):
+        _judge_done_locked(root, ticket)
+
+
+def _bb_state(root: Path, ticket: str, state: str, reason: str = "", commit: str | None = None) -> dict:
+    code = _reason_code(reason)
+    value = {"state": state, "reason": reason, "reason_code": code, "at": tickets.now()}
+    if commit:
+        value["commit"] = commit
+
+    def fn(t):
+        old = (t.get("work") or {}).get("bring_back") or {}
+        if all(old.get(k) == value.get(k) for k in ("state", "reason", "reason_code", "commit")):
+            value["at"] = old.get("at", value["at"])
+            return tickets.NO_WRITE  # the same answer again: no new revision, "since" stays
+        t.setdefault("work", {}).update(bring_back=value)
+
+    tickets.apply_op(root, ticket, fn, by=tickets.SYSTEM)
+    # Local retention survives deletion of the ticket itself.
+    _mark(root, "kept", ticket, reason=reason, reason_code=code, bring_back=state == "waiting")
+    return value
+
+
+def _finished(root: Path, ticket: str, state: str, commit: str) -> dict:
+    """This round is brought back (or had nothing): a branch that shows up again later is not this work."""
+    if tickets.load(root, ticket).get("status") == "done":  # reopened meanwhile: the next round starts clean
+        _copy_authority(root, ticket, lambda r: r.update(finished=True))
+    return _bb_state(root, ticket, state, commit=commit)
+
+
+def _unmerged_done_work(root: Path, ticket: str) -> bool:
+    """Deletion gate: stored flags never authorize deletion; unreadable git means keep."""
+    try:
+        # The signed store counts too: the pending file is unsigned and agent-writable.
+        try:
+            authority = _copy_authority(root, ticket)
+        except (OSError, ValueError, Refused):
+            authority = {"done_seen": True}  # unreadable store: only git (merged or not) decides
+        retained = bool(authority.get("done_seen") or authority.get("reviewed_tip")) or any(
+            i.get("bring_back") for i in _pending(root)["kept"] if i["ticket"] == ticket
+        )
+        t = tickets.load(root, ticket) if tickets.ticket_path(root, ticket).exists() else {}
+        if (
+            t.get("status") != "done"
+            and not retained
+            and t.get("work", {}).get("bring_back", {}).get("state") != "waiting"
+        ):
+            return False
+        top = _top_of(root)
+        if top is None:
+            return True
+        ref = f"refs/heads/orch/{ticket}"
+        rc, _, _ = _git(["show-ref", "--verify", "--quiet", ref], top, read_only=True)
+        if rc == 1:
+            return False  # no branch: nothing on it can be lost
+        rc, tip, _ = _git(["rev-parse", "--verify", ref], top, read_only=True)
+        if rc:
+            return True
+        # A signed tip (approved, or of a merge attempt) that is not in the project keeps the branch, even
+        # when the ref itself was moved back onto something already merged.
+        journal = authority.get("journal") if isinstance(authority.get("journal"), dict) else {}
+        for signed in (authority.get("reviewed_tip"), journal.get("tip")):
+            if isinstance(signed, str) and signed:
+                if _git(["merge-base", "--is-ancestor", signed, "HEAD"], top, read_only=True)[0] != 0:
+                    return True
+        # Merged means: in the project's own branch, with the project ON that branch (a person looking at
+        # the work on a detached HEAD or a branch of their own has not brought it back). Without a recorded
+        # branch (unreadable store, a copy from before it was recorded) the project must at least be on a
+        # branch: a detached HEAD never counts.
+        origin = authority.get("origin_branch")
+        rc, current, _ = _git(["symbolic-ref", "-q", "HEAD"], top, read_only=True)
+        if rc or (origin and current != origin):
+            return True
+        return _git(["merge-base", "--is-ancestor", tip, "HEAD"], top, read_only=True)[0] != 0
+    except Exception:  # noqa: BLE001 - destruction must fail closed
+        return True
+
+
+def _bb_read(top: Path, args: list[str], **kw) -> str:
+    rc, out, err = _git(args, top, read_only=True, **kw)
+    if rc:
+        raise Refused("git could not read your folder" + (": " + err if err else ""))
+    return out
+
+
+def _bb_paths(status: str) -> list[str]:
+    fields = iter(status.split("\0"))
+    paths = []
+    for field in fields:
+        if not field:
+            continue
+        if "\ufffd" in field or len(field) < 4:
+            raise Refused("git could not read a changed filename")
+        paths.append(field[3:])
+        if "R" in field[:2] or "C" in field[:2]:
+            origin = next(fields, "")
+            if not origin:
+                raise Refused("git could not read a changed filename")
+            paths.append(origin)
+    return paths
+
+
+def _rel_posix(top: Path, p: Path) -> str:
+    """`p` below git's top folder, whatever spelling (link, `..`) the workspace root was given in."""
+    try:
+        return Path(os.path.realpath(p)).relative_to(os.path.realpath(top)).as_posix()
+    except ValueError:
+        raise Refused(UNREADABLE) from None
+
+
+def _bb_status(top: Path) -> str:
+    """`git status` of the project, without orch's own run state (the lock token changes when recovery
+    runs in a new process; neither it nor anything below .orch/run is a person's file)."""
+    # --ignored=matching: an ignored folder is ONE entry (node_modules is not listed file by file); the
+    # overlap test matches folders as prefixes, so a merge into it still waits.
+    status = _bb_read(
+        top, ["status", "--porcelain=v1", "-z", "--ignored=matching", "-uall"], strip=False, timeout=60
+    )
+    local_root = getattr(_ctx, "root", None) or top
+    run_dir = _rel_posix(top, local_root / ".orch/run") + "/"
+    own_lock = _rel_posix(top, local_root / ".orch/run/tickets/_copies.lock")
+    fields = iter(status.split("\0"))
+    keep: list[str] = []
+    for f in fields:
+        if not f:
+            continue
+        entry = [f]
+        if "R" in f[:2] or "C" in f[:2]:  # a rename's origin is the next field, without a status prefix
+            entry.append(next(fields, ""))
+        if f[3:] == run_dir.rstrip("/") or f[3:].startswith(run_dir) or f[3:] == own_lock:
+            continue
+        keep.extend(entry)
+    return "\0".join(keep)
+
+
+def _outside(status: str, prep) -> str:
+    """A hash of every status entry the merge does not touch (what a recovery must find unchanged)."""
+    fields = iter(status.split("\0"))
+    entries = []
+    for f in fields:
+        if not f:
+            continue
+        entries.append([f[:2], f[3:]])
+        if "R" in f[:2] or "C" in f[:2]:
+            entries.append(["<-", next(fields, "")])
+    keep = sorted(e for e in entries if not _hits(prep, e[1]))
+    return hashlib.sha256(json.dumps(keep).encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def _bb_snapshot(top: Path) -> dict:
+    status = _bb_status(top)
+    hashes = {}
+    kinds = {f[3:]: f[:2] for f in status.split("\0") if len(f) >= 4}
+    prep = getattr(_ctx, "snapshot_touched", None) or (set(), set())
+    links: dict[Path, bool] = {}
+
+    def linked(parent: Path) -> bool:
+        if parent not in links:
+            links[parent] = _is_link(parent)
+        return links[parent]
+
+    for name in _bb_paths(status):
+        p = top / name
+        # Never read through a symlink, including a parent directory.
+        if any(linked(parent) for parent in p.parents if parent != top and top in parent.parents):
+            raise Refused("your folder has a linked path")
+        overlap = _hits(prep, name)
+        if p.is_symlink():
+            raw = os.readlink(p).encode()
+        elif p.is_file():
+            stat = p.stat()
+            untracked = kinds.get(name) in ("!!", "??")
+            if overlap and stat.st_size > 8 * 1024 * 1024:
+                raise Refused("a changed file is too large to check safely")
+            if (untracked and not overlap) or stat.st_size > 8 * 1024 * 1024:
+                raw = f"{stat.st_size}:{stat.st_mtime_ns}".encode()
+            else:
+                raw = p.read_bytes()
+        else:
+            try:
+                st = os.lstat(p)
+            except FileNotFoundError:
+                raw = b"<deleted>"
+            else:
+                # A nested repository, a socket, a FIFO: never read, only an overlap with the merge counts.
+                if overlap:
+                    raise Refused(OVERLAP)
+                raw = f"other:{st.st_mode}:{st.st_mtime_ns}".encode()
+        hashes[name] = hashlib.sha256(raw).hexdigest()
+    data = {
+        "head": _bb_read(top, ["rev-parse", "HEAD"]),
+        "branch": _bb_read(top, ["symbolic-ref", "-q", "HEAD"]),
+        "status": status,
+        "files": hashes,
+    }
+    data["hash"] = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+    return data
+
+
+def _bb_merge(top: Path, args: list[str]):
+    before = getattr(_ctx, "deadline", None)
+    _ctx.deadline = None
+    try:
+        return _git(args, top, BRING_BACK_TIMEOUT, identity=True)
+    finally:
+        _ctx.deadline = before
+
+
+def _fsck(top: Path, *ids: str) -> int:
+    """rc of orch's object check over the history of `ids` (see safegit.FSCK_FORMAT_OK); 124: it ran out of
+    time. The sweep is detached, so the check gets its full time, like the merge."""
+    before = getattr(_ctx, "deadline", None)
+    _ctx.deadline = None
+    try:
+        return _git(
+            ["fsck", "--no-dangling", "--no-reflogs", "--no-progress", *ids],
+            top,
+            FSCK_TIMEOUT,
+            read_only=True,
+        )[0]
+    finally:
+        _ctx.deadline = before
+
+
+def _files_match(top: Path, touched, commit: str) -> bool:
+    """Every touched file in the folder hashes (in Python: git's stat shortcut is not trusted) to the blob id
+    of `commit` (mode 100644/100755 only; a missing file, link or gitlink is skipped: refused before the
+    merge already). A file that changed since `commit` (its blob differs from the index) cannot be checked
+    against it: the check does not pass, so a swapped file cannot hide behind a later `git add`."""
+    listing = _bb_read(top, ["ls-files", "-s", "-z"], strip=False)
+    index = {}
+    for entry in listing.split("\0"):
+        meta, _, name = entry.partition("\t")
+        parts = meta.split()
+        if name and len(parts) == 3 and parts[2] == "0":
+            index[name] = (parts[0], parts[1])
+    for name in touched:
+        mode, blob = index.get(name, (None, None))
+        if mode not in ("100644", "100755"):
+            continue
+        if commit != "HEAD":
+            rc, there, _ = _git(["rev-parse", "--verify", "-q", f"{commit}:{name}"], top, read_only=True)
+            if rc or there != blob:
+                return False  # changed since (or unreadable): never passed unchecked, a person looks
+        path = top / name
+        try:
+            if path.is_symlink() or not path.is_file():
+                return False
+            h = hashlib.sha256() if len(blob) == 64 else hashlib.sha1()
+            h.update(b"blob %d\0" % path.stat().st_size)
+            with path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+        except OSError:
+            return False
+        if h.hexdigest() != blob:
+            return False
+    return True
+
+
+def _after_merge(top: Path, touched, merge_commit: str) -> str | None:
+    """Checked after the merge, in the same locked section: what the merge WROTE is what its commit says.
+    The copy shares the project's object folder, so a blob swapped between the check before the merge and
+    the merge itself would land on disk (and may be swapped back afterwards). None: fine; "later": the
+    object check ran out of time; "bad": a file or object differs from its id."""
+    rc = _fsck(top, merge_commit)
+    if rc == 124:
+        return "later"
+    if rc != 0 or not _files_match(top, touched, merge_commit):
+        return "bad"
+    return None
+
+
+def _set_journal(root: Path, ticket: str, value: dict | None) -> None:
+    """The record of one merge attempt lives in the signed copies store (never in the project's agent-
+    writable files): only orch can write one that a recovery trusts."""
+
+    def update(r):
+        if value is None:
+            r.pop("journal", None)
+        else:
+            r["journal"] = value
+
+    _copy_authority(root, ticket, update)
+
+
+def _file_text(top: Path, name: str) -> str | None:
+    path = top / _bb_read(top, ["rev-parse", "--git-path", name])
+    try:
+        return path.read_text(encoding="utf-8", errors="replace") if not path.is_symlink() else None
+    except OSError:
+        return None
+
+
+def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
+    """What is left of an earlier attempt. None: nothing (go on). Else the reason to wait. The journal is
+    only cleared when the folder shows the attempt is over; it is never cleared while it still matches.
+
+    A merge in progress is aborted ONLY when it is provably orch's own: the signed journal names its tip
+    and the commit it started from, HEAD, its branch, ORIG_HEAD and MERGE_MSG agree, the paths the merge
+    touches are the recorded ones, and every status entry outside them is exactly as before the merge (the
+    merge only ever started with a clean index, so the abort cannot drop a person's staged change)."""
+    journal = journal if isinstance(journal, dict) else None
+    rc, merge_head, _ = _git(["rev-parse", "--verify", "-q", "MERGE_HEAD"], top, read_only=True)
+    head = _bb_read(top, ["rev-parse", "HEAD"])
+    if rc == 0:
+        if journal is None or merge_head != journal.get("tip") or head != journal.get("pre_head"):
+            return MERGING
+        # Only a fresh attempt is undone: later, the person may have resolved and staged by hand.
+        started = _parse_at(journal.get("started_at"))
+        if started is None or not 0 <= time.time() - started <= RECOVER_SECONDS:
+            return MERGING
+        orc, orig, _ = _git(["rev-parse", "--verify", "-q", "ORIG_HEAD"], top, read_only=True)
+        brc, branch, _ = _git(["symbolic-ref", "-q", "HEAD"], top, read_only=True)
+        message = _file_text(top, "MERGE_MSG") or ""
+        wrote = journal.get("message")
+        if (
+            orc
+            or orig != journal.get("pre_head")
+            or brc
+            or branch != journal.get("pre_branch")
+            or not isinstance(wrote, str)
+            or message.splitlines()[:1] != [wrote]
+        ):
+            return MERGING
+        touched = _touched(top, journal["tip"])
+        if _digest(touched) != journal.get("touched"):
+            return MERGING
+        # The index is still what the merge wrote: unmerged entries of a conflict, or (a merge stopped
+        # without one) exactly the checked tree. A path resolved and staged by hand is never thrown away.
+        unmerged = _bb_read(top, ["ls-files", "--unmerged", "-z"], strip=False)
+        tree = journal.get("tree")
+        if not unmerged and (
+            not isinstance(tree, str)
+            or _git(["diff", "--cached", "--quiet", "--no-renames", tree], top, read_only=True)[0] != 0
+        ):
+            return MERGING
+        prep = _prep(touched)
+        if _outside(_bb_status(top), prep) != journal.get("outside"):
+            return MERGING
+        if _bb_merge(top, ["merge", "--abort"])[0]:
+            return MERGING
+        _ctx.snapshot_touched = prep
+        if _bb_snapshot(top)["hash"] != journal.get("pre_hash"):
+            return CHANGED
+        _set_journal(root, ticket, None)
+        return None
+    if journal is None:
+        return None
+    if head != journal.get("pre_head"):
+        # Is orch's own merge commit M (parents [pre_head, tip]) in the history since? Then it never counts as
+        # merged before its post-merge check has passed, whatever was committed on top meanwhile, and whatever
+        # the journal says (a stop between the merge and the journal write leaves no verdict at all).
+        listing = _bb_read(
+            top, ["rev-list", "--parents", "--merges", f"{journal.get('pre_head')}..HEAD"], strip=False
+        )
+        mine = next(
+            (
+                f[0]
+                for f in (line.split() for line in listing.splitlines())
+                if len(f) == 3 and f[1:] == [journal.get("pre_head"), journal.get("tip")]
+            ),
+            None,
+        )
+        if mine is not None:
+            if _bb_read(top, ["rev-parse", f"{mine}^{{tree}}"]) != journal.get("tree"):
+                return CHANGED  # orch's merge commit holds something else than was checked: a person looks
+            if journal.get("post_check") == "bad":
+                return CHANGED  # a failed check stays until a person has looked
+            _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": mine})
+            names = _bb_read(
+                top, ["diff", "--name-only", "--no-renames", "-z", journal["pre_head"], mine], strip=False
+            )
+            problem = _after_merge(top, [n for n in names.split("\0") if n], mine)
+            if problem == "bad":
+                _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": mine})
+            if problem:
+                return CHANGED
+            # passed on this very commit: it is orch's merge, recorded as such (the normal checks follow)
+            _copy_authority(root, ticket, lambda r: r.update(merged=mine))
+        _set_journal(root, ticket, None)  # orch's merge finished, or the person moved on: checks run again
+        return None
+    if journal.get("touched"):
+        _ctx.snapshot_touched = _prep(_touched(top, journal["tip"]))
+    if _bb_snapshot(top)["hash"] == journal.get("pre_hash"):
+        _set_journal(root, ticket, None)  # the merge never started: nothing to undo
+        return None
+    # A clean merge killed after it wrote the index and files but before its commit (git writes no
+    # MERGE_HEAD then): when the index is EXACTLY the checked result, a two-way read-tree from it back to
+    # HEAD is its inverse; git refuses it for any file that differs from the index (a later edit stays).
+    tree = journal.get("tree")
+    if (
+        isinstance(tree, str)
+        and re.fullmatch(r"[0-9a-f]{40,64}", tree)
+        and _git(["diff", "--cached", "--quiet", "--no-renames", tree], top, read_only=True)[0] == 0
+        and _bb_merge(top, ["read-tree", "-m", "-u", tree, "HEAD"])[0] == 0
+        and _bb_snapshot(top)["hash"] == journal.get("pre_hash")
+    ):
+        _set_journal(root, ticket, None)
+        return None
+    return INTERRUPTED_BB
+
+
+def _digest(paths: list[str]) -> str:
+    return hashlib.sha256(json.dumps(sorted(paths)).encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def _bring_back_locked(root: Path, ticket: str) -> dict | None:
+    t = tickets.load(root, ticket)
+    if t.get("status") != "done":
+        return None
+
+    def wait(reason):
+        return _bb_state(root, ticket, "waiting", reason)
+
+    journal_written = False
+    merge_started = False
+    _ctx.preview = {}
+    try:
+        top = _top_of(root)
+        if top is None:
+            return wait(UNREADABLE)
+        want = _want(root, ticket)
+        if _alive_here(root, ticket):
+            return wait("an agent is still working in the copy")
+        # The Done click found the lock busy: judge it now, BEFORE anything is saved.
+        with contextlib.suppress(OSError, ValueError, Refused):
+            _judge_done_locked(root, ticket)
+        copy_there = want is not None and os.path.lexists(want)
+        if copy_there:
+            if _is_link(want) or not _owned(root, want) or not _is_our_worktree(top, want):
+                return wait("git could not confirm this is your copy")
+            ok, why = _save_leftovers(want, ticket, top)
+            if not ok:
+                return wait(why)
+        try:
+            authority = _copy_authority(root, ticket)
+        except (OSError, ValueError, Refused):
+            return wait(APPROVAL_NEEDED)
+        ref = f"refs/heads/orch/{ticket}"
+        if _git(["show-ref", "--verify", "--quiet", ref], top, read_only=True)[0] == 1 and not copy_there:
+            return _bb_state(root, ticket, "none")  # no branch, no copy: nothing is left to bring back
+        tip = _bb_read(top, ["rev-parse", "--verify", ref])
+        why = _recover(root, top, ticket, authority.get("journal"))
+        if why:
+            return wait(why)
+        # Merged (or nothing to do) is judged only on the project's own recorded branch, with the
+        # project ON it: a person looking at the work (detached, or a branch of their own) is not a merge.
+        origin = authority.get("origin_branch")
+        if not origin:
+            return wait("The original project branch was not recorded. A person needs to check it.")
+        if _bb_read(top, ["symbolic-ref", "-q", "HEAD"]) != origin:
+            return wait("your project is on another branch")
+        base = authority.get("base")
+
+        def ancestor(a: str, b: str) -> bool:
+            return _git(["merge-base", "--is-ancestor", a, b], top, read_only=True)[0] == 0
+
+        if ancestor(tip, "HEAD"):
+            # Nothing to bring back (the saved tip is already in the project): no merge, no approval needed.
+            head = _bb_read(top, ["rev-parse", "HEAD"])
+            if bool(base) and _bb_read(top, ["rev-list", "--count", f"{base}..{tip}"]) == "0":
+                return _finished(root, ticket, "none", head)
+            # "Merged" is certified only for orch's own merge commit, or for the tip a person approved with
+            # the project's files matching it (a branch moved by somebody else is not a merge).
+            mine = authority.get("merged")
+            if isinstance(mine, str) and re.fullmatch(r"[0-9a-f]{40,64}", mine) and ancestor(tip, mine):
+                if ancestor(mine, "HEAD"):
+                    return _finished(root, ticket, "merged", head)
+            if authority.get("reviewed_tip") != tip or _paths_differ(top, base, tip):
+                return wait(MERGED_OUTSIDE)
+            return _finished(root, ticket, "merged", head)
+        if authority.get("finished"):
+            return wait(FOREIGN)  # this round was brought back; the branch moved on without orch
+        # The project still holds the commit the copy started from, and the branch grew from it: a dropped
+        # or rewritten commit (a secret taken out again) would come back with the branch's history.
+        if not base or not ancestor(base, "HEAD") or not ancestor(base, tip):
+            return wait(BASE_CHANGED)
+        rc, fork, _ = _git(["merge-base", "HEAD", tip], top, read_only=True)
+        if rc or not ancestor(base, fork):
+            return wait(BASE_CHANGED)
+        if _committed_conflict(top, tip):
+            return wait(CONFLICT_PENDING)
+        control = _control_paths(top, tip)
+        hard = _hard_refusal(root, top, control)
+        if hard:
+            return wait(hard)
+        if authority.get("reviewed_tip") != tip:
+            return wait(NEW_CHANGES if authority.get("shown_stale") else APPROVAL_NEEDED)
+        if control and authority.get("controls_tip") != tip:
+            return wait(
+                "Your work touches files that control orch or git ("
+                + control[0]
+                + "). A person has to review that before it is brought back."
+            )
+        # The real merge only runs when git already computed it as clean: a conflict never reaches the
+        # project folder, so a failure never needs an abort.
+        tree, clean = _preview(top, tip)
+        if tree is None:
+            return wait(CRISS_CROSS)
+        if not clean:
+            return wait(UPDATE)
+        for marker in ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+            path = _bb_read(top, ["rev-parse", "--git-path", marker])
+            if (top / path).exists():
+                return wait("a merge or another git operation is in progress in your folder")
+        # The same folder however it is spelled (a link in the workspace path, case on Windows).
+        here = {_real(root), _real(top)}
+        for record in (runs.run_dir(root) / "tickets").glob("t_*.json"):
+            rec = runs.read(root, record.stem)
+            if (
+                rec
+                and runs.state(rec) in ("alive", "maybe-stale")
+                and _real(runs.workdir_for(root, rec, record.stem)) in here
+            ):
+                return wait("an agent is still working in your folder")
+        # A repository setting can change what `git merge` does (branch.<b>.mergeOptions: --squash,
+        # --no-commit, -s ours). It is not something orch can switch off here: refuse it.
+        name = origin.removeprefix("refs/heads/")
+        rc, opts, _ = _git(["config", "--get-all", f"branch.{name}.mergeOptions"], top, read_only=True)
+        if rc == 0 and opts.strip():
+            return wait(CRISS_CROSS)
+        if rc not in (0, 1):
+            return wait(UNREADABLE)
+        # Settings that make the real merge (or its checkout) write something else than merge-tree computed:
+        # only their defaults are accepted (safegit cannot pin them per call).
+        rc, found, _ = _git(["config", "--null", "--get-regexp", MERGE_SETTINGS], top, read_only=True)
+        if rc not in (0, 1):
+            return wait(UNREADABLE)
+        for rec in filter(None, found.split("\0") if rc == 0 else []):
+            key, _, value = rec.partition("\n")
+            if value.strip().lower() not in MERGE_DEFAULTS.get(key.lower(), ()):
+                return wait(SETTINGS)
+        # git merge refuses with staged changes anyway; checking first means the merge only ever starts
+        # from an index equal to HEAD (an abort can then never drop a person's staged change).
+        rc, _, _ = _git(["diff", "--cached", "--quiet", "--no-renames"], top, read_only=True)
+        if rc == 1:
+            return wait(STAGED)
+        if rc:
+            return wait(UNREADABLE)
+        touched = _touched(top, tip)
+        if any("\ufffd" in p for p in touched):
+            return wait("git could not read a changed filename")
+        prep = _prep(touched)
+        _ctx.snapshot_touched = prep
+        pre = _bb_snapshot(top)
+        if any(_hits(prep, b) for b in _bb_paths(pre["status"])):
+            return wait(OVERLAP)
+        tracked = _bb_read(top, ["ls-files", "-z"], strip=False).split("\0")
+        if _name_clash(touched, (p for p in tracked if p)):
+            return wait(NAME_CLASH)
+        if _index_mismatch(top, touched):
+            return wait(OVERLAP)
+        if touched and _special_attributes(top, tip, touched):
+            return wait("files need special handling: bring them back by hand")
+        deadline = getattr(_ctx, "deadline", None)
+        if deadline is not None and deadline - time.monotonic() < 60:
+            return wait("saving needs more time; the next sweep will try again")
+        journal = {
+            "pre_head": pre["head"],
+            "pre_branch": pre["branch"],
+            "tip": tip,
+            "tree": tree,
+            "touched": _digest(touched),
+            "outside": _outside(pre["status"], prep),
+            "pre_hash": pre["hash"],
+            "started_at": tickets.now(),
+            # one line: a title cannot add trailers (Co-authored-by: ...) to a commit on the person's branch
+            "message": " ".join(f"orch: {ticket} {t.get('title', '')}".split())[:200],
+        }
+        _set_journal(root, ticket, journal)
+        journal_written = True
+        if _bb_snapshot(top) != pre:
+            return wait(CHANGED)
+        if tickets.load(root, ticket).get("status") != "done":
+            return None  # reopened while this was prepared: the Done that approved it is withdrawn
+        if _alive_here(root, ticket):
+            return wait("an agent is still working in the copy")
+        # Git does not re-hash objects while it merges, and the copy shares the project's object folder: check
+        # that what the merge reads is what its ids say, in this same locked section, right before it.
+        # (Residual: a process the agent left running after its run ended is not covered by _alive_here.)
+        # (No --strict. orch's fsck call ignores only a listed set of format-only messages of old imported
+        # history (safegit.FSCK_FORMAT_OK); ANY other non-zero result refuses. The sweep is detached, so the
+        # check gets its full time, like the merge.)
+        rc = _fsck(top, tip, pre["head"])
+        if rc == 124:
+            return wait("checking the stored history needs more time; the next sweep will try again")
+        if rc:
+            return wait(OBJECTS_BAD)
+        merge_started = True
+        rc, _, _ = _bb_merge(
+            top,
+            [
+                "merge",
+                "--no-verify-signatures",
+                "--no-ff",
+                "--commit",
+                "--no-squash",
+                "-s",
+                "ort",
+                "--no-edit",
+                "--no-autostash",
+                "--no-rerere-autoupdate",
+                # an ignored file written after the last snapshot: kept where git honours this (merge-ort's
+                # checkout does not yet; the window is the moment between the last snapshot and this call)
+                "--no-overwrite-ignore",
+                "-m",
+                journal["message"],
+                tip,
+            ],
+        )
+        if rc:
+            # Never a blind abort: only a merge the signed journal proves is orch's own is undone.
+            return wait(_recover(root, top, ticket, journal) or UPDATE)
+        parents = _bb_read(top, ["rev-list", "--parents", "-n", "1", "HEAD"]).split()
+        if len(parents) != 3 or parents[1:] != [pre["head"], tip]:
+            return wait(CHANGED)
+        if _bb_read(top, ["rev-parse", "HEAD^{tree}"]) != tree:
+            return wait(CHANGED)  # the journal stays: this merge commit is not what was checked
+        # Recorded in the signed journal BEFORE the check (it can take minutes and orch may be stopped in it):
+        # ancestry alone never certifies this merge; _recover re-runs the check for "pending" and keeps "bad".
+        _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": parents[0]})
+        problem = _after_merge(top, touched, parents[0])
+        if problem == "bad":
+            _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": parents[0]})
+        if problem == "later":
+            return wait(CHANGED)  # the merge is in; the next sweep checks again
+        if problem:
+            # Back to where the project was, never with --hard (a person's edit is never thrown away):
+            # --keep refuses over any file whose bytes differ from the index, and then a person looks.
+            # Only when HEAD and the branch are still the merge's and the folder NOW (re-read: the check can
+            # take minutes) holds no change outside the merged files. Afterwards the restored files are
+            # hashed again: a swapped pre-merge blob must not land either.
+            now = _bb_status(top)
+            clean = not any(
+                f[:2] != "!!" and ("R" in f[:2] or "C" in f[:2] or not _hits(prep, f[3:]))
+                for f in now.split("\0")
+                if f
+            )
+            if (
+                clean
+                and _bb_read(top, ["rev-parse", "HEAD"]) == parents[0]
+                and _bb_read(top, ["symbolic-ref", "-q", "HEAD"]) == pre["branch"]
+                and _git(["reset", "--keep", pre["head"]], top)[0] == 0
+                and _files_match(top, touched, pre["head"])
+                and _fsck(top, pre["head"]) == 0
+            ):
+                _set_journal(root, ticket, None)  # rolled back and verified: nothing of the merge is left
+                return wait(FILES_CHANGED)
+            return wait(CHANGED)  # the journal stays: a person needs to look
+        try:
+            after = _bb_snapshot(top)
+            compare = ("branch", "status", "files")
+        except (MemoryError, OSError):
+            after = {"branch": _bb_read(top, ["symbolic-ref", "-q", "HEAD"]), "status": _bb_status(top)}
+            if _bb_read(top, ["rev-parse", "HEAD"]) != parents[0]:
+                return wait(CHANGED)
+            compare = ("branch", "status")
+        if any(after[k] != pre[k] for k in compare):
+            return wait(CHANGED)
+        _copy_authority(root, ticket, lambda r: r.update(merged=parents[0]))  # orch's own merge commit
+        if _unmerged_done_work(root, ticket):
+            return wait("the agent added more changes while saving; nothing was removed")
+        result = _finished(root, ticket, "merged", parents[0])
+        _set_journal(root, ticket, None)
+        return result
+    except (OSError, MemoryError, ValueError, Refused) as e:
+        return wait(str(e) or "git could not inspect your folder")
+    finally:
+        _ctx.snapshot_touched = None
+        _ctx.preview = None
+        if journal_written and not merge_started:
+            with contextlib.suppress(OSError, ValueError, Refused):
+                _set_journal(root, ticket, None)
+
+
+def bring_back(root: Path, ticket: str) -> dict | None:
+    if not _TID.fullmatch(ticket):
+        raise Refused("That is not a ticket id.")
+    with _scoped(root), runs.locked(root, LOCK_ID, wait=LOCK_WAIT):
+        return _bring_back_locked(root, ticket)
+
+
+def _agent_ticket(root: Path) -> str | None:
+    """None for a person. For an agent: the ticket of its LIVE run record. ORCH_RUN and ORCH_TICKET must
+    name the claim record of that ticket (same run id, a live process); an agent context that cannot be
+    tied to one (raw or forged variables, another ticket's run, a dead run) is refused."""
+    run, tid = os.environ.get("ORCH_RUN"), os.environ.get("ORCH_TICKET")
+    agent = any(os.environ.get(k) for k in ("ORCH_RUN", "ORCH_TICKET", "ORCH_VIA", "ORCH_AGENT"))
+    if not agent and not tickets.agent_tool():
+        return None
+    refused = Refused("Only a person or this ticket's running agent can do this.")
+    if not run or not isinstance(tid, str) or not _TID.fullmatch(tid):
+        raise refused
+    rec = runs.read(root, tid)
+    if not rec or rec.get("run") != run or rec.get("ticket", tid) != tid or runs.state(rec) != "alive":
+        raise refused
+    return tid
+
+
+def update_copy(root: Path, ticket: str) -> str:
+    own = _agent_ticket(root)
+    if own is not None and own != ticket:
+        raise Refused("Only a person or this ticket's running agent can do this.")
+    with _scoped(root), runs.locked(root, LOCK_ID, wait=LOCK_WAIT):
+        top = _top_of(root)
+        want = _want(root, ticket)
+        if not top or not want or not _owned(root, want) or not _is_our_worktree(top, want):
+            raise Refused("This ticket has no usable copy.")
+        if not _same(Path.cwd(), want) and want not in Path.cwd().resolve().parents:
+            raise Refused("Run this command inside the ticket's copy.")
+        if _bb_read(want, ["symbolic-ref", "-q", "HEAD"]) != f"refs/heads/orch/{ticket}":
+            raise Refused("The copy is on another branch.")
+        if own is None and _alive_here(root, ticket):
+            raise Refused("The agent is working in this copy: ask it to update instead.")
+        # The branch the work goes back to (signed when the copy was made), never whatever the project folder
+        # happens to have checked out (a private branch of the person would travel along).
+        origin = _copy_authority(root, ticket).get("origin_branch")
+        if not isinstance(origin, str) or not origin.startswith("refs/heads/"):
+            raise Refused("The original project branch was not recorded. A person needs to check it.")
+        head = _bb_read(top, ["rev-parse", "--verify", origin + "^{commit}"])
+        rc, _, _ = _git(
+            [
+                "merge",
+                "--no-verify-signatures",
+                "--no-edit",
+                "--no-autostash",
+                "--no-rerere-autoupdate",
+                head,
+            ],
+            want,
+            30,
+            identity=True,
+        )
+    if rc:
+        return (
+            "Resolve the conflicts in your copy and commit, then run orch copy update " + ticket + " again."
+        )
+    on_run_ended(root, ticket)
+    return "Copy updated. Commit any remaining changes; saving will be retried when the run ends."
+
+
+def ask_update(root: Path, ticket: str) -> str:
+    from orch import runs_live
+
+    if not isinstance(ticket, str) or not _TID.fullmatch(ticket):
+        raise Refused("That is not a ticket id.")
+    tickets.load(root, ticket)
+    own = _agent_ticket(root)
+    if own is not None and own != ticket:
+        raise Refused("Only a person or this ticket's agent can ask it to update.")
+    if not runs_live.session_exists(root, ticket):
+        raise Refused("There is no session for this ticket; start the agent again.")
+    text = f"Your project changed in the same places. Run `orch copy update {ticket}`, resolve and commit."
+    result = runs_live.send(root, ticket, "system:copies", text)
+    return runs_live.send_text(result, ticket)
+
+
 # ---------------------------------------------------------------- routing
 
 
@@ -839,7 +2300,8 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
 #   (4) its work is saved: every change, tracked and untracked (not what git ignores), is committed on
 #       branch orch/<ticket> through safegit, and HEAD is verified to BE that branch's tip afterwards.
 # Any step before the rename that fails keeps the copy (the clean log and "kept" list say why).
-# A closed ticket's vanished copy is always removed from the registry, even if later cleanup fails.
+# Done work additionally requires verified ancestry and a completed bring-back state.
+# A vanished copy with unmerged Done work keeps its registry entry and branch.
 # Nothing is ever plain-deleted while it may hold unsaved work: the folder is first RENAMED into
 # <ws8>/.trash/ (atomic, same disk); only the trash, which holds saved work only, is deleted, relative to
 # open directories (no link is followed), outside the person's command (a detached `orch copy clean --trash`).
@@ -851,7 +2313,7 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
 REGISTRY_PENDING = Path(".orch") / "run" / "worktrees-pending.json"
 CLEAN_LOG = Path(".orch") / "run" / "logs" / "copies-clean.log"
 BRANCH_DAYS = 14  # unmerged orch/<ticket> branch of a closed ticket: kept this long
-SWEEP_BUDGET = 25.0  # seconds of git time for one sweep (orch copy clean, Clean up now)
+SWEEP_BUDGET = 90.0  # seconds of git time for one sweep (orch copy clean, Clean up now)
 START_SWEEP_BUDGET = 8.0  # the same when a start triggers it: a start never waits longer
 SWEEP_WAIT = 2.0  # how long a sweep waits for the copies lock; busy = skip, the next one does it
 TRASH = ".trash"
@@ -881,6 +2343,14 @@ def _same(p: Path, want: Path) -> bool:
         return os.path.abspath(p) == str(want) and p.resolve() == want
     except (OSError, RuntimeError, ValueError):
         return False
+
+
+def _real(p) -> str:
+    """One spelling of a folder: links resolved, case folded where the system folds it."""
+    try:
+        return os.path.normcase(os.path.realpath(p))
+    except (OSError, ValueError, TypeError):
+        return ""
 
 
 def _owned(root: Path, want: Path) -> bool:
@@ -1043,6 +2513,15 @@ def _mark(root: Path, kind: str, ticket: str, **fields) -> None:
     """Record (kept: why a copy stayed; branches: this ticket's copy was removed now); one line per ticket."""
     with contextlib.suppress(OSError, Refused):
         doc = _pending(root)
+        mine = [i for i in doc[kind] if i["ticket"] == ticket]
+        if kind == "kept" and fields and "bring_back" not in fields:
+            if any(i.get("bring_back") for i in mine):
+                fields["bring_back"] = True  # a note about the copy never drops the bring-back retention
+        if not fields and not mine:
+            return
+        before = {k: v for k, v in mine[0].items() if k != "at"} if len(mine) == 1 else None
+        if fields and before == {"ticket": ticket, **fields}:
+            return  # the same note again: no rewrite
         doc[kind] = [i for i in doc[kind] if i["ticket"] != ticket]
         if fields:
             doc[kind].append({"ticket": ticket, "at": tickets.now(), **fields})
@@ -1143,6 +2622,18 @@ def stat_is_file(st) -> bool:
 
 
 INTERRUPTED = "git was interrupted"
+SAVE_MIN_SECONDS = 5.0  # a save (add + commit) starts only with this much of a sweep's budget left
+
+
+@contextlib.contextmanager
+def _no_deadline():
+    """git calls that write run with their own timeout, never capped by the budget's remainder."""
+    before = getattr(_ctx, "deadline", None)
+    _ctx.deadline = None
+    try:
+        yield
+    finally:
+        _ctx.deadline = before
 
 
 def _clean_status(want: Path) -> bool | None:
@@ -1150,14 +2641,29 @@ def _clean_status(want: Path) -> bool | None:
     return None if rc != 0 else not out
 
 
-def _save_leftovers(want: Path, ticket: str) -> tuple[bool, str]:
+def _save_leftovers(want: Path, ticket: str, main_top: Path | None = None) -> tuple[bool, str]:
     """(4): commit what is in the copy to orch/<ticket> (no hooks, no signing, identity orch) and verify
     that
     HEAD is that branch's tip and nothing is left uncommitted. Never commits onto another branch or a
     detached
     HEAD (a detached HEAD sitting exactly on the tip is put back on the branch first). Call only after
-    _is_our_worktree. Returns (saved, why not)."""
+    _is_our_worktree. Returns (saved, why not); never raises (one broken copy never stops a sweep).
+    `main_top`: the git top of the project the work goes back to, given only for work that goes back (a
+    Done ticket of THIS workspace): then committed conflict markers against it keep the copy for the agent.
+    Never derived here: an orphan copy belongs to another project, a dropped ticket is never merged."""
+    try:
+        return _save_leftovers_inner(want, ticket, main_top)
+    except (OSError, ValueError, Refused) as e:
+        return False, str(e) or "git could not read the copy's state"
+
+
+def _save_leftovers_inner(want: Path, ticket: str, main_top: Path | None) -> tuple[bool, str]:
+    if _copy_conflict(want):
+        return False, CONFLICT_PENDING
     ref = f"refs/heads/orch/{ticket}"
+    top = main_top if main_top is not None and _is_our_worktree(main_top, want) else None
+    if top is not None and _committed_conflict(top, ref):
+        return False, CONFLICT_PENDING
     rc, cur, _ = _git(["symbolic-ref", "-q", "HEAD"], want, read_only=True, filters=False)
     if cur != ref:
         if rc == 0:
@@ -1174,13 +2680,24 @@ def _save_leftovers(want: Path, ticket: str) -> tuple[bool, str]:
     if clean is None:
         return False, interrupted if _stale_index_lock(want) else "git could not read the copy's state"
     if not clean:
-        rc, _, err = _git(["add", "-A"], want, GIT_ADD_TIMEOUT)
+        # A write is never cut short by what is left of a sweep's budget (a killed add or commit leaves an
+        # index.lock that needs a person): it starts only with some budget left, then runs with its own
+        # timeout (the sweep may overrun its budget by that much).
+        deadline = getattr(_ctx, "deadline", None)
+        if deadline is not None and deadline - time.monotonic() < SAVE_MIN_SECONDS:
+            return False, "saving needs more time; the next sweep will try again"
+        msg = f"orch: {ticket} (saved when the copy was removed)"
+        with _no_deadline():
+            rc, _, err = _git(["add", "-A"], want, GIT_ADD_TIMEOUT)
+            if rc == 0:
+                rc2, _, err = _git(
+                    ["commit", "-q", "--no-verify", "-m", msg], want, GIT_ADD_TIMEOUT, identity=True
+                )
         if rc != 0:
             if _stale_index_lock(want):
                 return False, interrupted
             return False, f"git could not add the copy's files ({err.splitlines()[-1] if err else rc})"
-        msg = f"orch: {ticket} (saved when the copy was removed)"
-        rc, _, err = _git(["commit", "-q", "--no-verify", "-m", msg], want, GIT_ADD_TIMEOUT, identity=True)
+        rc = rc2
         if rc != 0:
             if _stale_index_lock(want):
                 return False, interrupted
@@ -1189,6 +2706,8 @@ def _save_leftovers(want: Path, ticket: str) -> tuple[bool, str]:
     rc2, tip, _ = _git(["rev-parse", "--verify", "-q", ref], want, read_only=True, filters=False)
     if not (rc1 == 0 and rc2 == 0 and head and head == tip) or _clean_status(want) is not True:
         return False, f"the saved changes are not on branch orch/{ticket}"
+    if top is not None and _committed_conflict(top, head):
+        return False, CONFLICT_PENDING
     return True, ""
 
 
@@ -1209,6 +2728,8 @@ def _delete_branch(top: Path | None, ticket: str, force: bool = False) -> bool:
     """`branch -d orch/<ticket>` (merged into the project's current commit); -D only for the 14-day rule.
     True when the branch is gone (or was never there). The name is built here from the ticket id."""
     if top is None:
+        return False
+    if _unmerged_done_work(getattr(_ctx, "root", None) or top, ticket):
         return False
     branch = f"orch/{ticket}"
     rc, _, _ = _git(
@@ -1246,7 +2767,7 @@ def _delete_copy(root: Path, ticket: str, reason: str, top: Path | None, entry: 
     # The rename is the removal boundary. Later git/trace cleanup can fail, but
     # cannot turn a vanished closed copy back into a kept registry entry.
     want = _want(root, ticket)
-    if want is not None and _ticket_closed(root, ticket):
+    if want is not None and _ticket_closed(root, ticket) and not _unmerged_done_work(root, ticket):
         try:
             want.lstat()
         except FileNotFoundError:
@@ -1270,6 +2791,13 @@ def _delete_copy_inner(root: Path, ticket: str, top: Path | None, entry: dict) -
         return "kept: its ticket is not done or closed"
     if _alive_here(root, ticket):  # (3)
         return "kept: an agent is still working in it"
+    done = False
+    if tickets.ticket_path(root, ticket).exists():
+        t = tickets.load(root, ticket)
+        back = t.get("work", {}).get("bring_back", {})
+        done = t.get("status") == "done"
+        if done and back.get("state") not in ("merged", "none"):
+            return "kept: " + (back.get("reason") or "changes are waiting to come back")
     if os.path.lexists(want):
         if _is_link(want) or not want.is_dir():
             return "kept: not a folder"
@@ -1277,14 +2805,19 @@ def _delete_copy_inner(root: Path, ticket: str, top: Path | None, entry: dict) -
             return "kept: git is not available right now"
         if not _is_our_worktree(top, want):
             return "kept: git could not confirm it is a copy of this project"
-        ok, why = _save_leftovers(want, ticket)  # (4)
+        # (4); the conflict check against the project only for work that goes back (never for dropped)
+        ok, why = _save_leftovers(want, ticket, top if done else None)
         if not ok:
             return f"kept: {why}"
+        if _unmerged_done_work(root, ticket):
+            return "kept: changes are waiting to come back"
         moved = _to_trash(want, ticket)
         if moved is None:
             return "kept: it could not be moved away (a file is in use?)"
         _trash_note(root, ticket, moved.name)
         _mark(root, "branches", ticket, branch=f"orch/{ticket}")
+    if _unmerged_done_work(root, ticket):
+        return "kept: changes are waiting to come back"
     if top is not None:
         _git(["worktree", "prune"], top, filters=False)  # its folder is gone from where git knew it
     if not _delete_branch(top, ticket):
@@ -1356,23 +2889,66 @@ def remove(root: Path, ticket: str, wait: float = 10.0) -> list[str]:
     return notes
 
 
+def _has_work(root: Path, ticket: str) -> bool:
+    if ticket in registry(root):
+        return True
+    with _scoped(root):
+        return _git(["rev-parse", "--verify", f"refs/heads/orch/{ticket}"], root, read_only=True)[0] == 0
+
+
 def on_closed(root: Path, ticket: str) -> None:
-    """A ticket was done, closed or cancelled: its copy goes. Never raises, never waits long."""
     try:
-        if ticket not in registry(root):
-            return  # no copy: nothing to do, no git call, no lock (the sweep finds odd leftovers)
-    except Exception:  # noqa: BLE001
-        return
-    remove(root, ticket, wait=SWEEP_WAIT)
+        # Existence reads precede the first Done action; never create a Need for a ticket without a copy.
+        if _has_work(root, ticket):
+            if tickets.load(root, ticket).get("status") == "done":
+                # "Mark Done" stays cheap: it only judges the tip recorded when the review began (no save, no
+                # merge). The bring-back itself runs in the detached sweep, never inside the person's click.
+                with contextlib.suppress(OSError, ValueError, Refused):
+                    _record_done_tip(root, ticket)
+                schedule_sweep(root)
+                return
+            remove(root, ticket, wait=SWEEP_WAIT)
+    except Exception:  # noqa: BLE001 - keep on any failure
+        pass
+
+
+def on_status(root: Path, ticket: str, before: str | None, after: str | None) -> None:
+    """A status change that starts or ends a review round (tickets.apply_op calls it after the ticket lock is
+    released; never raises). Any change forgets the tip recorded for an earlier review; entering Review
+    records the one shown now; leaving Done (reopened for more work) forgets the whole finished round."""
+    try:
+        if not _has_work(root, ticket):
+            return
+        with _scoped(root):
+
+            def forget(r):
+                for k in ROUND_KEYS if before == "done" else REVIEW_KEYS:
+                    r.pop(k, None)
+
+            if before == "done":
+                # a reopen must not interleave with a running bring-back (it re-checks the status)
+                try:
+                    with runs.locked(root, LOCK_ID, wait=SWEEP_WAIT):
+                        _copy_authority(root, ticket, forget)
+                except Exception:  # noqa: BLE001 - busy for long: forget anyway, the merge re-checks the status
+                    _copy_authority(root, ticket, forget)
+            else:
+                _copy_authority(root, ticket, forget)
+            if after == "review":
+                with runs.locked(root, LOCK_ID, wait=SWEEP_WAIT):
+                    _record_review_locked(root, ticket)
+    except Exception:  # noqa: BLE001 - no review tip is the safe side (the Done then needs an approval)
+        pass
 
 
 def on_run_ended(root: Path, tid: str) -> None:
-    """A run of `tid` ended: when its ticket is already closed, its copy goes now (it waited for the run)."""
-    try:
-        if tid in registry(root) and _ticket_closed(root, tid):
-            remove(root, tid, wait=SWEEP_WAIT)
-    except Exception:  # noqa: BLE001
-        pass
+    # A run that ends while its ticket is in Review: what is in the copy now is what the person reviews,
+    # unless a tip was recorded in this round already (that one is kept, or forgotten when the branch moved).
+    with contextlib.suppress(Exception):
+        if tickets.load(root, tid).get("status") == "review" and _has_work(root, tid):
+            with _scoped(root), runs.locked(root, LOCK_ID, wait=SWEEP_WAIT):
+                _record_review_locked(root, tid, new_round=False)
+    schedule_sweep(root)
 
 
 # ---------------------------------------------------------------- the trash (saved work only)
@@ -1506,19 +3082,22 @@ def spawn_trash_clean(root: Path) -> None:
 
 
 def schedule_sweep(root: Path) -> None:
-    """What a START does: never the sweep itself (its saves must not run under a start's patience), only a
-    detached `orch copy clean --background`, and only when there is anything that could need cleaning."""
+    """Schedule cleanup without holding up starts, including branches whose copies vanished."""
     try:
         d = copies_dir(root)
-        if (d is not None and d.is_dir() and any(True for _ in os.scandir(d))) or (
+        pending = (d is not None and d.is_dir() and any(True for _ in os.scandir(d))) or (
             root / REGISTRY_PENDING
-        ).exists():
+        ).exists()
+        if not pending:
+            with _scoped(root):
+                rc, refs, _ = _git(
+                    ["for-each-ref", "--format=%(refname:short)", "refs/heads/orch/"], root, read_only=True
+                )
+            pending = rc == 0 and any(_TID.fullmatch(n.removeprefix("orch/")) for n in refs.splitlines())
+        if pending:
             _spawn_clean(root, "--background")
     except Exception:  # noqa: BLE001
         pass
-
-
-# ---------------------------------------------------------------- the sweep
 
 
 def _out_of_time(deadline: float) -> bool:
@@ -1527,12 +3106,26 @@ def _out_of_time(deadline: float) -> bool:
 
 def _sweep_registry(root: Path, top, deadline: float, notes: list[str]) -> None:
     """(1) registry entries whose ticket is done, closed or missing."""
-    for tid in list(registry(root)):
+    candidates = set(registry(root))
+    if top:
+        rc, names, _ = _git(
+            ["for-each-ref", "--format=%(refname:short)", "refs/heads/orch/"], top, read_only=True
+        )
+        if not rc:
+            candidates.update(
+                n.removeprefix("orch/") for n in names.splitlines() if _TID.fullmatch(n.removeprefix("orch/"))
+            )
+    for tid in candidates:
         if _out_of_time(deadline):
             notes.append("time box reached")
             return
-        if _ticket_closed(root, tid):
-            notes += _remove_locked(root, tid, top, "sweep")
+        try:
+            if _ticket_closed(root, tid):
+                if tickets.ticket_path(root, tid).exists():
+                    _bring_back_locked(root, tid)
+                notes += _remove_locked(root, tid, top, "sweep")
+        except Exception as e:  # noqa: BLE001 - one broken ticket never stops the others (it is kept)
+            notes.append(f"{tid}: kept: {e}")
 
 
 def _sweep_orphans(root: Path, top, deadline: float, notes: list[str]) -> None:
@@ -1765,6 +3358,7 @@ def retry(root: Path, ticket: str) -> list[str]:
         before = getattr(_ctx, "deadline", None)
         _ctx.deadline = time.monotonic() + SWEEP_BUDGET
         try:
+            _bring_back_locked(root, ticket)
             notes = _remove_locked(root, ticket)
         finally:
             _ctx.deadline = before

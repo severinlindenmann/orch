@@ -26,6 +26,9 @@ HUMAN_ONLY = {
     "copy clean",  # a person's call (the dashboard's "Clean up now"); `orch copy` is hidden from help
     "copy retry",  # a person's "Try again" (agents are refused)
     "copy remove-orphaned",  # a person decides about copies of a moved project
+    "copy review",  # the dashboard's review of waiting work (read-only)
+    "copy approve",  # a person's "Review and bring back" (needs the person's proof)
+    "copy ask-update",  # a person's button; only that ticket's own live run may send it too
     "init",
     "share",
     "private",  # a person's approvals and Move to private (agents are refused)
