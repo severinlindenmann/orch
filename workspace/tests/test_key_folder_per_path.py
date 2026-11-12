@@ -344,3 +344,18 @@ def test_record_key_survives_a_stale_local_id(proj):
     _forge(proj)  # a stale id must not derive another subkey (every sealed record would stop verifying)
     assert hp.record_key(proj) == before
     assert _id(proj) == d.name
+
+
+def test_pending_mac_uses_the_healed_id_not_a_forged_one(proj, new_ticket, monkeypatch):
+    from orch import runs
+
+    monkeypatch.setattr(hp, "ENFORCE_PENDING_MAC", True)
+    d = hp.key_dir(proj)
+    tid = new_ticket()
+    runs.pending_add(proj, tid, "human:pat", "answer", "yes", "dashboard", proven=True)
+    assert len(runs.human_waiting(proj, tid)) == 1
+    _forge(proj)  # stale/forged id read before healing
+    assert runs._pending_proof(proj, tid) == (hp.human_key(proj, create=False), d.name)
+    assert runs._ws_id(proj) == d.name
+    assert len(runs.human_waiting(proj, tid)) == 1
+    assert _id(proj) == d.name
