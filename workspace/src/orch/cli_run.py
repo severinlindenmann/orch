@@ -352,7 +352,9 @@ def dispatch(args, root: Path) -> bool:
     elif sub == "attach":
         runs_live.attach(root, tid, args.watch)
     elif sub == "stop":
-        ok = runs_live.stop(root, tid, hold=True)  # a person's stop (also --by focus): hold what waits
+        ok = runs_live.stop(  # a person's stop (also --by focus) holds what waits; the automation's own never
+            root, tid, hold=by != runs_live.AUTOMATION_BY
+        )
         _out(
             args,
             {"stopped": ok},
@@ -408,8 +410,6 @@ def dispatch(args, root: Path) -> bool:
             text=args.text,
             agent=args.agent,
         )
-        if by != runs_live.AUTOMATION_BY:  # an explicit start ends a person's stop hold
-            runs_live.clear_held(root, tid)
         for note in r["notes"]:
             print(note, file=sys.stderr)
         how = "Continued the earlier conversation" if r["resumed"] else "Started fresh from the ticket"

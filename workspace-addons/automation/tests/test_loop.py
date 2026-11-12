@@ -495,3 +495,12 @@ def test_an_answer_and_a_change_note_start_one_run(ws):
     assert Scheduler(ws).tick(T(8, 1)) == []
     starts = [c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"]]
     assert len(starts) == 1
+
+
+def test_the_automation_actor_name_is_the_one_core_never_holds_for():
+    """N4: core's runs_live.AUTOMATION_BY (no hold, no hold clear) is this host's own actor."""
+    from orch import runs_live
+
+    from orch_automation import orchcli
+
+    assert orchcli.BY == runs_live.AUTOMATION_BY

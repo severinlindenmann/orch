@@ -89,14 +89,14 @@ def test_stop_leaves_the_ticket_ready(proj, run, gen, one_step):
     assert _status_soon(proj, tid, "ready") == "ready"
 
 
-def _stop_a_run(proj, run, tid):
+def _stop_a_run(proj, run, tid, *extra):
     import subprocess
     import sys
 
     p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         runs.claim(proj, tid, "human:t", "fake", "oneshot", pid=p.pid)
-        code, _, err = run("run", "stop", tid)
+        code, _, err = run("run", "stop", tid, *extra)
         assert code == 0, err
     finally:
         p.kill()
@@ -145,6 +145,50 @@ def test_an_explicit_start_after_a_stop_clears_the_hold(proj, run, gen, one_step
     assert run("run", "start", tid, "--by", "human:t")[0] == 0
     _wait(proj, tid)
     assert not path.exists()
+
+
+def test_a_stop_by_the_automation_holds_nothing(proj, run):
+    """N1: `run stop --by agent:automation` never sets a hold."""
+    tid = _new(run)
+    runs.pending_add(proj, tid, "human:owner", "message", "one more thing")
+    _stop_a_run(proj, run, tid, "--by", runs_live.AUTOMATION_BY)
+    assert not runs_live._held_path(proj, tid).exists() and _held(run, tid) == []
+
+
+def test_runs_start_itself_clears_the_hold_for_a_person_only(proj, gen, one_step):
+    """N2/N3: the clearing lives in runs.start (every caller), keyed on `by`."""
+    gen("--silent 0.2")
+    tid = tickets.create(proj, "Make the report", "human:t")["id"]
+    path = runs_live._held_path(proj, tid)
+    runs_live._write_held(proj, tid, ["p_x"])
+    runs.start(proj, tid, runs_live.AUTOMATION_BY)
+    _wait(proj, tid)
+    assert path.exists()
+    runs_live._write_held(proj, tid, ["p_x"])
+    runs.start(proj, tid, "human:t")
+    _wait(proj, tid)
+    assert not path.exists()
+
+
+def test_a_corrupt_or_deeply_nested_hold_file_is_no_hold(proj, run):
+    """H4: a deeply nested hold file (RecursionError) or a corrupt one does not crash `run status`."""
+    tid = _new(run)
+    path = runs_live._held_path(proj, tid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"ids":' + "[" * 20000 + "]" * 20000 + "}")
+    assert runs_live.stop_held(proj, tid, ["p_x"]) == [] and _held(run, tid) == []
+
+
+def test_a_broken_queue_never_breaks_the_stop(proj, run, monkeypatch):
+    """H3: human_waiting raising must not make stop raise or skip the stop."""
+    tid = _new(run)
+
+    def boom(*a, **k):
+        raise ValueError("corrupt queue")
+
+    monkeypatch.setattr(runs, "human_waiting", boom)
+    _stop_a_run(proj, run, tid)
+    assert runs.read(proj, tid) is None
 
 
 def test_only_a_person_stop_with_a_run_sets_a_hold(proj, run):

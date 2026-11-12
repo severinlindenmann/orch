@@ -1092,7 +1092,7 @@ def stop_held(root: Path, tid: str, pending: list[str]) -> list[str]:
         return []
     try:
         held = json.loads(raw).get("ids")
-    except (ValueError, AttributeError):
+    except Exception:  # bad JSON, a nesting too deep (RecursionError), not an object: no hold
         return []
     if not isinstance(held, list) or not all(isinstance(i, str) for i in held):
         return []
@@ -1118,8 +1118,8 @@ def _write_held(root: Path, tid: str, ids: list[str]) -> None:
 def clear_held(root: Path, tid: str) -> None:
     """An explicit start (a person, Focus, the CLI; not the automation's own start) ends the hold."""
     path = _held_path(root, tid)
-    if _held_dir_ok(path):
-        with contextlib.suppress(OSError):
+    if _held_dir_ok(path) and os.path.lexists(path):
+        with contextlib.suppress(OSError), runs.locked(root, tid):
             path.unlink(missing_ok=True)
 
 
@@ -1130,7 +1130,10 @@ def stop(root: Path, tid: str, hold: bool = False) -> bool:
         rec = runs.read(root, tid)
         if rec:
             if hold:
-                _write_held(root, tid, [i["id"] for i in runs.human_waiting(root, tid)])
+                try:
+                    _write_held(root, tid, [i["id"] for i in runs.human_waiting(root, tid)])
+                except Exception:  # a corrupt queue never stops the stop
+                    pass
             rec["stop_requested"] = tickets.now()
             runs._write(root, rec)
     if not rec:
