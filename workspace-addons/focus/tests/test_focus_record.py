@@ -239,6 +239,8 @@ def test_helpers_keep_their_parent_and_stay_in_the_tree_when_finished():
         kind="helper.start",
         agent="h_1",
         parent="main",
+        via="log",
+        checked=True,  # a line orch checked: only those open and close helpers
         used={"kind": "helper", "name": "x", "action": None, "source": "builtin", "version": None},
     )
     end = {**start, "kind": "helper.end", "outcome": {"ok": True, "error": None, "ms": 5}}
