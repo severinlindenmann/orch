@@ -4,6 +4,7 @@
 import io
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -1927,7 +1928,7 @@ def test_xcode_shims_are_checked_where_they_really_run(ws, monkeypatch, tmp_path
     link = tmp_path / "xcode_select_link"
     link.symlink_to(dev)
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
-    with pytest.raises(Refused, match="belongs to your own user"):
+    with pytest.raises(Refused, match=LOCATION):
         secretrun.approve_program(ws, "/usr/bin/true")
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(tmp_path / "missing"))
     assert secretrun.approve_program(ws, "/usr/bin/true")[0]
@@ -1936,7 +1937,7 @@ def test_xcode_shims_are_checked_where_they_really_run(ws, monkeypatch, tmp_path
 def test_a_system_folder_the_user_can_write_through_a_group_counts_as_user_owned(ws, monkeypatch):
     real = secretrun._user_can_write
     monkeypatch.setattr(secretrun, "_user_can_write", lambda p: p == "/usr/bin" or real(p))
-    with pytest.raises(Refused, match="belongs to your own user"):
+    with pytest.raises(Refused, match=LOCATION):
         secretrun.approve_program(ws, "/usr/bin/true")
 
 
@@ -1973,9 +1974,25 @@ def test_a_program_that_starts_with_a_shebang_needs_a_system_interpreter(ws, tmp
     secretrun._check_shebang(ws, script(b"not a script"), 0)
 
 
+LOCATION = "belongs to your own user|changed by other users"  # which reason fires first depends on the folder
+
+
+def _safe_file():
+    """A real (not linked) file in a system folder that the user cannot change, on any OS."""
+    for cand in ("/usr/bin/false", "/bin/false", "/usr/bin/env", "/bin/ls", "/usr/bin/ls"):
+        if os.path.isfile(cand) and os.path.realpath(cand) == cand:
+            try:
+                secretrun._check_chain(cand, "/nonexistent-workspace")
+            except Refused:
+                continue
+            return cand
+    pytest.skip("no suitable system file on this machine")
+
+
 def _user_program(tmp_path):
     import shutil
 
+    tmp_path = Path(os.path.realpath(tmp_path))
     exe = tmp_path / "bin" / "tool"
     exe.parent.mkdir(exist_ok=True)
     shutil.copy("/usr/bin/true", exe)
@@ -1986,7 +2003,7 @@ def _user_program(tmp_path):
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
 def test_h2_a_program_in_a_folder_the_user_owns_cannot_be_approved(store, run, ws, monkeypatch, tmp_path):
     code, _, err = _set(run, monkeypatch, ws, "mine", "--run", str(_user_program(tmp_path)))
-    assert code == 2 and "belongs to your own user" in err and "mine" not in keystore.read_profiles(ws)
+    assert code == 2 and re.search(LOCATION, err) and "mine" not in keystore.read_profiles(ws)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
@@ -2000,7 +2017,7 @@ def test_h2_a_forged_profile_pointing_at_a_user_program_is_refused_in_every_mode
     seed_profiles(ws, prof)
     for argv in (("exec", "mine"), ("env", "mine", "--", str(exe)), ("file", "mine", "--", str(exe))):
         code, out, err = run("secret", *argv)
-        assert code == 2 and "belongs to your own user" in err, argv
+        assert code == 2 and re.search(LOCATION, err), argv
 
 
 @pytest.mark.parametrize("arg", ["-f/etc/hosts", "--conf=/etc/hosts", "@/etc/hosts", "../x", "a/b", "./x"])
@@ -2010,27 +2027,28 @@ def test_h2_arguments_with_a_path_must_be_a_full_path_on_their_own(store, run, w
 
 
 def test_h2_a_full_path_argument_in_a_safe_place_is_accepted(store, run, ws, monkeypatch):
-    code, out, err = _set(run, monkeypatch, ws, "safe", "--run", "/usr/bin/true", "--run", "/usr/bin/false")
+    code, out, err = _set(run, monkeypatch, ws, "safe", "--run", "/usr/bin/true", "--run", _safe_file())
     assert code == 0, out + err
-    assert keystore.read_profiles(ws)["safe"]["run"][1:] == ["/usr/bin/false"]
+    assert keystore.read_profiles(ws)["safe"]["run"][1:] == [_safe_file()]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uid ownership")
 def test_h2_a_user_writable_or_linked_or_missing_path_argument_is_refused(
     store, run, ws, monkeypatch, tmp_path
 ):
+    tmp_path = Path(os.path.realpath(tmp_path))
     mine = tmp_path / "data.txt"
     mine.write_text("x")
     link = tmp_path / "link"
-    link.symlink_to("/usr/bin/false")
+    link.symlink_to(_safe_file())
     for arg, message in (
-        (str(mine), "belongs to your own user"),
+        (str(mine), LOCATION),
         (str(link), "through a link"),
         ("/nonexistent/place", "does not exist"),
-        (str(tmp_path), "belongs to your own user"),
+        (str(tmp_path), LOCATION),
     ):
         code, out, err = _set(run, monkeypatch, ws, "args", "--run", "/usr/bin/true", "--run", arg)
-        assert code == 2 and message in err, (arg, err)
+        assert code == 2 and re.search(message, err), (arg, err)
 
 
 def test_h2_the_stored_command_is_checked_again_for_argument_less_system_programs(store, ws):
@@ -2068,13 +2086,14 @@ def test_a_real_home_profile_is_for_the_person_only(store, run, ws, monkeypatch,
 
 
 def test_a_command_argument_is_checked_again_at_every_start(store, run, ws, monkeypatch, tmp_path):
+    tmp_path = Path(os.path.realpath(tmp_path))
     mine = tmp_path / "data.txt"
     mine.write_text("x")
     prof = keystore.read_profiles(ws)
     prof["late"] = {"env": {"T": "other-token"}, "files": {}, "run": ["/usr/bin/true", str(mine)]}
     seed_profiles(ws, prof)  # (forged: a person would have been refused at set)
     code, out, err = run("secret", "exec", "late")
-    assert code == 2 and "belongs to your own user" in err
+    assert code == 2 and re.search(LOCATION, err)
 
 
 def test_set_values_that_are_paths_follow_the_same_rule_but_web_addresses_do_not(store, run, ws, monkeypatch):
@@ -2097,12 +2116,15 @@ def test_the_developer_folder_itself_must_be_safe_for_any_usr_bin_program(ws, mo
     link = tmp_path / "link"
     link.symlink_to(dev)
     monkeypatch.setattr(secretrun, "XCODE_SELECT_LINK", str(link))
-    with pytest.raises(Refused, match="belongs to your own user"):
+    with pytest.raises(Refused, match=LOCATION):
         secretrun.approve_program(ws, "/usr/bin/true")
 
 
 @pytest.mark.real_checks
 def test_without_the_trusted_test_interpreter_the_interpreter_is_refused(ws):
+    real = os.path.realpath(sys.executable)
+    if not any(secretrun._user_can_write(p) for p in secretrun._chain(real)):
+        pytest.skip("on this machine the interpreter is not in a place the user can change")
     with pytest.raises(Refused):
         secretrun.approve_program(ws, sys.executable)
 
