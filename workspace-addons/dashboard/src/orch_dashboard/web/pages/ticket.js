@@ -555,6 +555,8 @@ function taskProofChips(t, task) {
   }).filter(Boolean);
   return chips.length ? h('div', {className:'task-proofs row'}, chips.slice(0, 4)) : null;
 }
+// Open task menus and their typed reason, keyed tid:check; kept across render() until submit, Escape or close.
+const taskMenus = new Map();
 function taskRows(t) {
   return array(t.checklist).map((task, i) => {
     const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
@@ -564,23 +566,37 @@ function taskRows(t) {
     if (!snapshot && task.id) mark.onclick = () => toggleTask(t.id, task.id);
     let menu = null;
     if (!snapshot && task.id) {
+      // The open menu and the typed reason survive render() (the background refresh redraws the row): kept in
+      // taskMenus under tid:check until it is submitted, closed or Escaped; never redrawn while focus is inside.
+      const menuKey = t.id + ':' + task.id, formKey = 'task-menu-' + task.id;
+      const isOpen = taskMenus.has(menuKey);
       const reason = h('input', {type:'text', className:'input', placeholder:'Reason (optional)', 'aria-label':'Reason (optional)', maxlength:200});
-      const form = h('form', {className:'stack', hidden:true, 'data-key':'task-menu-' + task.id},
+      reason.value = taskMenus.get(menuKey) || '';
+      const form = h('form', {className:'stack', hidden:!isOpen, 'data-key':formKey},
         window.DashHelpers.resolved(task) ? null : reason,
         h('button', {type:'submit', className:'btn outline sm'}, window.DashHelpers.resolved(task) ? 'Open again' : "Won't do"));
+      const closeMenu = () => { taskMenus.delete(menuKey); locks.delete(formKey); form.hidden = true; more.setAttribute('aria-expanded', 'false'); more.focus(); };
+      reason.addEventListener('input', () => taskMenus.set(menuKey, reason.value));
+      form.addEventListener('focusin', () => locks.add(formKey));
+      form.addEventListener('focusout', event => { if (!form.contains(event.relatedTarget)) locks.delete(formKey); });
+      form.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeMenu(); } });
       form.onsubmit = async event => {
         event.preventDefault();
-        if (window.DashHelpers.resolved(task)) { const r = await act('check.reopen', {ticket:t.id, check:task.id}); render(); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
+        if (window.DashHelpers.resolved(task)) { taskMenus.delete(menuKey); const r = await act('check.reopen', {ticket:t.id, check:task.id}); render(); if (!r.ok) window.orch.toast(r.text, 'error'); return; }
         const lock = 'task-' + t.id + '-' + task.id;
         if (locks.has(lock)) return;
         locks.add(lock);
         const result = await act('check.wont_do', {ticket:t.id, check:task.id, reason:reason.value || ''});
         locks.delete(lock);
+        if (result.ok) { taskMenus.delete(menuKey); locks.delete(formKey); }
         render();
         if (!result.ok) window.orch.toast(result.text, 'error');
       };
-      const more = h('button', {type:'button', className:'btn outline sm', 'aria-label':'More', 'aria-expanded':'false'}, '...');
-      more.onclick = () => { form.hidden = !form.hidden; more.setAttribute('aria-expanded', String(!form.hidden)); };
+      const more = h('button', {type:'button', className:'btn outline sm', 'aria-label':'More', 'aria-expanded':String(isOpen)}, '...');
+      more.onclick = () => {
+        if (taskMenus.has(menuKey)) closeMenu();
+        else { taskMenus.set(menuKey, reason.value); form.hidden = false; more.setAttribute('aria-expanded', 'true'); reason.focus(); }
+      };
       menu = h('div', {className:'stack'}, more, form);
     }
     return h('div', {className:'card-row ticket-task-row', 'data-key':'task-' + (task.id || i)}, mark,
