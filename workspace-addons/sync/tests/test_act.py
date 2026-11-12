@@ -387,7 +387,10 @@ def test_review_text_never_hides_a_character():
     assert act.plain("a\u202eb\u2066c\u200bd\x9be\x07f\ufeffg") == "a\ufffdb\ufffdc\ufffdd\ufffde\ufffdf\ufffdg"
     assert act.plain("one\ntwo   three\x85four") == "one two three four"  # line breaks (also NEL): one space
     assert act.plain("x" * 10, 5) == "xxxx…"
-    for hidden in ("\xad", "\u180e", "\ufe00", "\ufe0f", "\U000e0000", "\U000e0041", "\U000e007f"):
+    assert act.plain("plain text, ünïcode 日本 é") == "plain text, ünïcode 日本 é"  # ordinary text is untouched
+    for hidden in ("\xad", "\u180e", "\ufe00", "\ufe0f", "\U000e0000", "\U000e0041", "\U000e007f",
+                   "\U000e0100", "\U000e01ef", "\u180b", "\u115f", "\u1160", "\u3164", "\uffa0", "\ue000",
+                   "\ud800", "\u0378", "\U000f0000"):
         assert act.plain(f"a{hidden}b") == "a\ufffdb"
 
 

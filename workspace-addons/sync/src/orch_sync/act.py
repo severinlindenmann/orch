@@ -10,8 +10,8 @@ the server mints only for the target it echoes back; the verb checks the target 
 """
 
 import json
-import re
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from orch import config, humanproof
@@ -29,10 +29,27 @@ SECRET_WHY = "may contain a password or access key"
 PUBLIC = "pending-public"  # run/sync/pending-public.json: a public address waiting for the person's signed choice
 PUBLIC_KIND = "sync-pending-public"  # its local1 domain: only set_where writes (signs) it
 NO_ADDRESS = "Sync can't use this address: https or ssh, without a password"
-# what a sign step never shows as such: controls (C0, C1), bidi overrides and marks, zero-width characters, the soft
-# hyphen, the Mongolian vowel separator, variation selectors and tag characters
-HIDDEN = re.compile("[\x00-\x1f\x7f-\x9f\xad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufe00-\ufe0f"
-                    "\ufeff\U000e0000-\U000e007f]")
+# what a sign step never shows as such: decided by Unicode category, not by a list that has gaps: control (Cc), format
+# (Cf: bidi, zero-width, soft hyphen, tag characters), private use, surrogate, unassigned, line and paragraph
+# separators; plus the Hangul fillers (blank letters) and every variation selector (they change nothing visible).
+_HIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Cn", "Zl", "Zp"})
+_BLANK_LETTERS = frozenset("\u115f\u1160\u3164\uffa0")
+_VARIATION_SELECTORS = ((0x180B, 0x180D), (0x180F, 0x180F), (0xFE00, 0xFE0F), (0xE0100, 0xE01EF))
+
+
+def hidden_char(c):
+    """True for a character a sign step must never show as such (it is shown as U+FFFD)."""
+    cp = ord(c)
+    return (
+        unicodedata.category(c) in _HIDDEN_CATEGORIES
+        or c in _BLANK_LETTERS
+        or any(lo <= cp <= hi for lo, hi in _VARIATION_SELECTORS)
+    )
+
+
+def _visible(value):
+    """`value` as one line, whitespace collapsed, every hidden character replaced by U+FFFD."""
+    return "".join("\ufffd" if hidden_char(c) else c for c in " ".join(str(value).split()))
 
 
 def _person(what):
@@ -46,7 +63,7 @@ def _person(what):
 def plain(value, limit=200):
     """Text from a peer, a file or the agent as one clipped plain line for a sign step: whitespace collapsed, every
     control, bidi or zero-width character shown as U+FFFD (never hidden), at most `limit` characters."""
-    text = HIDDEN.sub("\ufffd", " ".join(str(value).split()))
+    text = _visible(value)
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
@@ -58,7 +75,7 @@ TOO_LARGE = ("This change is too large to review here, so it can't be signed in 
 def whole(value):
     """A signed value shown in FULL (M-C): never clipped, so what the person signs is what they see. Hidden
     characters are shown as U+FFFD. Too long for a sign step: refused (nothing is offered for signing)."""
-    text = HIDDEN.sub("\ufffd", " ".join(str(value).split()))
+    text = _visible(value)
     if len(text) > REVIEW_MAX:
         raise repo.Refused(TOO_LARGE)
     return text
