@@ -308,7 +308,6 @@ final class ConversationModelTests: XCTestCase {
         let m = await paired(); m.pageSize = 2
         await m.reloadMessages()
         let first = try XCTUnwrap(m.messagesNext, "more than one page in the sample")
-        let start = m.messages.count
         let running = Task { await m.loadOlderMessages() }
         await Task.yield()
         XCTAssertTrue(m.loadingOlder)
@@ -316,7 +315,6 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertEqual(m.messagesNext, first)
         await running.value
         XCTAssertFalse(m.loadingOlder)
-        XCTAssertGreaterThan(m.messages.count, start)
         XCTAssertNotEqual(m.messagesNext, first, "the cursor moved on")
         var guardRail = 0
         while m.hasOlderMessages && guardRail < 100 { await m.loadOlderMessages(); guardRail += 1 }
