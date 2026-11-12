@@ -2776,3 +2776,66 @@ def test_b13t_a_merged_file_changed_since_the_merge_is_never_passed_unchecked(do
     (top / "code.py").write_text("swapped\n")
     git(top, "add", "code.py")
     assert not worktrees._files_match(top, ["code.py"], merge)
+
+
+def test_b13v_crlf_checkout_passes_both_file_checks_with_one_helper(done_copy):
+    """core.autocrlf=true (git for Windows default): the folder holds CRLF, the blob LF. Bring-back works,
+    both checks accept it through the one helper."""
+    root, tid, copy = done_copy
+    git(root, "config", "core.autocrlf", "true")
+    to_review(root, tid)
+    done_and_sweep(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "merged", back
+    assert (root / "code.py").read_bytes().endswith(b"\r\n")
+    assert worktrees._bytes_match_blob(b"a\r\nb\r\n", worktrees._blob_id(b"a\nb\n", "0" * 40))
+    assert not worktrees._bytes_match_blob(b"a\r\nB\r\n", worktrees._blob_id(b"a\nb\n", "0" * 40))
+
+
+def test_b13v_new_reasons_have_their_own_plain_texts(done_copy, monkeypatch):
+    for code, text in (
+        ("unverified", worktrees.UNVERIFIED),
+        ("verify-time", worktrees.VERIFY_TIME),
+        ("objects", worktrees.OBJECTS_BAD),
+        ("files", worktrees.FILES_CHANGED),
+        ("history", worktrees.HISTORY_NOTE),
+    ):
+        assert worktrees._reason_code(text) == code and worktrees.BRING_BACK_REASONS[code] == text
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: "later")
+        done_and_sweep(root, tid)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["reason"] == worktrees.VERIFY_TIME and back["reason_code"] == "verify-time"
+
+
+def test_b13v_approve_keeps_a_failed_check_verdict(done_copy, monkeypatch):
+    """'Review and bring back' must not wipe the verdict of a merge whose check failed (ancestry would then
+    certify it)."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: "bad")
+        m.setattr(worktrees, "_bb_status", lambda top: "?? person-file\0")
+        done_and_sweep(root, tid)
+    assert worktrees._copy_authority(root, tid)["journal"]["post_check"] == "bad"
+    target = worktrees.approval_target(root, tid)[0]
+    worktrees.approve_copy(root, tid, target)
+    assert worktrees._copy_authority(root, tid)["journal"]["post_check"] == "bad"
+    assert not worktrees._copy_authority(root, tid).get("merged")
+
+
+def test_b13v_a_shallow_project_says_so(done_copy):
+    root, tid, copy = done_copy
+    (root / ".git" / "shallow").write_text("0" * 40 + "\n")
+    entry, why = worktrees._create(root, "t_zzzzzz")
+    assert entry is None and why == worktrees.HISTORY_NOTE
+
+
+def test_b13v_bind_shown_never_blocks_the_done(done_copy, monkeypatch):
+    root, tid, copy = done_copy
+    monkeypatch.setattr(
+        worktrees, "_copy_authority", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+    )
+    assert worktrees.bind_shown(root, tid, "a" * 40) is True

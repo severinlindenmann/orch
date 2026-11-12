@@ -59,7 +59,6 @@ FSCK_TIMEOUT = 900  # the object check before a merge reads the whole history of
 GIT_ADD_TIMEOUT = 60
 CREATE_BUDGET = 100.0  # all git time of one _create; LOCK_WAIT must stay above it
 SETUP_TIMEOUT = 600
-ID_ARGS = ["-c", "user.name=orch", "-c", "user.email=orch@localhost"]  # for commits made by orch (bring-back)
 _TID = re.compile(r"t_[a-z0-9]{6,16}")
 _WS8 = re.compile(r"[0-9a-f]{8}")
 _SHA = re.compile(r"[0-9a-f]{40,64}")
@@ -565,6 +564,8 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
         return None, str(e)
     repo = _repo(root)
     if repo is None:
+        if safegit.hostile_history(root):
+            return None, HISTORY_NOTE
         return None, "This folder is not a git project with at least one commit."
     top, rel, head = repo
     try:
@@ -812,10 +813,21 @@ INTERRUPTED_BB = (
 )
 MERGING = "a merge is in progress in your folder"
 FILES_CHANGED = "The copy's files changed during the merge; nothing was merged"
+UNVERIFIED = (
+    "The work is already in your branch, but orch could not check that its files are right. "
+    "Look at your project; if something is wrong, undo that last commit or reopen this ticket."
+)
+VERIFY_TIME = (
+    "The work is already in your branch. Checking it takes longer; orch will check again on its own."
+)
 CHANGED = "your folder changed while saving - nothing was removed"
 OVERLAP = "your folder has changes in the same places"
 UPDATE = "your project changed in the same places; ask the agent to update"
 UNREADABLE = "git could not read your folder"
+HISTORY_NOTE = (
+    "Your project's git history is a shallow or shared one (it has a shallow, alternates or grafts file): "
+    "separate copies are not made for it."
+)
 MERGED_OUTSIDE = "the work is in your branch, but orch did not bring it back: check your folder"
 FOREIGN = "a branch appeared that orch did not make: check it by hand"
 SETTINGS = "a git setting changes how the merge works: bring it back by hand"
@@ -851,6 +863,11 @@ BRING_BACK_REASONS = {
     "merging": "a merge is in progress in your folder",
     "busy": "a merge or another git operation is in progress in your folder",
     "changed": "your folder changed while saving - nothing was removed",
+    "history": HISTORY_NOTE,
+    "files": FILES_CHANGED,
+    "objects": OBJECTS_BAD,
+    "unverified": UNVERIFIED,
+    "verify-time": VERIFY_TIME,
     "origin": "The original project branch was not recorded. A person needs to check it.",
     "branch": "your project is on another branch",
     "filename": "git could not read a changed filename",
@@ -1016,6 +1033,19 @@ def _special_attributes(top: Path, tip: str, touched: list[str]) -> bool:
     return False
 
 
+def _blob_id(data: bytes, sha: str) -> str:
+    return (hashlib.sha1 if len(sha) == 40 else hashlib.sha256)(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def _bytes_match_blob(data: bytes, sha: str) -> bool:
+    """`data` is the content of blob `sha`, or that content with CRLF line ends (git for Windows checks out
+    with core.autocrlf=true: the file on disk has CRLF, the blob LF). The ONE comparison for every check
+    of files against blob ids (before and after the merge)."""
+    return _blob_id(data, sha) == sha or (
+        b"\r\n" in data and _blob_id(data.replace(b"\r\n", b"\n"), sha) == sha
+    )
+
+
 def _index_mismatch(top: Path, touched: list[str]) -> bool:
     """The project's index (shared with every agent) is not trusted for the paths the merge writes: each
     touched entry must be a plain cached entry (no assume-unchanged, skip-worktree, unmerged) whose bytes
@@ -1048,12 +1078,7 @@ def _index_mismatch(top: Path, touched: list[str]) -> bool:
                     data = p.read_bytes()
             except OSError:
                 return True
-            algo = hashlib.sha1 if len(sha) == 40 else hashlib.sha256
-
-            def blob(b: bytes, algo=algo) -> str:
-                return algo(b"blob %d\0" % len(b) + b).hexdigest()
-
-            if blob(data) != sha and not (b"\r\n" in data and blob(data.replace(b"\r\n", b"\n")) == sha):
+            if not _bytes_match_blob(data, sha):
                 return True
     return False
 
@@ -1253,8 +1278,8 @@ def approve_copy(root: Path, ticket: str, target: str) -> dict:
                 r["origin_branch"] = branch
             if not r.get("base"):
                 r["base"] = base
-            if not merging:
-                r.pop("journal", None)
+            if not merging and not (r.get("journal") or {}).get("post_check"):
+                r.pop("journal", None)  # (a merge whose check has not passed keeps its verdict)
 
         _copy_authority(root, ticket, record)
         return _bring_back_locked(root, ticket)
@@ -1444,8 +1469,8 @@ def bind_shown(root: Path, ticket: str, shown) -> bool:
                 _copy_authority(root, ticket, stale)
                 return False
             return not result
-    except (OSError, ValueError, Refused):
-        return True  # no readable store: nothing recorded there can approve the Done either
+    except Exception:  # noqa: BLE001 - never blocks a person's Done: nothing recorded can approve it then
+        return True  # no readable store (or anything else odd)
 
 
 def _record_done_tip(root: Path, ticket: str) -> None:
@@ -1530,6 +1555,8 @@ def _unmerged_done_work(root: Path, ticket: str) -> bool:
 
 def _bb_read(top: Path, args: list[str], **kw) -> str:
     rc, out, err = _git(args, top, read_only=True, **kw)
+    if rc and err == safegit.HISTORY_REFUSAL:
+        raise Refused(HISTORY_NOTE)
     if rc:
         raise Refused("git could not read your folder" + (": " + err if err else ""))
     return out
@@ -1698,14 +1725,18 @@ def _files_match(top: Path, touched, commit: str) -> bool:
         try:
             if path.is_symlink() or not path.is_file():
                 return False
-            h = hashlib.sha256() if len(blob) == 64 else hashlib.sha1()
-            h.update(b"blob %d\0" % path.stat().st_size)
-            with path.open("rb") as f:
-                for chunk in iter(lambda: f.read(1 << 20), b""):
-                    h.update(chunk)
+            if path.stat().st_size > 8 * 1024 * 1024:  # too big to read at once: raw bytes only, streamed
+                h = hashlib.sha256() if len(blob) == 64 else hashlib.sha1()
+                h.update(b"blob %d\0" % path.stat().st_size)
+                with path.open("rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                ok = h.hexdigest() == blob
+            else:
+                ok = _bytes_match_blob(path.read_bytes(), blob)
         except OSError:
             return False
-        if h.hexdigest() != blob:
+        if not ok:
             return False
     return True
 
@@ -1816,9 +1847,9 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
         )
         if mine is not None:
             if _bb_read(top, ["rev-parse", f"{mine}^{{tree}}"]) != journal.get("tree"):
-                return CHANGED  # orch's merge commit holds something else than was checked: a person looks
+                return UNVERIFIED  # orch's merge commit holds something else than was checked: a person looks
             if journal.get("post_check") == "bad":
-                return CHANGED  # a failed check stays until a person has looked
+                return UNVERIFIED  # a failed check stays until a person has looked
             _set_journal(root, ticket, {**journal, "post_check": "pending", "merge_commit": mine})
             names = _bb_read(
                 top, ["diff", "--name-only", "--no-renames", "-z", journal["pre_head"], mine], strip=False
@@ -1827,7 +1858,7 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
             if problem == "bad":
                 _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": mine})
             if problem:
-                return CHANGED
+                return VERIFY_TIME if problem == "later" else UNVERIFIED
             # passed on this very commit: it is orch's merge, recorded as such (the normal checks follow)
             _copy_authority(root, ticket, lambda r: r.update(merged=mine))
         _set_journal(root, ticket, None)  # orch's merge finished, or the person moved on: checks run again
@@ -2076,7 +2107,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         if problem == "bad":
             _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": parents[0]})
         if problem == "later":
-            return wait(CHANGED)  # the merge is in; the next sweep checks again
+            return wait(VERIFY_TIME)  # the merge is in; the next sweep checks again
         if problem:
             # Back to where the project was, never with --hard (a person's edit is never thrown away):
             # --keep refuses over any file whose bytes differ from the index, and then a person looks.
@@ -2089,17 +2120,18 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 for f in now.split("\0")
                 if f
             )
-            if (
+            rolled = (
                 clean
                 and _bb_read(top, ["rev-parse", "HEAD"]) == parents[0]
                 and _bb_read(top, ["symbolic-ref", "-q", "HEAD"]) == pre["branch"]
                 and _git(["reset", "--keep", pre["head"]], top)[0] == 0
-                and _files_match(top, touched, pre["head"])
-                and _fsck(top, pre["head"]) == 0
-            ):
+            )
+            if rolled and _files_match(top, touched, pre["head"]) and _fsck(top, pre["head"]) == 0:
                 _set_journal(root, ticket, None)  # rolled back and verified: nothing of the merge is left
                 return wait(FILES_CHANGED)
-            return wait(CHANGED)  # the journal stays: a person needs to look
+            # the journal stays: a person needs to look. Rolled back but not verified: the stored history is
+            # in doubt; not rolled back: the unchecked merge is in the branch.
+            return wait(OBJECTS_BAD if rolled else UNVERIFIED)
         try:
             after = _bb_snapshot(top)
             compare = ("branch", "status", "files")

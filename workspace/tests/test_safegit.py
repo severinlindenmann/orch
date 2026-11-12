@@ -1640,3 +1640,14 @@ def test_every_fsck_format_id_can_really_be_ignored(tmp_path):
     for i in safegit.FSCK_FORMAT_OK:
         p = subprocess.run(["git", "-c", f"fsck.{i}=ignore", "fsck"], cwd=r, capture_output=True, text=True)
         assert "Cannot demote" not in p.stderr, i
+
+
+def test_colour_is_off_for_every_call(tmp_path, monkeypatch):
+    """A repo's own config (color.diff=always) must not put escape codes into what orch parses."""
+    seen = []
+    monkeypatch.setattr(
+        safegit, "_raw", lambda argv, cwd, timeout, data=None, root=None: seen.append(argv) or (0, "", "")
+    )
+    monkeypatch.setattr(safegit, "git_exe", lambda cwd, root=None: "/usr/bin/git")
+    safegit.run(["status"], tmp_path, read_only=True, filters=False)
+    assert "color.ui=never" in seen[-1] and "color.diff=never" in seen[-1]
