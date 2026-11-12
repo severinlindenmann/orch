@@ -32,6 +32,7 @@ _D_KID = b"orch.record.kid/1\0"
 _D_GENESIS = b"orch.record.genesis/1\0"
 _D_LINE = b"orch.record.line/1\0"
 _D_SPOOL = b"orch.record.spool/1\0"
+_D_SPOOL_NAME = b"orch.record.spoolname/1\0"
 _D_JOB = b"orch.record.job/1\0"
 _D_JOB_GENESIS = b"orch.record.job.genesis/1\0"
 _D_HEAD = b"orch.record.head/1\0"
@@ -265,11 +266,23 @@ def scan(
     return state
 
 
-def finish(state: State, kid: str, head: dict | None = None, *, old_kid=True) -> Verified:
+def _olds(old_kid) -> set:
+    if old_kid is None:
+        return set()
+    if isinstance(old_kid, str):
+        return {old_kid}
+    if isinstance(old_kid, set | frozenset | list | tuple) and all(isinstance(k, str) for k in old_kid):
+        return set(old_kid)
+    raise TypeError("old_kid must be None, a str or a collection of str")
+
+
+def finish(state: State, kid: str, head: dict | None = None, *, old_kid=None) -> Verified:
     """The result for the walk so far (does not change `state`, so a cache can go on from it). `old_kid`: the
-    key id orch recorded for the run when its key changed (a protection reset), a str. Only lines of exactly
-    that key id can be old history; any other foreign id is planted (a made-up key id, a run copied from
-    another workspace). None: no reset is recorded, nothing is history. True (the pure vectors only): any."""
+    key id(s) orch recorded for the run when its key changed (a protection reset): a str or a set/list/tuple
+    of str. Only lines of exactly those key ids can be old history; any other foreign id is planted (a
+    made-up key id, a run copied from another workspace). None (default): no reset is recorded, nothing is
+    history. Anything else raises TypeError."""
+    olds = _olds(old_kid)
     s = state.copy()
     out = s.out
     n_bad, n_oldkey = s.n_bad, 0
@@ -282,13 +295,8 @@ def finish(state: State, kid: str, head: dict | None = None, *, old_kid=True) ->
             rotation = out.events[0]["seq"] == s.base + 1
         else:
             rotation = not has_head
-        olds = (
-            {old_kid}
-            if isinstance(old_kid, str)
-            else (set(old_kid) if old_kid not in (None, True) else set())
-        )
-        if rotation and (old_kid is True or olds):
-            n_oldkey = s.pending if old_kid is True else sum(s.kids.get(k, 0) for k in olds)
+        if rotation and olds:
+            n_oldkey = sum(s.kids.get(k, 0) for k in olds)
             n_bad += s.pending - n_oldkey
         else:
             n_bad += s.pending
@@ -316,7 +324,7 @@ def verify_run(
     head: dict | None = None,
     *,
     job: str | None = None,
-    old_kid=True,
+    old_kid=None,
 ) -> Verified:
     """Decide which lines of a run file (or, with `job`, of a job stream) count. `head` is the guarded home's
     {kid, seq, mac} for the file, already checked by the caller (None = no head). Verified lines are never
@@ -389,6 +397,28 @@ def legacy_prefix(raw: bytes, head: dict | None) -> tuple[bytes, int]:
 
 
 # ------------------------------ spool, head, detail
+
+_SPOOL_NAME = re.compile(r"([0-9]{20})_([0-9a-f]{32})\.json")
+
+
+def spool_name(rk: bytes, ws: str, run: str, time_ns: int) -> str:
+    """`<20-digit time>_<32 hex>.json`: the hex is the first 16 bytes of a MAC over workspace, run and the
+    time, so a name proves itself without reading the file (a planted name never costs a read)."""
+    t = f"{time_ns:020d}"
+    if len(t) != 20 or not t.isdigit():
+        raise SealError("bad time")
+    proof = hmac.new(rk, _D_SPOOL_NAME + _enc(ws) + b"\0" + _enc(run) + b"\0" + _enc(t), hashlib.sha256)
+    return f"{t}_{proof.digest()[:16].hex()}.json"
+
+
+def spool_name_ok(rk: bytes, ws: str, run: str, name) -> bool:
+    if not isinstance(name, str):
+        return False
+    m = _SPOOL_NAME.fullmatch(name)
+    if m is None:
+        return False
+    want = spool_name(rk, ws, run, int(m.group(1)))
+    return hmac.compare_digest(want.encode(), name.encode())
 
 
 def spool_mac(rk: bytes, ws: str, run: str, name: str, entry: dict) -> str:

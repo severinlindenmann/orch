@@ -240,7 +240,7 @@ def test_an_entry_with_an_extra_key_is_refused(store):
     d = _spool_dir(ws)
     d.mkdir(parents=True)
     rec = hp.record_key(ws)
-    name = "0" * 19 + "1_" + "e" * 32 + ".json"
+    name = ra.spool_name(rec[2], rec[0], RUN, 1)
     entry = dict(event=example(id="toolu_x"), payload=None, default_id=False)
     sm = ra.spool_mac(rec[2], rec[0], RUN, name, entry)
     (d / name).write_text(json.dumps(dict(entry, sm=sm, extra=1)))

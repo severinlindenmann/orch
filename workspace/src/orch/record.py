@@ -559,17 +559,25 @@ def _file_size(ws, rel):
 
 def _flat_size(ws, name):
     """Bytes of the direct entries of record/<name>/ and of record/<name>/<run>/ (one level each), by lstat:
-    a planted tree below is never walked."""
-    total = 0
+    a planted tree below is never walked. At most _SIZE_ENTRIES_MAX entries are counted (a flood is cheap)."""
+    total = counted = 0
     try:
-        for run in _entries(ws, (name,)):
+        for run in _entries(ws, (name,))[:_SIZE_ENTRIES_MAX]:
+            counted += 1
             try:
-                total += sum(_one_size(ws, (name, run, n)) for n in _entries(ws, (name, run)))
+                for n in _entries(ws, (name, run))[: max(0, _SIZE_ENTRIES_MAX - counted)]:
+                    counted += 1
+                    total += _one_size(ws, (name, run, n))
             except (RecordTampered, RecordUnavailable):
                 continue  # not a folder of ours: not counted, not walked
+            if counted >= _SIZE_ENTRIES_MAX:
+                break
     except (RecordTampered, RecordUnavailable):
         return 0
     return total
+
+
+_SIZE_ENTRIES_MAX = 10000
 
 
 def _one_size(ws, rel):
@@ -995,7 +1003,7 @@ def _legacy_view(raw, run):
 
 _SPOOL_MAX_BYTES = 3 * 1024**2  # one line (8 KB), its detail (1 MB) and the escaping of both
 _SPOOL_NAME = re.compile(r"[0-9]{20}_[0-9a-f]{32}\.json")
-_SPOOL_LIST_MAX = 1000  # names looked at per drain: a flood is told once and cannot make a write endless
+_SPOOL_LIST_MAX = 5000  # names looked at per drain: a flood is told once and cannot make a write endless
 _REJECT_BATCH = (
     50  # planted entries refused per drain: the rest on the next one (a flood cannot stall a write)
 )
@@ -1781,7 +1789,7 @@ class RecordWriter:
         rec = humanproof.record_key(self.workspace)
         if rec is None:
             raise RecordOff(_OFF_KEY)
-        name = f"{time.time_ns():020d}_{uuid.uuid4().hex}.json"
+        name = record_auth.spool_name(rec[2], rec[0], event["run"], time.time_ns())
         rel = ("pending", event["run"], name)
         entry = dict(event=event, payload=payload.decode() if payload else None, default_id=default_id)
         entry["sm"] = record_auth.spool_mac(rec[2], rec[0], event["run"], name, dict(entry))
@@ -1816,24 +1824,34 @@ class RecordWriter:
         rec = humanproof.record_key(self.workspace)
         if rec is None:
             raise RecordOff(_OFF_KEY)
+        if len(names) > _SPOOL_LIST_MAX:
+            _alert(self.workspace, target="folder", run=run, reason="content", seen_by="writer")
+        names = names[:_SPOOL_LIST_MAX]
+        # a name proves itself (record_auth.spool_name): only proven names are ever read, and first
+        valid = sorted(n for n in names if record_auth.spool_name_ok(rec[2], rec[0], run, n))
+        self._drain_valid(run, rec, valid, check_lock)
+        if any(not _SPOOL_NAME.fullmatch(n) for n in names):
+            # orch never names an entry so: left, alerted, not counted
+            _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
+        proven = set(valid)
+        invalid = sorted(n for n in names if _SPOOL_NAME.fullmatch(n) and n not in proven)
+        for name in invalid[:_REJECT_BATCH]:  # a well-shaped name without its proof: refused by name, unread
+            check_lock()
+            _reject_entry(self.workspace, run, ("pending", run, name))
+
+    def _drain_valid(self, run, rec, valid, check_lock):
         refused = 0
 
         def refuse(rel):
-            """Refuse one planted entry, but only up to the batch: past it the entry stays for the next call
-            while every entry that passes its MAC is still committed (a flood cannot starve a genuine one)."""
+            """Refuse an entry under a proven name that still fails (MAC, shape, size), up to the batch."""
             if refused >= _REJECT_BATCH:
                 return 0
             _reject_entry(self.workspace, run, rel)
             return 1
 
-        if len(names) > _SPOOL_LIST_MAX:
-            _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
-        for name in sorted(names)[:_SPOOL_LIST_MAX]:
+        for name in valid:
             check_lock()
             rel = ("pending", run, name)
-            if not _SPOOL_NAME.fullmatch(name):  # orch never names an entry so: left, alerted, not counted
-                _alert(self.workspace, target="folder", run=run, reason="swapped", seen_by="writer")
-                continue
             try:
                 if _file_size(self.workspace, rel) > _SPOOL_MAX_BYTES:
                     refused += refuse(rel)  # never more than a line and its detail
@@ -1913,6 +1931,10 @@ def _reject_bad_spool(workspace, run, check_lock):
         if not _SPOOL_NAME.fullmatch(name):
             continue  # never counted; a writer's drain tells it
         rel = ("pending", run, name)
+        if not record_auth.spool_name_ok(rec[2], rec[0], run, name):
+            refused += 1  # a name without its proof: refused by name, never read
+            _reject_entry(workspace, run, rel)
+            continue
         try:
             if _file_size(workspace, rel) > _SPOOL_MAX_BYTES:
                 bad = True

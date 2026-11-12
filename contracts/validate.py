@@ -488,7 +488,7 @@ def ra_verify(raw, run, ws, rk, kid, head=None, job=None, old_kids=None):
         if k != kid:
             if shown:
                 bad += 1
-            elif old_kids is None or k in old_kids:  # only the recorded old key ids are history (None: any)
+            elif old_kids is not None and k in old_kids:  # only the recorded old key ids are history
                 oldkey += 1  # held: becomes `bad` at the end unless the rotation shape holds (below)
             else:
                 bad += 1
@@ -595,6 +595,14 @@ def ra_check(vec):
         raw = b"".join(bytes.fromhex(x) for x in c["lines"])
         _expect(f"activity record_auth job {c['name']}", ra_verify(raw, run, ws, rk, kid, c["head"], c["job"]), c["expect"])
     for c in r["spool"]:
+        if "name_ok" in c:
+            # the name proves itself: <20-digit time>_<first 16 bytes of HMAC(rk, domain ws 0 run 0 time), hex>.json
+            nm = re.fullmatch(r"(\d{20})_([0-9a-f]{32})\.json", c["file"])
+            ok = nm is not None and _hmac.compare_digest(
+                _hmac.new(rk, b"orch.record.spoolname/1\0" + ws.encode() + b"\0" + run.encode() + b"\0"
+                          + nm.group(1).encode(), hashlib.sha256).digest()[:16].hex(), nm.group(2))
+            _expect(f"activity record_auth spool {c['name']}", ok, c["name_ok"])
+            continue
         entry = c["entry"]
         ok = (c["sm"] is not None and set(entry) <= {"event", "payload", "default_id"} and re.fullmatch(r"\d{20}_[0-9a-f]{32}\.json", c["file"]) is not None
               and c["file"] not in c["drained"] and c["file"][:20] >= c["floor"]

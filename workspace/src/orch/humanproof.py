@@ -698,7 +698,7 @@ def human_key(root: Path, create: bool = True) -> bytes:
             except (
                 LooseFile
             ) as e:  # a loose key is never read: rotate it (old proofs and MACs stop verifying)
-                if _LOADING_OLD:
+                if getattr(_LOADING_OLD, "active", False):
                     raise  # a reset is already reading the old key: it carries nothing over
                 reset_protection(root, str(e))
                 raw = _read_guarded(f)
@@ -772,9 +772,29 @@ def ensure_record_key(root: Path) -> bool:
     no usable guarded home (nothing is made, nothing is raised: the run starts, it records nothing)."""
     try:
         guarded_home(root)
-        return record_key(root, create=True) is not None
+        made = record_key(root, create=True) is not None
     except Refused:
         return False
+    if made:
+        _cutover_upgrade(root)
+    return made
+
+
+def _cutover_upgrade(root: Path) -> None:
+    """A key made before the cutover list existed (an upgrade): the list is made once, but only while no run
+    was ever sealed (no chain head). Once a head exists a missing list stays missing (no run is legacy)."""
+    try:
+        d = key_dir(root, create=False)
+        if (d / "record-cutover.json").exists() or (d / "record-cutover.json").is_symlink():
+            return
+        try:
+            if any(n.endswith(".json") for n in os.listdir(d / "record-heads")):
+                return
+        except FileNotFoundError:
+            pass
+    except (Refused, OSError, ValueError):
+        return
+    record_cutover_ensure(root)
 
 
 def _cutover_path(root: Path) -> Path:
@@ -1000,13 +1020,13 @@ def record_head_carry(root: Path, run: str) -> dict:
         ):
             out["old_kid"] = raw["kid"]
             earlier = raw.get("old_kids") if isinstance(raw.get("old_kids"), list) else []
-            out["old_kids"] = sorted(
-                {
-                    k
-                    for k in [*earlier, raw["kid"], raw.get("old_kid")]
-                    if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{8}", k)
-                }
-            )[:8]
+            kids = []
+            for k in [*earlier, raw["kid"]]:  # reset order, the newest last
+                if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{8}", k):
+                    if k in kids:
+                        kids.remove(k)
+                    kids.append(k)
+            out["old_kids"] = kids[-8:]
             if type(raw.get("rejected")) is int and 0 <= raw["rejected"] < 10**6:
                 out["rejected"] = raw["rejected"]
             names = raw.get("drained")
@@ -1544,7 +1564,7 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-_LOADING_OLD: list = []
+_LOADING_OLD = threading.local()  # .active: a reset is reading the old key in this thread
 
 
 def reset_protection(root: Path, reason: str) -> None:
@@ -1568,15 +1588,13 @@ def reset_protection(root: Path, reason: str) -> None:
             loose = True
         listed = (False, set(), None)
         if not loose:
-            _LOADING_OLD.append(
-                1
-            )  # human_key must not start a reset of its own while this one reads the old key
+            _LOADING_OLD.active = True  # human_key must not start a reset of its own while this one reads it
             try:
                 listed = _cutover_load(root)
             except Refused:  # a key that cannot be read soundly carries nothing over
                 listed = (False, set(), None)
             finally:
-                _LOADING_OLD.pop()
+                _LOADING_OLD.active = False
         _write_private(d / "human.key", secrets.token_hex(32) + "\n")  # replaces whatever was there
         _cutover_reseal(root, listed)
         record_reset_note(root)  # when the record key changed (orch's own time; old-key runs age from it)

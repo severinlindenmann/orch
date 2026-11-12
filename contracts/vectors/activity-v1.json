@@ -2401,7 +2401,10 @@
      "changed": 2,
      "removed": 0,
      "reason": "old_key"
-    }
+    },
+    "old_kids": [
+     "bc5a268b"
+    ]
    },
    {
     "name": "duplicate key in the body",
@@ -2455,7 +2458,10 @@
      "changed": 2,
      "removed": 0,
      "reason": "old_key"
-    }
+    },
+    "old_kids": [
+     "bc5a268b"
+    ]
    },
    {
     "name": "planted unknown key id after a verified line",
@@ -2489,7 +2495,10 @@
      "changed": 1,
      "removed": 0,
      "reason": "old_key"
-    }
+    },
+    "old_kids": [
+     "00000000"
+    ]
    },
    {
     "name": "run file deleted, head ahead",
@@ -2740,6 +2749,26 @@
     "drained": [],
     "floor": "00000000000000000101",
     "drain": false
+   },
+   {
+    "name": "name proof valid",
+    "file": "01794480000123456789_2964f4ec2c39c50d3d0c3b1d7a283b91.json",
+    "name_ok": true
+   },
+   {
+    "name": "name proof wrong",
+    "file": "01794480000123456789_0964f4ec2c39c50d3d0c3b1d7a283b91.json",
+    "name_ok": false
+   },
+   {
+    "name": "name proof of another run",
+    "file": "01794480000123456789_895387902eae68a422888c74e67f547a.json",
+    "name_ok": false
+   },
+   {
+    "name": "name proof of another time",
+    "file": "01794480000123456790_2964f4ec2c39c50d3d0c3b1d7a283b91.json",
+    "name_ok": false
    }
   ],
   "job_streams": [

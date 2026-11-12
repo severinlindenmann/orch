@@ -77,9 +77,7 @@ def test_seal_matches_vector(c):
 @pytest.mark.parametrize("c", VEC["verify"], ids=_ids(VEC["verify"]))
 def test_verify_vectors(c):
     olds = c.get("old_kids")
-    got = ra.verify_run(
-        _raw(c["lines"]), RUN, WS, RK, KID, c["head"], old_kid=True if olds is None else set(olds)
-    )
+    got = ra.verify_run(_raw(c["lines"]), RUN, WS, RK, KID, c["head"], old_kid=olds and set(olds))
     assert _summary(got) == c["expect"]
 
 
@@ -108,6 +106,9 @@ def test_job_vectors(c):
 
 @pytest.mark.parametrize("c", VEC["spool"], ids=_ids(VEC["spool"]))
 def test_spool_vectors(c):
+    if "name_ok" in c:
+        assert ra.spool_name_ok(RK, WS, RUN, c["file"]) is c["name_ok"]
+        return
     assert ra.drain_ok(RK, WS, RUN, c["file"], c["entry"], c["sm"], c["drained"], c["floor"]) is c["drain"]
 
 
@@ -250,14 +251,14 @@ def test_planted_unknown_kid_is_changed_once_the_current_key_verified():
     v = ra.verify_run(a + planted + b, RUN, WS, RK, KID)
     assert [e["seq"] for e in v.events] == [1, 2] and (v.changed, v.reason) == (1, "content")
     # before any verified line it can only be the old segment of a rotation
-    v = ra.verify_run(planted + a, RUN, WS, RK, KID)
+    v = ra.verify_run(planted + a, RUN, WS, RK, KID, old_kid={"00000000"})
     assert (v.changed, v.reason) == (1, "old_key") and [e["seq"] for e in v.events] == [1]
 
 
 def test_key_missing_or_wrong_verifies_nothing():
     lines = b"".join(_chain(3))
     other_rk, other_kid = ra.derive(b"\x07" * 32, WS)
-    v = ra.verify_run(lines, RUN, WS, other_rk, other_kid)
+    v = ra.verify_run(lines, RUN, WS, other_rk, other_kid, old_kid={KID})
     assert v.events == [] and v.changed == 3 and v.reason == "old_key"
     with pytest.raises(ra.SealError):
         ra.derive(b"", WS)  # no key: nothing is derived, nothing sealed
@@ -640,3 +641,16 @@ def test_a_lost_or_forged_local_id_never_switches_recording_off_or_changes_the_m
     lock.unlink()
     w.append(dict(ev, run="r_8k2m01", id="toolu_4"))
     assert "toolu_s" in [e["id"] for e in record.read_run(tws, "r_8k2m01").unwrap()]
+
+
+@pytest.mark.parametrize("bad", [True, False, 1, ["aaaaaaaa", 2]])
+def test_old_kid_must_be_none_a_str_or_strs(bad):
+    with pytest.raises(TypeError):
+        ra.verify_run(b"", RUN, WS, RK, KID, old_kid=bad)
+
+
+def test_spool_name_is_bound_to_run_and_time():
+    name = ra.spool_name(RK, WS, RUN, 1234)
+    assert name.startswith("0" * 16 + "1234_") and ra.spool_name_ok(RK, WS, RUN, name)
+    assert not ra.spool_name_ok(RK, WS, "r_other01", name)
+    assert not ra.spool_name_ok(RK, WS, RUN, "0" * 16 + "1235" + name[20:])

@@ -164,3 +164,57 @@ def test_a_planted_symlinked_run_and_detail_never_leave_the_record(store, tmp_pa
     (detail / f"{name}.json").symlink_to(outside)  # a link at the name a future detail will use
     stored = w.append(example(id="toolu_d", at="2026-11-16T09:00:04Z"), detail={"input": "a", "output": "b"})
     assert stored["detail_lost"] is True and outside.read_text() == "keep"
+
+
+def test_planted_spool_names_never_starve_a_genuine_entry_and_are_never_read(store, monkeypatch):
+    import os
+
+    from orch import record_auth as ra
+
+    ws, w = store
+    lock = record_dir(ws) / "runs" / f"{RUN}.lock"
+    lock.touch()
+    monkeypatch.setattr(record, "_LOCK_WAIT", 0.01)
+    w.append(example(id="toolu_g", at="2026-11-16T09:00:04Z"))  # spooled under a proven name
+    lock.unlink()
+    d = spool(ws)
+    (genuine,) = list(d.iterdir())
+    rec = hp.record_key(ws)
+    assert ra.spool_name_ok(rec[2], rec[0], RUN, genuine.name)
+    planted = {f".{n:04d}" for n in range(600)} | {f"{n:020d}_{'a' * 32}.json" for n in range(600)}
+    for name in planted:  # all sort before the genuine entry
+        (d / name).write_text("{}")
+    seen = []
+    for fn in ("_read_json", "_file_size"):
+        real = getattr(record, fn)
+        monkeypatch.setattr(record, fn, lambda *a, _r=real: (seen.append(a[1][-1]), _r(*a))[1])
+    real_open = os.open
+
+    def counted_open(p, *a, **k):
+        seen.append(os.path.basename(str(p)))
+        return real_open(p, *a, **k)
+
+    monkeypatch.setattr(os, "open", counted_open)
+    w.append(example(id="toolu_5", at="2026-11-16T09:00:05Z"))
+    snapshot = set(seen)
+    assert "toolu_g" in [e["id"] for e in read_run(ws, RUN).unwrap()]
+    assert not planted & snapshot  # no planted name was opened or read
+    assert len(list(d.iterdir())) == 1200 - 50  # 50 refused by name per call, the rest next time
+
+
+def test_an_upgraded_key_without_a_cutover_list_adopts_existing_runs_once(tmp_path):
+    ws = tmp_path / "up"
+    ws.mkdir()
+    assert hp.ensure_record_key(ws)
+    cutover = hp.key_dir(ws, create=False) / "record-cutover.json"
+    cutover.unlink()  # a key made before the list existed
+    (record_dir(ws) / "runs").mkdir(parents=True, exist_ok=True)
+    (record_dir(ws) / "runs" / f"{RUN}.jsonl").write_text(json.dumps(example(seq=1)) + "\n")
+    assert hp.ensure_record_key(ws)
+    assert hp.record_cutover_read(ws) == {RUN} and read_run(ws, RUN).legacy is True
+    RecordWriter(ws, hider=hider.Hider({"k": "KEYVALUE-abc123XYZ-secret"})).append(
+        example(run="r_other01", id="toolu_n")
+    )  # a head exists
+    cutover.unlink()
+    assert hp.ensure_record_key(ws)
+    assert not cutover.exists()  # never re-made once a run was sealed

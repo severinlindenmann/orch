@@ -501,7 +501,11 @@ seq 1 with `p` = the genesis of the new key and rewrites the head (the old head 
 old lines stay in the file before it and are `old_key`, never `removed`. Lines without `auth` are `changed`. No migration (pre-release).
 
 **Spool and drain.** A spool entry `pending/<run>/<time_uuid>.json` carries `sm = b64u(HMAC(rk, "orch.record.spool/1\0" +
-ws + 0 + run + 0 + name + 0 + canonical JSON of {event, payload, default_id}))`; the file name is bound. It is sealed
+ws + 0 + run + 0 + name + 0 + canonical JSON of {event, payload, default_id}))`; the file name is bound. The name
+proves itself: `name = <time_ns, 20 digits>_<hex of the first 16 bytes of HMAC-SHA256(rk, "orch.record.spoolname/1\0"
++ ws + 0 + run + 0 + <the 20 digits>)>.json` (`record_auth.spool_name` / `spool_name_ok`, constant-time compare), so
+the drain reads only files under a proven name and refuses every other well-shaped name by its exact name without
+reading it (vectors `record_auth.spool`, `name_ok`). It is sealed
 into the chain only when drained under the lock. An entry with a missing or wrong `sm`, a name already drained, or a
 name older than `drained_floor` is never committed: it is deleted by exact path, counted in `head.rejected` and alerted.
 The MACed object is exactly `{event, payload, default_id}`: an entry with any other key (`sm` aside) is refused.
@@ -585,8 +589,14 @@ only a legacy run reads a detail with no hash.
   head. Lines of a key id other than the current one are old history (`old_key`) only for exactly those ids and only
   in front of the chain; any other foreign key id is `changed`, reason `content` (vectors `record_auth.verify`,
   `old_kids`). The cutover list is made only when the human key is made; a list missing while a key exists means no
-  run is legacy. The drain looks at 1000 names per call, refuses at most 50 planted entries per call and still commits
-  every entry that passes its MAC.
+  run is legacy, with one exception at upgrade: when the key exists, the list is missing and no run was ever sealed
+  (`record-heads/` absent or without a head), `ensure_record_key` makes the list once; once a head exists it is never
+  re-made (the writer never makes it). Files planted before the very first key exists are adopted as legacy (listed)
+  and shown as not checked. The drain lists at most 5000 names per call (more: alerted once, reason `content`),
+  processes names that carry their proof first, in sorted order, then refuses at most 50 well-shaped names without
+  their proof per call by their exact name, never reading them (invalid names never consume the valid-name work);
+  names that are not spool-shaped are alerted (`swapped`). Retention's spool check uses the same name check first.
+  Record and detail sizes count at most 10000 spool/quarantine entries.
 - *Not in S2:* job streams, alerts and counts files are not sealed yet (S3); a protection reset does not carry the legacy
   prefix or tombstones over to the new key (fail closed: the old unsigned lines are `changed`).
 

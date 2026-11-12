@@ -171,6 +171,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "self._append",
     "self._commit",
     "self._drain",
+    "self._drain_valid",
     "self._line",
     "self._prepare_detail",
     "self._serialized",
@@ -215,6 +216,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "record_auth.seal",
     "record_auth.split",
     "record_auth.spool_mac",
+    "record_auth.spool_name",
+    "record_auth.spool_name_ok",
     "sealed.rfind",
     "self._move_head",
     "self._reject",
@@ -306,6 +309,7 @@ ERROR_BOUNDARIES = {
     "read_detail",
     "_commit",
     "_drain",
+    "_drain_valid",
     "_append",
     "read_meta",
     "_read_json",
@@ -1206,7 +1210,7 @@ def test_pending_tampering_is_alerted_and_skipped(store, monkeypatch):
         for p in (record.record_dir(ws) / "alerts").glob("*")
         for line in p.read_text().splitlines()
     ]
-    assert {a["reason"] for a in alerts} == {"link", "content"}
+    assert {a["reason"] for a in alerts} == {"content"}  # a name without its proof is refused unread
 
 
 def test_actual_unreadable_directory(store):
