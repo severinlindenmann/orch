@@ -1800,6 +1800,16 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
             top, ["rev-parse", "HEAD^{tree}"]
         ) != journal.get("tree"):
             return CHANGED  # orch's merge commit holds something else than was checked: a person looks
+        if parents[1:] == [journal.get("pre_head"), journal.get("tip")]:
+            # orch's own merge commit (the run stopped, or its post-merge check could not finish or failed
+            # and the rollback was refused): it never counts as merged before that check has passed.
+            if journal.get("post_check") == "bad":
+                return CHANGED  # a failed check stays until a person has looked
+            names = _bb_read(
+                top, ["diff", "--name-only", "--no-renames", "-z", journal["pre_head"], head], strip=False
+            )
+            if _after_merge(top, [n for n in names.split("\0") if n], head) is not None:
+                return CHANGED
         _set_journal(root, ticket, None)  # orch's merge finished, or the person moved on: checks run again
         return None
     if journal.get("touched"):
@@ -2040,8 +2050,12 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         if _bb_read(top, ["rev-parse", "HEAD^{tree}"]) != tree:
             return wait(CHANGED)  # the journal stays: this merge commit is not what was checked
         problem = _after_merge(top, touched, _bb_read(top, ["rev-parse", "HEAD"]))
+        if problem:
+            # Recorded in the signed journal: ancestry alone never certifies this merge (_recover re-runs
+            # the check for "pending" and keeps "bad" until a person acts).
+            _set_journal(root, ticket, {**journal, "post_check": "pending" if problem == "later" else "bad"})
         if problem == "later":
-            return wait(CHANGED)  # the merge is in; the journal stays and the next sweep checks again
+            return wait(CHANGED)  # the merge is in; the next sweep checks again
         if problem:
             # Back to where the project was, never with --hard (a person's edit is never thrown away):
             # --keep refuses over any file whose bytes differ from the index, and then a person looks.
@@ -2062,7 +2076,7 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
                 and _files_match(top, touched)
                 and _fsck(top, pre["head"]) == 0
             ):
-                _set_journal(root, ticket, None)
+                _set_journal(root, ticket, None)  # rolled back and verified: nothing of the merge is left
                 return wait(FILES_CHANGED)
             return wait(CHANGED)  # the journal stays: a person needs to look
         try:

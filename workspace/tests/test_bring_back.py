@@ -2664,3 +2664,27 @@ def test_b13o_a_failed_post_merge_check_with_an_untouched_folder_rolls_back(done
     back = tickets.load(root, tid)["work"]["bring_back"]
     assert back["state"] == "waiting" and back["reason"] == worktrees.FILES_CHANGED, back
     assert git(root, "rev-parse", "HEAD") == head and (root / "code.py").read_text() != "print(2)\n"
+
+
+@pytest.mark.parametrize("problem", ["later", "bad"])
+def test_b13q_a_merge_whose_post_check_failed_is_never_counted_merged_later(done_copy, monkeypatch, problem):
+    """The post-merge check could not finish (or failed and the rollback was refused): the merge commit stays,
+    the next sweep must not certify it as merged until that check passes."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: problem)
+        if problem == "bad":  # a person edits a merged file: the rollback is refused, the merge commit stays
+            m.setattr(worktrees, "_bb_status", lambda top: "?? person-file\0")
+        done_and_sweep(root, tid)
+        worktrees.sweep(root)
+        back = tickets.load(root, tid)["work"]["bring_back"]
+        assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
+        assert not worktrees._copy_authority(root, tid).get("merged")
+    worktrees.sweep(root)  # the check passes now
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    if problem == "later":  # re-checked and passed: the merge counts
+        assert back["state"] == "merged", back
+    else:  # a failed check stays until a person has looked, even when the next check would pass
+        assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
+        assert not worktrees._copy_authority(root, tid).get("merged")
