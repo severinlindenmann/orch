@@ -11,11 +11,23 @@ LINE = {"at": "2026-11-09T09:00:00Z", "by": "human:alice", "via": "dashboard", "
 
 def _ticket(tid="t_synced01"):
     return {
-        "schema": "orch.ticket/1", "id": tid, "title": "Synced", "status": "active",
-        "created_at": "2026-11-09T08:00:00Z", "updated_at": "2026-11-09T09:00:00Z",
-        "checklist": [{"id": "c1", "text": "s", "done": True,
-                       "evidence": [{"type": "note", "ref": "x", "by": "human:alice"}]}],
-        "refs": [], "questions": [], "history": [dict(LINE)],
+        "schema": "orch.ticket/1",
+        "id": tid,
+        "title": "Synced",
+        "status": "active",
+        "created_at": "2026-11-09T08:00:00Z",
+        "updated_at": "2026-11-09T09:00:00Z",
+        "checklist": [
+            {
+                "id": "c1",
+                "text": "s",
+                "done": True,
+                "evidence": [{"type": "note", "ref": "x", "by": "human:alice"}],
+            }
+        ],
+        "refs": [],
+        "questions": [],
+        "history": [dict(LINE)],
     }
 
 
@@ -43,7 +55,9 @@ def test_without_the_core_plan_description_and_lookalike_agents_are_demoted(monk
         **_ticket(),
         "plan": {"text": "p", "by": "human:alice"},
         "description_by": "human:alice",
-        "history": [{**LINE, "by": by} for by in ("agent:relay", "agent:phone1", "AGENT:CLAUDE", "agent:claude")],
+        "history": [
+            {**LINE, "by": by} for by in ("agent:relay", "agent:phone1", "AGENT:CLAUDE", "agent:claude")
+        ],
     }
     shown = data._demote_all(t)
     assert shown["plan"]["by"] == shown["description_by"] == data.SYNC_BY

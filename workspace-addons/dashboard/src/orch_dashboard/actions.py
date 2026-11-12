@@ -730,7 +730,9 @@ def _review(v) -> dict | None:
     return out if out.get("title") else None
 
 
-def addon_proof_target(root: Path, orch_bin: str, argv: list[str], addon: str) -> tuple[str | None, dict | None]:
+def addon_proof_target(
+    root: Path, orch_bin: str, argv: list[str], addon: str
+) -> tuple[str | None, dict | None]:
     """Which proof a signed add-on click needs and what the person is shown: `orch <addon> act <verb> --proof-target
     ... -- <target>` answers {"target": "<addon>:..." | null, "review": {title, body, here, there, value}}, both from
     the same bytes, and changes nothing. Only a target under the add-on's own name is minted, and only for the core
@@ -1077,7 +1079,9 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             raise BadRequest("This can't be signed right now. Nothing was changed.")
         return 200, "", {"target": target, "review": review}
     if op == "addon.act" and args.get("sign") is True and orch_bin == SELF:
-        target, _ = addon_proof_target(root, orch_bin, argv, args["addon"])  # a click with a session only (above)
+        target, _ = addon_proof_target(
+            root, orch_bin, argv, args["addon"]
+        )  # a click with a session only (above)
         if target != args.get("seen"):  # phase 2: only what the page showed is minted
             raise BadRequest("This changed after you opened it. Nothing was changed; open it again.")
         need = ("addon.act", target) if target else None
