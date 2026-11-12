@@ -57,6 +57,7 @@ jobs:
           enable-cache: true
       - run: uv sync
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
   tool-name-scan:
     # The cross-tree scan lives in the workspace tests but also reads workspace-addons/,
