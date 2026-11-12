@@ -412,8 +412,9 @@ def _resolve(root: Path, home: Path) -> tuple[str | None, list[str]]:
     home. Creates no folder and no fresh id."""
     from orch import addons
 
-    bound = _bound_folders(root, home)
-    ws, healed = _decide(home, addons.read_local_id(root), bound)
+    own = addons.read_local_id(root)
+    bound = _bound_folders(root, home, own)
+    ws, healed = _decide(home, own, bound)
     if healed:
         addons.put_local_id(root, ws, replace=True)
     return ws, bound
@@ -435,7 +436,7 @@ def key_dir(root: Path, create: bool = True) -> Path:
             winacl.set_private(home, True)
         _check_dir(home)
         _private_dir(home / "keys", home)
-        with _key_lock(home / "keys"):  # id, check, mkdir and bind are one step: two first starts cannot
+        with _folders_lock(home / "keys"):  # id, check, mkdir and bind are one step: two first starts cannot
             ws, bound = _resolve(root, home)  # both bind (read again under the lock)
             if ws is None:
                 ws = addons.put_local_id(root, secrets.token_hex(16))
@@ -477,7 +478,7 @@ def _try_again(name: str) -> str:
     )
 
 
-def _bound_folders(root: Path, home: Path) -> list[str]:
+def _bound_folders(root: Path, home: Path, own: str | None = None) -> list[str]:
     """Names of the key folders in `home` whose binding.json names this workspace's real path (identity by
     samefile where both exist, else equal real paths). A folder with no or a damaged binding names nothing."""
     keys = home / "keys"
@@ -501,6 +502,8 @@ def _bound_folders(root: Path, home: Path) -> list[str]:
         except (ValueError, AttributeError):  # garbage JSON: bound to nothing
             continue
         except (winacl.Unknown, OSError, Refused):  # cannot be told: fail closed, never "not bound"
+            if name == own:
+                continue  # this workspace's own folder: _check_binding refuses it with its own words below
             raise Refused(_try_again(name)) from None
         if not isinstance(stored, str):
             continue
@@ -585,6 +588,21 @@ def _lock_held(d: Path) -> bool:
 def _key_lock(d: Path):
     """keys.lock (O_EXCL) around read-modify-write of the nonce store, delivered ids, settings and resets.
     Re-entrant in the same thread (reset_protection runs inside readers that already hold it)."""
+    with _file_lock(d, "keys.lock"):
+        yield
+
+
+@contextlib.contextmanager
+def _folders_lock(keys: Path):
+    """folders.lock in keys/ around "one key folder per path": id, check, mkdir and bind are one step, so two
+    first starts cannot both bind. A different lock from a key folder's own keys.lock."""
+    with _file_lock(keys, "folders.lock"):
+        yield
+
+
+@contextlib.contextmanager
+def _file_lock(d: Path, name: str):
+    """The O_EXCL lock file `name` in `d`, re-entrant in the same thread."""
     held = _LOCKS.__dict__.setdefault("held", {})
     if held.get(str(d), 0) > 0:
         held[str(d)] += 1
@@ -593,7 +611,7 @@ def _key_lock(d: Path):
         finally:
             held[str(d)] -= 1
         return
-    lock = d / "keys.lock"
+    lock = d / name
     end = time.monotonic() + 10
     while True:
         try:
