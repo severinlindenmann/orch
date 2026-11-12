@@ -401,6 +401,8 @@ def key_dir(root: Path, create: bool = True) -> Path:
         raise Refused("This folder has no local id yet.")
     d = home / "keys" / ws
     if create:
+        if not d.exists() and not d.is_symlink():
+            _one_folder_per_path(root, home, d.name)  # nothing is created while another folder is bound
         fresh = not home.exists()
         home.mkdir(parents=True, exist_ok=True)
         if fresh:
@@ -421,6 +423,7 @@ def key_dir(root: Path, create: bool = True) -> Path:
         _check_dir(home)
         _check_dir(home / "keys")  # no link or loose rights anywhere on the path
         _check_dir(d)
+    _one_folder_per_path(root, home, d.name)
     _check_binding(root, d)
     return d
 
@@ -429,6 +432,44 @@ BINDING_MISMATCH = (
     "Refused: this folder's key id belongs to another folder (it was copied or moved). "
     "Its keys stay where they are."
 )
+SECOND_FOLDER = (
+    "Refused: this workspace already has its keys in another key folder, so no second one is started. "
+    "Its keys stay where they are; reconnect the workspace."
+)
+
+
+def _bound_folders(root: Path, home: Path) -> list[str]:
+    """Names of the key folders in `home` whose binding.json names this workspace's real path (identity by
+    samefile where both exist, else equal real paths). A folder with no or a damaged binding names nothing."""
+    keys = home / "keys"
+    here = os.path.realpath(root)
+    out: list[str] = []
+    try:
+        names = sorted(os.listdir(keys))
+    except OSError:
+        return out
+    for name in names:
+        try:
+            stored = json.loads(_read_guarded(keys / name / "binding.json").decode("utf-8")).get("realpath")
+        except (OSError, ValueError, AttributeError, Refused, winacl.Unknown):
+            continue
+        if not isinstance(stored, str):
+            continue
+        try:
+            same = stored == here or os.path.samefile(stored, here)
+        except OSError:
+            same = os.path.realpath(stored) == here
+        if same:
+            out.append(name)
+    return out
+
+
+def _one_folder_per_path(root: Path, home: Path, name: str) -> None:
+    """THE rule: a real path has exactly one key folder. A workspace id is workspace-writable, so a forged or
+    new id must never open a second folder (empty ledgers would read as "never pinned"): any other folder
+    bound to this path refuses, for every create and every read. Nothing is migrated; a person reconnects."""
+    if any(n != name for n in _bound_folders(root, home)):
+        raise Refused(SECOND_FOLDER)
 
 
 def _bind_new(root: Path, d: Path) -> None:
