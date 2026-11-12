@@ -2688,3 +2688,39 @@ def test_b13q_a_merge_whose_post_check_failed_is_never_counted_merged_later(done
     else:  # a failed check stays until a person has looked, even when the next check would pass
         assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
         assert not worktrees._copy_authority(root, tid).get("merged")
+
+
+@pytest.mark.parametrize("problem", ["later", "bad"])
+def test_b13q_a_commit_on_top_of_an_unchecked_merge_certifies_nothing(done_copy, monkeypatch, problem):
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: problem)
+        if problem == "bad":
+            m.setattr(worktrees, "_bb_status", lambda top: "?? person-file\0")
+        done_and_sweep(root, tid)
+    git(
+        root, "-c", "user.name=p", "-c", "user.email=p@x", "commit", "--allow-empty", "-qm", "person works on"
+    )
+    worktrees.sweep(root)
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
+    assert not worktrees._copy_authority(root, tid).get("merged")
+
+
+def test_b13q_a_failed_recheck_is_written_as_bad_and_a_later_pass_does_not_certify(done_copy, monkeypatch):
+    """pending, then a failed re-check (bad is written), then a passing one: stays CHANGED."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: "later")
+        done_and_sweep(root, tid)
+    assert worktrees._copy_authority(root, tid)["journal"]["post_check"] == "pending"
+    with monkeypatch.context() as m:
+        m.setattr(worktrees, "_after_merge", lambda *a: "bad")
+        worktrees.sweep(root)
+    assert worktrees._copy_authority(root, tid)["journal"]["post_check"] == "bad"
+    worktrees.sweep(root)  # the real check would pass now
+    back = tickets.load(root, tid)["work"]["bring_back"]
+    assert back["state"] == "waiting" and back["reason"] == worktrees.CHANGED, back
+    assert not worktrees._copy_authority(root, tid).get("merged")

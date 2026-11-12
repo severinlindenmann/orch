@@ -1794,6 +1794,17 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
         return None
     if journal is None:
         return None
+    mc = journal.get("merge_commit")
+    if (
+        journal.get("post_check")
+        and isinstance(mc, str)
+        and head != mc
+        and head != journal.get("pre_head")
+        and _git(["merge-base", "--is-ancestor", mc, head], top, read_only=True)[0] == 0
+    ):
+        return (
+            CHANGED  # work was added on top of a merge whose check has not passed: ancestry certifies nothing
+        )
     if head != journal.get("pre_head"):
         parents = _bb_read(top, ["rev-list", "--parents", "-n", "1", "HEAD"]).split()
         if parents[1:] == [journal.get("pre_head"), journal.get("tip")] and _bb_read(
@@ -1808,8 +1819,13 @@ def _recover(root: Path, top: Path, ticket: str, journal) -> str | None:
             names = _bb_read(
                 top, ["diff", "--name-only", "--no-renames", "-z", journal["pre_head"], head], strip=False
             )
-            if _after_merge(top, [n for n in names.split("\0") if n], head) is not None:
+            problem = _after_merge(top, [n for n in names.split("\0") if n], head)
+            if problem == "bad":
+                _set_journal(root, ticket, {**journal, "post_check": "bad", "merge_commit": head})
+            if problem:
                 return CHANGED
+            # passed on this very commit: it is orch's merge, recorded as such (the normal checks follow)
+            _copy_authority(root, ticket, lambda r: r.update(merged=head))
         _set_journal(root, ticket, None)  # orch's merge finished, or the person moved on: checks run again
         return None
     if journal.get("touched"):
@@ -2053,7 +2069,15 @@ def _bring_back_locked(root: Path, ticket: str) -> dict | None:
         if problem:
             # Recorded in the signed journal: ancestry alone never certifies this merge (_recover re-runs
             # the check for "pending" and keeps "bad" until a person acts).
-            _set_journal(root, ticket, {**journal, "post_check": "pending" if problem == "later" else "bad"})
+            _set_journal(
+                root,
+                ticket,
+                {
+                    **journal,
+                    "post_check": "pending" if problem == "later" else "bad",
+                    "merge_commit": parents[0],
+                },
+            )
         if problem == "later":
             return wait(CHANGED)  # the merge is in; the next sweep checks again
         if problem:
