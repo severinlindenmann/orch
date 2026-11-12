@@ -784,6 +784,33 @@ if sys.argv[1:3] == ["publish", "list"]:
     assert c.getresponse().status == 403
 
 
+def test_links_are_rebuilt_locally_when_the_list_has_no_url(act_server, act_orch, ws):
+    """The server's file list carries no link: base address (saved) + id + the saved key; the key stays local."""
+    script = act_orch.read_text()
+    pos = script.index("\n") + 1
+    script = (
+        script[:pos]
+        + """import sys, json
+if sys.argv[1:3] == ["addon", "list"]:
+    print('[{"name":"publish","active":true}]'); sys.exit(0)
+if sys.argv[1:3] == ["publish", "whoami"]:
+    print('{"id":"w_local"}'); sys.exit(0)
+if sys.argv[1:3] == ["publish", "list"]:
+    print(json.dumps({"files":[{"id":"f_a","name":"Report","size":3,"expires_at":None,"key":"secretsecretsecret1"},{"id":"f_b","name":"No key","size":4,"expires_at":None}]})); sys.exit(0)
+"""
+        + script[pos:]
+    )
+    act_orch.write_text(script)
+    secrets = ws / ".orch" / "secrets"
+    secrets.mkdir(parents=True, exist_ok=True)
+    (secrets / "publish.json").write_text(json.dumps({"url": "https://pub.example.test", "workspace": "w", "token": "t"}))
+    rows = json.loads(get(act_server + "/api/links")[1])["links"]
+    assert rows[0]["link"] == "https://pub.example.test/f/f_a#k=secretsecretsecret1" and rows[0]["copy"] is True
+    assert rows[1]["link"] is None and rows[1]["copy"] is False  # no saved key: nothing to copy
+    body = get(act_server + "/api/links")[1].decode()
+    assert '"key"' not in body and "token" not in body
+
+
 def test_links_off(server):
     assert json.loads(get(server + "/api/links")[1]) == {"links": []}
 

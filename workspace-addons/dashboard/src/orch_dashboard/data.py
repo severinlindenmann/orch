@@ -973,6 +973,10 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
         return {"links": []}
     raw = run_orch(orch_bin, ["publish", "list", "--json"], root)
     files = raw.get("files", []) if isinstance(raw, dict) else []
+    # The server's file list carries no link: rebuild it here from the saved publish address, the file id and
+    # the key saved on this computer (publish list merges it in). The key is never sent to the server.
+    saved = _load(root / ".orch" / "secrets" / "publish.json")
+    base = _host(saved.get("url")) if isinstance(saved, dict) else ""
     links = []
     for f in files if isinstance(files, list) else []:
         if (
@@ -988,6 +992,8 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
         except (ValueError, TypeError, AttributeError):
             expired = False
         key, url = f.get("key"), f.get("url")
+        if not isinstance(url, str) and base.startswith("https://"):
+            url = f"{base}/f/{f['id']}"
         ok = (
             isinstance(key, str)
             and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", key)
