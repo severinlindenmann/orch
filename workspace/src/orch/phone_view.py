@@ -24,7 +24,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import net, phone_results, refs, runs, safefile, tickets
+from orch import history, net, phone_results, refs, runs, safefile, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -374,20 +374,51 @@ def _clean_full(t: str) -> str:
 
 
 def _has_secret(data: bytes) -> bool:
+    """The file scan uses the SAME detection as redact (_scrub_text: patterns, key=value, spaced values, flag
+    values and URL userinfo): a text hides something when the scrub changes it, in its raw, NFKC and cleaned
+    (invisible characters and comments gone) form. Over-hiding is accepted: such a file is not sent."""
     text = data.decode(errors="ignore")
-    norm = unicodedata.normalize("NFKC", text)
-    if any(rx.search(t) for rx in _SECRET_PATTERNS for t in (text, norm)):
+    cleaned = _clean_full(text)
+    forms = (text, cleaned, unicodedata.normalize("NFKC", text), unicodedata.normalize("NFKC", cleaned))
+    return any(_scrub_text(t) != t for t in dict.fromkeys(forms))
+
+
+def _holds_stored_value(root: Path, data: bytes, texts: list[str]) -> bool:
+    """True when the file holds a stored key value of the keystore (the value hider: exact needles in all the
+    forms it knows). Read as _scan read it (`texts`: the BOM-decoded text of a UTF-16/32 file, else the UTF-8
+    text), as raw bytes, with CR removed, NUL-stripped (UTF-16/32 text in a picture's text chunk), as lenient
+    UTF-16/32 readings, and cleaned and NFKC-normalized (invisible characters, fullwidth forms). A hider that
+    can not be built or fails: True (fail closed)."""
+    try:
+        h = phone_results.value_hider(root)
+        if h is None:
+            return True
+        more = [data[k:].decode(c, "ignore") for c in ("utf-16-le", "utf-16-be") for k in (0, 1)]
+        more += [data[k:].decode(c, "ignore") for c in ("utf-32-le", "utf-32-be") for k in range(4)]
+        more.append(data.replace(b"\x00", b"").decode("utf-8", "ignore"))
+        seen = list(dict.fromkeys(texts + more))
+        seen += [t.replace("\r", "") for t in seen if "\r" in t]
+        seen += [unicodedata.normalize("NFKC", _clean_full(t)) for t in list(seen)]
+        return h.hide_bytes(data) != data or any(h.hide_text(t) != t for t in dict.fromkeys(seen))
+    except Exception:  # noqa: BLE001 - never a failed view, never a pass
         return True
-    return bool(_SECRET_KV.search(text))
 
 
 def _scan(data: bytes, name: str) -> str:
-    """One of ok, secret (looks like a password or key) or unknown (can not be checked: a PDF, zip, docx,
-    xlsx or any other packed or binary file, or text with NULs; such a file is not sent, fail closed). Text
-    (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type matches its extension is
-    scanned as its raw bytes (text in metadata or after the image is still caught)."""
+    """The verdict of _scan_texts."""
+    return _scan_texts(data, name)[0]
+
+
+def _scan_texts(data: bytes, name: str) -> tuple[str, list[str]]:
+    """(verdict, texts). The verdict is one of ok, secret (looks like a password or key) or unknown (can not
+    be checked: a PDF, zip, docx, xlsx or any other packed or binary file, or text with NULs; such a file is
+    not sent, fail closed). Text (UTF-8, or UTF-32/UTF-16 with a BOM) is scanned as text; an image whose type
+    matches its extension is scanned as its raw bytes (text in metadata or after the image is still caught).
+    `texts` are exactly the texts the verdict was read from (the BOM-decoded text of a UTF-16/32 file, else
+    the lenient UTF-8 text), so every other check of the same file (the stored-value needle check) reads
+    it the same way."""
     if any(magic in data for magic in _PACKED_MAGIC):  # pdf, zip/OOXML, OLE office anywhere in the file
-        return "unknown"
+        return "unknown", []
     for bom, codec in (
         ((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"), "utf-32"),  # before UTF-16: same first two bytes
         ((b"\xff\xfe", b"\xfe\xff"), "utf-16"),
@@ -396,21 +427,21 @@ def _scan(data: bytes, name: str) -> str:
             try:
                 text = data.decode(codec)
             except UnicodeDecodeError:
-                return "unknown"
+                return "unknown", []
             if "\x00" in text:
-                return "unknown"
-            return "secret" if _has_secret(text.encode()) else "ok"
+                return "unknown", []
+            return ("secret" if _has_secret(text.encode()) else "ok"), [text]
     if _is_image(data, name):
         if not _image_clean(data):  # compressed text chunks or data after the end: can not be checked
-            return "unknown"
+            return "unknown", []
     else:
         try:
             data.decode("utf-8")
         except UnicodeDecodeError:
-            return "unknown"
+            return "unknown", []
         if b"\x00" in data:
-            return "unknown"
-    return "secret" if _has_secret(data) else "ok"
+            return "unknown", []
+    return ("secret" if _has_secret(data) else "ok"), [data.decode(errors="ignore")]
 
 
 _ROUNDS = 3
@@ -593,14 +624,7 @@ def size_of(view: dict) -> int:
     return len(json.dumps(view, separators=(",", ":"), ensure_ascii=False).encode())
 
 
-def is_agent_history_author(by) -> bool:
-    """Only explicit agent labels are safe as unverified synced attribution."""
-    if not isinstance(by, str) or not by.isascii() or by != unicodedata.normalize("NFKC", by):
-        return False
-    label = by.casefold()
-    return bool(re.fullmatch(r"agent:[a-z0-9._-]{1,40}", label)) and not label[6:].startswith(
-        ("relay", "phone", "ph_")
-    )
+is_agent_history_author = history.is_agent_history_author  # ONE rule (orch.history)
 
 
 def _who(by: str, h=None) -> tuple[str, str]:
@@ -884,11 +908,13 @@ def _gate(root: Path, tid: str, data: bytes, name: str, state: dict | None, phot
     marked once in the ticket log and in state["secret_skipped"] (fail closed). `photo_ok` (evidence only): a
     picture that can't be fully checked (a JPEG photo) still goes when its raw bytes hold no secret."""
     try:
-        verdict = _scan(data, name)
+        verdict, texts = _scan_texts(data, name)
     except Exception:  # a malformed file skips only itself, never the whole view
-        verdict = "unknown"
+        verdict, texts = "unknown", []
     if verdict == "unknown" and photo_ok and _is_image(data, name):
         verdict = _photo_verdict(data)
+    if verdict == "ok" and _holds_stored_value(root, data, texts):
+        verdict = "secret"  # the exact value of a stored key, whatever the label (or none)
     name = Path(name).name
     if verdict == "ok":
         return True
@@ -1254,6 +1280,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     """The full view. Every text goes through the scrub and the value hider `h` (built here when not given):
     a stored key value never leaves, also in prose without a label. No value hider, or a value still in the
     finished view: _closed_view (fail closed)."""
+    ticket = history.shown_ticket(root, ticket)  # EVERY person field as this machine can prove it
     checklist = _shown_checklist(ticket)
     done, wont, total = tickets.checks_split({"checklist": checklist})
     h = h if h is not None else phone_results.value_hider(root)
@@ -1261,7 +1288,7 @@ def build(root: Path, ticket: dict, atts: list[dict], h=None) -> dict:
     if h is None:
         return _closed_view(ticket, running, done, total)
     hist = []
-    for entry in (ticket.get("history") or [])[-HISTORY:]:
+    for entry in history.lines(root, ticket)[-HISTORY:]:  # an unproven synced author is the sync role here
         if internal_wakeup(entry) or _ADMIN_NOTE.match(str(entry.get("text", ""))):
             continue
         # Ticket history has no verified relay sender; raw labels cannot name a phone.
@@ -1405,6 +1432,7 @@ def light_view(root: Path, ticket: dict) -> dict:
     The phone overlays these on its last full snapshot. No questions, no checklist, history or files. Texts
     pass the scrub and the value hider; without a value hider (or a stored value still in it) Refused: the
     light update is not sent (sync_light backs off), never sent with a value or with a blank title."""
+    ticket = history.shown_ticket(root, ticket)  # as in build
     h = phone_results.value_hider(root)
     if h is None:
         raise Refused("Stored key values can't be hidden right now, so no light update was sent.")

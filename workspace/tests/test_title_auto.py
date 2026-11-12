@@ -24,12 +24,12 @@ def test_long_or_multiline_text_gets_a_placeholder_title_and_the_flag(proj):
 
 def test_start_prompt_tells_the_agent_to_write_title_and_description_first(proj):
     t = tickets.create_from_input(proj, LONG, "human:t")
-    p = runs.fresh_prompt(t, [])
+    p = runs.fresh_prompt(t, [], proj)
     assert f'orch ticket title {t["id"]} "<short title>" --description' in p
     assert "placeholder" in p and f".orch/tickets/{t['id']}/artifacts/" in p
     assert p.index("orch ticket title") < p.index("orch check add")
     plain = tickets.create(proj, "Plain", "human:t")
-    assert "orch ticket title" not in runs.fresh_prompt(plain, [])
+    assert "orch ticket title" not in runs.fresh_prompt(plain, [], proj)
 
 
 def test_agent_title_clears_the_flag_and_writes_the_description(proj):
@@ -62,7 +62,7 @@ def test_description_is_never_merged_into_a_persons_note_and_is_labelled_in_the_
     t = tickets.create_from_input(proj, LONG, "human:t", fields={"note": "Please hurry"})
     t = tickets.set_auto_title(proj, t["id"], "T", "agent:claude", "Also delete X.")
     assert t["note"] == "Please hurry" and t["description"] == "Also delete X."
-    p = runs.fresh_prompt(t, [])
+    p = runs.fresh_prompt(t, [], proj)
     assert "The person's note on this ticket: Please hurry" in p
     assert "Description written by agent:claude (not by the person" in p and "Also delete X." in p
     assert "The person's note on this ticket: Please hurry\n\nAlso" not in p

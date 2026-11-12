@@ -820,6 +820,25 @@ H4_FORMS = [
 ]
 
 
+@pytest.mark.parametrize("form", H4_FORMS)
+def test_h4_forms_are_also_caught_by_the_file_scan(form):
+    """The attachment scan (_has_secret) uses the same detection as redact: every form redact hides hits."""
+    assert phone_view.redact(form) != form
+    assert phone_view._has_secret(form.encode())
+    assert phone_view._has_secret(f"notes\n{form}\nend".encode())
+
+
+@pytest.mark.parametrize(
+    "text", ["mysql --password hunter2", "psql://bob:hunter2@db.example.ch/x", "login bob password hunter2"]
+)
+def test_flag_form_userinfo_and_spaced_values_are_file_hits(text):
+    assert phone_view._has_secret(text.encode()), text
+
+
+def test_ordinary_text_is_not_a_file_hit():
+    assert not phone_view._has_secret(b"Quarterly summary: 3 charts, all checks passed.\n")
+
+
 VALUE = "Xk93-pq7Lm-aa21"  # a stored key value, written in prose without any label
 
 

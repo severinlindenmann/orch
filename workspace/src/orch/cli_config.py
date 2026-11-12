@@ -15,7 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, humanproof, tickets
+from orch import adapters, config, history, humanproof, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -77,6 +77,8 @@ def _person(args, root: Path, op: str, target: str, **kw) -> str:
 
 
 def _out(args, data, text: str) -> None:
+    if args.json:
+        data = history.shown_json(history.args_root(args), data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
