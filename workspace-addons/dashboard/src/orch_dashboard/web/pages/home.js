@@ -60,7 +60,7 @@ function needRow(row, newest, questionCount = 1) {
 // The only core op a row may name is the existing, signed private.move, and only in a row of the sync add-on. Its button
 // and sign step always use the core's own words below: a row's label and review are never shown for a core op.
 const NEED_OPS = {'private.move':{label:'Move', title:'Move your orch files out of the team repository?',
-  body:'Why: your tickets sit in your team’s repository, so everyone on the team sees each change. Where: they stay in this folder on this computer; the team repository no longer keeps them. Your team’s files are not touched.',
+  body:'Why: your team’s repository holds orch files that are not shared with the team, so everyone on the team sees each change. Where: they stay in this folder on this computer; the team repository no longer keeps them. Your team’s files are not touched.',
   done:'Moved your orch files.'}};
 const needOp = (row, a) => row.source === 'sync' && typeof a.op === 'string' && Object.prototype.hasOwnProperty.call(NEED_OPS, a.op) ? NEED_OPS[a.op] : null;
 const needLabel = a => a.core ? a.core.label : a.label;

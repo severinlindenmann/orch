@@ -295,8 +295,17 @@ def state(root):
         return 'ready' if safe(root, '.git/orch-state').is_file() else 'needs-adoption'
     # Read-only discovery from .orch before init; no command ever changes the outer repo.
     if any((p / '.git').exists() for p in (Path(root), *Path(root).parents)):
-        tracked = git(root, 'ls-files', '-z', '--', '.').stdout
-        return 'needs-move' if tracked else 'new'
+        # Core's one discovery (the same list Move removes): the team's own files do not count. Fails closed:
+        # when git cannot tell, or the index holds a name core does not accept, it stays needs-move.
+        from orch import harness
+
+        try:
+            private = harness.private_tracked(Path(root))
+        except Exception:  # noqa: BLE001 - unknown state is never 'new'
+            return 'needs-move'
+        if private is None:
+            return 'needs-move'
+        return 'needs-move' if private else 'new'
     return 'new'
 
 

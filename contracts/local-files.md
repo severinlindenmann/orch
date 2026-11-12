@@ -132,7 +132,9 @@ prompt = "stdin"            # optional: the task goes on stdin instead of the co
   environment check plus the dashboard's Origin fence, which stops browsers, not a process running as you. Permissions
   (`permissions.json`) and add-on consent already live per machine in the orch home, so a committed `config.toml` or
   `addons.json` cannot raise them or switch add-ons on.
-- Already-tracked personal files: `orch private` lists them; `orch private move` (a person only) runs `git rm --cached` on them,
+- Already-tracked orch files that are not shared with the team (shared: `.orch/.gitignore`, `workspace.toml`; the
+  list is `TEAM_FILES` in core, every other file under `.orch` is private): `orch private` lists them (the personal
+  files by name, the rest as "N other orch files"); `orch private move` (a person only) runs `git rm --cached` on them,
   keeps the files and commits nothing (older commits keep their copies). `orch status` shows the same lines. This is information
   only: trust does not depend on it.
 - (Replaced by the invariant above: no command is used without this person's approval.) Its first use on a machine prints one
