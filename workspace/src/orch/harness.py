@@ -463,39 +463,72 @@ TEAM_FILES = (
 )
 
 
+def _ascii_lower(text: str) -> str | None:
+    """A-Z lowered, nothing else; None for any non-ASCII character (no Unicode case folding: U+212A is not k)."""
+    if not text.isascii():
+        return None
+    return text.translate(_ASCII_LOWER)
+
+
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
 def is_team_file(rel: str) -> bool:
-    """A project-relative path that a team repo may track (not something `orch private move` takes out)."""
-    return rel.replace("\\", "/").lower() in TEAM_FILES
+    """A project-relative path that a team repo may track (not something `orch private move` takes out).
+    ASCII case variants only; a name with any non-ASCII character is never a team file."""
+    return _ascii_lower(rel) in TEAM_FILES
+
+
+def _canonical(name: str) -> bool:
+    """An index name as git itself would write it under .orch: no empty, `.` or `..` part, no leading or
+    trailing slash, no backslash. Never normalised: git normalises `:(literal)` pathspecs, so `.orch/../x`
+    would remove x."""
+    if "\\" in name:
+        return False
+    parts = name.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        return False
+    return _ascii_lower(parts[0]) == ".orch"
 
 
 def tracked_private(root: Path) -> list[str]:
-    return _tracked_private(root) or []
+    return _tracked_private(root)[0] or []
 
 
-def _tracked_private(root: Path, icase: bool = True) -> list[str] | None:
-    """The orch files that git already tracks in this folder's repo and that are not shared with the team
-    (shared: TEAM_FILES, .orch/.gitignore and workspace.toml): the personal files and any other file under .orch
-    (project-relative, sorted, at most 2000). [] outside a git repo; None when git cannot say (the warning is
-    advice; the trust check is `_tracked`)."""
+def _tracked_private(root: Path) -> tuple[list[str] | None, str | None]:
+    """The ONE discovery of the orch files that git already tracks in this folder's repo and that are not shared
+    with the team (shared: TEAM_FILES, .orch/.gitignore and workspace.toml): the personal files and any other file
+    under .orch, any case variant of .orch included (project-relative, exactly as the index spells them, sorted,
+    at most 2000 per call). ([], None) outside a git repo; (None, why) when git cannot say, the listing is too
+    long, or the index holds a name that is not canonical (the trust check is `_tracked`)."""
     try:
         if not _in_git_repo(root):
-            return []
+            return [], None
     except Refused:
-        return None
-    rc, raw, _ = _safegit().run_bytes(
-        ["ls-files", "-z", "--", f":({'icase,' if icase else ''}literal).orch"],
-        root,
-        20,
-    )
+        return None, "orch could not check which orch files the team repo holds. Nothing was changed."
+    sg = _safegit()
+    rc, raw, _ = sg.run_bytes(["ls-files", "-z", "--", ":(icase,literal).orch"], root, 20)
+    if rc == sg.TOO_LONG:
+        return None, (
+            "The team repo lists too many orch files for orch to check at once. Nothing was changed. "
+            "Look at: git ls-files .orch"
+        )
     if rc != 0:
-        return None
+        return None, "orch could not check which orch files the team repo holds. Nothing was changed."
     names = sorted({os.fsdecode(n) for n in raw.split(b"\0") if n})
-    return [n for n in names if not is_team_file(n)][:2000]
+    bad = [n for n in names if not _canonical(n)]
+    if bad:
+        return None, (
+            f"The team repo's index holds a file name orch does not accept ({bad[0]!r}). Nothing was changed. "
+            "Look at: git ls-files .orch"
+        )
+    return [n for n in names if not is_team_file(n)][:2000], None
 
 
 def private_tracked(root: Path) -> list[str] | None:
-    """Public for add-ons: the tracked orch files not shared with the team, or None when git cannot say."""
-    return _tracked_private(root)
+    """Public for add-ons (sync's needs-move uses exactly this): the tracked orch files not shared with the team,
+    or None when git cannot say or the index holds a name that is not canonical."""
+    return _tracked_private(root)[0]
 
 
 def private_summary(root: Path) -> dict:
@@ -535,7 +568,11 @@ def move_to_private(root: Path, by: str | None = None) -> list[str]:
     from orch import config
 
     config.require_person(by, "move these files out of the team repo")
-    files = _tracked_private(root, icase=False) or []  # exactly the names git holds, no case variants
+    files, why = _tracked_private(
+        root
+    )  # the same discovery as sync's needs-move; names as the index spells them
+    if files is None:
+        raise Refused(why)
     if not files:
         return []
     protect_local(root)  # the ignore rules first, so the files do not turn into "new files" afterwards
@@ -554,7 +591,7 @@ def move_to_private(root: Path, by: str | None = None) -> list[str]:
                     "Run orch private move again, or look at: git status"
                 )
             raise Refused("git could not remove the files from the team repo. Nothing was changed.")
-    left = _tracked_private(root, icase=False)
+    left = _tracked_private(root)[0]
     if left is None:  # git cannot say now: do not claim anything was moved
         raise Refused("git ran, but orch could not check what was removed. Look at: git status")
     still = set(left)

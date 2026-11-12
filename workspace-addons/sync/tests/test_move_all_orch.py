@@ -64,3 +64,73 @@ def test_move_with_extra_orch_files_clears_needs_move(root, monkeypatch):
     assert (root / '.orch' / 'unknown').is_file()
     out = subprocess.run(['git', '-C', str(root), 'ls-files', '--', '.orch'], capture_output=True, text=True, check=True).stdout
     assert out.split() == ['.orch/.gitignore']  # the team-owned file stays tracked
+
+
+# #604 review: state() uses core's one discovery (harness.private_tracked) and fails closed.
+
+
+def plant(root, path):
+    """A raw index entry (update-index refuses `..`): a same-length stand-in, renamed in the index bytes."""
+    import hashlib
+
+    stand = path.replace('/../', '/aa/')
+    blob = subprocess.run(['git', '-C', str(root), 'hash-object', '-w', '--stdin'], input='x',
+                          capture_output=True, text=True, check=True).stdout.strip()
+    git(root, 'update-index', '--add', '--cacheinfo', f'100644,{blob},{stand}')
+    if stand != path:
+        idx = root / '.git' / 'index'
+        data = idx.read_bytes()[:-20].replace(stand.encode(), path.encode())
+        idx.write_bytes(data + hashlib.sha1(data).digest())
+
+
+def agree(root):
+    from orch import harness
+
+    found = harness.private_tracked(root)
+    assert repo.state(root) == ('needs-move' if found is None or found else 'new')
+    return found
+
+
+def test_non_canonical_index_name_stays_needs_move(root):
+    init(root)
+    (root / 'README.md').write_text('team')
+    git(root, 'add', 'README.md')
+    plant(root, '.orch/../README.md')
+    assert agree(root) is None
+    assert repo.state(root) == 'needs-move'
+
+
+def test_kelvin_workspace_toml_is_needs_move(root):
+    init(root)
+    plant(root, '.orch/wor\u212aspace.toml')
+    assert agree(root) == ['.orch/wor\u212aspace.toml']
+
+
+def test_case_variant_orch_folder_is_needs_move(root):
+    init(root)
+    probe = root / '.orch' / 'CaseProbe'
+    probe.write_text('x')
+    icase = (root / '.orch' / 'caseprobe').exists()
+    probe.unlink()
+    if not icase:
+        import pytest
+
+        pytest.skip('case-sensitive filesystem')
+    (root / '.orch' / 'unknown').write_text('x')
+    (root / '.orch').rename(root / '.ORCH')
+    git(root, 'add', '-f', '.ORCH/unknown')
+    (root / '.ORCH').rename(root / '.orch')
+    assert agree(root) == ['.ORCH/unknown']
+
+
+def test_discovery_failure_is_needs_move(root, monkeypatch):
+    from orch import safegit
+
+    init(root)
+    (root / '.orch' / 'unknown').write_text('x')
+    git(root, 'add', '-f', '.orch/unknown')
+    real = safegit.run_bytes
+    monkeypatch.setattr(safegit, 'run_bytes',
+                        lambda args, *a, **k: (123, b'', '') if args[:1] == ['ls-files'] else real(args, *a, **k))
+    assert agree(root) is None
+    assert repo.state(root) == 'needs-move'

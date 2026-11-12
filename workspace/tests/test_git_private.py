@@ -47,7 +47,8 @@ def _other_private(proj):
     personal = tuple(rel for rel, _ in harness.PRIVATE_FILES)
     tracked = git(proj, "ls-files", "--", ".orch").stdout.split()
     return [
-        f for f in tracked
+        f
+        for f in tracked
         if not any(f == r or f.startswith(r + "/") for r in personal) and not harness.is_team_file(f)
     ]
 
@@ -508,3 +509,129 @@ def test_agent_add_says_so_when_the_file_has_more_than_was_typed(proj, capsys, m
     config.add_agent(proj, "bar", "bar {prompt}", approve=True)
     assert "not allowed yet" in capsys.readouterr().err
     assert config.agent_entries(proj) == {}
+
+
+# ---- #604 review: discovery is one definition, canonical, ASCII-only, and fails closed
+
+
+def _plant(proj, path):
+    """A raw index entry, as an agent writing .git/index directly would (git add / update-index refuse `..`):
+    a same-length stand-in that sorts the same, then its bytes renamed and the checksum redone."""
+    import hashlib
+
+    stand = path.replace("/../", "/aa/")
+    blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=proj,
+        input="x",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    git(proj, "update-index", "--add", "--cacheinfo", f"100644,{blob},{stand}")
+    if stand != path:
+        idx = proj / ".git" / "index"
+        data = idx.read_bytes()[:-20]
+        assert data.count(stand.encode()) == 1
+        data = data.replace(stand.encode(), path.encode())
+        idx.write_bytes(data + hashlib.sha1(data).digest())
+    assert path in git(proj, "ls-files", "-z").stdout.split("\0")
+
+
+def _case_insensitive_fs(path):
+    probe = path / "CaseProbe"
+    probe.write_text("x")
+    try:
+        return (path / "caseprobe").exists()
+    finally:
+        probe.unlink()
+
+
+def test_move_refuses_a_non_canonical_index_name_and_changes_nothing(proj, run):
+    repo(proj)
+    (proj / "README.md").write_text("team")
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch" / "unknown").write_text("x")
+    git(proj, "add", "README.md")
+    git(proj, "add", "-f", ".orch/unknown")
+    git(proj, "commit", "-qm", "team")
+    _plant(proj, ".orch/../README.md")
+    before = git(proj, "ls-files", "-s").stdout
+    assert harness.private_tracked(proj) is None
+    code, out, err = run("private", "move")
+    assert code != 0 and "Nothing to move" not in out + err
+    assert "Nothing was changed" in out + err
+    assert git(proj, "ls-files", "-s").stdout == before
+    assert git(proj, "ls-files", "--", "README.md").stdout.strip() == "README.md"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".orch/../README.md",
+        ".orch/x/../workspace.toml",
+        ".orch/./a",
+        ".orch//a",
+        ".orch/a/",
+        "/.orch/a",
+        ".orch\\a",
+        ".orch/a\\..\\b",
+    ],
+)
+def test_non_canonical_names_are_rejected(name):
+    assert not harness._canonical(name)
+
+
+def test_canonical_names_are_accepted():
+    assert harness._canonical(".orch/tickets/DM1-1.json") and harness._canonical(".ORCH/unknown")
+
+
+def test_kelvin_sign_workspace_toml_is_private(proj):
+    repo(proj)
+    (proj / ".orch").mkdir(exist_ok=True)
+    kelvin = ".orch/wor\u212aspace.toml"
+    assert not harness.is_team_file(kelvin)
+    assert harness.is_team_file(".orch/WorkSpace.TOML")
+    _plant(proj, kelvin)
+    assert harness.private_tracked(proj) == [kelvin]
+
+
+def test_case_variant_orch_folder_is_found_and_moved(proj, run):
+    repo(proj)
+    (proj / ".orch").mkdir(exist_ok=True)
+    if not _case_insensitive_fs(proj / ".orch"):
+        pytest.skip("case-sensitive filesystem")
+    (proj / ".orch" / "unknown").write_text("x")
+    os.rename(proj / ".orch", proj / ".ORCH")  # an agent renames the folder, then tracks it
+    git(proj, "add", "-f", ".ORCH/unknown")
+    git(proj, "commit", "-qm", "oops")
+    os.rename(proj / ".ORCH", proj / ".orch")
+    assert git(proj, "ls-files").stdout.split() == [".ORCH/unknown"]
+    assert harness.private_tracked(proj) == [".ORCH/unknown"]
+    code, out, _ = run("private", "move")
+    assert code == 0 and "Moved 1 file" in out
+    assert git(proj, "ls-files").stdout == "" and (proj / ".orch" / "unknown").is_file()
+
+
+@pytest.mark.parametrize("rc", [1, 123])
+def test_move_refuses_when_discovery_fails(proj, run, monkeypatch, rc):
+    from orch import safegit
+
+    repo(proj)
+    (proj / ".orch").mkdir(exist_ok=True)
+    (proj / ".orch" / "unknown").write_text("x")
+    git(proj, "add", "-f", ".orch/unknown")
+    git(proj, "commit", "-qm", "oops")
+    real = safegit.run_bytes
+
+    def failing(args, *a, **k):
+        if args[:1] == ["ls-files"]:
+            return rc, b"", "failed"
+        return real(args, *a, **k)
+
+    monkeypatch.setattr(safegit, "run_bytes", failing)
+    assert harness.private_tracked(proj) is None
+    code, out, err = run("private", "move")
+    assert code != 0 and "Nothing to move" not in out + err and "Nothing was changed" in out + err
+    monkeypatch.setattr(safegit, "run_bytes", real)
+    assert git(proj, "ls-files").stdout.split() == [".orch/unknown"]
