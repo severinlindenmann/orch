@@ -1039,11 +1039,15 @@ def _blob_id(data: bytes, sha: str) -> str:
 
 
 def _crlf_checkout(top: Path) -> bool:
-    """The project's git writes CRLF line ends on checkout (core.autocrlf=true, git for Windows' default, or
-    core.eol=crlf): only then is a CRLF form of a blob what the folder should hold."""
+    """The project's git writes CRLF line ends on checkout: core.autocrlf=true (git for Windows' default), or
+    core.eol=crlf while core.autocrlf is unset. autocrlf=input|false never writes CRLF (git's precedence:
+    autocrlf wins over eol): only then is a CRLF form of a blob what the folder should hold."""
     rc, out, _ = _git(["config", "--get", "core.autocrlf"], top, read_only=True)
-    if rc == 0 and out.strip().lower() == "true":
+    mode = out.strip().lower() if rc == 0 else ""
+    if mode == "true":
         return True
+    if mode in ("input", "false"):
+        return False
     rc, out, _ = _git(["config", "--get", "core.eol"], top, read_only=True)
     return rc == 0 and out.strip().lower() == "crlf"
 
@@ -1856,10 +1860,14 @@ def _roll_back(top: Path, prep, touched, pre: dict, merge_commit: str, written: 
     ):
         return "kept"
     if _git(["reset", "--keep", pre["head"]], top)[0] != 0:
-        if _written_hashes(top, touched) != written or any(
-            f.startswith("?? ") for f in _bb_status(top).split("\0")
+        if (
+            _written_hashes(top, touched) != written
+            or any(v in ("other", "unreadable", "link") for v in written.values())
+            or _git(["diff", "--cached", "--quiet", "--no-renames", merge_commit], top, read_only=True)[0]
+            != 0
+            or any(f[:2] in ("??", "!!") and _hits(prep, f[3:]) for f in _bb_status(top).split("\0") if f)
         ):
-            return "kept"  # (untracked files are never in the way of a --hard: they would be deleted)
+            return "kept"  # untracked or ignored files, folders, links: a --hard could delete a person's
         if _git(["reset", "--hard", pre["head"]], top)[0] != 0:
             return "kept"
     if _files_match(top, touched, pre["head"]) and _history_ok_below(top, pre["head"]):

@@ -3038,3 +3038,13 @@ def test_b13x_a_new_folder_where_the_merge_deleted_a_file_is_never_hard_reset(do
     got = worktrees._written_hashes(root, ["gone.txt", "dir", "ln", "missing"])
     assert got["gone.txt"].startswith("file:") and got["dir"] == "other"
     assert got["ln"] == "link" and got["missing"] == "absent"
+
+
+def test_b13x_autocrlf_input_never_means_crlf(done_copy):
+    root, tid, copy = done_copy
+    git(root, "config", "core.eol", "crlf")
+    assert worktrees._crlf_checkout(root) is True
+    git(root, "config", "core.autocrlf", "input")
+    assert worktrees._crlf_checkout(root) is False
+    git(root, "config", "core.autocrlf", "true")
+    assert worktrees._crlf_checkout(root) is True
