@@ -22,6 +22,8 @@ $ orch relay profile --description "Builds and tests the customer website" --tag
 
 The profile is a proposal; the admin approves it. Until then the old text stays.
 
+Try it: connect your workspace to a demo workspace and try messages, tasks, groups and files ([demo-workspace-to-workspace.md](demo-workspace-to-workspace.md)).
+
 ## Texts from your phone
 
 Write to a workspace from the phone app. If your text names a ticket, that ticket continues: the agent that worked on it
