@@ -649,7 +649,8 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
             if not listed:
                 continue
             data = listed.encode("utf-8", "surrogateescape")
-        rc, _, err = _git(argv, dest, GIT_ADD_TIMEOUT, data, filters=argv[0] == "checkout-index")
+        # filters stay ON for every step, read-tree and update-index too
+        rc, _, err = _git(argv, dest, GIT_ADD_TIMEOUT, data)
         if rc != 0:
             break
     if rc != 0:

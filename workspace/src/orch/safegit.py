@@ -20,8 +20,9 @@ sandbox and permission mode. So every call here:
   `working-tree-encoding` attribute applies on git >= 2.40: a copy holds the committed bytes (tests check a
   CRLF `text=auto` repo); older git reads the attributes (filters stay neutralized).
   FAIL CLOSED: if the enumeration fails or times out, the operation is refused
-  (rc 125), never run with the repository's own drivers. `filters=False` is only for calls that touch no file
-  content (rev-parse, config, worktree list);
+  (rc 125), never run with the repository's own drivers. `filters=False` is only for the subcommands in
+  FILTERS_OFF_OK, which never hash, clean, smudge or check out file content; any other subcommand with
+  filters=False is refused before git starts (this covers run_bytes, whose default is filters off);
 * adds `--no-optional-locks` to read-only calls, takes an argv list and a timeout, never a shell;
 * runs one absolute `git` found on the PATH (no current folder, nothing inside the workspace, the copy or any
   orch worktrees folder), cached per set of such folders.
@@ -68,17 +69,14 @@ _DIFFLIKE = {
     "whatchanged",
     "range-diff",
 }  # (`git cherry` takes none of these flags and runs no diff driver)
-_GLOBAL_WITH_VALUE = {
-    "-C",
-    "-c",
-    "--git-dir",
-    "--work-tree",
-    "--namespace",
-    "--exec-path",
-    "--attr-source",
-    "--config-env",
-    "--super-prefix",
-}
+# The ONLY options safegit lets stand before the subcommand (a CLOSED list: git has options that take the next
+# word as a value, e.g. --shallow-file, and a parser that guesses differently from git can be made to see
+# `rev-parse` where git runs `rm`). -C takes a value; the rest are plain switches.
+_GLOBAL_WITH_VALUE = {"-C"}
+_GLOBAL_PLAIN = {
+    "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs",
+    "--no-optional-locks", "--no-replace-objects", "-P", "--no-pager", "--version",
+}  # fmt: skip
 
 # a value that runs nothing, for the read-only questions orch asks first (no editor is ever involved there)
 _NOOP = ""
@@ -626,9 +624,11 @@ def refusal(args: list[str]) -> str | None:
     config: reading only). Never an interactive mode: -p/-i/-e and
     every abbreviation of --patch/--interactive/--edit (git accepts `--patc`, `--inter`)."""
     k = subcommand_index(args)
-    for g in args[:k]:
+    if k < len(args) and args[k].startswith("-"):  # any option that is not on the closed list
+        g = args[k]
         if g in _BAD_GLOBALS or any(g.startswith(b + "=") for b in _BAD_GLOBALS if b.startswith("--")):
             return f"git option {g} before the command is not allowed: orch sets git's configuration itself"
+        return f"git option {g} before the command is not allowed: orch passes only its own, known options"
     if k >= len(args):
         return None
     cmd, rest = args[k], args[k + 1 :]
@@ -685,13 +685,73 @@ def refusal(args: list[str]) -> str | None:
     return None
 
 
+# filters=False skips the check of the repository's filter drivers, so it is ONLY for subcommands that never
+# hash, clean, smudge or check out file content (git re-hashes a stat-dirty file through the clean filter in
+# anything that refreshes the index or compares the work tree: rm, add, status, diff, ls-files -m).
+# Subcommand -> the flags it may carry (None = any); worktree is checked by hand in filters_off_refusal.
+_LS_FILES_OK = {"-z", "-s", "--stage", "-o", "--others", "--exclude-standard", "--error-unmatch"}
+FILTERS_OFF_OK = {
+    "rev-parse": None,  # resolves names and paths; reads refs only
+    "symbolic-ref": None,  # reads / writes HEAD
+    "branch": {"-D", "-d", "--list"},  # refs only
+    "check-attr": None,  # attribute lookup only; refusal() limits it to -z, --cached, --source=<commit>
+    "check-ignore": None,  # ignore rules only (already limited by refusal())
+    "worktree": None,  # only prune, list, add --no-checkout (no checkout: no content is written)
+    "ls-files": _LS_FILES_OK,  # names from the index / directory walk; never -m/-d/--eol (stat + hash)
+}
+
+
+def _worktree_add_no_checkout(words: list[str]) -> bool:
+    """The only `worktree add` shapes allowed with filters off, parsed with exact arity (an option VALUE can
+    never pass for `--no-checkout`, e.g. `--lock --reason --no-checkout`): `--no-checkout` first, then an
+    optional `-b <branch>`, then one or two plain words (the folder, a commit or branch). Nothing else."""
+    if not words or words[0] != "--no-checkout":
+        return False
+    rest = words[1:]
+    if rest[:1] == ["-b"]:
+        if len(rest) < 2 or rest[1].startswith("-"):
+            return False
+        rest = rest[2:]
+    return 1 <= len(rest) <= 2 and not any(w.startswith("-") for w in rest)
+
+
+def filters_off_refusal(args: list[str]) -> str | None:
+    """Why filters=False is not allowed for this git call (None = fine): only FILTERS_OFF_OK subcommands,
+    with their flags checked, may skip the filter-driver check. Everything else runs with filters=True."""
+    k = subcommand_index(args)
+    if k >= len(args):
+        return None  # nothing to run: refusal() decides
+    cmd, rest = args[k], args[k + 1 :]
+    flags = rest[: rest.index("--")] if "--" in rest else rest
+    why = f"git {cmd} may read or hash file content: it runs only with filters=True"
+    if cmd not in FILTERS_OFF_OK:
+        return why
+    if cmd == "worktree":
+        sub = rest[0] if rest else ""
+        if sub in ("prune", "list"):
+            return None
+        if sub == "add" and _worktree_add_no_checkout(rest[1:]):
+            return None
+        return why
+    ok = FILTERS_OFF_OK[cmd]
+    if ok is not None and not {a for a in flags if a.startswith("-")} <= ok:  # (names are not options)
+        return why
+    return None
+
+
 def subcommand_index(args: list[str]) -> int:
-    """Index of the git subcommand in `args`, past leading global options (-C x, -c k=v, --literal-pathspecs,
-    --opt=value ...); len(args) when there is none."""
+    """Index of the git subcommand in `args`, past the leading global options of the CLOSED list above (-C x,
+    --literal-pathspecs, ...). Stops at the first other word: refusal() refuses it when it is an option, so an
+    unknown option that takes a value can never hide the real subcommand. len(args) when there is none."""
     i = 0
-    while i < len(args) and args[i].startswith("-"):
-        i += 2 if args[i] in _GLOBAL_WITH_VALUE else 1
-    return i
+    while i < len(args):
+        if args[i] in _GLOBAL_WITH_VALUE:
+            i += 2
+        elif args[i] in _GLOBAL_PLAIN:
+            i += 1
+        else:
+            break
+    return min(i, len(args))
 
 
 def driver_args(
@@ -794,7 +854,8 @@ FSCK_FORMAT_OK = (
 
 def _prepare(args, cwd, timeout, filters, read_only, root, guard=None):
     """(argv, config) for git `args`, or (None, (rc, reason)) when orch refuses to run it."""
-    why = refusal(args) or unusable_root(guard if guard is not None else root) or hostile_history(cwd)
+    why = refusal(args) or (None if filters else filters_off_refusal(args))
+    why = why or unusable_root(guard if guard is not None else root) or hostile_history(cwd)
     if why:
         return None, (REFUSED, why)
     top: list[str] = []  # options before the subcommand
