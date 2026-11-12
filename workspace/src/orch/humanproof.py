@@ -732,9 +732,78 @@ def ensure_record_key(root: Path) -> bool:
     no usable guarded home (nothing is made, nothing is raised: the run starts, it records nothing)."""
     try:
         guarded_home(root)
-        return record_key(root, create=True) is not None
+        made = record_key(root, create=True) is not None
+        if made:
+            record_cutover_ensure(root)
+        return made
     except Refused:
         return False
+
+
+def _cutover_path(root: Path) -> Path:
+    return key_dir(root, create=False) / "record-cutover.json"
+
+
+def record_cutover_read(root: Path) -> set[str] | None | bool:
+    """The runs that existed when protection began (the only runs whose unsigned lines may be shown as "not
+    checked, before protection"): a set; None when no list was made yet (nothing was written since the
+    upgrade); False when it is damaged or fails its MAC (no run may then be treated as legacy)."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return False
+    try:
+        raw = _read_guarded(_cutover_path(root))
+    except FileNotFoundError:
+        return None
+    except (Refused, OSError, ValueError):
+        return False
+    try:
+        body = json.loads(raw)
+        ok = (
+            isinstance(body, dict)
+            and body.get("schema") == "orch.record-cutover/1"
+            and body.get("kid") == rec[1]
+            and isinstance(body.get("runs"), list)
+            and isinstance(body.get("cm"), str)
+            and hmac.compare_digest(
+                record_auth.cutover_mac(rec[2], rec[0], body).encode(), body["cm"].encode()
+            )
+        )
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return False
+    return set(body["runs"]) if ok else False
+
+
+def record_cutover_ensure(root: Path) -> None:
+    """Write the cutover list once, when the record key is first used for writing: the unsigned run files in
+    the workspace's record folder at that moment. Never changed afterwards (a later run is never legacy).
+    Never raises: without it no run is adopted as legacy by the writer."""
+    from orch import record_auth
+
+    rec = record_key(root)
+    if rec is None:
+        return
+    try:
+        path = _cutover_path(root)
+        if path.exists() or path.is_symlink():
+            return
+        names = sorted(
+            n[:-6]
+            for n in os.listdir(root / ".orch" / "record" / "runs")
+            if _RUN_NAME.fullmatch(n[:-6]) and n.endswith(".jsonl")
+        )
+    except FileNotFoundError:
+        names = []
+    except (Refused, OSError, ValueError):
+        return
+    body = {"schema": "orch.record-cutover/1", "kid": rec[1], "runs": names}
+    body["cm"] = record_auth.cutover_mac(rec[2], rec[0], body)
+    try:
+        _write_private(path, json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n")
+    except (Refused, OSError, ValueError):
+        return
 
 
 def record_head_names(root: Path) -> list[str]:

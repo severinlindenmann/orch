@@ -32,6 +32,7 @@ def at(n):
 def store(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
+    hp.record_key(ws)  # a clean key folder (a claim makes it in a run)
     return ws, RecordWriter(ws, hider=hider.Hider({"deploy-key": "KEYVALUE-abc123XYZ-secret"}))
 
 
@@ -275,13 +276,35 @@ def test_a_sealed_line_with_a_detail_pointer_but_no_hash_is_refused(store, proj_
     assert code == 2 and err["code"] == "tampered"
 
 
+def _legacy_with_detail(ws, run, eid="toolu_d"):
+    """A legacy run (a line made before protection) whose line points at a detail file."""
+    ev = example(run=run, id=eid)
+    name = record.detail_name(run, ev["kind"], eid, ev["ticket"])
+    d = record_dir(ws) / "detail" / run
+    d.mkdir(parents=True)
+    (d / f"{name}.json").write_text(
+        json.dumps(
+            dict(
+                v=1,
+                id=eid,
+                run=run,
+                kind=ev["kind"],
+                ticket=ev["ticket"],
+                input="a",
+                output="b",
+                truncated=False,
+                hidden=0,
+            )
+        )
+    )
+    runfile(ws, run).parent.mkdir(parents=True, exist_ok=True)
+    runfile(ws, run).write_text(json.dumps(dict(ev, seq=1, detail=f"detail/{run}/{name}.json")) + "\n")
+    return d / f"{name}.json"
+
+
 def test_a_legacy_run_still_reads_its_detail(store, proj_cli, capsys):
     ws, writer = store
-    stored = writer.append(example(id="toolu_d"), detail={"input": "a", "output": "b"})
-    legacy = {k: v for k, v in stored.items() if k != "detail_hash"}
-    runfile(ws).write_text(json.dumps(dict(legacy, seq=1)) + "\n")
-    hp.key_dir(ws, create=False)  # the key folder is clean
-    (hp.key_dir(ws, create=False) / "record-heads" / f"{RUN}.json").unlink()
+    _legacy_with_detail(ws, RUN)
     code, (got,) = _query_detail(capsys, RUN, "toolu_d")
     assert code == 0 and got["output"] == "b" and got["checked"] is False  # never shown as verified
 
@@ -290,16 +313,12 @@ def test_a_detail_of_a_before_protection_line_is_not_checked_and_a_plant_at_its_
     store, proj_cli, capsys
 ):
     ws, writer = store
-    stored = writer.append(example(run=OTHER, id="toolu_d"), detail={"input": "a", "output": "b"})
-    legacy = {k: v for k, v in stored.items() if k not in ("detail_hash", "replaced_hook")}
-    runfile(ws, OTHER).write_text(json.dumps(dict(legacy, seq=1)) + "\n")
-    (hp.key_dir(ws, create=False) / "record-heads" / f"{OTHER}.json").unlink()
+    target = _legacy_with_detail(ws, OTHER)
     writer.append(example(run=OTHER, id="toolu_new", via="log", at=at(9)))  # the upgrade: the head records it
     assert hp.record_head_read(ws, OTHER)[0]["legacy_lines"] == 1
     code, (got,) = _query_detail(capsys, OTHER, "toolu_d")
     assert code == 0 and got["output"] == "b" and got["checked"] is False
-    target = record_dir(ws) / stored["detail"]  # a planted file at the legacy line's name
-    forged = json.loads(target.read_text())
+    forged = json.loads(target.read_text())  # a planted file at the legacy line's name
     forged["output"] = "forged"
     target.write_text(json.dumps(forged))
     code, (got,) = _query_detail(capsys, OTHER, "toolu_d")
@@ -323,12 +342,12 @@ def proj_cli(store, monkeypatch):
 
 
 def _legacy_run(ws, writer, run=OTHER):
-    """A run as written before S2: plain lines, no auth, no head (the clean key folder exists)."""
-    writer.append(example(run=run, id="toolu_a"))
+    """A run as written before S2: plain lines, no auth, no head. It exists before the first sealed write
+    (that write lists it in the cutover list, the only runs whose unsigned lines may be adopted)."""
+    runfile(ws, run).parent.mkdir(parents=True, exist_ok=True)
     runfile(ws, run).write_text(
         "".join(json.dumps(dict(example(run=run, id=f"toolu_{n}", at=at(n)), seq=n)) + "\n" for n in (1, 2))
     )
-    (hp.key_dir(ws, create=False) / "record-heads" / f"{run}.json").unlink()
 
 
 def test_a_legacy_run_is_shown_marked_not_checked_and_never_counted(store, proj_cli, capsys):
@@ -567,3 +586,44 @@ def test_a_deleted_run_file_or_runs_folder_cannot_hide_the_run(store, proj_cli, 
     assert {ln["run"] for ln in lines if ln["type"] == "unavailable"} == {RUN, OTHER}
     code, (counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
     assert counts["complete"] is False and counts["runs"] == 0
+
+
+# ------------------------------------------------------------------ legacy adoption only for the cutover list (M1)
+
+
+def test_unsigned_lines_in_a_run_made_after_protection_are_changed_not_adopted(store):
+    """(a) a predictable run name, (c) a run file the agent made before the writer's first commit."""
+    ws, writer = store
+    write3(writer)  # protection has begun: the cutover list is written (no runs then)
+    for run in ("r_outside_20261116", OTHER):
+        runfile(ws, run).write_text(json.dumps(dict(planted(via="core", run=run), seq=1)) + "\n")
+        writer.append(example(run=run, id="toolu_real", via="log", at=at(9)))
+        r = read_run(ws, run)
+        assert (r.legacy, r.changed, r.reason) == (False, 1, "content"), run
+        assert [e["id"] for e in r.unwrap()] == ["toolu_real"], run
+        assert "legacy_lines" not in hp.record_head_read(ws, run)[0], run
+        assert not any(e.get("before_protection") for e in r.unwrap())
+
+
+def test_a_pruned_run_is_never_legacy_again(store):
+    """(b) the tombstone counts as a head: a run file planted at a pruned run's name is `changed`."""
+    ws, writer = store
+    write3(writer)
+    record._tombstone(ws, RUN, "2026-11-16T10:00:00Z")
+    runfile(ws).write_text(json.dumps(dict(planted(via="core", run=RUN), seq=1)) + "\n")
+    r = read_run(ws, RUN)
+    assert (r.status, r.reason) == ("tampered", "unverified") and not r.legacy
+    writer.append(example(id="toolu_after", via="log", at=at(9)))
+    r = read_run(ws, RUN)
+    assert (r.legacy, r.changed) == (False, 1) and not any(e.get("before_protection") for e in r.unwrap())
+
+
+def test_a_forged_cutover_list_adopts_nothing(store):
+    ws, writer = store
+    _legacy_run(ws, writer)
+    write3(writer)  # lists OTHER
+    path = hp.key_dir(ws, create=False) / "record-cutover.json"
+    body = json.loads(path.read_text())
+    path.write_text(json.dumps(dict(body, runs=[*body["runs"], RUN])))  # a run added by hand: the MAC fails
+    assert hp.record_cutover_read(ws) is False
+    assert read_run(ws, OTHER).status == "tampered"  # no run is legacy any more: fail closed

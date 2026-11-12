@@ -35,6 +35,7 @@ _D_SPOOL = b"orch.record.spool/1\0"
 _D_JOB = b"orch.record.job/1\0"
 _D_JOB_GENESIS = b"orch.record.job.genesis/1\0"
 _D_HEAD = b"orch.record.head/1\0"
+_D_CUTOVER = b"orch.record.cutover/1\0"
 
 REASONS = ("content", "removed", "unverified", "old_key")
 
@@ -403,6 +404,13 @@ def head_mac(rk: bytes, ws: str, head: dict) -> str:
     """`hm` of a chain head: over the head without its own `hm`."""
     body = {k: v for k, v in head.items() if k != "hm"}
     return _mac(rk, _D_HEAD + _enc(ws) + b"\0" + canon_strict(body))
+
+
+def cutover_mac(rk: bytes, ws: str, body: dict) -> str:
+    """`cm` of the cutover list: the runs that existed (as unsigned run files) when protection began."""
+    return _mac(
+        rk, _D_CUTOVER + _enc(ws) + b"\0" + canon_strict({k: v for k, v in body.items() if k != "cm"})
+    )
 
 
 def head_ok(rk: bytes, ws: str, head) -> bool:

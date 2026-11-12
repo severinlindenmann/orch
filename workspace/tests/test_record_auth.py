@@ -565,11 +565,11 @@ def test_a_run_with_only_a_head_and_no_sealed_line_is_unverified_without_a_key(t
 def test_a_genuine_legacy_run_in_a_clean_home_is_shown_not_checked(tws, capsys, monkeypatch):
     from orch import record
 
-    _sealed_ws(tws)
     ev = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
-    (tws / ".orch/record/runs/r_old00001.jsonl").write_text(
-        json.dumps(dict(ev, run="r_old00001", seq=1)) + "\n"
-    )
+    runs = tws / ".orch/record/runs"
+    runs.mkdir(parents=True)
+    (runs / "r_old00001.jsonl").write_text(json.dumps(dict(ev, run="r_old00001", seq=1)) + "\n")
+    _sealed_ws(tws)  # the first sealed write lists the run that existed (cutover)
     read = record.read_run(tws, "r_old00001")
     assert (read.status, read.legacy, read.reason) == ("ok", True, "unchecked")
     code, lines = _tail(capsys, tws, monkeypatch, "r_old00001")

@@ -228,6 +228,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "whole.split",
     "gone.append",
     "humanproof.record_head_names",
+    "humanproof.record_cutover_ensure",
+    "humanproof.record_cutover_read",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",

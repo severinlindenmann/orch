@@ -857,13 +857,18 @@ def _verified(workspace, run, raw) -> _View:
     if state == "unknown":
         raise RecordTampered("unverified")
     rec = humanproof.record_key(workspace)
+    # a run whose unsigned lines may be shown as "not checked": it existed when protection began (the cutover
+    # list), or no list was made yet. Any other run that has no sealed line and no head holds planted lines.
+    cutover = humanproof.record_cutover_read(workspace)
+    legacy_ok = cutover is None or (cutover is not False and run in cutover)
+    present = state == "present" or not legacy_ok
     if rec is None:
-        mode, _sealed, _prefix = record_auth.legacy_split(raw, state == "present")
+        mode, _sealed, _prefix = record_auth.legacy_split(raw, present)
         if mode != "legacy":
             raise RecordTampered("unverified")  # sealed lines or a head, and no key: fail closed
         return _legacy_view(raw, run)
     head, _ = humanproof.record_head_read(workspace, run) if state == "present" else (None, True)
-    verified, mode, pre = _chain(workspace, run, raw, rec, head, state == "present")
+    verified, mode, pre = _chain(workspace, run, raw, rec, head, present)
     if mode == "legacy":
         return _legacy_view(raw, run)
     old, _skipped = _legacy_parse_prefix(pre, run)
@@ -1522,20 +1527,24 @@ class RecordWriter:
         if rec is None:
             raise RecordOff(_OFF_KEY)
         ws_id, kid, rk = rec
+        # once, BEFORE this run's file is made: which runs existed (unsigned) when protection began
+        humanproof.record_cutover_ensure(self.workspace)
         fd = _open(self.workspace, ("runs", run + ".jsonl"), "read_append", create_dirs=True)
         try:
             check_lock()
             _check_fd(fd)
             raw = _read_bytes(fd)
             torn = bool(raw and not raw.endswith(b"\n"))
+            cutover = humanproof.record_cutover_read(self.workspace)
+            legacy_ok = cutover is None or (cutover is not False and run in cutover)
             head, head_state = humanproof.record_head_read(self.workspace, run)
             if head_state is False:  # damaged, of another run or failing its MAC: treated as missing
                 alert_content(self.workspace, run)
+            # a head file that exists (a pruned run's tombstone too) means the run is never a legacy run
+            present = not (head is None and head_state is True) or not legacy_ok
             if head is not None and head.get("pruned"):
                 head = None
-            view, mode, _pre = _chain(
-                self.workspace, run, raw, rec, head, not (head is None and head_state is True)
-            )
+            view, mode, _pre = _chain(self.workspace, run, raw, rec, head, present)
             previous = view.events  # verified lines only: an unverified line never suppresses a real one
             legacy = None
             last_seq = view.last_seq
