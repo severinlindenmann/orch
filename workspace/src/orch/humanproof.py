@@ -689,13 +689,14 @@ def record_key(root: Path, create: bool = False) -> tuple[str, str, bytes] | Non
     sealed). rk is derived from human.key (record_auth.derive) so human.key itself is never used for a MAC.
     Cached
     per process by the key file's identity and mtime, so a reset_protection rotation is picked up at once."""
-    from orch import addons, record_auth
+    from orch import record_auth
 
     try:
-        ws = addons.workspace_id(root, create=create)
-        if not ws:
-            return None
-        f = key_dir(root, create=create) / "human.key"
+        # the id is the key folder's own name, after key_dir healed a lost or forged .local-id (#587): a file
+        # an agent can write never switches recording off or changes what is MACed
+        d = key_dir(root, create=create)
+        ws = d.name
+        f = d / "human.key"
         try:
             st = f.lstat()
         except FileNotFoundError:

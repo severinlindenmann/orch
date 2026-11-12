@@ -636,15 +636,19 @@ def test_05_foreign_owner(store, monkeypatch, target):
         fields["st_uid"] = real if info.st_ino == chosen_ino else real + 1
         return SimpleNamespace(**fields)
 
-    monkeypatch.setattr(os, "fstat", selected_owner)
-    monkeypatch.setattr(os, "geteuid", lambda: real + 1)
-    result = record.read_run(ws, RUN)
-    assert result.reason == "foreign_owner"
-    assert result.message == record._MESSAGES["tampered"] and result.alert
-    # refused either way: the run file is untrusted, and with the owner faked the key folder is too (no key,
-    # no recording: fail closed)
-    with pytest.raises((record.RecordTampered, record.RecordOff)):
-        writer.append(event(id="new"))
+    from orch import humanproof
+
+    key = humanproof.record_key(ws)  # the key is resolved before the owner is faked (the guarded home
+    # is not what this test is about); an own patcher: the record-key fixture patches the same name
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(humanproof, "record_key", lambda *a, **k: key)
+        monkeypatch.setattr(os, "fstat", selected_owner)
+        monkeypatch.setattr(os, "geteuid", lambda: real + 1)
+        result = record.read_run(ws, RUN)
+        assert result.reason == "foreign_owner"
+        assert result.message == record._MESSAGES["tampered"] and result.alert
+        with pytest.raises(record.RecordTampered):
+            writer.append(event(id="new"))
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires FIFO")

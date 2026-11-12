@@ -544,8 +544,7 @@ def test_a_damaged_guarded_home_never_downgrades_a_sealed_run_to_legacy(tws, cap
         read = record.read_run(tws, "r_8k2m01")
         # a lost or forged local id is healed from the one bound key folder (#587): the stripped lines are
         # then judged against the head that is there. Never shown as a legacy run either way.
-        assert read.status == "tampered" and read.value is None and not read.legacy
-        assert read.reason in ("unverified", "removed")
+        assert (read.status, read.reason) == ("tampered", "unverified") and read.value is None
         code, lines = _tail(capsys, tws, monkeypatch)
         assert code == 2 and lines[0]["code"] == "tampered"
         assert "orch cannot check these records" in lines[0]["error"]
@@ -607,3 +606,33 @@ def test_an_unknown_home_state_with_no_run_file_is_unverified_not_missing(tws):
     )
     read = record.read_run(tws, "r_nofile01")
     assert (read.status, read.reason) == ("tampered", "unverified")
+
+
+@pytest.mark.parametrize("damage", ["removed", "forged"])
+def test_a_lost_or_forged_local_id_never_switches_recording_off_or_changes_the_mac(tws, damage):
+    from orch import record
+
+    w = _sealed_ws(tws)
+    before = hp.record_key(tws)
+    idf = tws / ".orch/.local-id"
+    if damage == "removed":
+        idf.unlink()
+    else:
+        idf.write_text("ef" * 16 + "\n")
+    assert hp.record_key(tws) == before  # the id is the key folder's name, healed from the trusted home
+    ev = json.loads((CONTRACTS / "examples/activity/valid-step-started.json").read_text())
+    assert w.append(dict(ev, run="r_8k2m01", id="toolu_3"))["seq"] == 3  # still seals
+    assert [e["id"] for e in record.read_run(tws, "r_8k2m01").unwrap()] == ["toolu_1", "toolu_2", "toolu_3"]
+    # a spool entry made now carries the right workspace id: it still drains
+    lock = tws / ".orch/record/runs/r_8k2m01.lock"
+    lock.touch()
+    import orch.record as rec
+
+    old, rec._LOCK_WAIT = rec._LOCK_WAIT, 0.01
+    try:
+        w.append(dict(ev, run="r_8k2m01", id="toolu_s"))
+    finally:
+        rec._LOCK_WAIT = old
+    lock.unlink()
+    w.append(dict(ev, run="r_8k2m01", id="toolu_4"))
+    assert "toolu_s" in [e["id"] for e in record.read_run(tws, "r_8k2m01").unwrap()]
