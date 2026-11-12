@@ -82,9 +82,32 @@ def _forms_one(value: str) -> set[str]:
         )
         for escaped in quoted:
             forms.update((escaped, _lower_pct(escaped)))
+    forms |= _nested_forms(value)
     if "\n" in value:
         forms.update(line for line in value.splitlines() if len(line) >= 16)
     return {form for form in forms if len(form) >= 8}
+
+
+def _nested_forms(value: str) -> set[str]:
+    """Forms a layer of escaping adds that the single JSON escape above does not cover: JSON inside JSON
+    (a payload carrying a serialized document, up to three levels, in both ensure_ascii modes and with
+    the `/` -> `\\/` variant at every level), a backslash before the shell-special characters, a backslash
+    before every non-alphanumeric character, and the shell single-quote and double-quote forms."""
+    forms: set[str] = set()
+    levels = {value}
+    for _ in range(3):
+        step = set()
+        for level in levels:
+            for ascii_only in (False, True):
+                escaped = json.dumps(level, ensure_ascii=ascii_only)[1:-1]
+                step.update((escaped, escaped.replace("/", "\\/")))
+        forms |= step
+        levels = step
+    forms.add(value.replace("\\", "\\\\").replace('"', '\\"'))
+    forms.add(re.sub(r"([^A-Za-z0-9_\n])", r"\\\1", value))
+    forms.add(re.sub(r'([$`"\\])', r"\\\1", value))
+    forms.add(value.replace("'", "'\\''"))
+    return forms
 
 
 def _leaves(obj: Any) -> Iterator[str]:
@@ -189,6 +212,28 @@ class Hider:
 
     def hide_bytes(self, b: bytes) -> bytes:
         return _hide_upto(b, self._binary, len(b))[0]
+
+    def leaks(self, obj: Any) -> bool:
+        """True if any decoded string value or key of `obj` still holds a form of a hidden value. The
+        fail-closed backstop of a writer: it looks at what a reader gets after `json.loads`, not only at
+        escaped bytes."""
+
+        def walk(value: Any) -> bool:
+            kind = type(value)
+            if kind is str:
+                return self.hide_text(value) != value
+            if kind is dict:
+                return any(walk(k) or walk(v) for k, v in value.items())
+            if kind in (list, tuple):
+                return any(walk(v) for v in value)
+            if kind in (bytes, bytearray):
+                return self.hide_bytes(bytes(value)) != bytes(value)
+            return False
+
+        try:
+            return walk(obj)
+        except RecursionError:
+            return True
 
     def drop_trailing_prefix(self, s: str) -> str:
         return _drop_prefix(s, self._text)
