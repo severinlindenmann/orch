@@ -103,6 +103,10 @@ test('the icon picker opens behind Change with 12 icons, More icons and one prev
   assert.equal(textOf(tree.find(x => x.attrs['data-lk'] === 'more')), 'More icons');
   assert.equal(tree.filter(x => x.className === 'lk-pv-row').length, 1, 'a single preview');
   assert.equal(tree.some(x => x.attrs['data-lk'] === 'open'), false);
+  const order = () => all(L.settingsSection()).filter(x => x.className === 'lk-tile').map(x => x.attrs['data-v']);
+  const before = order();
+  click({lk: 'icon', v: before[6]});
+  assert.deepEqual(order(), before, 'picking an icon keeps the tiles in place');
   click({lk: 'icon', v: ''});
   tree = all(L.settingsSection());
   assert.match(textOf(tree.find(x => x.attrs['data-testid'] === 'look-summary')), /^First letter · /);

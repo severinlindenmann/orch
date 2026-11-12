@@ -12,7 +12,7 @@
   const EXTRA = {finance: ['wallet', 'savings', 'cash', 'bank', 'receipt', 'growth', 'calculator'], bills: ['receipt'], taxes: ['bank', 'legal'], budget: ['savings', 'calculator']};
 
   let look = null, name = 'Workspace';
-  let open = false, more = false, draft = {icon: null, color: null}, cat = null, light = false;
+  let open = false, more = false, short = [], draft = {icon: null, color: null}, cat = null, light = false;
   let editing = false, descDraft = '', busy = false, status = '', statusTone = 'ok';
 
   const clean = v => String(v == null ? '' : v).normalize('NFC').trim();
@@ -113,6 +113,7 @@
   }
 
   // The first 12 icons: the current choice, recent ones, suggested ones, then the rest in order.
+  // Taken once when the picker opens so tiles never move under the pointer.
   function firstIcons() {
     return [...new Set([draft.icon, look.icon, ...recent(), ...suggested(), ...Object.keys(D.icons)].filter(i => i && D.icons[i]))].slice(0, 12);
   }
@@ -130,7 +131,7 @@
     const icons = more
       ? [n('div', {className: 'lk-chips', role: 'tablist', 'aria-label': 'Icon groups'}, cats.map(([k, l]) => tab(k, l))),
         n('div', {className: 'lk-grid', 'data-key': 'lk-grid'}, cat === 'suggested' || cat === 'recent' ? tile(null) : null, ids.map(tile))]
-      : [n('div', {className: 'lk-grid', 'data-key': 'lk-grid'}, tile(null), firstIcons().map(tile))];
+      : [n('div', {className: 'lk-grid', 'data-key': 'lk-grid'}, tile(null), short.map(tile))];
     return n('div', {className: 'lk-picker', 'data-key': 'lk-picker', 'data-c': tone},
       n('div', {},
         n('p', {className: 'meta'}, 'Icon'),
@@ -221,9 +222,9 @@
     if (!t || !look || t.disabled) return;
     const v = t.dataset.v;
     switch (t.dataset.lk) {
-      case 'open': open = true; more = false; draft = {icon: look.icon || null, color: look.color || null}; cat = null; status = ''; repaint(); break;
+      case 'open': open = true; more = false; draft = {icon: look.icon || null, color: look.color || null}; short = firstIcons(); cat = null; status = ''; repaint(); break;
       case 'cancel': open = false; repaint(); break;
-      case 'icon': draft.icon = v || null; repaint(); break;
+      case 'icon': draft.icon = v || null; if (draft.icon && !short.includes(draft.icon)) short = [draft.icon, ...short].slice(0, 12); repaint(); break;
       case 'color': draft.color = v || null; repaint(); break;
       case 'cat': cat = v; repaint(); break;
       case 'more': more = !more; repaint(); break;

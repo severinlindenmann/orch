@@ -429,7 +429,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
         blocks.append(
             {
                 "type": "list",
-                "title": f"Schedules · {on} on",
+                "title": f"Schedules · {on} on" + ("" if pid or not on else ", paused"),
                 "items": sched_rows[:20],
                 "more": max(0, len(sched_rows) - 20),
             }
@@ -511,7 +511,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
         view.update(notice=line, notice_tone="good")
     else:
         view.update(
-            notice="Automation is stopped: nothing starts by itself. Press Start on Home to turn it back on.",
+            notice="Automation is stopped: nothing starts by itself. Ask your helper to start background work.",
             notice_tone="warn",
         )
     return view

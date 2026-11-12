@@ -42,7 +42,7 @@ def test_empty_view_is_valid(ws):
         sch["title"] == "Schedules · 0 on"
         and sch["items"][0]["subtitle"] == "Ask your helper to repeat a ticket."
     )
-    assert "stopped" in v["notice"] and "Start" in v["notice"]
+    assert "stopped" in v["notice"] and "start background work" in v["notice"] and "Press" not in v["notice"]
 
 
 def test_schedule_listed_and_old_blocks_gone(ws, monkeypatch):
@@ -357,6 +357,7 @@ def test_stopped_scheduler_shows_paused_not_a_countdown(ws):
     v = build(ws, T(8))  # no running service
     check(v)
     (rep,) = blocks(v, "list", "Schedules")
+    assert rep["title"] == "Schedules · 1 on, paused"
     assert rep["items"][0]["subtitle"] == "Mondays at 07:00 · Paused"
     nxt = next(d["value"] for d in rep["items"][0]["detail"] if d["label"] == "Next run")
     assert nxt.startswith("Paused · would run ")
