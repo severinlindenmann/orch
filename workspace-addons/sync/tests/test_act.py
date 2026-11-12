@@ -426,7 +426,7 @@ def test_a_planted_saved_copy_is_never_offered_for_signing(machines, monkeypatch
 
 @pytest.mark.parametrize("remote", [None, "", 0, ["x"]])
 def test_a_pause_without_a_checked_version_offers_no_saved_copy(machines, remote):
-    """L-3: a signed pause whose remote_sha is empty or not a string takes no saved copy (nothing to check it by)."""
+    """L-3: a signed pause whose remote_sha is empty or not a string, or None with a saved copy, takes no saved copy."""
     a, b, _ = both(machines)
     edit(a, title="Theirs")
     edit(b, title="Mine")
@@ -438,6 +438,24 @@ def test_a_pause_without_a_checked_version_offers_no_saved_copy(machines, remote
     step.write(b, "run/sync/state.json", step.encoded(state))
     with pytest.raises(repo.Refused, match="Saved copy does not match the checked version"):
         pause.resolve_sides(b, TICKET)
+
+
+def test_a_pause_with_no_remote_version_and_no_saved_copy_still_resolves(machines):
+    """A pause before any remote version (first push, local mode) has no saved copy: Keep mine still works."""
+    a, b, _ = both(machines)
+    edit(a, title="Theirs")
+    edit(b, title="Mine")
+    success(a)
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(step.merge, "merge_ticket", lambda *a, **k: None)
+        state = run(b)
+    state["paused"] = pause.sign(b, {**{k: v for k, v in state["paused"].items() if k != "mac"}, "remote_sha": None})
+    step.write(b, "run/sync/state.json", step.encoded(state))
+    saved = repo.safe(b, "run/sync/theirs/" + TICKET)
+    if saved.exists():
+        saved.unlink()
+    _paused, remote, _, theirs = pause.resolve_sides(b, TICKET)
+    assert remote is None and theirs is None
 
 
 def test_leave_deleted_review_names_the_ticket(machines):

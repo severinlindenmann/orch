@@ -127,8 +127,8 @@ def revoke_address(root):
     # {}: no pin was ever made, so no address record can ever pass pin_ok
     if pin is None or (pin != {} and not humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None})):
         raise repo.Refused("orch could not record that sync left this address. Sync is stopped; try again.")
-    if failed:
-        raise failed
+    if failed is not None:
+        raise repo.Refused("orch could not remove the sync address record. Sync is stopped; ask the owner to clear it.")
 
 
 def address_confirmed(root, address):
