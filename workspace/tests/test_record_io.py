@@ -1179,7 +1179,7 @@ def test_pending_tampering_is_alerted_and_skipped(store, monkeypatch):
     assert writer.append(event(id="good"))["seq"] == 2
     assert not planted.exists()  # deleted by its exact path, never committed (M4)
     assert [e["id"] for e in record.read_run(ws, RUN).unwrap()][-1] == "good"
-    assert target.is_symlink()
+    assert not target.is_symlink()  # a planted link at orch's name is removed too (never followed)
     alerts = [
         json.loads(line)
         for p in (record.record_dir(ws) / "alerts").glob("*")

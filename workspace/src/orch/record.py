@@ -1706,10 +1706,13 @@ class RecordWriter:
         alert_content(self.workspace, run)
         try:
             with _io():
-                _unlink(self.workspace, rel)
-        except (RecordTampered, RecordUnavailable) as error:
-            _report(self.workspace, error, "folder", run, "writer")
-            return
+                _unlink(self.workspace, rel)  # by its exact name: a link is removed, never followed
+        except (RecordTampered, RecordUnavailable):
+            try:
+                _rmtree(self.workspace, rel)  # a planted folder (a link or special file inside refuses)
+            except (RecordTampered, RecordUnavailable) as error:
+                _report(self.workspace, error, "folder", run, "writer")
+                return
         head, _ = humanproof.record_head_read(self.workspace, run)
         if head is not None:
             self._move_head(run, head, head["seq"], head.get("mac"), rejected=1)
@@ -1759,8 +1762,10 @@ class RecordWriter:
                 pending = _read_json(self.workspace, rel)
             except (RecordTampered, RecordUnavailable) as error:
                 _report(self.workspace, error, "folder", run, "writer")
-                if isinstance(error, RecordTampered) and error.reason == "swapped":
-                    self._reject(run, rel, check_lock)  # not JSON: planted
+                if isinstance(error, RecordTampered):
+                    self._reject(
+                        run, rel, check_lock
+                    )  # a link, a special file, a folder or not JSON: planted
                 continue
             head, _ = humanproof.record_head_read(self.workspace, run)
             drained = (head or {}).get("drained", [])

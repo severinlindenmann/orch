@@ -2,6 +2,7 @@
 tests through the record API and the `orch record` CLI. Raw run files are made with conftest.seal_lines."""
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -588,7 +589,7 @@ def test_a_deleted_run_file_or_runs_folder_cannot_hide_the_run(store, proj_cli, 
     assert counts["complete"] is False and counts["runs"] == 0
 
 
-# ------------------------------------------------------------------ legacy adoption only for the cutover list (M1)
+# ------------------------------------------------------------------ legacy adoption: cutover list (M1)
 
 
 def test_unsigned_lines_in_a_run_made_after_protection_are_changed_not_adopted(store):
@@ -627,3 +628,24 @@ def test_a_forged_cutover_list_adopts_nothing(store):
     path.write_text(json.dumps(dict(body, runs=[*body["runs"], RUN])))  # a run added by hand: the MAC fails
     assert hp.record_cutover_read(ws) is False
     assert read_run(ws, OTHER).status == "tampered"  # no run is legacy any more: fail closed
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires FIFO")
+@pytest.mark.parametrize("kind", ["symlink", "folder", "fifo"])
+def test_a_planted_link_folder_or_fifo_at_a_spool_name_is_rejected_and_never_blocks_retention(store, kind):
+    ws, writer = store
+    write3(writer)
+    d = _spool_dir(ws)
+    d.mkdir(parents=True)
+    name = d / ("0" * 19 + "1_" + "f" * 32 + ".json")
+    outside = ws / "outside.txt"
+    outside.write_text("keep")
+    if kind == "symlink":
+        name.symlink_to(outside)
+    elif kind == "folder":
+        name.mkdir()
+    else:
+        os.mkfifo(name)
+    writer.append(example(id="toolu_4", at=at(4)))
+    assert not name.exists() and not name.is_symlink() and outside.read_text() == "keep"
+    assert record._pending_count(ws, RUN) == 0
