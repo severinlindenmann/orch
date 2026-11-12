@@ -1314,7 +1314,9 @@ def _removed_run(workspace, run):
         raise RecordTampered("unverified")
     if state == "absent":
         return 0, None
-    head, _ = humanproof.record_head_read(workspace, run)
+    head, hstate = humanproof.record_head_read(workspace, run)
+    if hstate == "old_key" and humanproof.record_head_old_live(workspace, run):
+        return 1, None  # a head from before a protection reset with lines: the file was there
     if head is None or head.get("pruned") or not head["seq"]:
         return 0, None
     return head["seq"], head
@@ -1448,8 +1450,10 @@ def list_runs(workspace):
     gone = []
     for name in humanproof.record_head_names(workspace):
         if name not in files:
-            head, _ = humanproof.record_head_read(workspace, name)
-            if head is not None and head["seq"] and not head.get("pruned"):
+            head, hstate = humanproof.record_head_read(workspace, name)
+            if (head is not None and head["seq"] and not head.get("pruned")) or (
+                hstate == "old_key" and humanproof.record_head_old_live(workspace, name)
+            ):
                 gone.append(name)
     if problem is not None and not (problem.status == "unavailable" and problem.reason == "missing"):
         return problem
@@ -1543,14 +1547,17 @@ class RecordWriter:
             event["detail_lost"] = True
             return None
 
-    def append(self, event, *, detail=None, lock_wait=None):
-        """lock_wait: seconds to wait for the run lock before the write is spooled (default 30)."""
+    def append(self, event, *, detail=None, lock_wait=None, admit=None, spool=True):
+        """lock_wait: seconds to wait for the run lock before the write is spooled (default 30). admit: called
+        under the run lock with (verified lines, head) right before the line is sealed; it returns True to
+        write or raises (a quota is checked and used atomically). spool=False: a busy lock raises
+        RecordBusy."""
         try:
-            return self._append(event, detail, lock_wait)
+            return self._append(event, detail, lock_wait, admit=admit, spool=spool)
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
             raise RecordInvalid() from None
 
-    def _append(self, event, detail, lock_wait=None):
+    def _append(self, event, detail, lock_wait=None, *, admit=None, spool=True):
         if not isinstance(event, dict):
             raise RecordInvalid()
         run = _name(event.get("run"), _RUN)
@@ -1632,8 +1639,10 @@ class RecordWriter:
                 check_lock()
                 self._drain(run, check_lock=check_lock)
                 check_lock()
-                return self._commit(event, payload, default_id, check_lock=check_lock)
+                return self._commit(event, payload, default_id, check_lock=check_lock, admit=admit)
         except RecordBusy:
+            if not spool:
+                raise
             return self._spool(event, payload, default_id)
         except (RecordTampered, RecordUnavailable) as error:
             _report(self.workspace, error, "run", run, "writer")
@@ -1646,7 +1655,7 @@ class RecordWriter:
             raise RecordInvalid("The record entry is too large.")
         return line
 
-    def _commit(self, event, payload, default_id, *, check_lock=lambda: None, drained=None):
+    def _commit(self, event, payload, default_id, *, check_lock=lambda: None, drained=None, admit=None):
         """The only place a run line is sealed (activity.md, Authenticated record). Under the run lock: the
         next seq and link come from the last VERIFIED line of the current key (the chain head only when the
         file was cut short), the line is sealed and written, then the head."""
@@ -1675,6 +1684,8 @@ class RecordWriter:
             old_kid = _old_kids(carry, head)
             view, mode, _pre = _chain(self.workspace, run, raw, rec, head, present, old_kid)
             previous = view.events  # verified lines only: an unverified line never suppresses a real one
+            if admit is not None and admit([dict(e) for e in previous], head) is not True:
+                raise RecordRefused()
             legacy = None
             last_seq = view.last_seq
             if mode == "legacy" and raw.strip():
@@ -2408,30 +2419,45 @@ def _tombstone(workspace, run, now):
     humanproof.record_head_try_write(workspace, run, dict(head or {"seq": 0}, pruned=now))
 
 
-def _no_current_chain(workspace, run):
-    """The run has no head of the current key: nothing of it was written since the reset."""
-    head, state = humanproof.record_head_read(workspace, run)
-    return head is None and state in (True, "old_key")
-
-
 def _retention_end(workspace, run, read, now):
     """(when the run ended, whether its size counts toward max_mb), or None when retention must leave it.
     A checked run ends with its checked core run.state. A true legacy run (made before protection: no head,
     no sealed line, on the cutover list) ends when protection began, orch's own MACed time: it is pruned once
     that is older than keep_days and its size never counts toward max_mb. Every other run orch cannot check
-    (tampered, unverified, removed) is NEVER pruned by retention; one whose records all predate a protection
-    reset (old key) ages from the recorded reset time: it stays and stays reported (a
-    file's mtime is the agent's to set, so it decides nothing here)."""
+    (tampered, unverified, removed, old key: made before a protection reset) is NEVER pruned by retention:
+    it stays and stays reported (only the person's delete-all removes it; a file's mtime is the agent's to
+    set, so it decides nothing here)."""
     if read.status == "ok" and not read.legacy:
         return _ended_run(run, _own(read.value), now), True
     if read.status == "ok" and read.legacy:
         listed = humanproof.record_cutover_read(workspace)
         if isinstance(listed, set) and run in listed:
             return humanproof.record_cutover_at(workspace), False
-    if read.status == "tampered" and read.reason == "old_key" and _no_current_chain(workspace, run):
-        # made before a protection reset: ages from the recorded reset (orch's own MACed time), never counted
-        return humanproof.record_reset_at(workspace), False
     return None
+
+
+def _counted_mb(workspace, run, read, counted):
+    """What of a run counts toward max_mb: only bytes a verified line vouches for (the run file of a verified
+    run and the detail files its sealed lines point at). Anything else under detail/<run> or jobs/<run> can be
+    planted: it is removed with the run, never counted (it must not push genuine runs out early)."""
+    if not counted:
+        return dict(detail_mb=0, file_mb=0)
+    names = {
+        e["detail"]
+        for e in read.value
+        if is_sealed(e) and isinstance(e.get("detail"), str) and e.get("detail_hash")
+    }
+    detail = 0
+    for point in sorted(names):
+        parts = point.split("/")
+        if len(parts) != 3 or parts[:2] != ["detail", run] or not re.fullmatch(_PART, parts[2]):
+            continue
+        try:
+            detail += _file_size(workspace, tuple(parts))
+        except RecordUnavailable as error:
+            if error.reason != "missing":
+                raise
+    return dict(detail_mb=detail / 1024**2, file_mb=_size(workspace, ("runs", run + ".jsonl")) / 1024**2)
 
 
 def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list[dict]], Any]):
@@ -2465,9 +2491,7 @@ def apply_retention(workspace, now, keep_days, max_mb, fold: Callable[[str, list
                     run=run,
                     ended=end[0],
                     counted=end[1],
-                    detail_mb=_detail_parts(workspace, run, "retention")[1] / 1024**2,
-                    file_mb=(_size(workspace, ("runs", run + ".jsonl")) + _size(workspace, ("jobs", run)))
-                    / 1024**2,
+                    **_counted_mb(workspace, run, read, end[1]),
                 )
             )
         except (RecordTampered, RecordUnavailable) as error:

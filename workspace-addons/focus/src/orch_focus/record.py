@@ -111,14 +111,13 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
             if done is None:
                 return [make("tool.start", id=eid, used=used, files=files)]
             ok = done.get("ok") is not False if checked else done.get("ok")  # a hook's "ok" is only its word
-            return [make("tool.end", id=eid, ok=ok, used=used, files=files)]
+            return [make("tool.end", id=eid, ok=ok, used=used, files=files, confirmed=checked)]
+        if kind.startswith("helper.") and not checked:
+            return []  # the agent's word: never opens or closes a helper
         if kind == "helper.start":
             return [make("helper.start", id=eid, parent=e.get("parent"))]
         if kind == "helper.end":
-            ok = (
-                (done or {}).get("ok") is not False if checked else (done or {}).get("ok")
-            )  # unchecked: unknown
-            return [make("helper.end", id=eid, ok=ok)]
+            return [make("helper.end", id=eid, ok=(done or {}).get("ok") is not False, confirmed=True)]
         if kind == "run.state":
             if not checked:
                 return []

@@ -31,9 +31,16 @@ def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
     match = next((a for a in agents if a.get("name") == claim.get("agent")), {})
     chosen = next((a for a in agents if a.get("chosen")), {})
     first = agents[0] if agents else {}
-    raw = str(claim.get("label") or match.get("label") or claim.get("agent")
-              or chosen.get("label") or chosen.get("name")
-              or first.get("label") or first.get("name") or "Agent")
+    raw = str(
+        claim.get("label")
+        or match.get("label")
+        or claim.get("agent")
+        or chosen.get("label")
+        or chosen.get("name")
+        or first.get("label")
+        or first.get("name")
+        or "Agent"
+    )
     raw = re.sub(r"^(agent|human):", "", raw)
     return raw[:1].upper() + raw[1:]
 
@@ -47,7 +54,24 @@ TYPES = {
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
              "question-card.js", "evidence.js")  # fmt: skip
-WEB_FILES = ("index.html", "focus.js", "store.js", "jobs.js", "session.js", "settings.js", "live.js", "ticket.js", "proof.js", "helpers.js", "launch.js", "live-now.js", "areas.js", "used.js", "focus.css", "logo.svg")
+WEB_FILES = (
+    "index.html",
+    "focus.js",
+    "store.js",
+    "jobs.js",
+    "session.js",
+    "settings.js",
+    "live.js",
+    "ticket.js",
+    "proof.js",
+    "helpers.js",
+    "launch.js",
+    "live-now.js",
+    "areas.js",
+    "used.js",
+    "focus.css",
+    "logo.svg",
+)
 PREFIX = re.compile(
     r"/addon/[a-z][a-z0-9-]{1,31}"
 )  # set by the dashboard when it shows this page under its own address
@@ -78,7 +102,9 @@ class Tracker:
         self.status_cache: dict[str, tuple[float, dict]] = {}
         # ticket -> run id, for the runs Focus started (kept in .orch/run/focus/ so a crash is recoverable)
         self.started: dict[str, str] = self._load_started()
-        self.pins: dict[str, dict] = {t: p for t, p in self._load_pins().items() if self.started.get(t) == p["run"]}  # ticket -> {run, pid, start}: who a stop may signal
+        self.pins: dict[str, dict] = {
+            t: p for t, p in self._load_pins().items() if self.started.get(t) == p["run"]
+        }  # ticket -> {run, pid, start}: who a stop may signal
         self.perms = Permissions(root, orch_bin)
         self.clock = WorkClock(root)
         self.last_agent: dict[str, tuple[str, str]] = {}  # ticket -> (agent, mode) of its latest run
@@ -112,7 +138,10 @@ class Tracker:
     def workspace(self):
         data = self.lookup("workspace", ["status", "--json"])
         if isinstance(data, list):
-            data = next((w for w in data if isinstance(w, dict) and w.get("workspace") == str(self.root.resolve())), {})
+            data = next(
+                (w for w in data if isinstance(w, dict) and w.get("workspace") == str(self.root.resolve())),
+                {},
+            )
         name = (data.get("name") or data.get("workspace")) if isinstance(data, dict) else None
         if isinstance(name, dict):
             name = name.get("name")
@@ -234,14 +263,22 @@ class Tracker:
                 return False
         import sys
 
-        print(f"focus: no process id for run {run} on {tid} after 30 s; it stays out of Running now", file=sys.stderr)
+        print(
+            f"focus: no process id for run {run} on {tid} after 30 s; it stays out of Running now",
+            file=sys.stderr,
+        )
         return False
 
     def _ours(self, tid: str, run: str, claim: dict, running: bool) -> bool:
         """True only for a run Focus itself started (run id recorded by Focus, claim still that run, started by
         Focus) that is alive and whose process is the one pinned when Focus started it: same pid and same start
         time (a reused pid has another start time). No pin, or a claim that lost its pid: not ours."""
-        if not (running and self.started.get(tid) == run and claim.get("run") == run and claim.get("by") == "focus"):
+        if not (
+            running
+            and self.started.get(tid) == run
+            and claim.get("run") == run
+            and claim.get("by") == "focus"
+        ):
             return False
         with self.plock:
             pin = dict(self.pins.get(tid) or {})
@@ -263,7 +300,13 @@ class Tracker:
             ticket = self.ticket(tid) or {}
             live = claim.get("live") or {}
             needs = any(q.get("answer") is None for q in ticket.get("questions") or [])
-            state = "needs" if needs or live.get("state") == "attention" else "paused" if live.get("state") == "idle" else "working"
+            state = (
+                "needs"
+                if needs or live.get("state") == "attention"
+                else "paused"
+                if live.get("state") == "idle"
+                else "working"
+            )
             rows.append({
                 "ticket": tid, "key": ticket.get("key"), "title": str(ticket.get("title") or "")[:200],
                 "run": run, "label": agent_label(claim, agents), "state": state,
@@ -280,7 +323,9 @@ class Tracker:
         if not self._ours(tid, run, status.get("claim") or {}, bool(status.get("running"))):
             return False, "Focus did not start that one, or it already ended."
         try:
-            code, _, err = actions.orch(self.root, self.orch_bin, ["run", "stop", tid, "--by", "focus"], timeout=20)
+            code, _, err = actions.orch(
+                self.root, self.orch_bin, ["run", "stop", tid, "--by", "focus"], timeout=20
+            )
         except actions.Unavailable as e:
             return False, str(e)
         if code != 0:
@@ -392,8 +437,18 @@ class Tracker:
         if run is None and claim.get("run") is not None:
             claim = {**claim, "run": None}  # an id that is not a run id is unknown
         v = self._shape(ticket, status, claim, board, events, self.is_generic(claim, tid), self.agents())
-        mode = "worked" if v["state"] == "working" else None if v["state"] == "done" or not v["ticket"]["started"] else "paused"
-        v["run"].update(self.clock.tick(tid, mode, claim.get("started_at") if isinstance(claim.get("started_at"), str) else None))
+        mode = (
+            "worked"
+            if v["state"] == "working"
+            else None
+            if v["state"] == "done" or not v["ticket"]["started"]
+            else "paused"
+        )
+        v["run"].update(
+            self.clock.tick(
+                tid, mode, claim.get("started_at") if isinstance(claim.get("started_at"), str) else None
+            )
+        )
         mobile = self.mobile()
         v["capabilities"] = {"phone_mode": mobile["available"]}
         v["phone_mode"] = mobile["on"]
@@ -403,7 +458,13 @@ class Tracker:
 
     @staticmethod
     def _shape(
-        ticket: dict, status: dict, claim: dict, board: dict, events: list[dict], generic: bool, agents: list[dict] | None = None
+        ticket: dict,
+        status: dict,
+        claim: dict,
+        board: dict,
+        events: list[dict],
+        generic: bool,
+        agents: list[dict] | None = None,
     ) -> dict:
         checks = ticket.get("checklist") or []
         questions = ticket.get("questions") or []
@@ -498,17 +559,30 @@ class Tracker:
             ):
                 questions = [q for q in t.get("questions", []) if q.get("answer") is None]
                 started = bool(t.get("started") or (t.get("ticket_view") or {}).get("started"))
-                next_step = ("Done" if t["status"] == "done" else "Answer" if questions
-                             else "Check the result" if t["status"] == "review"
-                             else "Working…" if t["status"] == "active"
-                             else "Paused" if started or t["status"] == "waiting" else "Start")
+                next_step = (
+                    "Done"
+                    if t["status"] == "done"
+                    else "Answer"
+                    if questions
+                    else "Check the result"
+                    if t["status"] == "review"
+                    else "Working…"
+                    if t["status"] == "active"
+                    else "Paused"
+                    if started or t["status"] == "waiting"
+                    else "Start"
+                )
                 out.append(
                     {
-                        "id": t["id"], "next_step": next_step, "question_count": len(questions),
+                        "id": t["id"],
+                        "next_step": next_step,
+                        "question_count": len(questions),
                         "key": t.get("key"),
                         "title": str(t.get("title", ""))[:200],
                         "status": t["status"],
-                        "closed_at": (t.get("closed_at") or ((t.get("history") or [{}])[-1] or {}).get("at")) if t["status"] == "done" else None,
+                        "closed_at": (t.get("closed_at") or ((t.get("history") or [{}])[-1] or {}).get("at"))
+                        if t["status"] == "done"
+                        else None,
                         "started": bool(t.get("started") or (t.get("ticket_view") or {}).get("started")),
                     }
                 )
@@ -577,13 +651,17 @@ class Handler(BaseHTTPRequestHandler):
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if path == "/api/tickets":
-            return self._json(200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()})
+            return self._json(
+                200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()}
+            )
         if path == "/api/live":
             cards = livecards.cards(self.tracker)
             return self._json(200, {"cards": cards, "same_file": livecards.same_file(cards)})
         if path == "/api/areas":
             cards = livecards.cards(self.tracker)
-            return self._json(200, {"areas": areas.strip(self.root, cards), "same_file": livecards.same_file(cards)})
+            return self._json(
+                200, {"areas": areas.strip(self.root, cards), "same_file": livecards.same_file(cards)}
+            )
         if path == "/api/procs":
             return self._json(200, {"procs": self.tracker.procs()})
         if path == "/api/mobile":
@@ -609,8 +687,12 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype, extra = proofs.read(self.root, one("t"), one("n"), one("m") or "view")
             return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
         m = re.fullmatch(r"/page/(t_[a-z0-9]{6,16})/([0-9a-f]{16})/(.+)", path)
-        if m:  # a page of a ticket and the files it loads, by path so relative links resolve (proofs.read_page)
-            code, body, ctype, extra = proofs.read_page(self.root, m.group(1), m.group(2), unquote(m.group(3)))
+        if (
+            m
+        ):  # a page of a ticket and the files it loads, by path so relative links resolve (proofs.read_page)
+            code, body, ctype, extra = proofs.read_page(
+                self.root, m.group(1), m.group(2), unquote(m.group(3))
+            )
             return self._send(code, body, ctype, {"Cross-Origin-Resource-Policy": "same-origin", **extra})
         if path == "/" or re.fullmatch(r"(/t)?/t/t_[a-z0-9]{6,16}", path):
             pre = self.headers.get("X-Forwarded-Prefix") or ""
@@ -686,7 +768,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.orch_bin == actions.SELF and not (
             self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
         ):
-            return self._send(403, b"Open Focus from this computer (orch focus open) to do this.", "text/plain; charset=utf-8")
+            return self._send(
+                403,
+                b"Open Focus from this computer (orch focus open) to do this.",
+                "text/plain; charset=utf-8",
+            )
         try:
             (areas.accept if op == "area.accept" else areas.remove)(self.root, args["area"])
         except areas.BadArea as e:
@@ -708,7 +794,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"This request came from another website and was refused.", "text/plain")
         from orch.pageproof import forwarded, host_ok
 
-        if self.session is None or forwarded(self.headers) or not host_ok(self.headers, self.server.server_address[1]):
+        if (
+            self.session is None
+            or forwarded(self.headers)
+            or not host_ok(self.headers, self.server.server_address[1])
+        ):
             return self._send(403, b"forbidden", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
@@ -755,7 +845,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._area_op(body["op"], args)
         try:
             mint = None
-            if self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1]):
+            if self.session is not None and self.session.can_mint(
+                self.headers, self.server.server_address[1]
+            ):
                 mint = self.session.mint
             code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), args, mint=mint)
         except actions.NeedsPerson as e:
@@ -784,7 +876,12 @@ class Handler(BaseHTTPRequestHandler):
         view = self.tracker.view(tid) if isinstance(tid, str) and TID_RE.fullmatch(tid) else None
         note = None
         if body.get("op") == "run.send":
-            note = chat.note(extra, bool(view and view["run"]["running"]), bool(view and view["live"]), any(q.get("answer") is None for q in view["ticket"].get("questions", [])) if view else False)
+            note = chat.note(
+                extra,
+                bool(view and view["run"]["running"]),
+                bool(view and view["live"]),
+                any(q.get("answer") is None for q in view["ticket"].get("questions", [])) if view else False,
+            )
         self._json(200, {"result": extra, "view": view, "note": note})
 
 
@@ -810,7 +907,9 @@ CLOCK_EVERY = 10.0  # seconds between the server's own looks at tickets whose cl
 
 
 class _Server(ThreadingHTTPServer):
-    request_queue_size = 128  # a page loads a dozen files at once; the default backlog of 5 resets connections
+    request_queue_size = (
+        128  # a page loads a dozen files at once; the default backlog of 5 resets connections
+    )
 
     def server_close(self):
         if hasattr(self, "ticker_stop"):
@@ -831,7 +930,9 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
 
         session = PageSession(root, "focus")
     tracker = Tracker(root, orch_bin)
-    srv = _Server(("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=session))
+    srv = _Server(
+        ("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=session)
+    )
     srv.revisions = Revisions(root)
     srv.tracker = tracker
     srv.ticker_stop = stop = threading.Event()

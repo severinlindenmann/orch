@@ -1044,6 +1044,28 @@ def record_head_carry(root: Path, run: str) -> dict:
         return {}
 
 
+def record_head_old_live(root: Path, run: str) -> bool:
+    """Whether the run's head is one of another key id (made before a protection reset) that is shaped like a
+    head with lines and not pruned. Its MAC cannot be checked with the new key: it only says the run existed
+    (it is listed and a missing file reads as `removed`), it never makes anything trusted."""
+    rec = record_key(root)
+    try:
+        raw = json.loads(_read_guarded(_head_path(root, run, False)))
+    except (FileNotFoundError, Refused, OSError, ValueError, RecursionError):
+        return False
+    return (
+        rec is not None
+        and isinstance(raw, dict)
+        and raw.get("schema") == "orch.record-head/1"
+        and raw.get("run") == run
+        and isinstance(raw.get("kid"), str)
+        and raw["kid"] != rec[1]
+        and type(raw.get("seq")) is int
+        and raw["seq"] > 0
+        and not raw.get("pruned")
+    )
+
+
 def record_head_state(root: Path, run: str) -> str:
     """Whether a run has a chain head in the guarded home: "present", "absent" or "unknown". "absent" only
     when the guarded home, the workspace id and this workspace's key folder all resolve cleanly AND the head

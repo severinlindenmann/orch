@@ -244,7 +244,8 @@ SAFE_ATTRIBUTE_CALLS = {
     "raw.split",
     "humanproof.record_cutover_at",
     "humanproof.record_head_carry",
-    "humanproof.record_reset_at",
+    "humanproof.record_head_old_live",
+    "point.split",
     "carry.get",
     "os.stat",
     "out.add",
@@ -330,6 +331,7 @@ ERROR_BOUNDARIES = {
     "_reject_bad_spool",
     "_reject_entry",
     "_flat_size",
+    "_counted_mb",
 }
 
 

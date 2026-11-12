@@ -166,7 +166,11 @@ def test_the_view_shows_live_steps_from_the_record(server, ws, fake_orch, monkey
 
 def denial(**kw):
     e = example(
-        "valid-step-started.json", kind="denial", text="Not allowed by this workspace", via="log", checked=True
+        "valid-step-started.json",
+        kind="denial",
+        text="Not allowed by this workspace",
+        via="log",
+        checked=True,
     )
     e["outcome"] = {"ok": False, "error": "Not allowed by this workspace", "ms": None}
     e.update(kw)
@@ -325,6 +329,42 @@ def test_an_unchecked_denial_or_a_before_protection_line_never_drives_the_board(
 
 def test_problem_markers_of_orch_are_kept_not_dropped(tmp_path):
     f = RecordFeed(tmp_path, None, RUN, TICKET)
-    f._line(json.dumps({"type": "unavailable", "cursor": "rc1.x", "run": RUN, "status": "ok",
-                        "reason": "content", "message": "m", "changed": 2, "removed": 0}).encode())
+    f._line(
+        json.dumps(
+            {
+                "type": "unavailable",
+                "cursor": "rc1.x",
+                "run": RUN,
+                "status": "ok",
+                "reason": "content",
+                "message": "m",
+                "changed": 2,
+                "removed": 0,
+            }
+        ).encode()
+    )
     assert f.notes["content"]["changed"] == 2 and f.cursor == "rc1.x"
+
+
+def test_h_an_unchecked_helper_line_never_closes_a_helper_or_shows_done():
+    start = example(
+        "valid-step-started.json", kind="helper.start", via="log", checked=True, agent="h_1", parent="main"
+    )
+    end = example(
+        "valid-step-started.json", kind="helper.end", via="hook", checked=False, agent="h_1", parent="main"
+    )
+    end["outcome"] = {"ok": None, "error": None, "ms": None}
+    assert to_events(end, TICKET, RUN) == []  # not a helper end at all: only the agent's word
+    assert [e["kind"] for e in to_events(start, TICKET, RUN)] == ["helper.start"]
+
+
+def test_h_an_unchecked_tool_end_keeps_its_unknown_outcome():
+    e = example(
+        "valid-step-started.json", via="hook", checked=False, outcome={"ok": None, "error": None, "ms": None}
+    )
+    (got,) = to_events(e, TICKET, RUN)
+    assert got["data"].get("ok") is None and got["data"]["confirmed"] is False
+    checked = example(
+        "valid-step-started.json", via="log", checked=True, outcome={"ok": True, "error": None, "ms": 1}
+    )
+    assert to_events(checked, TICKET, RUN)[0]["data"]["ok"] is True

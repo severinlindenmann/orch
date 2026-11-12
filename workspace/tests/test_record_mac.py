@@ -905,7 +905,9 @@ def test_the_outside_day_cap_counts_verified_lines_and_fails_closed_only_on_unkn
     monkeypatch.setattr(secretrun, "_record_event", lambda root, ev: example(run=run))
     wrote = []
     monkeypatch.setattr(
-        secretrun, "record_writer", lambda root: type("W", (), {"append": lambda s, e: wrote.append(e)})()
+        secretrun,
+        "record_writer",
+        lambda root: type("W", (), {"append": lambda s, e, **k: wrote.append(e)})(),
     )
     # one planted junk line and nothing else: it must not stop key uses for the day
     runfile(ws, run).parent.mkdir(parents=True, exist_ok=True)
@@ -986,17 +988,26 @@ def test_med2_a_run_planted_after_the_key_exists_is_never_legacy(store):
     assert read_run(ws, OTHER).legacy is True
 
 
-def test_med4_a_reset_run_is_pruned_from_the_recorded_reset_and_never_counted(store):
+def test_med4_a_reset_run_is_never_pruned_by_retention_and_is_reported(store):
     ws, writer = store
     write3(writer)
     _reset(ws)
     r = read_run(ws, RUN)
     assert (r.status, r.reason) == ("tampered", "old_key")
-    at_reset = hp.record_reset_at(ws)
-    assert at_reset
-    assert record.apply_retention(ws, at_reset, 90, 2048, lambda r, es: None)["delete_run"] == []
-    later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 100 * 86400))
-    assert record.apply_retention(ws, later, 90, 2048, lambda r, es: None)["delete_run"] == [RUN]
+    later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 1000 * 86400))
+    out = record.apply_retention(ws, later, 90, 2048, lambda r, es: None)
+    assert out["delete_run"] == [] and (out["status"], out["reason"]) == ("tampered", "old_key")
+    assert (record.record_dir(ws) / "runs" / (RUN + ".jsonl")).exists()
+
+
+def test_d_an_old_key_run_whose_file_is_deleted_lists_as_removed(store):
+    ws, writer = store
+    write3(writer)
+    _reset(ws)
+    (record.record_dir(ws) / "runs" / (RUN + ".jsonl")).unlink()
+    assert RUN in record.list_runs(ws).value
+    r = read_run(ws, RUN)
+    assert (r.status, r.reason) == ("tampered", "removed")
 
 
 def test_low1_made_up_key_ids_are_content_not_old_key():
@@ -1109,23 +1120,98 @@ def test_low12_a_line_that_fails_its_checks_leaves_no_detail_file(store, monkeyp
     assert read_run(ws, RUN).reason == "missing"  # no line either
 
 
-@pytest.mark.slow
-def test_perf_a_warm_read_and_append_are_cheap(store):
+def test_perf_work_counts_per_read_and_append_stay_small(store, monkeypatch):
+    """Deterministic: how many key folders are resolved and binding files read, not milliseconds."""
     ws, writer = store
     for n in range(4):
         other = ws.parent / f"other{n}"
         other.mkdir()
         hp.record_key(other)
+    read_run(ws, RUN)  # warm
+    calls = {"key_dir": 0, "binding": 0}
+    real_dir, real_read = hp.key_dir, hp._read_guarded
+
+    def counting_dir(*a, **k):
+        calls["key_dir"] += 1
+        return real_dir(*a, **k)
+
+    def counting_read(path, *a, **k):
+        if str(path).endswith("binding.json"):
+            calls["binding"] += 1
+        return real_read(path, *a, **k)
+
+    monkeypatch.setattr(hp, "key_dir", counting_dir)
+    monkeypatch.setattr(hp, "_read_guarded", counting_read)
     read_run(ws, RUN)
-    t = time.perf_counter()
-    for _ in range(40):
-        read_run(ws, RUN)
-    read_ms = (time.perf_counter() - t) / 40 * 1000
-    t = time.perf_counter()
-    for n in range(20):
-        writer.append(example(id=f"p{n}", at=at(9)))
-    append_ms = (time.perf_counter() - t) / 20 * 1000
-    assert read_ms < 6 and append_ms < 15, (read_ms, append_ms)
+    # one binding read per key_dir (the workspace's own); the other workspaces' bindings come from the cache
+    assert calls["binding"] <= calls["key_dir"] <= 10, calls
+    calls.update(key_dir=0, binding=0)
+    writer.append(example(id="p1", at=at(9)))
+    assert calls["binding"] <= calls["key_dir"] <= 24, calls
+
+
+def test_e_planted_detail_and_job_files_do_not_count_toward_the_size_cap(store):
+    ws, writer = store
+    writer.append(
+        example(id="r_end", kind="run.state", via="core", at=at(5), used=None, data={"state": "done"})
+    )
+    for sub in ("detail", "jobs"):
+        d = record_dir(ws) / sub / RUN
+        d.mkdir(parents=True)
+        with (d / "planted.json").open("wb") as f:
+            f.truncate(300 * 1024**2)  # sparse: a huge file that costs nothing
+    res = record.apply_retention(ws, "2026-11-17T00:00:00Z", 90, 1, lambda r, es: None)
+    assert res["delete_run"] == []  # a recent genuine run is not pushed out by planted bytes
+
+
+def test_g_two_callers_at_cap_minus_one_admit_exactly_one(store, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from orch import secretrun
+    from orch.errors import Refused
+
+    ws, writer = store
+    run = "r_outside_20261116"
+    monkeypatch.setattr(secretrun, "_run_ids", lambda: None)
+    monkeypatch.setattr(secretrun, "require_run", lambda *a: None)
+    count = iter(range(1000))
+    monkeypatch.setattr(secretrun, "_record_event", lambda root, ev: example(run=run, id=f"u{next(count)}"))
+    monkeypatch.setattr(secretrun, "OUTSIDE_DAY_CAP", 3)
+    monkeypatch.setattr(secretrun, "record_writer", lambda root: writer)
+    for _ in range(2):
+        secretrun._write_record(ws, {})
+
+    def go(_):
+        try:
+            secretrun._write_record(ws, {})
+            return True
+        except Refused:
+            return False
+
+    with ThreadPoolExecutor(4) as pool:
+        results = list(pool.map(go, range(4)))
+    assert results.count(True) == 1 and len(ids(ws, run)) == 3
+
+
+def test_i_counts_expose_the_protected_marker_and_its_note(store, proj_cli, capsys):
+    ws, writer = store
+    writer.append(example(run=RUN, id="toolu_c", via="log", harness="claude", at=at(2)))
+    writer.append(example(run=OTHER, id="toolu_x", via="log", harness="codex", at=at(2)))
+    code, (counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
+    by = {r["run"]: r for r in counts["per_run"]}
+    assert by[RUN] == {"run": RUN, "protected": True}
+    assert by[OTHER] == {"run": OTHER, "protected": False, "note": record.UNPROTECTED_TEXT}
+
+
+@pytest.mark.no_record_key
+def test_j_without_the_autouse_key_the_writer_is_off_and_readers_are_unverified(tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    w = RecordWriter(ws, hider=hider.Hider({"k": "KEYVALUE-abc123XYZ-secret"}))
+    with pytest.raises(record.RecordOff):
+        w.append(example(id="toolu_1"))
+    assert not (record_dir(ws) / "runs").exists()  # nothing written
+    assert read_run(ws, RUN).status in ("tampered", "unavailable")
 
 
 def test_foreign_key_lines_are_old_history_only_for_the_exact_recorded_old_kid(store):

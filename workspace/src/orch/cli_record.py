@@ -1031,6 +1031,11 @@ def counts(root: Path, args) -> dict:
             "last_sent": None,
             "queued": 0,
         },
+        "per_run": [
+            {"run": m["run"], "protected": m["protected"]}
+            | ({} if m["protected"] else {"note": record.UNPROTECTED_TEXT})
+            for m in runs
+        ],
         "unavailable": unavailable,
         "complete": not unavailable,
     }

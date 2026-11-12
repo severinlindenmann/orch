@@ -573,9 +573,11 @@ only a legacy run reads a detail with no hash.
   is ever sized or deleted recursively, and nothing deeper than 8 levels is walked anywhere.
 - *Runs are listed from the files and the heads* (non-pruned): a run file or `runs/` deleted shows as `removed`.
 - *Retention.* A true legacy run (on the cutover list) is pruned once the recorded cutover time (orch's own, MACed) is
-  older than `keep_days`; a run whose records all predate a protection reset ages from the recorded reset time
-  (`record-reset.json`, MACed); neither counts toward `max_mb`. A tampered, unverified or removed run is NEVER pruned by
-  retention (a file's mtime is the agent's to set and decides nothing). The tombstone is written before the run file is
+  older than `keep_days` and never counts toward `max_mb`. A tampered, unverified, removed or old-key run (made before
+  a protection reset: its segment cannot be verified with the new key) is NEVER pruned by retention (only the person's
+  delete-all removes it; retention reports it). Toward `max_mb` count only the run file of a verified run and the detail
+  files its sealed lines point at; other files under `detail/<run>/` and `jobs/<run>/` are removed with the run but
+  never counted. An old-key head with lines (not pruned) lists its run; with the file gone it reads as `removed`. Retention (a file's mtime is the agent's to set and decides nothing). The tombstone is written before the run file is
   deleted. A planted spool entry never blocks retention (entries whose MAC fails are refused under the run lock).
   The cutover list is made when the key is made. A recorded legacy prefix
   that is gone from the file counts as `removed`.

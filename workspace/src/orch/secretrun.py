@@ -153,8 +153,23 @@ def _write_record(root, ev):
         head, _ = hp.record_head_read(root, line["run"])
         seen = max(len(own), int(head["seq"]) if head else 0)
         if (read.status != "ok" and not fresh and not junk) or seen >= OUTSIDE_DAY_CAP:
-            raise Refused("Refused: too many key uses outside a run today.")
+            raise Refused(_TOO_MANY)
+
+        def admit(lines, head):  # checked again under the run lock, where the line is written: atomic
+            own = [e for e in lines if record.is_sealed(e)]
+            if max(len(own), int(head["seq"]) if head else 0) >= OUTSIDE_DAY_CAP:
+                raise Refused(_TOO_MANY)
+            return True
+
+        try:
+            record_writer(root).append(line, admit=admit, spool=False)
+        except record.RecordBusy:
+            raise Refused("Refused: too many key uses outside a run right now (busy).") from None
+        return
     record_writer(root).append(line)
+
+
+_TOO_MANY = "Refused: too many key uses outside a run today."
 
 
 def record_writer(root):

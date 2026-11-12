@@ -353,7 +353,9 @@ def test_same_shapes_as_the_fake(ws, capsys):
     assert shape(real_page) == shape(fake_page) and set(real_page) == set(fake_page)
     _, (real_counts,) = cli_lines(capsys, "counts", "--from", "2026-11-16", "--to", "2026-11-16")
     _, (fake_counts,) = fake_lines("record", "counts", "--json")
-    assert set(real_counts) == set(fake_counts)
+    assert set(real_counts) - {"per_run"} == set(
+        fake_counts
+    )  # per_run (protected + note) is new: S3 renders it
     assert set(real_counts["items"][0]) == set(fake_counts["items"][0]) - {"tickets"}
     for kind in ("invalid", "not_found"):
         args = ["--limit", "0"] if kind == "invalid" else ["--run", "r_nothere1"]
