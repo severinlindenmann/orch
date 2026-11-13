@@ -304,7 +304,7 @@ struct VoiceSettingsView: View {
                     row("Monthly limit (USD)") {
                         Picker("Monthly limit (USD)", selection: Binding(get: { model.settings.ttsCapUsd }, set: { update(SettingsPatch(ttsCapUsd: $0)) })) {
                             ForEach([0, 5, 10, 20, 50], id: \.self) { amount in
-                                Text("$\(amount)").tag(Double(amount))
+                                Text("$\(amount)").tag(Double(amount)).accessibilityIdentifier("limit-\(amount)")
                             }
                         }.accessibilityIdentifier("voice-limit-menu")
                     }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
