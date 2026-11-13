@@ -34,7 +34,7 @@ def _strict_messages(conn):  # noqa: F811
 
 def test_a_cache_from_another_relay_is_not_used(proj, run, new_ticket, conn):  # noqa: F811
     tid = _ticket(proj, run, new_ticket)
-    phone_view.view_for(proj, tid)["attachments"][0]["blob_id"]
+    phone_view.view_for(proj, tid)
     cfg = net.load_service(proj, "relay")
     other = dict(
         cfg, url=cfg["url"].replace("127.0.0.1", "localhost")
@@ -84,3 +84,20 @@ def test_a_second_404_falls_back_to_plain_text_with_the_hint(proj, run, new_tick
     code, _, err = run("relay", "send", "phones", "Done", "--ticket", tid, "--update", "result")
     assert code == 0, err
     assert "without the ticket page" in err
+
+
+def test_a_404_that_is_not_about_a_blob_does_not_reupload(proj, run, new_ticket, conn):  # noqa: F811
+    tid = _ticket(proj, run, new_ticket)
+    post = next(fn for m, rx, fn in conn.routes if rx == "/v1/messages")
+    seen = []
+
+    def gone(m, q, body):
+        seen.append(1)
+        if "ticket_view" in json.loads(body)["body"]:
+            return 404, {"error": "not_found", "message": "No such device."}
+        return post(m, q, body)
+
+    conn.routes.insert(0, ("POST", "/v1/messages", gone))
+    code, _, err = run("relay", "send", "phones", "Done", "--ticket", tid, "--update", "result")
+    assert code == 0, err
+    assert len(seen) == 2 and len(conn.blobs) == 1, "one try with the view, one plain: no second upload"

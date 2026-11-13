@@ -755,7 +755,7 @@ def send_text(
             # the relay does not have a blob the view names (another relay, or it expired it): forget those
             # cached ids, upload again and send the same message once WITH its view before any fallback
             msg = None
-            if getattr(e, "status", None) == 404:
+            if getattr(e, "status", None) == 404 and re.search(r"blob|attachment", str(e), re.I):
                 msg = _retry_with_fresh_blobs(root, to, body, tv, ticket, reply_to, mid)
             if msg is not None:
                 note = ""
@@ -825,7 +825,9 @@ def _retry_with_fresh_blobs(root, to, body, tv, ticket, reply_to, mid) -> dict |
         return None
     try:
         return _message(root, to, "text", {**body, "ticket_view": fresh}, ticket, reply_to, mid)
-    except Refused:
+    except Refused as e:
+        if _unreachable(e):
+            raise  # no answer is ambiguous: never sent a third time
         return None
 
 
