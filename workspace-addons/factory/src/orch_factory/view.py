@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from . import autopilot, flow, orchcli
+from . import autopilot, flow, orchcli, service
 from .commands import listing
 from .store import Refused, Store, clock, now
 
@@ -91,4 +91,8 @@ def view(root):
         until = max(g["until"] for g in live).astimezone().strftime("%d %b %H:%M")
         view["notice"] = f"Autopilot is on until {until} · decided today: {today}"
         view["notice_tone"] = "good"
+    if not service.running_pid(root, clean=False):
+        off = "Factory watcher off — answers wait until it runs"
+        view["notice"] = f"{off} · {view['notice']}" if "notice" in view else off
+        view["notice_tone"] = "warn"
     return view

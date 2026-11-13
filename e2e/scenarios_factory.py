@@ -21,7 +21,7 @@ from lib import Fail, check, scenario
 from scenarios_v2 import W, wait_for
 
 EXAMPLES = "contracts/examples/factory-proposal"
-WAKEUP_WIRED = False  # automation does not wake the agent for a person's factory:* answer yet (A21 skips)
+WAKEUP_WIRED = True  # the Factory watcher (orch factory watch) wakes the manager run for a person's factory:* answer
 AGENT = "fake"  # the e2e fake agent (fixtures/generic-agent), registered in the workspace as agent "fake"
 
 
@@ -356,24 +356,26 @@ def a20(e):
 
 @scenario("A21")
 def a21(e):
-    """Factory wake-up (PENDING): after a person's Start the automation add-on should start a run of the order ticket.
-    Today automation only acts on its own `automation:failure` answers and on queued human input, so a person's answer
-    to a `factory:*` question leaves the order Ready with no run. Flip WAKEUP_WIRED when it does."""
+    """Factory wake-up: the Factory watcher (`orch factory watch --once`, the loop of `orch factory start`) starts a
+    run of the order ticket after a person's Start, once, and never before anyone answered."""
     from lib import Skip
 
     if not WAKEUP_WIRED:
-        raise Skip("no wake-up for factory:* answers yet: automation (loop.py KINDS) only acts on automation:failure answers")
+        raise Skip("the Factory watcher is not wired")
     with _factory(e, "A21") as f:
         log = e.tmp / "a21-agent.log"
         f.w.env["GENERIC_AGENT_LOG"] = str(log)
         order = _idea(f, "Wake me")
         info = f.f("propose", order, data=_proposal(e))
-        rc, out, err = f.w.sh(["orch", "automation", "run", "--once"], timeout=120)
-        check(rc == 0, f"automation run --once: {(err or out)[-200:]}")
+        check(f.f("watch", "--once")["woken"] == [], "the watcher woke the manager before anyone answered")
         check(not log.exists() or "prompt:" not in log.read_text(), "the agent woke up before anyone answered")
         f.human(order, info["question"], "Start")
-        rc, out, err = f.w.sh(["orch", "automation", "run", "--once"], timeout=120)
-        check(rc == 0, f"automation run --once: {(err or out)[-200:]}")
+        woke = f.f("watch", "--once")["woken"]
+        check([w["order"] for w in woke] == [order], f"the watcher did not wake the order: {woke}")
         ok = wait_for(lambda: log.exists() and "prompt:" in log.read_text(), 30)
         check(ok, f"no agent run started after a person's Start; ticket: {f.ticket(order).get('status')}")
-        return "automation started an agent run of the order after a person's Start, none before"
+        hist = json.dumps(f.ticket(order).get("history", []))
+        check("Factory woke the manager" in hist, f"the wake-up is not in the order history: {hist[-300:]}")
+        # no second wake for the same answer
+        check(f.f("watch", "--once")["woken"] == [], "the watcher woke the manager twice for one answer")
+        return "watch --once started a run after a person's Start, none before, none twice; the order history says why"

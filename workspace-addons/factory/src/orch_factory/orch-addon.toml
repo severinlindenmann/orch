@@ -8,7 +8,8 @@ skill = "skills/orch-factory"
 agents_block = "skills/orch-factory/AGENTS-block.md"
 ticket_ext = "ext.schema.json"
 needs = true
-requires = ["automation"]
+background = true                          # `orch factory start|stop|status`: the watcher that wakes the manager
+runs_agents = true                         # it starts the manager run (orch run start) when you answer
 
 [dashboard]
 label = "Factory"

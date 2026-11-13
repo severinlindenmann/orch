@@ -106,9 +106,19 @@ elif args[0] == "log":
     result = {}
 elif args[:2] == ["run", "start"]:
     load(args[2])
+    if (root / "fail-run").exists():
+        print(json.dumps({"error": "No agent.", "code": "not_available"}))
+        sys.exit(2)
     with (root / "runs.jsonl").open("a") as stream:
-        stream.write(json.dumps({"ticket": args[2], "agent": flag("--agent"), "by": by}) + "\n")
+        stream.write(
+            json.dumps({"ticket": args[2], "agent": flag("--agent") if "--agent" in args else None, "by": by})
+            + "\n"
+        )
     result = {"run": "r1"}
+elif args[:2] == ["run", "status"]:
+    load(args[2])
+    live = (root / "live-runs").read_text().split() if (root / "live-runs").exists() else []
+    result = {"ticket": args[2], "running": args[2] in live}
 else:
     raise AssertionError(args)
 print(json.dumps(result))

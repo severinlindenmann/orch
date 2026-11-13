@@ -21,9 +21,14 @@ anything that cannot be undone and other workspaces always come back to you. Eve
 its reason and listed in a daily report. It can never extend its own autopilot.
 
 ```sh
-$ orch addon add factory --yes      # needs automation (wakes the agent when you answer)
+$ orch addon add factory --yes
+$ orch start                        # starts the Factory watcher: it wakes your agent when you answer
 $ orch factory list                 # orders and what waits for you
 ```
+
+The Factory watcher (started with `orch start`, or `orch factory start`) checks every 20 seconds. When you answer one of
+Factory's questions, or a crew task finishes, it starts the agent's run on the order, once per answer and never while a run is
+already going. With the watcher off, answers simply wait until it runs (the Factory tab says so).
 
 ## What protects your decisions
 Only your own answers count (the core records a person's answer only with proof from your dashboard, Focus or phone), and

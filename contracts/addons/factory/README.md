@@ -27,6 +27,8 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 | `orch factory stop <order> --file -` | `$defs/stop` → asks `factory:stop` for that stage (`Ship it` / `Continue` · `Send back`) |
 | `orch factory decide <order> <q> --answer "<option>" --why "<text>"` | Autopilot only: records the agent's own decision on a routine/taste stop item under a valid grant |
 | `orch factory reconcile` | Replays the journal, redoes missing steps, finds answers given while the add-on was off |
+| `orch factory start` / `stop` / `status` | The Factory watcher (manifest `background = true`, `runs_agents = true`; core's `orch start` calls `start`). `start` → `{"running": true, "pid"}`, `stop` → `{"stopped": bool}` (`stop` without an order; `stop <order> --file` is the stop stage above), `status` → `{"running": bool, "pid"?}`, exit 1 when not running. Pid record in `.orch/run/factory/`, signalled only after start time and command-line check |
+| `orch factory watch [--once]` | The watcher loop (every 20 s); `--once` = one pass, prints `{"woken": [{"order", "why"}]}`. Wakes the manager with `orch run start <order> --by agent:factory` when (a) a person answered a Factory question `next` has not consumed, (b) a crew sub-ticket of a started order became done/failed, (c) a live autopilot grant covers an open routine/taste stop; never for an agent answer, never twice for one id, never while a run is live. Seen state in `.orch/addons/factory/watch.json`; one history line "Factory woke the manager: <why>" |
 | `orch factory list` / `show <order>` / `view` / `needs` | Read only. `view` = dashboard tab blocks (addon-view.schema.json) |
 
 ## Question kinds (rows in `../question-kinds.md`)
@@ -36,6 +38,11 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 | `factory:autopilot` | `Start` · `Edit` · `Not now` | `{"order", "file", "hash", "days"}` |
 | `factory:change` | `Accept` · `Edit` · `Save for later` | `{"order", "file": "changes/<order>/c<N>.json", "hash"}` |
 | `factory:stop` | ship stage: `Ship it` · `Send back`; other stages: `Continue` · `Send back` | `{"order", "file": "stops/<order>/s<N>.json", "hash", "stage"}` |
+
+## Notes
+- Autopilot grants are workspace-wide: a valid grant covers the routine/taste stops of any person-started run order here.
+- Owner-visible text fields are refused at freeze time when longer than the render cap (120 characters; stop `before` /
+  `after` 80, `recommend` 40), so what the owner reads is never cut.
 
 ## Authority (what counts, phase 1)
 1. **Only a person's answer counts**: `answered_by` starts with `human:` (the core records a person's answer only with the

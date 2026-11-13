@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import autopilot, commands, flow
+from . import autopilot, commands, flow, service, watch
 from .store import Refused, read_bytes
 from .view import view
 
@@ -14,6 +14,45 @@ from .view import view
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         raise Refused(message, "invalid")
+
+
+def background(args, root):
+    """start | stop | status of the watcher; watch = the loop itself (or one pass with --once)."""
+    if args.cmd == "watch":
+        if args.once:
+            print(json.dumps({"woken": watch.once(root)}))
+            return 0
+        import signal
+
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        print(f"orch factory watcher for {root.name} started", flush=True)
+        nonce = service.announce(root)
+        try:
+            watch.loop(root)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            service.forget(root, nonce)
+        return 0
+    try:
+        if args.cmd == "start":
+            print(json.dumps({"running": True, "pid": service.start(root)}))
+        elif args.cmd == "stop":
+            res = service.stop(root)
+            out = {"stopped": res == "stopped"}
+            if res == "not verified":
+                out["note"] = (
+                    "A file in .orch/run/factory/ names a process that is not the Factory watcher; "
+                    "nothing was stopped."
+                )
+            print(json.dumps(out))
+        else:
+            pid = service.running_pid(root)
+            print(json.dumps({"running": bool(pid), **({"pid": pid} if pid else {})}))
+            return 0 if pid else 1
+    except RuntimeError as error:
+        raise Refused(str(error), "not_available") from None
+    return 0
 
 
 def main(argv=None):
@@ -27,10 +66,17 @@ def main(argv=None):
         p = sub.add_parser("idea", parents=[common])
         p.add_argument("title")
         p.add_argument("--file")
-        for command in ("draft", "propose", "autopilot", "change", "stop"):
+        for command in ("draft", "propose", "autopilot", "change"):
             p = sub.add_parser(command, parents=[common])
             p.add_argument("order")
             p.add_argument("--file", required=True)
+        p = sub.add_parser("stop", parents=[common])  # an order's stop stage, or (no order) the watcher
+        p.add_argument("order", nargs="?")
+        p.add_argument("--file")
+        sub.add_parser("start", parents=[common])
+        sub.add_parser("status", parents=[common])
+        p = sub.add_parser("watch", parents=[common])
+        p.add_argument("--once", action="store_true")
         p = sub.add_parser("show", parents=[common])
         p.add_argument("order")
         for command in ("next", "ship"):
@@ -58,6 +104,10 @@ def main(argv=None):
         root = next((p for p in (root, *root.parents) if (p / ".orch").is_dir()), None)
         if root is None:
             raise Refused("No orch workspace here. Run orch init first.", "not_found")
+        if args.cmd in ("start", "stop", "status", "watch") and (args.cmd != "stop" or args.order is None):
+            return background(args, root)
+        if args.cmd == "stop" and not args.file:
+            raise Refused("A stop needs --file.", "invalid")
         if args.cmd in ("idea", "draft", "propose", "autopilot", "change", "stop"):
             data = (
                 sys.stdin.buffer.read()
