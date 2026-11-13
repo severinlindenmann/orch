@@ -17,7 +17,7 @@ final class ResultsSectionUITests: XCTestCase {
     func testTicketWithoutResultsShowsNoSection() {
         let app = openInfo("ws_reports001", "t_9k2m4q")
         // Give the screen a moment to settle, then make sure no Results header or result card appears anywhere.
-        XCTAssertTrue(app.descendants(matching: .any)["info-tab-links"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["info-shared"].firstMatch.waitForExistence(timeout: 10))   // a lone filter shows no tab
         XCTAssertFalse(app.staticTexts["Results"].exists, "no Results header without results")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'results-card-'")).firstMatch.exists)
     }

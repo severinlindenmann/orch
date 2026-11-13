@@ -23,9 +23,10 @@ final class OwnerTF1MediaUITests: XCTestCase {
 
     func testAttachShowsOneCompactRowOfFourChoices() {
         let app = openPicker()
-        let ids = ["media-camera", "media-photos", "media-files", "media-location"]
+        // No camera (Simulator): the tile is hidden, not shown dim.
+        let ids = (app.buttons["media-camera"].exists ? ["media-camera"] : []) + ["media-photos", "media-files", "media-location"]
         let choices = app.descendants(matching: .any)["media-choices"].firstMatch
-        XCTAssertEqual(choices.buttons.count, 4)
+        XCTAssertEqual(choices.buttons.count, ids.count)
         XCTAssertEqual(choices.tables.count, 0)
         XCTAssertFalse(app.buttons["media-fake-photo"].exists)
         XCTAssertFalse(app.buttons["media-fake-pdf"].exists)
