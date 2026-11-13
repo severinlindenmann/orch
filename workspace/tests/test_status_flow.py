@@ -228,7 +228,9 @@ def test_ask_for_changes_is_ready_with_one_human_pending_item(proj, run, new_tic
     tickets.set_status(proj, tid, "review", "human:lume")
     t = tickets.ask_for_changes(proj, tid, "Make the header blue", "human:lume")
     assert t["status"] == "ready" and t["waiting_on"] is None
-    assert any(c["text"] == "Make the header blue" for c in t["checklist"])
+    assert any(
+        c["text"] == "Make the header blue" and c.get("origin") == "change_request" for c in t["checklist"]
+    )
     pending = runs.undelivered(proj, tid)
     assert len(pending) == 1 and pending[0]["by"] == "human:lume" and pending[0]["kind"] == "message"
     assert pending[0]["via"] == "dashboard" or pending[0]["via"] == "cli"
