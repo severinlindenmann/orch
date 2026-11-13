@@ -1,0 +1,27 @@
+{
+  "schema": "orch.addon-view/1",
+  "generated_at": "2026-11-13T10:00:00Z",
+  "notice": "Running. Next run in 2 days.",
+  "notice_tone": "good",
+  "blocks": [
+    {
+      "type": "table",
+      "columns": [{"key": "schedule", "label": "Schedule", "type": "text"}, {"key": "next", "label": "Next run", "type": "text"}],
+      "rows": [
+        {
+          "cells": {"schedule": "Weekly report", "next": "Mon 16 Nov, 08:00"},
+          "link": "t_abc12345",
+          "subtitle": "Workspace helper",
+          "toggle": {"on": true, "label": "Weekly report on or off", "action": {"op": "addon.act", "args": {"verb": "toggle", "target": "t_abc12345"}}},
+          "actions": [
+            {"label": "Run now", "action": {"op": "addon.act", "args": {"verb": "run", "target": "t_abc12345"}}},
+            {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": "t_abc12345"}}}
+          ]
+        }
+      ]
+    },
+    {"type": "calendar", "title": "Coming up", "meta": "13-19 November", "days": [{"date": "2026-11-16", "items": [{"time": "08:00", "title": "Weekly report", "link": "t_abc12345"}]}]},
+    {"type": "list", "title": "Recent runs", "meta": "Latest activity", "items": [], "empty": {"title": "Nothing has run yet", "text": "Your schedules will show their results here.", "mark": "repeat"}},
+    {"type": "footnote", "text": "Incoming from your phone and other workspaces. Nothing arrived yet.", "link": {"label": "Manage incoming work", "to": "app:addon/relay"}}
+  ]
+}

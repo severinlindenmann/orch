@@ -536,6 +536,11 @@ main.addEventListener('keydown', event => {
   selectTicketTab(tab.dataset.ticket, next.dataset.tab);
   document.getElementById(next.id)?.focus();
 });
+// A choice in an add-on view (radio block): the saved one is redrawn from the add-on's answer, never from the click.
+main.addEventListener('change', event => {
+  const radio = event.target.closest?.('input[data-radio-verb],input[data-radio-go]');
+  if (radio) addonRadio(radio);
+});
 main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
   if (menu && event.target.closest('button,a')) menu.open = false;
@@ -543,6 +548,8 @@ main.addEventListener('click', async event => {
   if (sendControl) { messageSend(sendControl); return; }
   const row = event.target.closest('[data-addon-act]');
   if (row) { if (!snapshot) addonAct(row); return; }
+  const edit = event.target.closest('[data-addon-edit]');
+  if (edit) { if (!snapshot) repeatsDialog(edit.dataset.addonEdit, shownAddon()); return; }
   const copy = event.target.closest('[data-copy]');
   if (copy) { copyText(copy); return; }
   const control = event.target.closest('[data-action]');

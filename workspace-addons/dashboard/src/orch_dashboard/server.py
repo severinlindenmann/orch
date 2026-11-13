@@ -26,7 +26,7 @@ from .views import ViewPuller
 DEFAULT_PORT = 8420
 MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = 5 * 1024 * 1024  # a new ticket with a long text and up to 5 attached files
-BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach")
+BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT = (
     "tokens.css",
