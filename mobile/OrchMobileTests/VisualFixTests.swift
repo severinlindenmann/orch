@@ -100,6 +100,16 @@ final class VisualFixTests: XCTestCase {
         XCTAssertEqual(ChatsRowRules.pinned(Array(qs.prefix(2))).count, 2)
         XCTAssertEqual(ChatsRowRules.titleLines(false), 1)
         XCTAssertEqual(ChatsRowRules.titleLines(true), 2)
+        XCTAssertTrue(ChatsRowRules.showsHeaderSubtitle(false))
+        XCTAssertFalse(ChatsRowRules.showsHeaderSubtitle(true))
+        XCTAssertNil(ChatsRowRules.needsYouSpoken(0))
+        XCTAssertEqual(ChatsRowRules.needsYouSpoken(1), "1 needs your OK")
+        XCTAssertEqual(WorkspaceStatus.online.dotLabel(), "online")
+        XCTAssertEqual(WorkspaceStatus.offline.dotLabel(), "offline")
+        let utc = { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "UTC")!; return c }()
+        let now = ISO8601DateFormatter().date(from: "2026-11-12T15:00:00Z")!
+        let seen = ISO8601DateFormatter().date(from: "2026-11-12T14:02:00Z")!
+        XCTAssertEqual(WorkspaceStatus.notReachable(.lastSeen(seen)).dotLabel(now: now, calendar: utc), "last seen 14:02")
         XCTAssertTrue(ChatsRowRules.matches("All", unread: 0, needsYou: false))
         XCTAssertTrue(ChatsRowRules.matches("Unread", unread: 2, needsYou: false))
         XCTAssertFalse(ChatsRowRules.matches("Unread", unread: 0, needsYou: true))

@@ -116,8 +116,8 @@ struct WorkspaceView: View {
                 HStack(spacing: 10) {
                     WorkspaceBadge(name: name, icon: summary?.workspace.icon, color: summary?.workspace.color, size: 32, id: "header-\(workspaceId)")
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(name).themeFont(17, .semibold).lineLimit(1)
-                        PresenceLine(lastSeen: summary?.workspace.lastSeen)
+                        Text(name).themeFont(17, .semibold).lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
+                        if ChatsRowRules.showsHeaderSubtitle(typeSize.isAccessibilitySize) { PresenceLine(lastSeen: summary?.workspace.lastSeen) }
                     }
                 }
             }

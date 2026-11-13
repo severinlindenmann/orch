@@ -236,7 +236,9 @@ struct ChatsListView: View {
                             if working && !starting { ProgressView().controlSize(.mini).tint(Theme.muted).accessibilityHidden(true) }
                             Text(preview).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
                         }
-                        if let label = ChatsRowRules.questionLabel(summary.openQuestions) { Text(label).themeFont(13).foregroundStyle(Theme.warn) }
+                        if let label = ChatsRowRules.questionLabel(summary.openQuestions) {
+                            Text(label).themeFont(13).foregroundStyle(Theme.warn).accessibilityLabel(ChatsRowRules.needsYouSpoken(summary.openQuestions) ?? label)
+                        }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .trailing, spacing: 10) {
                         Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
@@ -392,6 +394,10 @@ enum ChatsRowRules {
     static func pinned(_ questions: [Question]) -> [Question] { Array(questions.prefix(pinnedLimit)) }
     /// Row titles: one line (tail cut) at default sizes, two at accessibility Dynamic Type sizes. Full title: Info.
     static func titleLines(_ accessibilitySize: Bool) -> Int { accessibilitySize ? 2 : 1 }
+    /// Chat headers drop their subtitle (status, last seen) at accessibility sizes so the title stays readable; Info has it.
+    static func showsHeaderSubtitle(_ accessibilitySize: Bool) -> Bool { !accessibilitySize }
+    /// VoiceOver words for the amber needs-you count, kept apart from the unread badge ("3 unread").
+    static func needsYouSpoken(_ count: Int) -> String? { count > 0 ? "\(count) needs your OK" : nil }
     /// One filter rule for every conversation kind on the list (workspaces and groups).
     static func matches(_ filter: String, unread: Int, needsYou: Bool) -> Bool {
         switch filter { case "Unread": unread > 0; case "Needs your OK": needsYou; default: true }

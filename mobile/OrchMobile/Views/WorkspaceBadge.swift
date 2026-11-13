@@ -17,6 +17,11 @@ struct WorkspaceBadge: View {
     /// Amber means "needs you" and teal/green mean unread, online and actions, so a badge never wears them (P06).
     /// The stored pick stays untouched; only the drawn tone moves to a nearby non-status colour.
     static let statusSwaps = ["amber": "orange", "teal": "cyan", "green": "blue", "lime": "indigo"]
+    private var dotLabel: String? {
+        guard let lastSeen else { return nil }
+        return WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen)).dotLabel()
+    }
+
     static func identityColor(_ token: String) -> String { statusSwaps[token] ?? token }
 
     var body: some View {
@@ -41,7 +46,7 @@ struct WorkspaceBadge: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Workspace icon")
+        .accessibilityLabel(dotLabel.map { "Workspace icon, \($0)" } ?? "Workspace icon")
         .accessibilityIdentifier(id.map { "workspace-badge-\($0)" } ?? "workspace-badge")
         .accessibilityHidden(id == nil)
     }
