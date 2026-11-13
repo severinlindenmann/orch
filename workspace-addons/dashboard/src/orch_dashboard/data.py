@@ -915,8 +915,20 @@ def load_state(
     """with_addons=False (snapshots by default): no add-on tabs, no ticket rows, `ext` dropped from tickets."""
     from .actions import actor
 
-    tickets, skipped = load_tickets(root, orch_bin)
-    raw = run_orch(orch_bin, ["addon", "list", "--json"], root)
+    # The independent `orch ... --json` reads run side by side; .result() in the old order raises as before.
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        f_tickets = pool.submit(load_tickets, root, orch_bin)
+        f_raw = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
+        f_needs = pool.submit(run_orch, orch_bin, ["needs", "--json"], root) if with_addons else None
+        f_general = pool.submit(load_general, root) if with_addons else None
+        f_chat = pool.submit(load_chat, root, orch_bin) if with_addons else None
+        f_services = pool.submit(load_services, root, orch_bin) if with_addons else None
+        f_groups = pool.submit(mobile.load_groups, root, orch_bin) if with_addons else None
+        f_mobile = pool.submit(mobile.load_mobile, root, orch_bin) if with_settings else None
+        f_look = pool.submit(look.load_look, root, orch_bin, fresh) if with_settings else None
+        f_settings = pool.submit(load_settings, root, orch_bin) if with_settings else None
+    tickets, skipped = f_tickets.result()
+    raw = f_raw.result()
     addons = load_addons(root, orch_bin, raw) if with_addons else []
     if not with_addons:
         for t in tickets:
@@ -944,7 +956,15 @@ def load_state(
     add_link_views(
         tickets, link_kinds(raw) if with_addons else []
     )  # snapshots: known sites only, no add-on names
-    needs = run_orch(orch_bin, ["needs", "--json"], root) if with_addons else None
+    needs = f_needs.result() if f_needs else None
+    general = f_general.result() if f_general else None
+    chat = f_chat.result() if f_chat else None
+    services = f_services.result() if f_services else []
+    runs = load_runs(root, orch_bin, tickets, fresh) if with_addons else {}
+    groups = f_groups.result() if f_groups else None
+    mobile_mode = f_mobile.result() if f_mobile else None
+    look_ = f_look.result() if f_look else None
+    settings = f_settings.result() if f_settings else None
     state = {
         "workspace": root.name,
         "who": actor().removeprefix("human:"),
@@ -953,24 +973,16 @@ def load_state(
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
-        "general": load_general(root) if with_addons else None,  # snapshots carry no phone chat
+        "general": general,  # snapshots carry no phone chat
         # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
-        "chat": load_chat(root, orch_bin) if with_addons else None,
+        "chat": chat,
         "needs": needs if isinstance(needs, list) else [],
-        "services": load_services(root, orch_bin) if with_addons else [],  # snapshots name no add-on
-        "runs": load_runs(root, orch_bin, tickets, fresh) if with_addons else {},
-        "groups": mobile.load_groups(root, orch_bin)
-        if with_addons
-        else None,  # group chats; snapshots carry none
-        "mobile_mode": mobile.load_mobile(root, orch_bin)
-        if with_settings
-        else None,  # the live page only, never a snapshot
-        "look": look.load_look(root, orch_bin, fresh)
-        if with_settings
-        else None,  # the live page only, never a snapshot
-        "settings": load_settings(root, orch_bin)
-        if with_settings
-        else None,  # only the live local server: it holds the folder path
+        "services": services,  # snapshots name no add-on
+        "runs": runs,
+        "groups": groups,  # group chats; snapshots carry none
+        "mobile_mode": mobile_mode,  # the live page only, never a snapshot
+        "look": look_,  # the live page only, never a snapshot
+        "settings": settings,  # only the live local server: it holds the folder path
     }
     add_warmth(root, tickets, state["runs"])
     state["rev"] = hashlib.sha1(
