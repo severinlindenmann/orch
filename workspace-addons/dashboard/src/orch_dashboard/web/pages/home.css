@@ -81,3 +81,18 @@
 @media(max-width:1100px){.home-columns{grid-template-columns:minmax(0,1fr) 256px;gap:16px}.home-need .answer-options{grid-template-columns:1fr}}
 @media(max-width:900px){.home-columns{grid-template-columns:minmax(0,1fr)}}
 @media(prefers-reduced-motion:reduce){.answer-option{transition:none}}
+/* Second pass: tiles for the answers, header meta, Check result button, Working now header (accepted Home draft) */
+.home-need .answer-options{display:flex;flex-wrap:wrap;gap:8px}
+.answer-option{flex:0 1 auto;min-width:150px;max-width:100%}
+.answer-option>span:first-child{flex-direction:column;align-items:flex-start;gap:6px}
+.home-need .choose-line{margin-top:4px}
+.home-card>.card-h{padding:12px 16px}
+.home-card>.card-h+.card-row{border-top:1px solid var(--border)}
+.home-changes{overflow:hidden}.home-changes .home-change{padding:16px}
+.home-change>.badge{flex:none}
+.home-result>.btn{flex:none}
+.home-section-head{align-items:center;justify-content:space-between;margin-bottom:12px}.home-section-head h2{margin:0}
+.home-section>.home-section-head+.card{margin:0}
+.home-section>h2{margin:0 0 12px}
+.home-result .result-link{min-height:0;margin:0;font-size:14px;font-weight:500}.home-result .result-link:hover .grow{text-decoration:none}
+.home-section-head h2{font-size:14px;line-height:20px}

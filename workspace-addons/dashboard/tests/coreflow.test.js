@@ -127,7 +127,7 @@ test('inline options send the question and selected answer, disable together, an
   const buttons = row.querySelectorAll('button');
   const options = buttons.filter(b => b.attrs.className?.startsWith('answer-option'));
   assert.equal(options.length, 2); assert.match(JSON.stringify(options[0]), /"Hi".*"Suggested"/); assert.match(options[0].attrs.className, /suggested/);
-  assert.match(JSON.stringify(row), /Write a different answer/);
+  assert.match(JSON.stringify(row), /Write your own/);
   const pending = options[0].onclick({currentTarget:{closest:() => row}});
   assert.ok(buttons.every(b => b.disabled));
   assert.deepEqual(sent, {op:'answer', ticket:'t_one', question:'q1', digest:'a'.repeat(64), answer:'Hi'});

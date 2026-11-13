@@ -60,7 +60,7 @@ function needRow(row, newest, questionCount = 1, same = []) {
       return control;
     }));
     // a written answer goes through the full question card (checked answer, Undo)
-    other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id}, 'Write a different answer →');
+    other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id}, 'Write your own…');
   } else if (!snapshot) {
     actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
   }
@@ -69,6 +69,7 @@ function needRow(row, newest, questionCount = 1, same = []) {
     h('h2', {className:'question-title'}, clean(window.DashHelpers.plainWhy(question, 'The helper'))),
     h('p', {className:'meta question-context'}, whoAsked(t) + ' asked' + (when ? ' ' + when : ''),
       t ? [' on ‘' + clean(t.title) + '’ · ', h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
+    actions && options.length ? h('p', {className:'meta choose-line'}, 'Needs you · Choose an answer') : null,
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
     actions, other, t ? parentLine(t) : null);
@@ -184,8 +185,9 @@ function resultRow(group) {
   const t = group[group.length - 1], older = group.slice(0, -1), preview = resultPreview(t);
   return h('div', {className:'card-row home-result', 'data-key':'ticket-' + t.id}, preview ? preview.thumb : null,
     h('div', {className:'grow'},
-      h('a', {className:'result-link', href:href(t.id)}, h('span', {className:'grow'}, clean(t.title)), older.length ? h('span', {className:'meta'}, group.length + ' versions') : null, h('span', {className:'chevron', 'aria-hidden':'true'}, '›')),
+      h('h3', {className:'result-link'}, h('span', {className:'grow'}, clean(t.title)), older.length ? h('span', {className:'meta'}, group.length + ' versions') : null),
       preview ? preview.open : null),
+    h('a', {className:'btn outline sm', href:href(t.id), 'data-key':'check-' + t.id}, 'Check result'),
     older.length && !snapshot ? h('div', {className:'row'}, button('Mark older as done', 'ghost sm', async event => {
       const lock = 'older-' + t.id, control = event?.currentTarget;
       if (locks.has(lock)) return;
@@ -201,11 +203,11 @@ function changeRow(t) {
   const add = !snapshot && t.bring_back?.tip && typeof ticketBringBackDialog === 'function'
     ? h('button', {type:'button', className:'btn outline sm', 'data-key':'add-files-' + t.id}, 'Add to my files') : null;
   if (add) add.onclick = () => ticketBringBackDialog(t);
-  return h('div', {className:'card-row home-change', 'data-key':'change-' + t.id},
+  return h('div', {className:'card-row home-change', 'data-key':'change-' + t.id}, h('span', {className:'badge needs'}, '↗ Changes to add'),
     h('div', {className:'grow'}, h('h3', {}, 'Add the changes from ‘' + clean(t.title) + '’ to your files?'), h('a', {className:'meta', href:href(t.id)}, 'See what changed')), add);
 }
-function attentionCard(key, badge, cls, body) {
-  return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge)), body);
+function attentionCard(key, badge, cls, body, meta = '') {
+  return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge), h('span', {className:'grow'}), meta ? h('span', {className:'meta'}, meta) : null), body);
 }
 function attentionSummary(groups, failed, results, changes) {
   const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
@@ -213,8 +215,9 @@ function attentionSummary(groups, failed, results, changes) {
   return [part(questionsAsked, 'question', 'questions'), part(other, 'thing to look at', 'things to look at'),
     part(results, 'result to check', 'results to check'), part(changes, 'change to add', 'changes to add')].filter(Boolean).join(' · ');
 }
-function homeSection(key, title, body) {
-  return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null}, h('h2', {}, title), h('div', {className:'card'}, body));
+function homeSection(key, title, body, count = '', more = null) {
+  return h('section', {className:'home-section', 'data-key':key, id:key === 'needs-you' ? key : null},
+    h('div', {className:'row between home-section-head'}, h('h2', {}, title, count ? [' ', h('span', {className:'meta'}, String(count))] : null), more), h('div', {className:'card'}, body));
 }
 // One group per ticket; a single question asked the same way (same words, same choices) on several tickets is one group.
 function homeNeeds(rows) {
@@ -275,11 +278,14 @@ function home() {
   const needsBody = rowsShown >= 3 && !needsOpen ? needsFold(groupedNeeds, failed, newest) : [...groupedNeeds.map(({row, count, same}) => needRow(row, newest, count, same)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), rowsShown >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null];
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      needCount ? attentionCard('needs-you', (allQuestions ? '! Question · ' : '! Needs you · ') + needCount, 'needs', needsBody) : null,
+      needCount ? attentionCard('needs-you', (allQuestions ? '! Question · ' : '! Needs you · ') + needCount, 'needs', needsBody, groupedNeeds.length ? whoAsked(ticketOf(groupedNeeds[0].row.ticket)) : '') : null,
       results.length ? attentionCard('check-result', '◇ Check · ' + review.length, 'review', [...results.slice(0, 3).map(resultRow),
-        results.length > 3 ? h('div', {className:'card-row', 'data-key':'results-all'}, h('a', {className:'btn ghost sm', href:'#tickets'}, 'Show all (' + review.length + ')')) : null]) : null,
-      changes.length ? attentionCard('changes', '↗ Changes to add · ' + changes.length, 'changes', changes.map(changeRow)) : null,
-      working.length ? homeSection('working-now', 'Working now', working.map(workingRow)) : null),
+        results.length > 3 ? h('div', {className:'card-row', 'data-key':'results-all'}, h('a', {className:'btn ghost sm', href:'#tickets'}, 'Show all (' + review.length + ')')) : null], (() => {
+        const newestResult = results[0][results[0].length - 1], at = finishedAt(newestResult) || parse(newestResult.updated_at);
+        return [whoAsked(newestResult), at ? time(at) : ''].filter(Boolean).join(' · ');
+      })()) : null,
+      changes.length ? h('section', {className:'card home-card home-changes', 'data-key':'changes', id:'changes'}, changes.map(changeRow)) : null,
+      working.length ? homeSection('working-now', 'Working now', working.map(workingRow), working.length, h('a', {className:'btn ghost xs', href:'#tickets?view=working', 'data-key':'working-all'}, 'View all →')) : null),
     h('aside', {className:'stack', 'data-key':'right'}, finishedCard,
       h('p', {className:'quiet-note', 'data-key':'finished-note'}, 'Finished work stays in Tickets. ', h('a', {href:'#tickets'}, 'See finished tickets →')))));
 }
