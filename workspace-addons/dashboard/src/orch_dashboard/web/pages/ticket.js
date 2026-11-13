@@ -880,8 +880,9 @@ function ticketBringBackRow(t) {
     const r = await act('copies.ask-update', {ticket:t.id});
     window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
   }) : null;
-  return h('div', {className:'row', 'data-key':'bring-back'}, h('span', {}, 'Changes to add'), h('span', {}, clean(b.reason)),
-    !snapshot && b.tip ? ticketButton('Add to my files', 'outline sm', () => ticketBringBackDialog(t)) : null, ask);
+  return h('section', {className:'card attention decision bring-back-card', 'data-key':'bring-back'},
+    h('p', {className:'meta'}, 'Approval needed'), h('h2', {}, 'Changes to add'), h('p', {className:'muted'}, clean(b.reason)),
+    h('div', {className:'actions'}, !snapshot && b.tip ? ticketButton('Add to my files', 'primary sm', () => ticketBringBackDialog(t)) : null, ask));
 }
 const ticketHistoryTechnical = false;
 let ticketHistoryActor = 'All';
@@ -1172,11 +1173,29 @@ function ticketReviewCard(t) {
     h('p', {className:'review-check'}, t.done_when ? 'Does this match “' + clean(t.done_when) + '”?' : 'Does this look right?'),
     ticketProofLine(t), snapshot ? null : ticketChangesEditor(t));
 }
+// What the helper (or you) said when a task was finished: the note shown in Results of a Done ticket.
+function completionNotes(t) {
+  if (t.status !== 'done') return [];
+  const notes = [];
+  array(t.checklist).forEach(c => { if (c.done && !c.wont_do) array(c.evidence).forEach(ev => {
+    if ((ev.type || ev.kind) !== 'note') return;
+    const body = clean(window.DashHelpers.cleanOutcome(ev.text) || window.DashHelpers.cleanOutcome(ev.ref)), head = clean(window.DashHelpers.cleanOutcome(ev.summary));
+    if (head || body) notes.push({at:ev.at, head:head || body, body:head && body !== head ? body : ''});
+  }); });
+  notes.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  return notes.slice(0, 3);
+}
+function ticketCompletionNote(n) {
+  return h('article', {className:'completion-note', 'data-key':'completion-note'}, h('p', {className:'meta eyebrow'}, 'Completion note' + (n.at ? ' · ' + time(n.at) : '')),
+    h('h2', {}, n.head), n.body ? h('p', {className:'muted preserve-lines'}, n.body) : null);
+}
 function ticketResultsCard(t) {
-  const files = artifactFiles(t);
-  if (!files.length) return null;
-  return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Results'), h('span', {className:'meta'}, files.length + (files.length === 1 ? ' file' : ' files'))),
-    t.status === 'done' ? ticketResultFrame(t, 'artifacts', files[0]) : ticketFileRow(t, 'artifacts', files[0]), files.slice(1, 4).map(f => ticketFileRow(t, 'artifacts', f)), headerProof(t));
+  const files = artifactFiles(t), notes = completionNotes(t);
+  if (!files.length && !notes.length) return null;
+  const count = [notes.length ? notes.length + (notes.length === 1 ? ' note' : ' notes') : '', files.length ? files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join(' · ');
+  return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Results'), h('span', {className:'meta'}, count)),
+    notes.map(ticketCompletionNote),
+    files.length ? (t.status === 'done' ? ticketResultFrame(t, 'artifacts', files[0]) : ticketFileRow(t, 'artifacts', files[0])) : null, files.slice(1, 4).map(f => ticketFileRow(t, 'artifacts', f)), files.length ? headerProof(t) : null);
 }
 // A change you asked for: what you asked, and that new changes wait for your approval.
 function ticketRequestCard(t) {
@@ -1241,6 +1260,7 @@ function detail(t) {
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
   const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;
   const overview = [
+    ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
     t.status === 'review' ? ticketReviewCard(t) : null,
@@ -1260,7 +1280,7 @@ function detail(t) {
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
     h('header', {className:'ticket-heading'},
       parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
-      ticketBringBackRow(t), actions,
+      actions,
       h('h1', {}, inlineField(t, 'title')), stateLine, ticketStepper(t, run)),
     snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
