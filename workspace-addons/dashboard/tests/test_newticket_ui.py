@@ -6,14 +6,14 @@ from .webjs import WEB, all_js
 def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "'What needs doing?'" in js
-    assert "input.rows = 4; input.maxLength = 500000; input.required = true" in js
-    assert (
-        "Paste or write it here. A short title or a long text with many points: the agent splits it into tasks."
-        in js
-    )
-    assert "el('details', 'new-ticket-options')" in js
-    assert "el('summary', '', 'More options')" in js
-    assert "t ? ['owner', 'due', 'note', 'done_when'] : ['owner', 'due', 'done_when']" in js
+    assert "input.rows = 8; input.maxLength = 500000; input.required = true" in js
+    assert "What should the helper do? A sentence or a long text; it is split into tasks." in js
+    # Simpler window: helper, due date and "done when" are shown plainly, not behind "More options".
+    assert "More options" not in js
+    assert "el('div', 'new-ticket-options')" in js
+    assert "t ? ['owner', 'due', 'note', 'done_when'] : []" in js
+    assert "'Done when (optional)'" in js
+    assert "'Describe what needs doing before you continue.'" in js
     for removed in ("One point per line", "Something new", "Something broken", "Small job"):
         assert removed not in js
 
@@ -23,7 +23,7 @@ def test_paste_title_and_description_use_existing_create_action():
     assert "const fullText = inputs.text.value;" in js
     assert "values.title = ticketTextTitle(" in js
     assert "shortText.length <= 1500" in js
-    assert "inputs.text.setCustomValidity(empty ? 'What needs doing?' : '')" in js
+    assert "inputs.text.setCustomValidity(empty ? EMPTY_TICKET : '')" in js
     assert "const args = {title:values.title" in js and "act('ticket.new', args)" in js
     assert "long_text:longText" in js
     assert "files:files.map(({name, text, data})" in js
@@ -32,7 +32,9 @@ def test_paste_title_and_description_use_existing_create_action():
 def test_attachments_and_safe_preview():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "maxLength = 20000" not in js
-    assert "button('Attach file', 'new-ticket-attach'" in js
+    assert "button('＋ Add files or drop them here', 'new-ticket-attach'" in js
+    assert "At most" not in js  # no file-count limit
+    assert "up to 2 MB each" in js and "100 MB" not in js  # the real per-file limit
     assert "for (const target of [form])" in js  # drops land on the whole form
     assert "pre.textContent = file.text.slice(0, 200000)" in js
     assert "innerHTML" not in js
@@ -49,7 +51,7 @@ def test_edit_and_create_start_semantics_are_preserved():
         in js
     )
     assert "let startAfter = !t" in js
-    assert "startAfter = false; form.requestSubmit()" in js  # Create without starting
+    assert "startAfter = false; form.requestSubmit()" in js  # Save without starting
     assert "const planFirst = startAfter && !!planBox?.checked" in js  # Show me the plan first
     assert "startAfter = true;" in js
     assert "act('run.start', {ticket:created.id})" in js
@@ -71,3 +73,10 @@ def test_paste_styles_are_scoped_to_new_ticket():
         "min-height: 44px",
     ):
         assert rule in css
+
+
+def test_window_closes_through_the_shared_overlay_and_uses_the_shared_date_picker():
+    js = (WEB / "pages" / "newticket.js").read_text()
+    assert "'Close new ticket'" not in js  # the Close button, Esc and backdrop come from kit/overlay.js
+    assert "window.UI.date(dueInput, dueToggle)" in js
+    assert "ticketDatePicker" not in js

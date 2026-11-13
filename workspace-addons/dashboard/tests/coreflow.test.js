@@ -111,7 +111,7 @@ function pageContext(snapshot = false) {
   const t = {id:'t_one', title:'Launch', questions:[{id:'q1', text:'Which greeting?'}]};
   const ctx = {snapshot, state:{runs:{}}, locks:new Set(), document:{getElementById:() => connection},
     h:(...args) => new Element(...args), button:(label, cls, click) => Object.assign(new Element('button', {}, label), {click}),
-    array:v => Array.isArray(v) ? v : [], clean:x => x, ticketOf:() => t, ticketTitle:() => new Element('h3'), parentLine:() => null,
+    array:v => Array.isArray(v) ? v : [], clean:x => x, href:id => '#ticket/' + id, ticketOf:() => t, ticketTitle:() => new Element('h3'), parentLine:() => null,
     window:{DashHelpers:{needAction:() => ({label:'Answer'}), plainWhy:text => text}, orch:{toast:text => toasts.push(text)}}, render:() => calls.push('render'), refresh:() => calls.push('refresh')};
   vm.createContext(ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
@@ -125,8 +125,10 @@ test('inline options send the question and selected answer, disable together, an
   ctx.act = (op, args) => { sent = {op, ...args}; return new Promise(resolve => { complete = resolve; }); };
   const row = ctx.needRow({id:'n1', ticket:'t_one', answer:{question:'q1', digest:'a'.repeat(64), options:['Hi','Hello'], recommended:'Hi'}});
   const buttons = row.querySelectorAll('button');
-  assert.equal(buttons.length, 2); assert.equal(buttons[0].children[0], 'Hi · Suggested');
-  const pending = buttons[0].click({currentTarget:{closest:() => row}});
+  const options = buttons.filter(b => b.attrs.className?.startsWith('answer-option'));
+  assert.equal(options.length, 2); assert.match(JSON.stringify(options[0]), /"Hi".*"Suggested"/); assert.match(options[0].attrs.className, /suggested/);
+  assert.match(JSON.stringify(row), /Write your own/);
+  const pending = options[0].onclick({currentTarget:{closest:() => row}});
   assert.ok(buttons.every(b => b.disabled));
   assert.deepEqual(sent, {op:'answer', ticket:'t_one', question:'q1', digest:'a'.repeat(64), answer:'Hi'});
   complete({ok:true}); await pending;
@@ -137,18 +139,19 @@ test('offline answers do not send; network failures show the plain message; snap
   const data = {id:'n1', ticket:'t_one', answer:{question:'q1', options:['Hi']}};
   let sent = 0; ctx.act = async () => { sent++; return {ok:false, status:0}; };
   const row = ctx.needRow(data), control = row.querySelectorAll('button')[0], event = {currentTarget:{closest:() => row}};
-  connection.hidden = false; await control.click(event); assert.equal(sent, 0);
-  connection.hidden = true; await control.click(event); assert.equal(sent, 1);
+  connection.hidden = false; await control.onclick(event); assert.equal(sent, 0);
+  connection.hidden = true; await control.onclick(event); assert.equal(sent, 1);
   assert.ok(toasts.every(text => text === "Can't reach orch. Your change was not sent."));
   assert.equal(pageContext(true).ctx.needRow(data).querySelectorAll('button').length, 0);
 });
-test('connection notice offers retry and details', () => {
+test('connection notice keeps the saved view and offers Try again', () => {
   const {ctx, connection, calls} = pageContext();
   connection.replaceChildren = (...children) => { connection.children = children; };
   ctx.connectionNotice(connection, false);
-  assert.equal(connection.hidden, false); assert.match(connection.children[0].children[0], /Can't reach orch yet/);
+  assert.equal(connection.hidden, false); assert.match(connection.children[0].children[1].children[0], /Reconnect to load your workspace/);
   connection.children[1].click(); assert.deepEqual(calls, ['refresh']);
-  ctx.connectionNotice(connection, true); assert.match(connection.children[0].children[0], /Showing the last update/);
+  ctx.connectionNotice(connection, true); assert.match(connection.children[0].children[1].children[0], /Showing the last saved view/);
+  assert.equal(connection.children[0].children[0].children[0], 'Can’t reach the workspace');
 });
 
 test('act keeps small requests alive and omits keepalive for large bodies', async () => {

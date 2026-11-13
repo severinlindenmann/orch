@@ -56,7 +56,7 @@ test('home renders one need card per ticket with question count and yellow chip'
   const c = context([t], {needsList:() => needs});
   const home = c.home(), text = JSON.stringify(home);
   assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
-  assert.match(text, /2 questions/); assert.match(text, /Needs you \(1\)/); assert.doesNotMatch(text, /questions? for you/);
+  assert.match(text, /2 questions/); assert.match(text, /1 thing needs you/); assert.match(text, /! Question · 1/); assert.doesNotMatch(text, /questions? for you/);
   assert.match(text, /First\?/); assert.doesNotMatch(text, /Second\?/);
   assert.equal(nodes(home, n => /chip/.test(n.attrs?.className || '')).length, 0); // the section heading already says it
   needs.shift();
@@ -66,7 +66,7 @@ test('home: the Needs you heading shows the count (one per ticket plus failed st
   const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'active', questions:[{id:id + '1', text:'One?'}, {id:id + '2', text:'Two?'}]}));
   const needs = items.flatMap(t => t.questions.map(q => ({id:q.id, ticket:t.id, title:q.text, answer:{question:q.id}})));
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
-  assert.match(text, /Needs you \(3\)/);
+  assert.match(text, /3 things need you/);
   assert.equal(helpers.needsYouCount(needs, []), 3);
   assert.equal(helpers.needsYouCount([{id:'x'}, {id:'y', ticket:'a'}, {id:'z', ticket:'a'}], [['b']]), 3);
   assert.equal(helpers.needsYouCount([], []), 0);
@@ -78,7 +78,7 @@ test('home: the badge and Menu count (needsToday) equal the Needs you heading an
   const c = context(items, {needsList:() => needs, today:() => '2026-11-12', localStorage:{getItem:() => JSON.stringify(later)}, button:label => ({tag:'button', children:[label]})});
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 2);
-  assert.match(text, /Needs you \(2\)/);
+  assert.match(text, /2 things need you/);
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
   assert.match(app, /const needCount = needsYouTotal\(\)/); assert.doesNotMatch(app, /needsList\(\)\.length/);
 });
@@ -87,7 +87,7 @@ test('home: Needs you counts a failed start on the page', () => {
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
   assert.match(text, /could not start/);
-  assert.match(text, /Needs you \(2\)/);
+  assert.match(text, /2 things need you/);
 });
 
 // Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.
@@ -147,7 +147,7 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   assert.equal(nodes(c.privateCard({git_private:{count:0, lines:[], pending:[unsafe(1), unsafe(2), unsafe(3)]}}), n => n.attrs?.className === 'card').length, 1);
 });
 
-test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote behind Details', () => {
+test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote shown plainly (no Details)', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   const start = src.indexOf('const COPY_CHOICES'), end = src.indexOf('function settingsPage');
   const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
@@ -157,7 +157,8 @@ test('Separate copies card: one plain row with a switch; when, cap, setup and th
   const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
   const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join(' ');
   // the visible part: one row, plain words, a switch; nothing technical outside Details
-  const details = all(card, n => n.tag === 'details')[0];
+  assert.equal(all(card, n => n.tag === 'details').length, 0, 'no Details disclosure');
+  const details = all(card, n => n.attrs?.['data-key'] === 'settings-copies-details')[0];
   const outside = text({children:all(card, n => n.tag === 'div' && n.attrs?.className === 'card')[0].children.filter(n => n !== details)});
   assert.match(outside, /Helpers working at the same time: each gets its own copy of your files/);
   assert.doesNotMatch(text(vm.runInContext('copiesCard', c)({copies:'together'})), /\bgit\b|npm ci|\.env|nested repositories|warning line|e\.g\./i);
@@ -185,8 +186,7 @@ test('Separate copies card: one plain row with a switch; when, cap, setup and th
   const off = vm.runInContext('copiesCard', c)({copies:'off'});
   const offSwitch = all(off, n => n.attrs?.['data-key'] === 'settings-switch-copies')[0];
   assert.equal(offSwitch.attrs['aria-checked'], false); assert.equal(offSwitch.attrs['data-mode'], 'together');
-  assert.equal(all(details, n => n.attrs?.open === '').length, 0, 'Details stays closed while nothing needs a look');
-});
+  });
 
 test('Copies on this computer line: count, size, "Counting…" then a real empty state, Clean up now button', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
@@ -210,7 +210,7 @@ test('Copies on this computer line: count, size, "Counting…" then a real empty
   assert.equal(btn.children[0], 'Clean up now');
   assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-orphaned').length, 1);
   assert.equal(all(card, n => n.attrs?.['data-action'] === 'copies-retry').length, 1);
-  assert.equal(all(card, n => n.tag === 'details')[0].attrs.open, '', 'Details opens by itself when a copy needs a look');
+  assert.equal(all(card, n => n.tag === 'details').length, 0);
 });
 
 test('Settings review step: Share, the copies switch, Clean up now and "Helpers may mark tickets Done" show a plain review, then one click', async () => {
@@ -301,25 +301,25 @@ test('General phone messages belong in Chat, not Home Messages', () => {
 });
 
 
-test('settings: the workspace folder is visible on the row without opening Details (owner fb11)', () => {
+test('settings: the folder is shown plainly with Copy path and the quiet full path, no Details', () => {
   const c = context([], {snapshot:false, addons:() => []});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
   const long = '/Users/someone/Documents/Projects/2026/customer-work/team-shared/pilatus-workspace';
   for (const folder of ['/Users/me/pilatus', long]) {
     c.state.settings = {folder, addons:[]};
-    const ws = nodes(c.settingsPage(), n => n.attrs?.['data-key'] === 'settings-workspace')[0];
+    const page = c.settingsPage();
+    const ws = nodes(page, n => n.attrs?.['data-key'] === 'settings-workspace')[0];
     const row = nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder')[0];
-    // on the row, not inside the closed <details>
     assert.ok(row);
-    assert.equal(nodes(ws, n => n.tag === 'details' && nodes(n, m => m === row).length).length, 0);
+    assert.equal(nodes(ws, n => n.tag === 'details').length, 0);
     assert.equal(row.attrs.title, folder);
+    assert.equal(nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder-name')[0].textContent, folder.split('/').pop());
+    assert.equal(nodes(ws, n => n.attrs?.['data-key'] === 'settings-copy-path')[0].attrs['data-copy'], folder);
     if (folder === long) {
       assert.ok(row.textContent.length <= 48 && row.textContent.includes('…'));
       assert.ok(row.textContent.startsWith('/Users/someone') && row.textContent.endsWith('pilatus-workspace'));
     } else assert.equal(row.textContent, folder);
-    const details = nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder-details')[0];
-    assert.match(JSON.stringify(details), /Stored on this computer/);
-    assert.ok(nodes(details, n => n.textContent === folder).length);
+    assert.equal(nodes(page, n => n.tag === 'details').length, 0, 'Settings has no Details toggles');
   }
 });
 
@@ -332,8 +332,8 @@ test('home rows: no key or chip, no empty Working now, See all tickets (N), fini
   assert.doesNotMatch(text, /Working now|No tickets are being worked on/);
   assert.match(text, /Finished 9:05/);
   const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
-  assert.deepEqual(left.children.at(-1).children, ['See all tickets (2)']);
-  assert.equal(left.children.at(-1).attrs.className, 'see-all');
+  assert.ok(left); assert.match(text, /All 2 tickets →/); assert.match(text, /1 result to check/);
+  assert.match(text, /Check · 1/); assert.doesNotMatch(text, /Details|Technical details/);
 });
 // Dash 03/04/14: results fold to 3 one-link rows; same-name results stack with "Mark older as done".
 test('home results: one link per row, same-name stacked, newest first, 3 shown and Show all (N)', async () => {
@@ -382,7 +382,7 @@ test('home needs: fold shows the oldest card with answers; identical questions a
   const cards = nodes(home, n => n.attrs?.className === 'card-row home-need');
   assert.equal(cards.length, 1);
   const host = {querySelectorAll:() => []};
-  await nodes(cards[0], n => n.tag === 'button')[0].click({currentTarget:{closest:() => host}});
+  await nodes(cards[0], n => n.tag === 'button')[0].onclick({currentTarget:{closest:() => host}});
   assert.deepEqual(sent, ['a', 'b', 'c']); assert.deepEqual(toasts, ['Answered on 3 tickets']);
 });
 const sameNeeds = (n, act) => {
@@ -405,7 +405,7 @@ test('home needs: a failed answer on stacked questions says how many were answer
   const {c, toasts} = sameNeeds(3, async () => ++n === 2 ? {ok:false, status:409, text:'Nope'} : {ok:true});
   c.window.DashHelpers.scrubText = t => t;
   const card = nodes(c.home(), n => n.attrs?.className === 'card-row home-need')[0];
-  await nodes(card, n => n.tag === 'button')[0].click({currentTarget:{closest:() => ({querySelectorAll:() => []})}});
+  await nodes(card, n => n.tag === 'button')[0].onclick({currentTarget:{closest:() => ({querySelectorAll:() => []})}});
   assert.deepEqual(toasts, [['Answered on 2 of 3 tickets. Nope', 'error']]);
 });
 
@@ -442,4 +442,17 @@ test('shell: quiet footer, one phone control while on, Ask the helper', () => {
   assert.match(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/);
   assert.match(web('index.html'), />Ask the helper<\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
   assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
+});
+test('ticket saved views filter by status and the board shows Changes to add', () => {
+  const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
+    {id:'d',title:'D',status:'done',owner:'anna',done_at:new Date().toISOString(),bring_back:{state:'waiting'}},
+    {id:'o',title:'O',status:'done',owner:'ben',done_at:'2000-01-01T00:00:00Z'}];
+  const c = context(items);
+  const ids = (view, person = '') => c.filterTickets(items, '', false, '', person, view).map(t => t.id).join();
+  assert.equal(ids('working'), 'w');
+  assert.equal(ids('needs-you'), 'r,d');
+  assert.equal(ids('done-week'), 'd');
+  assert.equal(ids('', 'ben'), 'r,o');
+  assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
+  assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
 });

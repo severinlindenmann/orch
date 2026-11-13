@@ -23,6 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from orch import keepold
+from orch.keepold import STILL_OLD, backup_tool, discard_backup, plain_reason, restore_tool  # noqa: F401
 from orch_entry import marker_path, updating
 
 # The finisher. Kept free of orch imports: it runs while orch's own files are being replaced.
@@ -43,22 +45,40 @@ def say(text):
     log.flush()
 
 
+IN_USE_SUFFIXES = (".exe", ".pyd", ".dll")
+
+
+def _held(path):
+    """Windows: a running program or a loaded module can not be opened for writing with no sharing."""
+    if os.name != "nt":  # tests on POSIX name the held paths in the job
+        return path in (job.get("test_held") or ())
+    import ctypes
+    from ctypes import wintypes
+
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    d = wintypes.DWORD
+    k.CreateFileW.argtypes = [wintypes.LPCWSTR, d, d, ctypes.c_void_p, d, d, ctypes.c_void_p]
+    k.CreateFileW.restype = ctypes.c_void_p
+    k.CloseHandle.argtypes = [ctypes.c_void_p]
+    h = k.CreateFileW(path, 0x40000000, 0, None, 3, 0x80, None)  # GENERIC_WRITE, no sharing, OPEN_EXISTING
+    if h is None or h == ctypes.c_void_p(-1).value:
+        return ctypes.get_last_error() not in (2, 3)  # gone is not held
+    k.CloseHandle(h)
+    return False
+
+
 def free(path):
-    """Nothing runs from `path` any more: Windows lets us rename it (and we rename it straight back)."""
+    """Nothing runs from `path` any more. Windows: no program or module under it is held open; checked without
+    renaming anything (a rename made a starting orch miss its own files). Elsewhere: nothing to wait for."""
     if not os.path.exists(path):
         return True
-    probe = path + ".free-check"
-    try:
-        os.rename(path, probe)
-    except OSError:
-        return False
-    for _ in range(40):  # never leave orch's folder under the probe name
-        try:
-            os.rename(probe, path)
-            return True
-        except OSError:
-            time.sleep(0.25)
-    raise RuntimeError("could not rename " + probe + " back to " + path + ": rename it back by hand")
+    if os.path.isfile(path) or os.name != "nt":
+        return not _held(path)
+    for top, _dirs, files in os.walk(path):
+        for name in files:
+            if name.lower().endswith(IN_USE_SUFFIXES) and _held(os.path.join(top, name)):
+                return False
+    return True
 
 
 def busy():
@@ -103,6 +123,58 @@ def start_services():
             say("could not start the services in " + ws + ": " + str(e)[:200])
 
 
+def wait_free():
+    deadline = time.time() + job["wait"]
+    while True:
+        busy_paths = [p for p in job["free"] if not free(p)]
+        if not busy_paths:
+            return []
+        if time.time() > deadline:
+            return busy_paths
+        busy()
+        time.sleep(0.5)
+
+
+def reinstall_once(last):
+    """None: uv succeeded. "again": orch held its files while uv replaced them (the old one is back). Else the
+    exit code, with the RESULT line set."""
+    busy_paths = wait_free()
+    if busy_paths:
+        result("fail: still in use after %ds: %s. Nothing was changed. Run the command again."
+               % (job["wait"], ", ".join(busy_paths)))
+        return 1
+    busy()
+    kept = None
+    if job.get("backup"):
+        try:
+            kept = backup_tool(job["backup"]["env"], job["backup"].get("bins"))
+        except Exception as e:
+            say("could not keep a copy of orch: " + str(e)[:300])
+            result("fail: could not keep a copy of orch, so nothing was changed. Try again later.")
+            return 1
+    busy()
+    try:
+        env = dict(os.environ)
+        env.update(job.get("env") or {})  # e.g. UV_TOOL_DIR pinned to where the person installed orch
+        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"], env=env)
+    except subprocess.TimeoutExpired:
+        restored = restore_tool(kept, job.get("restore_wait", 60)) if kept else not job.get("backup")
+        result("fail: " + plain_reason("took too long", restored))
+        return 1
+    busy()
+    if r.returncode == 0:
+        discard_backup(kept)
+        return None
+    detail = (r.stderr or r.stdout).strip()[-1500:]
+    say("uv failed: " + detail)
+    restored = restore_tool(kept, job.get("restore_wait", 60)) if kept else not job.get("backup")
+    say("the old orch was put back" if restored else "the old orch could NOT be put back")
+    if restored and not last and locked_failure(detail):
+        return "again"
+    result("fail: " + plain_reason(detail, restored))
+    return 1
+
+
 def main():
     global registry_written, registry_before
     with open(job["updating"], "w", encoding="utf-8") as f:
@@ -112,30 +184,14 @@ def main():
         time.sleep(job.get("stop_delay", 3))  # the update that started us is just ending
         stop_services()
     say("waiting for orch to exit (pid %d; folders: %s)" % (os.getpid(), ", ".join(job["free"])))
-    deadline = time.time() + job["wait"]
-    while True:
-        busy_paths = [p for p in job["free"] if not free(p)]
-        if not busy_paths:
+    tries = job.get("tries", 3)
+    for attempt in range(1, tries + 1):
+        code = reinstall_once(attempt == tries)
+        if code is None:
             break
-        if time.time() > deadline:
-            result("fail: still in use after %ds: %s. Nothing was changed. Run the command again."
-                   % (job["wait"], ", ".join(busy_paths)))
-            return 1
-        busy()
-        time.sleep(0.5)
-    busy()
-    try:
-        env = dict(os.environ)
-        env.update(job.get("env") or {})  # e.g. UV_TOOL_DIR pinned to where the person installed orch
-        r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"], env=env)
-    except subprocess.TimeoutExpired:
-        result("fail: uv took too long. Run it again: orch update")
-        return 1
-    busy()
-    if r.returncode != 0:
-        say("uv failed: " + (r.stderr or r.stdout).strip()[-1500:])
-        result("fail: the reinstall failed. Run it again: orch update")
-        return 1
+        if code != "again":
+            return code
+        say("orch was started while it was being replaced; trying again (%d of %d)" % (attempt + 1, tries))
     if job.get("record"):  # the reinstall drops the install record: put it back
         rpath, rtext = job["record"]
         with open(rpath, "w", encoding="utf-8", newline="\n") as f:
@@ -202,6 +258,10 @@ finally:
         pass
 sys.exit(code)
 '''
+# The finisher carries keepold's code (one copy, no orch imports) in front of its own.
+FINISHER = FINISHER.replace(
+    "\njob = json.load", Path(keepold.__file__).read_text(encoding="utf-8") + "\njob = json.load", 1
+)
 
 
 PENDING_MAX_AGE = 600  # seconds without a sign of life: the finisher has died
@@ -244,6 +304,8 @@ def fail_reason_since(home: Path, offset: object) -> str:
         return default
     line = next((x for x in text.splitlines() if "RESULT fail:" in x), "")
     why = line.split("RESULT fail:", 1)[-1].strip()
+    if STILL_OLD in why or "could not be put back" in why or "could not keep a copy" in why:
+        return why[:200]
     if "still in use" in why:
         return "orch was still running, so nothing was changed. Run the update again."
     if "took too long" in why:
@@ -320,6 +382,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "env": (extra or {}).get("env"),
         "record": (extra or {}).get("record"),
         "consents": (extra or {}).get("consents"),  # [consent.json, workspace id, names]: dropped on failure
+        "backup": {"env": str(env_dir), "bins": (extra or {}).get("bins") or []},
         "then": [{"argv": [str(py), "-I", "-P", "-m", "orch", *t], "cwd": str(cwd)} for t in then],
         "py": str(py),
         "services": [str(w) for w in (extra or {}).get("services") or []],
@@ -390,13 +453,21 @@ def replacing(home: Path):
     if updating(home):
         raise Busy("orch is still updating, try again in a moment.")
     mark.write_text(str(os.getpid()), encoding="utf-8")
-    result = "fail"
+    result = "fail: package reinstall"
+    detail = ""
     try:
         yield
-        result = "ok"
+        result = "ok: package reinstall"
+    except BaseException as e:  # the reason goes into finish.log (a detached update has no terminal)
+        cause = e.__cause__ or e
+        detail = " ".join(str(cause).split()).removeprefix("uv failed: ")[-1500:]
+        result = "fail: package reinstall: " + " ".join(str(e).split())[:300]
+        raise
     finally:
         try:
             with log_path(home).open("a", encoding="utf-8") as log:
-                log.write(f"RESULT {result}: package reinstall\n")
+                if detail:
+                    log.write(f"uv failed: {detail}\n")
+                log.write(f"RESULT {result}\n")
         finally:
             mark.unlink(missing_ok=True)

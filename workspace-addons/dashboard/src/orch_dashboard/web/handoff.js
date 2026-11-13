@@ -108,7 +108,7 @@
       ok.disabled = true;
       post("handoff.confirm", i.id).then(function (r) {
         if (r.ok) {
-          if (r.status === 202) { r.text().then(function (t) { banner(t); }); }
+          if (r.status === 202) { updateStarted(); r.text().then(function (t) { banner(t); }); }
           poll();
         } else { return r.text().then(function (t) { ok.disabled = false; banner(t); }); }
       });
@@ -189,12 +189,30 @@
     b.appendChild(x); place(b);
   }
   // the detached update: "Update finished" / "Update failed: <reason>" (also after the page reconnects)
+  // The page stops waiting after 3 minutes (the start time survives the page reloading while orch restarts).
+  var UPDATE_WAIT = 180000, UPDATE_KEY = "orch-update-started";
+  function updateStarted() { try { sessionStorage.setItem(UPDATE_KEY, String(Date.now())); } catch (e) {} }
+  function updateDone() { try { sessionStorage.removeItem(UPDATE_KEY); } catch (e) {} }
+  function updateOverdue(unreachable) {
+    var at = 0;
+    try { at = Number(sessionStorage.getItem(UPDATE_KEY)) || 0; } catch (e) {}
+    if (!at || Date.now() - at < UPDATE_WAIT) return;
+    updateDone();
+    // unreachable = this page's server is gone (restarted, maybe on another address): not a failed update
+    var t = unreachable === true
+      ? "orch restarted. Reload the dashboard."
+      : "The update did not finish. orch is still the old version. Start the update again when you are ready.";
+    if (t !== shown) { shown = t; banner(t); }
+  }
   function updateStatus() {
-    fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : {}; }).then(function (s) {
-      if (!s || !s.state || s.state === "running") return;
-      var t = s.state === "finished" ? "Update finished." : "Update failed: " + (s.reason || "it did not finish") + ".";
+    var gone = false;
+    fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { gone = !r.ok; return r.ok ? r.json() : {}; }).then(function (s) {
+      if (!s || !s.state || s.state === "running") { updateOverdue(gone); return; }
+      updateDone();
+      var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
+      var t = s.state === "finished" ? "Update finished." : "Update failed: " + why + ".";
       if (t !== shown) { shown = t; banner(t); }
-    }).catch(function () {});
+    }).catch(function () { updateOverdue(true); });
   }
   notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
 })();

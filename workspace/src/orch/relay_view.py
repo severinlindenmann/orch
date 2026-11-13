@@ -215,19 +215,6 @@ def view(root: Path) -> dict:
     else:
         out["notice"] = "Connected. Send messages and files to other workspaces."
         out["notice_tone"] = "good"
-    out["blocks"].append(
-        {
-            "type": "list",
-            "title": f"Workspaces you can talk to · {len(peers)}",
-            "items": peers[:50]
-            or [
-                {
-                    "title": "Nobody yet",
-                    "subtitle": "Ask your admin to allow this workspace to talk to others.",
-                }
-            ],
-        }
-    )
     rows: list[tuple[str, dict]] = []
 
     def row(at: str, who: str, arrow: str, type_: str, line: str, extra: str) -> tuple[str, dict]:
@@ -265,11 +252,24 @@ def view(root: Path) -> dict:
             "subtitle": (
                 "Send one from the phone or from another workspace."
                 if peers
-                else "First add a workspace you can talk to (ask your admin)."
+                else "Pair a phone or allow a workspace in Settings to start a conversation."
             ),
         }
     ]
     out["blocks"].append(
         {"type": "list", "title": "Recent messages", "items": items, "more": max(0, len(rows) - 20)}
+    )
+    out["blocks"].append(
+        {
+            "type": "list",
+            "title": f"Workspaces you can talk to · {len(peers)}" if peers else "Workspaces you can talk to",
+            "items": peers[:50]
+            or [
+                {
+                    "title": "No workspaces allowed",
+                    "subtitle": "Allow a workspace to send it messages and files in the phone settings.",
+                }
+            ],
+        }
     )
     return out

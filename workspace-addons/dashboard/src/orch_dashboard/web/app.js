@@ -144,24 +144,27 @@ const heading = (title, sub = '', {eyebrow = '', actions = null} = {}) => h('hea
 function skeletonFor(kind) {
   const bar = cls => h('div', {className:'skeleton ' + cls, 'aria-hidden':'true'});
   const stack = (n, cls = 'sk-card') => h('div', {className:'sk-stack', 'aria-hidden':'true'}, Array.from({length:n}, () => bar(cls)));
-  const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(2), stack(1))]
+  const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(3), stack(1))]
     : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
     : kind === 'section' ? [stack(3, 'sk-row')]
+    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-stack sk-side'}, stack(4, 'sk-tab')), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
 // The skeleton for an address before the state is there (no state needed).
 function hashKind(hash) {
   const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
-  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : ['addon', 'open', 'notes', 'chat', 'general', 'settings'].includes(k) ? 'page' : 'home';
+  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : k === 'settings' ? 'settings' : ['addon', 'open', 'notes', 'chat', 'general', 'settings'].includes(k) ? 'page' : 'home';
 }
 function notFoundPage() {
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
     h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
-      h('h2', {}, 'We couldn’t find that page'), h('p', {className:'muted'}, 'The link may be out of date, or the page may have moved.'),
+      h('span', {className:'error-number', 'aria-hidden':'true'}, '404'),
+      h('h2', {}, 'We couldn’t find that page'),
+      h('p', {className:'muted'}, 'The link may be out of date, or the page may have moved.', h('br'), 'Your workspace is still here.'),
       h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#home'}, 'Go to Home'),
-        addons().filter(a => a.dashboard || a.page).map(a => h('a', {className:'btn outline sm', href:'#addon/' + encodeURIComponent(a.name)}, addonLabel(a)))))));
+        h('a', {className:'btn ghost sm', href:'#settings/addons'}, 'Check installed add-ons')))));
 }
 // Sidebar icons (trusted constants, same drawings as the design).
 const NAV_ICON = {
@@ -179,6 +182,8 @@ function navIcon(name) {
   return node;
 }
 const ADDONS_OPEN = 'orch.nav.addons';
+const VIEWS_OPEN = 'orch.nav.views';
+const viewsOpen = () => { try { return localStorage.getItem(VIEWS_OPEN) === 'open'; } catch (_) { return false; } };
 const addonsOpen = () => { try { return localStorage.getItem(ADDONS_OPEN) !== 'closed'; } catch (_) { return true; } };
 let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
@@ -245,8 +250,8 @@ function route() {
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|phone|addons))?$/.exec(hash);
-  if (settingsHash && !snapshot && state?.settings) return {kind:'settings', hash:'#settings', tab:settingsHash[1] || 'general'};
+  const settingsHash = /^#settings(?:\/(general|agent|phone|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) { const [tab, addon] = (settingsHash[1] || 'general').split('/'); return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
@@ -268,7 +273,7 @@ function route() {
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
-  if (r.kind === 'settings') settingsTab = r.tab;
+  if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
   if (r.kind === 'page' && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
@@ -298,7 +303,12 @@ function render(arrived = new Set()) {
   const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount);
-  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), navLink('#notes', 'Notes', 'notes'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null));
+  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), navLink('#notes', 'Notes', 'notes'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
+    // Saved ticket views: the same list with a filter on the address (#tickets?view=...)
+    array(state.tickets).length ? h('details', {className:'nav-group', 'data-key':'nav-views', open:viewsOpen() || /[?&]view=/.test(r.hash || '') ? '' : null},
+      h('summary', {className:'nav-item', 'aria-label':'Ticket views'}, navIcon('tickets'), h('span', {className:'nav-label'}, 'Ticket views')),
+      h('nav', {'aria-label':'Saved ticket views'}, [['needs-you', 'Needs me'], ['working', 'Working now'], ['done-week', 'Done this week']].map(([id, label]) =>
+        h('a', {className:'nav-item', href:'#tickets?view=' + id, 'aria-label':label, 'aria-current':String(r.hash || '').includes('view=' + id) ? 'page' : null}, h('span', {className:'nav-label'}, label))))) : null));
   const pages = addons().filter(a => a.dashboard);
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
@@ -578,6 +588,11 @@ main.addEventListener('click', async event => {
     settingsConfirm('Move to private?', 'Removes them from the team repo and keeps your files.', '', 'Move to private', send);
     return;
   }
+  if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
+  if (action === 'phone-pair') { phonePairDialog(); return; }
+  if (action === 'relay-setup') { relaySetupDialog(); return; }
+  if (action === 'relay-reconnect') { await relayReconnect(control); return; }
+  if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;
@@ -657,6 +672,10 @@ window.addEventListener('hashchange', async () => {
   for (const d of document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
 });
+document.getElementById('side-nav')?.addEventListener('toggle', event => {
+  if (!event.target.matches?.('details.nav-group')) return;
+  try { localStorage.setItem(VIEWS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
+}, true);
 document.getElementById('side-addons')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;
   try { localStorage.setItem(ADDONS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }

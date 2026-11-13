@@ -23,6 +23,8 @@ if cmd == "start":
         print("Refused: port is busy\x1b]0;evil\x07", file=sys.stderr)
         sys.exit(2)
     f.write_text("on", encoding="utf-8")
+    pref = os.environ.get("ORCH_PREFERRED_PORT", "-")
+    Path(os.environ["ORCH_ROOT"], "pref.txt").write_text(pref, encoding="utf-8")
     bad = Path(os.environ["ORCH_ROOT"], "bad.json")
     over = json.loads(bad.read_text(encoding="utf-8")) if bad.exists() else {}
     print(json.dumps({"running": True, "pid": int(os.environ["TEST_ALIVE_PID"]), "url": "http://127.0.0.1:18420",
@@ -297,3 +299,36 @@ def test_ago_words():
     assert services.ago(at(hours=3)) == "3 h ago"
     assert services.ago(at(minutes=10)) == "10 min ago"
     assert services.ago(at(days=3)) == "3 d ago"
+
+
+def test_restart_reuses_the_last_port(svc, proj, run):
+    pref = proj / "pref.txt"
+    assert run("start")[0] == 0
+    assert pref.read_text() == "-"  # first start: no history
+    assert services.last_port(proj, "hello") == 18420
+    assert run("stop")[0] == 0
+    assert services.last_port(proj, "hello") == 18420  # kept across stop
+    assert run("start")[0] == 0
+    assert pref.read_text() == "18420"
+
+
+def test_sticky_port_follows_the_port_it_really_got(svc, proj, run):
+    assert run("start")[0] == 0
+    run("stop")
+    (proj / "bad.json").write_text(json.dumps({"url": "http://127.0.0.1:19999"}), encoding="utf-8")
+    assert run("start")[0] == 0  # the old one was taken: the add-on fell back to another
+    assert services.last_port(proj, "hello") == 19999
+    run("stop")
+    (proj / "bad.json").unlink()
+    assert run("start")[0] == 0
+    assert (proj / "pref.txt").read_text() == "19999"
+
+
+def test_bad_port_file_is_ignored(svc, proj, run):
+    services._ports_path().parent.mkdir(parents=True, exist_ok=True)
+    services._ports_path().write_text(json.dumps({services._port_key(proj, "hello"): 22}), encoding="utf-8")
+    assert services.last_port(proj, "hello") is None
+    services._ports_path().write_text("not json", encoding="utf-8")
+    assert services.last_port(proj, "hello") is None
+    assert run("start")[0] == 0
+    assert (proj / "pref.txt").read_text() == "-"

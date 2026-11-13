@@ -1039,12 +1039,14 @@ def test_attachments_shape_and_limits():
         {"files": [{"name": "a.md", "text": "x", "data": "eA=="}]},
         {"files": [{"name": "a.png", "data": "not base64!"}]},
         {"files": [{"name": "a\x00.md", "text": "x"}]},
-        {"files": [{"name": "a.md", "text": "x"}] * 6},
-        {"long_text": "t", "files": [{"name": "a.md", "text": "x"}] * 5},
     )
     for args in bad:
         with pytest.raises(actions.BadRequest):
             actions.attachments("ticket.new", {"title": "T", **args})
+    many = actions.attachments(
+        "ticket.new", {"title": "T", "long_text": "t", "files": [{"name": "a.md", "text": "x"}] * 12}
+    )
+    assert len(many) == 13  # no file-count limit, only the per-file size limit
     assert actions.attachments("log", {"files": [1]}) == []  # only a new ticket takes files
     with pytest.raises(actions.BadRequest):
         actions.build_argv("ticket.paste", {"text": "x", "files": []})
@@ -1231,13 +1233,22 @@ def test_copies_retry_takes_one_ticket_id_only():
 def test_attach_files_to_an_existing_ticket():
     import base64
 
-    args = {"ticket": "t_abcdef12", "files": [{"name": "s.png", "data": base64.b64encode(b"\x89PNG").decode()}]}
+    args = {
+        "ticket": "t_abcdef12",
+        "files": [{"name": "s.png", "data": base64.b64encode(b"\x89PNG").decode()}],
+    }
     argv = actions.build_argv("ticket.attach", args)
     assert argv[:2] == ["log", "t_abcdef12"] and "Added files to the ticket" in argv
     assert actions.attachments("ticket.attach", args) == [("s.png", b"\x89PNG")]
     assert "ticket.attach" in actions.FREE_OPS
-    for bad in ({"ticket": "t_abcdef12"}, {"ticket": "t_abcdef12", "files": []}, {"ticket": "nope", "files": [{"name": "a.md", "text": "x"}]}):
+    for bad in (
+        {"ticket": "t_abcdef12"},
+        {"ticket": "t_abcdef12", "files": []},
+        {"ticket": "nope", "files": [{"name": "a.md", "text": "x"}]},
+    ):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("ticket.attach", bad)
     with pytest.raises(actions.BadRequest):  # a program file is refused before orch is asked
-        actions.attachments("ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]})
+        actions.attachments(
+            "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]}
+        )

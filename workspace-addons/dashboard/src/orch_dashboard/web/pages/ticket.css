@@ -96,3 +96,145 @@
 .ticket-plan-steps li { padding: 10px 0; overflow-wrap: anywhere; }
 .ticket-plan-steps p { margin: 0; }
 .ticket-plan-actions { flex-wrap: wrap; }
+
+/* ---- Redesign (ux/ticket): header, tabs, review card, tasks, files, Properties, viewer. Matches mockup/ticket. ---- */
+.ticket-page{gap:0;padding-bottom:64px}
+.ticket-page .ticket-heading{display:grid;gap:0;margin-bottom:16px}
+.ticket-page .ticket-heading h1{margin:4px 0 12px;font-size:28px;line-height:36px}
+.ticket-page .plain-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.ticket-page .plain-actions .menu summary{min-height:32px}
+.ticket-page .state-line{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;color:var(--text-muted);font-size:12px;line-height:20px;margin:0 0 16px}
+.ticket-page .state-line .status-word{font-size:14px;font-weight:500}
+.ticket-page .state-line .status-word.warn{color:var(--needs-you)}
+.ticket-page .state-line .status-word.good{color:var(--done)}
+.ticket-page .state-line .status-word.working{color:var(--working)}
+.ticket-page .state-line .btn{margin-left:auto}
+.ticket-page .status-change{animation:status-in var(--dur-base) var(--ease-enter)}
+@keyframes status-in{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
+.ticket-page .stepper{display:flex;gap:16px;list-style:none;margin:0;padding:0;flex-wrap:wrap;color:var(--text-muted);font-size:12px}
+.ticket-page .stepper li{display:inline-flex;align-items:center;gap:8px}
+.ticket-page .phase{display:inline-grid;place-items:center;width:20px;height:20px;border:1px solid var(--border-strong);border-radius:50%;font-size:12px}
+.ticket-page .phase.done{color:var(--success);border-color:var(--success)}
+.ticket-page .phase.current{color:var(--working);border-color:var(--working)}
+.ticket-page .ticket-tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);margin:0 0 24px;overflow-x:auto;flex-wrap:nowrap}
+.ticket-page .ticket-tabs button{border-radius:0;white-space:nowrap;padding:10px 14px;border:0;border-bottom:2px solid transparent;min-height:44px}
+.ticket-page .ticket-tabs [aria-selected=true]{color:var(--text);border-bottom-color:var(--brand);background:var(--surface-2)}
+.ticket-page .tab-count{font:12px var(--font-mono);color:var(--text-muted);margin-left:2px}
+.ticket-page .ticket-layout{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:24px;align-items:start}
+.ticket-page .ticket-panel[hidden]{display:none!important}
+.ticket-page .story{display:grid;gap:24px;min-width:0}
+.ticket-page .ticket-side{position:sticky;top:80px}
+.ticket-page .section-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ticket-page .section-head h2,.ticket-page .properties h2{font-size:14px;line-height:20px;margin:0}
+.ticket-page .card{padding:16px;display:grid;gap:12px}
+.ticket-page .attention{border-left:3px solid var(--needs-you)}
+.ticket-page .review-card{gap:16px}
+.ticket-page .review-card .section-head h2{font-size:20px;line-height:28px}
+.ticket-page .review-check{font-weight:500;margin:0}
+.ticket-page .result-frame{border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)}
+.ticket-page .result-frame .file-row{border-bottom:1px solid var(--border);padding:12px 16px}
+.ticket-page .preview-body{position:relative;overflow:hidden;max-height:260px;min-height:120px;background:var(--surface)}
+.ticket-page .preview-body:after{content:'';position:absolute;inset:auto 0 0;height:36px;background:linear-gradient(transparent,var(--surface));pointer-events:none}
+.ticket-page .preview-body .ticket-preview{border:0;border-radius:0;max-height:244px}
+.ticket-page .preview-expand{position:absolute;right:12px;bottom:8px;z-index:1;background:var(--surface);min-height:32px}
+.ticket-page .file-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.ticket-page .file-row:last-child{border-bottom:0}
+.ticket-page .file-row .grow{min-width:0}
+.ticket-page .file-row p{margin:0;overflow-wrap:anywhere}
+.ticket-page .file-name{font-weight:500}
+.ticket-page .file-type{display:inline-grid;place-items:center;min-width:32px;height:32px;border-radius:4px;background:var(--surface-3);color:var(--text-muted);font-size:12px;font-weight:600;flex:none}
+.ticket-page .file-actions{display:flex;gap:4px;flex-wrap:wrap}
+.ticket-page .file-actions .btn{font-size:12px;min-height:32px;padding:4px 8px}
+.ticket-page .file-group{display:grid;gap:4px;margin-bottom:16px}
+.ticket-page .file-group h3{margin:0}
+.ticket-page .task-list{list-style:none;margin:0;padding:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.ticket-page .task-row{display:flex;gap:12px;align-items:flex-start;min-height:40px;padding:8px 0;border-bottom:1px solid var(--border)}
+.ticket-page .task-row:last-child{border-bottom:0}
+.ticket-page .task-mark{width:20px;text-align:center;color:var(--text-muted);flex:none}
+.ticket-page .task-mark.good{color:var(--done)}
+.ticket-page .task-title{margin:0}
+.ticket-page .task-note{display:block;margin:4px 0 0}
+.ticket-page .current-task{display:flex;gap:12px;padding:16px 12px;background:var(--info-soft);border-left:2px solid var(--working)}
+.ticket-page .current-task h3{margin:0}
+.ticket-page .current-task p{margin:4px 0 0}
+.ticket-page .task-mark.working{color:var(--working)}
+.ticket-page .task-word{white-space:nowrap}
+.ticket-page .property-details,.ticket-page .next-up{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.ticket-page .next-up p{margin:8px 0 0}
+.ticket-page .properties{display:grid;gap:0;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.ticket-page .properties dl{margin:12px 0 0}
+.ticket-page .properties dl>div{display:grid;grid-template-columns:80px minmax(0,1fr);gap:8px;padding:12px 0;border-bottom:1px solid var(--border)}
+.ticket-page .properties dd{margin:0;font-size:14px;line-height:20px;min-width:0;overflow-wrap:anywhere}
+.ticket-page .ticket-meta-line{margin:12px 0 0}
+.ticket-page .change-request{border-left:3px solid var(--needs-you)}
+.ticket-page .change-request h2,.ticket-page .asked h2,.ticket-page .progress-card h2{font-size:14px;line-height:20px;margin:0}
+.ticket-page .request-row p{margin:0}
+.ticket-page .empty-ticket{min-height:240px;place-items:center;text-align:center;align-content:center}
+.ticket-page .empty-mark{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:4px;background:var(--surface-3)}
+.ticket-page .ticket-ask-label{font-weight:500}
+@keyframes ticket-reveal{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media(max-width:899px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-side{position:static}.ticket-page .ticket-heading h1{font-size:24px;line-height:32px}.ticket-page .state-line .btn{margin-left:0}}
+@media(min-width:1600px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr) 320px;gap:32px}}
+@media(prefers-reduced-motion:reduce){.ticket-page .status-change{animation:none}}
+.ticket-page .ticket-heading h1 .ed-title,.ticket-page .ticket-heading h1 .ed{padding-left:0;margin-left:0;border-color:transparent}
+.ticket-page .ticket-heading h1 .inline-host{display:block}
+.ticket-page .properties .links-card{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+
+/* ---- Files tab: aligned toolbar, grouped picture tiles, list mode (matches mockup/previews) ---- */
+.ticket-page .files-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.ticket-page .files-toolbar h2{margin-right:4px;font-size:20px;line-height:28px;white-space:nowrap}
+.ticket-page .files-toolbar .files-search{flex:1 1 220px;min-width:180px;height:40px;padding:0 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text);font:inherit}
+.ticket-page .files-toolbar .ui-select{flex:none}
+.ticket-page .files-toolbar .ui-select-trigger{height:40px;min-height:40px;white-space:nowrap}
+.ticket-page .view-switch{display:flex;flex:none;height:40px;padding:3px;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-sizing:border-box}
+.ticket-page .view-switch .btn{min-height:32px;height:32px;border-color:transparent;background:none}
+.ticket-page .view-switch .btn[aria-pressed=true]{background:var(--surface-3);color:var(--text)}
+.ticket-page .collection-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 0 12px;border-bottom:1px solid var(--border)}
+.ticket-page .collection-summary p{margin:0}
+.ticket-page .files-collection .file-group{display:block;margin:0;border-bottom:1px solid var(--border)}
+.ticket-page .files-collection .file-group>summary{display:flex;align-items:center;gap:12px;cursor:pointer;list-style:none;padding:12px;border-radius:6px}
+.ticket-page .files-collection .file-group>summary::-webkit-details-marker{display:none}
+.ticket-page .files-collection .file-group>summary:before{content:'';width:8px;height:8px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);flex:none;margin:0 5px 0 2px;transition:transform var(--dur-fast) var(--ease-move)}
+.ticket-page .files-collection .file-group[open]>summary:before{transform:rotate(45deg) translate(-2px,-2px)}
+.ticket-page .files-collection .file-group>summary:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.ticket-page .file-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:4px 0 20px}
+.ticket-page .file-tile{display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);overflow:hidden;transition:border-color var(--dur-fast) var(--ease-move)}
+.ticket-page .file-tile:hover{border-color:var(--border-strong)}
+.ticket-page .file-preview-link{display:block;width:100%;padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.ticket-page .file-preview-link:hover strong{text-decoration:underline}
+.ticket-page .file-preview-link:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.ticket-page .file-thumb{position:relative;height:112px;overflow:hidden;background:var(--bg);display:grid;place-items:center}
+.ticket-page .file-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.ticket-page .file-thumb .ticket-preview{border:0;border-radius:0;height:100%;width:100%;background:var(--bg)}
+.ticket-page .file-thumb .ticket-preview-label{display:none}
+.ticket-page .file-thumb .ticket-preview pre{padding:12px 16px;min-height:0;max-height:112px;font-size:12px;line-height:1.5;color:var(--text-muted)}
+.ticket-page .file-sym{display:grid;justify-items:center;gap:6px;color:var(--text-muted);font-size:12px}
+.ticket-page .tile-copy{display:flex;flex-direction:column;gap:2px;padding:12px 12px 8px;min-width:0}
+.ticket-page .tile-copy strong{overflow-wrap:anywhere}
+.ticket-page .file-context{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:0 12px 12px;font-size:12px;line-height:18px}
+.ticket-page .role-chip{display:inline-block;padding:2px 7px;border:1px solid var(--border);background:var(--surface-2);border-radius:5px}
+.ticket-page .role-chip[data-role=Result]{color:var(--success);background:var(--success-soft)}
+.ticket-page .task-link{padding:0;border:0;background:none;color:var(--text-muted);font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;text-align:left}
+.ticket-page .task-link:hover{color:var(--brand)}
+.ticket-page .created-time{display:block;margin:0;font-variant-numeric:tabular-nums}
+.ticket-page .file-more{align-items:center;justify-content:center;min-height:120px;color:var(--text-muted);cursor:pointer;font:inherit;font-size:16px}
+.ticket-page .file-more:hover{color:var(--text)}
+.ticket-page .files-collection[data-view-mode=list] .file-grid{grid-template-columns:1fr;gap:0;padding:0 0 8px}
+.ticket-page .files-collection[data-view-mode=list] .file-tile{display:grid;grid-template-columns:minmax(200px,1fr) minmax(260px,1fr);align-items:center;gap:16px;min-height:64px;border:0;border-bottom:1px solid var(--border);border-radius:0;background:none}
+.ticket-page .files-collection[data-view-mode=list] .file-preview-link{display:flex;align-items:center;gap:12px}
+.ticket-page .files-collection[data-view-mode=list] .file-thumb{flex:none;width:48px;height:36px;border-radius:6px}
+.ticket-page .files-collection[data-view-mode=list] .file-thumb .ticket-preview,.ticket-page .files-collection[data-view-mode=list] .file-sym span{display:none}
+.ticket-page .files-collection[data-view-mode=list] .tile-copy{padding:8px 0}
+.ticket-page .files-collection[data-view-mode=list] .file-context{flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:8px 0}
+.ticket-page .files-collection[data-view-mode=list] .file-more{min-height:48px}
+@media(min-width:1600px){.ticket-page .file-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.ticket-page .file-thumb{height:132px}}
+@media(max-width:760px){.ticket-page .file-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ticket-page .files-collection[data-view-mode=list] .file-tile{grid-template-columns:1fr;gap:0}.ticket-page .files-collection[data-view-mode=list] .file-context{padding-left:60px}.ticket-page .files-toolbar .files-search{flex-basis:100%}}
+@media(prefers-reduced-motion:reduce){.ticket-page .file-tile,.ticket-page .files-collection .file-group>summary:before{transition:none}}
+.ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-layout.wide .ticket-side{display:none}
+.ticket-page .files-toolbar h2 .meta{margin-left:8px}
+.ticket-page .preview-body.live{max-height:none}
+.ticket-page .preview-body.live:after{content:none}
+.ticket-page .preview-live{display:block;width:100%;height:340px;border:0;background:#fff}
+.ticket-page .preview-body.live .preview-expand{bottom:12px}
+.ticket-page .skeleton-tile{height:200px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:fv-shimmer 1.4s linear infinite}
+@media(prefers-reduced-motion:reduce){.ticket-page .skeleton-tile{animation:none}}
