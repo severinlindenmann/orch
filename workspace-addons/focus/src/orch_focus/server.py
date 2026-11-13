@@ -82,10 +82,18 @@ def _web(name: str) -> bytes:
     return resources.files("orch_focus").joinpath("web", name).read_bytes()
 
 
-def _kit(name: str) -> bytes:
-    import orch_ui
+def _kit(name: str) -> bytes | None:
+    """A kit file from orch_ui's static folder, else the dashboard's own copy; None when neither has it."""
+    try:
+        import orch_ui
 
-    return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
+        return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
+    except (ImportError, OSError, TypeError):
+        pass
+    try:
+        return resources.files("orch_dashboard").joinpath("web", "kit", name).read_bytes()
+    except (ImportError, OSError, TypeError):
+        return None
 
 
 class Tracker:
@@ -701,7 +709,10 @@ class Handler(BaseHTTPRequestHandler):
             pre = pre if PREFIX.fullmatch(pre) else ""
             return self._send(200, _web("index.html").replace(b"__P__", pre.encode()), TYPES[".html"])
         if path.startswith("/kit/") and path[5:] in KIT_FILES:
-            return self._send(200, _kit(path[5:]), TYPES["." + path.rsplit(".", 1)[1]])
+            body = _kit(path[5:])
+            if body is None:
+                return self._send(404, b"not found", "text/plain")
+            return self._send(200, body, TYPES["." + path.rsplit(".", 1)[1]])
         if path.startswith("/web/") and path[5:] in WEB_FILES:
             return self._send(200, _web(path[5:]), TYPES["." + path.rsplit(".", 1)[1]])
         self._send(404, b"not found", "text/plain")

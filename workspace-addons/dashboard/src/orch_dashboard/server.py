@@ -116,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.send_header(
             "Content-Security-Policy",
-            csp or "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'",
+            csp or "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'",
         )
         self.end_headers()
         self.wfile.write(body)
