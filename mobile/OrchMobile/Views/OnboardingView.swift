@@ -3,9 +3,9 @@ import UIKit
 
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
-    @State private var invitationShown = false
     @State private var showLink = false
     @State private var showScanner = false
+    @State private var pendingPaste = false
     @State private var link = ""
     @State private var linkError: String?
     @State private var finishing = false
@@ -20,23 +20,10 @@ struct OnboardingView: View {
                     if model.phase == .notifyStep {
                         ScreenHeading(title: "You're connected.", subtitle: model.pairedWorkspaces.count == 1 ? "1 workspace is ready." : "\(model.pairedWorkspaces.count) workspaces are ready.")
                             .padding(.top, 28)
-                    } else if invitationShown || hasInvitation {
-                        ScreenHeading(title: "Your invitation.", subtitle: "Paste the link you received, or scan its QR code.").padding(.top, 28)
-                    } else {
-                        ScreenHeading(title: "Let's get connected.", subtitle: "Bring your workspaces along. You'll need an invitation from your computer.").padding(.top, 28)
-                    }
-                    if model.phase == .notifyStep {
                         notificationStep
-                    } else if invitationShown || hasInvitation {
-                        invitationStep
                     } else {
-                        Button("Use invitation") { invitationShown = true }.buttonStyle(PrimaryButtonStyle())
-                        Text("Paste a link or scan a QR code in the next step.").themeFont(13).foregroundStyle(Theme.muted)
-                        #if DEBUG
-                        Button { model.openSampleInvite() } label: { Text("Try a demo") }
-                            .buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(12)
-                            .accessibilityIdentifier("sample-invite")
-                        #endif
+                        ScreenHeading(title: "Let's get connected.", subtitle: "Bring your workspaces along with an invitation.").padding(.top, 28)
+                        invitationStep
                     }
                     ModelMessage()
                 }.padding(.horizontal, 25).padding(.vertical, 24)
@@ -45,7 +32,7 @@ struct OnboardingView: View {
         }
         .sheet(isPresented: $showLink) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Paste invitation link").font(.headline)
+                Text("Paste link").font(.headline)
                 Text("Invitation link").themeFont(12).foregroundStyle(Theme.muted)
                 TextField("orch://pair?…", text: $link)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -61,18 +48,17 @@ struct OnboardingView: View {
                 Button { showLink = false } label: { Text("Close") }.buttonStyle(WideButtonStyle(color: Theme.muted))
             }.padding(23).presentationDetents([.medium, .large]).presentationBackground(Theme.bg)
         }
-        .sheet(isPresented: $showScanner) {
-            QRScannerView { code in model.openInvite(code); showScanner = false }
+        // Open the paste sheet only after the scanner sheet is gone: two sheets in one update drop the second.
+        .sheet(isPresented: $showScanner, onDismiss: { if pendingPaste { pendingPaste = false; showLink = true } }) {
+            QRScannerView(onPaste: { pendingPaste = true }) { code in model.openInvite(code); showScanner = false }
         }
     }
-
-    private var hasInvitation: Bool { if case .none = model.inviteState { false } else { true } }
 
     private func submitLink() {
                     let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
                     if clean.isEmpty { linkError = "Paste the link you were sent first. It starts with orch://."; return }
                     if (try? PairingLink(clean)) == nil {
-                        linkError = "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
+                        linkError = "That link does not look right. Check you copied the whole link, or create a new one in orch on your computer."
                         return
                     }
                     model.openInvite(clean); showLink = false
@@ -82,38 +68,46 @@ struct OnboardingView: View {
         switch model.inviteState {
         case .none:
             VStack(spacing: 10) {
-                Button { showScanner = true } label: { Label("Scan invitation QR code", systemImage: "qrcode.viewfinder") }
-                    .buttonStyle(PrimaryButtonStyle())
-                Button {
-                    if let value = UIPasteboard.general.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       (try? PairingLink(value)) != nil {
-                        model.openInvite(value)
-                    } else { showLink = true }
-                } label: { Text("Paste invitation link") }.buttonStyle(SecondaryButtonStyle())
-                Text("Ask the person who invited you for a link or QR code.").themeFont(12)
-                    .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 4)
+                Button { showScanner = true } label: { Label("Scan QR code", systemImage: "qrcode.viewfinder") }
+                    .buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-scan")
+                Button { pasteLink() } label: { Text("Paste link") }.buttonStyle(SecondaryButtonStyle())
+                    .accessibilityIdentifier("invite-paste")
+                InviteHelp()
                 #if DEBUG
-                Button { model.openSampleInvite() } label: { Text("Try a demo") }
-                    .buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(12)
+                Button { model.openSampleInvite() } label: { Text("Try a demo").frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle()) }
+                    .buttonStyle(WideButtonStyle(color: Theme.muted)).themeFont(15)
                     .accessibilityIdentifier("sample-invite")
                 #endif
             }
         case .found(let host):
             VStack(alignment: .leading, spacing: 12) {
                 Text("Your invitation is ready").themeFont(15, .semibold)
-                Text("Server: \(host)").themeFont(13).foregroundStyle(Theme.muted)
                 Text("You were invited to connect this phone.").themeFont(13).foregroundStyle(Theme.muted)
-                DisclosureGroup { Text(host).themeFont(12).frame(maxWidth: .infinity, alignment: .leading) } label: {
+                DisclosureGroup { Text(host).themeFont(13).frame(maxWidth: .infinity, alignment: .leading) } label: {
                     Text("Connection details").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                 }
-                    .themeFont(12).foregroundStyle(Theme.muted)
+                    .themeFont(13).foregroundStyle(Theme.muted)
             }.orchCard()
-            Button("Connect this phone") {
-                Task { await model.connect(phoneName: UIDevice.current.name) }
-            }.buttonStyle(PrimaryButtonStyle())
+            if model.inviteNeedsReplacement {
+                Button("Use a new invitation") { model.clearInvite() }.buttonStyle(PrimaryButtonStyle())
+                    .accessibilityIdentifier("invite-new")
+            } else {
+                Button("Connect this phone") {
+                    Task { await model.connect(phoneName: UIDevice.current.name) }
+                }.buttonStyle(PrimaryButtonStyle())
+                Button("Use a different link") { model.clearInvite() }.buttonStyle(WideButtonStyle(color: Theme.muted))
+                    .accessibilityIdentifier("invite-different")
+            }
         case .connecting:
             ProgressView("Connecting this phone…").frame(maxWidth: .infinity, minHeight: 80)
         }
+    }
+
+    private func pasteLink() {
+        if let value = UIPasteboard.general.string, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           (try? PairingLink(value)) != nil {
+            model.openInvite(value)
+        } else { showLink = true }
     }
 
     private var notificationStep: some View {
@@ -134,5 +128,29 @@ struct OnboardingView: View {
     private func finish(_ allowed: Bool) {
         finishing = true
         Task { await model.finishSetup(allowNotifications: allowed); finishing = false }
+    }
+}
+
+/// "Get an invitation": where the invitation comes from, with the computer-side steps behind a tap.
+struct InviteHelp: View {
+    @State private var open = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(InviteWording.source).themeFont(13).foregroundStyle(Theme.muted)
+            Button { open.toggle() } label: {
+                HStack {
+                    Text(InviteWording.stepsTitle)
+                    Image(systemName: open ? "chevron.up" : "chevron.down").themeFont(12).accessibilityHidden(true)
+                }.themeFont(15).foregroundStyle(Theme.brand).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(PressStyle()).accessibilityIdentifier("invite-help")
+                .accessibilityValue(open ? "Shown" : "Hidden")
+            if open {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(InviteWording.steps.enumerated()), id: \.offset) { index, step in
+                        Text("\(index + 1). \(step)").themeFont(13).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.foregroundStyle(Theme.text).accessibilityIdentifier("invite-help-steps")
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
     }
 }
