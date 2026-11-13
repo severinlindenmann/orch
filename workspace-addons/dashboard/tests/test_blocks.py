@@ -314,3 +314,118 @@ def test_settings_general_panel_holds_look_name_folder_and_share_together():
         "const panel = (id, body) =>" in src[: src.index("function settingsPage")]
         or "const panel = (id, body) =>" in src
     )
+
+
+def _page(name):
+    return json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts" / "examples" / "addon-view" / name).read_text()
+    )
+
+
+@node
+def test_page_layout_blocks_render(tmp_path):
+    """Schedules page: heading quiet text, an Edit button on the row, the empty state and the footnote."""
+    tree = run(tmp_path, _page("valid-schedules-page.json"))
+    t = texts(tree)
+    assert "Coming up" in t and "13-19 November" in t and "Recent runs" in t and "Latest activity" in t
+    assert "Nothing has run yet" in t and "Manage incoming work" in t
+    edit = [x for x in walk(tree) if x["data"].get("addonEdit")]
+    assert [x["data"]["addonEdit"] for x in edit] == ["t_abc12345"] and edit[0]["text"] == "Edit"
+    hrefs = [x["attrs"]["href"] for x in walk(tree) if x["tag"] == "a" and "href" in x["attrs"]]
+    assert "#addon/relay" in hrefs  # an app: link is a hash route of the dashboard, nothing else
+
+
+@node
+def test_messages_page_pairs_half_lists_with_empty_states(tmp_path):
+    tree = run(tmp_path, _page("valid-messages-page.json"))
+    pairs = [x for x in walk(tree) if x["cls"] == "blk-pair"]
+    assert len(pairs) == 1 and len(pairs[0]["kids"]) == 2
+    t = texts(tree)
+    assert "No messages yet" in t and "No workspaces allowed" in t and "Open phone settings" in t
+    assert "Allow a workspace" in t
+
+
+@node
+def test_settings_card_holds_the_radio_choice(tmp_path):
+    tree = run(tmp_path, _page("valid-sync-page.json"))
+    cards = [x for x in walk(tree) if x["cls"] == "blk blk-settings"]
+    assert len(cards) == 1
+    inside = list(walk(cards[0]))
+    radios = [x for x in inside if x["tag"] == "input"]
+    assert len(radios) == 3 and [x["data"]["selected"] for x in radios] == ["true", "false", "false"]
+    assert [x["data"].get("radioTarget") for x in radios[:2]] == ["off", "local"]
+    assert radios[2]["data"]["radioGo"] == "settings"
+    assert "Current setting" in texts(cards[0]) and "Where to keep a copy" in texts(cards[0])
+
+
+@node
+def test_compact_list_has_row_actions_for_shared_links(tmp_path):
+    tree = run(tmp_path, _page("valid-links-page.json"))
+    btns = [x for x in walk(tree) if x["data"].get("native")]
+    assert [(x["data"]["native"], x["data"]["linkId"]) for x in btns] == [
+        ("link-copy", "f_abc123"),
+        ("link-extend", "f_abc123"),
+        ("link-stop", "f_abc123"),
+    ]
+    assert "Anyone with the link" in texts(tree) and "Expires 13 Dec 2026, 12:47" in texts(tree)
+
+
+@node
+def test_unsafe_ops_and_links_are_not_drawn(tmp_path):
+    v = {
+        "blocks": [
+            {
+                "type": "list",
+                "title": "T",
+                "compact": True,
+                "items": [
+                    {
+                        "title": "x",
+                        "actions": [
+                            {"label": "A", "action": {"op": "link.stop", "args": {"id": "../etc"}}},
+                            {"label": "B", "action": {"op": "addon.edit", "args": {"target": "../x"}}},
+                            {"label": "C", "action": {"op": "shell.run", "args": {}}},
+                        ],
+                    }
+                ],
+            },
+            {"type": "footnote", "text": "x", "link": {"label": "Go", "to": "app:evil/x"}},
+            {
+                "type": "radio",
+                "title": "R",
+                "options": [
+                    {
+                        "label": "a",
+                        "selected": True,
+                        "action": {"op": "addon.act", "args": {"verb": "set", "target": "../x"}},
+                    },
+                    {"label": "b", "selected": False},
+                ],
+            },
+        ]
+    }
+    tree = run(tmp_path, v)
+    assert not [x for x in walk(tree) if x["tag"] == "button"]
+    assert not [x for x in walk(tree) if x["tag"] == "a"]
+    assert all(
+        x["attrs"].get("disabled") is None and not x["data"].get("radioVerb")
+        for x in walk(tree)
+        if x["tag"] == "input"
+    )
+
+
+def test_new_examples_pass_both_checks_and_bad_ones_fail_both():
+    import jsonschema
+
+    from orch_dashboard.views import check_view
+
+    folder = Path(__file__).resolve().parents[3] / "contracts" / "examples" / "addon-view"
+    schema = json.loads((folder.parents[1] / "addon-view.schema.json").read_text())
+    validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
+    for f in sorted(folder.glob("*.json")):
+        v = json.loads(f.read_text())
+        good = not list(validator.iter_errors(v))
+        assert good == f.name.startswith("valid-"), f.name
+        if f.name in ("invalid-action-button.json",):  # unknown ops are dropped on screen, not by this check
+            continue
+        assert (check_view(v) is not None) == good, f.name

@@ -1,0 +1,9 @@
+{
+  "schema": "orch.addon-view/1",
+  "generated_at": "2026-11-13T10:00:00Z",
+  "header": {"status": {"label": "Connected", "tone": "good"}},
+  "blocks": [
+    {"type": "list", "title": "Recent messages", "span": "half", "items": [], "empty": {"title": "No messages yet", "text": "Pair a phone or allow a workspace in Settings to start a conversation.", "button": {"label": "Open phone settings", "to": "app:settings/phone"}}},
+    {"type": "list", "title": "Workspaces you can talk to", "span": "half", "count": 0, "items": [], "empty": {"title": "No workspaces allowed", "text": "Allow a workspace to send it messages and files.", "link": {"label": "Allow a workspace", "to": "app:settings/phone"}}}
+  ]
+}

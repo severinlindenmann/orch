@@ -36,9 +36,9 @@ def blocks(view, type_, title=None):
 def test_empty_view_is_valid(ws):
     v = build(ws, T(8))
     check(v)
-    assert {b["type"] for b in v["blocks"]} == {"list"}  # no schedules: no table, no week
-    (sch,) = blocks(v, "list", "No schedules yet")
-    assert sch["items"][0]["title"] == "Repeat any ticket on a plan you choose"
+    assert {b["type"] for b in v["blocks"]} == {"list", "footnote"}  # no schedules: no table, no week
+    (sch,) = blocks(v, "list", "Schedules")
+    assert sch["items"] == [] and sch["empty"]["title"] == "No schedules yet"
     assert "stopped" in v["notice"] and "Ask your helper" not in v["notice"] and "Press" not in v["notice"]
     assert v["button"] == {"label": "Start", "action": {"op": "addon.start"}}
 
@@ -56,7 +56,7 @@ def test_schedule_listed_as_a_table_with_the_week_ahead(ws, monkeypatch):
     v = build(ws, T(8))
     check(v)
     assert not blocks(v, "stat")
-    (table,) = blocks(v, "table", "Schedules")
+    (table,) = blocks(v, "table")
     assert [c["label"] for c in table["columns"]] == ["Schedule", "Repeats", "Next run", "Last result"]
     (row,) = table["rows"]
     assert row["cells"]["schedule"] == "Weekly breport/b" and row["cells"]["repeats"] == "Mondays at 07:00"
@@ -120,7 +120,7 @@ def test_frequent_repeat_is_one_row(ws, monkeypatch):
     )
     v = build(ws, T(15, 2))
     check(v)
-    (rep,) = blocks(v, "table", "Schedules")
+    (rep,) = blocks(v, "table")
     assert len(rep["rows"]) == 1 and rep["rows"][0]["cells"]["repeats"] == "Every 5 minutes"
 
 
@@ -131,7 +131,7 @@ def test_notice_says_next_run_when_running(ws, monkeypatch):
     add_ticket(ws, "t_hour0001", ext={"automation": {"recurring": True, "cron": "0 * * * *"}})
     v = build(ws, T(8))
     check(v)
-    assert v["notice"].startswith("Running. Next run in ")
+    assert v["notice"].startswith("On. Next: ")
     assert "button" not in v
 
 
@@ -187,7 +187,7 @@ def test_schedule_time_is_shown_once_in_local_time(ws, set_tz, monkeypatch):
     )
     v = build(ws, T(8))
     check(v)
-    (sch,) = blocks(v, "table", "Schedules")
+    (sch,) = blocks(v, "table")
     rows = {r["cells"]["schedule"]: r["cells"] for r in sch["rows"]}
     utc, zh = rows["Report"], rows["Zurich"]
     assert "UTC" not in utc["repeats"] and utc["repeats"] == "Mondays at 08:00"
@@ -213,7 +213,7 @@ def test_repeats_are_one_row_each_sorted_and_monthly_stays(ws, monkeypatch):
     )
     v = build(ws, T(8))
     check(v)
-    (rep,) = blocks(v, "table", "Schedules")
+    (rep,) = blocks(v, "table")
     assert [r["link"] for r in rep["rows"]] == ["t_day00001", "t_mon00001"]
     assert rep["rows"][1]["cells"]["repeats"] == "Every month on day 1 at 08:00"  # 09:00 Zurich
 
@@ -265,15 +265,15 @@ def test_schedule_row_has_a_switch_and_buttons(ws):
     )
     v = build(ws, T(8))
     check(v)
-    (sch,) = blocks(v, "table", "Schedules")
+    (sch,) = blocks(v, "table")
     (row,) = sch["rows"]
     assert row["toggle"]["on"] is True and row["toggle"]["action"] == {
         "op": "addon.act",
         "args": {"verb": "toggle", "target": "t_rec00001"},
     }
     assert row["subtitle"] == "claude"
-    assert [a["label"] for a in row["actions"]] == ["Run now", "Delete"]
-    assert row["actions"][1]["confirm"] == "Stop and remove this schedule? Its tickets stay."
+    assert [a["label"] for a in row["actions"]] == ["Run now", "Edit"]
+    assert row["actions"][1]["action"] == {"op": "addon.edit", "args": {"target": "t_rec00001"}}
 
 
 def test_last_result_comes_from_the_recorded_run(ws):
@@ -285,7 +285,7 @@ def test_last_result_comes_from_the_recorded_run(ws):
     )
     v = build(ws, T(9))
     check(v)
-    (row,) = blocks(v, "table", "Schedules")[0]["rows"]
+    (row,) = blocks(v, "table")[0]["rows"]
     assert row["cells"]["last"].startswith("Done · ")
 
 
@@ -298,7 +298,7 @@ def test_paused_schedule_stays_listed_but_is_not_planned(ws):
     )
     v = build(ws, T(7))
     check(v)
-    (row,) = blocks(v, "table", "Schedules")[0]["rows"]
+    (row,) = blocks(v, "table")[0]["rows"]
     assert row["toggle"]["on"] is False and row["cells"]["next"] == "Off"
 
 
@@ -313,7 +313,7 @@ def test_webhook_source_has_a_copy_field(ws):
     v = build(ws, T(7))
     check(v)
     items = blocks(v, "list", "Incoming work")[0]["items"]
-    assert items[1]["detail"][0] == {"label": "Webhook address", "value": "wh_abc123", "copy": True}
+    assert items[0]["detail"][0] == {"label": "Webhook address", "value": "wh_abc123", "copy": True}
 
 
 def test_rows_show_the_ticket_key_first(ws):
@@ -326,7 +326,7 @@ def test_rows_show_the_ticket_key_first(ws):
     )
     v = build(ws, T(8))
     check(v)
-    (rep,) = blocks(v, "table", "Schedules")
+    (rep,) = blocks(v, "table")
     assert rep["rows"][0]["cells"]["schedule"] == "MEC-7 · Weekly report"
 
 
@@ -342,7 +342,7 @@ def test_stopped_scheduler_shows_paused_not_a_countdown(ws):
     add_ticket(ws, "t_rec00003", title="Weekly", ext={"automation": {"recurring": True, "cron": "0 7 * * 1"}})
     v = build(ws, T(8))  # no running service
     check(v)
-    (rep,) = blocks(v, "table", "Schedules")
+    (rep,) = blocks(v, "table")
     assert rep["rows"][0]["cells"]["next"] == "Paused"
 
 
@@ -355,3 +355,25 @@ def test_countdown_words_are_written_in_full():
     assert _in(timedelta(days=1, hours=2)) == "in 1 day"
     assert _in(timedelta(hours=5)) == "in 5 hours"
     assert _in(timedelta(minutes=1)) == "in 1 minute"
+
+
+def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
+    """Coming up (with the week), Recent runs (heading above its card, empty state) and the incoming-work footnote."""
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    add_ticket(
+        ws, "t_rec00009", title="Weekly report", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}}
+    )
+    v = build(ws, T(7))
+    check(v)
+    (table,) = blocks(v, "table")
+    assert "title" not in table
+    (week,) = blocks(v, "calendar")
+    assert week["title"] == "Coming up" and week["meta"].endswith("Workspace time")
+    (runs,) = blocks(v, "list", "Recent runs")
+    assert runs["above"] is True and runs["meta"] == "Latest activity" and runs["items"] == []
+    assert runs["empty"]["title"] == "Nothing has run yet" and "run it now" in runs["empty"]["text"]
+    foot = v["blocks"][-1]
+    assert foot["type"] == "footnote" and foot["link"]["to"] == "app:addon/relay"
+    assert foot["text"].startswith("Incoming from your phone and other workspaces")

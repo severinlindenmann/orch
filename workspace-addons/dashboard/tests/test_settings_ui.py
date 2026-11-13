@@ -79,12 +79,6 @@ def test_shared_links_are_optional_and_use_plain_actions():
         "if (res.status !== 200) { sharedLinks = null; sharedLinksDown = false; return; }",
         "Array.isArray(data.links)",
         "catch (_) { sharedLinks = null; sharedLinksDown = false; }",
-        "Couldn't reach the sharing server; try again in a moment.",
-        "sharedLinks !== null",
-        "No shared links yet.",
-        "Valid until ",
-        "No end date",
-        "'Expired '",
         "if (!link.copy) return;",
         "navigator.clipboard.writeText(link.link)",
         "act('link.extend', {id:link.id, days:7})",
@@ -92,6 +86,7 @@ def test_shared_links_are_optional_and_use_plain_actions():
         "'The link stops working.'",
         "'Stop sharing', send",
         "bindAddonControls(host)",
+        "data-native', 'link-share'",  # the page heading's "Share a file"
     ):
         assert text in src
 

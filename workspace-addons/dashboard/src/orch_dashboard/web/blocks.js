@@ -11,6 +11,8 @@ const OrchBlocks = (() => {
   const arr = v => Array.isArray(v) ? v : [];
   const ADDON = /^addon:([a-z][a-z0-9-]{1,31})(\/[A-Za-z0-9_./-]{0,100})?$/;
   const OWN = /^addon:(?![/\\])(?!.*\.\.)([A-Za-z0-9_./?=&%-]{0,300})$/;   // a page of the add-on whose view this is
+  const APP = /^app:(home|tickets|notes|chat|settings|addon)(\/[a-z][a-z0-9-]{0,31}){0,2}$/;   // a page of the dashboard (hash route)
+  const FILE = /^f_[a-z0-9]+$/;
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
   const VERB = /^[a-z][a-z-]{0,20}$/;
@@ -32,6 +34,7 @@ const OrchBlocks = (() => {
   // Wrap `child` in a link when `link` is a ticket id or an https URL; otherwise return it as is.
   function linked(cls, link, child) {
     const l = typeof link === 'string' ? link : '';
+    if (APP.test(l)) { const a = el('a', cls); a.href = '#' + l.slice(4); a.append(...child); return a; }  // a page of the dashboard itself
     const own = opts.self ? OWN.exec(l) : null;
     const am = own ? [l, opts.self, own[1] ? '/' + own[1] : ''] : ADDON.exec(l);
     if (am && !am[2]?.includes('..')) {
@@ -84,11 +87,41 @@ const OrchBlocks = (() => {
   // An action is only drawn when it is the one generic add-on op with a plain verb and a ticket id as target.
   // The page (not this file) turns the data attributes into a request: the DOM carries no code.
   function actionAttrs(node, a, label) {
-    const args = a && a.args, ok = a && a.op === 'addon.act' && args && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
+    const args = a && a.args || {};
+    if (a && a.op === 'addon.edit' && TICKET.test(String(args.target))) { node.dataset.addonEdit = String(args.target); return true; }
+    const nat = a && /^link\.(copy|extend|stop)$/.exec(String(a.op));
+    if (nat && FILE.test(String(args.id))) { node.dataset.native = 'link-' + nat[1]; node.dataset.linkId = String(args.id); return true; }
+    const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
     if (!ok) return false;
     node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
     if (label) node.dataset.label = label;
     return true;
+  }
+  const rowButton = (a, cls) => {
+    const ghost = a.action && (a.action.op === 'addon.edit' || a.action.op === 'link.extend' || a.action.op === 'link.stop');
+    const b = el('button', 'btn ' + (ghost && a.tone !== 'bad' ? 'ghost' : 'outline') + ' sm' + (a.tone === 'bad' ? ' danger' : '') + (cls ? ' ' + cls : ''), a.label); b.type = 'button';
+    if (a.confirm) b.dataset.confirm = String(a.confirm);
+    return actionAttrs(b, a.action, a.label) ? b : null;
+  };
+  // Heading row of a block: the title, then quiet text (`meta`, or the `count`) at the right.
+  function blkHead(b, tag) {
+    const quiet = b.meta || (Number.isInteger(b.count) ? String(b.count) : '');
+    if (!quiet) return b.title ? el(tag || 'h2', 'blk-title', b.title) : null;
+    const d = el('div', 'blk-head'); if (b.title) d.append(el(tag || 'h2', 'blk-title', b.title));
+    d.append(el('span', 'meta', quiet));
+    return d;
+  }
+  const shownLink = to => typeof to === 'string' && (APP.test(to) || TICKET.test(to) || HTTPS.test(to));
+  const MARKS = {arrow: '\u2197', repeat: '\u21ba', dash: '\u2014'};
+  function emptyState(e) {
+    const d = el('div', 'empty blk-empty'), mark = el('span', 'empty-mark', MARKS[e.mark] || MARKS.arrow); mark.setAttribute('aria-hidden', 'true');
+    d.append(mark, el('h3', '', e.title)); if (e.text) d.append(el('p', '', e.text));
+    for (const [key, cls] of [['button', 'btn primary sm'], ['link', 'btn ghost sm']]) {
+      const x = e[key]; if (!x || !shownLink(x.to)) continue;
+      const a = linked(cls, x.to, [x.label + (key === 'link' ? ' \u2192' : '')]);
+      a.className = cls; d.append(a);
+    }
+    return d;
   }
   // "Send a message" opens its workspace thread in Chat via messageSend. The DOM carries only the checked peer id.
   const PEER = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
@@ -154,6 +187,18 @@ const OrchBlocks = (() => {
     return finish();
   }
 
+  // One line per row: the title, quiet cells, and the actions that show on hover or keyboard focus.
+  function compactItem(it) {
+    const li = el('li', 'compact-li'), row = el('div', 'compact-row');
+    const t = linked('li-title compact-title', it.link, [String(it.title)]);
+    t.title = String(it.title);
+    row.append(t); for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
+    const box = el('div', 'compact-actions');
+    for (const a of arr(it.actions)) { const b = rowButton(a); if (b) box.append(b); }
+    row.append(box); li.append(row);
+    return li;
+  }
+
   const draw = {
     stat(b) {
       const d = el('div', 'stat t-' + tone(b.tone));
@@ -161,10 +206,14 @@ const OrchBlocks = (() => {
       return d;
     },
     list(b) {
-      const s = el('section', 'blk'); s.append(el('h2', 'blk-title', b.title));
-      const ul = el('ul', 'blk-list');
+      const s = el('section', 'blk' + (b.compact ? ' blk-compact' : '') + (b.above ? ' blk-above' : '')), head = blkHead(b), ul = el('ul', 'blk-list');
+      if (head) s.append(head);
+      const host = b.above ? el('div', 'blk-card card') : s;
+      if (b.above) s.append(host);
+      if (!arr(b.items).length && b.empty) { host.append(emptyState(b.empty)); return s; }
       if (!arr(b.items).length) ul.append(el('li', 'blk-none', 'Nothing here.'));
       arr(b.items).forEach((it, n) => {
+        if (b.compact) { ul.append(compactItem(it)); return; }
         if (arr(it.detail).length || arr(it.tickets).length || arr(it.actions).length || it.toggle) {
           ul.append(accordionItem(it, 'acc-' + String(b.title).slice(0, 30) + '-' + n)); return;
         }
@@ -175,12 +224,45 @@ const OrchBlocks = (() => {
         if (row.tagName === 'A') row.append(icon('chevron', 'go'));
         li.append(row); ul.append(li);
       });
-      s.append(ul);
-      if (b.more > 0) s.append(el('p', 'blk-more', `+${b.more} more`));
+      host.append(ul);
+      if (b.more > 0) host.append(el('p', 'blk-more', `+${b.more} more`));
+      return s;
+    },
+    footnote(b) {
+      const p = el('p', 'blk-footnote'); p.append(el('span', '', b.text));
+      if (b.link && shownLink(b.link.to)) p.append(linked('', b.link.to, [b.link.label + ' \u2192']));
+      return p;
+    },
+    settings(b) {
+      const s = el('section', 'blk blk-settings'), head = el('header', 'card-h'); head.append(el('h3', '', b.title)); s.append(head);
+      for (const r of arr(b.rows)) {
+        const row = el('div', 'setting-row'), val = el('div', 'row-value' + (r.tone && r.tone !== 'neutral' ? ' t-' + tone(r.tone) : '')), act = el('div', 'row-action');
+        val.append(String(r.value)); if (r.note) val.append(el('p', 'meta', r.note));
+        if (r.button) { const b2 = rowButton({label: r.button.label, action: r.button.action}); if (b2) act.append(b2); }
+        row.append(el('div', 'row-label', r.label), val, act); s.append(row);
+      }
+      return s;
+    },
+    radio(b) {
+      const s = el('section', 'blk blk-radio'); s.setAttribute('aria-label', String(b.title));
+      const head = el('header', 'card-h'); head.append(el('h3', '', b.title)); s.append(head);
+      const box = el('div', 'sync-options'); box.setAttribute('role', 'radiogroup'); box.setAttribute('aria-label', String(b.title));
+      const name = 'radio-' + String(b.title).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30);
+      for (const o of arr(b.options)) {
+        const label = el('label'), input = el('input'); input.type = 'radio'; input.name = name; input.checked = o.selected === true; input.dataset.selected = o.selected === true ? 'true' : 'false';
+        const a = o.action || {}, args = a.args || {};
+        if (a.op === 'addon.act' && VERB.test(String(args.verb)) && /^[a-z][a-z0-9-]{0,20}$/.test(String(args.target))) { input.dataset.radioVerb = String(args.verb); input.dataset.radioTarget = String(args.target); }
+        else if (typeof o.link === 'string' && APP.test(o.link)) input.dataset.radioGo = o.link.slice(4);
+        else input.disabled = true;
+        label.append(input, String(o.label)); box.append(label);
+      }
+      s.append(box);
       return s;
     },
     calendar(b) {
-      const s = el('section', 'blk panel strip-panel'), strip = el('ol', 'strip');
+      const s = el('section', 'blk blk-above'), strip = el('ol', 'strip'), head = blkHead(b);
+      if (head) s.append(head);
+      const box = el('div', 'blk-card card strip-panel');
       const today = new Date().toDateString();
       for (const day of arr(b.days)) {
         const d = parseDate(day.date); if (!d) continue;
@@ -197,11 +279,11 @@ const OrchBlocks = (() => {
         }
         strip.append(li);
       }
-      s.append(strip);
+      box.append(strip); s.append(box);
       return s;
     },
     timeline(b) {
-      const s = el('section', 'blk'); if (b.title) s.append(el('h2', 'blk-title', b.title));
+      const s = el('section', 'blk'), head = blkHead(b); if (head) s.append(head);
       const ol = el('ol', 'blk-timeline');
       for (const it of arr(b.items)) {
         const d = parseDate(it.at);
@@ -213,19 +295,19 @@ const OrchBlocks = (() => {
       return s;
     },
     chips(b) {
-      const s = el('section', 'blk'); if (b.title) s.append(el('h2', 'blk-title', b.title));
+      const s = el('section', 'blk'), head = blkHead(b); if (head) s.append(head);
       const c = el('div', 'chips'); c.append(...arr(b.items).map(chip)); s.append(c);
       return s;
     },
     table(b) {
-      const s = el('section', 'blk'); if (b.title) s.append(el('h2', 'blk-title', b.title));
+      const s = el('section', 'blk'), head = blkHead(b); if (head) s.append(head);
       const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table'), cols = arr(b.columns);
       const hr = el('tr');
       const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
       for (const c of cols) { const th = el('th', c.type === 'number' || c.type === 'duration' ? 'num' : '', c.label); th.scope = 'col'; hr.append(th); }
       if (hasActions) { const th = el('th', '', 'Actions'); th.scope = 'col'; hr.append(th); }
       if (hasToggle) { const th = el('th', '', 'On'); th.scope = 'col'; hr.append(th); }
-      const head = el('thead'); head.append(hr); t.append(head);
+      const thead = el('thead'); thead.append(hr); t.append(thead);
       const tb = el('tbody');
       for (const r of arr(b.rows)) {
         const tr = el('tr');
@@ -239,11 +321,7 @@ const OrchBlocks = (() => {
         });
         if (hasActions) {
           const td = el('td'), box = el('div', 'row');
-          for (const a of arr(r.actions)) {
-            const btn = el('button', 'btn outline sm' + (a.tone === 'bad' ? ' danger' : ''), a.label); btn.type = 'button';
-            if (a.confirm) btn.dataset.confirm = String(a.confirm);
-            if (actionAttrs(btn, a.action, a.label)) box.append(btn);
-          }
+          for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) box.append(btn); }
           td.append(box); tr.append(td);
         }
         if (hasToggle) { const td = el('td'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }
@@ -259,16 +337,25 @@ const OrchBlocks = (() => {
   function render(blocks, options) {
     opts = options || {};
     const root = document.createDocumentFragment();
-    let stats = null;
+    let stats = null, pair = null, settings = null;
     for (const b of arr(blocks)) {
       const f = b && Object.prototype.hasOwnProperty.call(draw, b.type) ? draw[b.type] : null;
       if (!f) continue;
       if (b.type === 'stat') { if (!stats) { stats = el('div', 'stats'); root.append(stats); } stats.append(f(b)); continue; }
       stats = null;
-      root.append(f(b));
+      const node = f(b);
+      if (b.type === 'radio' && settings) { settings.append(...node.childNodes); continue; }   // a choice sits in the card above it
+      settings = b.type === 'settings' ? node : null;
+      if (b.type === 'list' && b.span === 'half') {   // two half lists side by side
+        if (!pair || pair.childNodes.length >= 2) { pair = el('div', 'blk-pair'); root.append(pair); }
+        pair.append(node); continue;
+      }
+      pair = null;
+      root.append(node);
     }
     return root;
   }
-  return {render, duration};
+  const appHash = to => typeof to === 'string' && APP.test(to) ? '#' + to.slice(4) : null;
+  return {render, duration, appHash};
 })();
 if (typeof module !== 'undefined') module.exports = OrchBlocks;

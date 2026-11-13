@@ -314,12 +314,7 @@ def _schedules(
                     },
                     "actions": [
                         {"label": "Run now", "action": _act("run", t["id"])},
-                        {
-                            "label": "Delete",
-                            "tone": "bad",
-                            "confirm": "Stop and remove this schedule? Its tickets stay.",
-                            "action": _act("delete", t["id"]),
-                        },
+                        {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
                     ],
                 },
             )
@@ -402,7 +397,6 @@ def build(root: Path, now: datetime | None = None) -> dict:
         blocks.append(
             {
                 "type": "table",
-                "title": "Schedules",
                 "columns": [
                     {"key": "schedule", "label": "Schedule", "type": "text"},
                     {"key": "repeats", "label": "Repeats", "type": "text"},
@@ -423,31 +417,33 @@ def build(root: Path, now: datetime | None = None) -> dict:
                     "items": _day_items(tickets, now, start, start + timedelta(days=1), n == 0),
                 }
             )
-        blocks.append({"type": "calendar", "days": days})
+        first, last = local_now.date(), (local_now + timedelta(days=6)).date()
+        span = (
+            f"{first.day}\u2013{last.day} {last:%B}"
+            if first.month == last.month
+            else f"{first.day} {first:%B} \u2013 {last.day} {last:%B}"
+        )
+        blocks.append(
+            {"type": "calendar", "title": "Coming up", "meta": f"{span} \u00b7 Workspace time", "days": days}
+        )
     else:
         blocks.append(
             {
                 "type": "list",
-                "title": "No schedules yet",
-                "items": [
-                    {
-                        "title": "Repeat any ticket on a plan you choose",
-                        "subtitle": "Your upcoming work and results will appear here.",
-                    }
-                ],
+                "title": "Schedules",
+                "items": [],
+                "empty": {
+                    "title": "No schedules yet",
+                    "text": "Repeat any ticket on a plan you choose. Your upcoming work and results will appear here.",
+                    "mark": "repeat",
+                },
             }
         )
 
     ls = listen.read(root) if pid else {}
     sources = _sources(tickets, ls, bool(pid))
-    blocks.append(
-        {
-            "type": "list",
-            "title": "Incoming work",
-            "items": sources[:20],
-            "more": max(0, len(sources) - 20),
-        }
-    )
+    # the first row is the phone and workspaces inbox: with nothing arrived it is just the footnote below
+    waiting_hooks = sources if (ls.get("recent") or []) else sources[1:]
     warn = needs.rows(root, now)
     if warn:
         blocks.append(
@@ -487,28 +483,63 @@ def build(root: Path, now: datetime | None = None) -> dict:
         if r["ticket"] in by_id:
             row["link"] = r["ticket"]
         recent.append(row)
-    if recent:
-        blocks.append({"type": "list", "title": "Recent runs", "items": recent})
-    elif sched_rows:
+    if waiting_hooks:
+        blocks.append(
+            {
+                "type": "list",
+                "title": "Incoming work",
+                "items": waiting_hooks[:20],
+                "more": max(0, len(waiting_hooks) - 20),
+            }
+        )
+    if recent or sched_rows:
+        nxt_row = sched_rows[0] if sched_rows else None
+        soon = None
+        if nxt_row:
+            tid = nxt_row["link"]
+            t = by_id.get(tid)
+            here = local_next(_repeats(t, True), _tz(t), now) if t and _repeats(t, True) else None
+            soon = f"{_name(t)} is scheduled for {here[0]:%A}. " if here else None
         blocks.append(
             {
                 "type": "list",
                 "title": "Recent runs",
-                "items": [
-                    {
-                        "title": "Nothing has run yet",
-                        "subtitle": "Your schedules will show their results here.",
-                    }
-                ],
+                "meta": "Latest activity",
+                "above": True,
+                "items": recent,
+                "empty": {
+                    "title": "Nothing has run yet",
+                    "text": (soon or "") + "You can also run it now.",
+                    "mark": "repeat",
+                },
             }
         )
+    state = (
+        "Listening"
+        if ls.get("listening")
+        else clean(ls.get("note") or ("Not listening" if pid else "Automation is stopped"), 80)
+    )
+    arrived = (ls.get("recent") or [None])[-1] if ls.get("recent") else None
+    blocks.append(
+        {
+            "type": "footnote",
+            "text": clean(
+                "Incoming from your phone and other workspaces \u00b7 "
+                + (state if not arrived else f"{state}, last message {_arrival(arrived)['subtitle']}"),
+                200,
+            ),
+            "link": {"label": "Manage incoming work", "to": "app:addon/relay"},
+        }
+    )
 
     today = now.strftime("%Y-%m-%d")
     ran = sum(r["at"].startswith(today) for r in runs)
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
     if pid:
         nxt = events[0][0] if events else None
-        line = "Running." + (f" Next run {_in(nxt - now)}." if nxt else " Nothing planned.")
+        line = "On." + (
+            f" Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}." if nxt else " Nothing planned."
+        )
         if ran >= 5:
             line += f" Ran {ran} times today."
         view.update(notice=line, notice_tone="good")

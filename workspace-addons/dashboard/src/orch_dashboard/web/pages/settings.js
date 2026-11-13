@@ -650,14 +650,30 @@ function pageFrame(r) {
   return fragment(frame);
 }
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
+const addonTitle = a => a?.dashboard?.title || addonLabel(a);
+// The add-on's own page heading (manifest `title`/`subtitle`) with what its view puts at the right: a status pill, a
+// quiet link and/or one primary button (view `header`). Redrawn when the view arrives.
+function addonHeaderNodes(id) {
+  const header = addonViews[id]?.view?.header;
+  if (!header || snapshot) return [];
+  const out = [];
+  if (header.status) out.push(h('span', {className:'badge ' + (header.status.tone === 'good' ? 'done' : header.status.tone && header.status.tone !== 'neutral' ? 'paused' : ''), role:'status'}, (header.status.tone === 'good' ? '● ' : '') + clean(header.status.label)));
+  const to = header.link ? OrchBlocks.appHash(header.link.to) : null;
+  if (to) out.push(h('a', {className:'btn ghost sm', href:to}, clean(header.link.label)));
+  const op = header.button?.action?.op;
+  if (op === 'link.share') out.push(h('button', {type:'button', className:'btn primary sm', 'data-native':'link-share'}, clean(header.button.label)));
+  else if (op === 'addon.refresh') out.push(h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, clean(header.button.label)));
+  return out;
+}
 function addonTab(id) {
   // The add-on that repeats tickets is the Schedules page: its main button sits in the heading.
+  const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
   if (panelOf(id) === 'repeats') {
     const add = snapshot ? null : h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ New schedule');
     if (add) add.onclick = () => repeatsDialog(null, id);
-    return fragment(heading('Schedules', 'Repeat work on a plan you choose.', {actions:add}), addonHost(id));
+    return fragment(heading('Schedules', 'Repeat work on a plan you choose.', {actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
   }
-  return fragment(heading(addonLabel(addons().find(a => a.name === id))), addonHost(id));
+  return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {actions:slot}), addonHost(id));
 }
 // The add-on whose blocks view is on screen: its own tab.
 function shownAddon() {
@@ -676,7 +692,7 @@ function addonBody(a, res) {
   if (!res) return fragment(skeletonFor('section'));
   const retry = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, 'Try again');
   if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'No answer.', ' Nothing here was changed.'), retry));
-  return fragment(h('p', {className:'meta'}, 'As of ', time(res.as_of)),
+  return fragment(res.state === 'stale' ? h('p', {className:'meta'}, 'As of ', time(res.as_of)) : null,
     res.state === 'stale' ? h('div', {className:'banner attn', role:'status'}, h('p', {className:'grow'}, 'Not up to date. Showing the last answer from ', time(res.as_of), '.', res.message ? ' ' + clean(res.message) + ' Newer items may be missing.' : ''), retry) : null,
     addonNotice(res.view), h('div', {id:'addon-blocks'}));
 }
@@ -687,8 +703,9 @@ function addonNotice(view) {
   // "Running. Next run in 2 days." -> a small state badge and the rest of the line
   const split = view.notice_tone === 'good' && /^([^.]{1,24})\. (.+)$/.exec(String(view.notice));
   if (split) return h('p', {className:'status-line'}, h('span', {className:'badge done'}, '● ' + clean(split[1])), h('span', {}, clean(split[2])));
-  if (snapshot || b?.action?.op !== 'addon.start') return h('p', {className:tone}, clean(view.notice));
-  return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, clean(b.label)));
+  const op = b?.action?.op;
+  if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return h('p', {className:tone}, clean(view.notice));
+  return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label)));
 }
 function paintAddon(id) {
   const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);
@@ -699,7 +716,7 @@ function paintAddon(id) {
   if (blocks) {
     blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
     if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
-    blocks.querySelectorAll('.blk').forEach(n => n.classList.add('card'));
+    blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
     blocks.querySelectorAll('svg').forEach(n => {
       n.replaceWith(iconEl('external'));
     });
@@ -707,8 +724,9 @@ function paintAddon(id) {
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
   }
-  if (!snapshot && panelOf(id) === 'links' && sharedLinks !== null) template.append(sharedLinksCard());
   reconcile(host, template);
+  const slot = document.getElementById('addon-header');
+  if (slot) { slot.replaceChildren(...addonHeaderNodes(id)); bindAddonControls(slot); }
   bindAddonControls(host);
   host.querySelectorAll('[data-action="retry-addon"]').forEach(n => { n.disabled = false; });
   window.scrollTo(...scroll);
@@ -757,6 +775,18 @@ async function addonAct(control) {
   d.append(actions);
   window.orch.open(d);
 }
+async function addonRadio(input) {
+  const id = shownAddon();
+  if (snapshot || !id) return;
+  if (input.dataset.radioGo) { location.hash = '#' + input.dataset.radioGo; return; }
+  if (locks.has('addon-act')) return;
+  const group = [...input.closest('.sync-options').querySelectorAll('input')];
+  locks.add('addon-act'); group.forEach(n => { n.disabled = true; });
+  const result = await act('addon.act', {addon:id, verb:input.dataset.radioVerb, target:input.dataset.radioTarget});
+  locks.delete('addon-act');
+  window.orch.toast(result.ok ? 'Saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+  await loadAddon(id);
+}
 // Workspace messages are composed in their persistent Chat thread.
 function messageSend(control) {
   if (snapshot) return;
@@ -796,14 +826,27 @@ function repeatPlan(c) {
   if (n === 1) return {phrase:'daily ' + at, summary:'Runs every day at ' + at, hint:''};
   return {phrase:mm + ' ' + hh + ' */' + n + ' * *', summary:'Runs every ' + n + ' days at ' + at, hint:'Counted from the 1st of each month.'};
 }
+// The reverse of repeatPlan for the plans it writes: a saved 5-field cron -> the dialog's choices (null when it is some other plan).
+function cronToChoice(cron) {
+  const f = String(cron || '').trim().split(/\s+/);
+  if (f.length !== 5 || !/^\d+$/.test(f[0]) || !/^\d+$/.test(f[1]) || f[3] !== '*') return null;
+  const time = String(f[1]).padStart(2, '0') + ':' + String(f[0]).padStart(2, '0'), base = {freq:'weekly', days:[1], monthday:1, every:2, time};
+  if (f[2] === '*' && f[4] === '*') return {...base, freq:'daily'};
+  if (f[2] === '*' && /^[0-6](,[0-6])*$/.test(f[4])) return {...base, freq:'weekly', days:f[4].split(',').map(Number)};
+  if (/^\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'monthly', monthday:Math.min(28, Number(f[2]))};
+  if (/^\*\/\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'custom', every:Number(f[2].slice(2))};
+  return null;
+}
 const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];
 // The ticket is chosen in the window, or fixed when it is opened from a ticket's menu (`only`).
 function repeatsDialog(only = null, addonName = null) {
   if (snapshot) return;
-  const {d, actions} = dialog('New schedule', 'dialog repeat-dialog');
+  const saved = only ? tickets().find(t => t.id === only)?.ext?.[addonName || repeatsAddon()] : null;
+  const had = saved?.recurring === true ? cronToChoice(saved.cron) : null;
+  const {d, actions} = dialog(had ? 'Edit schedule' : 'New schedule', 'dialog repeat-dialog');
   const ticket = h('select', {className:'input', name:'ticket', id:'repeat-ticket'});
   tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
-  const choice = {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00'};
+  const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00'};
   const summary = h('p', {className:'repeat-summary', role:'status'}), hint = h('span', {className:'meta'});
   const rowsHost = h('div', {className:'schedule-fields'});
   const row = (label, ...kids) => h('div', {className:'schedule-row'}, h('span', {}, label), ...kids);
@@ -869,7 +912,18 @@ function repeatsDialog(only = null, addonName = null) {
     if (route().kind === 'addon') await loadAddon(route().id);
   });
   draw();
-  actions.append(copy, save); d.append(fields, actions); window.orch.open(d);
+  // An existing schedule: Save changes, or remove it (its tickets stay); a new one may also copy the ticket.
+  const remove = button('Delete schedule', 'outline danger', async () => {
+    if (remove.disabled) return;
+    remove.disabled = true;
+    const result = await act('addon.act', {addon:addonName || route().id, verb:'delete', target:only});
+    window.orch.toast(result.ok ? 'Schedule removed. Its tickets stay.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    remove.disabled = false;
+    if (result.ok) await window.orch.close(d);
+    if (route().kind === 'addon') await loadAddon(route().id);
+  });
+  if (had) actions.append(remove, save); else actions.append(copy, save);
+  d.append(fields, actions); window.orch.open(d);
 }
 let sharedLinks = null, sharedLinksDown = false;
 async function loadSharedLinks() {
@@ -881,27 +935,9 @@ async function loadSharedLinks() {
     sharedLinksDown = data.unreachable === true;
   } catch (_) { sharedLinks = null; sharedLinksDown = false; }
 }
-// Compact rows, one line per file: name, expiry shown once, then Copy link / Extend / Stop sharing.
-function linkExpiry(link) {
-  const expiry = link.expires_at, date = expiry ? new Date(typeof expiry === 'number' ? expiry * 1000 : expiry) : null;
-  const expired = link.expired === true || (date && date.getTime() <= Date.now());
-  const text = date ? (expired ? 'Expired ' : 'Valid until ') + (Number.isNaN(date.getTime()) ? String(expiry) : date.toLocaleDateString()) : 'No end date';
-  return {expired, text};
-}
-function sharedLinksCard() {
-  return h('section', {className:'card pad stack addon-native', 'data-key':'shared-links'}, h('h2', {}, 'Links'),
-    sharedLinksDown ? h('p', {className:'meta'}, "Couldn't reach the sharing server; try again in a moment.") : sharedLinks.length ? sharedLinks.map(link => {
-      const {expired, text} = linkExpiry(link);
-      const control = (verb, label) => h('button', {type:'button', className:'btn outline sm', 'data-native':verb, 'data-link-id':link.id,
-        disabled:verb === 'link-copy' && !link.copy, title:verb === 'link-copy' && !link.copy ? 'This link is not available to copy.' : null}, label);
-      const meta = [text, link.size != null ? (typeof link.size === 'number' ? link.size.toLocaleString() + ' bytes' : link.size) : null].filter(Boolean).join(' · ');
-      return h('article', {className:'shared-link link-row', 'data-key':'shared-link-' + link.id},
-        h('div', {className:'link-main'}, settingsText('h3', {}, link.name), settingsText('span', {className:'meta' + (expired ? ' bad' : '')}, meta)),
-        h('div', {className:'actions'}, control('link-copy', 'Copy link'), control('link-extend', 'Extend'), control('link-stop', 'Stop sharing')));
-    }) : h('p', {className:'meta'}, 'No shared links yet.'));
-}
 async function sharedLinkAction(control) {
   if (snapshot || control.disabled) return;
+  if (control.dataset.native === 'link-share') { shareDialog(); return; }
   const link = sharedLinks?.find(link => String(link.id) === control.dataset.linkId);
   if (!link) return;
   if (control.dataset.native === 'link-copy') {
@@ -916,7 +952,7 @@ async function sharedLinkAction(control) {
     const result = stop ? await act('link.stop', {id:link.id}) : await act('link.extend', {id:link.id, days:7});
     window.orch.toast(result.ok ? (stop ? 'Sharing stopped.' : 'Link extended.') : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     await loadSharedLinks();
-    paintAddon(shownAddon());
+    await loadAddon(shownAddon());
     control.disabled = false;
   };
   if (stop) settingsConfirm('Stop sharing ' + link.name + '?', 'The link stops working.', '', 'Stop sharing', send);

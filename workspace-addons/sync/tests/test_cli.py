@@ -350,7 +350,20 @@ def test_view_matches_the_addon_view_contract(root, capsys):
     assert run(root, "view") == 0
     off = json.loads(capsys.readouterr().out)
     assert not list(check.iter_errors(off))
-    assert off["notice"] == "Sync is off"
+    assert "notice" not in off  # off is the saved setting, not a problem
+    settings, radio = off["blocks"][:2]
+    assert settings["type"] == "settings" and settings["rows"][0] == {
+        "label": "Current setting",
+        "value": "Off",
+        "note": "Tickets and their files can be copied. Secrets and private files are never included.",
+    }
+    assert [(o["label"], o["selected"]) for o in radio["options"]] == [
+        ("Off", True),
+        ("On this computer only", False),
+        ("Also on another computer or server", False),
+    ]
+    assert radio["options"][2]["link"] == "app:settings" and "action" not in radio["options"][2]
+    assert off["header"]["link"]["to"] == "app:settings"
     assert run(root, "set", "--mode", "local") == 0
     (root / ".orch/run/sync/state.json").write_text(
         json.dumps(
@@ -364,6 +377,33 @@ def test_view_matches_the_addon_view_contract(root, capsys):
     assert run(root, "view") == 0
     view = json.loads(capsys.readouterr().out)
     assert not list(check.iter_errors(view))
+    assert next(b for b in view["blocks"] if b["type"] == "radio")["options"][1]["selected"] is True
     rows = next(b for b in view["blocks"] if b["type"] == "list")
     assert rows["title"].endswith("· 1")
     assert "t_abc123" in rows["items"][0]["title"]
+
+
+def test_view_keeps_the_saved_setting_when_the_status_cannot_be_read(root, capsys, monkeypatch):
+    from orch_sync import act as sync_act
+
+    assert run(root, "set", "--mode", "local") == 0
+    capsys.readouterr()
+
+    def boom(*a, **k):
+        raise OSError("nope")
+
+    monkeypatch.setattr(sync_act, "status", boom)
+    assert run(root, "view") == 0
+    view = json.loads(capsys.readouterr().out)
+    schema = json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts/addon-view.schema.json").read_text()
+    )
+    assert not list(
+        jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).iter_errors(view)
+    )
+    assert view["blocks"][0]["rows"][0]["value"] == "On this computer"
+    assert (
+        view["notice"].startswith("Can\u2019t read sync status")
+        and "Nothing here was changed" in view["notice"]
+    )
+    assert view["button"] == {"label": "Try again", "action": {"op": "addon.refresh"}}

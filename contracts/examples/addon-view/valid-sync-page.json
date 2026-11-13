@@ -1,0 +1,13 @@
+{
+  "schema": "orch.addon-view/1",
+  "generated_at": "2026-11-13T10:00:00Z",
+  "header": {"link": {"label": "General settings", "to": "app:settings"}},
+  "blocks": [
+    {"type": "settings", "title": "Keep a copy of my tickets", "rows": [{"label": "Current setting", "value": "Off", "note": "Tickets and their files can be copied. Secrets and private files are never included."}]},
+    {"type": "radio", "title": "Where to keep a copy", "options": [
+      {"label": "Off", "selected": true, "action": {"op": "addon.act", "args": {"verb": "set", "target": "off"}}},
+      {"label": "On this computer only", "selected": false, "action": {"op": "addon.act", "args": {"verb": "set", "target": "local"}}},
+      {"label": "Also on another computer or server", "selected": false, "link": "app:settings"}
+    ]}
+  ]
+}
