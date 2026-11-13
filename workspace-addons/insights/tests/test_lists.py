@@ -364,4 +364,4 @@ def test_frontend_lists_text_only_and_read_only():
     # Read-only slice: no Remove / Allow actions (signed human actions come later).
     assert not re.search(r"\b(?:Remove|Allow)\b", js)
     css = PACKAGE.joinpath("web", "insights.css").read_text()
-    assert "position: fixed" in css and "bottom: 0" in css
+    assert "max-width:600px" in css  # the phone layout stays

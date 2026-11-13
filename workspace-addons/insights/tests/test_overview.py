@@ -371,6 +371,11 @@ def test_assets_prefix_and_nonce(server, monkeypatch):
         "/kit/tokens.css",
         "/kit/components.css",
         "/kit/icons.js",
+        "/kit/motion.css",
+        "/kit/interaction.css",
+        "/kit/overlay.js",
+        "/kit/select.js",
+        "/kit/components.js",
     ):
         assert request(server, path)[0] == 200
     nonce, challenge = "a" * 32, "b" * 32
@@ -392,7 +397,7 @@ def test_frontend_text_only_and_refresh():
     assert "textContent" in js and "createElement" in js
     assert "setInterval(refresh, 30000)" in js and "document.hidden" in js
     assert "row.uses === null" in js
-    assert "Nothing recorded yet. Counts appear after the first helper run." in js
+    assert "Counts appear after the first helper run." in js
     assert "dataset.prefix" in js
     for word in ("MCP", "NetBird", "VPN"):
         assert word not in js
