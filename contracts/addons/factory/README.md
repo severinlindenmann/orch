@@ -78,3 +78,26 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 Measured active time (agent run time on the order and its crew; waiting for the owner never counts) against
 `active_min_cap`; `api_usd_target` is shown as a target, not a cap. At 80 % the manager asks with a change proposal ("+1 h"
 / narrow / stop); at 100 % `crew start` refuses until the owner answers.
+
+## Page (phase 2a, read only)
+The watcher process also serves the Factory page on `127.0.0.1:<port>` (`orch factory status --json` gives `url`;
+manifest `[page] path = "/"`). The dashboard embeds it as `#addon/factory/<path>` through its `/addon/factory/` proxy
+(`X-Forwarded-Prefix`), same pattern and fences as Insights: Host/Origin checks, GET only, no human key, CSP
+`default-src 'self'`, kit CSS/JS from `orch_ui` (fallback: the dashboard's copy). Decisions are never made on this page:
+every decision button is a link `target="_top"` to the dashboard ticket page of the order (`/#ticket/<order>`), where
+the native question card asks for the person's proof.
+
+| GET | Answer (JSON) |
+|---|---|
+| `/api/home` | `{"generated_at", "orders": [order summary], "autopilot": {"on", "until", "decided_today"} \| null, "watcher": true}` |
+| `/api/order/<id>` | order summary + `proposal` (frozen data of the started or newest proposal), `drafts` `[{"v", "at"}]`, `crew` `[{"ticket", "title", "role", "agent", "status"}]`, `changes` `[{"n", "title", "adds_min", "state": "open"\|"accepted"\|"edit"\|"later"}]`, `tiny` `[{"what", "minutes"}]`, `stops` `[{"n", "stage", "data", "state", "answer", "by"}]`, `activity` `[{"at", "text"}]` (Factory lines of the order history) |
+| `/api/order/<id>/draft/<v>` | `{"v", "text"}` (markdown as plain text; the page renders it as text) |
+| `/api/order/<id>/file/<name>` | an image of a stop round (`png`, `jpg`, `webp`, `gif` only, from `stops/<id>/`; no other path) |
+| `/api/autopilot` | `{"grants": [{"order", "until", "may", "limits"}], "decisions": [{"order", "q", "answer", "why", "at"}]}` |
+
+Order summary: `{"id", "title", "kind": "run"\|"autopilot", "phase": "draft"\|"proposed"\|"started"\|"edit"\|"parked"\|"shipped"\|"cancelled", "stage", "line": [{"stage", "stop", "state"}], "budget": {"used", "cap", "warn"}, "eta", "due", "open": {"q", "kind", "text", "options"} \| null, "owner_min"}` — every field derived through `flow.derive` (never `ext.factory`). `line[].label` comes from the frozen proposal; `open.data` carries the frozen stop/change data for stop and change questions. `phase` may also be `broken` (the add-on refused the order's files as tampered; the summary then has `problem`).
+Also: `/api/home` `watcher` is `true` only while a verified watcher runs (else `false`); grants carry `live`; a draft answer
+may carry `truncated: true` (over 256 KB); any answer may carry `stale: true` (a slow build gave the last good answer); with no
+earlier answer a slow or failed build is `503 {"error", "stale": true}`.
+Page routes (hash inside the page): `#/` home · `#/order/<id>` · `#/order/<id>/proposal` · `#/order/<id>/stop/<n>` ·
+`#/order/<id>/draft/<v>` · `#/autopilot`.

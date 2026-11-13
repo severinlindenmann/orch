@@ -97,15 +97,12 @@ def stop_options(s):
 
 
 def stop_text(s, n):
-    items = []
-    for i in s["items"]:
-        item = f"{clean(i['title'])} [{i['tag']}"
-        if i.get("recommend"):
-            item += f", suggested: {clean(i['recommend'], 40)}"
-        for key in ("before", "after"):
-            if i.get(key):
-                item += f", {key}: {clean(i[key], 80)}"
-        items.append(item + "]")
+    # no image names (owners read this line); the agent's suggestion stays on routine items
+    items = [
+        f"{clean(i['title'])} ({i['tag']}"
+        + (f", suggested: {clean(i['recommend'], 40)})" if i.get("recommend") else ")")
+        for i in s["items"]
+    ]
     segments = [f"Stop at {clean(s['stage'], 40)}. Decide", "; ".join(items)]
     segments[0] += ": " + segments.pop(1)
     for label, key in (

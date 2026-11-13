@@ -1,0 +1,61 @@
+/* Factory composition; dashboard owns the surrounding shell. */
+.factory-page{max-width:1280px;gap:24px}
+#factory-view,.f-section,.f-card,.f-loading{display:grid;gap:16px}
+#factory-view{gap:24px}
+.f-heading{display:flex;align-items:start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.f-heading>div{display:grid;gap:8px}
+.f-card{padding:16px;align-content:start}
+.f-card h2{font-size:16px;line-height:24px}
+.f-card p{color:var(--text-muted)}
+.f-section>h2{font-size:14px;line-height:20px}
+.f-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:24px;align-items:start}
+.f-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.f-order{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.72fr);gap:24px;align-items:start}
+.f-autopilot{border-left:2px solid var(--brand)}
+.f-attention{border-left:2px solid var(--warning)}
+.f-note{padding:12px 16px;background:var(--brand-soft);border-radius:8px;color:var(--text-muted)}
+.f-banner{padding:12px 16px;border:1px solid var(--warning);border-radius:8px;background:var(--warning-soft)}
+.f-stage{display:flex;gap:5px;list-style:none;margin:0;padding:0;font-size:12px;color:var(--text-faint);flex-wrap:wrap}
+.f-stage li{flex:1 1 70px;border-top:3px solid var(--border);padding-top:8px;overflow-wrap:anywhere}
+.f-stage .complete{border-color:var(--brand);color:var(--brand)}
+.f-stage [aria-current]{border-color:var(--info);color:var(--info)}
+.f-budget{display:grid;gap:8px}
+.f-budget progress{width:100%;height:8px;appearance:none;border:0;border-radius:4px;overflow:hidden;background:var(--surface-3)}
+.f-budget progress::-webkit-progress-bar{background:var(--surface-3)}
+.f-budget progress::-webkit-progress-value{background:var(--warning)}
+.f-budget progress::-moz-progress-bar{background:var(--warning)}
+.f-line{display:grid;list-style:none;padding:0 0 0 4px;margin:0}
+.f-line li{padding:10px 0 10px 22px;border-left:1px solid var(--border);position:relative}
+.f-line li:before{content:'';width:7px;height:7px;background:var(--text-faint);border-radius:50%;position:absolute;left:-4px;top:16px}
+.f-line li.stop:before{background:var(--warning)}
+.f-line small{display:block;color:var(--text-faint);margin-top:4px}
+.f-list{padding-left:20px;margin:0;display:grid;gap:8px}
+.f-details{border-top:1px solid var(--border);padding-top:12px}
+.f-details>summary{margin-bottom:12px;color:var(--text-muted)}
+.f-record{padding:12px 0;border-bottom:1px solid var(--border);display:grid;gap:6px}
+.f-record:last-child{border-bottom:0}
+.f-timeline{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.f-timeline li{border-left:2px solid var(--border);padding-left:16px}
+.f-compare{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.f-compare figure{display:grid;gap:8px;align-content:start;min-width:0}
+.f-compare img{display:block;width:100%;height:300px;object-fit:contain;background:var(--surface-2);border:1px solid var(--border);border-radius:8px}
+.f-range{width:100%;accent-color:var(--brand)}
+.f-draft{padding:24px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.7}
+.f-tabs{display:flex;gap:8px;flex-wrap:wrap}
+.f-tabs [aria-current]{border-color:var(--brand);color:var(--brand)}
+.factory-page .badge{white-space:normal;justify-self:start}
+.factory-page .btn{white-space:normal;max-width:100%;text-align:center}
+.factory-page .meta{overflow-wrap:anywhere}
+.f-loading .skeleton{min-height:110px}
+.f-loading .skeleton.title{min-height:28px}
+@media(max-width:860px){.f-three,.f-order{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:700px){.f-grid,.factory-page .grid-2{grid-template-columns:minmax(0,1fr)}.f-compare{gap:8px}.f-compare img{height:200px}.f-draft{padding:16px}.f-stage{font-size:11px}.f-heading h1{font-size:24px;line-height:32px}}
+.f-card>.f-btn,.f-card>.btn{justify-self:start;width:auto}
+.f-card .actions,.f-section .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.f-card h3{font-size:15px;line-height:22px}
+.f-summary{padding:12px 16px;background:var(--brand-soft);border-radius:8px;color:var(--text)}
+.f-crew{grid-template-columns:minmax(0,1fr)}
+.f-crewlink{color:var(--text);font-weight:500;text-decoration:none;overflow-wrap:anywhere}
+.f-crewlink:hover{text-decoration:underline}
+.f-details .meta{margin-bottom:8px}
+.f-details:not([open])>summary{margin-bottom:0}
