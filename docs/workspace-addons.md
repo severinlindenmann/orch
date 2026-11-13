@@ -79,7 +79,7 @@ Dashboard writes nothing but its runtime files in `.orch/run/dashboard/` (backgr
    Use only the public CLI (`$ORCH_BIN ticket list --json`, `ext set`, `ticket patch --if-revision`, `log`, `wait`), never the ticket files.
 4. Your space: `.orch/addons/<name>/`, ticket key `ext.<name>` (with a `ticket_ext` JSON Schema), config table `[<name>]`.
 5. Dashboard tab: `[dashboard]` label + icon from the fixed set, and `orch <name> view --json` returning
-   `contracts/addon-view.schema.json` blocks (stat, list, calendar, timeline, chips, table). Ticket detail rows: `[[ticket_view]]`.
+   `contracts/addon-view.schema.json` blocks (stat, list, calendar, timeline, chips, table, footnote, settings, radio; page layout fields such as `header`, `meta`, `span`, `compact`, `empty`: see addon-manifest.md, Views). Ticket detail rows: `[[ticket_view]]`.
 6. Skill `skills/orch-<name>/SKILL.md` + `AGENTS-block.md`, short, plain words, same tone as the core skills.
 7. Background process? `background = true` and `start` / `stop` / `status` commands with `--json` (`orch start` / `orch stop` call them); runtime files in `.orch/run/<name>/`; check that you are still active on each pass.
 **Security:** no HTML, CSS or JS reaches the dashboard: only the declared blocks, shown as plain text; links only to tickets or
