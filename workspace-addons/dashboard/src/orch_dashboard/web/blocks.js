@@ -91,7 +91,7 @@ const OrchBlocks = (() => {
     if (a && a.op === 'addon.edit' && TICKET.test(String(args.target))) { node.dataset.addonEdit = String(args.target); return true; }
     // shared-link ops only on the page of the add-on with the `links` panel (opts.links)
     const nat = a && /^link\.(copy|extend|stop)$/.exec(String(a.op));
-    if (nat && opts.links === true && FILE.test(String(args.id))) { node.dataset.native = 'link-' + nat[1]; node.dataset.linkId = String(args.id); return true; }
+    if (nat && opts.links === true && FILE.test(String(args.id))) { node.dataset.native = 'link-' + nat[1]; node.dataset.linkId = String(args.id); node.textContent = LINK_LABEL[a.op]; node.setAttribute('aria-label', LINK_LABEL[a.op]); return true; }   // always orch's words
     const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
     if (!ok) return false;
     node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
@@ -137,6 +137,7 @@ const OrchBlocks = (() => {
     return b;
   }
   function toggleEl(t) {
+    if (t && t.action && /^link\./.test(String(t.action.op))) return null;   // a switch never carries a shared-link op
     const b = el('button', 'switch'); b.type = 'button';
     b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', t.on ? 'true' : 'false'); b.setAttribute('aria-label', String(t.label));
     return actionAttrs(b, t.action, t.label) ? b : null;

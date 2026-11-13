@@ -650,6 +650,8 @@ function pageFrame(r) {
   return fragment(frame);
 }
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
+// Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
+const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };
 const addonTitle = a => a?.dashboard?.title || addonLabel(a);
 // The add-on's own page heading (manifest `title`/`subtitle`) with what its view puts at the right: a status pill, a
 // quiet link and/or one primary button (view `header`). Redrawn when the view arrives.
@@ -661,7 +663,7 @@ function addonHeaderNodes(id) {
   const to = header.link ? OrchBlocks.appHash(header.link.to) : null;
   if (to) out.push(h('a', {className:'btn ghost sm', href:to}, clean(header.link.label)));
   const op = header.button?.action?.op;
-  if (op === 'link.share' && panelOf(id) === 'links') out.push(h('button', {type:'button', className:'btn primary sm', 'data-native':'link-share'}, 'Share a file'));
+  if (op === 'link.share' && isPublish(id)) out.push(h('button', {type:'button', className:'btn primary sm', 'data-native':'link-share'}, 'Share a file'));
   else if (op === 'addon.refresh') out.push(h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, clean(header.button.label)));
   return out;
 }
@@ -714,7 +716,7 @@ function paintAddon(id) {
   const template = addonBody(a, addonViews[id]);
   const blocks = template.querySelector('#addon-blocks');
   if (blocks) {
-    blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:panelOf(id) === 'links', inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
+    blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
     if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
     blocks.querySelectorAll('svg').forEach(n => {
@@ -746,7 +748,7 @@ async function loadAddon(id, manual = false) {
   } catch (_) {
     addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
   } finally { addonBusy.delete(id); }
-  if (panelOf(id) === 'links' && !snapshot) await loadSharedLinks();
+  if (isPublish(id) && !snapshot) await loadSharedLinks();
   if (shownAddon() === id) paintAddon(id);
 }
 function startAddon(id) {

@@ -1069,7 +1069,7 @@ def _sweep_shares(parent: Path, older_than: float = 600.0) -> None:
     now = time.time()
     for d in parent.glob("s-*"):
         try:
-            if d.is_dir() and not d.is_symlink() and now - d.stat().st_mtime > older_than:
+            if d.is_dir() and not runfiles.is_link(d) and now - d.stat().st_mtime > older_than:
                 shutil.rmtree(d, ignore_errors=True)
         except OSError:
             continue

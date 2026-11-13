@@ -23,7 +23,7 @@ def test_settings_navigation_and_cards():
         "'data-action':'settings-addon'",
         "settingsText('p', {className:'meta'}, addon.description)",
         "panelOf(id) === 'repeats'",
-        "panelOf(id) === 'links'",
+        "isPublish(id)",
         "a?.dashboard?.label",
     ):
         assert text in src

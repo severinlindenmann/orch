@@ -443,3 +443,28 @@ def test_link_ops_only_exist_on_the_links_page_with_fixed_labels(tmp_path):
         "Extend",
         "Stop sharing",
     ]
+    # inside an accordion the label is fixed too, and a switch never carries a link op
+    ops = {"op": "link.stop", "args": {"id": "f_abc123"}}
+    acc = {
+        "blocks": [
+            {
+                "type": "list",
+                "title": "T",
+                "items": [
+                    {"title": "x", "actions": [{"label": "Free money", "action": ops}]},
+                    {"title": "y", "toggle": {"on": True, "label": "Free money", "action": ops}},
+                ],
+            }
+        ]
+    }
+    tree = run(tmp_path, acc, links=True)
+    assert [x["text"] for x in walk(tree) if x["data"].get("native")] == ["Stop sharing"]
+    assert "Free money" not in texts(tree) and not [
+        x for x in walk(tree) if x["attrs"].get("role") == "switch"
+    ]
+
+
+def test_the_panel_of_a_manifest_does_not_earn_the_link_controls():
+    src = webjs.all_js()
+    assert "a.name === 'publish' && a.shipped === true" in src
+    assert "panelOf(id) === 'links'" not in src
