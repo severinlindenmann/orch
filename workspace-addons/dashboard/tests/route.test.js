@@ -78,7 +78,7 @@ test('shared words: status, steps and the updated time', () => {
 test('#settings is General; #settings/<tab> opens that tab on the same Settings page', () => {
   assert.deepEqual({...route('#settings', [])}, {kind:'settings', hash:'#settings', tab:'general'});
   for (const tab of ['general', 'agent', 'phone', 'addons']) assert.deepEqual({...route('#settings/' + tab, [])}, {kind:'settings', hash:'#settings', tab});
-  assert.equal(route('#settings/nope', []).kind, 'home');
+  assert.equal(route('#settings/nope', []).kind, 'notfound');  // an unknown tab is an unknown address: Page not found
 });
 test('the phone tab is role=tab and choosing it keeps Settings open at #settings/phone', () => {
   const settingsSrc = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
