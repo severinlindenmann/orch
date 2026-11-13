@@ -72,6 +72,26 @@
   function ticket(id, label = 'Answer in the ticket', primary = true) {
     return validId(id) ? link(label, '/#ticket/' + id, primary) : meta('Ticket reference unavailable.');
   }
+  const validQuestion = q => typeof q === 'string' && /^q[A-Za-z0-9_-]{0,31}$/.test(q);
+  const embedded = () => { try { return window.top !== window; } catch (_) { return true; } };
+  // Inside the dashboard a decision asks it to open its own question card for this order's open question (the page itself
+  // never answers). Outside the dashboard, or with nothing open, it stays a link to the ticket.
+  function decide(order, label = 'Answer', primary = true) {
+    if (!embedded() || !order.open || !validId(order.id) || !validQuestion(order.open.q)) return ticket(order.id, label, primary);
+    const b = node('button', label, primary ? 'btn primary f-btn' : 'btn outline sm f-btn');
+    b.type = 'button';
+    b.addEventListener('click', () => {
+      b.disabled = true;
+      window.parent.postMessage({type: 'orch.question', ticket: order.id, question: order.open.q}, location.origin);
+      setTimeout(() => { b.disabled = false; }, 1500);
+    });
+    return b;
+  }
+  window.addEventListener('message', e => {
+    const d = e.data;
+    if (e.source !== window.parent || e.origin !== location.origin || !d || d.type !== 'orch.question.done' || !validId(d.ticket) || !validQuestion(d.question)) return;
+    render();
+  });
   function orderLink(order, label = 'Open order', suffix = '') {
     return validId(order.id) ? link(label, '#/order/' + order.id + suffix) : meta('Order reference unavailable.');
   }
@@ -91,8 +111,8 @@
     const h1 = node('h1', title); h1.tabIndex = -1;
     return group('f-heading', group('stack', h1, meta(subtitle)), group('actions', ...actions));
   }
-  function answer(id) {
-    return group('stack', group('actions', ticket(id)), meta("You answer on the order's ticket, where orch confirms it's you."));
+  function answer(order) {
+    return group('stack', group('actions', decide(order)), meta(embedded() && order.open ? 'Your answer opens in a card here, where orch confirms it\'s you.' : "You answer on the order's ticket, where orch confirms it's you."));
   }
   function stages(order) {
     const el = node('ol', null, 'f-stage'); el.setAttribute('aria-label', 'Order stages');
@@ -188,7 +208,7 @@
     }, 'No proposals waiting for Start.');
     section(primary, 'Needs you · stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
       const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false), rawDetails(o.open),
-        tail(ticket(o.id, 'Answer in the ticket', true), orderLink(o, 'Review order')));
+        tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
       c.classList.add('f-attention'); return c;
     }, 'No stops waiting for you.');
     section(primary, 'Running', orders.filter(o => o.phase === 'started'), o => o.kind === 'autopilot'
@@ -227,7 +247,7 @@
   function proposal(order) {
     const data = order.proposal;
     view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order)));
-    if (!data) { view.append(card('No frozen proposal yet', p('Your agent is still planning this order.'), answer(order.id))); return; }
+    if (!data) { view.append(card('No frozen proposal yet', p('Your agent is still planning this order.'), answer(order))); return; }
     if (data.kind === 'autopilot') {
       const l = data.limits || {};
       const parts = [];
@@ -237,7 +257,7 @@
       view.append(node('p', parts.join(' · '), 'f-summary'),
         group('grid-2', card('May decide', list(array(data.may_decide).map(x => mayDecide[x] || capital(x))), ...(array(data.examples).length ? [meta('Examples: ' + array(data.examples).join('; '))] : [])),
           card('Always asks you', list(alwaysAsks))),
-        card('Limits & duration', limits(data.limits)), card('Done means', list(data.done_means)), answer(order.id)); return;
+        card('Limits & duration', limits(data.limits)), card('Done means', list(data.done_means)), answer(order)); return;
     }
     const time = data.time || {}, b = data.budget || {};
     view.append(p(data.goal));
@@ -256,7 +276,7 @@
     for (const a of array(data.assumptions)) assumptions.append(group('row', ...(a.uncertain ? [badge('Unsure')] : []), p(a.text)));
     if (!array(data.assumptions).length) assumptions.append(meta('No assumptions recorded.'));
     assumptions.append(meta('Resolve unsure assumptions on the ticket before Start.'));
-    view.append(assumptions, answer(order.id));
+    view.append(assumptions, answer(order));
     const details = node('details', null, 'f-details');
     details.append(node('summary', 'Details · full line, crew, plan & tasks'), group('stack', line(data.line), node('h3','Crew'), crewPlan(data.crew),
       node('h3','Tasks'), list(array(data.tasks).map(t => text(t.title) + ' · ' + text(t.slug) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage) + (array(t.proves).length ? ' · proves: ' + t.proves.map(i => array(data.done_means)[i] || i).join('; ') : ''))),
@@ -290,12 +310,12 @@
     main.append(card('Activity', timeline.children.length ? timeline : meta('No activity recorded.')));
     const aside = group('stack');
     if (order.open) {
-      const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order.id));
+      const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
     }
     if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
     const changes = card('Changes');
-    for (const c of array(order.changes)) changes.append(group('f-record', badge(capital(c.state)), node('h3', c.title), meta('+' + text(c.adds_min) + ' min'), ...(c.state === 'open' ? [group('actions', ticket(order.id))] : [])));
+    for (const c of array(order.changes)) changes.append(group('f-record', badge(capital(c.state)), node('h3', c.title), meta('+' + text(c.adds_min) + ' min'), ...(c.state === 'open' ? [group('actions', decide(order))] : [])));
     if (!array(order.changes).length) changes.append(meta('No changes proposed.'));
     aside.append(changes);
     const stops = card('Stops');
@@ -337,7 +357,7 @@
       c.append(meta('Review images and pins are view-only here. Add feedback on the order ticket.')); view.append(c);
     }
     view.append(group('grid-2', card('Checked', list(data.checked)), card('Not checked', list(data.not_checked))),
-      card('Changed during the run', list(data.changed_during_run)), answer(order.id));
+      card('Changed during the run', list(data.changed_during_run)), answer(stop.state === 'open' ? order : {...order, open: null}));
   }
   function autopilot(data) {
     view.append(heading('Autopilot', 'Bounded permission for your agent. Ship still asks you.'));

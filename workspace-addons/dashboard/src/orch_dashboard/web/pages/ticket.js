@@ -1488,6 +1488,7 @@ function mountQuestion(host, q, context = {}) {
       // Let the shared card finish its send transition before releasing its host.
       setTimeout(async () => {
         window.orch.toast('Answered · ' + who + ' · dashboard', 'ok');
+        context.onAnswered?.();
         if (context.dialog) {
           context.dialog.dataset.resolving = 'true';
           await window.orch.close(context.dialog);
@@ -1545,3 +1546,36 @@ async function openNeed(row, trigger) {
     }
   }
 }
+
+// A shipped add-on page (the Factory) may ask the dashboard to show one open question in its own card. The message only
+// NAMES a ticket and a question; it never carries text, options or an answer, and it never answers anything. The person
+// presses an option in the native card, which sends the answer through the normal proof path.
+const EMBED_TICKET = /^t_[a-z0-9]{6,16}$/, EMBED_QUESTION = /^q[A-Za-z0-9_-]{0,31}$/;
+function embedQuestionRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.question') return null;
+  if (e.origin !== location.origin) return null;
+  const r = route();
+  if (r.kind !== 'page' || !addons().find(a => a.name === r.id)?.shipped) return null;
+  const frame = document.querySelector('iframe.embed[data-key="embed"]');
+  if (!frame || !frame.contentWindow || e.source !== frame.contentWindow) return null;
+  if (typeof data.ticket !== 'string' || typeof data.question !== 'string' || !EMBED_TICKET.test(data.ticket) || !EMBED_QUESTION.test(data.question)) return null;
+  return {ticket:data.ticket, question:data.question, frame};
+}
+function openEmbedQuestion(req) {
+  const t = ticketOf(req.ticket);
+  const q = array(t?.questions).find(x => x.id === req.question);
+  const open = q && q.answer == null && t.id === req.ticket;
+  const {d, actions} = dialog(open ? (clean(t.title) || 'Question') : 'Question', 'dialog', 'needs-you');
+  if (!open) {
+    d.append(el('p', '', 'This question is no longer waiting for you.'), actions);
+    window.orch.open(d);
+    return;
+  }
+  const host = el('div');
+  d.append(host, actions);
+  const done = () => { try { req.frame.contentWindow?.postMessage({type:'orch.question.done', ticket:req.ticket, question:req.question}, location.origin); } catch (_) { /* The page was left. */ } };
+  mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))}, {dialog:d, lock:'needs-you', onAnswered:done});
+  window.orch.open(d);
+}
+addEventListener('message', e => { const req = embedQuestionRequest(e); if (req) openEmbedQuestion(req); });
