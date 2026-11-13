@@ -11,6 +11,8 @@ enum Theme {
     static let text = Color(hex: 0xe8eaed), muted = Color(hex: 0x9aa3ad)
     static let brand = Color(hex: 0x2fc6a3), onBrand = Color(hex: 0x06231c)
     static let online = brand
+    /// This phone's own bubbles (filled, no outline) and the time/ticks on them (>= 4.5:1 on mineFill).
+    static let mineFill = Color(hex: 0x1d5446), mineStamp = Color(hex: 0xbfcccb)
     static let warn = Color(hex: 0xfbbf24), danger = Color(hex: 0xf87171), purple = Color(hex: 0xb392f0)
 }
 

@@ -9,6 +9,9 @@ struct ReceiptView: View {
     /// Sits at the bottom-right inside the bubble next to the text (no own full-width line).
     var inline = false
     var tint: Color = Theme.muted
+    /// "Waiting" beside the clock while no offline banner says why the message has not left yet.
+    var waitingWord = false
+    static func showsWaitingWord(offline: Bool, note: String?) -> Bool { !offline && note == nil }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -18,7 +21,7 @@ struct ReceiptView: View {
                 VStack(alignment: .trailing, spacing: 0) { stamp; recovery }
             }
             if case .queued = receipt, let note {
-                Text(note).foregroundStyle(Theme.muted).accessibilityIdentifier("receipt-wait")
+                Text(note).foregroundStyle(tint).accessibilityIdentifier("receipt-wait")
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -32,6 +35,7 @@ struct ReceiptView: View {
             Group {
                 switch receipt {
                 case .queued:
+                    if waitingWord { Text("Waiting").accessibilityHidden(true) }
                     Image(systemName: "clock").accessibilityLabel("Waiting to send").accessibilityIdentifier("receipt-queued")
                 case .sent:
                     Image(systemName: "checkmark").accessibilityLabel("Sent").accessibilityIdentifier("receipt-sent")

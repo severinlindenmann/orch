@@ -37,9 +37,12 @@ Added Chats Groups, open / sent / read-only group rooms and Done groups. Redrew 
 
 11 Nov: helper wording
 
-## 12 Nov phone UX, batch 3: topic chat
-
-Topic header: plain icons of one size; the subtitle shows the status (Working green, Needs your OK amber, Done grey) or the helper's presence, never the network. Steps row "2 of 5 steps done", hidden for a single step. "N questions" banner only with 2+ open questions. Own bubbles filled, time and ticks inline; photos edge to edge with the time on a dark backing. No "Working" or "Waiting · will send when online" caption (the clock and the banner say it). General: "Today · fresh start ⓘ" separator explains what the helper forgets.
 12 Nov phone UX, batch 1: chats list. Removed the summary strip and its NEW pill; a busy workspace row says "Working…". Pinned Needs your OK shows at most 3 (each with its workspace avatar and name), then "See all (n)" opens the filter. Titles are one line (two at XL text). Unread / Needs your OK filters also apply to groups. "Earlier" link is now a "Finished groups" row with a count. Avatars no longer use the status colours (amber, teal, green). Workspace screen: Chat card in the same margins with one status line; "Done" is a plain disclosure row with a count.
 
 12 Nov phone UX, batch 1 review: an unread reply now shows instead of "Working…" on a workspace row and on the Chat card; the Chat card shows the last message or "X is working…" like the app. "Working…" counts only started topics with status Working. Groups follow the Unread / Needs your OK filters. "Finished groups" shows only when there are finished groups (helper-chat days stay under each chat's "Earlier").
+
+## 12 Nov phone UX, batch 3: topic chat
+
+Topic header: plain icons of one size; the subtitle shows the status (Working green, Needs your OK amber, Done grey) or the helper's presence, never the network. Steps row "2 of 5 steps done", shown from 1 step on ("1 step" / "1 step · done"). "N questions" banner only with 2+ open questions. Own bubbles filled, time and ticks inline; photos edge to edge with the time on a dark backing. No "Working" or "Waiting · will send when online" caption (the clock and the banner say it). General: "Today · fresh start ⓘ" separator explains what the helper forgets.
+
+12 Nov phone UX, batch 3 review: the status reads "Ready for review" and Stopped / Didn't work in red; no status while an open question card says it. "N questions" banner skips stale questions. "Today · fresh start ⓘ" only when earlier days exist. A queued own message shows "Waiting ◷" when there is no offline banner. Own bubbles #1d5446 with stamp #bfcccb (5.3:1). A failed picture retries on a tap instead of opening.

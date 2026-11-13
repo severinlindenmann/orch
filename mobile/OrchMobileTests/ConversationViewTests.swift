@@ -83,7 +83,27 @@ final class ConversationViewTests: XCTestCase {
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Ready for review"), "")
         XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 steps done")
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 1, status: "Working"), "1 step")
-        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 1, status: "Working"), "1 step, done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 1, status: "Working"), "1 step · done")
+    }
+
+    func testFailedPictureTapRetriesInsteadOfOpening() {
+        XCTAssertTrue(BlobImageState.failed.tapRetries)
+        for state in [BlobImageState.loading, .loaded, .unavailable] { XCTAssertFalse(state.tapRetries) }
+    }
+
+    func testQueuedClockSaysWaitingOnlyWithoutBannerOrNote() {
+        XCTAssertTrue(ReceiptView.showsWaitingWord(offline: false, note: nil), "online, not left yet: say Waiting")
+        XCTAssertFalse(ReceiptView.showsWaitingWord(offline: true, note: nil), "the offline banner says it")
+        XCTAssertFalse(ReceiptView.showsWaitingWord(offline: false, note: "Try again later"), "the note says it")
+    }
+
+    func testOwnBubbleStampContrast() {
+        func lum(_ hex: UInt32) -> Double {
+            func c(_ v: UInt32) -> Double { let x = Double(v) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+            return 0.2126 * c(hex >> 16 & 0xff) + 0.7152 * c(hex >> 8 & 0xff) + 0.0722 * c(hex & 0xff)
+        }
+        let ratio = (lum(0xbfcccb) + 0.05) / (lum(0x1d5446) + 0.05)
+        XCTAssertGreaterThanOrEqual(ratio, 4.5, "Theme.mineStamp on Theme.mineFill")
     }
 
     func testStepsRowOnlyWhenItSaysSomething() {

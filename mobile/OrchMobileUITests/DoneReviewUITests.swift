@@ -17,14 +17,15 @@ final class DoneReviewUITests: XCTestCase {
     private func assertReviewStatus(_ app: XCUIApplication, reviewBar: Bool) {
         XCTAssertTrue(app.descendants(matching: .any)["conversation-view"].firstMatch.waitForExistence(timeout: 20))
         let said = app.staticTexts.matching(NSPredicate(format: "label == %@", "Ready for review"))
+        let header = app.descendants(matching: .any)["chat-status"].firstMatch
         if reviewBar {
             XCTAssertTrue(app.descendants(matching: .any)["review-bar"].firstMatch.waitForExistence(timeout: 10))
             XCTAssertFalse(app.descendants(matching: .any)["chat-status"].firstMatch.exists, "the review bar already says it: no header status")
         } else {
-            let status = said.firstMatch
-            XCTAssertTrue(status.waitForExistence(timeout: 10), "header status line")
-            XCTAssertTrue(status.isHittable)
-            XCTAssertTrue(app.descendants(matching: .any)["chat-status"].firstMatch.exists)
+            // The header reads as one VoiceOver item: "Status: Ready for review, <workspace>".
+            XCTAssertTrue(header.waitForExistence(timeout: 10), "header status line")
+            XCTAssertTrue(header.isHittable)
+            XCTAssertTrue(header.label.hasPrefix("Status: Ready for review, "), header.label)
         }
         XCTAssertLessThanOrEqual(said.count, 1, "Ready for review is shown once")
         XCTAssertFalse(app.staticTexts["Done"].exists)

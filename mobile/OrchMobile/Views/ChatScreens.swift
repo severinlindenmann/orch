@@ -60,8 +60,8 @@ enum ConversationRules {
     /// Checklist progress in plain words: "1 step", "2 of 5 steps done". The status has its own line.
     static func summaryText(done: Int, total: Int, status: String, separator: String = " · ", wontDo: Int = 0) -> String {
         guard total > 0 else { return "" }
-        if wontDo > 0 { return "\(done) of \(total) done, \(wontDo) won't do" }
-        if total == 1 { return done >= 1 ? "1 step, done" : "1 step" }
+        if wontDo > 0 { return "\(done) of \(total) steps done, \(wontDo) won't do" }
+        if total == 1 { return done >= 1 ? "1 step\(separator)done" : "1 step" }
         return "\(done) of \(total) steps done"
     }
 
@@ -308,9 +308,11 @@ struct ConversationView: View {
         else if let status = headerStatus {
             HStack(spacing: 4) {
                 Circle().fill(status.tone).frame(width: 7, height: 7)
-                Text(status.label).foregroundStyle(status.tone).lineLimit(1).accessibilityIdentifier("chat-status")
+                Text(status.label).foregroundStyle(status.tone).lineLimit(1).layoutPriority(1)
                 Text("· \(workspaceName)").lineLimit(1).truncationMode(.tail)
             }.themeFont(13).foregroundStyle(Theme.muted)
+                .accessibilityElement(children: .combine).accessibilityLabel("Status: \(status.label), \(workspaceName)")
+                .accessibilityIdentifier("chat-status")
         } else {
             TimelineView(.everyMinute) { context in
                 let presence = model.presence(of: resolved.workspace, now: context.date)
@@ -566,6 +568,8 @@ struct ConversationView: View {
         guard let focus, items.contains(where: { $0.id == focus }) else { return }
         scrolledQuestion = focus
         scroll(proxy, to: items.first { $0.id == focus }?.rowID ?? focus, anchor: .center)
+        // Done: a later return to this chat must not jump back to the question.
+        DispatchQueue.main.async { if model.focusedQuestion == focus { model.focusedQuestion = nil; scrolledQuestion = nil } }
     }
     private func scroll(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
         if reduceMotion { proxy.scrollTo(id, anchor: anchor) }
