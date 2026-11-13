@@ -91,8 +91,12 @@ final class ConversationUITests: XCTestCase {
         let plus = el(app, "composer-attach")
         must(app, plus, "composer-attach")
         plus.tap()
-        for kind in ["camera", "photos", "files", "location"] {
+        // Camera is hidden when the device has none (Simulator); the other three are always offered.
+        for kind in ["photos", "files", "location"] {
             XCTAssertTrue(el(app, "media-\(kind)").waitForExistence(timeout: 5), kind)
+        }
+        if UIDevice.current.userInterfaceIdiom == .phone, el(app, "media-camera").exists {
+            XCTAssertTrue(el(app, "media-camera").isHittable, "a shown Camera tile is usable")
         }
     }
 }

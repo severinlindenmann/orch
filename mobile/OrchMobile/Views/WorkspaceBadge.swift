@@ -17,11 +17,24 @@ struct WorkspaceBadge: View {
     /// Amber means "needs you" and teal/green mean unread, online and actions, so a badge never wears them (P06).
     /// The stored pick stays untouched; only the drawn tone moves to a nearby non-status colour.
     static let statusSwaps = ["amber": "orange", "teal": "cyan", "green": "blue", "lime": "indigo"]
+    private func status(_ lastSeen: String?, now: Date) -> WorkspaceStatus {
+        WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: now))
+    }
+
     static func identityColor(_ token: String) -> String { statusSwaps[token] ?? token }
 
+    /// The dot and its VoiceOver words share one clock, so both turn to "last seen" together after 5 quiet minutes.
     var body: some View {
+        if let lastSeen {
+            TimelineView(.everyMinute) { context in badge(status: status(lastSeen, now: context.date), now: context.date) }
+        } else {
+            badge(status: nil, now: Date())
+        }
+    }
+
+    private func badge(status: WorkspaceStatus?, now: Date) -> some View {
         let s = shown
-        ZStack {
+        return ZStack {
             if let icon = s.icon {
                 Image("look-\(icon)").resizable().renderingMode(.template).scaledToFit()
                     .frame(width: size * (size <= 20 ? 0.75 : 0.52), height: size * (size <= 20 ? 0.75 : 0.52))
@@ -33,15 +46,13 @@ struct WorkspaceBadge: View {
         .frame(width: size, height: size)
         .background(tone.opacity(0.18), in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
         .overlay(alignment: .bottomTrailing) {
-            if let lastSeen {
-                TimelineView(.everyMinute) { context in
-                    Circle().fill(WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: context.date)).isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
-                        .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
-                }
+            if let status {
+                Circle().fill(status.isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
+                    .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Workspace icon")
+        .accessibilityLabel(status.map { "Workspace icon, \($0.dotLabel(now: now))" } ?? "Workspace icon")
         .accessibilityIdentifier(id.map { "workspace-badge-\($0)" } ?? "workspace-badge")
         .accessibilityHidden(id == nil)
     }

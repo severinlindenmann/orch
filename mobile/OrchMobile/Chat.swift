@@ -137,7 +137,7 @@ enum ChatBuilder {
                 let key = msg.key ?? msg.ticket.flatMap { keyOf[$0]?.key }
                 let title = u.title ?? msg.body.text
                 out.append(ChatItem(id: "sys-" + m.id, at: msg.createdAt,
-                                    kind: .system("Ticket created: " + [key, title].compactMap { $0 }.joined(separator: " · "))))
+                                    kind: .system("Topic started: " + [key, title].compactMap { $0 }.joined(separator: " · "))))
             } else if msg.ticket == nil {
                 out.append(ChatItem(id: m.id, at: msg.createdAt, kind: m.fromPhone ? .mine(msg.body.text, queued: false) : .theirs(msg.body.text, label: nil)))
             }

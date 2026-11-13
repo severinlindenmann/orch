@@ -140,6 +140,7 @@ struct TicketChatView: View {
 struct ConversationView: View {
     let id: ConversationID
     @State var historyDay: String? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
     var goToToday: (() -> Void)? = nil
     @AppStorage("workspaceAliasRevision") private var aliasRevision = 0
     @State private var historyShown = false
@@ -224,10 +225,12 @@ struct ConversationView: View {
                 }.chatCircleBackground()
                 ToolbarItem(placement: .principal) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(title).themeFont(16, .semibold).lineLimit(1).truncationMode(.tail).accessibilityIdentifier("chat-title")
-                        presence
+                        Text(title).themeFont(16, .semibold).lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize)).truncationMode(.tail).accessibilityIdentifier("chat-title")
+                        if ChatsRowRules.showsHeaderSubtitle(typeSize.isAccessibilitySize) { presence }
                     }
                     .padding(.vertical, 8)
+                    // The toolbar slot has a fixed height: two title lines fit up to AX2, larger sizes would clip.
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 }
                 if isGeneral && historyDay == nil {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -245,7 +248,7 @@ struct ConversationView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
                         headerIcon("info.circle")
-                    }.buttonStyle(.plain).accessibilityLabel("Chat info").accessibilityIdentifier("chat-info")
+                    }.buttonStyle(.plain).accessibilityLabel(isGeneral ? "Chat info" : "Topic info").accessibilityIdentifier("chat-info")
                 }.chatCircleBackground()
                 }
             }
@@ -534,7 +537,7 @@ struct ConversationView: View {
     }
     @ViewBuilder private var emptyState: some View {
         if topicSummary != nil {
-            Text("Updates and results show up in this chat.").themeFont(13).foregroundStyle(Theme.muted)
+            Text("Updates and results show up in this topic.").themeFont(13).foregroundStyle(Theme.muted)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
         } else {
             VStack(spacing: 12) {

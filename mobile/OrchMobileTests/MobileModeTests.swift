@@ -14,7 +14,7 @@ final class MobileModeTests: XCTestCase {
     }
     func testOnlineShowsTurnOff() {
         let s = MobileModeBannerState.of(ws(on: true, lastSeen: "2026-11-07T14:39:00Z"), now: now, calendar: cal)
-        XCTAssertEqual(s?.text, "Acme PC · Send questions to my phone · on")
+        XCTAssertEqual(s?.text, "You're away from Acme PC · questions come to your phone")
         XCTAssertEqual(s?.canTurnOff, true)
     }
     func testSilentComputerSaysSinceWhen() {
@@ -24,11 +24,11 @@ final class MobileModeTests: XCTestCase {
     }
     func testMutedPhoneSaysMutedBut() {
         let s = MobileModeBannerState.of(ws(on: true, lastSeen: "2026-11-07T14:39:00Z", muted: "forever"), now: now, calendar: cal)
-        XCTAssertEqual(s?.text, "Acme PC · Send questions to my phone · muted")
+        XCTAssertEqual(s?.text, "You're away from Acme PC · questions muted")
     }
     func testMissingMachineFallsBackToWorkspaceName() {
         let s = MobileModeBannerState.of(ws(on: true, machine: nil, lastSeen: "2026-11-07T14:39:00Z"), now: now, calendar: cal)
-        XCTAssertEqual(s?.text, "Acme · Send questions to my phone · on")
+        XCTAssertEqual(s?.text, "You're away from Acme · questions come to your phone")
     }
     func testDecodesTheRelayShape() throws {
         let json = #"{"id":"ws_a","name":"A","description":"","tags":[],"online":true,"last_seen":null,"open_questions":0,"muted_until":null,"mobile_mode":{"on":true,"since":"2026-11-07T14:02:00Z","ends_at":"2026-11-08T02:02:00Z","machine":"Acme PC"}}"#

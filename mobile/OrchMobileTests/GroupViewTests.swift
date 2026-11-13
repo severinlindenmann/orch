@@ -118,7 +118,7 @@ final class GroupViewTests: XCTestCase {
         XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [update])?.label, "HOME-8")
         var noKey = update
         noKey.key = nil
-        XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [noKey])?.label, "ticket")
+        XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [noKey])?.label, "topic")
         let wrongWorkspace = GroupTask(delegate: "d", ws: GroupMock.finance, ticket: "t_local", status: "working")
         let finance = Workspace(id: GroupMock.finance, name: "Finance", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0)
         XCTAssertNil(GroupRoomRules.openTarget(task: wrongWorkspace, workspaces: [finance], tickets: [ticket], updates: [update]))

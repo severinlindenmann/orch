@@ -31,12 +31,12 @@ struct MakeTicketCard: View {
     private func content(_ state: MakeTicketRules.CardState) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             switch state {
-            case .making: status("Making ticket…", spinning: true)
+            case .making: status("Making topic…", spinning: true)
             case .waiting: status("Waiting for \(question.workspaceName)…", spinning: true)
             case .made(let key):
-                status("Ticket made")
+                status("Topic made")
                 if let key { DisclosureGroup("Details") { Text(key).themeFont(13) }.themeFont(13) }
-            case .failed: status("Couldn't make the ticket")
+            case .failed: status("Couldn't make the topic")
             case .closed(let notNow): status(notNow ? "Not now" : "Already decided")
             case .open:
                 Text(question.message.body.text).themeFont(15)
@@ -45,7 +45,7 @@ struct MakeTicketCard: View {
                     Text(date).themeFont(13).foregroundStyle(Theme.muted)
                 }
                 HStack(spacing: 10) {
-                    option("make", title: "Make ticket", primary: true, id: "make-ticket")
+                    option("make", title: "Make topic", primary: true, id: "make-ticket")
                     option("not_now", title: "Not now", primary: false, id: "make-ticket-not-now")
                 }.disabled(busy)
             }

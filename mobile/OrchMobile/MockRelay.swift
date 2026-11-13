@@ -108,7 +108,7 @@ actor MockRelay: RelayAPI {
         Question(message: QuestionMessage(schema: "orch.msg/1", id: "m_maketicket00001", from: pilatus,
             to: "phones", type: "question", createdAt: now(), ticket: nil,
             body: QuestionBody(questionId: "proposal-m_maketicket00001", title: "Check the backups",
-                text: "Here is a ticket for Friday 13 Nov.", options: ["make", "not_now"], recommended: nil,
+                text: "Here is a topic for Friday 13 Nov.", options: ["make", "not_now"], recommended: nil,
                 proposal: "make_ticket", when: "2026-11-13")), workspaceName: "Pilatus Workspace")
     }
 
@@ -360,7 +360,7 @@ actor MockRelay: RelayAPI {
         let result = refused ? ProposalResult(result: "refused", reason: "unavailable") : ProposalResult(result: "made", key: "PIL-15")
         received.append(PhoneMessage(message: TextMessage(id: "m_maketicketres01", from: Self.pilatus,
             to: refused ? "ph_iphone0001" : "phones", type: "text", createdAt: Self.now(), ticket: nil,
-            body: TextBody(text: refused ? "Couldn't make the ticket" : "Ticket made: PIL-15", proposalResult: result),
+            body: TextBody(text: refused ? "Couldn't make the topic" : "Topic made: PIL-15", proposalResult: result),
             replyTo: "m_maketicket00001"), workspaceName: "Pilatus Workspace"))
     }
 
