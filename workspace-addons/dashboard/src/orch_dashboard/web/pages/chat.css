@@ -187,3 +187,8 @@
 .chat-page .chat-compose>.chat-primary:disabled{opacity:1;background:var(--surface-3);border-color:var(--border-strong);color:var(--text-muted);cursor:default}
 .chat-page .chat-compose>.chat-primary[data-state=sending]{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
 .chat-page .chat-compose>.chat-primary .spinner{border-color:rgb(6 35 28 / .35);border-top-color:var(--on-brand)}
+/* Second pass (accepted Chat drafts): no outer frame in the grouped view either; the list is a quiet column with a divider */
+.chat-page{border:0;border-radius:0;background:transparent}
+.chat-page .chat-list{background:transparent;padding:0 12px 0 0}
+.chat-page .chat-list-row{border-radius:8px}
+.chat-page .chat-thread{background:transparent}
