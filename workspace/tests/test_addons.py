@@ -1067,12 +1067,19 @@ def test_addons_install_from_where_orch_came_from(proj, monkeypatch, uv_calls):
     assert addons.spec("workspace").endswith("/archive/v1.zip#subdirectory=workspace")
 
 
-def test_windows_reinstall_keeps_its_python(monkeypatch):
-    monkeypatch.setattr(addons.sys, "platform", "win32")
-    monkeypatch.setattr(addons.sys, "_base_executable", r"C:\uv\cpython-3.13-windows-x86_64-none\python.exe")
-    assert addons._same_python() == ["--python", r"C:\uv\cpython-3.13-windows-x86_64-none\python.exe"]
-    monkeypatch.setattr(addons.sys, "platform", "darwin")
-    assert addons._same_python() == []
+def test_reinstall_keeps_its_python_on_every_platform(monkeypatch, tmp_path):
+    """uv must not pick a newer Python for an add-on add/remove or update (lib/python3.11 -> 3.13 broke the
+    running services): the interpreter orch runs on, or at least its version."""
+    exe = tmp_path / "cpython-3.11" / "bin" / "python3.11"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    for platform in ("win32", "darwin", "linux"):
+        monkeypatch.setattr(addons.sys, "platform", platform)
+        monkeypatch.setattr(addons.sys, "_base_executable", str(exe))
+        assert addons._same_python() == ["--python", str(exe)]
+    monkeypatch.setattr(addons.sys, "_base_executable", str(tmp_path / "gone"))
+    v = addons.sys.version_info
+    assert addons._same_python() == ["--python", f"{v.major}.{v.minor}"]
 
 
 def test_github_sources_install_without_git(monkeypatch):

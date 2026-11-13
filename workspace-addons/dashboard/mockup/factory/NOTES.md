@@ -11,3 +11,9 @@ These owner-reviewed mockups preserve their local, simulated interactions and sa
 Preview controls offer loading and empty states; Reset Factory demo clears only `orch-factory-demo` local storage. The comparison slider and pins here are simulated; live-page pins are view-only.
 
 Built page vs mockup, on purpose (phase 2a polish): times are shown in the viewer's local time ("today 18:30", "16 Nov 19:18"); open questions are titled from the structured stop data ("Ship it?", "Check at Build") with the raw question text behind Details; the live page has no Talk to Helper panel, no pause/cancel/renew buttons and no per-day money figures beyond the proposal's own targets; autopilot orders show a short card instead of a run card; every decision button is a compact link to the dashboard ticket.
+
+## Phase 2b (built)
+Decision buttons on the Factory page are one "Answer" button: inside the dashboard it opens the dashboard's own native
+question card in a dialog (same card and person-proof path as the ticket page; options come from the dashboard's ticket
+data, never from the page). Outside the dashboard it stays a link to the order's ticket. The mockup's in-card Start / Edit /
+Not now buttons stand for that dialog.
