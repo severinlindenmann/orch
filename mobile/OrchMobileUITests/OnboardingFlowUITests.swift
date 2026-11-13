@@ -139,13 +139,31 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS \"Can't reach the server\"")).firstMatch.waitForExistence(timeout: 5))
     }
 
+    /// "Paste link" on the camera screen opens the paste sheet once the camera sheet is gone.
+    func testScannerPasteOpensLinkSheet() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
+        app.launch()
+        addUIInterruptionMonitor(withDescription: "camera permission") { alert in
+            for name in ["OK", "Allow", "Don\u{2019}t Allow", "Don't Allow"] where alert.buttons[name].exists {
+                alert.buttons[name].tap(); return true
+            }
+            return false
+        }
+        app.buttons["invite-scan"].tap()
+        let paste = app.buttons["scanner-paste"]
+        if !paste.waitForExistence(timeout: 5) { app.tap() }   // lets the monitor answer a system alert
+        XCTAssertTrue(paste.waitForExistence(timeout: 10))
+        paste.tap()
+        XCTAssertTrue(app.textFields["invite-field"].waitForExistence(timeout: 10))
+    }
+
     /// A bad invitation link keeps the sheet open and the typed text, and says what to do next.
     func testBadInviteLinkKeepsInputAndExplains() {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
         app.launch()
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        app.buttons["Paste invitation link"].tap()
+        app.buttons["invite-paste"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap(); expectKeyboardFocus(field)
@@ -154,7 +172,7 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(cont.waitForExistence(timeout: 10))
         cont.tap()
         XCTAssertTrue(app.staticTexts["invite-error"].waitForExistence(timeout: 10))
-        XCTAssertTrue((app.staticTexts["invite-error"].label).contains("ask the person who invited you"))
+        XCTAssertTrue((app.staticTexts["invite-error"].label).contains("orch on your computer"))
         XCTAssertEqual(app.textFields["invite-field"].value as? String, "https://example.com/nope")
     }
 
@@ -163,8 +181,7 @@ final class OnboardingFlowUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-resetState", "YES", "-relayMode", "mock"]
         app.launch()
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        app.buttons["Paste invitation link"].tap()
+        app.buttons["invite-paste"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap(); expectKeyboardFocus(field)
@@ -173,7 +190,9 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(connect.waitForExistence(timeout: 5))
         connect.tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'expired or was already used'")).firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Connect this phone"].exists)
+        XCTAssertTrue(app.buttons["invite-new"].exists, "an expired invitation offers a new one")
+        app.buttons["invite-new"].tap()
+        XCTAssertTrue(app.buttons["invite-scan"].waitForExistence(timeout: 5), "back to scan / paste")
     }
 
     /// The whole Sign out box is a tap target (left edge, not only the label).

@@ -29,29 +29,31 @@ struct AddWorkspaceView: View {
                     if attempted {
                         Text(model.message ?? "No workspaces were added. Try another invitation.")
                             .themeFont(15).foregroundStyle(Theme.danger).accessibilityIdentifier("invite-error")
-                        Button("Try another link") { reset() }.buttonStyle(SecondaryButtonStyle())
+                        Button("Use a new invitation") { reset() }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-new")
                     } else {
-                        Text("Add this workspace?").themeFont(22, .semibold)
-                        Text("Server: \(link.host)").themeFont(15).foregroundStyle(Theme.muted)
+                        Text("Add this workspace?").themeFont(22, .semibold).accessibilityAddTraits(.isHeader)
+                        Text("You were invited to add it to this phone.").themeFont(15).foregroundStyle(Theme.muted)
                         DisclosureGroup {
-                            Text(link.relay.absoluteString).themeFont(13).textSelection(.enabled).padding(.vertical, 8)
+                            Text(link.host).themeFont(13).textSelection(.enabled).padding(.vertical, 8)
                         } label: { Text("Connection details").themeFont(15).frame(minHeight: 44) }
                         Button {
                             busy = true; model.message = nil
                             Task { added = await model.redeemInvitation(link.link); attempted = true; busy = false }
                         } label: {
-                            HStack { if busy { ProgressView().tint(Theme.onBrand) }; Text(busy ? "Adding workspace…" : "Add workspace") }
+                            HStack { if busy { ProgressView().tint(Theme.onBrand) }; Text(busy ? "Adding…" : "Add") }
                         }.buttonStyle(PrimaryButtonStyle()).disabled(busy).accessibilityIdentifier("invite-add")
-                        Button("Try another link") { reset() }.buttonStyle(WideButtonStyle(color: Theme.muted)).disabled(busy)
+                        Button("Use a different link") { reset() }.buttonStyle(WideButtonStyle(color: Theme.muted)).disabled(busy)
+                            .accessibilityIdentifier("invite-different")
                     }
                 } else {
-                    Text("Use the invitation for your workspace.").themeFont(13).foregroundStyle(Theme.muted)
-                    Button("Scan invitation QR code") { scanner = true }.buttonStyle(PrimaryButtonStyle())
-                    Button("Paste invitation link") {
+                    Button { scanner = true } label: { Label("Scan QR code", systemImage: "qrcode.viewfinder") }
+                        .buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-scan")
+                    Button("Paste link") {
                         if let value = UIPasteboard.general.string, let parsed = try? PairingLink(value) {
                             link = parsed; error = nil
                         } else { showField = true }
-                    }.buttonStyle(SecondaryButtonStyle())
+                    }.buttonStyle(SecondaryButtonStyle()).accessibilityIdentifier("invite-paste")
+                    InviteHelp()
                     if showField {
                         TextField("orch://pair?…", text: $linkText).themeFont(16)
                             .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
@@ -67,7 +69,7 @@ struct AddWorkspaceView: View {
             }.padding(16).padding(.top, 16)
         }.foregroundStyle(Theme.text).background(Theme.surface.ignoresSafeArea())
             .presentationBackground(Theme.surface).presentationDragIndicator(.visible).interactiveDismissDisabled(busy)
-            .sheet(isPresented: $scanner) { QRScannerView { code in scanner = false; validate(code) } }
+            .sheet(isPresented: $scanner) { QRScannerView(onPaste: { scanner = false; showField = true }) { code in scanner = false; validate(code) } }
             .onDisappear {
                 if let id = openAfterDismiss { model.path = [.workspace(id)] }
             }
