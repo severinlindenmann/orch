@@ -277,6 +277,8 @@ def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
     assert "addonSet(name, true)" in body  # same op as the switch (addon.set), recovered after a restart
     assert "act('addon.set', {name, on})" in src[src.index("async function addonSet(") :][:400]
     assert "'Every add-on that comes with orch is already here.'" in body
-    assert "'Turned on.'" in body and "It starts with orch start" not in body  # its service starts with the add
+    assert (
+        "'Turned on.'" in body and "It starts with orch start" not in body
+    )  # its service starts with the add
     assert "state.settings?.available" in body
     assert "not connected yet" not in body and "innerHTML" not in body

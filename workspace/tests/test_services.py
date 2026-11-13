@@ -52,6 +52,8 @@ def svc(proj, run, tmp_path, monkeypatch, request):
         monkeypatch.syspath_prepend(str(f / "src"))
     monkeypatch.setenv("PYTHONPATH", f"{folder / 'src'}{__import__('os').pathsep}{quiet / 'src'}")
     monkeypatch.setattr(addons, "_entry_points", lambda: {"hello": "orch_hello", "quiet": "orch_quiet"})
+    # these tests start the services themselves: the start right after an add (tested on its own) stays out
+    monkeypatch.setattr(addons, "_start_added", lambda root, names: [])
     assert run("init")[0] == 0
     install(run, folder)
     install(run, quiet)
