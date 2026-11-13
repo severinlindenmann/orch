@@ -41,8 +41,10 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 1. **Only a person's answer counts**: `answered_by` starts with `human:` (the core records a person's answer only with the
    human proof, H1). Agent answers on `factory:*` questions are ignored and logged — except `factory:stop` items decided with
    `orch factory decide` under a valid autopilot grant.
-2. **Only questions Factory asked count**: the question id must be in the journal (`asked`) with the same kind, file and hash,
-   and the stored file must still hash to that value. A `factory:*` question an agent added with `orch ask` is ignored.
+2. **Only questions about a frozen file count**: the question's `action` (stored by the core when it was asked) must name a
+   file whose bytes still hash to `action.hash`, and the question text and options must equal what Factory renders from that
+   file. A `factory:*` question an agent added with other text or another file is ignored. The journal is bookkeeping
+   (idempotency, `consumed`, reconcile), never an authority source: it is a workspace file an agent could edit.
 3. **Derived every time**: start, stops, accepted changes and grants are computed from (1)+(2) on each command. `ext.factory`
    is a cache for the dashboard; when it disagrees, the add-on refuses and logs it.
 4. **Frozen after Start**: `propose` refuses on a started order; any new scope is a change proposal with its own answer.
@@ -56,6 +58,9 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 - A grant exists only from a person's `Start` on a `factory:autopilot` question; it lasts `limits.days` from that answer's
   time and covers only `may_decide`. The agent can never create, extend or widen a grant (a new grant = a new proposal + a
   new answer).
+- Known limit (phase 1): the agent tags stop items itself. `decide` is refused on the ship stop, on `cant-undo` items and
+  on tags the grant does not list; a mislabelled item stays small, undoable, inside the grant's limits and in the daily
+  report. Add-on-derived irreversibility (fixed action list) is a hardening item.
 - Always asks the owner (fixed in the add-on, not configurable): the ship stop, scope changes, budget beyond the limits, crew
   outside an approved proposal, `cant-undo` items, new connections or credentials, other workspaces, `factory:start`,
   `factory:autopilot`, budget questions.
