@@ -64,6 +64,8 @@ const settle = (page, ms = Number(process.env.FOCUS_SHOTS_SETTLE_MS) || 4500) =>
 // puts the screen on the Insights fixture server (e2e/focus_insights/insights_server.py); default is Focus.
 const INS = { server: 'insights' };
 const insTab = tab => async p => { await settle(p, 800); await p.click(`#tab-${tab}`); await settle(p, 800); };
+// Since the Focus redesign the ticket tabs and the task/helper rail only show in Terminal mode; the plain view is the feed.
+const terminal = async p => { await settle(p); await p.click('button[data-act=mode]'); await p.waitForSelector('.fx-tab', { timeout: 20000 }); };
 const SCREENS = [
   { name: 'start', url: '/', wait: '.fx-ln-card', setup: p => settle(p) }, // strip + Live now + same-file line
   { name: 'start-areas', url: '/', wait: '.fx-areas button', async setup(p) {
@@ -71,11 +73,11 @@ const SCREENS = [
     await p.click('.fx-areas button');
     await p.waitForSelector('dialog[open]');
   } },
-  { name: 'ticket-steps', url: '/t/t_pil2bbbb', wait: '.fx-tab', async setup(p) { await settle(p); await p.click('details.fx-history summary'); } },
-  { name: 'ticket-used', url: '/t/t_pil2bbbb', wait: '.fx-tab', async setup(p) { await settle(p); await p.click('#fx-t-used'); } },
-  { name: 'ticket-files', url: '/t/t_pil2bbbb', wait: '.fx-tab', async setup(p) { await settle(p); await p.click('#fx-t-files'); } },
-  { name: 'ticket-helpers', url: '/t/t_pil2bbbb', wait: '.fx-tab', async setup(p) {
-    await settle(p);
+  { name: 'ticket-steps', url: '/t/t_pil2bbbb', wait: '.fx-history', async setup(p) { await settle(p); await p.waitForSelector('.fx-history .fx-step'); } },
+  { name: 'ticket-used', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-used'); } },
+  { name: 'ticket-files', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-files'); } },
+  { name: 'ticket-helpers', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) {
+    await terminal(p);
     if (!(await p.locator('.fx-agent').first().isVisible())) await p.click('.fx-mobile-tasks'); // the rail is folded on a phone
     await p.click('.fx-agent >> nth=1');
   } },
