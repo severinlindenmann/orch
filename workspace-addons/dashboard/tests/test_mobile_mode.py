@@ -186,3 +186,24 @@ def test_mobile_mode_palette_has_aa_contrast():
     assert "body.mobile-mode-on" in css
     assert "[data-theme=light]" in css
     assert "linear-gradient" in css and "min-height:44px" in css
+
+
+def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
+    """A changed helper command (config.toml) or a person's Allow (approvals file) must move the revision, or
+    the open Settings page and the cached /api/state keep showing the old pending request (G3)."""
+    from orch_dashboard.events import Revisions
+
+    from orch import addons
+
+    monkeypatch.setattr(addons, "home", lambda root=None: tmp_path / "orchhome")
+    r = Revisions(ws)
+    before = r.signature()
+    cfg = ws / ".orch" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text('[agents.e2e-git]\ncommand = "true 1"\n')
+    after_cfg = r.signature()
+    assert after_cfg != before
+    approvals = tmp_path / "orchhome" / "agent-approvals.json"
+    approvals.parent.mkdir(parents=True, exist_ok=True)
+    approvals.write_text("[]")
+    assert r.signature() != after_cfg

@@ -30,7 +30,26 @@ class Revisions:
                             rows.append((path, st.st_mtime_ns, st.st_size))
                         except OSError:
                             pass
+        # Settings come from these files: a changed helper command (committed config) or a person's Allow (the
+        # machine's approvals) must reach the open page and the cached /api/state, not only ticket changes.
+        for path in self.settings_files():
+            try:
+                st = os.stat(path, follow_symlinks=False)
+                rows.append((str(path), st.st_mtime_ns, st.st_size))
+            except OSError:
+                pass
         return hashlib.sha256(repr(sorted(rows)).encode()).hexdigest()
+
+    def settings_files(self):
+        files = [self.root / ".orch" / "config.toml", self.root / ".orch" / "workspace.toml",
+                 self.root / "workspace.toml"]
+        try:
+            from orch import addons
+
+            files.append(addons.home() / "agent-approvals.json")
+        except Exception:  # noqa: BLE001 - no orch installed or no home: the workspace files still count
+            pass
+        return files
 
     def join(self):
         first = self.signature()  # the folder walk happens outside the lock
