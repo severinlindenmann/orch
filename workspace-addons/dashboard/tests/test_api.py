@@ -862,3 +862,13 @@ def test_standalone_fallback_shows_a_raw_done_as_review(tmp_path):
     (folder / "t_abc123.json").write_text(json.dumps(t))
     tickets, _skipped = data.load_tickets(tmp_path, orch_bin=None)
     assert [(x["id"], x["status"], x["verdict_needed"]) for x in tickets] == [("t_abc123", "review", True)]
+
+
+def test_links_say_so_when_the_sharing_server_cannot_be_reached(monkeypatch, tmp_path):
+    from orch_dashboard import data
+
+    monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: True)
+    monkeypatch.setattr(data, "run_orch", lambda *a, **k: None)  # `orch publish list` failed
+    assert data.load_links(tmp_path, "orch") == {"links": [], "unreachable": True}
+    monkeypatch.setattr(data, "run_orch", lambda *a, **k: {"files": []})
+    assert data.load_links(tmp_path, "orch") == {"links": []}

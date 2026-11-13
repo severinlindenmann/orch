@@ -1586,6 +1586,23 @@ def test_b13e_legacy_copy_gets_branch_from_approval(done_copy):
     assert worktrees._copy_authority(root, tid)["origin_branch"] == git(root, "symbolic-ref", "HEAD")
 
 
+def test_approved_bring_back_of_unshown_done_removes_the_copy(done_copy):
+    """Done from the list (no tip shown) waits for approval; once approved and merged the copy and its
+    registry entry are gone right away."""
+    root, tid, copy = done_copy
+    to_review(root, tid)
+    worktrees.bind_shown(root, tid, worktrees.NO_TIP)
+    tickets.set_status(root, tid, "done", "human:test", proven=True)
+    worktrees.sweep(root)
+    assert tickets.load(root, tid)["work"]["bring_back"]["state"] == "waiting"
+    assert copy.exists() and tid in worktrees.registry(root)
+    target, _, _ = worktrees.approval_target(root, tid)
+    assert worktrees.approve_copy(root, tid, target)["state"] == "merged"
+    assert (root / "code.py").read_text() == "print(2)\n"
+    assert not copy.exists()
+    assert tid not in worktrees.registry(root)
+
+
 def test_b13e_create_on_detached_head_is_a_plain_reason(repo):
     """#9: nothing is made (no folder, no branch) and nothing raises."""
     tid = repo.tids[0]
@@ -2493,7 +2510,7 @@ def test_b13h_none_binds_between_the_run_end_read_and_write(done_copy, run, monk
 
     def holds(*a):
         monkeypatch.setattr(worktrees, "_copy_holds_tip", real)
-        assert worktrees.bind_shown(root, tid, "none") is True  # nothing recorded yet: voided
+        worktrees.bind_shown(root, tid, worktrees.NO_TIP)  # nothing recorded yet: voided
         return real(*a)
 
     monkeypatch.setattr(worktrees, "_copy_holds_tip", holds)
@@ -2591,7 +2608,7 @@ def test_b13n_shown_tip_then_status_bounce_approves_nothing_unseen(done_copy):
 def test_b13n_none_then_status_bounce_approves_nothing_unseen(done_copy):
     root, tid, copy = done_copy
     assert worktrees._save_leftovers(copy, tid)[0]
-    assert worktrees.bind_shown(root, tid, "none") is True
+    worktrees.bind_shown(root, tid, worktrees.NO_TIP)
     tickets.set_status(root, tid, "review", "agent:x")  # records a tip (no run alive), void gone
     tickets.set_status(root, tid, "done", "human:test", proven=True)
     worktrees.sweep(root)
