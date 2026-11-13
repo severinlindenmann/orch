@@ -340,7 +340,7 @@
     function fileCard(ev, name, why, signal) {
       const sizeEl = h('dd', {text: '…'});
       const card = h('div', {class: 'fx-pv-file'}, why ? note(why, false) : null,
-        h('details', {}, h('summary', {text: 'Details'}), h('dl', {class: 'fx-pv-dl'}, h('dt', {text: 'Name'}), h('dd', {text: base(name || ev.ref) || 'File'}), h('dt', {text: 'Size'}), sizeEl, h('dt', {text: 'Saved'}), h('dd', {text: when(ev.at) || 'unknown'}))),
+        h('div', {}, h('dl', {class: 'fx-pv-dl'}, h('dt', {text: 'Name'}), h('dd', {text: base(name || ev.ref) || 'File'}), h('dt', {text: 'Size'}), sizeEl, h('dt', {text: 'Saved'}), h('dd', {text: when(ev.at) || 'unknown'}))),
         name !== null ? h('a', {class: 'btn primary', href: url(ev, 'dl'), download: base(name)}, h('span', {icon: 'download'}), h('span', {text: 'Download'})) : null);
       if (name === null) sizeEl.textContent = 'unknown';
       else fetch(url(ev, 'info'), {signal}).then(r => r.ok ? r.json() : null).then(j => { sizeEl.textContent = j ? sizeText(j.size) : 'over 25 MB or not available'; }).catch(() => { sizeEl.textContent = 'unknown'; });
