@@ -6,15 +6,15 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
 const marker = source.slice(source.indexOf('// A shipped add-on page'));
 // Everything the handler touches is faked; `calls` records every act (answer request) and mounted card.
-function setup({shipped = true, kind = 'page', tickets} = {}) {
+function setup({shipped = true, kind = 'page', tickets, snapshot = false} = {}) {
   const calls = {acts:[], mounts:[], opened:[], posts:[], dialogs:[]};
   const frameWindow = {postMessage:(m, o) => calls.posts.push([m, o])};
   const frame = {contentWindow:frameWindow};
   const t = tickets || [{id:'t_abcdef', key:'FAC-1', title:'Ship it', questions:[{id:'q1', text:'Start?', digest:'d', options:['Start', 'Not now'], recommended:'Start', answer:null}, {id:'q0', text:'Old', answer:'x'}]}];
-  const ctx = {location:{origin:'http://127.0.0.1:8000'}, array:v => Array.isArray(v) ? v : [], clean:v => String(v ?? ''),
+  const ctx = {snapshot, location:{origin:'http://127.0.0.1:8000'}, array:v => Array.isArray(v) ? v : [], clean:v => String(v ?? ''),
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:id => t.find(x => x.id === id || x.key === id),
     document:{querySelector:() => frame}, el:(tag, cls, text) => ({tag, cls, text, children:[], append(...c) { this.children.push(...c); }}),
-    dialog:title => { const d = {title, children:[], append(...c) { this.children.push(...c); }}; calls.dialogs.push(d); return {d, actions:{}}; },
+    dialog:title => { const d = {title, children:[], open:true, isConnected:true, listeners:{}, append(...c) { this.children.push(...c); }, addEventListener(n, f) { this.listeners[n] = f; }}; calls.dialogs.push(d); return {d, actions:{}}; },
     mountQuestion:(host, q, context) => { calls.mounts.push([q, context]); }, act:async (...a) => { calls.acts.push(a); return {ok:true}; },
     addEventListener(){}, window:{orch:{open:d => calls.opened.push(d)}}};
   vm.createContext(ctx); vm.runInContext(marker, ctx);
@@ -54,11 +54,29 @@ test('opening shows the dashboard-owned question, takes nothing from the message
 });
 test('an unknown or already answered question says so plainly and mounts no card', () => {
   const {ctx, calls, frame} = setup();
-  for (const [ticket, question] of [['t_abcdef', 'q0'], ['t_abcdef', 'q9'], ['t_zzzzzz', 'q1']]) ctx.openEmbedQuestion({ticket, question, frame});
+  for (const [ticket, question] of [['t_abcdef', 'q0'], ['t_abcdef', 'q9'], ['t_zzzzzz', 'q1']]) {
+    ctx.openEmbedQuestion({ticket, question, frame});
+    const d = calls.dialogs[calls.dialogs.length - 1]; d.open = false; d.listeners.close();  // the person closes it
+  }
   assert.equal(calls.mounts.length, 0); assert.equal(calls.acts.length, 0);
   assert.equal(calls.dialogs.length, 3);
   for (const d of calls.dialogs) assert.match(JSON.stringify(d), /no longer waiting for you/);
 });
 test('the message handler never calls act', () => {
   assert.doesNotMatch(marker, /\bact\(/);
+});
+
+test('a shared read-only snapshot opens nothing', () => {
+  const {ctx, frameWindow} = setup({snapshot:true});
+  assert.equal(ctx.embedQuestionRequest(good(frameWindow)), null);
+});
+test('repeated asks never stack dialogs; a closed dialog allows the next one', () => {
+  const {ctx, calls, frameWindow} = setup();
+  const req = ctx.embedQuestionRequest(good(frameWindow));
+  ctx.openEmbedQuestion(req); ctx.openEmbedQuestion(req); ctx.openEmbedQuestion(req);
+  assert.equal(calls.dialogs.length, 1);
+  calls.dialogs[0].open = false; calls.dialogs[0].listeners.close();
+  ctx.openEmbedQuestion(req);
+  assert.equal(calls.dialogs.length, 2);
+  assert.equal(calls.acts.length, 0);
 });

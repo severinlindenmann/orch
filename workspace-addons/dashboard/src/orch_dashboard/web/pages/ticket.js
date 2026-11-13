@@ -1554,7 +1554,7 @@ const EMBED_TICKET = /^t_[a-z0-9]{6,16}$/, EMBED_QUESTION = /^q[A-Za-z0-9_-]{0,3
 function embedQuestionRequest(e) {
   const data = e && e.data;
   if (!data || typeof data !== 'object' || data.type !== 'orch.question') return null;
-  if (e.origin !== location.origin) return null;
+  if (e.origin !== location.origin || snapshot) return null;  // a shared read-only copy answers nothing
   const r = route();
   if (r.kind !== 'page' || !addons().find(a => a.name === r.id)?.shipped) return null;
   const frame = document.querySelector('iframe.embed[data-key="embed"]');
@@ -1562,11 +1562,15 @@ function embedQuestionRequest(e) {
   if (typeof data.ticket !== 'string' || typeof data.question !== 'string' || !EMBED_TICKET.test(data.ticket) || !EMBED_QUESTION.test(data.question)) return null;
   return {ticket:data.ticket, question:data.question, frame};
 }
+let embedDialog = null;  // one embed question at a time: repeated asks never stack dialogs
 function openEmbedQuestion(req) {
+  if (embedDialog && embedDialog.isConnected && embedDialog.open) return;
   const t = ticketOf(req.ticket);
   const q = array(t?.questions).find(x => x.id === req.question);
   const open = q && q.answer == null && t.id === req.ticket;
   const {d, actions} = dialog(open ? (clean(t.title) || 'Question') : 'Question', 'dialog', 'needs-you');
+  embedDialog = d;
+  d.addEventListener('close', () => { if (embedDialog === d) embedDialog = null; });
   if (!open) {
     d.append(el('p', '', 'This question is no longer waiting for you.'), actions);
     window.orch.open(d);
