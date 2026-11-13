@@ -244,7 +244,7 @@ def _stops(d):
         if eff:
             state, answer, by = ("decided" if eff[1] == "agent:factory" else "answered"), eff[0], eff[1]
         elif e["q"].get("answer") is not None:
-            state, answer, by = "ignored", None, e["q"].get("answered_by")
+            state, answer, by = "ignored", None, authority.who(e["q"]) or None
         else:
             state, answer, by = "open", None, None
         out.append(
@@ -295,7 +295,7 @@ def _crew(d):
 def _activity(ticket):
     lines = [
         {"at": h.get("at"), "text": _text(h.get("text"), 300)}
-        for h in ticket.get("history", [])
+        for h in authority.history(ticket)
         if isinstance(h, dict)
         and isinstance(h.get("text"), str)
         and (h["text"].startswith("Factory") or h["text"].startswith("Decided by agent:factory"))
