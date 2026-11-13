@@ -147,3 +147,93 @@ def test_finisher_restores_the_old_orch_when_uv_fails(tmp_path):
 
 def test_plain_reason_when_nothing_could_be_put_back():
     assert "install script" in winfinish.plain_reason("anything", False)
+
+
+def test_finisher_tries_again_when_orch_held_its_files(tmp_path):
+    """A probe started orch while uv replaced it (Windows: Access is denied / Executable already exists):
+    the old orch is put back and the reinstall runs again; the second try succeeds."""
+    env = tmp_path / "tools" / "orch-workspace"
+    (env / "Scripts").mkdir(parents=True)
+    (env / "keep.txt").write_text("old")
+    (tmp_path / "finish.py").write_text(winfinish.FINISHER, encoding="utf-8")
+    flag = tmp_path / "tried"
+    code = (
+        "import os,sys,shutil; f=sys.argv[1]\n"
+        "if not os.path.exists(f):\n"
+        "    open(f,'w').close(); shutil.rmtree(sys.argv[2])\n"
+        "    sys.stderr.write('error: Executable already exists: orch.exe (use `--force` to overwrite)')\n"
+        "    sys.exit(2)\n"
+        "open(os.path.join(sys.argv[2],'new.txt'),'w').write('new')\n"
+    )
+    job = {
+        "uv": [sys.executable, "-c", code, str(flag), str(env)],
+        "free": [str(env)],
+        "wait": 5,
+        "uv_timeout": 30,
+        "registry": None,
+        "then": [],
+        "backup": {"env": str(env), "bins": []},
+        "log": str(tmp_path / "finish.log"),
+        "done": "orch updated",
+        "pending": str(tmp_path / "finish.pending"),
+    }
+    (tmp_path / "finish.pending").write_text("1")
+    (tmp_path / "job.json").write_text(json.dumps(job))
+    r = subprocess.run([sys.executable, "-I", str(tmp_path / "finish.py"), str(tmp_path / "job.json")])
+    log = (tmp_path / "finish.log").read_text()
+    assert r.returncode == 0, log
+    assert "trying again (2 of 3)" in log and log.rstrip().endswith("RESULT ok: orch updated")
+    assert (env / "keep.txt").read_text() == "old" and (env / "new.txt").read_text() == "new"
+    assert not (tmp_path / "tools" / "orch-workspace.orch-backup").exists()
+
+
+def test_a_failed_restore_keeps_the_copy(tmp_path):
+    from orch import keepold
+
+    env = tmp_path / "env"
+    env.mkdir()
+    (env / "a").write_text("old")
+    state = keepold.backup_tool(env, [])
+    shutil.rmtree(env)
+    os.rename(state["bak"], tmp_path / "moved")  # restore can not work now
+    assert keepold.restore_tool(state, wait=0) is False
+    os.rename(tmp_path / "moved", state["bak"])
+    assert keepold.restore_tool(state, wait=1) is True and (env / "a").read_text() == "old"
+
+
+def test_locked_failures_are_recognised():
+    from orch import keepold
+
+    assert keepold.locked_failure("failed to remove directory `C:\\x`: Access is denied. (os error 5)")
+    assert keepold.locked_failure("error: Executable already exists: orch.exe (use `--force` to overwrite)")
+    assert not keepold.locked_failure("error: Failed to fetch: dns error")
+
+
+def test_stand_in_answers_while_orch_entry_is_gone(tmp_path, monkeypatch):
+    """The uv window: orch_entry gone from site-packages; the .pth stand-in says still updating."""
+    import orch_entry
+
+    prefix = tmp_path / "env"
+    site = prefix / "site"
+    site.mkdir(parents=True)
+    (prefix / "uv-receipt.toml").write_text("")
+    monkeypatch.setattr(orch_entry.sys, "prefix", str(prefix))
+    import sysconfig
+
+    monkeypatch.setattr(sysconfig, "get_paths", lambda: {"purelib": str(site)})
+    orch_entry.ensure_stand_in()
+    folder = (site / orch_entry.STAND_IN_PTH).read_text().strip()
+    code = (
+        "import sys; sys.path.append(sys.argv[1]); sys.argv = ['orch', *sys.argv[2:]]; "
+        "import orch_entry; sys.exit(orch_entry.main())"
+    )
+    py = [sys.executable, "-I", "-S", "-c", code, folder]
+    r = subprocess.run([*py, "status"], capture_output=True, text=True)
+    assert r.returncode == 3 and "still updating" in r.stderr and "Traceback" not in r.stderr
+    r = subprocess.run([*py, "record", "hook"], capture_output=True, text=True)
+    assert r.returncode == 0
+    monkeypatch.setattr(orch_entry.sys, "prefix", str(tmp_path / "dev-venv"))  # not a uv tool env: nothing
+    (tmp_path / "dev-venv").mkdir()
+    (site / orch_entry.STAND_IN_PTH).unlink()
+    orch_entry.ensure_stand_in()
+    assert not (site / orch_entry.STAND_IN_PTH).exists()

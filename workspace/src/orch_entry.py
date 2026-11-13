@@ -184,7 +184,44 @@ def _record_hook(argv: list[str]) -> int:
         dog.cancel()
 
 
+STAND_IN = """\"\"\"orch's stand-in while a reinstall replaces orch (by orch_entry; no package owns it).\"\"\"
+import sys
+
+
 def main():
+    if sys.argv[1:2] == ["record"]:  # a tool's hook must never fail
+        return 0
+    sys.stderr.write("orch is still updating, try again in a moment.\\n")
+    return 3
+"""
+STAND_IN_PTH = "zz-orch-stand-in.pth"
+
+
+def ensure_stand_in() -> None:
+    """While uv replaces orch's packages, orch_entry is briefly missing and the console script failed with a
+    traceback (No module named 'orch_entry'). A .pth (which no package owns, so a reinstall leaves it) puts a
+    folder outside site-packages at the END of sys.path; its orch_entry is found only while the real one is
+    gone and says "still updating". Written once per tool environment; best effort."""
+    try:
+        import sysconfig
+
+        site = Path(sysconfig.get_paths()["purelib"])
+        folder = Path(sys.prefix) / "orch-stand-in"
+        pth = site / STAND_IN_PTH
+        line = str(folder) + "\n"
+        if pth.is_file() and pth.read_text(encoding="utf-8") == line and (folder / "orch_entry.py").is_file():
+            return
+        if not (Path(sys.prefix) / "uv-receipt.toml").is_file() or not site.is_dir():
+            return  # only in orch's uv tool environment
+        folder.mkdir(exist_ok=True)
+        (folder / "orch_entry.py").write_text(STAND_IN, encoding="utf-8")
+        pth.write_text(line, encoding="utf-8")
+    except (OSError, KeyError, ValueError):
+        pass
+
+
+def main():
+    ensure_stand_in()
     argv = sys.argv[1:]
     if is_record_hook(argv):
         return _record_hook(argv)

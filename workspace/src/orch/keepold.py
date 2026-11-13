@@ -9,6 +9,7 @@ carries this file's code.
 
 import os as _os
 import shutil as _shutil
+import time as _time
 
 FETCH_WORDS = (
     "failed to fetch",
@@ -58,16 +59,32 @@ def _drop(path):
         _shutil.rmtree(path)
 
 
-def restore_tool(state):
-    # Put the old environment and bin entries back. True when everything is back.
+def restore_tool(state, wait=0):
+    # Put the old environment and bin entries back; retried for `wait` seconds (on Windows a process that
+    # was started meanwhile holds the files for a moment). True when all is back; else the copy is kept.
     if not state:
         return False
+    deadline = _time.time() + wait
+    while True:
+        ok = _restore_once(state)
+        if ok or _time.time() >= deadline:
+            break
+        _time.sleep(0.5)
+    if ok:
+        discard_backup(state)
+    return ok
+
+
+def _restore_once(state):
     ok = True
-    try:
-        if _os.path.lexists(state["env"]):
-            _drop(state["env"])
-        _os.rename(state["bak"], state["env"])
-    except OSError:
+    if _os.path.isdir(state["bak"]):
+        try:
+            if _os.path.lexists(state["env"]):
+                _drop(state["env"])
+            _os.rename(state["bak"], state["env"])
+        except OSError:
+            ok = False
+    elif not _os.path.isdir(state["env"]):
         ok = False
     for path, kind, what in state["bins"]:
         try:
@@ -82,8 +99,16 @@ def restore_tool(state):
                 _shutil.copy2(what, path)
         except OSError:
             ok = False
-    discard_backup(state)
     return ok
+
+
+LOCK_WORDS = ("access is denied", "os error 5)", "os error 32)", "used by another process", "already exists")
+
+
+def locked_failure(detail):
+    # uv failed because orch was started (and held its files) while it replaced them: worth one more try.
+    t = (detail or "").lower()
+    return any(w in t for w in LOCK_WORDS)
 
 
 def discard_backup(state):
