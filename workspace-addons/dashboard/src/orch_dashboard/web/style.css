@@ -425,3 +425,5 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .sk-story{height:200px}
 .sk-row{height:40px}
 @media(max-width:899px){.sk-columns{grid-template-columns:minmax(0,1fr)}}
+/* Page heading with an actions slot: actions sit at the end of the title row */
+.page-heading:has(>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}

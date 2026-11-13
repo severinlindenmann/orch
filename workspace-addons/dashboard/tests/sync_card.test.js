@@ -229,7 +229,7 @@ test('Home › Needs you: the three sync rows in the draft words, with "Needs yo
   assert.deepEqual(rows.map(r => text(all(r, n => n.tag === 'p')[1])), ['Sync', 'Sync', 'Sync']);
   assert.deepEqual(rows.map(r => all(r, n => n.attrs?.className === 'sig').map(text)), [['Needs your signature'], ['Needs your signature'], ['Needs your signature']]);
   assert.deepEqual(rows.map(r => all(r, n => n.tag === 'button').map(text)), [['Keep mine', 'Keep theirs'], ['Move', 'Not now'], ['Leave it out', 'View file']]);
-  assert.match(text(home), /Needs you \(3\)/);
+  assert.match(text(home), /Needs you · 3/);
 });
 
 const KEEP_TARGET = 'sync:keep-theirs:' + 'e'.repeat(64);

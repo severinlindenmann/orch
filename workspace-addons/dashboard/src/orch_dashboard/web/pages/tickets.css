@@ -29,3 +29,44 @@
 .board-parent{min-width:0;margin:4px 0}
 .board-parent a{display:block;min-height:44px;line-height:44px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:440px){.ticket-row .grow{min-width:0;flex-basis:100%}.ticket-row h3 a{display:flex;flex-direction:column;align-items:flex-start;gap:2px}.ticket-row .mono{display:block}}
+
+.ticket-select{min-height:44px;width:auto;max-width:220px}
+.board .kanban-col{display:flex;flex-direction:column;max-height:calc(100dvh - 200px);min-height:240px}
+.board .col-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-bottom:8px}
+.board-none{padding:16px 8px;text-align:center;border:1px dashed var(--border);border-radius:8px}
+.changes-pending{color:var(--warning);font-weight:500;margin:2px 0 0}
+.ticket-card .who{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)}
+.owner-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.owner-line .when{margin-left:auto;white-space:nowrap}
+.tickets-empty{display:grid;justify-items:center;gap:12px;padding:48px 24px;text-align:center}.tickets-empty p{max-width:52ch}
+@media(max-width:720px){.board .kanban-col{max-height:none}.board .col-body{overflow:visible}}
+/* Ticket toolbar: layout toggle, active view chip, person, search (accepted Tickets draft) */
+.board-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.board-toolbar .view-toggle{margin:0}
+.board-toolbar .ticket-select{min-height:36px;font-size:12px;padding:6px 8px}
+.board-toolbar .search-field{width:220px;max-width:100%}.board-toolbar .search-field input{min-height:36px;font-size:12px;width:100%;max-width:100%}
+.view-chip{text-decoration:none}
+/* List: one table, grouped by status */
+.ticket-table .ticket-line{display:flex;align-items:center;gap:8px;min-width:0}
+.ticket-table .ticket-cell a{font-weight:500;color:var(--text);text-decoration:none}
+.ticket-table .ticket-cell a:hover{text-decoration:underline}
+.ticket-table .ticket-sub,.ticket-table .changes-pending{margin:2px 0 0;font-size:12px;line-height:16px}
+.ticket-table .btn{min-height:32px}.ticket-table .move-button{width:32px;min-width:32px;min-height:32px}
+.ticket-table td{height:auto;min-height:var(--row-height);padding-block:8px;vertical-align:middle}
+.ticket-table .group-row th{padding:0;background:var(--surface-2);height:36px}
+.ticket-table .group-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:36px;padding:0 12px;background:none;border:0;color:var(--text);font:inherit;font-size:12px;font-weight:600;text-align:left;cursor:pointer}
+.ticket-table .step-progress{display:flex;align-items:center;gap:8px}.ticket-table .step-progress .progress{width:56px;flex:none}
+.ticket-table .who{display:inline-flex;align-items:center;gap:6px}
+.ticket-table .ticket-actions{text-align:right;white-space:nowrap}.ticket-table .ticket-actions .btn+.btn{margin-left:4px}
+.ticket-table tr.child .ticket-cell{padding-left:36px}
+.ticket-table .when{white-space:nowrap}
+/* Board: coloured top border per status, no hint lines */
+.board .kanban-col[data-status=active] .col-head{border-top-color:var(--working)}
+.board .kanban-col[data-status=waiting] .col-head,.board .kanban-col[data-status=review] .col-head{border-top-color:var(--warning)}
+.board .kanban-col[data-status=done] .col-head{border-top-color:var(--success)}
+.board .col-head{margin-bottom:12px;padding:12px 0 0}
+@media(max-width:720px){.board-toolbar .search-field{width:100%}}
+.ticket-table .ticket-actions-row{display:flex;align-items:center;justify-content:flex-end;gap:4px}
+.page:has(.board-toolbar){max-width:none}
+.page:has(.board-toolbar)>.table-wrap{min-width:0;max-width:100%;overflow-x:auto}
+@media(max-width:899px){.ticket-table{min-width:680px}.ticket-table .ticket-cell{min-width:220px}.ticket-table .who{white-space:nowrap}}
+.table-wrap{position:relative}
