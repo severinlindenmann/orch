@@ -6,6 +6,12 @@ struct ReceiptView: View {
     var note: String? = nil
     var onRetry: (() -> Void)? = nil
     var onDiscard: (() -> Void)? = nil
+    /// Sits at the bottom-right inside the bubble next to the text (no own full-width line).
+    var inline = false
+    var tint: Color = Theme.muted
+    /// "Waiting" beside the clock while no offline banner says why the message has not left yet.
+    var waitingWord = false
+    static func showsWaitingWord(offline: Bool, note: String?) -> Bool { !offline && note == nil }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -15,12 +21,12 @@ struct ReceiptView: View {
                 VStack(alignment: .trailing, spacing: 0) { stamp; recovery }
             }
             if case .queued = receipt, let note {
-                Text(note).foregroundStyle(Theme.warn).accessibilityIdentifier("receipt-wait")
+                Text(note).foregroundStyle(tint).accessibilityIdentifier("receipt-wait")
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .themeFont(13).foregroundStyle(Theme.muted)
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .themeFont(inline ? 12 : 13).foregroundStyle(tint)
+        .frame(maxWidth: inline ? nil : .infinity, alignment: .trailing)
     }
 
     private var stamp: some View {
@@ -29,7 +35,8 @@ struct ReceiptView: View {
             Group {
                 switch receipt {
                 case .queued:
-                    Label("Sending…", systemImage: "clock").accessibilityIdentifier("receipt-queued")
+                    if waitingWord { Text("Waiting").accessibilityHidden(true) }
+                    Image(systemName: "clock").accessibilityLabel("Waiting to send").accessibilityIdentifier("receipt-queued")
                 case .sent:
                     Image(systemName: "checkmark").accessibilityLabel("Sent").accessibilityIdentifier("receipt-sent")
                 case .delivered:

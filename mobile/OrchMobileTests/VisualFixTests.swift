@@ -14,8 +14,8 @@ final class VisualFixTests: XCTestCase {
     }
 
     func testTasksWording() {
-        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 tasks done")
-        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 3, status: "Working"), "1 of 3 tasks done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 steps done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 3, status: "Working"), "1 of 3 steps done")
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Working"), "")
     }
 
