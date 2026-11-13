@@ -345,9 +345,9 @@ final class Outbox {
     /// The answer value inside a 409 "already answered" message ("This question was already answered: Blue." -> "Blue").
     /// Nil when the text has no recognisable value: the error text must never be shown as the answer.
     nonisolated static func takenAnswer(from message: String) -> String? {
-        guard message.range(of: "already answered", options: .caseInsensitive) != nil,
-              let colon = message.range(of: ": ") else { return nil }
-        var value = message[colon.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let prefix = message.range(of: "already answered: ", options: .caseInsensitive) else { return nil }
+        var value = message[prefix.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only the server's own closing period goes; a value's own dot ("v1.2.") stays.
         if value.hasSuffix(".") { value.removeLast() }
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value

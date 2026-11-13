@@ -26,7 +26,8 @@ struct QuestionCard: View {
                     }.themeFont(13, .semibold).foregroundStyle(isStale ? Theme.muted : Theme.warn)
                 }
                 if let context = QuestionCardRules.context(q) {
-                    Text(context).themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(context).themeFont(13).foregroundStyle(Theme.muted).lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("question-context")
                 }
                 questionText(q)
@@ -43,7 +44,7 @@ struct QuestionCard: View {
                         options(q)
                     }
                     if let answer = model.pendingAnswers[q.id] {
-                        UndoCountdown(answer: label(q, answer), seconds: undoSeconds,
+                        UndoCountdown(answer: label(q, answer), seconds: undoSeconds, start: model.pendingAnswerAt[q.id] ?? Date(),
                                       undoId: "undo-\(q.id)") { model.undoAnswer(q) }.id(answer)
                     }
                 }
@@ -75,10 +76,7 @@ struct QuestionCard: View {
             })
     }
 
-    private func label(_ q: Question, _ option: String) -> String {
-        if q.isAllow { return option == "No" ? "Don't allow" : q.label(option) }
-        return QuestionCardRules.optionText(option)
-    }
+    private func label(_ q: Question, _ option: String) -> String { QuestionCardRules.label(q, option) }
 
     private var undoSeconds: Double {
         Double(model.undoDelay.components.seconds) + Double(model.undoDelay.components.attoseconds) / 1e18
@@ -143,8 +141,8 @@ struct QuestionCard: View {
         let text = title ?? label(q, option)
         return VStack(alignment: .leading, spacing: 4) {
             if recommended {
-                Text("Recommended").themeFont(13, .medium).foregroundStyle(Theme.brand)
-                    .accessibilityHidden(true).accessibilityIdentifier("recommended-\(option)")
+                // VoiceOver hears ", recommended" on the button itself.
+                Text("Recommended").themeFont(13, .medium).foregroundStyle(Theme.brand).accessibilityHidden(true)
             }
             Button { model.chooseAnswer(q, option) } label: {
                 HStack(spacing: 6) {
@@ -244,13 +242,34 @@ struct QuestionCard: View {
 
 /// Pure display rules for question cards (unit tested).
 enum QuestionCardRules {
-    /// A shouted single word ("DATE", "TIMESTAMP") reads as "Date", "Timestamp"; short acronyms (CSV, PDF) stay.
+    /// Acronyms that keep their capitals even on a fully shouted card.
+    static let acronyms: Set<String> = ["JSON", "HTML", "UUID", "CSV", "API", "URL", "PDF", "XML", "SQL", "HTTP", "HTTPS",
+                                        "YAML", "UTC", "ISO", "ID", "UI", "CSS", "SVG", "PNG", "JPEG", "JPG", "GIF", "ZIP", "TXT", "AI", "OK"]
+
+    /// What a button reads for an option: the allow wording for permissions, otherwise `optionText` among the card's options.
+    static func label(_ q: Question, _ option: String) -> String {
+        if q.isAllow { return option == "No" ? "Don't allow" : q.label(option) }
+        return optionText(option, among: q.message.body.options)
+    }
+
+    /// Capitals carry meaning (JSON, NULL, DATE as a type), so an option is shown as sent. Only when every option on
+    /// the card is shouted ("DATE" / "TIMESTAMP") do the words read in sentence case, and known acronyms stay.
     /// Only the label changes; the raw option is what the relay receives.
-    static func optionText(_ option: String) -> String {
+    static func optionText(_ option: String, among options: [String]) -> String {
+        guard !options.isEmpty, options.allSatisfy(isShouted) else { return option }
+        return option.split(separator: " ", omittingEmptySubsequences: false).enumerated().map { (i: Int, word: Substring) -> String in
+            let w = String(word)
+            if acronyms.contains(w.uppercased()) || !w.contains(where: \.isLetter) { return w }
+            let lower = w.lowercased()
+            return i == 0 ? lower.prefix(1).uppercased() + String(lower.dropFirst()) : lower
+        }.joined(separator: " ")
+    }
+
+    /// All letters capital and at least one word that is not a known acronym ("TIMESTAMP" yes; "CSV", "Yes" no).
+    static func isShouted(_ option: String) -> Bool {
         let letters = option.filter(\.isLetter)
-        guard letters.count >= 4, !option.contains(" "), option.allSatisfy({ $0.isLetter || $0 == "_" || $0 == "-" }),
-              letters.allSatisfy(\.isUppercase) else { return option }
-        return option.prefix(1) + option.dropFirst().lowercased()
+        guard !letters.isEmpty, letters.allSatisfy(\.isUppercase) else { return false }
+        return option.split(separator: " ").contains { w in w.contains(where: \.isLetter) && !acronyms.contains(String(w)) }
     }
 
     /// The one plain line of context the agent gave (the question title), when it adds something to the question.
@@ -266,6 +285,8 @@ enum QuestionCardRules {
         "Sending in \(max(1, Int(remaining.rounded(.up)))) s"
     }
 
+    static func announcesSelection(tappedAt: Date, now: Date) -> Bool { now.timeIntervalSince(tappedAt) < 0.5 }
+
     static func selectedAnnouncement(_ answer: String, seconds: Double) -> String {
         "\(answer) selected. Sending in \(max(1, Int(seconds.rounded(.up)))) seconds. Undo to change."
     }
@@ -275,9 +296,10 @@ enum QuestionCardRules {
 private struct UndoCountdown: View {
     let answer: String
     let seconds: Double
+    /// When the answer was tapped (AppModel.pendingAnswerAt), so scrolling away and back does not restart the count.
+    let start: Date
     let undoId: String
     var onUndo: () -> Void
-    @State private var start = Date()
 
     var body: some View {
         HStack(spacing: 8) {
@@ -285,14 +307,15 @@ private struct UndoCountdown: View {
                 Text(QuestionCardRules.sendingText(remaining: seconds - context.date.timeIntervalSince(start)))
                     .themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("undo-countdown")
             }
-            AnswerUndoRing(seconds: seconds)
+            AnswerUndoRing(seconds: seconds, start: start)
             Spacer(minLength: 0)
             Button(action: onUndo) {
                 Text("Undo").themeFont(15, .medium).foregroundStyle(Theme.brand)
                     .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
             }.accessibilityLabel("Undo \(answer)").accessibilityIdentifier(undoId)
         }.onAppear {
-            start = Date()
+            // Announce once, right after the tap; reappearing (scroll back, return to the chat) stays quiet.
+            guard QuestionCardRules.announcesSelection(tappedAt: start, now: Date()) else { return }
             UIAccessibility.post(notification: .announcement, argument: QuestionCardRules.selectedAnnouncement(answer, seconds: seconds))
         }
     }
@@ -300,14 +323,18 @@ private struct UndoCountdown: View {
 
 private struct AnswerUndoRing: View {
     let seconds: Double
+    let start: Date
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var remaining: CGFloat = 1
     var body: some View {
         Circle().trim(from: 0, to: remaining).stroke(Theme.brand, style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .rotationEffect(.degrees(-90)).frame(width: 16, height: 16).accessibilityHidden(true)
             .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.linear(duration: max(0, seconds))) { remaining = 0 }
+                guard !reduceMotion, seconds > 0 else { return }
+                let left = max(0, seconds - Date().timeIntervalSince(start))
+                var transaction = Transaction(); transaction.disablesAnimations = true
+                withTransaction(transaction) { remaining = CGFloat(left / seconds) }
+                withAnimation(.linear(duration: left)) { remaining = 0 }
             }
             .onChange(of: reduceMotion) { _, reduced in
                 if reduced { var transaction = Transaction(); transaction.disablesAnimations = true
