@@ -492,7 +492,7 @@ function ticketShareButton(t, file) {
   return ticketButton('Share with group', 'outline', () => share(false));
 }
 // ---- The shared file viewer: name, meta, Open in new tab, Download, Copy link. × Close, Esc and a click outside close it,
-// and focus goes back to the control that opened it.
+// and the opening control gets the cursor back.
 const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName) + (dl ? '&dl=1' : '');
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
 const fileBadge = fileName => (/\.([^./]+)$/.exec(fileName)?.[1] || 'file').slice(0, 4).toUpperCase();
@@ -507,7 +507,7 @@ function viewerClose(d, trigger) {
     if (done) return;
     done = true;
     window.orch.close(d);
-    if (trigger && typeof trigger.focus === 'function') trigger.focus({preventScroll:true});
+    if (trigger && trigger.isConnected) trigger.focus({preventScroll:true});
   };
 }
 function bindViewer(d, close) {
@@ -1140,7 +1140,7 @@ function detail(t) {
     fresh ? ticketEmptyCard(t) : null,
     !fresh && !openQuestions.length && ticketPaused(t, run) ? h('section', {className:'card paused', 'data-key':'ticket-paused'}, h('p', {className:'meta'}, 'Paused' + (t.updated_at ? ' ' + localStamp(t.updated_at, false) : '')), snapshot ? null : ticketButton('Resume', 'primary sm', () => act('run.start', {ticket:t.id}))) : null,
     working ? agentBar(t) : null, working ? sharedFolderLine(t) : null, copyLine(t), working ? liveSessionStrip(t) : null,
-    t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, clean(t.description)), h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by))) : null,
+    t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, clean(t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ' + clean(t.summary)) : null,
     note,
     t.status !== 'review' ? ticketResultsCard(t) : null,

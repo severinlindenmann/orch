@@ -188,3 +188,7 @@ dialog.ticket-viewer::backdrop{background:rgb(0 0 0 / .7)}
 @media(max-width:899px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-side{position:static}.ticket-page .ticket-heading h1{font-size:24px;line-height:32px}.ticket-page .state-line .btn{margin-left:0}dialog.ticket-viewer{width:calc(100vw - 20px);height:calc(100dvh - 20px)}}
 @media(min-width:1600px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr) 320px;gap:32px}}
 @media(prefers-reduced-motion:reduce){dialog.ticket-viewer[open],.ticket-page .status-change{animation:none}}
+.ticket-page .ticket-heading h1 .ed-title,.ticket-page .ticket-heading h1 .ed{padding-left:0;margin-left:0;border-color:transparent}
+.ticket-page .ticket-heading h1 .inline-host{display:block}
+.ticket-page .properties .links-card{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.ticket-viewer .actions{margin:0}
