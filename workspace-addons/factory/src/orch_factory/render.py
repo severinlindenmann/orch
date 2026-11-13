@@ -97,15 +97,7 @@ def stop_options(s):
 
 
 def stop_text(s, n):
-    items = []
-    for i in s["items"]:
-        item = f"{clean(i['title'])} [{i['tag']}"
-        if i.get("recommend"):
-            item += f", suggested: {clean(i['recommend'], 40)}"
-        for key in ("before", "after"):
-            if i.get(key):
-                item += f", {key}: {clean(i[key], 80)}"
-        items.append(item + "]")
+    items = [f"{clean(i['title'])} ({i['tag']})" for i in s["items"]]  # no image names: owners read this line
     segments = [f"Stop at {clean(s['stage'], 40)}. Decide", "; ".join(items)]
     segments[0] += ": " + segments.pop(1)
     for label, key in (

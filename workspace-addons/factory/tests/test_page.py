@@ -90,6 +90,17 @@ def test_home_lists_orders_in_every_phase(ws, run, srv, proposal):
     assert by[order]["phase"] == "started" and by[order]["stage"] == "build" and by[order]["open"] is None
 
 
+def test_line_label_comes_from_the_proposal(run, srv, proposal):
+    import json
+
+    data = json.loads(proposal)
+    data["line"][0]["label"] = "Build the booking page"
+    order = run("idea", "Labelled line")["order"]
+    run("propose", order, "--file", "-", data=json.dumps(data).encode())
+    _, o, _ = get(srv, f"/api/order/{order}")
+    assert [x.get("label") for x in o["line"]] == ["Build the booking page", None, None]
+
+
 def test_order_detail_shape(ws, run, srv):
     order, q = waiting_stop(ws, run, {"title": "Button colour", "tag": "taste"})
     run("tiny", order, "--minutes", "5", "--what", "Fix a typo")
@@ -110,7 +121,9 @@ def test_order_detail_shape(ws, run, srv):
         "kind": "stop",
         "text": o["open"]["text"],
         "options": ["Continue", "Send back"],
+        "data": o["open"]["data"],  # the structured stop: the page titles the card from it
     }
+    assert o["open"]["data"]["stage"] == "build" and "before" not in o["open"]["text"]
     assert [x["state"] for x in o["line"]] == ["waiting", "todo"]
     assert o["proposal"]["kind"] == "run" and o["tiny"] == [{"what": "Fix a typo", "minutes": 5}]
     assert [(c["title"], c["role"], c["agent"], c["status"]) for c in o["crew"]] == [

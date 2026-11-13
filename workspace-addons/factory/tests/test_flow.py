@@ -622,9 +622,14 @@ def test_stop_change_autopilot_texts(ws, run):
         in text
     )
     assert "Always asks you: ship, scope, budget, new connections, can't-undo, other workspaces." in text
-    order, q = waiting_stop(ws, run, {"title": "Hero\nimage “v2”", "tag": "taste"})
+    order, q = waiting_stop(
+        ws,
+        run,
+        {"title": "Hero\nimage “v2”", "tag": "taste", "before": "s1/before.png", "after": "s1/after.png"},
+    )
     stop_text = next(x for x in core(ws, "ticket", "show", order)["questions"] if x["id"] == q)["text"]
-    assert "Hero image 'v2' [taste]" in stop_text and stop_text.endswith("(Stop 1)")
+    assert "Hero image 'v2' (taste)" in stop_text and stop_text.endswith("(Stop 1)")
+    assert ".png" not in stop_text and "before" not in stop_text  # no image names in the owner's question
     edit(ws, order, lambda t: t["questions"][-1].update(options=["Continue", "Send back", "Ship it"]))
     assert run("next", order, code=2)["code"] == "tampered"
 

@@ -95,6 +95,6 @@ the native question card asks for the person's proof.
 | `/api/order/<id>/file/<name>` | an image of a stop round (`png`, `jpg`, `webp`, `gif` only, from `stops/<id>/`; no other path) |
 | `/api/autopilot` | `{"grants": [{"order", "until", "may", "limits"}], "decisions": [{"order", "q", "answer", "why", "at"}]}` |
 
-Order summary: `{"id", "title", "kind": "run"\|"autopilot", "phase": "draft"\|"proposed"\|"started"\|"edit"\|"parked"\|"shipped"\|"cancelled", "stage", "line": [{"stage", "stop", "state"}], "budget": {"used", "cap", "warn"}, "eta", "due", "open": {"q", "kind", "text", "options"} \| null, "owner_min"}` — every field derived through `flow.derive` (never `ext.factory`).
+Order summary: `{"id", "title", "kind": "run"\|"autopilot", "phase": "draft"\|"proposed"\|"started"\|"edit"\|"parked"\|"shipped"\|"cancelled", "stage", "line": [{"stage", "stop", "state"}], "budget": {"used", "cap", "warn"}, "eta", "due", "open": {"q", "kind", "text", "options"} \| null, "owner_min"}` — every field derived through `flow.derive` (never `ext.factory`). `line[].label` comes from the frozen proposal; `open.data` carries the frozen stop/change data for stop and change questions.
 Page routes (hash inside the page): `#/` home · `#/order/<id>` · `#/order/<id>/proposal` · `#/order/<id>/stop/<n>` ·
 `#/order/<id>/draft/<v>` · `#/autopilot`.

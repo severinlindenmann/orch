@@ -18,8 +18,53 @@
   const p = value => node('p', value);
   const meta = value => node('p', value, 'meta');
   const badge = value => node('span', value, 'badge');
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad = n => String(n).padStart(2, '0');
+  function parseWhen(value) {
+    if (typeof value !== 'string') return null;
+    const day = /^(\d{4})-(\d\d)-(\d\d)$/.exec(value);
+    if (day) return {date: new Date(+day[1], +day[2] - 1, +day[3]), dateOnly: true};
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : {date, dateOnly: false};
+  }
+  function dayWord(date) {
+    const now = new Date();
+    const diff = Math.round((new Date(date.getFullYear(), date.getMonth(), date.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+    if (diff === 0) return 'today';
+    if (diff === 1) return 'tomorrow';
+    if (diff === -1) return 'yesterday';
+    return date.getDate() + ' ' + MONTHS[date.getMonth()] + (date.getFullYear() === now.getFullYear() ? '' : ' ' + date.getFullYear());
+  }
+  const hhmm = date => pad(date.getHours()) + ':' + pad(date.getMinutes());
+  // Local, human time: "today 18:30", "tomorrow 09:00", "16 Nov 19:18". Never a raw ISO string.
+  function when(value) {
+    const t = parseWhen(value);
+    if (!t) return '—';
+    return dayWord(t.date) + (t.dateOnly ? '' : ' ' + hhmm(t.date));
+  }
+  function whenRange(from, to) {
+    const a = parseWhen(from), b = parseWhen(to);
+    if (!a || !b) return when(from || to);
+    if (a.date.toDateString() === b.date.toDateString() && !a.dateOnly && !b.dateOnly) return dayWord(a.date) + ' ' + hhmm(a.date) + '–' + hhmm(b.date);
+    return when(from) + ' – ' + when(to);
+  }
+  const noIso = value => text(value).replace(/agent:factory/g, 'your agent').replace(/\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)/g, m => when(m));
+  function duration(min) {
+    const n = Math.round(Number(min));
+    if (!Number.isFinite(n)) return '—';
+    const h = Math.floor(n / 60), m = n % 60;
+    return [h ? h + ' h' : '', m || !h ? m + ' min' : ''].filter(Boolean).join(' ');
+  }
+  const capital = value => { const t = text(value).replace(/[-_]/g, ' '); return t.charAt(0).toUpperCase() + t.slice(1); };
+  const tagWord = tag => tag === 'cant-undo' ? "can't undo" : text(tag).replace(/[-_]/g, ' ');
+  // The proposal's own label when it gave one, else the capitalized stage name; the ship stage is always a question.
+  const stageLabel = item => item.label || (item.stage === 'ship' ? 'Ship it?' : capital(item.stage));
+  const stageName = (order, stage) => stageLabel(array(order?.line).find(x => x.stage === stage) || {stage});
+  const yourTime = min => Number.isFinite(Number(min)) && min !== null ? "you're needed ~" + min + ' min' : '';
   function link(label, href, primary = false) {
     const el = node('a', label, primary ? 'btn primary' : 'btn outline sm');
+    el.classList.add('f-btn');
     el.href = href;
     if (href.startsWith('/#')) el.target = '_top';
     return el;
@@ -53,11 +98,49 @@
     const el = node('ol', null, 'f-stage'); el.setAttribute('aria-label', 'Order stages');
     for (const stage of array(order.line)) {
       const done = ['done', 'complete', 'completed', 'passed'].includes(stage.state);
-      const li = node('li', (done ? '✓ ' : stage.stop ? '◇ ' : '') + text(stage.label || stage.stage), done ? 'complete' : '');
+      const li = node('li', (done ? '✓ ' : stage.stop ? '◇ ' : '') + stageLabel(stage), done ? 'complete' : '');
       if (stage.stage === order.stage) li.setAttribute('aria-current', 'step');
       el.append(li);
     }
     return el.children.length ? el : meta('The line is not planned yet.');
+  }
+  function nextStop(order) {
+    const stop = array(order.line).find(x => x.stop && x.state !== 'done');
+    if (!stop) return null;
+    const need = yourTime(order.owner_min);
+    return meta('Next stop: ' + stageLabel(stop) + (need ? ' · ' + need : ''));
+  }
+  // Plain title for an open question, from the structured stop/change data. The raw core text stays behind Details.
+  function openTitle(order, open) {
+    const data = open.data || {};
+    if (open.kind === 'stop') return data.stage === 'ship' ? 'Ship it?' : 'Check at ' + stageName(order, data.stage);
+    if (open.kind === 'change') return 'Add “' + text(data.title) + '”?';
+    if (open.kind === 'autopilot') return 'Start autopilot?';
+    return 'Start this run?';
+  }
+  function openBody(order, open, full) {
+    const data = open.data || {}, parts = [];
+    if (open.kind === 'stop') {
+      const items = array(data.items);
+      if (items.length) parts.push(list(items.map(i => text(i.title) + ' (' + tagWord(i.tag) + ')')));
+      const checked = array(data.checked).length, not = array(data.not_checked).length;
+      parts.push(meta('Checked: ' + checked + ' · Not checked: ' + not));
+      if (full) {
+        if (not) parts.push(meta('Not checked: ' + array(data.not_checked).join(', ')));
+      }
+    } else if (open.kind === 'change') {
+      parts.push(meta('+' + text(data.adds_min) + ' min' + (data.new_eta ? ' · new ETA ' + when(data.new_eta) : '')));
+      if (data.what) parts.push(p(data.what));
+    } else {
+      const need = yourTime(order.owner_min);
+      if (need) parts.push(meta(capital(need)));
+    }
+    return parts;
+  }
+  function rawDetails(open) {
+    const el = node('details', null, 'f-details');
+    el.append(node('summary', 'Details'), meta(open.text), ...(array(open.options).length ? [meta('Options: ' + open.options.join(' · '))] : []));
+    return el;
   }
   function budget(order) {
     const b = order.budget || {};
@@ -71,15 +154,27 @@
       meta(used + ' / ' + cap + ' active min · waiting for you never counts'),
       ...(b.warn ? [meta('Budget needs attention · review the order ticket.')] : []));
   }
+  const tail = (...nodes) => group('actions', ...nodes);
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
-    view.append(heading('Factory', 'Your ideas, planned runs, and the stops that need you.'));
-    const autoCard = card('Autopilot', group('row between',
-      group('stack', badge(auto?.on ? 'On' : 'Off'), meta(auto?.on ? 'Until ' + text(auto.until) + ' · ' + text(auto.decided_today) + ' decisions today' : 'Your agent asks you at the planned stops.')),
-      link('View grants & decisions', '#/autopilot')));
+    const needing = orders.filter(o => o.open);
+    const minutes = needing.reduce((sum, o) => sum + (Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
+    view.append(heading('Factory', needing.length
+      ? plural(needing.length, 'thing needs you', 'things need you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
+      : 'Nothing needs you right now. Your ideas and planned runs are below.'));
+    let autoCard;
+    if (auto?.on) {
+      const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
+      autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
+        meta('Ends ' + when(auto.until) + ' · ' + plural(Number(auto.decided_today) || 0, 'decision', 'decisions') + ' today'),
+        meta('Your agent answers routine stops. Ship still asks you.'),
+        tail(link('What it decided', '#/autopilot')));
+    } else {
+      autoCard = card('Autopilot off', meta('Your agent asks you at every planned stop.'), ...(auto ? [tail(link('What it decided', '#/autopilot'))] : []));
+    }
     autoCard.classList.add('f-autopilot'); view.append(autoCard);
     if (!orders.length) {
-      view.append(card('Start with an idea', p('Tell your agent an idea in Chat — it plans the run here.'), link('Open Chat', '/#chat', true))); return;
+      view.append(card('Start with an idea', p('Tell your agent an idea in Chat — it plans the run here.'), tail(link('Open Chat', '/#chat', true)))); return;
     }
     const primary = group('stack'), secondary = group('stack');
     const section = (parent, title, rows, render, empty) => {
@@ -87,50 +182,74 @@
       el.append(...(rows.length ? rows.map(render) : [meta(empty)])); parent.append(el);
     };
     section(primary, 'Proposals waiting for Start', orders.filter(o => o.phase === 'proposed'), o => {
-      const c = card(o.title, meta(text(o.owner_min) + ' min of your time'), orderLink(o, 'Read proposal', '/proposal'));
+      const need = yourTime(o.owner_min);
+      const c = card(o.title, ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
       c.classList.add('f-attention'); return c;
     }, 'No proposals waiting for Start.');
     section(primary, 'Needs you · stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
-      const c = card(o.title, badge(o.stage || o.open.kind), p(o.open.text), orderLink(o, 'Review order'), ticket(o.id));
+      const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false), rawDetails(o.open),
+        tail(ticket(o.id, 'Answer in the ticket', true), orderLink(o, 'Review order')));
       c.classList.add('f-attention'); return c;
     }, 'No stops waiting for you.');
-    section(primary, 'Running', orders.filter(o => o.phase === 'started'), o => card(o.title, stages(o), budget(o),
-      meta('ETA ' + text(o.eta)), orderLink(o)), 'No running orders.');
+    section(primary, 'Running', orders.filter(o => o.phase === 'started'), o => o.kind === 'autopilot'
+      ? card(o.title, meta('Autopilot order'), p('Routine stops answered by your agent · Ship still asks you'), tail(link('What it decided', '#/autopilot')))
+      : card(o.title, stages(o), budget(o), meta('ETA ' + when(o.eta)), tail(orderLink(o))), 'No running orders.');
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
-    section(secondary, 'Shipped this week', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), orderLink(o)), 'No shipped work recorded.');
+    section(secondary, 'Shipped this week', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
     secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
-    section(secondary, 'Saved ideas', orders.filter(o => ['draft','edit','parked','cancelled','broken'].includes(o.phase)), o => card(o.title, badge(o.phase), orderLink(o)), 'No saved ideas.');
+    section(secondary, 'Saved ideas', orders.filter(o => ['draft','edit','parked','cancelled','broken'].includes(o.phase)), o => card(o.title, badge(capital(o.phase)), tail(orderLink(o))), 'No saved ideas.');
     view.append(group('f-grid', primary, secondary));
   }
   function line(items) {
     const el = node('ol', null, 'f-line');
     for (const item of array(items)) {
-      const li = node('li', (item.stop ? '◇ ' : '') + text(item.label || item.stage), item.stop ? 'stop' : '');
+      const li = node('li', (item.stop ? '◇ ' : '') + stageLabel(item), item.stop ? 'stop' : '');
       li.append(node('small', item.why)); el.append(li);
     }
     return el;
   }
+  const roles = {manager: 'Manager', builder: 'Builder', reviewer: 'Reviewer'};
+  const roleName = role => roles[role] || capital(role);
   function crewPlan(crew) {
-    return list(array(crew).map(c => text(c.role) + ' · ' + text(c.agent) + ' — ' + text(c.why)));
+    return list(array(crew).map(c => roleName(c.role) + ' · ' + text(c.agent) + ' — ' + text(c.why)));
   }
   function limits(data) {
-    const labels = {days:'Duration (days)', max_orders:'Maximum orders', active_min_per_day:'Active min / day', api_usd_per_day:'API USD / day'};
-    return list(Object.entries(data || {}).map(([key, value]) => (labels[key] || key) + ': ' + text(value) + (key.endsWith('_per_day') ? ' · target, not enforced yet' : '')));
+    data = data || {};
+    const rows = [];
+    if (data.days != null) rows.push('Runs for ' + plural(Number(data.days), 'day', 'days') + '. Then your agent stops and asks you to renew.');
+    if (data.max_orders != null) rows.push('At most ' + plural(Number(data.max_orders), 'order', 'orders') + ' at once.');
+    if (data.active_min_per_day != null) rows.push('Target: ' + duration(data.active_min_per_day) + ' of active work a day · not enforced yet');
+    if (data.api_usd_per_day != null) rows.push('Target: $' + text(data.api_usd_per_day) + ' of API spend a day · not enforced yet');
+    return list(rows);
   }
-  const alwaysAsks = ['Ship and anything that cannot be undone.', 'Scope changes and budget beyond the limits.', 'Crew outside an approved proposal.', 'New connections or credentials and other workspaces.', 'Starting an order, budget questions, and creating, renewing or widening Autopilot.'];
+  const mayDecide = {routine: 'Routine improvements', taste: 'Taste decisions within your house rules'};
+  const alwaysAsks = ['Shipping: the final Ship stop.', 'Anything that cannot be undone.', 'Scope changes and budget beyond the limits.', 'New connections or credentials.', 'Anything touching another workspace.', 'Creating, renewing or widening Autopilot.'];
   function proposal(order) {
     const data = order.proposal;
-    view.append(heading(data?.title || order.title, 'Run proposal · review the whole run before answering', orderLink(order)));
+    view.append(heading(data?.title || order.title, data?.kind === 'autopilot' ? 'Autopilot proposal · ' + text(data.goal) : 'Run proposal · review the whole run before answering', orderLink(order)));
     if (!data) { view.append(card('No frozen proposal yet', p('Your agent is still planning this order.'), answer(order.id))); return; }
-    view.append(p(data.goal));
     if (data.kind === 'autopilot') {
-      view.append(group('grid-2', card('May decide', list(data.may_decide), list(data.examples)), card('Limits', limits(data.limits))), card('What always asks you', list(alwaysAsks)), card('Done means', list(data.done_means)), answer(order.id)); return;
+      const l = data.limits || {};
+      const parts = [];
+      if (l.days != null) parts.push(plural(Number(l.days), 'day', 'days'));
+      if (l.max_orders != null) parts.push('at most ' + plural(Number(l.max_orders), 'order', 'orders') + ' at once');
+      if (data.report_at) parts.push('daily report at ' + data.report_at);
+      view.append(node('p', parts.join(' · '), 'f-summary'),
+        group('grid-2', card('May decide', list(array(data.may_decide).map(x => mayDecide[x] || capital(x))), ...(array(data.examples).length ? [meta('Examples: ' + array(data.examples).join('; '))] : [])),
+          card('Always asks you', list(alwaysAsks))),
+        card('Limits & duration', limits(data.limits)), card('Done means', list(data.done_means)), answer(order.id)); return;
     }
     const time = data.time || {}, b = data.budget || {};
+    view.append(p(data.goal));
+    const summary = ['~' + duration(time.active_min)];
+    if (b.api_usd_target != null) summary.push('target $' + text(b.api_usd_target));
+    if (time.owner_min != null) summary.push("you're needed ~" + time.owner_min + ' min');
+    if (time.eta_from || time.eta_to) summary.push('ETA ' + whenRange(time.eta_from, time.eta_to));
+    view.append(node('p', summary.join(' · '), 'f-summary'));
     view.append(group('f-three', card('The line', line(data.line)),
-      card('Time + budget', p(text(time.active_min) + ' active min · API target $' + text(b.api_usd_target)),
-        p('ETA ' + text(time.eta_from) + ' – ' + text(time.eta_to)), meta('Budget preset · ' + text(b.preset)),
-        meta('Active time cap: ' + text(b.active_min_cap) + ' min. API spend is a target, not a cap.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
+      card('Time + budget', p('~' + duration(time.active_min) + ' active · API target $' + text(b.api_usd_target)),
+        p('ETA ' + whenRange(time.eta_from, time.eta_to)), meta('Budget preset · ' + capital(b.preset)),
+        meta('Active time cap: ' + duration(b.active_min_cap) + '. API spend is a target, not a cap.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
       card('Crew + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
     view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What Ship does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
     const assumptions = card('Assumptions');
@@ -140,31 +259,48 @@
     view.append(assumptions, answer(order.id));
     const details = node('details', null, 'f-details');
     details.append(node('summary', 'Details · full line, crew, plan & tasks'), group('stack', line(data.line), node('h3','Crew'), crewPlan(data.crew),
-      node('h3','Tasks'), list(array(data.tasks).map(t => text(t.title) + ' · ' + text(t.slug) + ' · ' + text(t.role) + ' · ' + text(t.stage) + (array(t.proves).length ? ' · proves: ' + t.proves.map(i => array(data.done_means)[i] || i).join('; ') : ''))),
-      node('h3','Skipped stages'), list(array(data.skipped).map(s => text(s.stage) + ' — ' + text(s.why))),
+      node('h3','Tasks'), list(array(data.tasks).map(t => text(t.title) + ' · ' + text(t.slug) + ' · ' + roleName(t.role) + ' · ' + capital(t.stage) + (array(t.proves).length ? ' · proves: ' + t.proves.map(i => array(data.done_means)[i] || i).join('; ') : ''))),
+      node('h3','Skipped stages'), list(array(data.skipped).map(s => capital(s.stage) + ' — ' + text(s.why))),
       node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
     view.append(details);
   }
   function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'No tiny changes recorded.')); }
+  const statusWord = {open: 'open', todo: 'not started', doing: 'working', done: 'done', blocked: 'blocked'};
   function orderPage(order) {
-    view.append(heading(order.title, text(order.phase) + ' · ' + text(order.stage) + ' · ETA ' + text(order.eta), orderLink(order, 'Read proposal', '/proposal')));
-    const main = group('stack', card('The line', stages(order)), card('Time + budget', budget(order), meta('Due ' + text(order.due))));
+    const phase = order.phase === 'started' ? 'Running' : capital(order.phase);
+    view.append(heading(order.title, [phase, order.stage ? 'Stage: ' + stageName(order, order.stage) : '', order.eta ? 'ETA ' + when(order.eta) : ''].filter(Boolean).join(' · '), orderLink(order, 'Read proposal', '/proposal')));
+    if (order.kind === 'autopilot') {
+      view.append(card('Autopilot order', p('Routine stops answered by your agent · Ship still asks you'),
+        group('actions', link('What it decided', '#/autopilot'), ticket(order.id, 'Open order ticket', false))));
+    }
+    const lineCard = card('The line', stages(order), ...(order.kind === 'run' && order.phase === 'started' ? [nextStop(order)].filter(Boolean) : []));
+    const main = group('stack', lineCard, card('Time + budget', budget(order), meta('Due ' + when(order.due))));
     const crew = card('Crew now');
-    for (const c of array(order.crew)) crew.append(group('f-record', ticket(c.ticket, c.title || c.role, false), meta([c.role,c.agent,c.status].filter(Boolean).join(' · '))));
+    for (const c of array(order.crew)) {
+      const label = [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
+      const row = group('f-record f-crew');
+      if (validId(c.ticket)) { const a = link(label + ' ↗', '/#ticket/' + c.ticket); a.className = 'f-crewlink'; a.title = c.title || ''; row.append(a); } else row.append(node('span', label));
+      row.append(meta(c.title));
+      crew.append(row);
+    }
     if (!array(order.crew).length) crew.append(meta('No crew assigned yet.'));
     main.append(crew, tiny(order));
     const timeline = node('ol', null, 'f-timeline');
-    for (const a of array(order.activity)) { const li = node('li'); li.append(meta(a.at), p(a.text)); timeline.append(li); }
+    for (const a of array(order.activity)) { const li = node('li'); li.append(meta(when(a.at)), p(noIso(a.text))); timeline.append(li); }
     main.append(card('Activity', timeline.children.length ? timeline : meta('No activity recorded.')));
     const aside = group('stack');
-    if (order.open) { const question = card('Needs you', badge(order.open.kind), p(order.open.text), list(order.open.options), answer(order.id)); question.classList.add('f-attention'); aside.append(question); }
-    if (order.problem) aside.append(card('Record needs attention', p(order.problem), ticket(order.id, 'Open order ticket', false)));
+    if (order.open) {
+      const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order.id));
+      question.classList.add('f-attention'); aside.append(question);
+    }
+    if (order.problem) aside.append(card('Record needs attention', p(order.problem), group('actions', ticket(order.id, 'Open order ticket', false))));
     const changes = card('Changes');
-    for (const c of array(order.changes)) changes.append(group('f-record', badge(c.state), node('h3', c.title), meta('+' + text(c.adds_min) + ' min'), ...(c.state === 'open' ? [ticket(order.id)] : [])));
+    for (const c of array(order.changes)) changes.append(group('f-record', badge(capital(c.state)), node('h3', c.title), meta('+' + text(c.adds_min) + ' min'), ...(c.state === 'open' ? [group('actions', ticket(order.id))] : [])));
     if (!array(order.changes).length) changes.append(meta('No changes proposed.'));
     aside.append(changes);
     const stops = card('Stops');
-    for (const s of array(order.stops)) if (validVersion(s.n)) stops.append(group('f-record', orderLink(order, text(s.stage) + ' · round ' + s.n, '/stop/' + s.n), meta([s.state,s.answer,s.by].filter(Boolean).join(' · '))));
+    const stateWord = {open: 'waiting for you', decided: 'decided by your agent', answered: 'answered', ignored: 'not counted'};
+    for (const s of array(order.stops)) if (validVersion(s.n)) stops.append(group('f-record', orderLink(order, stageName(order, s.stage) + ' · round ' + s.n, '/stop/' + s.n), meta([stateWord[s.state] || s.state, s.answer].filter(Boolean).join(' · '))));
     if (!stops.querySelector('a')) stops.append(meta('No stop reviews yet.'));
     aside.append(stops, card('Drafts', draftTabs(order)));
     view.append(group('f-order', main, aside));
@@ -186,10 +322,10 @@
     const stop = array(order.stops).find(s => String(s.n) === round);
     if (!stop) throw new Error('Stop not found');
     const data = stop.data || {};
-    view.append(heading(text(stop.stage) + ' · stop review', order.title, orderLink(order)), meta([stop.state,stop.answer,stop.by].filter(Boolean).join(' · ')));
+    view.append(heading(stageName(order, stop.stage) + ' · stop review', order.title, orderLink(order)), meta([({open: 'Waiting for you', decided: 'Decided by your agent', answered: 'Answered', ignored: 'Not counted'})[stop.state] || stop.state, stop.answer].filter(Boolean).join(' · ')));
     for (const [index, item] of array(data.items).entries()) {
       const compare = group('f-compare', preview(order, 'Before', item.before), preview(order, 'After', item.after));
-      const c = card(item.title, badge(item.tag), compare);
+      const c = card(item.title, badge(tagWord(item.tag)), compare);
       if (imageName(item.before) && imageName(item.after)) {
         const label = node('label', 'Compare before / after', 'stack');
         const range = node('input', null, 'f-range'); range.type = 'range'; range.min = '15'; range.max = '85'; range.value = '50';
@@ -197,7 +333,7 @@
         range.addEventListener('input', () => { const split = Number(range.value); compare.style.gridTemplateColumns = 'minmax(0,' + split + 'fr) minmax(0,' + (100 - split) + 'fr)'; });
         label.append(range); c.append(label);
       }
-      if (item.recommend) c.append(meta('Agent recommends: ' + item.recommend));
+      if (item.recommend) c.append(meta('Your agent suggests: ' + item.recommend));
       c.append(meta('Review images and pins are view-only here. Add feedback on the order ticket.')); view.append(c);
     }
     view.append(group('grid-2', card('Checked', list(data.checked)), card('Not checked', list(data.not_checked))),
@@ -206,19 +342,20 @@
   function autopilot(data) {
     view.append(heading('Autopilot', 'Bounded permission for your agent. Ship still asks you.'));
     const grants = card('Grants');
-    for (const grant of array(data.grants)) grants.append(group('f-record', node('h3', 'Until ' + text(grant.until)), node('h3', 'May decide'), list(grant.may), limits(grant.limits), ticket(grant.order, 'Open grant ticket', false)));
+    for (const grant of array(data.grants)) grants.append(group('f-record', node('h3', (grant.live ? 'Active until ' : 'Ended ') + when(grant.until)),
+      node('h3', 'May decide'), list(array(grant.may).map(x => mayDecide[x] || capital(x))), node('h3', 'Limits'), limits(grant.limits), group('actions', ticket(grant.order, 'Open order ticket', false))));
     if (!array(data.grants).length) grants.append(meta('No grants recorded.'));
-    const decisions = card('Decisions');
-    for (const d of array(data.decisions)) decisions.append(group('f-record', node('h3', d.answer), p('Decided by your agent · ' + text(d.why)), meta(text(d.at) + ' · ' + text(d.q)), ticket(d.order, 'Open order ticket', false)));
+    const decisions = card('What it decided');
+    for (const d of array(data.decisions)) decisions.append(group('f-record', node('h3', d.answer), p('Decided by your agent · ' + noIso(d.why)), meta(when(d.at)), group('actions', ticket(d.order, 'Open order ticket', false))));
     if (!array(data.decisions).length) decisions.append(meta('No agent decisions recorded.'));
-    view.append(group('grid-2', grants, card('What always asks you', list(alwaysAsks))), decisions);
+    view.append(group('grid-2', grants, card('Always asks you', list(alwaysAsks))), decisions);
   }
   function draftTabs(order, selected) {
     const nav = node('nav', null, 'f-tabs'); nav.setAttribute('aria-label', 'Draft versions');
     for (const d of array(order.drafts)) if (validVersion(d.v)) {
       const a = orderLink(order, 'Version ' + d.v, '/draft/' + d.v);
       if (String(d.v) === selected) a.setAttribute('aria-current','page');
-      if (d.at) a.title = text(d.at); nav.append(a);
+      if (d.at) a.title = when(d.at); nav.append(a);
     }
     if (!nav.children.length) nav.append(meta('No draft versions yet.'));
     return nav;

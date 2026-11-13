@@ -47,12 +47,24 @@ def _lead(d):
 
 def _open_question(e):
     q = e["q"]
-    return {
+    kind = e["row"]["kind"].split(":")[1]
+    out = {
         "q": q["id"],
-        "kind": e["row"]["kind"].split(":")[1],
+        "kind": kind,
         "text": q.get("text", ""),
         "options": list(q.get("options") or []),
     }
+    if kind in ("stop", "change"):
+        out["data"] = e[
+            "data"
+        ]  # frozen structured data: the page titles the question from it, never the raw text
+    return out
+
+
+def _labelled(line, proposal):
+    """Stage items with the proposal's own `label` when it gave one (a short, plain name for the owner)."""
+    labels = {x["stage"]: x["label"] for x in (proposal or {}).get("line", []) if x.get("label")}
+    return [{**x, "label": _text(labels[x["stage"]], 60)} if x["stage"] in labels else x for x in line]
 
 
 def _eta(d, proposal):
@@ -94,6 +106,7 @@ def _summary(ticket, d):
             {"stage": x["stage"], "stop": x["stop"], "state": "todo"}
             for x in (proposal or {}).get("line", [])
         ]
+    line = _labelled(line, proposal)
     open_ = None
     if started_run and d["open"]:
         open_ = _open_question(d["open"])
