@@ -158,6 +158,51 @@ def running() -> list[dict]:
     return alive
 
 
+def _ports_path() -> Path:
+    return running_path().parent / "ports.json"
+
+
+def _port_key(root: Path, name: str) -> str:
+    return f"{root.resolve()}\t{name}"
+
+
+def last_port(root: Path, name: str) -> int | None:
+    """The port this workspace's add-on had when it last ran (kept across stop/start and updates), or None."""
+    try:
+        data = json.loads(_ports_path().read_text(encoding="utf-8"))
+        v = data.get(_port_key(root, name)) if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+    return v if isinstance(v, int) and not isinstance(v, bool) and 1024 <= v < 65536 else None
+
+
+def _remember_ports(found: dict[str, int], root: Path) -> None:
+    """Best effort; a start never fails because this file cannot be written."""
+    if not found:
+        return
+    try:
+        try:
+            data = json.loads(_ports_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data = data if isinstance(data, dict) else {}
+        data.update({_port_key(root, n): p for n, p in found.items()})
+        p = _ports_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".tmp-", suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, p)
+    except OSError:
+        pass
+
+
+def _url_port(u: object) -> int | None:
+    m = re.search(r":(\d{1,5})(?:/|$)", u) if isinstance(u, str) else None
+    return int(m.group(1)) if m else None
+
+
 def _services(root: Path) -> dict[str, dict]:
     """Active add-ons of this workspace that have a background process."""
     return {n: m for n, m in sorted(addons.active_manifests(root).items()) if m["background"]}
@@ -178,6 +223,9 @@ def _call(root: Path, name: str, m: dict, sub: str, launch: dict[str, str] | Non
     launchenv). Nothing recorded is replayed."""
     base = launchenv.apply(dict(os.environ), launch) if launch else dict(os.environ)
     env = {**base, "ORCH_ADDON": name, "ORCH_ROOT": str(root.resolve()), "ORCH_BIN": addons.orch_bin()}
+    env.pop("ORCH_PREFERRED_PORT", None)
+    if sub == "start" and (pref := last_port(root, name)):
+        env["ORCH_PREFERRED_PORT"] = str(pref)  # sticky ports: the add-on tries this one first
     try:
         r = subprocess.run(
             [sys.executable, "-P", "-m", m["run"], sub, "--json"],
@@ -270,6 +318,9 @@ def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -
                 }
             )
     _save(entries)
+    _remember_ports(
+        {r["addon"]: p for r in rows if r.get("running") and (p := _url_port(r.get("url")))}, root
+    )
     workspace_rows(root)  # notes when each was last seen running
     return rows
 
