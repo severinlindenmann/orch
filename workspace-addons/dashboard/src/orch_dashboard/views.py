@@ -251,6 +251,9 @@ def _block_ok(b) -> bool:
             isinstance(r, dict)
             and isinstance(r.get("cells"), dict)
             and _opt(r, "link", _link)
+            and _opt(r, "subtitle", _text)
+            and _opt(r, "toggle", _toggle_ok)
+            and _opt(r, "actions", lambda v: isinstance(v, list) and len(v) <= 4 and all(map(_row_action_ok, v)))
             and all(
                 _KEY.match(str(k))
                 and (v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)) or _text(v))

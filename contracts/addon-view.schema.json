@@ -149,7 +149,10 @@
             "type": "object", "required": ["cells"], "additionalProperties": false,
             "properties": {
               "cells": { "type": "object", "propertyNames": { "pattern": "^[a-z_][a-z0-9_]{0,31}$" }, "additionalProperties": { "oneOf": [{ "type": "number" }, { "type": "string", "maxLength": 200, "pattern": "^[^<>]*$" }, { "type": "null" }] } },
-              "link": { "$ref": "#/$defs/link" }
+              "link": { "$ref": "#/$defs/link" },
+              "subtitle": { "$ref": "#/$defs/text", "description": "A quiet line under the first cell." },
+              "toggle": {"type": "object", "required": ["on", "label", "action"], "additionalProperties": false, "description": "An On/Off switch on the collapsed row. `action` carries the NEW state in its args when sent.", "properties": {"on": {"type": "boolean"}, "label": {"$ref": "#/$defs/text", "maxLength": 60}, "action": {"$ref": "#/$defs/action"}}},
+              "actions": {"type": "array", "maxItems": 4, "description": "Buttons in the expanded part. `confirm` = a short question; the dashboard shows a small Yes/No (no typed word) before sending.", "items": {"type": "object", "required": ["label", "action"], "additionalProperties": false, "properties": {"label": {"$ref": "#/$defs/text", "maxLength": 30}, "action": {"$ref": "#/$defs/action"}, "confirm": {"$ref": "#/$defs/text", "maxLength": 80}, "tone": {"enum": ["neutral", "bad"]}}}}
             }
           }
         },

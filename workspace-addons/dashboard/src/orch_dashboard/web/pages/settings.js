@@ -535,6 +535,12 @@ function pageFrame(r) {
 }
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
 function addonTab(id) {
+  // The add-on that repeats tickets is the Schedules page: its main button sits in the heading.
+  if (panelOf(id) === 'repeats') {
+    const add = snapshot ? null : h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ New schedule');
+    if (add) add.onclick = () => repeatsDialog(null, id);
+    return fragment(heading('Schedules', 'Repeat work on a plan you choose.', {actions:add}), addonHost(id));
+  }
   return fragment(heading(addonLabel(addons().find(a => a.name === id))), addonHost(id));
 }
 // The add-on's own page (#addon/<name>), shown inside another page: its iframe, or the host its blocks are painted into.
@@ -565,6 +571,9 @@ function addonNotice(view) {
   if (!view.notice) return null;
   const tone = 'banner ' + (view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(view.notice_tone) ? 'attn' : '');
   const b = view.button;
+  // "Running. Next run in 2 days." -> a small state badge and the rest of the line
+  const split = view.notice_tone === 'good' && /^([^.]{1,24})\. (.+)$/.exec(String(view.notice));
+  if (split) return h('p', {className:'status-line'}, h('span', {className:'badge done'}, '● ' + clean(split[1])), h('span', {}, clean(split[2])));
   if (snapshot || b?.action?.op !== 'addon.start') return h('p', {className:tone}, clean(view.notice));
   return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, clean(b.label)));
 }
@@ -585,7 +594,6 @@ function paintAddon(id) {
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
   }
-  if (!snapshot && panelOf(id) === 'repeats') template.append(repeatsCard());
   if (!snapshot && panelOf(id) === 'links' && sharedLinks !== null) template.append(sharedLinksCard());
   reconcile(host, template);
   bindAddonControls(host);
@@ -648,41 +656,107 @@ async function copyText(control) {
   catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
 }
 
-const repeatPresets = ['every day at 9', 'every weekday at 9', 'every monday at 9', 'every hour'];
-function repeatsCard() {
-  return h('section', {className:'card pad stack addon-native', 'data-key':'repeats-card'},
-    h('h2', {}, 'Repeats'), h('div', {className:'actions'},
-      h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ Repeat a ticket')));
-}
 // The add-on that declares the `repeats` panel (state.addons lists only active add-ons, with no `active` field); null when off (then no Copy/Repeat shows on a ticket).
 const repeatsAddon = () => addons().find(a => a.dashboard?.panel === 'repeats')?.name || null;
-// From a ticket's menu (`only`) the first schedule is preselected: "Repeat…" must not copy at once.
+// ---- "How often": plain choices that become one of the phrases (or a five-field cron) the repeating add-on accepts. ----
+const REPEAT_DAYS = [['Mon', 'Monday', 1], ['Tue', 'Tuesday', 2], ['Wed', 'Wednesday', 3], ['Thu', 'Thursday', 4], ['Fri', 'Friday', 5], ['Sat', 'Saturday', 6], ['Sun', 'Sunday', 0]];
+const andList = list => list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
+// {freq: daily|weekly|monthly|custom, days: [cron weekday numbers], monthday, every, time: 'HH:MM'} -> {phrase, summary, hint}
+function repeatPlan(c) {
+  const [hh, mm] = String(c.time || '').split(':').map(Number);
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return {phrase:null, summary:'Choose a time.', hint:''};
+  const at = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+  if (c.freq === 'daily') return {phrase:'daily ' + at, summary:'Runs every day at ' + at, hint:''};
+  if (c.freq === 'weekly') {
+    const picked = REPEAT_DAYS.filter(d => c.days.includes(d[2]));
+    if (!picked.length) return {phrase:null, summary:'Choose at least one day.', hint:''};
+    const phrase = picked.length === 1 ? 'every ' + picked[0][1].toLowerCase() + ' ' + at : mm + ' ' + hh + ' * * ' + picked.map(d => d[2]).join(',');
+    return {phrase, summary:'Runs every ' + andList(picked.map(d => d[1])) + ' at ' + at, hint:''};
+  }
+  if (c.freq === 'monthly') {
+    const day = Number(c.monthday);
+    if (!Number.isInteger(day) || day < 1 || day > 28) return {phrase:null, summary:'Choose a day from 1 to 28.', hint:''};
+    return {phrase:'monthly ' + day + ' ' + at, summary:'Runs on day ' + day + ' of every month at ' + at, hint:'Days go up to 28 so every month has them.'};
+  }
+  const n = Number(c.every);
+  if (!Number.isInteger(n) || n < 1 || n > 30) return {phrase:null, summary:'Choose between 1 and 30 days.', hint:''};
+  if (n === 1) return {phrase:'daily ' + at, summary:'Runs every day at ' + at, hint:''};
+  return {phrase:mm + ' ' + hh + ' */' + n + ' * *', summary:'Runs every ' + n + ' days at ' + at, hint:'Counted from the 1st of each month.'};
+}
+const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];
+// The ticket is chosen in the window, or fixed when it is opened from a ticket's menu (`only`).
 function repeatsDialog(only = null, addonName = null) {
   if (snapshot) return;
-  const {d, actions} = dialog('Repeat a ticket', 'dialog');
-  const ticket = h('select', {className:'input', name:'ticket'});
+  const {d, actions} = dialog('New schedule', 'dialog repeat-dialog');
+  const ticket = h('select', {className:'input', name:'ticket', id:'repeat-ticket'});
   tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
-  const preset = h('select', {className:'input', name:'repeat'});
-  preset.append(new Option('Just once, now', 'once'));
-  repeatPresets.forEach(value => preset.append(new Option(capitalise(value).replace('monday', 'Monday'), value)));
-  if (only) preset.value = repeatPresets[0];
-  const fields = h('div', {className:'form-fields'}, h('label', {}, 'Ticket', ticket), h('label', {}, 'How often', preset));
-  if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
-  const save = button(only ? 'Save' : 'Copy now', 'primary', async () => {
-    if (save.disabled || !ticket.value) return;
+  const choice = {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00'};
+  const summary = h('p', {className:'repeat-summary', role:'status'}), hint = h('span', {className:'meta'});
+  const rowsHost = h('div', {className:'schedule-fields'});
+  const row = (label, ...kids) => h('div', {className:'schedule-row'}, h('span', {}, label), ...kids);
+  const save = button('Save schedule', 'primary', async () => {
+    const plan = repeatPlan(choice);
+    if (save.disabled || !ticket.value || !plan.phrase) return;
     save.disabled = true;
-    const once = preset.value === 'once', verb = once ? 'copy' : 'repeat';
-    const args = {addon:addonName || route().id, verb, target:ticket.value};
-    if (!once) args.value = preset.value;
-    const result = await act('addon.act', args);
-    window.orch.toast(result.ok ? (once ? 'Ticket copied.' : 'Repeat saved.') : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    const result = await act('addon.act', {addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase});
+    window.orch.toast(result.ok ? 'Schedule saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     save.disabled = false;
     if (result.ok) await window.orch.close(d);
     if (route().kind === 'addon') await loadAddon(route().id);
   });
-  preset.onchange = () => { save.textContent = preset.value === 'once' ? 'Copy now' : 'Save'; };
-  save.disabled = !ticket.options.length;
-  actions.append(save); d.append(fields, actions); window.orch.open(d);
+  const refreshSummary = () => {
+    const plan = repeatPlan(choice);
+    summary.textContent = plan.summary; hint.textContent = plan.hint;
+    hint.hidden = !plan.hint; save.disabled = !plan.phrase || !ticket.options.length;
+  };
+  const draw = () => {
+    const plan = repeatPlan(choice), kids = [];
+    if (choice.freq === 'custom') {
+      const n = h('input', {className:'input', type:'number', min:'1', max:'30', value:String(choice.every), 'aria-label':'Number of days'});
+      n.oninput = () => { choice.every = n.value; refreshSummary(); };
+      kids.push(row('Repeat every', h('div', {className:'custom-interval'}, n, h('span', {}, 'days'))));
+    }
+    if (choice.freq === 'weekly') {
+      const chips = REPEAT_DAYS.map(([short, long, num]) => {
+        const box = h('input', {type:'checkbox', value:String(num), 'aria-label':long});
+        box.checked = choice.days.includes(num);
+        box.onchange = () => { choice.days = box.checked ? [...choice.days, num] : choice.days.filter(x => x !== num); refreshSummary(); };
+        return h('label', {className:'day-chip'}, box, h('span', {'aria-hidden':'true'}, short));
+      });
+      kids.push(row('Days of week', h('div', {className:'day-chips', role:'group', 'aria-label':'Days of week'}, chips)));
+    }
+    if (choice.freq === 'monthly') {
+      const day = h('select', {className:'input', 'aria-label':'Day of month'});
+      for (let i = 1; i <= 28; i++) day.append(new Option(String(i), String(i)));
+      day.value = String(choice.monthday);
+      day.onchange = () => { choice.monthday = Number(day.value); refreshSummary(); };
+      kids.push(row('Day of month', h('div', {className:'schedule-value'}, day, plan.hint ? hint : null)));
+    }
+    const time = h('input', {className:'input', type:'time', value:choice.time, required:'', 'aria-label':'Time'});
+    time.oninput = () => { choice.time = time.value; refreshSummary(); };
+    kids.push(row('Time', h('div', {className:'schedule-value'}, time, h('span', {className:'meta'}, 'Uses the workspace’s time zone.'))));
+    rowsHost.replaceChildren(...kids);
+    refreshSummary();
+  };
+  const freq = h('div', {className:'segmented frequency-control', role:'radiogroup', 'aria-label':'How often'},
+    REPEAT_FREQ.map(([value, label]) => {
+      const input = h('input', {type:'radio', name:'frequency', value});
+      input.checked = value === choice.freq;
+      input.onchange = () => { choice.freq = value; draw(); };
+      return h('label', {}, input, h('span', {}, label));
+    }));
+  const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket),
+    h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary));
+  if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
+  const copy = button('Copy ticket now', 'ghost', async () => {
+    if (!ticket.value) return;
+    const result = await act('addon.act', {addon:addonName || route().id, verb:'copy', target:ticket.value});
+    window.orch.toast(result.ok ? 'Ticket copied.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    if (result.ok) await window.orch.close(d);
+    if (route().kind === 'addon') await loadAddon(route().id);
+  });
+  draw();
+  actions.append(copy, save); d.append(fields, actions); window.orch.open(d);
 }
 let sharedLinks = null, sharedLinksDown = false;
 async function loadSharedLinks() {
