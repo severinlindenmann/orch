@@ -19,8 +19,14 @@ class Refused(Exception):
         self.code = code
 
 
+def clock():
+    """Current time; FACTORY_NOW (ISO) only exists so tests can move time."""
+    fixed = os.environ.get("FACTORY_NOW")
+    return datetime.fromisoformat(fixed) if fixed else datetime.now(UTC)
+
+
 def now():
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return clock().isoformat().replace("+00:00", "Z")
 
 
 def digest(data):

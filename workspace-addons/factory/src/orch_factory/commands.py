@@ -58,6 +58,8 @@ def propose(root, order, data):
     with store.locked():
         ticket = order_ticket(root, order)
         order = ticket["id"]
+        if ticket["ext"]["factory"].get("kind") == "autopilot":
+            raise Refused("This is an autopilot order. Use orch factory autopilot.", "invalid")
         # Read-only commands never log. A mutating proposal records ignored agent answers in core history.
         for q in authority.questions(store, ticket):
             if q.get("answer") is not None and str(q.get("answered_by") or "").startswith("agent:"):

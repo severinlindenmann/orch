@@ -1,7 +1,9 @@
 """Small public-CLI fake. Human labels are deliberately preserved for authority tests."""
 
 import json
+import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 root = Path.cwd()
@@ -27,6 +29,10 @@ def save(t):
     (folder / (t["id"] + ".json")).write_text(json.dumps(t))
 
 
+def stamp():
+    return os.environ.get("FACTORY_NOW") or datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
 def flag(name):
     return args[args.index(name) + 1]
 
@@ -39,6 +45,8 @@ if args[:2] == ["ticket", "new"]:
         "ext": {},
         "questions": [],
         "status": "open",
+        "parent": flag("--parent") if "--parent" in args else None,
+        "history": [],
     }
     save(t)
     result = t
@@ -87,14 +95,20 @@ elif args[0] == "answer":
     t = load(args[1])
     result = next(q for q in t["questions"] if q["id"] == args[2])
     result.update(answer=args[3], answered_by=by)
+    t.setdefault("history", []).append({"at": stamp(), "by": by, "text": f"Answered {args[2]}: {args[3]}"})
     t["revision"] += 1
     save(t)
 elif args[0] == "log":
     t = load(args[1])
-    t.setdefault("history", []).append({"text": args[2], "by": by})
+    t.setdefault("history", []).append({"at": stamp(), "by": by, "text": args[2]})
     t["revision"] += 1
     save(t)
     result = {}
+elif args[:2] == ["run", "start"]:
+    load(args[2])
+    with (root / "runs.jsonl").open("a") as stream:
+        stream.write(json.dumps({"ticket": args[2], "agent": flag("--agent"), "by": by}) + "\n")
+    result = {"run": "r1"}
 else:
     raise AssertionError(args)
 print(json.dumps(result))

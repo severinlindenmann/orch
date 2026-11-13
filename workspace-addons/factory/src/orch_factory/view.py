@@ -2,8 +2,9 @@
 
 from datetime import datetime, timedelta
 
+from . import autopilot, flow, orchcli
 from .commands import listing
-from .store import Store, now
+from .store import Refused, Store, clock, now
 
 
 def plain(text):
@@ -12,6 +13,18 @@ def plain(text):
 
 def view(root):
     orders = listing(root)
+    store = Store(root)
+    tickets = orchcli.tickets(root)
+    stops = []
+    for t in orders:
+        # A stop the agent decided under a valid autopilot grant no longer needs you.
+        try:
+            d = flow.derive(root, store, next(x for x in tickets if x["id"] == t["order"]), tickets)
+        except Refused:
+            continue
+        t["questions"] = [q for q in t["questions"] if q["id"] not in d["decided_ok"]]
+        if d["open"] and d["open"]["row"]["kind"] == "factory:stop":
+            stops.append((t, d["open"]["data"]["stage"]))
     local = datetime.now().astimezone()
     monday = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
     shipped = {
@@ -56,4 +69,26 @@ def view(root):
                 "more": max(0, len(items) - 50),
             }
         )
-    return {"schema": "orch.addon-view/1", "generated_at": now(), "blocks": blocks}
+    blocks.append(
+        {
+            "type": "list",
+            "title": "Stops waiting for you",
+            "items": [
+                {"title": plain(t["title"]), "link": t["order"], "subtitle": "stop at " + plain(stage)}
+                for t, stage in stops[:50]
+            ],
+            "more": max(0, len(stops) - 50),
+        }
+    )
+    view = {"schema": "orch.addon-view/1", "generated_at": now(), "blocks": blocks}
+    live = [g for g in autopilot.grants(store, tickets) if clock() < g["until"]]
+    if live:
+        today = sum(
+            1
+            for r in store.journal_read()
+            if r["type"] == "decided" and datetime.fromisoformat(r["at"]).astimezone().date() == local.date()
+        )
+        until = max(g["until"] for g in live).astimezone().strftime("%d %b %H:%M")
+        view["notice"] = f"Autopilot is on until {until} · decided today: {today}"
+        view["notice_tone"] = "good"
+    return view

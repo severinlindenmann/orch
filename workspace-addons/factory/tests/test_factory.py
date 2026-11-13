@@ -207,7 +207,8 @@ def test_view_shipped_week_and_reads_do_not_write(ws, run, proposal):
     before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in store.base.rglob("*") if p.is_file()}
     view = run("view")
     assert view["blocks"][3]["value"] == 1
-    assert [x["link"] for x in view["blocks"][-1]["items"]] == [first]
+    shipped = next(b for b in view["blocks"] if b["type"] == "list" and b["title"] == "Shipped this week")
+    assert [x["link"] for x in shipped["items"]] == [first]
     run("show", first)
     run("list")
     run("needs")
