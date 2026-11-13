@@ -375,6 +375,7 @@ function signStep({title, body, here, there, value, done, run}) {
 function settingsPage() {
   const settings = state.settings;
   const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
+  if (settingsTab === 'phone' && !phoneAddon) settingsTab = 'general';
   const agents = array(settings.agents).map(agent => {
     const radio = h('input', {type:'radio', 'aria-label':agent.label, name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
     radio.checked = !!agent.chosen;
@@ -401,7 +402,7 @@ function settingsPage() {
       more ? h('div', {className:'ad-b', hidden:!open}, addonFacts(addon)) : null);
   };
   return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings'),
-    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons']].map(([id, label]) => id === 'phone' ? h('a', {href:'#addon/' + phoneAddon.name, 'data-key':'settings-phone'}, label) : h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
+    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [privateCard(settings), snapshot ? null : window.OrchMobileMode?.settingsSection(h), snapshot ? null : window.OrchLook?.settingsSection(), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
       // Owner fb11: the folder is visible on the row without a click (long paths shortened in the middle, the full
@@ -413,6 +414,7 @@ function settingsPage() {
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),
+    phoneAddon ? panel('phone', settingsTab === 'phone' ? addonView(phoneAddon) : null) : null,
     panel('addons', h('div', {className:'settings-addon-grid'}, array(settings.addons).map(addonRow)))))
   ));
 }
@@ -531,8 +533,25 @@ function pageFrame(r) {
   if (!addons().find(a => a.name === r.id)?.shipped) frame.setAttribute('sandbox', 'allow-scripts');
   return fragment(frame);
 }
+const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
 function addonTab(id) {
-  return fragment(heading(addonLabel(addons().find(a => a.name === id))), h('div', {id:'addon-body', className:'stack', 'data-name':id}));
+  return fragment(heading(addonLabel(addons().find(a => a.name === id))), addonHost(id));
+}
+// The add-on's own page (#addon/<name>), shown inside another page: its iframe, or the host its blocks are painted into.
+const addonView = a => a.page ? pageFrame({id:a.name, path:''}) : addonHost(a.name);
+// The add-on whose blocks view is on screen: its own tab, or the phone tab in Settings.
+function shownAddon() {
+  const r = route();
+  if (r.kind === 'addon') return r.id;
+  const phone = r.kind === 'settings' && settingsTab === 'phone' ? addons().find(a => a.dashboard?.panel === 'phone') : null;
+  return phone && !phone.page ? phone.name : null;
+}
+// Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> without a navigation.
+function settingsGo(tab) {
+  settingsTab = tab;
+  settingsReview = null;
+  history.replaceState(null, '', '#settings/' + tab);
+  render();
 }
 function addonBody(a, res) {
   if (!res) return fragment(h('div', {className:'skeleton addon-loading', role:'status', 'aria-label':'Loading'}));
@@ -589,7 +608,7 @@ async function loadAddon(id, manual = false) {
     addonViews[id] = addonViews[id]?.view ? {...addonViews[id], state:'stale'} : {state:'error', message:'No answer.'};
   } finally { addonBusy.delete(id); }
   if (panelOf(id) === 'links' && !snapshot) await loadSharedLinks();
-  if (route().kind === 'addon' && route().id === id) paintAddon(id);
+  if (shownAddon() === id) paintAddon(id);
 }
 function startAddon(id) {
   clearInterval(addonTimer);
@@ -602,8 +621,8 @@ function startAddon(id) {
 // An add-on row's switch or button: the DOM only carries verb + ticket (blocks.js checked them); the page adds
 // the add-on of the open tab, so a view can never address another add-on.
 async function addonAct(control) {
-  const id = route().id;
-  if (route().kind !== 'addon' || control.disabled || locks.has('addon-act')) return;
+  const id = shownAddon();
+  if (!id || control.disabled || locks.has('addon-act')) return;
   const send = async () => {
     locks.add('addon-act'); control.disabled = true;
     const result = await act('addon.act', {addon:id, verb:control.dataset.verb, target:control.dataset.target});
@@ -707,7 +726,7 @@ async function sharedLinkAction(control) {
     const result = stop ? await act('link.stop', {id:link.id}) : await act('link.extend', {id:link.id, days:7});
     window.orch.toast(result.ok ? (stop ? 'Sharing stopped.' : 'Link extended.') : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     await loadSharedLinks();
-    paintAddon(route().id);
+    paintAddon(shownAddon());
     control.disabled = false;
   };
   if (stop) settingsConfirm('Stop sharing ' + link.name + '?', 'The link stops working.', '', 'Stop sharing', send);

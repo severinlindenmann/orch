@@ -10,7 +10,7 @@ def test_settings_navigation_and_cards():
         "'data-action':'settings-tab'",
         "'data-key':'settings-switch-'",
         "a.dashboard?.panel === 'phone'",
-        "href:'#addon/' + phoneAddon.name",
+        "panel('phone', settingsTab === 'phone' ? addonView(phoneAddon) : null)",
         "OrchMobileMode?.settingsSection(h)",
         "OrchLook?.settingsSection()",
         "agent-card",
@@ -24,6 +24,9 @@ def test_settings_navigation_and_cards():
     ):
         assert text in src
     assert "className:'settings-details'" not in src
+    # the phone tab is a real tab that stays in Settings (no link away to the add-on page)
+    assert "href:'#addon/' + phoneAddon.name" not in src
+    assert "history.replaceState(null, '', '#settings/' + tab)" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
     # owner fb11 (11 Nov): the folder path is on the row without a click; plain words + full path under Details
     folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:700]

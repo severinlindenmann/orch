@@ -25,7 +25,11 @@ KIT_FILES = ("tokens.css", "components.css", "icons.js")
 WEB_FILES = ("index.html", "insights.css", "insights.js", "settings.js")
 PLAIN = "text/plain; charset=utf-8"
 RELINK = "This sign-in link can not be used. Open Insights from the dashboard on this computer again."
-TYPES = {"html": "text/html; charset=utf-8", "css": "text/css; charset=utf-8", "js": "text/javascript"}
+TYPES = {
+    "html": "text/html; charset=utf-8",
+    "css": "text/css; charset=utf-8",
+    "js": "text/javascript",
+}
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
 CSP = "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 
@@ -67,9 +71,17 @@ def _web(name):
 
 
 def _kit(name):
-    import orch_ui
+    """A kit file from orch_ui's static folder, else the dashboard's own copy; None when neither has it."""
+    try:
+        import orch_ui
 
-    return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
+        return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
+    except (ImportError, OSError, TypeError):
+        pass
+    try:
+        return resources.files("orch_dashboard").joinpath("web", "kit", name).read_bytes()
+    except (ImportError, OSError, TypeError):
+        return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -157,7 +169,10 @@ class Handler(BaseHTTPRequestHandler):
             prefix = prefix if PREFIX.fullmatch(prefix) else ""
             return self._send(200, _web("index.html").replace(b"__P__", prefix.encode()), TYPES["html"])
         if path.startswith("/kit/") and path[5:] in KIT_FILES:
-            return self._send(200, _kit(path[5:]), TYPES[path.rsplit(".", 1)[1]])
+            body = _kit(path[5:])
+            if body is None:
+                return self._send(404, b"not found")
+            return self._send(200, body, TYPES[path.rsplit(".", 1)[1]])
         if path.startswith("/web/") and path[5:] in WEB_FILES:
             return self._send(200, _web(path[5:]), TYPES[path.rsplit(".", 1)[1]])
         return self._send(404, b"not found")
