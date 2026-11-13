@@ -238,6 +238,9 @@
 .ticket-page .preview-body.live .preview-expand{bottom:12px}
 .ticket-page .skeleton-tile{height:200px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:fv-shimmer 1.4s linear infinite}
 @media(prefers-reduced-motion:reduce){.ticket-page .skeleton-tile{animation:none}}
+/* Real thumbnails of web pages and PDFs (kit/fileviewer.js thumb()) sit over the type icon until they are drawn. */
+.ticket-page .file-type.has-thumb{position:relative;overflow:hidden;min-width:48px;width:48px;height:36px;border:1px solid var(--border);border-radius:6px}
+.ticket-page .ticket-preview.has-thumb{position:relative;height:160px}
 .ticket-page .completion-note{padding:24px;display:grid;gap:16px;border:1px solid var(--border);border-top:2px solid var(--done);border-radius:var(--radius-lg,8px);background:var(--surface)}
 .ticket-page .completion-note h2{font-size:20px;line-height:28px;margin:0}
 .ticket-page .completion-note .eyebrow{margin:0}

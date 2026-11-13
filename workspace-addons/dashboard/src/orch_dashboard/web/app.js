@@ -204,7 +204,7 @@ const nodeKey = node => node?.nodeType === 1 ? node.dataset.key || node.id || (n
 function sync(target, source) {
   if (target.nodeType === 3) { if (target.data !== source.data) target.data = source.data; return; }
   if (target.nodeType !== 1) return;
-  if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body') return;
+  if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body' || target.classList.contains('fv-pthumb')) return;  // a live thumbnail keeps its frame
   for (const attr of [...target.attributes]) {
     if (attr.name === 'open' && target.tagName === 'DETAILS') continue;
     if (target.classList.contains('ui-native-select') && ['class', 'tabindex', 'aria-hidden'].includes(attr.name)) continue;  // set by kit/select.js
