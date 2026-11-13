@@ -961,11 +961,17 @@ def _addon_is_on(root: Path, orch_bin: str, name: str) -> bool:
     )
 
 
-def _addon_known(root: Path, orch_bin: str, name: str) -> bool:
+def _addon_row(root: Path, orch_bin: str, name: str) -> dict | None:
     rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
-    return any(
-        isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else [])
-    )
+    for r in rows if isinstance(rows, list) else []:
+        if isinstance(r, dict) and r.get("name") == name:
+            return r
+    return None
+
+
+def _addon_known(root: Path, orch_bin: str, name: str) -> bool:
+    """Listed by core: installed, or shipped with orch and available (`installed: false`; turning it on is the Add)."""
+    return _addon_row(root, orch_bin, name) is not None
 
 
 def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
@@ -1143,6 +1149,13 @@ def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, 
     return 422, str(msg)[:500], None
 
 
+def _op_timeout(op, args) -> int:
+    """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
+    if op == "addon.set" and args.get("on") is True:
+        return 180
+    return 75 if op == "config.agent.test" else 60
+
+
 def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
     proof for a request that carries a page session; None = watch-only (the click is refused)."""
@@ -1166,6 +1179,10 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
         raise BadRequest("That add-on is not installed.")
+    if op == "addon.set" and args.get("on") is False:
+        row = _addon_row(root, orch_bin, args["name"])
+        if row is not None and row.get("installed") is False:
+            raise BadRequest("That add-on is not added yet, so there is nothing to turn off.")
     if op == "config.agent.test" and not _agent_exists(root, orch_bin, args["name"]):
         raise BadRequest("That agent is not set up.")
     if op == "config.agent.add" and _agent_exists(root, orch_bin, args["name"]):
@@ -1190,7 +1207,12 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
     try:
         if need:
             r = run_with_proof(
-                argv, mint(*need), orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=60
+                argv,
+                mint(*need),
+                orch_bin=orch_bin,
+                cwd=root,
+                env=human_env(root, orch_bin),
+                timeout=_op_timeout(op, args),
             )
         else:
             r = _run(
@@ -1199,11 +1221,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
                 cwd=root,
                 capture_output=True,
                 text=True,
-                timeout=75 if op == "config.agent.test" else 60,
+                timeout=_op_timeout(op, args),
                 stdin=subprocess.DEVNULL,
                 env=human_env(root, orch_bin),
             )
     except subprocess.TimeoutExpired:
+        if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
+            forget_static()
+            return 504, "Still adding it. Check again in a minute.", None
         return 504, "That took too long. Please try again.", None
     except OSError:
         raise Unavailable("The orch command could not be started.") from None
@@ -1218,6 +1243,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "",
             out,
         )  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
+    forget_static()  # a poll during a slow change (an add-on install) may have cached the old answer meanwhile
     if r.returncode == 0:
         if op.startswith("look."):
             look_forget(root)

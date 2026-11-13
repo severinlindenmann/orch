@@ -158,3 +158,5 @@
 @media(max-width:760px){.sk-columns.sk-settings{grid-template-columns:minmax(0,1fr)}.sk-settings .sk-side{display:none}}
 .settings .lk-sw{width:36px;height:36px;min-height:36px}
 .settings .lk-swatches{gap:10px}
+
+.catalog-done{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:8px}
