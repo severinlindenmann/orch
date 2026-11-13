@@ -23,6 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from orch import keepold
+from orch.keepold import STILL_OLD, backup_tool, discard_backup, plain_reason, restore_tool  # noqa: F401
 from orch_entry import marker_path, updating
 
 # The finisher. Kept free of orch imports: it runs while orch's own files are being replaced.
@@ -124,18 +126,31 @@ def main():
         busy()
         time.sleep(0.5)
     busy()
+    kept = None
+    if job.get("backup"):
+        try:
+            kept = backup_tool(job["backup"]["env"], job["backup"].get("bins"))
+        except Exception as e:
+            say("could not keep a copy of orch: " + str(e)[:300])
+            result("fail: could not keep a copy of orch, so nothing was changed. Try again later.")
+            return 1
     try:
         env = dict(os.environ)
         env.update(job.get("env") or {})  # e.g. UV_TOOL_DIR pinned to where the person installed orch
         r = subprocess.run(job["uv"], capture_output=True, text=True, timeout=job["uv_timeout"], env=env)
     except subprocess.TimeoutExpired:
-        result("fail: uv took too long. Run it again: orch update")
+        restored = restore_tool(kept) if kept else not job.get("backup")
+        result("fail: " + plain_reason("took too long", restored))
         return 1
     busy()
     if r.returncode != 0:
-        say("uv failed: " + (r.stderr or r.stdout).strip()[-1500:])
-        result("fail: the reinstall failed. Run it again: orch update")
+        detail = (r.stderr or r.stdout).strip()[-1500:]
+        say("uv failed: " + detail)
+        restored = restore_tool(kept) if kept else not job.get("backup")
+        say("the old orch was put back" if restored else "the old orch could NOT be put back")
+        result("fail: " + plain_reason(detail, restored))
         return 1
+    discard_backup(kept)
     if job.get("record"):  # the reinstall drops the install record: put it back
         rpath, rtext = job["record"]
         with open(rpath, "w", encoding="utf-8", newline="\n") as f:
@@ -202,6 +217,10 @@ finally:
         pass
 sys.exit(code)
 '''
+# The finisher carries keepold's code (one copy, no orch imports) in front of its own.
+FINISHER = FINISHER.replace(
+    "\njob = json.load", Path(keepold.__file__).read_text(encoding="utf-8") + "\njob = json.load", 1
+)
 
 
 PENDING_MAX_AGE = 600  # seconds without a sign of life: the finisher has died
@@ -244,6 +263,8 @@ def fail_reason_since(home: Path, offset: object) -> str:
         return default
     line = next((x for x in text.splitlines() if "RESULT fail:" in x), "")
     why = line.split("RESULT fail:", 1)[-1].strip()
+    if STILL_OLD in why or "could not be put back" in why or "could not keep a copy" in why:
+        return why[:200]
     if "still in use" in why:
         return "orch was still running, so nothing was changed. Run the update again."
     if "took too long" in why:
@@ -320,6 +341,7 @@ def start(home: Path, uv_argv: list[str], then: list[list[str]], cwd: Path, done
         "env": (extra or {}).get("env"),
         "record": (extra or {}).get("record"),
         "consents": (extra or {}).get("consents"),  # [consent.json, workspace id, names]: dropped on failure
+        "backup": {"env": str(env_dir), "bins": (extra or {}).get("bins") or []},
         "then": [{"argv": [str(py), "-I", "-P", "-m", "orch", *t], "cwd": str(cwd)} for t in then],
         "py": str(py),
         "services": [str(w) for w in (extra or {}).get("services") or []],
@@ -390,13 +412,21 @@ def replacing(home: Path):
     if updating(home):
         raise Busy("orch is still updating, try again in a moment.")
     mark.write_text(str(os.getpid()), encoding="utf-8")
-    result = "fail"
+    result = "fail: package reinstall"
+    detail = ""
     try:
         yield
-        result = "ok"
+        result = "ok: package reinstall"
+    except BaseException as e:  # the reason goes into finish.log (a detached update has no terminal)
+        cause = e.__cause__ or e
+        detail = " ".join(str(cause).split())[-1500:]
+        result = "fail: package reinstall: " + " ".join(str(e).split())[:300]
+        raise
     finally:
         try:
             with log_path(home).open("a", encoding="utf-8") as log:
-                log.write(f"RESULT {result}: package reinstall\n")
+                if detail:
+                    log.write(f"uv failed: {detail}\n")
+                log.write(f"RESULT {result}\n")
         finally:
             mark.unlink(missing_ok=True)
