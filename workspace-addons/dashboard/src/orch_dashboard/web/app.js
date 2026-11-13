@@ -203,9 +203,11 @@ function sync(target, source) {
   if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body') return;
   for (const attr of [...target.attributes]) {
     if (attr.name === 'open' && target.tagName === 'DETAILS') continue;
+    if (target.classList.contains('ui-native-select') && ['class', 'tabindex', 'aria-hidden'].includes(attr.name)) continue;  // set by kit/select.js
     if (!source.hasAttribute(attr.name)) target.removeAttribute(attr.name);
   }
   for (const attr of [...source.attributes]) {
+    if (target.classList.contains('ui-native-select') && attr.name === 'class') continue;
     if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
   }
   reconcile(target, source);
@@ -219,11 +221,13 @@ function reconcile(target, source) {
   const old = [...target.childNodes], used = new Set();
   for (const fresh of [...source.childNodes]) {
     const key = nodeKey(fresh);
-    const existing = old.find(n => !used.has(n) && n.nodeType === fresh.nodeType && n.nodeName === fresh.nodeName && (key ? nodeKey(n) === key : !nodeKey(n)));
+    // A select enhanced by kit/select.js sits inside a .ui-select wrapper: match the wrapper to the plain select of the new tree.
+    const base = n => n.classList?.contains('ui-select') ? n.querySelector('select') || n : n;
+    const existing = old.find(n => !used.has(n) && n.nodeType === fresh.nodeType && base(n).nodeName === fresh.nodeName && (key ? nodeKey(base(n)) === key : !nodeKey(base(n))));
     const node = existing || fresh;
     const at = target.childNodes[used.size];
     if (node !== at) target.insertBefore(node, at || null);
-    if (existing) sync(existing, fresh);
+    if (existing) sync(base(existing), fresh);
     used.add(node);
   }
   for (const node of old) if (!used.has(node) && !locks.has(node.dataset?.key)) node.remove();
@@ -242,7 +246,9 @@ function route() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
-  if (hash === '#settings' && !snapshot && state?.settings) return {kind:'settings', hash};
+  // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
+  const settingsHash = /^#settings(?:\/(general|agent|phone|addons))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) return {kind:'settings', hash:'#settings', tab:settingsHash[1] || 'general'};
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
@@ -264,6 +270,7 @@ function route() {
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
+  if (r.kind === 'settings') settingsTab = r.tab;
   if (r.kind === 'page' && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
@@ -317,9 +324,10 @@ function render(arrived = new Set()) {
       if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', oneTap:true, kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
     }
   });
-  if (r.kind === 'addon') {
-    if (activeAddon !== r.id) startAddon(r.id);
-    else if (!document.getElementById('addon-body').childNodes.length) paintAddon(r.id);
+  const shown = shownAddon();
+  if (shown) {
+    if (activeAddon !== shown) startAddon(shown);
+    else if (!document.getElementById('addon-body')?.childNodes.length) paintAddon(shown);
   } else {
     clearInterval(addonTimer); activeAddon = null;
   }
@@ -337,7 +345,8 @@ function render(arrived = new Set()) {
 // Every notice goes through one scrub: no raw ids, actor names or UTC times reach a person.
 if (window.orch && !window.orch.__scrubbed) {
   const rawToast = window.orch.toast.bind(window.orch);
-  window.orch.toast = (text, kind) => rawToast(window.DashHelpers.scrubText(text), kind);
+  // One shared toast (kit/components.js): one at a time, Dismiss, paused while hovered or focused, errors stay.
+  window.orch.toast = (text, kind, undo) => window.UI?.toast ? window.UI.toast(window.DashHelpers.scrubText(text), undo, kind) : rawToast(window.DashHelpers.scrubText(text), kind);
   window.orch.__scrubbed = true;
 }
 // One automatic retry for a change that raced with someone else (typically the agent that just finished):
@@ -505,9 +514,7 @@ main.addEventListener('keydown', event => {
     const tabs = [...settingsTabControl.parentElement.querySelectorAll('[role="tab"]')];
     const index = tabs.indexOf(settingsTabControl);
     const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
-    settingsTab = next.dataset.tab;
-    settingsReview = null;
-    render();
+    settingsGo(next.dataset.tab);
     document.getElementById(next.id)?.focus();
     return;
   }
@@ -548,11 +555,7 @@ main.addEventListener('click', async event => {
     render(); return;
   }
   if (snapshot) return;
-  if (action === 'settings-tab') {
-    settingsTab = control.dataset.tab;
-    settingsReview = null;
-    render(); return;
-  }
+  if (action === 'settings-tab') { settingsGo(control.dataset.tab); return; }
   // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
@@ -645,7 +648,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'addon-more') { const n = control.dataset.name; if (addonOpen.has(n)) addonOpen.delete(n); else addonOpen.add(n); render(); }
   if (action === 'need') openNeed(array(state.needs).find(n => n.id === control.dataset.need), control);
-  if (action === 'retry-addon') loadAddon(route().id, true);
+  if (action === 'retry-addon') loadAddon(shownAddon(), true);
   if (action === 'start') {
     if (locks.has('background')) return;
     locks.add('background');

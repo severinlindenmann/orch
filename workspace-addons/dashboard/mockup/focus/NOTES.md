@@ -36,3 +36,71 @@ focus-ticket-fullscreen.html
 - Questions, previews and messages remain beside the terminal during deep work.
 
 Validation: checked all three ticket pages in loaded, loading and empty states at 390, 1280 and 1920 pixels; checked clipboard text and no navigation on all four page types, remembered mode, full screen and Escape, messages after reload and preview opening. JavaScript syntax checks passed.
+
+
+## Revised after the owner's comment (13 Nov)
+
+### focus-help.html
+
+- Removed the unused Details-toggle code while preserving the help sheet and result actions.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### focus-ticket-fullscreen.html
+
+- Removed DEM-1 from the header and showed earlier tasks as a plain list; spaced the list and kept the message bar clear of the Preview pill.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### focus-ticket-terminal.html
+
+- Removed DEM-1 from the header and showed earlier tasks as a plain list; spaced the list and kept the message bar clear of the Preview pill.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### focus-ticket.html
+
+- Removed DEM-1 from the header and showed earlier tasks as a plain list; spaced the list and kept the message bar clear of the Preview pill.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### focus.html
+
+- Removed the unused Details-toggle code and kept the compact live rows and result actions.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### opus-focus.html
+
+- Removed the Details buttons and ticket keys; the short progress notes now stay visible with space between rows.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+
+## Revised after the owner's comment (13 Nov)
+
+Round 2 — working shared components.
+
+### focus-help.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Questions now share recommended choices, a checked written answer, an answered state and Undo; phone and desktop show the same reply.
+
+### focus-ticket-fullscreen.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Questions now share recommended choices, a checked written answer, an answered state and Undo; phone and desktop show the same reply.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### focus-ticket-terminal.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Questions now share recommended choices, a checked written answer, an answered state and Undo; phone and desktop show the same reply.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### focus-ticket.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Questions now share recommended choices, a checked written answer, an answered state and Undo; phone and desktop show the same reply.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### focus.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Questions now share recommended choices, a checked written answer, an answered state and Undo; phone and desktop show the same reply.
+
+Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.

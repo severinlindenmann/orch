@@ -179,3 +179,14 @@ Sentence case. Familiar nouns: helper, step, result, file, needs you, ready for 
 Reviewed the supplied screenshots, brief, checklist, old-core token source, current tokens/components/motion, current style/look/page styles and rendered HTML structure. No challenge findings or owner feedback files were present during this pass. Do not infer approval from their absence.
 
 Static validation covers HTML structure/local references, JS syntax, CSS token references and calculated contrast. The manager must capture shell/components at 1280×800 and 1920×1080, check the rail at 1024 and stacking below 900, Tab through dialogs/previews, test reduced motion and measure the actual application's performance. No browser was run, and no runtime accessibility, CLS or Web Vitals pass is claimed. Area authors should cite BP rules above when diverging from the reference and keep the same tokens and chrome.
+
+
+## Working shared components — 13 Nov revision
+
+Load `interaction.css` after page styles and load `overlay.js`, `select.js`, `date.js`, and `components.js` before page scripts. Keep `preview-controls.js` at the end of each shell page.
+
+- Native `dialog.showModal()` and `dialog.close()` use one shared lifecycle: close button, Escape, backdrop, focus containment and restoration, scroll lock, 150 ms entry / 100 ms exit. Reduced motion is instant. `UI.fullscreen(element, opener)` moves existing content into that same lifecycle and restores it on close.
+- Native selects are enhanced automatically, including dynamic controls. They retain their form values and change events. Use `data-prefix="Sort"` for labels inside the trigger and `UI.select.sync()` after programmatic value changes outside click/change/reset handlers.
+- `UI.toast(message, undo)` and `UI.copy(url)` provide one notification pattern. Details menus with `.menu` and ARIA tablists get shared keyboard behaviour. Page handlers may update domain content, but should not add separate keyboard or overlay lifecycles.
+- `UI.date(valueInput, trigger, oldCalendar)` provides the shared calendar. `UI.question.render(host, config)` provides recommended choices, custom input, answered state and Undo. `UI.phone()` opens demo pairing and the same question component in a phone frame.
+- `gallery.html` is the clickable source of truth. Each example has a state selector and a usage note. `COMPONENT-QA.md` records the audit and browser results.

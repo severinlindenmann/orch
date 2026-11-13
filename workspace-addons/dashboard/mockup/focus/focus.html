@@ -124,7 +124,7 @@ body[data-state=loading] .not-loading{display:none!important}
 
 @media(max-width:1279px){.pv-panel{grid-template-columns:1fr;padding-left:16px}.lrow{grid-template-columns:8px minmax(0,1fr) 140px auto}.lrow .ltime{display:none}}
 #live-h .live-dot{display:inline-block;margin-right:6px}.lrow{cursor:pointer}.nrow{grid-template-columns:auto minmax(240px,1fr) auto}#row-q .nact{max-width:530px;justify-content:flex-start}.lprog .progress>span{transition:width 150ms var(--ease-move)}@media(max-width:900px){.nrow{grid-template-columns:auto 1fr}.nact{grid-column:2}} </style>
-</head>
+<link rel="stylesheet" href="../system/interaction.css"><script src="../system/overlay.js"></script><script src="../system/select.js"></script><script src="../system/date.js"></script><script src="../system/components.js"></script><style>.newsletter-focus{display:grid;gap:12px;margin:16px 0}.newsletter-focus .question-card{padding:16px;border:1px solid var(--warning);border-radius:8px}.newsletter-focus h2{font-size:16px}.newsletter-focus p{margin:6px 0}.newsletter-focus .controls,.newsletter-focus .section-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.newsletter-focus .result-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.newsletter-focus .result-card{padding:12px;border:1px solid var(--border);border-radius:8px}.newsletter-focus h3{font-size:14px}.newsletter-focus .paper-mini{background:#ebe7dc;color:#303a31;padding:8px}.newsletter-focus .paper-mini b{display:block}@media(max-width:700px){.newsletter-focus .result-cards{grid-template-columns:1fr}}</style></head>
 <body class="has-shell">
 <script>document.body.dataset.state=(new URLSearchParams(location.search).get('state'))||'loaded';</script>
 <a class="skip-link btn primary" href="#content">Skip to content</a>
@@ -150,7 +150,7 @@ body[data-state=loading] .not-loading{display:none!important}
   <div class="fhead reveal" style="--i:0">
     <div>
       <h1>Focus</h1>
-      <p class="summary only-loaded" id="summary"><b>3</b> helpers working<span class="sep">·</span><b id="sum-q">1</b> question<span class="sep">·</span><b id="sum-r">1</b> result to check<span class="sep">·</span>1 change to add</p>
+      <p class="summary only-loaded" id="summary"><b>2</b> helpers working<span class="sep">·</span><b id="sum-q">2</b> questions<span class="sep">·</span><b id="sum-r">1</b> result to check<span class="sep">·</span>1 change to add</p>
       <p class="summary only-empty">All clear<span class="sep">·</span>last result finished at 12:32</p>
       <p class="summary only-loading"><span class="skeleton line" style="width:280px;display:inline-block;vertical-align:middle"></span></p>
     </div>
@@ -178,12 +178,14 @@ body[data-state=loading] .not-loading{display:none!important}
   </div>
 
   <!-- ===== CONTENT ===== -->
-  <div class="layout not-loading">
+  <section class="newsletter-focus only-loaded"><div class="block-h"><h2>Plan the autumn newsletter</h2><a href="focus-ticket.html">Work together →</a></div><article class="question-card" id="newsletter-question"><div class="section-title"><span class="eyebrow">Your next move</span><span class="meta" id="question-count">1 open question</span></div><h2>Who should receive the test mail?</h2><p>The test is prepared. Sending waits for your choice; no independent work remains.</p><p class="meta">Anna: anna@example.com · Ben: ben@example.com</p><div class="controls"><button class="btn primary sm" data-answer="Anna and Ben">Send test to Anna and Ben</button><button class="btn sm" data-answer="Anna">Send test only to Anna</button><button class="btn ghost sm" id="newsletter-other">Someone else</button><button class="btn ghost sm" id="newsletter-phone">Answer on phone</button></div><p class="meta">Sends one test mail to the selected addresses. No mail leaves this demo.</p></article>
+<aside class="results-rail" id="newsletter-results"><header class="section-title"><h2>Sent back to you</h2><span class="meta">3 items</span></header><div class="result-cards"><article class="result-card"><div class="paper-mini">AUTUMN NEWS <b>A little news from the shop.</b></div><h3>Newsletter preview</h3><p class="meta">Version 3 · All 6 links checked</p><button class="btn sm" data-inspect="preview">Open</button></article><article class="result-card"><span class="eyebrow">Change to review</span><h3>Update opening hours page</h3><p class="meta">Pull request · Version 2 · Checks passed</p><p>Corrects Saturday to 9 am–1 pm.</p><button class="btn sm" data-inspect="change">Review here</button></article><article class="result-card"><span class="eyebrow">Result</span><h3>Test mail report</h3><p class="meta">Version 1 · 6 links passed · Not sent</p><button class="btn sm" data-inspect="report">Open</button></article></div></aside>
+</section><div class="layout not-loading">
     <div class="main-col">
 
       <!-- 1. Needs you: always first -->
       <section class="block reveal" style="--i:1" aria-labelledby="needs-h">
-        <div class="block-h"><h2 id="needs-h">Needs you <span class="n" id="needs-n"><span class="only-loaded">3</span><span class="only-empty">0</span></span></h2><span class="meta only-loaded">Oldest first</span></div>
+        <div class="block-h"><h2 id="needs-h">Needs you <span class="n" id="needs-n"><span class="only-loaded">3</span><span class="only-empty">0</span></span></h2><span class="meta only-loaded">Oldest</span></div>
 
         <div class="card needs-card only-loaded" id="needs-card">
           <ul class="list" id="needs-list">
@@ -243,10 +245,10 @@ body[data-state=loading] .not-loading{display:none!important}
               <div class="lrow">
                 <span class="live-dot" aria-hidden="true"></span>
                 <div class="grow">
-                  <div class="lline"><a class="ttl truncate" href="focus-ticket.html">Plan the autumn newsletter</a><span class="badge working chip-st" data-st>Working</span></div>
+                  <div class="lline"><a class="ttl truncate" href="focus-ticket.html">Plan the autumn newsletter</a><span class="badge needs chip-st" data-st id="newsletter-status">Needs you</span></div>
                   <p class="lstep">Now: <span>Send a test mail to the team</span></p>
                 </div>
-                <div class="lprog"><span class="meta">3 of 4 steps</span><div class="progress" role="progressbar" aria-label="Tasks done" aria-valuenow="75" aria-valuemin="0" aria-valuemax="100"><span style="--value:75%"></span></div></div>
+                <div class="lprog"><span class="meta">Task 4 of 4</span><div class="progress" role="progressbar" aria-label="Tasks done" aria-valuenow="75" aria-valuemin="0" aria-valuemax="100"><span style="--value:75%"></span></div></div>
                 <div class="ltime"><b>Updated 23 min ago</b><span>Working <span data-demo="newsletter-duration">23 min</span></span></div>
                 <div class="lacts"><button class="btn ghost sm" type="button" data-pause>Pause</button></div>
               </div>
@@ -326,20 +328,9 @@ body[data-state=loading] .not-loading{display:none!important}
   function setNeeds(n){needs=n;document.querySelector('#needs-n .only-loaded').textContent=n;
     var c=document.getElementById('side-count');c.textContent=n;c.setAttribute('aria-label',n+' need you');c.hidden=n===0;
     document.getElementById('needs-calm').hidden=n!==0;}
-  function toast(msg,undo){var box=document.getElementById('toasts');box.innerHTML='';
-    var t=document.createElement('div');t.className='toast';t.dataset.state='opening';
-    t.innerHTML='<span class="grow"></span><button class="btn sm" type="button">Undo</button>';t.firstChild.textContent=msg;
-    t.querySelector('button').onclick=function(){undo();close();};box.appendChild(t);
-    var timer=setTimeout(close,5000);
-    function close(){clearTimeout(timer);t.dataset.state='closing';setTimeout(function(){t.remove();},120);}}
-  function leave(li,after){li.classList.add('leaving');setTimeout(function(){li.hidden=true;li.classList.remove('leaving');after();},160);}
+  function toast(msg,undo){UI.toast(msg,undo);}
+  function leave(li,after){li.classList.add('leaving');setTimeout(function(){li.hidden=true;li.classList.remove('leaving');after();},matchMedia('(prefers-reduced-motion: reduce)').matches?0:100);}
   function back(li,after){li.hidden=false;li.classList.add('row-new');setTimeout(function(){li.classList.remove('row-new');},200);after();}
-
-  document.querySelectorAll('[data-answer]').forEach(function(b){b.addEventListener('click',function(){
-    var li=document.getElementById('row-q');
-    leave(li,function(){setNeeds(needs-1);document.getElementById('sum-q').textContent='0';});
-    toast('Answer sent: '+b.dataset.answer,function(){back(li,function(){setNeeds(needs+1);document.getElementById('sum-q').textContent='1';});});
-  });});
 
   var chk=document.getElementById('check-btn'),pv=document.getElementById('pv-r');
   chk.addEventListener('click',function(){var o=!pv.classList.contains('open');pv.classList.toggle('open',o);pv.inert=!o;chk.setAttribute('aria-expanded',o);chk.textContent=o?'Hide result':'Check result';chk.classList.toggle('primary',!o);});
@@ -350,20 +341,15 @@ body[data-state=loading] .not-loading{display:none!important}
   });
   document.querySelectorAll('[data-copy]').forEach(function(b){b.addEventListener('click',async function(){try{await navigator.clipboard.writeText(new URL('../ticket/assets/survey-results.html',location.href).href);b.textContent='Link copied'}catch{b.textContent='Open the page to copy its address'}setTimeout(function(){b.textContent='Copy link';},2000);});});
 
-  document.querySelectorAll('[data-more]').forEach(function(b){b.addEventListener('click',function(){
-    var ex=b.closest('li').querySelector('.expand'),o=!ex.classList.contains('open');
-    ex.classList.toggle('open',o);ex.inert=!o;b.setAttribute('aria-expanded',o);b.textContent=o?'Hide details':'Details';});});
 
   document.querySelectorAll('[data-pause]').forEach(function(b){b.addEventListener('click',function(){
     var row=b.closest('.lrow'),chip=row.querySelector('[data-st]'),p=!row.classList.contains('paused');
-    row.classList.toggle('paused',p);chip.className='badge chip-st '+(p?'paused':'working');chip.textContent=p?'Working · paused':'Working';
+    row.classList.toggle('paused',p);chip.className='badge chip-st '+(p?'paused':'working');chip.textContent=p?'Paused':'Working';
     b.textContent=p?'Continue':'Pause';chip.classList.remove('status-change');void chip.offsetWidth;chip.classList.add('status-change');});});
 
-  document.querySelector('#write-own').onclick=()=>{document.querySelector('#custom-answer').hidden=false;document.querySelector('#custom-answer input').focus()};
-  document.querySelector('#custom-answer').onsubmit=e=>{e.preventDefault();document.querySelector('[data-answer]').click()};
   document.querySelectorAll('.lrow').forEach(row=>{row.tabIndex=0;row.setAttribute('role','link');const follow=()=>location.href=row.querySelector('a').href;row.onclick=e=>{if(!e.target.closest('button,a'))follow()};row.onkeydown=e=>{if(e.key==='Enter'&&e.target===row)follow()}});
 })();
 </script>
-<script src="../home/demo-data.js"></script><script src="../system/preview-controls.js"></script><script src="focus-copy.js"></script></body>
+<script src="../home/demo-data.js"></script><script src="../system/preview-controls.js"></script><script src="focus-copy.js"></script><script src="focus-list-sync.js"></script></body>
 
 </html>

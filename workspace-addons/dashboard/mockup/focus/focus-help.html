@@ -124,7 +124,7 @@ body[data-state=loading] .not-loading{display:none!important}
 
 @media(max-width:1279px){.pv-panel{grid-template-columns:1fr;padding-left:16px}.lrow{grid-template-columns:8px minmax(0,1fr) 140px auto}.lrow .ltime{display:none}}
 #live-h .live-dot{display:inline-block;margin-right:6px}.lrow{cursor:pointer}.nrow{grid-template-columns:auto minmax(240px,1fr) auto}#row-q .nact{max-width:530px;justify-content:flex-start}.lprog .progress>span{transition:width 150ms var(--ease-move)}@media(max-width:900px){.nrow{grid-template-columns:auto 1fr}.nact{grid-column:2}} </style>
-</head>
+<link rel="stylesheet" href="../system/interaction.css"><script src="../system/overlay.js"></script><script src="../system/select.js"></script><script src="../system/date.js"></script><script src="../system/components.js"></script></head>
 <body class="has-shell">
 <script>document.body.dataset.state=(new URLSearchParams(location.search).get('state'))||'loaded';</script>
 <a class="skip-link btn primary" href="#content">Skip to content</a>
@@ -183,7 +183,7 @@ body[data-state=loading] .not-loading{display:none!important}
 
       <!-- 1. Needs you: always first -->
       <section class="block reveal" style="--i:1" aria-labelledby="needs-h">
-        <div class="block-h"><h2 id="needs-h">Needs you <span class="n" id="needs-n"><span class="only-loaded">3</span><span class="only-empty">0</span></span></h2><span class="meta only-loaded">Oldest first</span></div>
+        <div class="block-h"><h2 id="needs-h">Needs you <span class="n" id="needs-n"><span class="only-loaded">3</span><span class="only-empty">0</span></span></h2><span class="meta only-loaded">Oldest</span></div>
 
         <div class="card needs-card only-loaded" id="needs-card">
           <ul class="list" id="needs-list">
@@ -326,20 +326,9 @@ body[data-state=loading] .not-loading{display:none!important}
   function setNeeds(n){needs=n;document.querySelector('#needs-n .only-loaded').textContent=n;
     var c=document.getElementById('side-count');c.textContent=n;c.setAttribute('aria-label',n+' need you');c.hidden=n===0;
     document.getElementById('needs-calm').hidden=n!==0;}
-  function toast(msg,undo){var box=document.getElementById('toasts');box.innerHTML='';
-    var t=document.createElement('div');t.className='toast';t.dataset.state='opening';
-    t.innerHTML='<span class="grow"></span><button class="btn sm" type="button">Undo</button>';t.firstChild.textContent=msg;
-    t.querySelector('button').onclick=function(){undo();close();};box.appendChild(t);
-    var timer=setTimeout(close,5000);
-    function close(){clearTimeout(timer);t.dataset.state='closing';setTimeout(function(){t.remove();},120);}}
-  function leave(li,after){li.classList.add('leaving');setTimeout(function(){li.hidden=true;li.classList.remove('leaving');after();},160);}
+  function toast(msg,undo){UI.toast(msg,undo);}
+  function leave(li,after){li.classList.add('leaving');setTimeout(function(){li.hidden=true;li.classList.remove('leaving');after();},matchMedia('(prefers-reduced-motion: reduce)').matches?0:100);}
   function back(li,after){li.hidden=false;li.classList.add('row-new');setTimeout(function(){li.classList.remove('row-new');},200);after();}
-
-  document.querySelectorAll('[data-answer]').forEach(function(b){b.addEventListener('click',function(){
-    var li=document.getElementById('row-q');
-    leave(li,function(){setNeeds(needs-1);document.getElementById('sum-q').textContent='0';});
-    toast('Answer sent: '+b.dataset.answer,function(){back(li,function(){setNeeds(needs+1);document.getElementById('sum-q').textContent='1';});});
-  });});
 
   var chk=document.getElementById('check-btn'),pv=document.getElementById('pv-r');
   chk.addEventListener('click',function(){var o=!pv.classList.contains('open');pv.classList.toggle('open',o);pv.inert=!o;chk.setAttribute('aria-expanded',o);chk.textContent=o?'Hide result':'Check result';chk.classList.toggle('primary',!o);});
@@ -350,17 +339,12 @@ body[data-state=loading] .not-loading{display:none!important}
   });
   document.querySelectorAll('[data-copy]').forEach(function(b){b.addEventListener('click',async function(){try{await navigator.clipboard.writeText(new URL('../ticket/assets/survey-results.html',location.href).href);b.textContent='Link copied'}catch{b.textContent='Open the page to copy its address'}setTimeout(function(){b.textContent='Copy link';},2000);});});
 
-  document.querySelectorAll('[data-more]').forEach(function(b){b.addEventListener('click',function(){
-    var ex=b.closest('li').querySelector('.expand'),o=!ex.classList.contains('open');
-    ex.classList.toggle('open',o);ex.inert=!o;b.setAttribute('aria-expanded',o);b.textContent=o?'Hide details':'Details';});});
 
   document.querySelectorAll('[data-pause]').forEach(function(b){b.addEventListener('click',function(){
     var row=b.closest('.lrow'),chip=row.querySelector('[data-st]'),p=!row.classList.contains('paused');
     row.classList.toggle('paused',p);chip.className='badge chip-st '+(p?'paused':'working');chip.textContent=p?'Working · paused':'Working';
     b.textContent=p?'Continue':'Pause';chip.classList.remove('status-change');void chip.offsetWidth;chip.classList.add('status-change');});});
 
-  document.querySelector('#write-own').onclick=()=>{document.querySelector('#custom-answer').hidden=false;document.querySelector('#custom-answer input').focus()};
-  document.querySelector('#custom-answer').onsubmit=e=>{e.preventDefault();document.querySelector('[data-answer]').click()};
   document.querySelectorAll('.lrow').forEach(row=>{row.tabIndex=0;row.setAttribute('role','link');const follow=()=>location.href=row.querySelector('a').href;row.onclick=e=>{if(!e.target.closest('button,a'))follow()};row.onkeydown=e=>{if(e.key==='Enter'&&e.target===row)follow()}});
 })();
 </script>
