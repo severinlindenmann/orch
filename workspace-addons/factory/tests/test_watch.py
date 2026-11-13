@@ -191,3 +191,117 @@ def test_view_says_when_the_watcher_is_off(ws, run):
 def test_refused_is_plain(ws):
     with pytest.raises(Refused):
         orchcli.call(ws, "run", "status", "t_nothere")
+
+
+def test_malformed_ticket_does_not_stop_the_loop(ws, run, monkeypatch, capsys):
+    order, _ = started(ws, run)
+    edit(ws, order, lambda t: t.update(questions="broken"))
+    passes = []
+
+    def sleep(_):
+        passes.append(1)
+        if len(passes) == 2:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        watch.loop(ws, sleep=sleep)
+    assert len(passes) == 2
+    err = capsys.readouterr().err
+    assert "order skipped" in err or "pass failed" in err
+
+
+def test_a_pass_that_raises_is_survived(ws, monkeypatch, capsys):
+    calls = []
+
+    def boom(root):
+        calls.append(1)
+        raise ValueError("bad")
+
+    monkeypatch.setattr(watch, "once", boom)
+
+    def sleep(_):
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        watch.loop(ws, sleep=sleep)
+    assert len(calls) == 2 and capsys.readouterr().err.count("pass failed: ValueError") == 2
+
+
+def test_non_dict_error_body_is_a_refusal(ws, monkeypatch):
+    script = ws.parent / "bad-orch"
+    script.write_text(f"#!{sys.executable}\nprint('[1, 2]')\nraise SystemExit(3)\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("ORCH_BIN", str(script))
+    with pytest.raises(Refused):
+        orchcli.call(ws, "ticket", "list")
+
+
+def test_first_sight_wakes_for_a_crew_task_already_done(ws, run):
+    order, _ = started(ws, run)
+    run("next", order)
+    finish_crew(ws, run, order, "booking-form")
+    assert not (ws / ".orch/addons/factory/watch.json").exists()  # the watcher never saw this order
+    woke = watch.once(ws)
+    assert woke == [{"order": order, "why": "crew task booking-form is done"}]
+    assert watch.once(ws) == [] and len(runs(ws)) == 1  # recorded: never again
+
+
+def test_first_sight_with_an_open_stop_does_not_wake(ws, run):
+    order, _ = started(ws, run)
+    run("next", order)
+    finish_crew(ws, run, order, "booking-form")
+    ask_stop(ws, run, order, "build", {"title": "Look", "tag": "taste"})
+    assert watch.once(ws) == [] and runs(ws) == []
+
+
+def test_second_start_while_the_lock_is_held_refuses_cleanly(ws):
+    d = runfiles.run_dir(ws, "factory")
+    with service._start_lock(d, 1), pytest.raises(RuntimeError, match="in progress"):
+        service.start(ws, wait=0.3)
+    assert service.running_pid(ws, clean=False) is None  # nothing was spawned
+
+
+def test_start_lock_refuses_a_link(ws, tmp_path):
+    d = runfiles.run_dir(ws, "factory")
+    target = tmp_path / "elsewhere"
+    target.write_text("x")
+    (d / "start.lock").symlink_to(target)
+    with pytest.raises(RuntimeError, match="symbolic link"):
+        service.start(ws, wait=0.3)
+    assert target.read_text() == "x"
+
+
+def test_concurrent_starts_share_one_watcher(ws):
+    import threading
+
+    pids = []
+    threads = [threading.Thread(target=lambda: pids.append(service.start(ws))) for _ in range(2)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        assert len(pids) == 2 and pids[0] == pids[1]
+    finally:
+        service.stop(ws)
+
+
+def test_announce_never_overwrites_a_live_watchers_record(ws, monkeypatch):
+    pid = service.start(ws)
+    try:
+        path = runfiles.run_dir(ws, "factory") / "factory.json"
+        before = path.read_bytes()
+        monkeypatch.setenv(service.NONCE_ENV, "c" * 32)
+        with pytest.raises(RuntimeError, match="already running"):
+            service.announce(ws)
+        assert path.read_bytes() == before and service.running_pid(ws) == pid
+    finally:
+        service.stop(ws)
+
+
+def test_stop_waits_until_the_watcher_is_gone(ws):
+    service.start(ws)
+    assert service.stop(ws) == "stopped"
+    assert service.running_pid(ws, clean=False) is None
+    assert not (runfiles.run_dir(ws, "factory") / "factory.json").exists()

@@ -29,7 +29,8 @@ Every owner reply that changes the idea → a new version with "what changed" at
 Ask only what you cannot decide yourself. When the owner says "good, now plan it" (or similar), go to 3.
 
 ## 3. Run proposal
-Write the proposal (contract: `orch factory propose --help`, schema `orch.factory.proposal/1`) and send it:
+Write the proposal (contract: `orch factory schema proposal`, schema `orch.factory.proposal/1`; `orch factory schema
+autopilot|change|stop` shows the others; `--help` of each command lists the fields) and send it:
 
     orch factory propose <order> --file proposal.json
 
@@ -51,7 +52,7 @@ what to change." **Never start the run yourself.** If the owner says "go" in the
 ## 4. The run
 Each time you are woken, ask Factory what to do next and follow it:
 
-    orch factory next <order>          # {"step": "start-crew" | "work" | "stop" | "ship" | "wait" | "edit" | "parked" | "done", …}
+    orch factory next <order>          # {"step": "start-crew" | "work" | "stop" | "ship" | "wait" | "edit" | "parked" | "resume" | "done", …}
 
 - `start-crew`: `orch factory crew add <order> <task>` then `orch factory crew start <order> <task>` for the tasks of this
   stage (one sub-ticket per task; never `orch run start` on crew tickets yourself).
@@ -59,6 +60,11 @@ Each time you are woken, ask Factory what to do next and follow it:
 - At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo`; a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.
 - `wait`: end your turn; you are woken when the owner answers.
+- `resume` (autopilot order, the owner's grant is still live): look at the open stops of the orders you work on and
+  decide the routine and taste items with `orch factory decide` (see Autopilot below), then end your turn. You are woken
+  again when something new needs you.
+- `done`: nothing is left to do for this order (shipped, or the autopilot grant has ended). Say so in one line and end
+  your turn; do not start anything new on it.
 
 ## 5. The owner talks during the run
 - **Tiny change** (within the approved scope: no new stage, no new done-means point, no new tool, no cost): just do it and

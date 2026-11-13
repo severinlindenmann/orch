@@ -4,10 +4,12 @@ when the process with that pid started at the recorded moment and runs orch_fact
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import secrets
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -18,6 +20,7 @@ from .runfiles import alive, valid_pid
 
 NONCE_ENV = "ORCH_FACTORY_NONCE"
 RECORD = "factory.json"
+LOCK = "start.lock"
 
 
 def _dir(root: Path) -> Path:
@@ -66,9 +69,11 @@ def announce(root: Path) -> str | None:
     if not re.fullmatch(r"[0-9a-f]{32}", nonce):
         return None
     me = os.getpid()
-    runfiles.write_json(
-        _dir(root) / RECORD, {"pid": me, "nonce": nonce, "started": runfiles.proc_start(me) or ""}
-    )
+    d = _dir(root)
+    other = _verified(root, runfiles.read_json(d / RECORD))
+    if other is not None and other != me:
+        raise RuntimeError("A Factory watcher is already running for this workspace.")
+    runfiles.write_json(d / RECORD, {"pid": me, "nonce": nonce, "started": runfiles.proc_start(me) or ""})
     return nonce
 
 
@@ -82,12 +87,50 @@ def forget(root: Path, nonce: str | None) -> None:
         runfiles.remove(p)
 
 
-def start(root: Path) -> int:
+@contextlib.contextmanager
+def _start_lock(d: Path, wait: float):
+    """Exclusive lock on start.lock (never follows a link, regular file only) for the pid check plus spawn."""
+    p = d / LOCK
+    if p.is_symlink():
+        raise RuntimeError(f"{p} is a symbolic link; orch does not use it.")
+    fd = os.open(p, os.O_RDWR | os.O_CREAT | runfiles.NOFOLLOW, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise RuntimeError(f"{p} is not a regular file.")
+        end = time.time() + wait
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() >= end:
+                    raise RuntimeError(
+                        "Another start of the Factory watcher is in progress. Try again."
+                    ) from None
+                time.sleep(0.05)
+        yield
+    finally:
+        os.close(fd)  # closing releases the lock
+
+
+def start(root: Path, wait: float = 20) -> int:
     root = Path(root).resolve()
-    pid = running_pid(root)
-    if pid:
-        return pid
     d = _dir(root)
+    with _start_lock(d, wait):
+        pid = running_pid(root)  # a start that held the lock before us may have finished: use its watcher
+        if pid:
+            return pid
+        return _spawn(root, d)
+
+
+def _spawn(root: Path, d: Path) -> int:
     nonce = secrets.token_hex(16)
     # -P: the workspace folder is never on the import path (a planted orch_factory.py there is not run)
     with runfiles.open_append(d / "factory.log") as out:
@@ -131,5 +174,8 @@ def stop(root: Path) -> str:
         os.kill(pid, signal.SIGTERM)
     except OSError:
         pass
+    end = time.time() + 2  # let it go first: its own cleanup removes the record, and a new start sees it gone
+    while alive(pid) and time.time() < end:
+        time.sleep(0.05)
     runfiles.remove(d / RECORD)
     return "stopped"

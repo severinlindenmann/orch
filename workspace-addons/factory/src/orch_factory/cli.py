@@ -3,12 +3,13 @@
 import argparse
 import json
 import os
+import signal
 import sys
 from pathlib import Path
 
 from . import autopilot, commands, flow, service, watch
-from .store import Refused, read_bytes
-from .view import view
+from .store import Refused, field_list, read_bytes, schema_of
+from .view import view as render_view
 
 
 class Parser(argparse.ArgumentParser):
@@ -22,11 +23,12 @@ def background(args, root):
         if args.once:
             print(json.dumps({"woken": watch.once(root)}))
             return 0
-        import signal
-
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         print(f"orch factory watcher for {root.name} started", flush=True)
-        nonce = service.announce(root)
+        try:
+            nonce = service.announce(root)
+        except RuntimeError as error:
+            raise Refused(str(error), "not_available") from None
         try:
             watch.loop(root)
         except KeyboardInterrupt:
@@ -66,11 +68,25 @@ def main(argv=None):
         p = sub.add_parser("idea", parents=[common])
         p.add_argument("title")
         p.add_argument("--file")
-        for command in ("draft", "propose", "autopilot", "change"):
-            p = sub.add_parser(command, parents=[common])
+        kinds = {"propose": "proposal", "autopilot": "autopilot", "change": "change", "stop": "stop"}
+
+        def epilog(command):
+            return f"{field_list(kinds[command])} Full contract: orch factory schema {kinds[command]}"
+
+        def contract(command):
+            return {"epilog": epilog(command), "formatter_class": argparse.RawDescriptionHelpFormatter}
+
+        p = sub.add_parser("draft", parents=[common])
+        p.add_argument("order")
+        p.add_argument("--file", required=True)
+        for command in ("propose", "autopilot", "change"):
+            p = sub.add_parser(command, parents=[common], **contract(command))
             p.add_argument("order")
             p.add_argument("--file", required=True)
-        p = sub.add_parser("stop", parents=[common])  # an order's stop stage, or (no order) the watcher
+        p = sub.add_parser("schema", parents=[common])
+        p.add_argument("what", nargs="?", default="proposal")
+        # an order's stop stage, or (no order) the watcher
+        p = sub.add_parser("stop", parents=[common], **contract("stop"))
         p.add_argument("order", nargs="?")
         p.add_argument("--file")
         sub.add_parser("start", parents=[common])
@@ -100,14 +116,20 @@ def main(argv=None):
         for command in ("list", "view", "needs", "reconcile"):
             sub.add_parser(command, parents=[common])
         args = parser.parse_args(argv)
+        if args.cmd == "schema":
+            print(json.dumps(schema_of(args.what)))
+            return 0
         root = Path(args.dir).absolute()
         root = next((p for p in (root, *root.parents) if (p / ".orch").is_dir()), None)
         if root is None:
             raise Refused("No orch workspace here. Run orch init first.", "not_found")
-        if args.cmd in ("start", "stop", "status", "watch") and (args.cmd != "stop" or args.order is None):
+        if args.cmd == "stop":
+            if args.order is None:  # no order: stop the watcher
+                return background(args, root)
+            if not args.file:  # an order: its stop stage, which needs the file
+                raise Refused("A stop needs --file.", "invalid")
+        elif args.cmd in ("start", "status", "watch"):
             return background(args, root)
-        if args.cmd == "stop" and not args.file:
-            raise Refused("A stop needs --file.", "invalid")
         if args.cmd in ("idea", "draft", "propose", "autopilot", "change", "stop"):
             data = (
                 sys.stdin.buffer.read()
@@ -143,8 +165,8 @@ def main(argv=None):
         elif args.cmd == "list":
             result = commands.listing(root)
         elif args.cmd == "view":
-            result = view(root)
-        else:
+            result = render_view(root)
+        else:  # needs: Factory's questions are shown by the dashboard view; nothing extra to list
             result = []
         print(json.dumps(result))
         return 0

@@ -41,6 +41,24 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def schema_of(definition):
+    """The bundled schema for one definition (proposal | autopilot | change | stop), self-contained."""
+    schema = json.loads(Path(__file__).with_name("proposal.schema.json").read_bytes())
+    if definition not in ("proposal", "autopilot", "change", "stop"):
+        raise Refused("Say which one: proposal, autopilot, change or stop.", "invalid")
+    schema["$ref"] = "#/$defs/" + definition
+    schema.pop("oneOf")
+    return schema
+
+
+def field_list(definition):
+    """One short text: the required and the optional fields of a definition."""
+    d = schema_of(definition)["$defs"][definition]
+    need = list(d.get("required", []))
+    more = [k for k in d.get("properties", {}) if k not in need]
+    return f"Fields. required: {', '.join(need)}. optional: {', '.join(more) or 'none'}."
+
+
 def validate(value, definition):
     schema = json.loads(Path(__file__).with_name("proposal.schema.json").read_bytes())
     schema["$ref"] = "#/$defs/" + definition

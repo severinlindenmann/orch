@@ -13,9 +13,9 @@ ALWAYS = "Only routine and taste stop items inside a valid grant can be decided 
 answered_at = authority.answered_at
 
 
-def grants_of(store, ticket):
+def grants_of(store, ticket, journal=None):
     result = []
-    for e in authority.entries(store, ticket):
+    for e in authority.entries(store, ticket, journal):
         q = e["q"]
         if e["row"]["kind"] == "factory:autopilot" and authority.human(q) and q["answer"] == "Start":
             at = answered_at(ticket, q)
@@ -36,13 +36,14 @@ def grants_of(store, ticket):
     return result
 
 
-def grants(store, tickets):
+def grants(store, tickets, journal=None):
+    journal = store.journal_read() if journal is None else journal
     result = []
     for t in tickets:
         if t.get("ext", {}).get("factory", {}).get("role") != "order":
             continue
         try:
-            result += grants_of(store, t)
+            result += grants_of(store, t, journal)
         except Refused:
             continue  # a broken order gives no grant
     return result

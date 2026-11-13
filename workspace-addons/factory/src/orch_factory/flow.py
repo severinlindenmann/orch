@@ -99,15 +99,18 @@ def freeze_ask(root, store, ticket, kind, data, value, ext=None):
 def derive(root, store, ticket, tickets=None):
     tickets = orchcli.tickets(root) if tickets is None else tickets
     tid = ticket["id"]
-    ents = authority.entries(store, ticket)
-    rows = [r for r in store.journal_read() if r["order"] == tid]
+    journal = store.journal_read()  # once per derive; passed down
+    ents = authority.entries(store, ticket, journal)
+    rows = [r for r in journal if r["order"] == tid]
     consumed = {r.get("q") for r in rows if r["type"] == "consumed"}
     decided = {}
     for r in rows:
         if r["type"] == "decided":
             decided.setdefault(r["q"], r)  # the first row is the decision; later ones change nothing
-    all_decided = [r for r in store.journal_read() if r["type"] == "decided"] if decided else []
-    granted = autopilot.grants(store, tickets) if decided else []
+    # every decided row in journal order, with the rows that precede it (max_orders counts those)
+    all_decided = [r for r in journal if r["type"] == "decided"] if decided else []
+    before_of = {id(r): all_decided[:i] for i, r in enumerate(all_decided)}
+    granted = autopilot.grants(store, tickets, journal) if decided else []
     now = clock()
 
     def decided_ok(e, r):
@@ -119,7 +122,7 @@ def derive(root, store, ticket, tickets=None):
             return False
         if when > now or e["row"]["kind"] != "factory:stop" or r.get("by") != "agent:factory":
             return False
-        before = all_decided[: all_decided.index(r)]
+        before = before_of.get(id(r), [])
         try:
             live = autopilot.check(e, r.get("answer"), granted, when, tid, before)
         except Refused:
@@ -136,7 +139,7 @@ def derive(root, store, ticket, tickets=None):
                 return True
         return False
 
-    def effective(e):
+    def compute(e):
         q = e["q"]
         if authority.human(q):
             return q["answer"], q["answered_by"]
@@ -165,7 +168,7 @@ def derive(root, store, ticket, tickets=None):
         "ignored": [e for e in ents if e["q"].get("answer") is not None and not authority.human(e["q"])],
         "pending": [],
         "open": None,
-        "decided_ok": {e["q"]["id"] for e in ents if effective(e) and effective(e)[1] == "agent:factory"},
+        "decided_ok": set(),
         "shipped": False,
         "finished": False,
         "stage": None,
@@ -178,7 +181,13 @@ def derive(root, store, ticket, tickets=None):
         "last_answer": None,
         "last_stop": None,
     }
-    d["pending"] = [e for e in ents if effective(e) and e["q"]["id"] not in consumed]
+    effective_of = {e["q"]["id"]: compute(e) for e in ents}  # each entry evaluated once
+
+    def effective(e):
+        return effective_of[e["q"]["id"]]
+
+    d["decided_ok"] = {qid for qid, eff in effective_of.items() if eff and eff[1] == "agent:factory"}
+    d["pending"] = [e for e in ents if effective_of[e["q"]["id"]] and e["q"]["id"] not in consumed]
     d["effective"] = effective
     if phase != "started" or d["kind"] == "autopilot":
         return d

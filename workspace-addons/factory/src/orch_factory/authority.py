@@ -138,9 +138,11 @@ def human(q):
     return q.get("answer") is not None and str(q.get("answered_by") or "").startswith("human:")
 
 
-def entries(store, ticket):
-    """Every valid Factory question with its journal row, frozen data and file number."""
-    rows = [r for r in store.journal_read() if r["order"] == ticket["id"]]
+def entries(store, ticket, journal=None):
+    """Every valid Factory question with its journal row, frozen data and file number.
+    `journal`: the rows already read by the caller (saves a re-read)."""
+    journal = store.journal_read() if journal is None else journal
+    rows = [r for r in journal if r["order"] == ticket["id"]]
     superseded = {r.get("q") for r in rows if r["type"] == "superseded"}
     asked = {r["q"]: r for r in rows if r["type"] == "asked"}
     present = {q["id"] for q in ticket.get("questions", [])}

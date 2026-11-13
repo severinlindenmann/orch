@@ -10,6 +10,7 @@ State in .orch/addons/factory/watch.json: per order the crew statuses seen and t
 from __future__ import annotations
 
 import json
+import sys
 import time
 
 from . import authority, autopilot, flow, orchcli
@@ -46,10 +47,16 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
     crew = {t["ext"]["factory"]["task"]: t.get("status") for t in d["crew"].values()}
     if d["phase"] == "started" and d["kind"] == "run" and not d["shipped"]:
         seen = entry.get("crew")
-        if seen is not None:
-            for task, status in crew.items():
-                if status in FINISHED and seen.get(task) != status:
-                    why.append(f"crew task {task} is {status}")
+        for task, status in crew.items():
+            if seen is None:
+                # First sight of this order (watcher started late or restarted with no record): a crew task that
+                # already ended with no stop open means the manager may be waiting for news nobody will send.
+                # It is recorded below like any wake, so it never repeats.
+                first = status in ("done", "failed") and not d["open"]
+            else:
+                first = status in FINISHED and seen.get(task) != status
+            if first:
+                why.append(f"crew task {task} is {status}")
         op = d["open"]
         if op and op["row"]["kind"] == "factory:stop" and f"stop:{op['q']['id']}" not in woken:
             options = list(op["q"].get("options") or [])
@@ -57,6 +64,12 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
                 why.append("autopilot may decide a stop")
                 ids.append(f"stop:{op['q']['id']}")
     return why, ids, crew
+
+
+def _role(ticket):
+    ext = ticket.get("ext") if isinstance(ticket, dict) else None
+    x = ext.get("factory") if isinstance(ext, dict) else None
+    return x.get("role") if isinstance(x, dict) else None
 
 
 def run_live(root, order):
@@ -74,14 +87,17 @@ def once(root):
         decided = [r for r in store.journal_read() if r["type"] == "decided"]
         changed = False
         for t in tickets:
-            if t.get("ext", {}).get("factory", {}).get("role") != "order":
-                continue
-            entry = orders.get(t["id"], {})
             try:
+                if _role(t) != "order":
+                    continue
+                entry = orders.get(t["id"], {})
                 why, ids, crew = _reasons(root, store, t, tickets, entry, granted, decided)
                 live = run_live(root, t["id"]) if why else False
             except Refused:
                 continue  # a broken order or an unreachable core: next pass
+            except Exception as error:  # noqa: BLE001 - a malformed ticket must not stop the other orders
+                print(f"order skipped: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
+                continue
             if live and why:
                 continue  # the live run reads the order itself; ask again when it ends (nothing saved)
             new = {"crew": crew, "woken": sorted(set(entry.get("woken", [])) | set(ids))}
@@ -115,6 +131,10 @@ def loop(root, sleep=time.sleep):
         try:
             for w in once(root):
                 print(f"woke {w['order']}: {w['why']}", flush=True)
-        except (Refused, OSError) as error:
-            print(f"pass failed: {error}", flush=True)
+        except Exception as error:  # noqa: BLE001 - nothing a pass meets may end the watcher
+            print(
+                f"pass failed: {type(error).__name__}: {' '.join(str(error).split())}",
+                file=sys.stderr,
+                flush=True,
+            )
         sleep(INTERVAL)

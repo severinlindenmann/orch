@@ -30,6 +30,8 @@ def call(root, *args, write=False):
     except ValueError:
         raise Refused("Orch did not return a readable answer.", "not_available") from None
     if result.returncode:
+        if not isinstance(value, dict):
+            raise Refused("Orch refused the request.", "refused")
         raise Refused(value.get("error", "Orch refused the request."), value.get("code", "refused"))
     return value
 

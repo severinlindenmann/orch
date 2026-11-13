@@ -15,11 +15,15 @@ def view(root):
     orders = listing(root)
     store = Store(root)
     tickets = orchcli.tickets(root)
+    by_id = {x["id"]: x for x in tickets}
     stops = []
     for t in orders:
         # A stop the agent decided under a valid autopilot grant no longer needs you.
+        ticket = by_id.get(t["order"])
+        if ticket is None:
+            continue
         try:
-            d = flow.derive(root, store, next(x for x in tickets if x["id"] == t["order"]), tickets)
+            d = flow.derive(root, store, ticket, tickets)
         except Refused:
             continue
         t["questions"] = [q for q in t["questions"] if q["id"] not in d["decided_ok"]]
@@ -27,9 +31,10 @@ def view(root):
             stops.append((t, d["open"]["data"]["stage"]))
     local = datetime.now().astimezone()
     monday = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    journal = store.journal_read()
     shipped = {
         r["order"]
-        for r in Store(root).journal_read()
+        for r in journal
         if r["type"] == "shipped" and monday <= datetime.fromisoformat(r["at"]) <= local
     }
     waiting = [
@@ -80,19 +85,19 @@ def view(root):
             "more": max(0, len(stops) - 50),
         }
     )
-    view = {"schema": "orch.addon-view/1", "generated_at": now(), "blocks": blocks}
+    out = {"schema": "orch.addon-view/1", "generated_at": now(), "blocks": blocks}
     live = [g for g in autopilot.grants(store, tickets) if clock() < g["until"]]
     if live:
         today = sum(
             1
-            for r in store.journal_read()
+            for r in journal
             if r["type"] == "decided" and datetime.fromisoformat(r["at"]).astimezone().date() == local.date()
         )
         until = max(g["until"] for g in live).astimezone().strftime("%d %b %H:%M")
-        view["notice"] = f"Autopilot is on until {until} · decided today: {today}"
-        view["notice_tone"] = "good"
+        out["notice"] = f"Autopilot is on until {until} · decided today: {today}"
+        out["notice_tone"] = "good"
     if not service.running_pid(root, clean=False):
         off = "Factory watcher off — answers wait until it runs"
-        view["notice"] = f"{off} · {view['notice']}" if "notice" in view else off
-        view["notice_tone"] = "warn"
-    return view
+        out["notice"] = f"{off} · {out['notice']}" if "notice" in out else off
+        out["notice_tone"] = "warn"
+    return out

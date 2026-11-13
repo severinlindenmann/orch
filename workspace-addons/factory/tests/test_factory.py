@@ -249,3 +249,37 @@ def test_question_text_must_match_frozen_proposal(ws, run, proposal):
     path.write_text(json.dumps(ticket))
     core(ws, "answer", order, p["question"], "Start", "--by", "human:anna")
     assert run("show", order, code=2)["code"] == "tampered"
+
+
+@pytest.mark.parametrize("what", ["proposal", "autopilot", "change", "stop"])
+def test_schema_command_prints_the_contract(run, what):
+    out = run("schema", what)
+    contract = json.loads((CONTRACTS / "addons/factory/proposal.schema.json").read_text())
+    assert out["$ref"] == f"#/$defs/{what}" and out["$defs"] == contract["$defs"]
+    assert "oneOf" not in out
+    jsonschema.Draft202012Validator.check_schema(out)
+
+
+def test_schema_default_and_unknown(run):
+    assert run("schema")["$ref"] == "#/$defs/proposal"
+    assert run("schema", "nope", code=2)["code"] == "invalid"
+
+
+@pytest.mark.parametrize("command", ["propose", "autopilot", "change", "stop"])
+def test_help_lists_the_fields(command):
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-m", "orch_factory", command, "--help"], capture_output=True, text=True, check=True
+    ).stdout
+    assert (
+        "required:" in out and f"orch factory schema {command if command != 'propose' else 'proposal'}" in out
+    )
+
+
+def test_skill_names_the_schema_command_and_steps():
+    import orch_factory
+
+    text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
+    assert "orch factory schema proposal" in text and "propose --help" not in text
+    assert "`resume`" in text and "`done`" in text
