@@ -90,7 +90,7 @@ def host_ok(headers, port: int) -> bool:
 
 
 def _say(line: str) -> None:
-    """One diagnostic line on stderr; a closed stderr (detached start) must never stop a server from starting."""
+    """One diagnostic line on stderr; a closed stderr (detached start) must not stop a start."""
     try:
         print(line, file=sys.stderr)
     except Exception:  # noqa: BLE001

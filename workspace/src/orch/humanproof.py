@@ -3361,7 +3361,7 @@ def take_resume_session(root: Path, server: str, why: list | None = None) -> tup
                 f.unlink()  # one use, whatever it holds
             except FileNotFoundError:
                 pass
-            except OSError:  # cannot prove it is spent (Windows: a scanner holds it): adopt nothing, no replay
+            except OSError:  # cannot prove it is spent (a Windows scanner holds it): adopt nothing
                 if why is not None:
                     why.append("the resume file could not be removed")
                 return None
