@@ -885,7 +885,7 @@ def test_frontend_text_only_and_plain_words():
     assert "textContent" in js
     assert "/api/act" in js and "/api/settings" in js and "record.delete_detail" in js
     assert "Delete the full detail of this ticket's runs? The counts stay. This cannot be undone." in html
-    assert re.search(r'id="settings-link"[^>]*>Settings<', html)
+    assert re.search(r'id="settings-link"[^>]*>.*?<span id="settings-label">Settings<', html, re.DOTALL)
     assert "settings.js" in html
     # the ticket id goes in the POST body only, never on screen
     assert "entry.ticket" in js and not re.search(r"node\([^)]*entry\.ticket", js)

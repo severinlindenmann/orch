@@ -21,7 +21,16 @@ from .settings import build_settings
 
 DEFAULT_PORT = 8431
 MAX_BODY = 4096
-KIT_FILES = ("tokens.css", "components.css", "icons.js")
+KIT_FILES = (
+    "tokens.css",
+    "components.css",
+    "motion.css",
+    "interaction.css",
+    "icons.js",
+    "overlay.js",
+    "select.js",
+    "components.js",
+)
 WEB_FILES = ("index.html", "insights.css", "insights.js", "settings.js")
 PLAIN = "text/plain; charset=utf-8"
 RELINK = "This sign-in link can not be used. Open Insights from the dashboard on this computer again."
