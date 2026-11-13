@@ -23,7 +23,7 @@ final class VisualFixTests: XCTestCase {
         XCTAssertEqual(InfoGroup.photos.tabLabel(count: 1), "Photos (1)")
         XCTAssertEqual(InfoGroup.files.tabLabel(count: 1), "Files (1)")
         XCTAssertEqual(InfoGroup.links.tabLabel(count: 4), "Links (4)")
-        XCTAssertEqual(InfoGroup.artifacts.tabLabel(count: 1), "Results (1)")
+        XCTAssertEqual(InfoGroup.artifacts.tabLabel(count: 1), "Previews (1)", "not Results: that is the section above")
         for group in InfoGroup.allCases { XCTAssertEqual(group.tabLabel(count: 0), group.title) }
     }
 
@@ -33,8 +33,18 @@ final class VisualFixTests: XCTestCase {
         XCTAssertEqual(InfoGroup.current(.photos, visible: shown), .files, "an empty filter falls back to the first with content")
         XCTAssertEqual(InfoGroup.current(.links, visible: shown), .links)
         XCTAssertNil(InfoGroup.current(.photos, visible: []), "nothing shared: no Shared list at all")
+        XCTAssertTrue(InfoGroup.showsTabs(shown))
+        XCTAssertFalse(InfoGroup.showsTabs([.files]), "a lone filter shows no tab row")
         XCTAssertEqual(InfoGroup.progressText(done: 3, total: 4), "3 of 4 done")
         XCTAssertNil(InfoGroup.progressText(done: 0, total: 0))
+    }
+
+    func testVoiceLoadOnlyFailsForARealFailure() {
+        XCTAssertEqual(VoiceLoadResult.from(blobId: nil, data: nil, loaded: false), .noSource, "still uploading: waits, not broken")
+        XCTAssertEqual(VoiceLoadResult.from(blobId: "", data: nil, loaded: false), .noSource)
+        XCTAssertEqual(VoiceLoadResult.from(blobId: "b1", data: nil, loaded: false), .failed, "blob fetch failed")
+        XCTAssertEqual(VoiceLoadResult.from(blobId: "b1", data: Data([1]), loaded: false), .failed, "audio could not be decoded")
+        XCTAssertEqual(VoiceLoadResult.from(blobId: "b1", data: Data([1]), loaded: true), .loaded)
     }
 
     func testResultSubtitleHasNoHashAndVoiceTimeCountsDown() {

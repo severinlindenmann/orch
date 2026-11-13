@@ -102,7 +102,7 @@ struct ConversationInfoView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Shared").themeFont(15, .semibold).accessibilityAddTraits(.isHeader)
                             .accessibilityIdentifier("info-shared")
-                        if !shown.isEmpty { segments(shown, counts: counts, current: current) }
+                        if InfoGroup.showsTabs(shown) { segments(shown, counts: counts, current: current) }
                         if current == .links { referenceContent(references, links: links) }
                         else { content(entries(in: current, from: all), group: current) }
                     }
@@ -409,14 +409,16 @@ struct ConversationInfoView: View {
 enum InfoGroup: String, CaseIterable, Identifiable {
     case photos, files, links, artifacts
     var id: String { rawValue }
-    /// Plain words: "References" became "Links", "Artifacts" became "Results".
+    /// Plain words: "References" became "Links", "Artifacts" became "Previews" ("Results" is the section above).
     var title: String {
-        switch self { case .photos: "Photos"; case .files: "Files"; case .links: "Links"; case .artifacts: "Results" }
+        switch self { case .photos: "Photos"; case .files: "Files"; case .links: "Links"; case .artifacts: "Previews" }
     }
     func tabLabel(count: Int) -> String { count > 0 ? "\(title) (\(count))" : title }
     /// Only filters that have something in them, in the fixed order.
     static func visible(counts: [InfoGroup: Int]) -> [InfoGroup] { allCases.filter { (counts[$0] ?? 0) > 0 } }
     /// The chosen filter if it still has content, else the first one that has; nil hides the whole Shared list.
+    /// A single filter needs no tabs.
+    static func showsTabs(_ visible: [InfoGroup]) -> Bool { visible.count > 1 }
     static func current(_ chosen: InfoGroup, visible: [InfoGroup]) -> InfoGroup? { visible.contains(chosen) ? chosen : visible.first }
     /// "3 of 4 done"; nil (no row) when the topic has no tasks.
     static func progressText(done: Int?, total: Int) -> String? {

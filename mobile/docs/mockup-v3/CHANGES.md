@@ -1,9 +1,10 @@
 # 12 Nov phone UX, batch 4
-- Info: one "Shared" list; filters (Photos, Files, Links, Results) only when they have content, zero counts hidden, "Progress · 3 of 4 done" row; no "N tasks · N references"; phone-local workspace name.
-- Result viewer: subtitle "PDF · 3 pages · today 12:38", version behind "Details", no status chip; PDF edge to edge on dark with page shadows and page count; share icon next to close; action bar on the composer band.
+- Info: one "Shared" list; filters (Photos, Files, Links, Previews) only when they have content and only when there are two or more, zero counts hidden, "Progress · 3 of 4 done" row; no "N tasks · N references"; phone-local workspace name.
+- Result viewer: subtitle "PDF · 3 pages · 12:38" (time as the app prints it), version behind "Details", no status chip; PDF edge to edge on dark with page shadows and page count; share icon next to close; action bar on the composer band.
 - Location: centred spinner with "Finding your location…"; on denial "Location is off for orch" + Open Settings + Try again.
 - Voice: real length counting down while playing; same filled play button for sent and received; failed audio shows a retry button; received audio has an adjustable VoiceOver scrubber; speed button kept.
 - Add sheet: "Add to chat" (sentence case), close button only (no grabber), Camera hidden when there is none.
+- Review fixes: info and viewer changes now live in round3b.js / visual-challenge.js (the screens that actually render); dead edits in app.js / flows.js removed. Share shown for links and web pages too. Jump flags (No camera, Location off) are no longer saved and reset on navigation.
 - Mockup jumps: Voice › "Audio not available" (shows "Audio not available" with a retry button), Media › "No camera", Media › "Location off".
 
 - Workspace badges show the picked icon and colour (Pilatus wallet/amber, Home house/teal) in the chats list, workspace screen and Conversation info; Rigi has no pick: letter + Automatic colour. Styles and the override live in `look.css` / `look.js`.

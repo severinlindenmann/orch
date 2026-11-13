@@ -95,6 +95,15 @@ struct Waveform: View {
     }
 }
 
+/// Outcome of loading a sent note: only a real failure shows "Audio not available"; a note still uploading (no blob yet) waits.
+enum VoiceLoadResult: Equatable {
+    case noSource, loaded, failed
+    static func from(blobId: String?, data: Data?, loaded: Bool) -> VoiceLoadResult {
+        guard let blobId, !blobId.isEmpty else { return .noSource }
+        return data != nil && loaded ? .loaded : .failed
+    }
+}
+
 func voiceRateText(_ rate: Double) -> String { rate == 1.5 ? "1.5x" : "\(Int(rate))x" }
 private func voiceDurationText(_ duration: Double) -> String { clockText(duration) }
 /// Nothing is shown until the length is known (never "00:00" for a real note).
@@ -133,6 +142,7 @@ struct OwnVoiceBubble: View {
                     Image(systemName: loadFailed ? "arrow.clockwise" : (player.isPlaying ? "pause.fill" : "play.fill"))
                         .themeFont(16).frame(width: 44, height: 44)
                         .foregroundStyle(Theme.onBrand).background(Theme.brand, in: Circle())
+                        .opacity(player.isAvailable || loadFailed ? 1 : 0.45)   // still loading: looks waiting, not tappable
                 }.disabled(!player.isAvailable && !loadFailed)
                     .accessibilityIdentifier("voice-play")
                     .accessibilityLabel(loadFailed ? "Audio not available, try again"
@@ -167,8 +177,8 @@ struct OwnVoiceBubble: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
             .task(id: "\(item.voice?.blobId ?? "")#\(reload)") {
                 loadFailed = false
-                await loadAudio()
-                if !Task.isCancelled { loadFailed = !player.isAvailable }
+                let result = await loadAudio()
+                if !Task.isCancelled { loadFailed = result == .failed }
             }
             .onDisappear { player.stop() }
             .accessibilityAction(named: "Reply") { onReply?() }
@@ -199,14 +209,18 @@ struct OwnVoiceBubble: View {
                 player.seek(to: player.progress + (direction == .increment ? 0.1 : -0.1))
             }.allowsHitTesting(player.isAvailable)
     }
-    private func loadAudio() async {
+    private func loadAudio() async -> VoiceLoadResult {
         if let queued = model.outbox.item(clientId: item.clientId ?? ""),
            let file = queued.voice?.file ?? item.queuedFiles.first(where: { $0.kind == .voice }),
            let data = try? Data(contentsOf: model.outbox.fileURL(queued, file)) {
-            player.load(data); return
+            player.load(data); return .from(blobId: "local", data: data, loaded: player.isAvailable)
         }
         let blob = item.voice?.blobId ?? item.attachments.first(where: { $0.kind == .voice })?.blobId
-        if let blob, !blob.isEmpty, let data = await model.blob(blob), !Task.isCancelled { player.load(data) }
+        var data: Data?
+        if let blob, !blob.isEmpty { data = await model.blob(blob) }
+        if Task.isCancelled { return .noSource }
+        if let data { player.load(data) }
+        return .from(blobId: blob, data: data, loaded: player.isAvailable)
     }
 }
 
@@ -250,6 +264,7 @@ struct AgentMemoBubble: View {
                     }.frame(height: 44).accessibilityElement(children: .ignore)
                         .accessibilityLabel("Voice message position")
                         .accessibilityValue("\(Int((current ? model.speech.progress : 0) * 100)) percent")
+                        .accessibilityHint(current ? "" : "Play the message first")
                         .accessibilityAdjustableAction { direction in
                             guard current else { return }
                             model.speech.seek(to: min(1, max(0, model.speech.progress + (direction == .increment ? 0.1 : -0.1))))
@@ -267,7 +282,7 @@ struct AgentMemoBubble: View {
                     }
                     Circle().fill(listened ? Theme.muted : Theme.brand).frame(width: 10, height: 10).accessibilityHidden(true)
                     Text(listened ? "Listened" : "Voice memo").foregroundStyle(listened ? Theme.muted : Theme.brand)
-                }.themeFont(13).padding(.leading, 48)
+                }.themeFont(13).padding(.leading, 52)
                 HStack {
                     Button {
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { showText.toggle() }

@@ -43,8 +43,8 @@ struct ArtifactViewer: View {
             HStack(spacing: 16) {
                 Text(item.title).themeFont(20, .semibold).frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
-                if let shareURL {
-                    ShareLink(item: shareURL) {
+                if let share = shareURL ?? (item.kind == .link || item.kind == .html ? item.safeLinkURL : nil) {
+                    ShareLink(item: share) {
                         Image(systemName: "square.and.arrow.up").themeFont(18)
                             .foregroundStyle(Theme.muted).frame(width: 44, height: 44)
                             .background(Theme.surface3, in: Circle())
@@ -85,6 +85,7 @@ struct ArtifactViewer: View {
                             .padding(.horizontal, 10).padding(.vertical, 4)
                             .background(Theme.surface3.opacity(0.9), in: Capsule()).padding(.bottom, 8)
                             .accessibilityIdentifier("artifact-page-count")
+                            .allowsHitTesting(false).accessibilityHidden(true)   // never blocks a pin tap; the subtitle already says it
                     }
                 }
             if !commentMode, let approval {

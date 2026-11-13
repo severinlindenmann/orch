@@ -94,22 +94,21 @@ import XCTest
             let app = launch("info", extra: size.isEmpty ? [] : ["-UIPreferredContentSizeCategoryName", size])
             XCTAssertTrue(app.buttons["demo-open-info"].waitForExistence(timeout: 20))
             app.buttons["demo-open-info"].tap()
-            // P33: only filters with content are shown (Photos, Files, Links, Results)
+            // P33: only filters with content are shown; the Q3 demo has a photo, a file and links (Previews only if present)
             let photos = app.buttons["info-tab-photos"]
             XCTAssertTrue(photos.waitForExistence(timeout: 10))
+            for t in ["photos", "files", "links"] { XCTAssertTrue(app.buttons["info-tab-\(t)"].exists, "\(t) filter missing (\(size))") }
             for t in ["photos", "files", "links", "artifacts"] {
                 let tab = app.buttons["info-tab-\(t)"]
-                guard tab.exists else { continue }
+                guard t != "artifacts" || tab.exists else { continue }
                 // one line: every tab is as tall as Photos, and all sit in the same row
                 XCTAssertEqual(tab.frame.height, photos.frame.height, accuracy: 1, "\(t) wraps (\(size))")
                 XCTAssertEqual(tab.frame.midY, photos.frame.midY, accuracy: 1, "\(t) not in one row (\(size))")
             }
             XCTAssertFalse(app.buttons["info-language-row"].exists, "no Voice & reply language row")
             XCTAssertFalse(app.staticTexts["Voice & reply language"].exists)
-            if app.buttons["info-tab-links"].exists {
-                app.buttons["info-tab-links"].tap()
-                XCTAssertTrue(app.buttons["info-tab-links"].isSelected, "Links filter selectable (\(size))")
-            }
+            app.buttons["info-tab-links"].tap()
+            XCTAssertTrue(app.buttons["info-tab-links"].isSelected, "Links filter selectable (\(size))")
             shot(app, size.isEmpty ? "info-tabs-default" : "info-tabs-xxl")
             app.terminate()
         }
