@@ -1,0 +1,89 @@
+{
+  "results": [
+    {
+      "label": "Cancel phone pairing leaves switch off",
+      "ok": true
+    },
+    {
+      "label": "Pairing enables phone switch",
+      "ok": true
+    },
+    {
+      "label": "Phone answer rendered",
+      "ok": true
+    },
+    {
+      "label": "Desktop answer stays in sync",
+      "ok": true
+    },
+    {
+      "label": "Blank answer stays open with error",
+      "ok": true
+    },
+    {
+      "label": "Written answer saved verbatim",
+      "ok": true
+    },
+    {
+      "label": "Ticket shares question answer",
+      "ok": true
+    },
+    {
+      "label": "Full-screen visible exit",
+      "ok": true
+    },
+    {
+      "label": "Full-screen returns content and focus",
+      "ok": true
+    },
+    {
+      "label": "Focus answer updates work",
+      "ok": true
+    },
+    {
+      "label": "Files toolbar one row and 36px controls",
+      "ok": true
+    },
+    {
+      "label": "Custom sort updates native value",
+      "ok": true
+    },
+    {
+      "label": "Select Escape restores trigger",
+      "ok": true
+    },
+    {
+      "label": "Keyboard date choice",
+      "ok": true
+    },
+    {
+      "label": "Date focus returns",
+      "ok": true
+    },
+    {
+      "label": "Dialog focus trapped",
+      "ok": true
+    },
+    {
+      "label": "Dialog focus returns to opener",
+      "ok": true
+    },
+    {
+      "label": "Tabs keyboard selects Files",
+      "ok": true
+    },
+    {
+      "label": "File full-screen close visible",
+      "ok": true
+    },
+    {
+      "label": "Full-screen file exits to collection",
+      "ok": true
+    },
+    {
+      "label": "No script errors",
+      "ok": true
+    }
+  ],
+  "errors": []
+}

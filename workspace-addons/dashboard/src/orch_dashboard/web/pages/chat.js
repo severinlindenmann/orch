@@ -305,7 +305,7 @@ function chatHistory() {
     ready && query && [...dayRows, ...groupRows].every(row => row.hidden) ? chatText('p', 'chat-muted', 'Nothing matches.') : null);
 }
 function chatHistoryStatus(status, retry) {
-  return h('div', {className:'chat-history-status', role:'status'}, status === 'error' ? fragment('Could not load earlier chats.', chatButton('Try again', retry)) : 'Loading…');
+  return h('div', {className:'chat-history-status', role:'status'}, status === 'error' ? fragment('Could not load earlier chats.', chatButton('Try again', retry)) : typeof skeletonFor === 'function' ? skeletonFor('section') : 'Loading…');
 }
 function chatSheet(g, readOnly) {
   const host = chatHost(g), adding = chatUi.sheet === 'add';

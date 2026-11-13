@@ -104,7 +104,7 @@ function activityInfo(t) {
   const agent = window.DashHelpers.agentLabel(state.settings, run?.claim);
   const getting = starting.has(t.id) || live?.state === 'starting';
   const busy = getting || (run?.running && !['idle', 'attention'].includes(live?.state));
-  const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Needs you' : t.status === 'review' ? 'Ready for review' : busy ? agent + ' is working' : '';
+  const text = getting ? 'Getting started…' : questions(t).length || live?.state === 'attention' ? 'Needs you' : t.status === 'review' ? window.DashHelpers.statusWord('review') : busy ? agent + ' is working' : '';
   return {run, live, agent, busy, text};
 }
 const needsList = () => window.DashHelpers.uniqueNeeds(state?.needs);
@@ -121,11 +121,11 @@ function activity(t, where = '') {
   if (snapshot) return null;
   const {live, busy, text: full} = activityInfo(t);
   if (!full || (where === 'head' && questions(t).length)) return null;  // the banner is the one place for an open question
-  if (full === 'Ready for review' && ['head', 'board'].includes(where)) return null;  // the status chip / column already says it: one chip
+  if (full === window.DashHelpers.statusWord('review') && ['head', 'board'].includes(where)) return null;  // the status chip / column already says it: one chip
   const text = full;
   const note = where === 'row' ? '' : activityNote(t);  // in a row the chip sits on the Move to line, the note goes under the title
   const open = live?.state === 'attention' ? liveLinkFor(t) : null;
-  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === 'Ready for review' ? {title:'Ready for review'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
+  return h('div', {className:'activity', 'data-key':'activity-' + t.id}, Object.assign(chip(text, busy && (text === 'Getting started…' || text.endsWith(' is working')) ? 'active activity-pulse' : 'attn'), text === window.DashHelpers.statusWord('review') ? {title:'Ready for you to check'} : text === 'Needs you' ? {title:'The agent asked you something'} : {}),
     note ? h('p', {className:'meta'}, note) : null,
     open ? h('a', {className:'btn outline xs', href:open.url, 'data-key':'activity-open-' + t.id}, 'Open the live session') : null);
 }
@@ -136,7 +136,57 @@ const statusControl = (t, scope) => {
   if (snapshot) return statusChip(t);
   return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'btn outline xs status-sum', 'aria-label':'Move to… ' + clean(t.title) + ' (now ' + statusWord(shown(t)) + ')'}, 'Move to', iconEl('down')), h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, statusItems(t, scope)));
 };
-const heading = (title, sub = '') => h('header', {className:'page-heading', 'data-key':'heading'}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null);
+// Page header: (eyebrow) title + one line under it; an optional actions slot at the end.
+const heading = (title, sub = '', {eyebrow = '', actions = null} = {}) => h('header', {className:'page-heading', 'data-key':'heading'},
+  h('div', {}, eyebrow ? h('p', {className:'eyebrow'}, eyebrow) : null, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
+  actions ? h('div', {className:'page-heading-actions'}, actions) : null);
+// Loading shapes that match the page they stand in for; `section` is a part of a page (add-on body, chat history ...).
+function skeletonFor(kind) {
+  const bar = cls => h('div', {className:'skeleton ' + cls, 'aria-hidden':'true'});
+  const stack = (n, cls = 'sk-card') => h('div', {className:'sk-stack', 'aria-hidden':'true'}, Array.from({length:n}, () => bar(cls)));
+  const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(2), stack(1))]
+    : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), stack(5, 'sk-row')]
+    : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
+    : kind === 'section' ? [stack(3, 'sk-row')]
+    : [bar('sk-title'), stack(3)];
+  return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
+}
+// The skeleton for an address before the state is there (no state needed).
+function hashKind(hash) {
+  const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
+  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : ['addon', 'open', 'notes', 'chat', 'general', 'settings'].includes(k) ? 'page' : 'home';
+}
+function notFoundPage() {
+  return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
+    h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
+      h('h2', {}, 'We couldn’t find that page'), h('p', {className:'muted'}, 'The link may be out of date, or the page may have moved.'),
+      h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#home'}, 'Go to Home'),
+        addons().filter(a => a.dashboard || a.page).map(a => h('a', {className:'btn outline sm', href:'#addon/' + encodeURIComponent(a.name)}, addonLabel(a)))))));
+}
+// Sidebar icons (trusted constants, same drawings as the design).
+const NAV_ICON = {
+  home:'<path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/>',
+  tickets:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/>',
+  notes:'<path d="M5 3h14v18H5zM8 8h8m-8 4h8m-8 4h5"/>',
+  chat:'<path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8m-8 4h5"/>',
+  addons:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/>',
+};
+function navIcon(name) {
+  const node = document.createElement('span');
+  node.className = 'ic-wrap';
+  node.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + NAV_ICON[name] + '</svg>'; // ic-wrap: trusted static nav icons only.
+  return node;
+}
+const ADDONS_OPEN = 'orch.nav.addons';
+const addonsOpen = () => { try { return localStorage.getItem(ADDONS_OPEN) !== 'closed'; } catch (_) { return true; } };
+let lastOk = 0, lastFetch = 0;
+function paintUpdated() {
+  const node = document.getElementById('updated');
+  if (!node) return;
+  const text = lastOk ? ' · ' + window.DashHelpers.updatedText(lastOk, Date.now()) : '';
+  if (node.textContent !== text) node.textContent = text;
+}
 const card = (key, title, suffix, body, chevron = false) => h('section', {className:'card', 'data-key':key, id:key === 'needs-you' ? key : null}, h('div', {className:'card-h'}, chevron ? iconEl('down') : null, h('h2', {}, title, suffix ? h('span', {className:'muted'}, ' · ', suffix) : null)), body);
 const emptyRow = text => h('div', {className:'card-row muted'}, text);
 const newButton = () => snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'new'}, 'New ticket');
@@ -151,9 +201,11 @@ function sync(target, source) {
   if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body') return;
   for (const attr of [...target.attributes]) {
     if (attr.name === 'open' && target.tagName === 'DETAILS') continue;
+    if (target.classList.contains('ui-native-select') && ['class', 'tabindex', 'aria-hidden'].includes(attr.name)) continue;  // set by kit/select.js
     if (!source.hasAttribute(attr.name)) target.removeAttribute(attr.name);
   }
   for (const attr of [...source.attributes]) {
+    if (target.classList.contains('ui-native-select') && attr.name === 'class') continue;
     if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
   }
   reconcile(target, source);
@@ -167,11 +219,13 @@ function reconcile(target, source) {
   const old = [...target.childNodes], used = new Set();
   for (const fresh of [...source.childNodes]) {
     const key = nodeKey(fresh);
-    const existing = old.find(n => !used.has(n) && n.nodeType === fresh.nodeType && n.nodeName === fresh.nodeName && (key ? nodeKey(n) === key : !nodeKey(n)));
+    // A select enhanced by kit/select.js sits inside a .ui-select wrapper: match the wrapper to the plain select of the new tree.
+    const base = n => n.classList?.contains('ui-select') ? n.querySelector('select') || n : n;
+    const existing = old.find(n => !used.has(n) && n.nodeType === fresh.nodeType && base(n).nodeName === fresh.nodeName && (key ? nodeKey(base(n)) === key : !nodeKey(base(n))));
     const node = existing || fresh;
     const at = target.childNodes[used.size];
     if (node !== at) target.insertBefore(node, at || null);
-    if (existing) sync(existing, fresh);
+    if (existing) sync(base(existing), fresh);
     used.add(node);
   }
   for (const node of old) if (!used.has(node) && !locks.has(node.dataset?.key)) node.remove();
@@ -187,7 +241,7 @@ function accept(next) {
   render(first ? new Set() : arrived);
 }
 function route() {
-  const hash = location.hash || '#home';
+  const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
@@ -206,8 +260,10 @@ function route() {
       const id = decodeURIComponent(hash.slice(7));
       if (addons().some(a => a.name === id && a.dashboard)) return {kind:'addon', id, hash};
     }
-  } catch (_) { /* Malformed links fall back to Home. */ }
-  return {kind:hash === '#tickets' ? 'tickets' : hash === '#notes' ? 'notes' : 'home', hash};
+  } catch (_) { /* Malformed links show Page not found. */ }
+  // a known page this workspace does not offer (no chat, a shared copy's settings) stays Home, as before
+  const kind = {'#home':'home', '#tickets':'tickets', '#notes':'notes', '#settings':'home', '#chat':'home', '#general':'home'}[hash] || (hash.startsWith('#chat/') ? 'home' : '');
+  return kind ? {kind, hash:full} : {kind:'notfound', hash:full};
 }
 function render(arrived = new Set()) {
   if (!state) return;
@@ -217,34 +273,43 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'notes' ? 'Notes' : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'notes' ? 'Notes' : r.kind === 'notfound' ? 'Page not found' : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
+  let title = pageName;
   if (r.kind === 'ticket') {
     const tk = ticketOf(r.id);
-    crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' / ', clean(tk?.title) || 'Ticket');
+    title = clean(tk?.title) || 'Ticket';
+    crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' › ', title);
   } else if (r.kind === 'page') {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
-    crumb.replaceChildren(pageName, ' › ', clean(tk?.title) || last);
+    title = clean(tk?.title) || last || pageName;
+    crumb.replaceChildren(...(last ? [h('a', {href:'#addon/' + encodeURIComponent(r.id)}, pageName), ' › ', title] : [pageName]));
   } else crumb.textContent = pageName;
+  document.title = title + ' · orch';
+  paintUpdated();
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
-  const needCount = needsToday().count, menuToggle = document.getElementById('menu-toggle');
+  const needCount = needsYouTotal(), menuToggle = document.getElementById('menu-toggle');
   menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
-  const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
-  reconcile(nav, fragment(navLink('#home', 'Home', 'page', needCount ? h('span', {className:'count', title:window.DashHelpers.needsYou(needCount), 'aria-label':window.DashHelpers.needsYou(needCount)}, window.DashHelpers.needsYou(needCount)) : null), navLink('#tickets', 'Tickets', 'table'), navLink('#notes', 'Notes', 'text'), state.chat || state.general ? navLink('#chat', 'Chat', 'text', chatBadge()) : null,
-    // On a narrow screen the header has no room for "Ask the helper": it is a Menu item there (CSS shows it only then).
-    snapshot ? null : h('button', {type:'button', className:'nav-item nav-helper', 'data-key':'nav-open-agent', 'data-nav':'open-agent'}, iconEl('spark'), 'Ask the helper'),
-    addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
-  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
+  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
+  const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
+  const needsWords = window.DashHelpers.needsYou(needCount);
+  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), navLink('#notes', 'Notes', 'notes'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null));
+  const pages = addons().filter(a => a.dashboard);
+  const sideAddons = document.getElementById('side-addons');
+  if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
+    h('summary', {className:'nav-item', 'aria-label':'Add-ons'}, navIcon('addons'), h('span', {className:'nav-label'}, 'Add-ons')),
+    h('nav', {'aria-label':'Add-ons'}, pages.map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon)))) : null));
+  reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'settings') : null));
   if (changed) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'notes' ? notesPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'notes' ? notesPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
@@ -273,7 +338,8 @@ function render(arrived = new Set()) {
 // Every notice goes through one scrub: no raw ids, actor names or UTC times reach a person.
 if (window.orch && !window.orch.__scrubbed) {
   const rawToast = window.orch.toast.bind(window.orch);
-  window.orch.toast = (text, kind) => rawToast(window.DashHelpers.scrubText(text), kind);
+  // One shared toast (kit/components.js): one at a time, Dismiss, paused while hovered or focused, errors stay.
+  window.orch.toast = (text, kind, undo) => window.UI?.toast ? window.UI.toast(window.DashHelpers.scrubText(text), undo, kind) : rawToast(window.DashHelpers.scrubText(text), kind);
   window.orch.__scrubbed = true;
 }
 // One automatic retry for a change that raced with someone else (typically the agent that just finished):
@@ -324,6 +390,7 @@ async function refresh() {
   if (fetching || writing) { refreshAgain = true; return; }
   fetching = true;
   refreshAgain = false;
+  lastFetch = Date.now();
   const version = mutation;
   const connection = document.getElementById('connection');
   try {
@@ -332,6 +399,8 @@ async function refresh() {
     const next = await res.json();
     if (writing || version !== mutation) { refreshAgain = true; return; }
     connection.hidden = true;
+    lastOk = Date.now();
+    paintUpdated();
     // rev is the server's hash of the whole state (every ticket field, runs, needs ...); without one, always take it.
     if (!state || !next.rev || next.rev !== state.rev) accept(next);
   } catch (_) {
@@ -588,9 +657,25 @@ window.addEventListener('hashchange', async () => {
   for (const d of document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
 });
+document.getElementById('side-addons')?.addEventListener('toggle', event => {
+  if (!event.target.matches?.('details.nav-group')) return;
+  try { localStorage.setItem(ADDONS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
+}, true);
+// Prefetch: resting 65 ms on a nav link refreshes a state older than 5 s (never on Save-Data).
+let prefetchTimer;
+const prefetch = event => {
+  if (!event.target.closest?.('.sidebar a.nav-item') || snapshot || navigator.connection?.saveData) return;
+  clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(() => { if (!fetching && !writing && Date.now() - lastFetch > 5000) refresh(); }, 65);
+};
+document.querySelector('.sidebar')?.addEventListener('mouseover', prefetch);
+document.querySelector('.sidebar')?.addEventListener('focusin', prefetch);
+document.querySelector('.sidebar')?.addEventListener('mouseout', () => clearTimeout(prefetchTimer));
 if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
-  main.replaceChildren(loadingView());
+  main.replaceChildren(skeletonFor(hashKind(location.hash)));
+  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', notes:'Notes', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
+  setInterval(paintUpdated, 30000);
   refresh();
   let poll = setInterval(refresh, 3000), pending;
   const cadence = up => { clearInterval(poll); poll = setInterval(refresh, up ? 20000 : 3000); };

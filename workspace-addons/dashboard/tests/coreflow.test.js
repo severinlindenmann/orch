@@ -68,7 +68,7 @@ test('push uses a 50 ms debounce and changes polling only while live', () => {
   const streams = [], intervals = [], timeouts = new Map();
   let refreshed = 0, nextTimer = 0;
   const ctx = {
-    main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, loadingView:() => 'loading',
+    main:{replaceChildren(node) { assert.equal(node, 'loading'); }}, skeletonFor:() => 'loading', hashKind:() => 'home', paintUpdated() {}, location:{hash:''}, document:{querySelector:() => null, getElementById:() => null}, navigator:{},
     snapshot:false, window:{addEventListener() {}}, refresh:() => { refreshed++; },
     setInterval:(_, ms) => { intervals.push(ms); return intervals.length; }, clearInterval() {},
     setTimeout:(fn, ms) => { assert.equal(ms, 50); timeouts.set(++nextTimer, fn); return nextTimer; }, clearTimeout:id => timeouts.delete(id),
@@ -116,7 +116,7 @@ function pageContext(snapshot = false) {
   vm.createContext(ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function needRow'), homeSource.indexOf('function workingRow')), ctx);
-  vm.runInContext(homeSource.slice(homeSource.indexOf('function loadingView'), homeSource.indexOf('// Chat (former General)')), ctx);
+  vm.runInContext(homeSource.slice(homeSource.indexOf('function connectionNotice'), homeSource.indexOf('// Chat (former General)')), ctx);
   return {ctx, connection, toasts, calls};
 }
 test('inline options send the question and selected answer, disable together, and unlock', async () => {
@@ -142,10 +142,8 @@ test('offline answers do not send; network failures show the plain message; snap
   assert.ok(toasts.every(text => text === "Can't reach orch. Your change was not sent."));
   assert.equal(pageContext(true).ctx.needRow(data).querySelectorAll('button').length, 0);
 });
-test('loading is keyed and busy; connection notice offers retry and details', () => {
+test('connection notice offers retry and details', () => {
   const {ctx, connection, calls} = pageContext();
-  const loading = ctx.loadingView();
-  assert.equal(loading.attrs['data-key'], 'loading'); assert.equal(loading.attrs['aria-busy'], 'true');
   connection.replaceChildren = (...children) => { connection.children = children; };
   ctx.connectionNotice(connection, false);
   assert.equal(connection.hidden, false); assert.match(connection.children[0].children[0], /Can't reach orch yet/);
