@@ -26,10 +26,10 @@ enum GroupRoomRules {
         -> (workspace: String, ticket: String, label: String, title: String?)? {
         guard workspaces.contains(where: { $0.id == task.ws }), let ticket = task.ticket else { return nil }
         if let local = tickets.first(where: { $0.workspace == task.ws && $0.ticket == ticket }) {
-            return (task.ws, ticket, local.key ?? "ticket", local.title)
+            return (task.ws, ticket, local.key ?? "topic", local.title)
         }
         if let local = updates.first(where: { $0.workspace == task.ws && $0.ticket == ticket }) {
-            return (task.ws, ticket, local.key ?? "ticket", local.title)
+            return (task.ws, ticket, local.key ?? "topic", local.title)
         }
         return nil
     }
