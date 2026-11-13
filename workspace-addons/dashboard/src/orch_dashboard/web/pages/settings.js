@@ -700,6 +700,7 @@ function addonBody(a, res) {
 }
 function addonNotice(view) {
   if (!view.notice) return null;
+  if (view.header?.status && view.notice_tone === 'good') return null;   // the heading's status pill already says it
   const tone = 'banner ' + (view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(view.notice_tone) ? 'attn' : '');
   const b = view.button;
   // "Running. Next run in 2 days." -> a small state badge and the rest of the line

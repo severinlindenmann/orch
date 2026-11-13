@@ -227,6 +227,8 @@ def view(root: Path) -> dict:
         out["notice_tone"] = "warn"
         out["header"] = {"status": {"label": "Waiting to send", "tone": "warn"}}
     else:
+        out["notice"] = "Connected. Send messages and files to other workspaces."
+        out["notice_tone"] = "good"  # the page shows the pill instead of a banner for this one
         out["header"] = {"status": {"label": "Connected", "tone": "good"}}
     rows: list[tuple[str, dict]] = []
 

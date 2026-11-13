@@ -1967,7 +1967,9 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
     recent, people = v["blocks"]  # messages first, then who you can talk to
-    assert "notice" not in v and v["header"] == {"status": {"label": "Connected", "tone": "good"}}
+    assert v["notice"].startswith("Connected.") and v["header"] == {
+        "status": {"label": "Connected", "tone": "good"}
+    }
     assert recent["span"] == people["span"] == "half"  # two cards side by side
     assert people["title"] == "Workspaces you can talk to" and people["count"] == 1
     first = people["items"][0]
