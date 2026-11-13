@@ -79,6 +79,8 @@ V = {
     "run-event": validator("addons/focus/run-event"),
     "automation-ext": validator("addons/automation/ext"),
     "focus-ext": validator("addons/focus/ext"),
+    "factory-ext": validator("addons/factory/ext"),
+    "factory-proposal": validator("addons/factory/proposal"),
 }
 # The [workspace] agent + [agents.<name>] part of .orch/config.toml: a $def of agent-adapter.schema.json.
 _adapters = json.loads((HERE / "agent-adapter.schema.json").read_text())
@@ -90,7 +92,7 @@ V["agent-config"] = Draft202012Validator(
 CORE_CLEAN = ["ticket", "run", "run-pending", "needs", "agent-adapter"]
 TOOL_NAMES = re.compile(r"scheduler|automation|focus|relay|dashboard|publish|claude|codex", re.I)
 # Add-on ext schemas, keyed by ext name. A ticket's ext.<name> is checked with it (as the CLI does for installed add-ons).
-EXT = {"automation": V["automation-ext"], "focus": V["focus-ext"]}
+EXT = {"automation": V["automation-ext"], "focus": V["focus-ext"], "factory": V["factory-ext"]}
 
 
 SESSION_ARG = re.compile(r"^(\{session\}|--[a-z][a-z0-9-]*=\{session\})$")

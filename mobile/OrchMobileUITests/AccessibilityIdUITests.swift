@@ -5,11 +5,11 @@ final class AccessibilityIdUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     @MainActor
-    private func duplicateIds(in app: XCUIApplication, ignoring: Set<String> = []) -> [String: Int] {
+    private func duplicateIds(in root: XCUIElement, ignoring: Set<String> = []) -> [String: Int] {
         do {
             // Equivalent to all descendants, but fetch the accessibility tree only once.
             // Reading identifiers from live XCUIElements would query the app repeatedly.
-            let snapshot = try app.snapshot()
+            let snapshot = try root.snapshot()
             var counts: [String: Int] = [:]
             func visit(_ node: XCUIElementSnapshot, barIds: Set<String>? = nil) {
                 let id = node.identifier
@@ -23,7 +23,8 @@ final class AccessibilityIdUITests: XCTestCase {
                 if !id.isEmpty { barIds?.insert(id) }
                 for child in node.children { visit(child, barIds: barIds) }
             }
-            for child in snapshot.children { visit(child) }
+            // An app snapshot starts below the application; an element snapshot includes the element itself.
+            if root.elementType == .application { for child in snapshot.children { visit(child) } } else { visit(snapshot) }
 
             var ignored = ignoring
             for id in counts.keys {
@@ -44,7 +45,7 @@ final class AccessibilityIdUITests: XCTestCase {
     }
 
     @MainActor
-    private func assertUniqueIds(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+    private func assertUniqueIds(in app: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
         let duplicates = duplicateIds(in: app)
         // One line: CI's failure summary only shows the first line of a message.
         let details = duplicates.keys.sorted().map { "\($0)=\(duplicates[$0]!)" }.joined(separator: ", ")
@@ -138,7 +139,8 @@ final class AccessibilityIdUITests: XCTestCase {
         XCTAssertTrue(element(app, "chat-search").waitForExistence(timeout: 15))
         reveal(app, "group-13-ws_finance001-grp_t_cartax2027").tap()
         XCTAssertTrue(element(app, "group-members").waitForExistence(timeout: 10))
-        _ = reveal(app, "group-approval")
-        assertUniqueIds(in: app)
+        // Snapshot only the approval card (its own subtree), not the whole app: the full-tree query timed out about every 3rd CI run.
+        let card = reveal(app, "group-approval")
+        assertUniqueIds(in: card)
     }
 }

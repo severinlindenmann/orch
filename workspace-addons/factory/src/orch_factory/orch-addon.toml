@@ -1,0 +1,27 @@
+schema = "orch.addon/1"
+orch_api = 1
+name = "factory"
+version = "0.1.0"
+description = "Turn an idea into finished work: your agent proposes the run, you press Start."
+run = "orch_factory"
+skill = "skills/orch-factory"
+agents_block = "skills/orch-factory/AGENTS-block.md"
+ticket_ext = "ext.schema.json"
+needs = true
+background = true                          # `orch factory start|stop|status`: the watcher that wakes the manager
+runs_agents = true                         # it starts the manager run (orch run start) when you answer
+
+[dashboard]
+label = "Factory"
+icon = "box"
+order = 15
+
+[[ticket_view]]
+field = "stage"
+label = "Factory stage"
+format = "text"
+
+[[ticket_view]]
+field = "eta"
+label = "ETA"
+format = "time"

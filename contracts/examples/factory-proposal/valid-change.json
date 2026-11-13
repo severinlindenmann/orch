@@ -1,0 +1,4 @@
+{"schema": "orch.factory.proposal/1", "kind": "change", "title": "Add a waiting list",
+ "what": "Customers can leave an email when a day is full.", "asked_by_owner": "Can we also add a waiting list?",
+ "adds_min": 25, "adds_usd": 2, "new_eta": "2026-11-13T18:55:00Z", "lands_in": "build",
+ "adds_done_means": ["A waiting-list signup is confirmed."]}
