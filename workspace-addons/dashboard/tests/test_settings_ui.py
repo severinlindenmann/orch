@@ -272,7 +272,8 @@ def test_settings_splits_installed_and_available(ws, monkeypatch):
 
 def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
     src = webjs.all_js()
-    body = src[src.index("function addonCatalog()") :][:4200]
+    start = src.index("function addonCatalog()")
+    body = src[start : src.index("function settingsConfirm", start)]
     assert "act('addon.set', {name, on:true})" in body  # same op as the switch
     assert "'Every add-on that comes with orch is already here.'" in body
     assert "'Turned on. It starts with orch start.'" in body and "act('addon.start', {})" in body

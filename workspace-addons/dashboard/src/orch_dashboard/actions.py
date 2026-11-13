@@ -1149,6 +1149,13 @@ def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, 
     return 422, str(msg)[:500], None
 
 
+def _op_timeout(op, args) -> int:
+    """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
+    if op == "addon.set" and args.get("on") is True:
+        return 180
+    return 75 if op == "config.agent.test" else 60
+
+
 def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
     proof for a request that carries a page session; None = watch-only (the click is refused)."""
@@ -1200,7 +1207,12 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
     try:
         if need:
             r = run_with_proof(
-                argv, mint(*need), orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=60
+                argv,
+                mint(*need),
+                orch_bin=orch_bin,
+                cwd=root,
+                env=human_env(root, orch_bin),
+                timeout=_op_timeout(op, args),
             )
         else:
             r = _run(
@@ -1209,11 +1221,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
                 cwd=root,
                 capture_output=True,
                 text=True,
-                timeout=75 if op == "config.agent.test" else 60,
+                timeout=_op_timeout(op, args),
                 stdin=subprocess.DEVNULL,
                 env=human_env(root, orch_bin),
             )
     except subprocess.TimeoutExpired:
+        if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
+            forget_static()
+            return 504, "Still adding it. Check again in a minute.", None
         return 504, "That took too long. Please try again.", None
     except OSError:
         raise Unavailable("The orch command could not be started.") from None

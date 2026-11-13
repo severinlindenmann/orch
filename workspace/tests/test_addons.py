@@ -1431,10 +1431,43 @@ def test_list_shows_shipped_addons_not_installed_yet(proj, run, tmp_path, monkey
     assert len(rows) == 1 and rows[0]["installed"] is True
 
 
-def test_list_leaves_out_an_available_addon_it_cannot_read_locally(proj, run, tmp_path, monkeypatch):
+def _not_local(monkeypatch):
     monkeypatch.delenv("ORCH_REPO", raising=False)
     monkeypatch.setattr(addons, "_install_origin", lambda: {})
     monkeypatch.setattr(addons, "_entry_points", lambda: {})
     monkeypatch.setattr(addons, "preview_builtin", lambda n: pytest.fail("no network in list"))
+
+
+@pytest.mark.real_bundle
+def test_list_uses_the_bundle_on_a_normal_install(proj, run, monkeypatch):
+    """No source folder: the shipped add-ons that are not installed come from shipped_addons.json."""
+    _not_local(monkeypatch)
+    assert not addons._is_local(addons.repo())
+    rows = {r["name"]: r for r in json.loads(run("addon", "list", "--json")[1])}
+    for n in addons.SHIPPED_ADDONS:
+        assert rows[n]["installed"] is False and rows[n]["active"] is False and rows[n]["running"] is False
+        assert rows[n]["source"] == "built-in" and rows[n]["description"]
+
+
+@pytest.mark.real_bundle
+def test_list_leaves_out_an_addon_that_is_in_neither_source(proj, run, monkeypatch):
+    _not_local(monkeypatch)
+    real = addons.bundled_manifests()
+    monkeypatch.setattr(
+        addons, "bundled_manifests", lambda: {n: m for n, m in real.items() if n != "factory"}
+    )
     names = [r["name"] for r in json.loads(run("addon", "list", "--json")[1])]
-    assert "factory" not in names
+    assert "factory" not in names and "focus" in names
+
+
+def test_bundle_matches_the_manifests(tmp_path):
+    """shipped_addons.json is generated: a manifest change without regenerating fails here."""
+    import importlib.util
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "gen_shipped_addons.py"
+    spec = importlib.util.spec_from_file_location("gen_shipped_addons", script)
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    assert gen.OUT.read_text(encoding="utf-8") == gen.render(), (
+        "workspace/src/orch/shipped_addons.json is out of date: run python3 scripts/gen_shipped_addons.py"
+    )

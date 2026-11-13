@@ -90,6 +90,16 @@ def _no_tool_version_probe(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_bundled_catalogue(request, monkeypatch):
+    """The bundled manifests of the shipped add-ons (shipped_addons.json) would list six not-installed
+    add-ons in every `addon list` of a test without a source folder. Off by default; the catalogue tests
+    (marked real_bundle) use the real bundle."""
+    if request.node.get_closest_marker("real_bundle"):
+        return
+    monkeypatch.setattr(addons, "bundled_manifests", lambda: {})
+
+
+@pytest.fixture(autouse=True)
 def _strict_orch_home(monkeypatch, tmp_path_factory):
     """Every test: a faked real home with its own ORCH_HOME (a test that never asked for `proj` used to write
     the real ~/.orch-tool/addons.json: ORCH_HOME unset = real folder); untrusted ORCH_HOME = error."""

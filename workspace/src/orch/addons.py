@@ -1076,12 +1076,29 @@ def core_manifests() -> dict[str, dict]:
     return {n: parse_manifest(base / n / MANIFEST, core=True) for n in CORE_ADDONS}
 
 
+def bundled_manifests() -> dict[str, dict]:
+    """The manifests of the shipped add-ons as they were when this orch was built (shipped_addons.json, from
+    scripts/gen_shipped_addons.py). Read from the package: no source folder and no network needed."""
+    try:
+        data = json.loads(
+            (Path(__file__).resolve().parent / "shipped_addons.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return {}
+    return (
+        {n: m for n, m in data.items() if n in SHIPPED_ADDONS and isinstance(m, dict)}
+        if isinstance(data, dict)
+        else {}
+    )
+
+
 def shipped_available(fetch: bool = True) -> dict[str, dict]:
     """Manifests of the shipped add-ons that are not installed yet.
-    From the local source folder when there is one; else (fetch=True) the manifest is previewed from the
-    repo (one small download each), and with fetch=False the answer is empty. An add-on whose manifest cannot
-    be read is left out."""
+    From the local source folder when there is one; else with fetch=True the manifest is previewed from the
+    repo (one small download each), and with fetch=False it comes from the bundle inside the package (never
+    the network). An add-on whose manifest cannot be read is left out."""
     have = set(discover())
+    bundle = {} if _is_local(repo()) or fetch else bundled_manifests()
     local = _is_local(repo())
     out = {}
     for name in SHIPPED_ADDONS:
@@ -1092,6 +1109,8 @@ def shipped_available(fetch: bool = True) -> dict[str, dict]:
                 out[name] = folder_manifest(Path(repo()) / "workspace-addons" / name)
             elif fetch:
                 out[name] = preview_builtin(name)
+            elif name in bundle:
+                out[name] = bundle[name]
         except Refused:
             continue
     return out
@@ -1525,7 +1544,7 @@ def _row(name: str, m: dict, source: str, installed: bool, active: bool, running
         "page": m.get("page"),
         "running": running,
         "ticket_links": [dict(x) for x in m["ticket_links"]],
-        "ticket_fields": fields.section(m),
+        "ticket_fields": m["ticket_fields_section"] if "ticket_fields_section" in m else fields.section(m),
         "acts": sorted(m["acts"]),
     }
 
@@ -1533,8 +1552,8 @@ def _row(name: str, m: dict, source: str, installed: bool, active: bool, running
 def listing(root: Path) -> list[dict]:
     """`orch addon list --json`: the one source the dashboard uses. Installed add-ons first (sorted), then the
     shipped add-ons that are not installed yet (`installed: false`, never active or running), sorted by name.
-    Never touches the network: an available add-on whose manifest is not readable from the local source folder
-    is left out of the list (it can still be added by name)."""
+    Never touches the network: the not-installed ones come from the local source folder, else from the bundle
+    in the package; one that is in neither is left out of the list (it can still be added by name)."""
     act = active(root)
     reg = {e["name"]: e for e in registry()}
     up = _running_here(root)
