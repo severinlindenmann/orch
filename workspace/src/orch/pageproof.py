@@ -38,7 +38,7 @@ _SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 SERVER_OPS = {"insights": frozenset({"insights.settings", "record.delete_detail"})}
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
 EXPIRED_MSG = "This request expired. Run the update again."
-RESTARTED_MSG = "orch restarted after the update. Reload this page to keep working."
+RESTARTED_MSG = "orch restarted. Reload this page to keep working."
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 
 

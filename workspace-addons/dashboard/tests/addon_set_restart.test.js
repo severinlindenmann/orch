@@ -69,3 +69,10 @@ test('running, no service, or a shared copy: the page itself', () => {
   assert.equal(stoppedPage([]), null);
   assert.equal(stoppedPage([{addon: 'factory', running: false}], true), null);
 });
+
+test('the restart banner: plain wording, above any open dialog, Reload asks for a fresh window when needed', () => {
+  const js = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/session.js'), 'utf8');
+  assert.match(js, /indexOf\("orch restarted"\) !== 0/);
+  assert.match(js, /querySelectorAll\("dialog\[open\]"\)/);
+  assert.match(js, /realFetch\("\/session\/reopen"/);
+});

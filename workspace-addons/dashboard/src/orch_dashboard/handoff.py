@@ -54,6 +54,8 @@ def confirm(
             return 503, "The update could not be started. Please try again from the terminal."
         _record_update(root, pid)
         return 202, "Update started. This page reconnects when it is done."
+    if item["op"] == "addon.add_local" and session is not None:  # it restarts this server like an update
+        humanproof.write_resume_cookie(root, session.server, session.cookie, session.secret)
     run = run_proof or run_with_proof
     try:
         r = run(
