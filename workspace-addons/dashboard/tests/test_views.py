@@ -491,8 +491,9 @@ def test_v1_home_and_ticket_controls():
     home = js[js.index("function changeUnavailable") : js.index("// Chat (former General)")]
     tickets = js[js.index("function filterTickets") : js.index("function ticketNotFound")]
     assert "row.answer.recommended" in home and "' · Suggested'" in home
+    assert "className:'row answer-options'" in home  # the question card carries answer buttons
     assert (
-        "act('answer', {ticket:row.ticket, question:row.answer.question, digest:row.answer.digest, answer:option})"
+        "act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:option})"
         in home
     )
     assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home

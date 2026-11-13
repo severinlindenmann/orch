@@ -83,6 +83,32 @@ final class VisualFixTests: XCTestCase {
         XCTAssertEqual(ChatsRowRules.preview("Allow access?"), "Allow access?")
     }
 
+    /// 12 Nov phone UX batch 1: pinned cap, one-line titles, one filter rule, one Chat-card line, no status avatar colours.
+    func testChatsListPhoneUXRules() {
+        let qs = (0..<5).map { question("q\($0)", from: "w\($0)", ticket: nil, at: "2026-11-12T0\($0):00:00Z") }
+        XCTAssertEqual(ChatsRowRules.pinned(qs).map(\.id), ["q0", "q1", "q2"])
+        XCTAssertEqual(ChatsRowRules.pinned(Array(qs.prefix(2))).count, 2)
+        XCTAssertEqual(ChatsRowRules.titleLines(false), 1)
+        XCTAssertEqual(ChatsRowRules.titleLines(true), 2)
+        XCTAssertTrue(ChatsRowRules.matches("All", unread: 0, needsYou: false))
+        XCTAssertTrue(ChatsRowRules.matches("Unread", unread: 2, needsYou: false))
+        XCTAssertFalse(ChatsRowRules.matches("Unread", unread: 0, needsYou: true))
+        XCTAssertTrue(ChatsRowRules.matches("Needs your OK", unread: 0, needsYou: true))
+        XCTAssertFalse(ChatsRowRules.matches("Needs your OK", unread: 3, needsYou: false))
+        XCTAssertEqual(ChatsRowRules.preview("Hi", working: true), "Working…")
+        XCTAssertEqual(ChatsRowRules.preview("Hi", starting: true, working: true), "Getting started…")
+        XCTAssertEqual(WorkspaceView.helperLine(name: "Finance", anyWorking: true, lastLine: "Hi"), "Finance is working…")
+        XCTAssertEqual(WorkspaceView.helperLine(name: "Finance", anyWorking: false, lastLine: " Hi "), "Hi")
+        XCTAssertEqual(WorkspaceView.helperLine(name: "Finance", anyWorking: false, lastLine: ""), "Talk to Finance")
+        XCTAssertEqual(ChatsRowRules.preview("New reply", working: true, unread: 1), "New reply")
+        XCTAssertEqual(WorkspaceView.helperLine(name: "Finance", anyWorking: true, lastLine: "New reply", unread: 2), "New reply")
+        XCTAssertEqual(WorkspaceView.activeOrder, [.waitingOnYou, .review, .working, .paused, .backlog])
+        for token in LookData.colors.map(\.id) {
+            XCTAssertFalse(["amber", "teal", "green", "lime"].contains(WorkspaceBadge.identityColor(token)), token)
+        }
+        XCTAssertEqual(WorkspaceBadge.identityColor("pink"), "pink")
+    }
+
     func testWorkspaceStatusCombinesConnectionAndPresence() {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Europe/Zurich")!
         let now = ISO8601DateFormatter().date(from: "2026-11-12T14:00:00Z")!

@@ -79,6 +79,19 @@
     if (t.started || run.run) return {key: 'paused', pill: 'Paused', headline: 'Paused', active: false};
     return {key: 'stopped', pill: null, headline: 'Work so far', active: false};
   }
-  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, pickerLine, fileIcon, ago, agentColor, holdText, sessionState};
+  /* The ticket list row's small line: the actual next step only when it says more than the action chip. */
+  function nextStepText(t, action) {
+    const next = String((t && t.next_step) || '').trim();
+    return next && next.toLowerCase() !== String(action || '').toLowerCase() ? next : '';
+  }
+  /* A list group shows the first n rows; the rest wait behind "Show all". */
+  function limitGroup(rows, n = 5) {
+    return {shown: rows.slice(0, n), more: Math.max(0, rows.length - n)};
+  }
+  /* Results counts tasks, the same unit as "1 of 1 tasks": the finished tasks that have a result. */
+  function resultCount(checklist) {
+    return (checklist || []).filter(c => c.done && !c.wont_do && (c.evidence || []).length).length;
+  }
+  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);

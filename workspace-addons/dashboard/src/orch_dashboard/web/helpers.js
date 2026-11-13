@@ -39,12 +39,12 @@
     return list.filter(e => !drop.has(e));
   }
 
-  /* The sidebar footer: the relay add-on's saved connection (the same fact Settings shows as "Connected"). */
+  /* The sidebar footer: empty unless something is wrong, i.e. the relay add-on's saved connection is lost
+     (the same fact Settings shows as "Connected"). A shared copy says so. */
   function footerState(state, snapshot) {
     if (snapshot) return 'Shared copy';
     const relay = ((state && state.settings && state.settings.addons) || []).find(a => a && a.name === 'relay' && a.active && a.detail);
-    if (!relay) return 'Local workspace';
-    return relay.detail.connected ? 'Connected' : 'Not connected yet';
+    return relay && !relay.detail.connected ? 'Not connected' : '';
   }
 
   function historyLine(entry, checklist) {

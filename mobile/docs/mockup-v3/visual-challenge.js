@@ -11,7 +11,10 @@
   const chart = () => '<svg class="vc-chart" viewBox="0 0 360 150" role="img" aria-label="Q3 chart: four revenue bars"><rect width="360" height="150" rx="10" fill="#15181d"/><path fill="#204e46" d="M30 100h60v40H30zM110 70h60v70h-60zM190 80h60v60h-60z"/><path fill="#2fc6a3" d="M270 15h60v125h-60z"/></svg>';
   const row = done => go(done?'group-done':'group-open',`${badges()}<span class="fill"><strong>Pay car tax ${done?'2026':'2027'}</strong><span class="preview">${done?'finished Tue 10 Nov':'3 helpers · started 14:30'}</span></span>${icon('chevron')}`,`vc-group-row ${done?'vc-muted':''}`);
   const oldRows = listRows;
-  listRows = function(){return oldRows() + ((!query || /group|car|fin|reports/i.test(query)) && filter==='All'?`<section data-key="vc-groups" class="vc-groups"><h3>Groups</h3>${row(false)}${go('done-groups',`<span>Earlier</span>${icon('chevron')}`,'vc-done-link')}</section>`:'');};
+  /* The open demo group: read, no open question. Same filter rule as workspace rows (unread / needs you). */
+  const groupUnread = 0, groupNeedsYou = false, finishedGroups = 1;
+  const groupMatches = () => filter==='All' || filter==='Unread'&&groupUnread>0 || filter==='Needs your OK'&&groupNeedsYou;
+  listRows = function(){return oldRows() + ((!query || /group|car|fin|reports/i.test(query)) && groupMatches()?`<section data-key="vc-groups" class="vc-groups"><h3>Groups</h3>${row(false)}</section>`:'') + (!query && filter==='All' && finishedGroups>0 ? go('done-groups',`<span class="fill">Finished groups</span><span class="vc-count">${finishedGroups}</span>${icon('chevron')}`,'vc-done-link vc-finished-row') : '');};
   const oldWorkspaceRow = workspaceRow;
   workspaceRow = function(c){return oldWorkspaceRow(c).replace('Say hello to '+esc(names[c]),'No messages yet');};
   function header(done=false, ticket=false){return `<header class="vc-header">${btn('navigate','Back','back','data-value="back"')}${ticket?'':badges()}<div class="fill"><h2>${ticket?(screen==='ticket-no-question'?'Finished work':'Test HTML page about fish'):'Pay car tax '+(done?'2026':'2027')}</h2>${ticket?'<small>Pilatus · 4 Nov</small>':actionButton('vc-source','From ticket ›','','vc-source')}</div>${done?'':btn('vc-mute',muted?'Unmute notifications':'Mute notifications','bell',`aria-pressed="${muted}"`)}${btn(ticket?'vc-ticket-info':'vc-details','Info','info')}</header>`;}
