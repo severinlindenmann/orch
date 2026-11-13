@@ -109,10 +109,9 @@ final class RealRelayE2ETests: XCTestCase {
     // MARK: 0 pair
     func test00PairWithTheInvitationLink() {
         let app = launch(reset: true)
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        must(app, app.buttons["Paste invitation link"], "paste button", timeout: 20)
+        must(app, app.buttons["invite-paste"], "paste button", timeout: 20)
         shot("00-onboarding")
-        app.buttons["Paste invitation link"].tap()
+        app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         must(app, f, "invite field"); f.tap(); f.typeText(info["link"] as? String ?? "")
         app.buttons["invite-continue"].tap()
@@ -393,12 +392,12 @@ final class RealRelayE2ETests: XCTestCase {
         el(app, "settings-button").tap()
         must(app, el(app, "settings-ws-\(ws)"), "workspace row in Settings"); shot("100-settings")
         el(app, "settings-ws-\(ws)").tap()
-        must(app, el(app, "mute-Always"), "mute options"); el(app, "mute-Always").tap(); sleep(2); shot("101-muted")
-        el(app, "mute-Off").tap(); sleep(2)
+        must(app, el(app, "workspace-notifications"), "notifications row"); el(app, "workspace-notifications").tap()
+        must(app, app.buttons["Until I turn it on"], "mute options"); app.buttons["Until I turn it on"].tap(); sleep(2); shot("101-muted")
+        el(app, "workspace-notifications").tap(); must(app, app.buttons["Turn on"], "turn on"); app.buttons["Turn on"].tap(); sleep(2)
         back(app)
         el(app, "add-workspace").tap()
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        must(app, app.buttons["Paste invitation link"], "Paste invitation link"); app.buttons["Paste invitation link"].tap()
+        must(app, app.buttons["invite-paste"], "invite-paste"); app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         must(app, f, "invite field"); f.tap(); f.typeText(link)
         app.buttons["invite-continue"].tap()
