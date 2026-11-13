@@ -364,7 +364,7 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     src = webjs.all_js()
     tree = src[src.index("function treeBranch") : src.index("let ticketView")]
-    assert tree.count("ticketAttentionChip(t, section)") == 1  # one chip, told which section the row sits in
+    assert tree.count("statusBadge(t)") == 1  # one status badge per table row
     assert "ticketAttentionChip(t)" not in tree
     chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
     assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
