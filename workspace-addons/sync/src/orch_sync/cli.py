@@ -390,7 +390,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="orch sync")
     ap.add_argument("--dir", default=os.environ.get("ORCH_ROOT", "."))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("set", "status", "now", "start", "stop", "needs", "run"):
+    for name in ("set", "status", "now", "start", "stop", "needs", "run", "view"):
         p = sub.add_parser(name)
         p.add_argument("--json", action="store_true")
         if name == "set":
@@ -529,6 +529,11 @@ def main(argv=None):
             from .needs import rows
 
             result = rows(root)
+        elif args.cmd == "view":
+            from .view import build
+
+            print(json.dumps(build(root, settings)))
+            return 0
         elif args.cmd == "deleted":
             result = deleted(root, args.ticket, args.keep, args)
         elif args.cmd == "start":

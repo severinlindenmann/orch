@@ -390,3 +390,17 @@ def test_merge_document_preserves_local_history_and_demotes_remote(root):
     assert {**remote_line, "by": "agent:sync", "text": "(synced, not verified here) Approved"} in out[
         "history"
     ]
+
+
+def test_a_ticket_with_an_orch_history_line_is_synced():
+    """orch writes system notes ("The agent stopped ...") with by: "orch"; sync must not skip such a ticket."""
+    note = {"at": NOW, "by": "orch", "text": "The agent stopped before the work was finished."}
+    doc = step.document(TICKET, json.dumps({**ticket(), "history": [note]}).encode())
+    assert doc["history"][0]["by"] == "orch"
+
+
+def test_other_authors_still_fail_the_ticket_schema():
+    for bad in ("Orch", "system", "someone", "orch:x"):
+        note = {"at": NOW, "by": bad, "text": "x"}
+        with pytest.raises(Exception, match="Ticket has a problem"):
+            step.document(TICKET, json.dumps({**ticket(), "history": [note]}).encode())
