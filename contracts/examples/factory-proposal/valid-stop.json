@@ -1,0 +1,5 @@
+{"schema": "orch.factory.proposal/1", "kind": "stop", "stage": "ship",
+ "items": [{"title": "Booking page, final version", "tag": "cant-undo", "before": "s1/before.png", "after": "s1/after.png"},
+           {"title": "Button text 'Find a time'", "tag": "routine", "recommend": "Ship it"}],
+ "checked": ["Keyboard", "Phone layout 390 px"], "not_checked": ["Safari", "Screen reader"],
+ "changed_during_run": ["Warmer button copy (+4 min)"]}

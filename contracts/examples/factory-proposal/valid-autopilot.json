@@ -1,0 +1,5 @@
+{"schema": "orch.factory.proposal/1", "kind": "autopilot", "title": "Keep improving how we work",
+ "goal": "Faster test runs and a tidy board.", "may_decide": ["routine", "taste"],
+ "examples": ["Split a slow test file", "Archive finished tickets older than 90 days"],
+ "limits": {"days": 7, "max_orders": 2, "active_min_per_day": 60, "api_usd_per_day": 10},
+ "done_means": ["One daily report lists every decision with its reason."], "report_at": "18:00"}
