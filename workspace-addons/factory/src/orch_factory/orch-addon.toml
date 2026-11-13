@@ -11,6 +11,10 @@ needs = true
 background = true                          # `orch factory start|stop|status`: the watcher that wakes the manager
 runs_agents = true                         # it starts the manager run (orch run start) when you answer
 
+[page]
+path = "/"
+label = "Open Factory"
+
 [dashboard]
 label = "Factory"
 icon = "box"

@@ -63,8 +63,19 @@ def running_pid(root: Path, clean: bool = True) -> int | None:
     return pid
 
 
-def announce(root: Path) -> str | None:
-    """In the background process: record who we are (only when started by `start`, which passed a nonce)."""
+def page_url(root: Path, clean: bool = True) -> str | None:
+    """The page address of the verified watcher (http://127.0.0.1:<port>), or None (no watcher, or no page)."""
+    d = _dir(root) if clean else Path(root) / ".orch" / "run" / "factory"
+    rec = runfiles.read_json(d / RECORD)
+    port = rec.get("port") if rec else None
+    if _verified(root, rec) is None or type(port) is not int or not 0 < port < 65536:
+        return None
+    return f"http://127.0.0.1:{port}"
+
+
+def announce(root: Path, port: int | None = None) -> str | None:
+    """In the background process: record who we are (only when started by `start`, which passed a nonce) and
+    the port of its page server."""
     nonce = os.environ.get(NONCE_ENV, "")
     if not re.fullmatch(r"[0-9a-f]{32}", nonce):
         return None
@@ -73,7 +84,10 @@ def announce(root: Path) -> str | None:
     other = _verified(root, runfiles.read_json(d / RECORD))
     if other is not None and other != me:
         raise RuntimeError("A Factory watcher is already running for this workspace.")
-    runfiles.write_json(d / RECORD, {"pid": me, "nonce": nonce, "started": runfiles.proc_start(me) or ""})
+    rec = {"pid": me, "nonce": nonce, "started": runfiles.proc_start(me) or ""}
+    if port:
+        rec["port"] = port
+    runfiles.write_json(d / RECORD, rec)
     return nonce
 
 

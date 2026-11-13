@@ -85,6 +85,16 @@ def view(root):
             "more": max(0, len(stops) - 50),
         }
     )
+    if service.page_url(root, clean=False):  # the link resolves against the checked [page] url
+        blocks.append(
+            {
+                "type": "list",
+                "title": "Factory page",
+                "items": [
+                    {"title": "Open Factory", "subtitle": "Orders, stops and autopilot", "link": "addon:"}
+                ],
+            }
+        )
     out = {"schema": "orch.addon-view/1", "generated_at": now(), "blocks": blocks}
     live = [g for g in autopilot.grants(store, tickets) if clock() < g["until"]]
     if live:

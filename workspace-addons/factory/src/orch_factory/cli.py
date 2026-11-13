@@ -7,7 +7,7 @@ import signal
 import sys
 from pathlib import Path
 
-from . import autopilot, commands, flow, service, watch
+from . import autopilot, commands, flow, server, service, watch
 from .store import Refused, field_list, read_bytes, schema_of
 from .view import view as render_view
 
@@ -15,6 +15,11 @@ from .view import view as render_view
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         raise Refused(message, "invalid")
+
+
+def _url(root):
+    url = service.page_url(root)
+    return {"url": url} if url else {}
 
 
 def background(args, root):
@@ -25,9 +30,17 @@ def background(args, root):
             return 0
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         print(f"orch factory watcher for {root.name} started", flush=True)
+        page = None
         try:
-            nonce = service.announce(root)
+            page = server.make_server(root)
+            server.serve_in_thread(page)
+        except OSError as error:  # no page, but the watcher still does its work
+            print(f"page server not started: {error}", file=sys.stderr, flush=True)
+        try:
+            nonce = service.announce(root, page.server_address[1] if page else None)
         except RuntimeError as error:
+            if page:
+                page.server_close()
             raise Refused(str(error), "not_available") from None
         try:
             watch.loop(root)
@@ -38,7 +51,8 @@ def background(args, root):
         return 0
     try:
         if args.cmd == "start":
-            print(json.dumps({"running": True, "pid": service.start(root)}))
+            pid = service.start(root)
+            print(json.dumps({"running": True, "pid": pid, **_url(root)}))
         elif args.cmd == "stop":
             res = service.stop(root)
             out = {"stopped": res == "stopped"}
@@ -50,7 +64,7 @@ def background(args, root):
             print(json.dumps(out))
         else:
             pid = service.running_pid(root)
-            print(json.dumps({"running": bool(pid), **({"pid": pid} if pid else {})}))
+            print(json.dumps({"running": bool(pid), **({"pid": pid, **_url(root)} if pid else {})}))
             return 0 if pid else 1
     except RuntimeError as error:
         raise Refused(str(error), "not_available") from None
