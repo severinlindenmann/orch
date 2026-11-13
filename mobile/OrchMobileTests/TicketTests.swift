@@ -117,6 +117,31 @@ final class TicketTests: XCTestCase {
         XCTAssertEqual(t.map(\.status), t.map(\.status).sorted(), "Needs your OK first, Done last")
     }
 
+    func testQuestionAnsweredElsewhereLeavesNeedsYouWhenTicketMovesOn() {
+        let q = MockRelayTestsFixtures.question
+        func upd(_ status: String, at: String) -> TicketUpdate {
+            TicketUpdate(id: "u_" + at, workspace: q.message.from, workspaceName: "W", ticket: q.message.ticket!, kind: "note", title: "Rename",
+                         text: "", replyTo: nil, at: at, ticketView: TicketSnapshot(title: "Rename", status: status, light: true))
+        }
+        let later = "2999-01-01T00:00:00Z", earlier = "2000-01-01T00:00:00Z"
+        // still waiting: the card stays open and the row is Needs your OK
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [upd("waiting", at: later)], answers: [:]).isEmpty)
+        // an older non-waiting snapshot does not close a newer question
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [upd("done", at: earlier)], answers: [:]).isEmpty)
+        let done = upd("done", at: later)
+        var open = TicketBuilder.build(updates: [done], questions: [q], answers: [:])
+        XCTAssertEqual(open.map(\.status), [.needsYou], "without the closing rule the open card wins")
+        let closed = QuestionClosing.closedByTicket(questions: [q], updates: [done], answers: [:])
+        XCTAssertEqual(closed, [q.id])
+        let answers = Dictionary(uniqueKeysWithValues: closed.map { ($0, "") })
+        open = TicketBuilder.build(updates: [done], questions: [q], answers: answers)
+        XCTAssertEqual(open.map(\.status), [.done])
+        XCTAssertEqual(ChatsRowRules.openQuestions([q], answers: answers).count, 0, "the Needs your OK count drops")
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [upd("blocked", at: later)], answers: [:]).isEmpty, "unknown status keeps it open")
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [done], answers: [:], pending: [q.id]).isEmpty, "a pending phone answer is left alone")
+        XCTAssertEqual(QuestionClosing.closedByTicket(questions: [q], updates: [upd("review", at: later)], answers: [:]), [q.id])
+    }
+
     func testOpenQuestionWinsOverTheLastUpdateAndAnsweredGoesBack() {
         let q = MockRelayTestsFixtures.question
         let u = TicketUpdate(id: "m_u1", workspace: q.message.from, workspaceName: "W", ticket: q.message.ticket!, kind: "working", title: "Rename", text: "Working", replyTo: nil, at: "2026-11-05T10:00:00Z")

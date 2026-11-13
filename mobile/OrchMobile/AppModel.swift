@@ -318,6 +318,9 @@ final class AppModel {
             if questions != newQuestions { questions = newQuestions }
             if updates != newUpdates { updates = newUpdates }
             if let st = await st, settings != st { settings = st }
+            for qid in QuestionClosing.closedByTicket(questions: questions, updates: updates, answers: answers, pending: Set(pendingAnswers.keys)) {
+                answers[qid] = ""; answeredElsewhere.insert(qid)
+            }
             await reloadMessages()
             for item in questions where questionLog[item.id] != item { questionLog[item.id] = item }
             if message != nil { message = nil }
@@ -448,7 +451,12 @@ final class AppModel {
 
     /// Only the "Got it" lines, for the sent screen.
     func refreshUpdates() async {
-        if let u = try? await client.updates() { updates = u }
+        if let u = try? await client.updates() {
+            updates = u
+            for qid in QuestionClosing.closedByTicket(questions: questions, updates: u, answers: answers, pending: Set(pendingAnswers.keys)) {
+                answers[qid] = ""; answeredElsewhere.insert(qid)
+            }
+        }
     }
 
     /// Today's chat composer: plain text. `ticket` nil = a new topic. Offline it waits in the outbox.
