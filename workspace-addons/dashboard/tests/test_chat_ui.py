@@ -130,15 +130,13 @@ def test_open_agent_proposal_and_moved_conversation():
         assert text in JS
 
 
-def test_open_helper_is_a_menu_item_on_a_narrow_screen():
+def test_open_helper_lives_in_the_topbar_only():
     app = (webjs.WEB / "app.js").read_text(encoding="utf-8")
-    css = (webjs.WEB / "style.css").read_text(encoding="utf-8")
-    assert "'data-nav':'open-agent'}, iconEl('spark'), 'Ask the helper')" in app
-    assert "if (helper) chatOpenAgent();" in app  # the Menu closes, then the helper opens
-    # hidden in the wide sidebar (the header has the button), shown in the Menu where the header has none
-    base = css.index(".nav-item.nav-helper{display:none;")
-    assert css.index("@media(max-width:720px){.nav-item.nav-helper{display:flex}}") > base
-    assert ".topbar-actions>#open-agent{display:none}" in css
+    index = (webjs.WEB / "index.html").read_text(encoding="utf-8")
+    # the shell moved "Ask the helper" out of the sidebar nav; the topbar button is the one entry
+    assert "nav-helper" not in app and "'data-nav':'open-agent'" not in app
+    assert "getElementById('open-agent').addEventListener('click', () => chatOpenAgent())" in app
+    assert 'id="open-agent"' in index
 
 
 def test_open_agent_button_sits_directly_left_of_new_ticket():

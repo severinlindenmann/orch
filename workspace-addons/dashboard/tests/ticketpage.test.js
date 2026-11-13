@@ -66,7 +66,7 @@ test('classic script loads before state and snapshot detail stays read-only insi
     walk(tree);
   }
   const waiting = ctx.detail({id:'t_test', title:'Test', status:'done', bring_back:{state:'waiting', reason:'Your files changed', tip:'a'.repeat(40), control_paths:2}});
-  assert.match(JSON.stringify(waiting), /Done · changes waiting/);
+  assert.match(JSON.stringify(waiting), /Changes to add/);
   assert.match(JSON.stringify(waiting), /Your files changed/);
   assert.doesNotMatch(JSON.stringify(waiting), /Review and bring back/); // snapshots cannot approve
 });
@@ -84,7 +84,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
   const row = c.ticketBringBackRow({id:'t_abc123', bring_back:b});
   assert.doesNotMatch(JSON.stringify(row), /Ask the helper to update/);
-  const button = nodes(row).find(n => n.tag === 'button' && n.children.includes('Review and bring back'));
+  const button = nodes(row).find(n => n.tag === 'button' && n.children.includes('Add to my files'));
   button.onclick();
   assert.equal(dialogs.length, 1);
   const {d, actions} = dialogs[0];
@@ -97,7 +97,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   assert.deepEqual(nodes(list).filter(n => n.tag === 'code').map(n => n.children[0]), b.paths);
   assert.match(text, /and 2 more/);
   assert.equal(calls.length, 0, 'opening the dialog sends nothing');
-  await nodes(actions).find(n => n.tag === 'button' && n.children.includes('Bring back')).onclick();
+  await nodes(actions).find(n => n.tag === 'button' && n.children.includes('Add to my files')).onclick();
   assert.equal(JSON.stringify(calls), JSON.stringify([['copies.approve', {ticket:'t_abc123', tip:b.tip, control_paths:7, paths_hash:'abcdef12'}]]));
   assert.equal(closed, d);
   assert.deepEqual(toasts, ['Review submitted']);
@@ -105,7 +105,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   const update = c.ticketBringBackRow({id:'t_abc123', bring_back:{state:'waiting', reason:'x', reason_code:'update'}});
   await nodes(update).find(n => n.tag === 'button' && n.children.includes('Ask the helper to update')).onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['copies.ask-update', {ticket:'t_abc123'}]));
-  assert.equal(nodes(update).filter(n => n.tag === 'button' && n.children.includes('Review and bring back')).length, 0);
+  assert.equal(nodes(update).filter(n => n.tag === 'button' && n.children.includes('Add to my files')).length, 0);
   c.snapshot = true;
   assert.equal(nodes(c.ticketBringBackRow({id:'t_abc123', bring_back:b})).filter(n => n.tag === 'button').length, 0);
 });

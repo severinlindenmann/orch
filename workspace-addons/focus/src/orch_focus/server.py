@@ -937,15 +937,19 @@ class _Server(ThreadingHTTPServer):
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
     # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
     # test harness passes a fake path. None = no orch.
-    session = None
-    if orch_bin == actions.SELF:
+    tracker = Tracker(root, orch_bin)
+    handler = partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=None)
+    srv = _Server(("127.0.0.1", port), handler)
+    if (
+        orch_bin == actions.SELF
+    ):  # after the bind: a busy port must not spend the resume file (see the dashboard)
         from orch.pageproof import PageSession
 
-        session = PageSession(root, "focus")
-    tracker = Tracker(root, orch_bin)
-    srv = _Server(
-        ("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=session)
-    )
+        try:
+            handler.keywords["session"] = PageSession(root, "focus")
+        except BaseException:
+            srv.server_close()
+            raise
     srv.revisions = Revisions(root)
     srv.tracker = tracker
     srv.ticker_stop = stop = threading.Event()

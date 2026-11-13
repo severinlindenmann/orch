@@ -20,7 +20,7 @@ test('a plain refresh adds no motion and reduced motion switches everything off'
 test('system font only and no thick warning bars in the kit', () => {
   const tokens = readFileSync(new URL('../static/tokens.css', import.meta.url), 'utf8');
   assert.ok(!/Geist/.test(tokens + comps));
-  assert.match(tokens, /--fs-body: 13px;/);
+  assert.match(tokens, /--fs-body: 14px;/);
   assert.ok(!/border-left:[3-9]px solid var\(--warning\)[^}]*\}/.test(comps.replace(/\.qcard\{[^}]*\}/, '')));
 });
 

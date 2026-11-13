@@ -56,7 +56,7 @@
 .settings .copies-setup-view{width:100%;gap:8px;align-items:center;flex-wrap:nowrap}
 .settings .copies-setup{width:100%;max-width:420px}
 .settings .copies-max{flex:none;width:5.5rem}
-.settings .copies-max,.settings .copies-setup{font-size:13px;min-height:36px;padding:5px 10px}
+.settings .copies-max,.settings .copies-setup{font-size:14px;min-height:36px;padding:5px 10px}
 .settings .folder-details p{margin-top:4px;overflow-wrap:anywhere}
 .settings .folder-path{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 /* Review step: the shown review before a change (the .cmd-preview look of the Add your own helper review). */
@@ -71,14 +71,14 @@
 .settings .sync-head{padding:14px 16px 0;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-head h3{font-weight:600;flex:1;min-width:120px;margin:0}
 .settings .sync-status-line{display:flex;gap:4px 12px;align-items:center;flex-wrap:wrap}
-.settings .sync-status{display:inline-flex;gap:8px;align-items:center;font-size:13px;color:var(--text-muted)}
+.settings .sync-status{display:inline-flex;gap:8px;align-items:center;font-size:14px;color:var(--text-muted)}
 .settings .sync-status.you,.settings .sync-status.you a{color:var(--warning)}
 .settings .sync-status a{text-underline-offset:2px}
 .settings .sync-status .dot{width:8px;height:8px;border-radius:50%;background:var(--text-faint);flex:none}
 .settings .sync-status .dot.ok{background:var(--success)}
 .settings .sync-status .dot.live{background:var(--brand)}
 .settings .sync-status .dot.you{background:var(--warning)}
-.settings .sync-skipped{background:none;border:0;padding:0;font-size:13px;color:var(--text-muted);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;cursor:pointer}
+.settings .sync-skipped{background:none;border:0;padding:0;font-size:14px;color:var(--text-muted);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;cursor:pointer}
 .settings .sync-where{border:0;margin:0;padding:0;min-width:0}
 .settings .sync-where legend{padding:10px 16px 0}
 .settings .sync-card .radio-row{cursor:pointer;justify-content:flex-start;gap:10px;padding:14px 16px}
@@ -94,7 +94,7 @@
 .settings .check-res .ic-wrap svg{width:14px;height:14px}
 .settings .sync-every{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-chips{display:flex;gap:6px;flex-wrap:wrap}
-.settings .sync-chip{min-height:44px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:13px;cursor:pointer}
+.settings .sync-chip{min-height:44px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:none;color:var(--text-muted);font-size:14px;cursor:pointer}
 .settings .sync-chip[aria-pressed=true]{border-color:var(--brand);background:var(--brand-soft);color:var(--text)}
 .settings .sync-act{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-act .btn.ghost{background:none;border-color:var(--border-strong);color:var(--text)}

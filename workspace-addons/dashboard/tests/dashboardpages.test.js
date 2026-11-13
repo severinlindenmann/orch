@@ -47,7 +47,7 @@ test('list groups have owner order and every ticket belongs to exactly one group
   const items = ['done','review','ready','open','active','waiting'].map(status => ({id:status,status}));
   items.push({id:'question',status:'active',questions:[{text:'Choose?'}]});
   const groups = context(items).ticketGroups(items);
-  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','Not started','Ready for review','Done']);
+  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','To do','Check','Done']);
   assert.deepEqual(Array.from(groups, g => Array.from(g.tickets, t => t.id)), [['waiting','question'],['active'],['ready','open'],['review'],['done']]);
 });
 test('home renders one need card per ticket with question count and yellow chip', () => {
@@ -80,7 +80,7 @@ test('home: the badge and Menu count (needsToday) equal the Needs you heading an
   assert.equal(c.needsToday().count, 2);
   assert.match(text, /Needs you \(2\)/);
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
-  assert.match(app, /const needCount = needsToday\(\)\.count/); assert.doesNotMatch(app, /needsList\(\)\.length/);
+  assert.match(app, /const needCount = needsYouTotal\(\)/); assert.doesNotMatch(app, /needsList\(\)\.length/);
 });
 test('home: Needs you counts a failed start on the page', () => {
   const items = [{id:'a', title:'T a', status:'active'}, {id:'f', title:'T f', status:'waiting', waiting_on:{start:true, ref:'x'}}];
