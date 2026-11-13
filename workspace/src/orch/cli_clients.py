@@ -755,7 +755,7 @@ def _view_hint(m: dict, ticket: str | None, update: str | None) -> None:
     if not update:
         if ticket:
             print(
-                "Sent as a plain text, without the ticket page. Add --update result (or note, question, "
+                "Sent as a plain text, without the ticket page. Add --update result (or stopped, question, "
                 "failure) so the phone shows the ticket page.",
                 file=sys.stderr,
             )

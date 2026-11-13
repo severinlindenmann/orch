@@ -16,7 +16,7 @@ const clean = value => { const text = cleanIds(value); return text.replace(TAG_H
 const hiddenTags = value => { const text = cleanIds(value), head = text.match(TAG_HEAD), tail = text.replace(TAG_HEAD, '').match(TAG_TAIL); return [head && head[0], tail && tail[0]].filter(Boolean).map(x => x.trim().replace(/\]\s*\[/g, '] [')).join(' '); };
 function titleTag(t, all = null) {
   const base = clean(t.title).toLowerCase(), tag = hiddenTags(t.title);
-  if (!tag || !base) return null;
+  if (!tag || !base || clean(t.title) === cleanIds(t.title)) return null;
   const same = (all || (typeof tickets === 'function' ? tickets() : [])).filter(o => o.id !== t.id && clean(o.title).toLowerCase() === base);
   return same.length ? h('span', {className:'meta title-tag'}, ' ' + tag) : null;
 }
