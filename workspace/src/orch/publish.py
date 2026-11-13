@@ -351,7 +351,7 @@ def view(root: Path) -> dict:
     return {
         "schema": "orch.addon-view/1",
         "generated_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "notice": "To copy, extend or delete a link, ask your agent.",
+        "notice": "Copy, extend or stop a link here.",
         "notice_tone": "neutral",
         "blocks": blocks,
     }

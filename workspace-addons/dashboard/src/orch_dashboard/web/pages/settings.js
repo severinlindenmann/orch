@@ -653,18 +653,19 @@ function repeatsDialog(only = null, addonName = null) {
   save.disabled = !ticket.options.length;
   actions.append(save); d.append(fields, actions); window.orch.open(d);
 }
-let sharedLinks = null;
+let sharedLinks = null, sharedLinksDown = false;
 async function loadSharedLinks() {
   try {
     const res = await fetch('/api/links', {cache:'no-store'});
-    if (res.status !== 200) { sharedLinks = null; return; }
+    if (res.status !== 200) { sharedLinks = null; sharedLinksDown = false; return; }
     const data = await res.json();
     sharedLinks = Array.isArray(data.links) ? data.links : null;
-  } catch (_) { sharedLinks = null; }
+    sharedLinksDown = data.unreachable === true;
+  } catch (_) { sharedLinks = null; sharedLinksDown = false; }
 }
 function sharedLinksCard() {
   return h('section', {className:'card pad stack addon-native', 'data-key':'shared-links'}, h('h2', {}, 'Links'),
-    sharedLinks.length ? sharedLinks.map(link => {
+    sharedLinksDown ? h('p', {className:'meta'}, "Couldn't reach the sharing server; try again in a moment.") : sharedLinks.length ? sharedLinks.map(link => {
       const expiry = link.expires_at;
       const date = expiry ? new Date(typeof expiry === 'number' ? expiry * 1000 : expiry) : null;
       const expired = link.expired === true || (date && date.getTime() <= Date.now());

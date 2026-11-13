@@ -66,9 +66,10 @@ def test_shared_links_are_optional_and_use_plain_actions():
     src = webjs.all_js()
     for text in (
         "fetch('/api/links', {cache:'no-store'})",
-        "if (res.status !== 200) { sharedLinks = null; return; }",
+        "if (res.status !== 200) { sharedLinks = null; sharedLinksDown = false; return; }",
         "Array.isArray(data.links)",
-        "catch (_) { sharedLinks = null; }",
+        "catch (_) { sharedLinks = null; sharedLinksDown = false; }",
+        "Couldn't reach the sharing server; try again in a moment.",
         "sharedLinks !== null",
         "No shared links yet.",
         "Link valid until ",
@@ -144,8 +145,10 @@ loadAddon = async () => {};
   assert.equal(location.hash, '#chat/ws_abcdefghij');
   global.fetch = async () => ({status:200, json:async () => ({links:[]})});
   await loadSharedLinks(); assert.deepEqual(sharedLinks, []);
+  global.fetch = async () => ({status:200, json:async () => ({links:[], unreachable:true})});
+  await loadSharedLinks(); assert.equal(sharedLinksDown, true); assert.deepEqual(sharedLinks, []);
   global.fetch = async () => ({status:404});
-  await loadSharedLinks(); assert.equal(sharedLinks, null);
+  await loadSharedLinks(); assert.equal(sharedLinks, null); assert.equal(sharedLinksDown, false);
   global.fetch = async () => { throw new Error('offline'); };
   await loadSharedLinks(); assert.equal(sharedLinks, null);
 })().catch(err => { console.error(err); process.exitCode = 1; });

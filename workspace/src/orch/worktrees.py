@@ -1302,7 +1302,11 @@ def approve_copy(root: Path, ticket: str, target: str) -> dict:
                 r.pop("journal", None)
 
         _copy_authority(root, ticket, record)
-        return _bring_back_locked(root, ticket)
+        result = _bring_back_locked(root, ticket)
+    # The lock is released (not reentrant): a brought-back Done ticket's copy goes now; remove never raises.
+    if isinstance(result, dict) and result.get("state") in ("merged", "none"):
+        remove(root, ticket, wait=SWEEP_WAIT)
+    return result
 
 
 # What belongs to one review round in the signed record: a reopened ticket (it leaves Done) forgets all of
