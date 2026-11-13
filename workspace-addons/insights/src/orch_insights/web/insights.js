@@ -233,7 +233,7 @@ async function refresh() {
     overview = await read('/api/overview');
     if (overview.error) { showMessage(overview.error); return; }
     if (overview.first_day) {
-      showMessage('Nothing recorded yet. Counts appear after the first agent run.');
+      showMessage('Nothing recorded yet. Counts appear after the first helper run.');
     } else {
       renderNeeds();
       renderTabs();

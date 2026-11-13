@@ -14,7 +14,7 @@ function context(items, extra = {}) {
     needsList:() => [], state:{}, starting:new Set(), sorted:v => v, STATUS_CHOICES:helpers.STATUS_CHOICES,
     heading:(...text) => h('h1', {}, text), now:() => new Date(), parse:() => null, capitalise:v => v,
     emptyRow:text => h('p', {}, text), card:(key,title,count,body) => h('section', {}, title,count,body),
-    activeTicket:() => true, ticketAttentionChip:() => null, ...extra});
+    activeTicket:() => true, ticketAttentionChip:() => null, titleTag:() => null, ...extra});
   for (const file of ['home', 'tickets']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/' + file + '.js'), 'utf8'), c);
   return c;
 }
@@ -140,6 +140,11 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   assert.equal(nodes(c.privateCard(settings), n => n.tag === 'button').length, 0);
   settings.git_private.count = 0;
   assert.equal(nodes(c.privateCard(settings), n => n.tag === 'h3').length, 1);
+  const unsafe = n => ({name:'u' + n, showable:false});
+  const text = s => nodes(c.privateCard({git_private:{count:0, lines:[], pending:s}}), n => n.textContent != null).map(n => n.textContent).join('|');
+  assert.match(text([unsafe(1)]), /1 request orch can't show safely\. Not allowed\./);
+  assert.match(text([unsafe(1), unsafe(2), unsafe(3)]), /3 requests orch can't show safely\. Not allowed\./);
+  assert.equal(nodes(c.privateCard({git_private:{count:0, lines:[], pending:[unsafe(1), unsafe(2), unsafe(3)]}}), n => n.attrs?.className === 'card').length, 1);
 });
 
 test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote behind Details', () => {
@@ -413,6 +418,18 @@ test('clean strips leading [X] tags and trailing number/time stamps', () => {
   assert.equal(c.clean('Water plants [2026-11-12T10:00:00Z]'), 'Water plants');
   assert.equal(c.clean('Order [3] chairs'), 'Order [3] chairs');
   assert.equal(c.clean('[Draft]'), '[Draft]');
+});
+test('titleTag: the hidden tags show muted only when two visible tickets share a base title', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children});
+  const c = vm.createContext({h, tickets:() => [], array:v => v || []});
+  vm.runInContext(app.slice(app.indexOf('let wsNames'), app.indexOf('const name =')) + ';this.titleTag = titleTag; this.hiddenTags = hiddenTags;', c);
+  assert.equal(c.hiddenTags('[R] Pay the invoice [0722]'), '[R] [0722]');
+  const a = {id:'a', title:'[R] Pay the invoice [0722]'}, b = {id:'b', title:'[R] Pay the invoice [0811]'}, d = {id:'d', title:'Water plants [0722]'};
+  assert.equal(c.titleTag(d, [a, b, d]), null);
+  assert.equal(c.titleTag(a, [a]), null);
+  assert.equal(c.titleTag(a, [a, b]).children[0], ' [R] [0722]');
+  assert.equal(c.titleTag(b, [a, b]).children[0], ' [R] [0811]');
 });
 // Dash 51/28/31: footer line only when the connection is lost; the phone switch hides while on; Ask the helper.
 test('shell: quiet footer, one phone control while on, Ask the helper', () => {

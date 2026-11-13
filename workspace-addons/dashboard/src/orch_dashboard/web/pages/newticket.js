@@ -138,7 +138,7 @@ function ticketForm(t) {
     if (!['note', 'done_when'].includes(field)) input.type = 'text';
     if (field === 'done_when') {
       input.rows = 4; input.maxLength = 2000;
-      input.placeholder = 'Optional. Say it in your own words, the agent turns it into tasks.';
+      input.placeholder = 'Optional. Say it in your own words, the helper turns it into tasks.';
     }
     if (field === 'due') {
       input.readOnly = true; input.placeholder = 'Pick a day';
@@ -169,7 +169,7 @@ function ticketForm(t) {
   const startNow = async () => {
     if (t || !startAfter || !created) return;
     const run = await act('run.start', {ticket:created.id});
-    window.orch.toast(run.ok ? 'Agent started' : 'The ticket was created, but the agent did not start: ' + run.text, run.ok ? 'ok' : 'error');
+    window.orch.toast(run.ok ? 'Helper started' : 'The ticket was created, but the helper did not start: ' + run.text, run.ok ? 'ok' : 'error');
   };
   form.append(fields, error, reload, actions); d.append(form);
   let created = null, creationUnresolved = false;

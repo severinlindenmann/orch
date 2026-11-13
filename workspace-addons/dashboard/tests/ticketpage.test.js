@@ -219,7 +219,7 @@ test('task outcomes and result cards use plain text without sizes', () => {
   const card = c.ticketResultCard({id:'t_test'}, ev);
   const text = JSON.stringify(card);
   assert.match(text, /ticket-result/);
-  assert.doesNotMatch(text, /109|Agent says|Completed/);
+  assert.doesNotMatch(text, /109|Helper says|Completed/);
 });
 
 test('next question stays above every tab and Answer scrolls and focuses it', () => {

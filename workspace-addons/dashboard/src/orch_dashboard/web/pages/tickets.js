@@ -105,7 +105,7 @@ function treeBranch(rows, index, section) {
   const tasks = array(t.checklist);
   const node = h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
-    h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title))), ticketNext(t),
+    h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title)), titleTag(t)), ticketNext(t),
       row.children ? h('p', {className:'meta'}, row.done + ' of ' + row.children + ' steps done') : null,
       row.parentMissing ? parentLine(t) : null),
     h('div', {className:'row ticket-meta'}, ticketAttentionChip(t, section), tasks.length ? h('span', {className:'meta'}, tasks.filter(window.DashHelpers.resolved).length + '/' + tasks.length) : null,
@@ -123,7 +123,7 @@ function boardCard(t, nested = false, column = '') {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
   const parts = boardChildren(tickets(), t);
   return h('article', {className:'card ticket-card' + (nested ? ' board-child' : ''), draggable:snapshot ? null : 'true', 'data-ticket':t.id, 'data-key':'card-' + t.id},
-    h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, clean(t.title))),
+    h('div', {className:'row'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, clean(t.title)), titleTag(t)),
       snapshot ? null : h('details', {className:'menu', 'data-key':'card-menu-' + t.id}, h('summary', {className:'btn ghost icon sm move-button', 'aria-label':'Move ' + clean(t.title) + ' to another column'}, iconEl('more')), h('div', {className:'menu-pop', role:'menu'}, statusItems(t, 'card', STATUS_CHOICES)))),
     ticketAttentionChip(t, column),
     !nested ? boardParentLine(t) : null,
@@ -133,7 +133,7 @@ function boardCard(t, nested = false, column = '') {
     ticketNext(t), h('div', {className:'owner-line'}, name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null, t.due ? h('span', {className:'due'}, date(t.due)) : null),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Tasks done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, done + '/' + tasks.length)) : null);
 }
-const COLUMN_HINT = {open:'Ideas to plan', active:'The agent is on it', waiting:'A question for you', review:'Ready for your look', done:'Finished work'};
+const COLUMN_HINT = {open:'Ideas to plan', active:'A helper is on it', waiting:'A question for you', review:'Ready for your look', done:'Finished work'};
 function board() {
   const visible = sorted(filteredTickets());
   const cols = STATUS_CHOICES.map(([status, label]) => {

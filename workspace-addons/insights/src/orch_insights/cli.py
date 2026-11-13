@@ -62,7 +62,7 @@ def _manage(args, root):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="orch insights", description="What your agents used.")
+    parser = argparse.ArgumentParser(prog="orch insights", description="What your helpers used.")
     parser.add_argument("--dir", default=".")
     commands = parser.add_subparsers(dest="cmd")
     serve = commands.add_parser("serve")
