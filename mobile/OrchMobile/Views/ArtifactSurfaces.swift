@@ -167,7 +167,9 @@ struct PDFSurface: UIViewRepresentable {
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
         view.autoScales = true
-        view.backgroundColor = .white
+        view.backgroundColor = UIColor(Theme.bg)   // pages edge to edge on the dark background, with page shadows
+        view.pageShadowsEnabled = true
+        view.displaysPageBreaks = true
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
         tap.cancelsTouchesInView = false
         tap.delegate = context.coordinator

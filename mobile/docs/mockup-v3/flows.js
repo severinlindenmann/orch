@@ -184,8 +184,8 @@ const reviewGroups=[
  ['Topic chat',[['ticket','Board summary'],['general','Your helper'],['checklist-demo','Task checklist']]],
  ['Artifacts & feedback',[['artifact-demo','HTML preview'],['feedback-demo','Comment pins'],['gallery','All artifact kinds'],['info','Artifacts · Files · References']]],
  ['Questions',[['question-options','Options'],['question-allow','Permission'],['question-free','Free text'],['question-variants','A / B previews'],['question-approval','Accept preview'],['stale-demo-view','Already answered']]],
- ['Voice',[['rigi-voice','My voice note'],['record','Hold to record'],['locked','Hands-free'],['voice-errors','Capture errors']]],
- ['Media',[['attach','Attachments'],['camera','Camera & scan'],['preview','Photo caption'],['files','Documents'],['location','Location']]],
+ ['Voice',[['rigi-voice','My voice note'],['record','Hold to record'],['locked','Hands-free'],['voice-errors','Capture errors'],['voice-failed','Audio not available']]],
+ ['Media',[['attach','Attachments'],['camera','Camera & scan'],['preview','Photo caption'],['files','Documents'],['attach-nocam','No camera'],['location','Location'],['location-off','Location off']]],
  ['New topic',[['new-chat-demo','Choose & compose']]],
  ['Add workspace',[['pair-demo','QR / invitation link'],['pair-errors','Pairing errors']]],
  ['Settings',[['settings','Connection & workspaces'],['voice-settings-demo','Voice defaults'],['signed-out','Signed out · 401']]],
@@ -210,7 +210,7 @@ review=function(key){
  else if(key==='artifact-demo'){navigate('rig4');openArtifact('landing');}
  else if(key==='feedback-demo'){navigate('rig4');openArtifact('landing');viewer.comment=true;openArtifact('landing',true);}
  else if(key==='gallery')artifactGallery();
- else if(key==='info'){tab='Artifacts';navigate('ticket');navigate('info');}
+ else if(key==='info'){tab='Previews';navigate('ticket');navigate('info');}
  else if(key==='rigi-voice'){navigate('general:rigi');jumpTo('r2');}
  else if(key==='stale-demo-view'){state.answers.t4={value:'In the total',stale:true};navigate('ticket');jumpTo('t4');}
  else if(key==='voice-errors')showVoiceErrors();
@@ -222,6 +222,9 @@ review=function(key){
  else if(key==='settings')navigate('settings');
  else if(key==='computer-off-demo'){state.computerOn=false;persist();navigate('ticket');}
  else if(key==='push'){navigate('push');}
+ else if(key==='voice-failed'){const m=state.messages.pilatus.find(x=>x.id==='p4');if(m){m.audioFailed=true;persist();}navigate('pilatus');}
+ else if(key==='attach'||key==='attach-nocam'){navigate('ticket');flags.noCamera=key==='attach-nocam';attach();}
+ else if(key==='location'||key==='location-off'){navigate('ticket');flags.locationOff=key==='location-off';flags.locationOff?showLocationOff():showLocation();}
  else if(['record','locked','attach','camera','preview','files','location','offline'].includes(key)){
   navigate('ticket');
   if(key==='record'||key==='locked')startRecord(key==='locked');
