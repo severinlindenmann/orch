@@ -44,7 +44,6 @@
 
 /* Separate copies: one row with a switch; the rest behind Details. */
 .settings .copies-details{padding:0 16px;border-top:1px solid var(--border)}
-.settings .copies-details[open]{padding-bottom:8px}
 .settings .copies-more{gap:16px;padding:4px 0 12px}
 .settings .copies-sub{display:grid;gap:6px;justify-items:start;min-width:0}
 .settings .copies-sub>.row,.settings .copies-choices{flex-wrap:wrap;gap:8px}
@@ -122,3 +121,40 @@
   .settings .copies-choices{justify-self:stretch;flex-direction:column;align-items:stretch}
   .settings .copies-choices .btn{width:100%}
 }
+
+/* SN-1: plain folder row, add-ons list, compact shared links (no Details toggles). */
+.settings .folder-row{align-items:flex-start}
+.settings .folder-row .folder-path{margin-top:4px}
+.settings .copies-details{padding:0 16px;border-top:1px solid var(--border)}
+.settings .sync-details{padding:12px 16px 14px}
+.settings .consent-details{margin:8px 0}
+.settings .ad-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.settings .ad-row{display:flex;align-items:center;gap:16px;border:0;border-top:1px solid var(--border);padding:16px}
+.settings .ad-row:first-child{border-top:0}
+.settings .ad-row h3{font-size:14px;font-weight:600}
+.settings .ad-row .ad-status,.settings .ad-row .ad-about{margin:4px 0 0;font-size:12px}
+.settings .ad-row>.switch{margin-left:auto}
+.settings .empty-note{display:grid;gap:4px;justify-items:start}
+.link-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.link-row .link-main{display:grid;gap:2px;min-width:0}
+.link-row .link-main h3{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.link-row .actions{flex-wrap:wrap}
+.link-row .actions .btn{min-height:36px}
+
+/* SN-1 (rest): Appearance right after Workspace, Phone & workspaces, add-on detail, content-shaped loading. */
+.settings [data-key=settings-look]{order:-1}
+.settings .between{justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.settings [data-key=settings-phone]{gap:24px}
+.settings [data-key=phone-relay] .card>p.card-row{border-top:1px solid var(--border);margin:0}
+.settings [data-key=settings-mobile-mode] .card-row{border-top:1px solid var(--border)}
+.settings [data-key=settings-mobile-mode] .switch{margin-left:auto}
+.settings .addon-about{padding:0 4px;display:grid;gap:4px}
+.settings .addon-about h3{font-size:14px;font-weight:600}
+.settings .addon-about p{margin:0;overflow-wrap:anywhere}
+.settings .ad-row>.btn{flex:none}
+.sk-columns.sk-settings{grid-template-columns:156px minmax(0,1fr)}
+.sk-settings .sk-tab{height:44px;border-radius:8px}
+.sk-settings .sk-short{height:88px}
+@media(max-width:760px){.sk-columns.sk-settings{grid-template-columns:minmax(0,1fr)}.sk-settings .sk-side{display:none}}
+.settings .lk-sw{width:36px;height:36px;min-height:36px}
+.settings .lk-swatches{gap:10px}

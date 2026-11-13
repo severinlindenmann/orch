@@ -93,11 +93,12 @@ function chatListRow(g) {
       chatText('small', '', chatPreview(g ? g.last : last?.text) || (g ? '' : 'No messages yet.'))),
     h('span', {className:'chat-row-time'}, time(g ? g.last_at : last?.at), g && chatCount(g.unread) ? h('span', {className:'count', 'aria-label':chatCount(g.unread) + ' unread'}, chatCount(g.unread)) : null));
 }
-function chatList() {
+function chatList(others = []) {  // others: the rows of other workspaces, shown between this workspace and the groups
   const groups = chatGroups(), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
   const rows = [chatListRow(null), ...groups.filter(g => !chatFinished(g)).map(chatListRow)];
   rows.forEach(row => { row.hidden = !history && !row.textContent.toLowerCase().includes(query); });
-  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'), history ? null : chatSearch(), rows[0],
+  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'), history ? null : chatSearch(),
+    rows.length > 1 || others.length ? h('h2', {'data-key':'chat-this-workspace'}, 'This workspace') : null, rows[0], others,
     rows.length > 1 ? h('h2', {}, 'Groups') : null, rows.slice(1),
     rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null);
 }
@@ -123,6 +124,11 @@ function chatFilter() {
   return h('div', {className:'chat-filter', role:'group', 'aria-label':'Show', 'data-key':'chat-filter'}, chatText('span', 'chat-filter-label', 'Show:'),
     [['all', 'All'], ['phone', 'From my phone']].map(([id, label]) => chatButton(label, 'filter', {className:'chat-button chat-seg', 'data-key':'filter-' + id, 'data-id':id, 'aria-pressed':String(chatUi.filter === id)})));
 }
+// The phone filter's neighbour: where phones and other workspaces are set up (only when that add-on is installed).
+function chatPhoneLink() {
+  const phone = typeof addons === 'function' ? addons().find(a => a.dashboard?.panel === 'phone') : null;
+  return phone ? h('a', {className:'chat-phone-link', 'data-key':'chat-phone-link', href:'#settings/phone'}, 'Phone & workspaces') : null;
+}
 function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const running = !g && !history && !agent ? chatCount(state?.chat?.activity?.running) : 0;
@@ -133,7 +139,7 @@ function chatHeader(g, history) {
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null,
       history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g ? null : chatButton('Earlier', 'history')),
     // Few header rows: "Working on N tickets" sits on the Show row, right.
-    !g && !history && !agent ? h('div', {className:'chat-head-row'}, chatFilter(),
+    !g && !history && !agent ? h('div', {className:'chat-head-row'}, chatFilter(), chatPhoneLink(),
       running ? chatText('span', 'chat-muted chat-running', 'Working on ' + running + (running === 1 ? ' ticket' : ' tickets')) : null) : null,
     agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
     moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(chatPlainTitle(moved.title, moved.key))) : null,
@@ -519,19 +525,17 @@ window.addEventListener('DOMContentLoaded', chatDmRoute);
 
 const chatListWithoutDm = chatList;
 chatList = function () {
-  const list = chatListWithoutDm();
-  if (!snapshot) list.prepend(chatButton('New chat', 'contacts', {'data-key':'new-chat'}));
   const rows = chatDm.contacts.filter(c => c.count > 0 || chatDmMessages(c.ws).length || chatUi.open === c.ws)
-    .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0));
-  if (rows.length) {
-    list.append(h('h2', {}, 'Workspaces'));
-    rows.filter(c => c.name.toLowerCase().includes(chatUi.search.toLowerCase())).forEach(c => {
-      const last = chatDmMessages(c.ws).at(-1);
-      list.append(h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-dm', 'data-id':c.ws, 'data-key':'row-' + c.ws,
-        'aria-current':chatUi.open === c.ws ? 'true' : null}, chatAvatar(c),
-        h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', last?.text || ''))));
-    });
-  }
+    .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0))
+    .filter(c => c.name.toLowerCase().includes(chatUi.search.toLowerCase()));
+  const others = rows.length ? [h('h2', {'data-key':'chat-other-workspaces'}, 'Other workspaces'), ...rows.map(c => {
+    const last = chatDmMessages(c.ws).at(-1);
+    return h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-dm', 'data-id':c.ws, 'data-key':'row-' + c.ws,
+      'aria-current':chatUi.open === c.ws ? 'true' : null}, chatAvatar(c),
+      h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', last?.text || '')));
+  })] : [];
+  const list = chatListWithoutDm(others);
+  if (!snapshot) list.prepend(chatButton('New chat', 'contacts', {'data-key':'new-chat'}));
   if (chatDmId(chatUi.open)) list.querySelector('[data-id="chat"]')?.removeAttribute('aria-current');
   return list;
 };

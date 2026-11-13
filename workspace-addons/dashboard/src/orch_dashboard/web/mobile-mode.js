@@ -86,7 +86,7 @@
   document.addEventListener('click', async event => {
     const t = event.target.closest('#mm-toggle,[data-mm],[data-mm-hours]');
     if (!t || !mm) return;
-    if (t.id === 'mm-toggle') {
+    if (t.id === 'mm-toggle' || t.dataset.mm === 'switch') {
       if (mm.on) await call('mobile.set', {on: false});
       else if (store.get()) await turnOn();
       else { asking = !asking; paint(); }
@@ -107,20 +107,23 @@
     paint();
   });
 
-  // The Settings > General block. app.js passes its own element builder `h`; the buttons are handled above.
+  // The Settings > Phone & workspaces rows (pairing card): the delivery switch and the automatic switch-off.
+  // app.js passes its own element builder `h`; the buttons are handled above.
   window.OrchMobileMode = {
     settingsSection(h) {
       if (!mm) return null;
       const choices = mm.hours_choices?.length ? mm.hours_choices : HOURS;
-      return h('div', {className: 'stack', 'data-key': 'settings-mobile-mode'},
-        h('h2', {className: 'set-sub'}, 'Send questions to my phone'),
-        h('div', {className: 'card'}, h('div', {className: 'card-row'},
-          h('div', {className: 'grow'}, h('p', {}, 'Switch off by itself after'),
-            h('p', {className: 'meta'}, 'Turn it on in the menu. While it is on, questions go to your phone and this computer stays awake.')),
-          h('div', {className: 'mm-hours', role: 'radiogroup', 'aria-label': 'Switch off by itself after', 'data-testid': 'mobile-mode-hours'},
+      return h('div', {'data-key': 'settings-mobile-mode'},
+        h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Send questions'),
+          h('div', {className: 'grow set-ctl'}, h('p', {}, 'Questions also go to your phone'),
+            h('p', {className: 'meta'}, 'This computer stays awake while this is on. Closing the lid still puts it to sleep.')),
+          h('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': mm.on ? 'true' : 'false', 'aria-label': 'Send questions to my phone',
+            'data-mm': 'switch', 'data-key': 'mm-switch', 'data-testid': 'mobile-mode-switch', disabled: busy}, mm.on ? 'On' : 'Off')),
+        h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Switch off after'),
+          h('div', {className: 'grow set-ctl mm-hours', role: 'radiogroup', 'aria-label': 'Switch off by itself after', 'data-testid': 'mobile-mode-hours'},
             choices.map(n => h('button', {type: 'button', className: 'btn sm ' + (n === mm.default_hours ? 'primary' : 'ghost'), role: 'radio',
               'aria-checked': n === mm.default_hours ? 'true' : 'false', 'data-mm-hours': n, 'data-key': 'mm-hours-' + n,
-              'data-testid': 'mobile-mode-hours-' + n}, n + ' h'))))));
+              'data-testid': 'mobile-mode-hours-' + n}, n + ' h')))));
     },
   };
 })();

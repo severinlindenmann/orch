@@ -170,7 +170,7 @@
     const on = look.shared_pages !== false;
     const set = look.icon || look.color;
     return n('div', {className: 'stack', 'data-key': 'settings-look', 'data-testid': 'settings-look'},
-      n('h2', {className: 'set-sub'}, 'Workspace look'),
+      n('h2', {className: 'set-sub'}, 'Appearance'),
       n('div', {className: 'card'},
         n('div', {className: 'card-row', 'data-key': 'lk-look-row'}, n('span', {className: 'set-label'}, 'Icon and colour'),
           n('div', {className: 'grow lk-current'}, badge(open ? draft : look, name, 32), n('span', {className: 'meta', 'data-testid': 'look-summary'}, lookText(open ? draft : look))),
