@@ -456,6 +456,16 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .strip .day:last-child{border-right:0}
 .strip .day-head{gap:8px;color:var(--text-muted)}
 .strip .day.today{background:var(--surface-2)}.strip .day.today .day-head b{color:var(--brand)}
+.page:has(.strip-panel){max-width:none}
+.blk-pair .blk-title,.blk-compact .blk-title{font-size:14px;line-height:20px;padding:16px}
+.blk-pair>.blk>.blk-title,.blk-compact>.blk-title{border-bottom:1px solid var(--border)}
+.blk-above .empty.blk-empty{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:16px;row-gap:4px;text-align:left;justify-items:start;align-content:center;min-height:0;padding:24px;background:var(--surface);border-radius:10px}
+.blk-above .blk-empty .empty-mark{grid-row:1/span 3;background:none;width:auto;height:auto;font-size:20px;color:var(--text-faint)}
+.blk-above .blk-empty h3{font-size:14px;line-height:20px}
+.strip .day-head{justify-content:flex-start;gap:4px;font-size:12px}.strip .day-head b{font-weight:600;color:var(--text)}
+.strip .day.empty::after{content:"\2014";color:var(--text-faint);font-size:12px}
+.strip .run{display:block;padding:0 0 0 8px;border-left:2px solid var(--brand);font-size:12px;line-height:16px}
+.strip .run time,.strip .run>span{display:block}
 @media(max-width:950px){.strip{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.strip .day{border-width:0 0 1px 0}}
 
 /* Add-on page layout blocks (contract: addon-view.schema.json "Page layout"): headings with quiet text, two cards side by side,
@@ -466,7 +476,9 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .blk-above>.blk-head{padding:0 4px 8px}.blk-above>.blk-head .blk-title,.blk-above>.blk-title{padding:0;font-size:14px;line-height:20px}
 .blk-above{display:block;margin-top:8px}
 .blk-above .blk-list{padding:0}
-.blk-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start}
+.blk-pair{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:24px;align-items:start}
+@media(min-width:1600px){.blk-pair{grid-template-columns:minmax(0,1fr) 320px}}
+.share-dialog .field{margin-top:16px}
 .blk-pair>.blk{min-width:0}
 .blk-pair .blk-head{border-bottom:1px solid var(--border)}.blk-pair .blk-head .blk-title{padding:16px}.blk-pair .blk-head .meta{padding-right:16px}
 .blk-empty.empty{min-height:192px}

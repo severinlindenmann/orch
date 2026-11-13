@@ -935,6 +935,37 @@ async function loadSharedLinks() {
     sharedLinksDown = data.unreachable === true;
   } catch (_) { sharedLinks = null; sharedLinksDown = false; }
 }
+const SHARE_MAX = 3 * 1024 * 1024;  // the same limit as the server (actions.share_file)
+// "Share a file": pick a file here; the dashboard hands it to the sharing server (encrypted on this computer) and the
+// new row shows up in the list. The link, which holds the key, is only ever copied from its row.
+function shareDialog() {
+  if (snapshot) return;
+  const {d, actions} = dialog('Share a file', 'dialog share-dialog');
+  const picker = h('input', {type:'file', className:'input', id:'share-file', 'aria-label':'File'});
+  const note = h('p', {className:'meta', role:'status'});
+  const create = button('Create link', 'primary', async () => {
+    const file = picker.files[0];
+    if (!file || create.disabled) { note.textContent = 'Choose a file first.'; return; }
+    if (file.size > SHARE_MAX) { note.textContent = 'That file is over 3 MB.'; return; }
+    create.disabled = true; note.textContent = 'Uploading…';
+    let data = '';
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      for (let i = 0; i < bytes.length; i += 32768) data += String.fromCharCode(...bytes.subarray(i, i + 32768));
+    } catch (_) { note.textContent = 'That file could not be read.'; create.disabled = false; return; }
+    const result = await act('link.share', {name:file.name, data:btoa(data), days:7});
+    create.disabled = false;
+    if (!result.ok) { note.textContent = result.text || 'That did not work.'; return; }
+    window.orch.toast('Link created. Copy it from the list.', 'ok');
+    await window.orch.close(d);
+    await loadSharedLinks();
+    if (shownAddon()) await loadAddon(shownAddon());
+  });
+  actions.append(create);
+  d.append(h('p', {className:'muted'}, 'Choose a file to share by private link. It works for 7 days; you can extend it or stop sharing any time.'),
+    h('label', {className:'field'}, 'File', picker), note, actions);
+  window.orch.open(d);
+}
 async function sharedLinkAction(control) {
   if (snapshot || control.disabled) return;
   if (control.dataset.native === 'link-share') { shareDialog(); return; }

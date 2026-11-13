@@ -538,10 +538,10 @@ def build(root: Path, now: datetime | None = None) -> dict:
     if pid:
         nxt = events[0][0] if events else None
         line = "On." + (
-            f" Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}." if nxt else " Nothing planned."
+            f" Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}" if nxt else " Nothing planned"
         )
         if ran >= 5:
-            line += f" Ran {ran} times today."
+            line += f". Ran {ran} times today"
         view.update(notice=line, notice_tone="good")
     else:
         view.update(

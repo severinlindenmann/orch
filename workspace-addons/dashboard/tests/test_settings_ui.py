@@ -86,7 +86,7 @@ def test_shared_links_are_optional_and_use_plain_actions():
         "'The link stops working.'",
         "'Stop sharing', send",
         "bindAddonControls(host)",
-        "data-native', 'link-share'",  # the page heading's "Share a file"
+        "'data-native':'link-share'",  # the page heading's "Share a file"
     ):
         assert text in src
 

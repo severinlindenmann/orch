@@ -12,7 +12,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -1056,9 +1058,84 @@ def human_env(root: Path, orch_bin: str) -> dict:
     return child_env({**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}, orch_bin)
 
 
+SHARE_MAX = (
+    3 * 1024 * 1024
+)  # raw bytes of a file picked in the browser (the request body is capped at 5 MB as base64)
+
+
+def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, str, dict | None]:
+    """Share a file picked in the browser: `orch publish file` on a private copy under .orch/run/share, removed
+    right after. The link (which holds the key) never goes back to the page: the list shows the new row."""
+    if not isinstance(args, dict) or set(args) - {"name", "data", "days"}:
+        raise BadRequest("That file could not be read.")
+    name = args.get("name")
+    if not isinstance(name, str) or not name.strip() or len(name) > 240 or "\x00" in name:
+        raise BadRequest("That file name is not allowed.")
+    base = re.sub(r"[^A-Za-z0-9._ -]", "_", name.replace("\\", "/").rsplit("/", 1)[-1]).lstrip(".")[:120]
+    if not base:
+        raise BadRequest("That file name is not allowed.")
+    days = args.get("days", 7)
+    if type(days) is not int or not 1 <= days <= 90:
+        raise BadRequest("Choose a whole number of days from 1 to 90.")
+    try:
+        raw = base64.b64decode(args.get("data") or "", validate=True)
+    except (ValueError, TypeError):
+        raise BadRequest("That file could not be read.") from None
+    if not raw:
+        raise BadRequest("That file is empty.")
+    if len(raw) > SHARE_MAX:
+        raise BadRequest("That file is over 3 MB. Share bigger files with `orch publish file` in a terminal.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    if orch_bin == SELF and mint is None:
+        raise NeedsPerson("Open the dashboard from this computer to do this.")
+    if not publish_connected(root, orch_bin):
+        raise BadRequest("Sharing is not set up here.")
+    parent = root / ".orch" / "run" / "share"
+    # a link planted at any level would send the private copy somewhere else: refuse, write nothing
+    if any(p.is_symlink() for p in (root / ".orch", root / ".orch" / "run", parent)):
+        raise BadRequest("This folder can't be used to share a file right now.")
+    parent.mkdir(parents=True, exist_ok=True)
+    folder = Path(tempfile.mkdtemp(prefix="s-", dir=parent))
+    try:
+        os.chmod(folder, 0o700)
+        path = folder / base
+        path.write_bytes(raw)
+        os.chmod(path, 0o600)
+        r = _run(
+            [*argv0(orch_bin), "publish", "file", str(path), "--days", str(days), "--json"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            stdin=subprocess.DEVNULL,
+            env=human_env(root, orch_bin),
+        )
+    except subprocess.TimeoutExpired:
+        return 504, "That took too long. Please try again.", None
+    except OSError:
+        raise Unavailable("The orch command could not be started.") from None
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        out = None
+    if r.returncode == 0 and isinstance(out, dict):
+        _audit(root, "link.share", {"id": out.get("id"), "days": days})
+        return 200, "", {"id": out.get("id"), "name": out.get("name")}
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not msg:
+        msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    return 422, str(msg)[:500], None
+
+
 def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
     proof for a request that carries a page session; None = watch-only (the click is refused)."""
+    if op == "link.share":
+        return share_file(root, orch_bin, args, mint)
     argv = build_argv(op, args)
     if orch_bin == SELF and needs_session(op) and mint is None:  # before anything is read, hashed or run (F8)
         raise NeedsPerson("Open the dashboard from this computer to do this.")
