@@ -59,7 +59,7 @@ final class StatusRefsUITests: XCTestCase {
         XCTAssertTrue(info.waitForExistence(timeout: 10)); info.tap()
         let tab = app.buttons["info-tab-links"]
         XCTAssertTrue(tab.waitForExistence(timeout: 10))
-        XCTAssertTrue(tab.label.hasPrefix("References"), tab.label)
+        XCTAssertTrue(tab.label.hasPrefix("Links"), tab.label)
         tab.tap()
         // The Results section (draft 02, 2.6) sits above the references and the list is lazy: scroll down to them.
         for _ in 0..<4 where !el(app, "info-ref-ref0").exists { app.swipeUp() }

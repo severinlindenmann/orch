@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 
 struct ArtifactApproval {
     let question: Question
@@ -22,6 +23,9 @@ struct ArtifactViewer: View {
     @State private var sending = false
     @State private var sendError: String?
     @State private var temporaryDirectory: URL?
+    @State private var shareURL: URL?
+    @State private var pageCount: Int?
+    @State private var showDetails = false
 
     private enum LoadState {
         case loading
@@ -39,6 +43,16 @@ struct ArtifactViewer: View {
             HStack(spacing: 16) {
                 Text(item.title).themeFont(20, .semibold).frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
+                if let shareURL {
+                    ShareLink(item: shareURL) {
+                        Image(systemName: "square.and.arrow.up").themeFont(18)
+                            .foregroundStyle(Theme.muted).frame(width: 44, height: 44)
+                            .background(Theme.surface3, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Share")
+                    .accessibilityIdentifier("artifact-share")
+                }
                 Button { dismiss() } label: {
                     Image(systemName: "xmark").themeFont(18)
                         .foregroundStyle(Theme.muted).frame(width: 44, height: 44)
@@ -49,10 +63,12 @@ struct ArtifactViewer: View {
                 .accessibilityIdentifier("artifact-close")
             }
             HStack(spacing: 8) {
-                Text(item.subtitle).themeFont(14).foregroundStyle(Theme.muted)
-                if let conversation = item.conversation, let id = conversation.ticket,
-                   let ticket = model.ticket(conversation.workspace, id) {
-                    TicketStatusChip(status: TopicStatus(ticket))
+                Text(item.subtitle(pages: pageCount)).themeFont(14).foregroundStyle(Theme.muted)
+                    .accessibilityIdentifier("artifact-subtitle")
+                if let version = item.versionDetail {
+                    Button(showDetails ? version : "Details") { showDetails.toggle() }
+                        .themeFont(13).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                        .accessibilityIdentifier("artifact-details")
                 }
             }
             if commentMode {
@@ -61,8 +77,16 @@ struct ArtifactViewer: View {
             }
             preview
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
+                .background(Theme.bg)
+                .padding(.horizontal, -16)   // edge to edge on the dark background
+                .overlay(alignment: .bottom) {
+                    if let pageCount, pageCount > 1 {
+                        Text("\(pageCount) pages").themeFont(13).foregroundStyle(Theme.text)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(Theme.surface3.opacity(0.9), in: Capsule()).padding(.bottom, 8)
+                            .accessibilityIdentifier("artifact-page-count")
+                    }
+                }
             if !commentMode, let approval {
                 VStack(spacing: 6) {
                     Button {
@@ -92,8 +116,9 @@ struct ArtifactViewer: View {
                     VStack(spacing: 10) { bottomButtons }
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(Theme.surface)
+                .padding(.vertical, 8).padding(.horizontal, 16)
+                .background(Theme.surface)   // same band as the chat composer bar
+                .padding(.horizontal, -16)
                 .buttonStyle(ArtifactActionButtonStyle())
                 .disabled(sending)
             }
@@ -232,7 +257,6 @@ struct ArtifactViewer: View {
     }
 
     private func fileContent(_ bytes: Data, name: String, mime: String) throws -> ArtifactSurfaceContent {
-        if mime == "application/pdf" || mime.hasPrefix("image/") { return .data(bytes, name: name, mime: mime) }
         if mime.hasPrefix("text/html"), let html = String(data: bytes, encoding: .utf8) { return .publish(.page(html: html, name: name)) }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("orch-preview-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -242,6 +266,12 @@ struct ArtifactViewer: View {
         catch { try? FileManager.default.removeItem(at: folder); throw error }
         if let temporaryDirectory { try? FileManager.default.removeItem(at: temporaryDirectory) }
         temporaryDirectory = folder
+        shareURL = url   // the share icon in the top bar, also for PDFs and pictures
+        if mime == "application/pdf" {
+            pageCount = PDFDocument(data: bytes)?.pageCount
+            return .data(bytes, name: name, mime: mime)
+        }
+        if mime.hasPrefix("image/") { return .data(bytes, name: name, mime: mime) }
         return ArtifactItem.canPreview(fileName: url.lastPathComponent) ? .quickLook(url) : .shareOnly(url, name: name, size: bytes.count)
     }
 

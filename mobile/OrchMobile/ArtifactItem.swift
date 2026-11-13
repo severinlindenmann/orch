@@ -33,7 +33,7 @@ struct ArtifactItem: Identifiable, Equatable, Sendable {
     init(_ a: TicketSnapshot.Attachment, in conversation: ConversationID? = nil) {
         id = a.id; title = a.label ?? a.name ?? "Preview"; artifactId = a.artifactId; rev = a.rev
         url = a.url.flatMap(URL.init(string:)); blobId = a.blobId; name = a.name; self.conversation = conversation
-        mime = a.name.map(MediaPrep.mime(forFileName:))
+        mime = a.name.map(MediaPrep.mime(forFileName:)); at = a.at
         switch a.kind {
         case "html": kind = .html
         case "image": kind = .image
@@ -70,13 +70,20 @@ struct ArtifactItem: Identifiable, Equatable, Sendable {
     /// The address to open for a link item: only http/https with a host (an agent-sent tel:, sms:, javascript: or app scheme is never opened).
     var safeLinkURL: URL? { SafeLink.url(url?.absoluteString) }
 
-    /// "Web page preview · v2".
-    var subtitle: String {
+    /// When the result was made (ticket attachments only).
+    var at: String?
+
+    /// "PDF · 3 pages · today 12:38": no revision hash on the main surface (that sits behind Details).
+    var subtitle: String { subtitle(pages: nil) }
+    func subtitle(pages: Int?, now: Date = Date()) -> String {
         let k: String
         switch kind { case .html: k = "Web page preview"; case .pdf: k = "PDF"; case .image: k = "Picture"; case .file: k = "File"; case .link: k = "Link" }
-        guard let rev else { return k }
-        return "\(k) · \(rev.count > 8 ? String(rev.prefix(7)) : rev)"
+        let pageText = pages.flatMap { $0 > 0 ? ($0 == 1 ? "1 page" : "\($0) pages") : nil }
+        let time = at.map { ShellTime.short($0, now: now) }.flatMap { $0.isEmpty ? nil : $0 }
+        return [k, pageText, time].compactMap { $0 }.joined(separator: " · ")
     }
+    /// The version, only shown behind "Details".
+    var versionDetail: String? { rev.map { "Version \($0.count > 8 ? String($0.prefix(7)) : $0)" } }
 }
 
 // MARK: Pins

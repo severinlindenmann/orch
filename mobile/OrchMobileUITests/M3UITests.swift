@@ -79,7 +79,8 @@ import XCTest
 
     func testMediaPickerOffersTheFourSources() throws {
         let app = launch("picker")
-        for id in ["media-camera", "media-photos", "media-files", "media-location"] {
+        // Camera is hidden when the device has none (Simulator): Photos, Files and Location always show.
+        for id in ["media-photos", "media-files", "media-location"] {
             XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 20), id)
         }
         app.buttons["media-close"].tap()
@@ -93,19 +94,22 @@ import XCTest
             let app = launch("info", extra: size.isEmpty ? [] : ["-UIPreferredContentSizeCategoryName", size])
             XCTAssertTrue(app.buttons["demo-open-info"].waitForExistence(timeout: 20))
             app.buttons["demo-open-info"].tap()
+            // P33: only filters with content are shown (Photos, Files, Links, Results)
             let photos = app.buttons["info-tab-photos"]
             XCTAssertTrue(photos.waitForExistence(timeout: 10))
             for t in ["photos", "files", "links", "artifacts"] {
                 let tab = app.buttons["info-tab-\(t)"]
-                XCTAssertTrue(tab.exists, t)
+                guard tab.exists else { continue }
                 // one line: every tab is as tall as Photos, and all sit in the same row
                 XCTAssertEqual(tab.frame.height, photos.frame.height, accuracy: 1, "\(t) wraps (\(size))")
                 XCTAssertEqual(tab.frame.midY, photos.frame.midY, accuracy: 1, "\(t) not in one row (\(size))")
             }
             XCTAssertFalse(app.buttons["info-language-row"].exists, "no Voice & reply language row")
             XCTAssertFalse(app.staticTexts["Voice & reply language"].exists)
-            app.buttons["info-tab-links"].tap()
-            XCTAssertTrue(app.buttons["info-tab-links"].isSelected, "References tab selectable (\(size))")
+            if app.buttons["info-tab-links"].exists {
+                app.buttons["info-tab-links"].tap()
+                XCTAssertTrue(app.buttons["info-tab-links"].isSelected, "Links filter selectable (\(size))")
+            }
             shot(app, size.isEmpty ? "info-tabs-default" : "info-tabs-xxl")
             app.terminate()
         }

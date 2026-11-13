@@ -22,9 +22,29 @@ final class VisualFixTests: XCTestCase {
     func testTabCountsKeepReferencePrefixAndOmitZero() {
         XCTAssertEqual(InfoGroup.photos.tabLabel(count: 1), "Photos (1)")
         XCTAssertEqual(InfoGroup.files.tabLabel(count: 1), "Files (1)")
-        XCTAssertEqual(InfoGroup.links.tabLabel(count: 4), "References (4)")
-        XCTAssertEqual(InfoGroup.artifacts.tabLabel(count: 1), "Artifacts (1)")
+        XCTAssertEqual(InfoGroup.links.tabLabel(count: 4), "Links (4)")
+        XCTAssertEqual(InfoGroup.artifacts.tabLabel(count: 1), "Results (1)")
         for group in InfoGroup.allCases { XCTAssertEqual(group.tabLabel(count: 0), group.title) }
+    }
+
+    func testSharedFiltersOnlyWithContentAndProgressRow() {
+        let shown = InfoGroup.visible(counts: [.photos: 0, .files: 2, .links: 1, .artifacts: 0])
+        XCTAssertEqual(shown, [.files, .links])
+        XCTAssertEqual(InfoGroup.current(.photos, visible: shown), .files, "an empty filter falls back to the first with content")
+        XCTAssertEqual(InfoGroup.current(.links, visible: shown), .links)
+        XCTAssertNil(InfoGroup.current(.photos, visible: []), "nothing shared: no Shared list at all")
+        XCTAssertEqual(InfoGroup.progressText(done: 3, total: 4), "3 of 4 done")
+        XCTAssertNil(InfoGroup.progressText(done: 0, total: 0))
+    }
+
+    func testResultSubtitleHasNoHashAndVoiceTimeCountsDown() {
+        let pdf = ArtifactItem(id: "a", title: "Offer", kind: .pdf, rev: "2f7f62e9abc")
+        XCTAssertEqual(pdf.subtitle(pages: 3), "PDF · 3 pages")
+        XCTAssertFalse(pdf.subtitle.contains("2f7f62e"))
+        XCTAssertEqual(pdf.versionDetail, "Version 2f7f62e")
+        XCTAssertEqual(voiceTimeLabel(duration: 7, progress: 0, started: false), clockText(7))
+        XCTAssertEqual(voiceTimeLabel(duration: 10, progress: 0.5, started: true), clockText(5))
+        XCTAssertNil(voiceTimeLabel(duration: 0, progress: 0, started: false))
     }
 
     func testChatRowPreview() {

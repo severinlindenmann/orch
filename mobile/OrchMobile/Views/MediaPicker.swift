@@ -54,6 +54,7 @@ struct MediaPicker: View {
             VStack(alignment: .leading, spacing: step == .choices ? 0 : 16) {
                 HStack {
                     Text(title).themeFont(20, .semibold)
+                        .fixedSize(horizontal: false, vertical: true).layoutPriority(1)   // never clipped to "Cu…"
                         .accessibilityAddTraits(.isHeader)
                     Spacer()
                     Button { finished = true; removePrepared(drafts); dismiss() } label: {
@@ -80,7 +81,7 @@ struct MediaPicker: View {
             .padding(.vertical, step == .choices ? 4 : 16)
         }
         .presentationDetents([detent], selection: $detent)
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)   // the close button is the one way out (not both)
         .onChange(of: step) { _, value in
             detent = value == .choices ? .height(170) : .large
         }
@@ -114,16 +115,17 @@ struct MediaPicker: View {
     }
 
     private var title: String {
-        switch step { case .choices: "Add to Chat"; case .preview: "Preview"; case .location: "Current location" }
+        switch step { case .choices: "Add to chat"; case .preview: "Preview"; case .location: "Current location" }
     }
 
     private var choices: some View {
         HStack(alignment: .top, spacing: 8) {
-            Button { errorText = nil; cameraOptions = true } label: {
-                MediaTile(label: "Camera", icon: "camera", color: Theme.brand)
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {   // no camera: hidden, never a dim tile without a reason
+                Button { errorText = nil; cameraOptions = true } label: {
+                    MediaTile(label: "Camera", icon: "camera", color: Theme.brand)
+                }
+                .accessibilityLabel("Camera").accessibilityIdentifier("media-camera")
             }
-            .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
-            .accessibilityLabel("Camera").accessibilityIdentifier("media-camera")
             photoChoice
             Button {
                 errorText = nil
@@ -262,7 +264,11 @@ struct MediaPicker: View {
                     .buttonStyle(MediaActionStyle(primary: true))
                     .accessibilityLabel("Share current location").accessibilityIdentifier("media-send")
             } else if let locationProblem {
-                Text(locationProblem.localizedDescription).themeFont(14).foregroundStyle(Theme.danger)
+                Text(locationProblem == .denied ? "Location is off for orch" : locationProblem.localizedDescription)
+                    .themeFont(locationProblem == .denied ? 16 : 14, locationProblem == .denied ? .semibold : .regular)
+                    .foregroundStyle(locationProblem == .denied ? Theme.text : Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("location-problem")
                 if locationProblem == .denied {
                     Button("Open Settings") {
                         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
@@ -272,7 +278,12 @@ struct MediaPicker: View {
                 Button("Try again") { locationRequest = UUID() }
                     .buttonStyle(MediaActionStyle(primary: true)).accessibilityLabel("Try again")
             } else {
-                ProgressView("Finding your location…").tint(Theme.brand).themeFont(16)
+                VStack(spacing: 12) {
+                    ProgressView().tint(Theme.brand)
+                    Text("Finding your location…").themeFont(16).foregroundStyle(Theme.muted)
+                }
+                .frame(maxWidth: .infinity, minHeight: 160).multilineTextAlignment(.center)
+                .accessibilityElement(children: .combine)
             }
         }
     }

@@ -1,4 +1,11 @@
-# Workspace look (7 Nov)
+# 12 Nov phone UX, batch 4
+- Info: one "Shared" list; filters (Photos, Files, Links, Results) only when they have content, zero counts hidden, "Progress · 3 of 4 done" row; no "N tasks · N references"; phone-local workspace name.
+- Result viewer: subtitle "PDF · 3 pages · today 12:38", version behind "Details", no status chip; PDF edge to edge on dark with page shadows and page count; share icon next to close; action bar on the composer band.
+- Location: centred spinner with "Finding your location…"; on denial "Location is off for orch" + Open Settings + Try again.
+- Voice: real length counting down while playing; same filled play button for sent and received; failed audio shows a retry button; received audio has an adjustable VoiceOver scrubber; speed button kept.
+- Add sheet: "Add to chat" (sentence case), close button only (no grabber), Camera hidden when there is none.
+- Mockup jumps: Voice › "Audio not available" (shows "Audio not available" with a retry button), Media › "No camera", Media › "Location off".
+
 - Workspace badges show the picked icon and colour (Pilatus wallet/amber, Home house/teal) in the chats list, workspace screen and Conversation info; Rigi has no pick: letter + Automatic colour. Styles and the override live in `look.css` / `look.js`.
 
 # Info tabs (TestFlight 10 + 14, 7 Nov)
