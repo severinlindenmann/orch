@@ -218,3 +218,295 @@ The product needs one metadata response (label, original name, MIME type, bytes,
 ## Integration checks still needed
 
 Browser screenshots and keyboard/assistive-technology verification remain with the manager. Check native PDF rendering under the production CSP, image and media codecs, zoom, focus restore, browser clipboard permissions, reduced motion, row overflow below 900 px, both desktop widths and cold-load metrics. Shared native dialog supplies focus containment. Different document/media frames can consume keyboard shortcuts; visible navigation always remains available. The draft does not claim production latency or full checklist certification from source inspection alone.
+
+
+## Revised after the owner's comment (13 Nov)
+
+### files.html
+- Added Sort beside the type filter: Most important first is the default, followed by Newest first and Oldest first; results come before evidence, then the remaining files. Sorting applies within each task or role group; None gives one sorted list.
+- Added By task, By role and None grouping, with choices kept in the page address alongside search and Grid/List.
+- Every file now has a role chip, a separate task link and a visible creation date and time in both views. The supplied files all share 13 Nov, 13:38, so date ties retain their original order instead of inventing different times.
+- Task links carry the exact task name to ../ticket/ticket-working.html?task=…#ticket-tasks. That separate folder currently has no matching catalogue tasks or task-link handler; its owner must resolve that parameter, select Tasks and open the matching task. No files outside previews were edited.
+
+### many.html
+- Added the same Sort and Group choices, keeping the catalogue PDF first as a Result and marking the twelve supplied samples as Evidence for: Attach 12 samples at once.
+- Added task links and creation dates to every tile and list row; filtering and grouping recalculate the hidden-file count, and Show all files reveals the remaining samples.
+- Preserved all thirteen real files, the sample download, shared shell, Preview pill, loading and empty states, and reduced-motion support.
+
+### viewer-html.html
+- The website now loads its own styling, pictures and interactive calculator, so it looks and works like a complete website.
+- Added a small responsive Demo Coffee site at assets/site/index.html with separate style.css, script.js and the supplied shop photo; the calculator uses the existing CHF 9.50 beans and CHF 24.00 gift-box prices.
+- The full-width preview uses sandbox="allow-scripts" without same-origin access, with Desktop, Tablet and Phone buttons; Open in new tab opens the complete site, and Download website includes all four files in a ZIP.
+- The product must serve each site's complete folder at a stable isolated preview URL, preserving relative paths and correct content types for HTML, CSS, JavaScript and images. Its security rules must allow those site resources and scripts without dashboard origin privileges; the new-tab URL must use the same isolated hosting, and downloads must include the whole folder.
+
+
+Validation for this revision: JavaScript syntax checks passed. Local HTTP browser checks passed for both file counts, sorting/grouping controls, search, list dates, shared Preview pill, loading/empty states, the iframe's CSS and image, the live calculator (two beans plus one gift box = CHF 43.00), and 390 px Phone / 768 px Tablet widths. Serve the mockup over HTTP: opening it as a local file can block external scripts inside an opaque sandbox. Roles are new demonstration metadata; supplied file contents and recorded creation times were preserved. The earlier source-only validation note describes the previous pass.
+
+
+## Revised after the owner's comment (13 Nov)
+
+Polish pass: this section replaces the earlier advice to open file facts and the warning about local-file website previews. Useful facts are visible without opening anything.
+
+### files.html
+- Made each group name a full-width, keyboard-friendly control with a clear chevron and focus outline.
+- Kept the real files, visible roles, task links, creation dates, filters and grid/list choices; checked spacing at 1280×800.
+
+### many.html
+- Made each group name a full-width, keyboard-friendly control with a clear chevron and focus outline.
+- Kept the real files, visible roles, task links, creation dates, filters and grid/list choices; checked spacing at 1280×800.
+
+### review-card.html
+- Removed the Details toggle and put the short review explanation beside the actions.
+- Checked the result, supporting files and review controls at 1280×800, including loading and empty states.
+
+### viewer-audio.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-code.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-error.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-html.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+- Embedded the shop styling, calculator and image directly in the preview, so the website works over HTTP and as a local file.
+- Kept the styled shop header, illustrated hero, priced product cards and working total calculator; Open in new tab still opens assets/site/index.html.
+
+### viewer-image.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-large.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-loading.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-markdown.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-pdf.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-table.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-text.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-unknown.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-video.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-xlsx.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer-zip.html
+- Removed File details and the error Details toggle; type, size, creation time, task and role now appear plainly under the title.
+- Kept the action row and footer from shrinking, allowed metadata to wrap, and checked the page at 1280×800 with loading and empty states.
+
+### viewer.html
+- Allowed file labels to wrap while keeping their type labels separate.
+- Checked all file links and the shared loading and empty layouts at 1280×800.
+
+Validation for this polish pass: visually reviewed all 19 pages at 1280×800 and checked 57 default/loading/empty page states in the browser. No page overflow, clipped checked controls, remaining Details toggles or JavaScript errors were found; each page retains the shared Preview pill. The shop image, styling and CHF 43.00 calculation passed for both local files and HTTP. The current server at 127.0.0.1:8788 serves an older copy outside this assigned folder; HTTP validation therefore used a temporary server on port 18913 serving this mockup root. The 8788 server must serve this edited folder for the requested address to show these revisions. No files outside previews were edited.
+
+
+## Revised after the owner's comment (13 Nov)
+
+Round 2 — working shared components.
+
+### files.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Aligned search, type, sort, group and view choices in one 36 px toolbar row at 1280 px, with labels inside the dropdown buttons.
+
+### many.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Aligned search, type, sort, group and view choices in one 36 px toolbar row at 1280 px, with labels inside the dropdown buttons.
+
+### review-card.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+
+### viewer-audio.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-code.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-error.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-html.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-image.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-large.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-loading.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-markdown.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-pdf.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-table.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-text.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-unknown.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-video.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-xlsx.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer-zip.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Full-screen previews have a visible Exit full screen button and Escape closes them; focus and scrolling return when they close.
+
+### viewer.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+
+Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+
+## Revised after the owner's comment (13 Nov)
+
+QA follow-up: Full screen opens a separate dialog and returns to the same file preview when closed.
+
+### viewer-audio.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-code.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-error.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-html.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-image.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-large.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-loading.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-markdown.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-pdf.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-table.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-text.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-unknown.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-video.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-xlsx.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### viewer-zip.html
+- Moved Full screen into the file action row so it is visible and clickable.
+- Added a full-screen dialog with Exit full screen, Escape and a clickable backdrop; closing restores the file preview and keyboard focus.
+- Kept the real file, loading and empty states, shared Preview pill and reduced-motion behaviour.
+
+### review-card.html
+- Expand now opens the catalogue in a dialog on the same page.
+- Exit full screen, Escape and a backdrop click return to the review card and restore keyboard focus.

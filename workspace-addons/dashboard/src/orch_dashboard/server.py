@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import sys
 import threading
 import time
 from functools import partial
@@ -19,6 +20,7 @@ from urllib.parse import parse_qs
 from . import actions, reffiles, selfupdate, ticketfiles
 from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
+from .state_cache import StateCache
 from .views import ViewPuller
 
 DEFAULT_PORT = 8420
@@ -31,6 +33,11 @@ KIT = (
     "components.css",
     "motion.css",
     "motion.js",
+    "interaction.css",
+    "overlay.js",
+    "select.js",
+    "date.js",
+    "components.js",
     "icons.js",
     "question-card-state.js",
     "question-card.js",
@@ -106,7 +113,31 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
+    def _refused_text(self, text: str) -> str:
+        """The words of a 403 for a missing page session: a sign-in link that was used twice, a tab whose
+        session the restarted server does not know (after an update), or the plain default."""
+        from orch.pageproof import RESTARTED_MSG, REVOKED_MSG
+
+        if self.session is None:
+            return text
+        if self.session.revoked:
+            return REVOKED_MSG
+        if self.session.stale(self.headers, self.server.server_address[1]):
+            return RESTARTED_MSG
+        return text
+
+    def _act_log(self, text: str) -> None:
+        """One line per /api/act on stderr (op name, status, ms): never the arguments."""
+        try:
+            print("act " + text, file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            pass
+
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
+        act = getattr(self, "_act", None)
+        if act is not None:
+            self._act = None
+            self._act_log(f"{act[0]} end status={code} ms={int((time.monotonic() - act[1]) * 1000)}")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -116,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.send_header(
             "Content-Security-Policy",
-            csp or "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'",
+            csp or "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'",
         )
         self.end_headers()
         self.wfile.write(body)
@@ -259,10 +290,9 @@ class Handler(BaseHTTPRequestHandler):
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
         if path == "/api/state":
+            state, age = self.server.state_cache.get()
             return self._send(
-                200,
-                json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
-                "application/json",
+                200, json.dumps(state).encode(), "application/json", {"X-State-Age-Ms": str(int(age * 1000))}
             )
         if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
             from .data import load_chat_contacts, load_chat_thread
@@ -473,6 +503,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        op_name = re.sub(r"[^A-Za-z0-9_.-]", "?", str(body.get("op"))[:40])
+        self._act = (op_name, time.monotonic())
+        self._act_log(f"{op_name} start")
         try:
             mint = None
             if self.session is not None and self.session.can_mint(
@@ -504,21 +537,17 @@ class Handler(BaseHTTPRequestHandler):
                     session=self.session,
                 )  # 202 = started in the background (an update): the answer is sent below as it is
                 if code != 200:
+                    if code == 403:
+                        text = self._refused_text(text)
                     return self._send(code, text.encode(), "text/plain; charset=utf-8")
-                return self._send(
-                    200,
-                    json.dumps(
-                        load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
-                    ).encode(),
-                    "application/json",
-                )
+                state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+                self.server.state_cache.invalidate(state)
+                return self._send(200, json.dumps(state).encode(), "application/json")
             code, text, extra = actions.run_op(
                 self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint
             )
         except actions.NeedsPerson as e:
-            from orch.pageproof import REVOKED_MSG
-
-            msg = REVOKED_MSG if self.session is not None and self.session.revoked else str(e)
+            msg = self._refused_text(str(e))
             return self._send(403, msg.encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
@@ -528,6 +557,7 @@ class Handler(BaseHTTPRequestHandler):
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
         state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+        self.server.state_cache.invalidate(state)  # before the reply's own keys are added
         if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
             state["chat_dm_result"] = extra
         if body.get("op") == "config.agent.test" and isinstance(
@@ -566,6 +596,8 @@ class _Server(ThreadingHTTPServer):
     def server_close(self):
         if hasattr(self, "revisions"):
             self.revisions.close()
+        if hasattr(self, "state_cache"):
+            self.state_cache.close()
         super().server_close()
 
     request_queue_size = (
@@ -576,14 +608,19 @@ class _Server(ThreadingHTTPServer):
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
     # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
     # test harness passes a fake path. None = standalone, reads files only.
-    session = None
+    handler = partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin), session=None)
+    # The session is made AFTER the port is bound. A restarted server adopts the open tab's session ONCE
+    # (PageSession reads and removes the resume file): made before the bind, a port that is still busy right
+    # after the restart (Windows) would spend the file and the auto-port retry would start without it.
+    srv = _Server(("127.0.0.1", port), handler)
     if orch_bin == actions.SELF:
         from orch.pageproof import PageSession
 
-        session = PageSession(root, "dashboard")
-    srv = _Server(
-        ("127.0.0.1", port),
-        partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin), session=session),
-    )
+        try:
+            handler.keywords["session"] = PageSession(root, "dashboard")
+        except BaseException:
+            srv.server_close()
+            raise
     srv.revisions = Revisions(root)
+    srv.state_cache = StateCache(root, orch_bin, srv.revisions)
     return srv

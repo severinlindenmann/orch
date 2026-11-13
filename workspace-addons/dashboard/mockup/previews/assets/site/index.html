@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Spring catalogue · Demo Coffee</title><link rel="stylesheet" href="style.css"><script src="script.js" defer></script></head>
+<body>
+<header><a class="wordmark" href="#">Demo Coffee<span>Good coffee. Good company.</span></a><nav aria-label="Shop"><a href="#collection">The collection</a><a href="#calculator">Plan your order</a></nav></header>
+<main>
+<section class="hero"><div><p class="eyebrow">The spring collection</p><h1>A little something<br>to look forward to.</h1><p>Fresh beans, gift boxes and workshops.<br>Bring a taste of Demo Coffee home.</p><a class="button" href="#collection">Explore the collection <span aria-hidden="true">↘</span></a></div><figure><img src="shop-photo.png" width="320" height="180" alt="Demo Coffee shop"><figcaption>Your next coffee starts here.</figcaption></figure></section>
+<section id="collection"><div class="section-heading"><p class="eyebrow">Made for everyday moments</p><h2>Find your spring favourite</h2></div><div class="products"><article><span class="number">01 / THE EVERYDAY FAVOURITE</span><h3>Coffee beans</h3><p>Fresh beans for your daily cup.</p><strong>CHF 9.50</strong></article><article><span class="number">02 / SOMETHING TO SHARE</span><h3>Gift box</h3><p>A little coffee, a little joy.</p><strong>CHF 24.00</strong></article></div></section>
+<section id="calculator" class="calculator"><div><p class="eyebrow">Plan your order</p><h2>Good things add up.</h2><p>Choose your quantities to see the total.<br>This is a sample calculator; no order is placed.</p></div><form><label>Coffee beans <span>CHF 9.50 each</span><input id="beans" type="number" min="0" max="99" step="1" value="1"></label><label>Gift boxes <span>CHF 24.00 each</span><input id="gifts" type="number" min="0" max="99" step="1" value="1"></label><div class="total"><span>Items total</span><output id="total" aria-live="polite">CHF 33.50</output></div><p id="quantity-error" role="status"></p><noscript>Turn on JavaScript to update the total.</noscript></form></section>
+</main><footer><strong>Demo Coffee</strong><span>Fresh beans · Gift boxes · Workshops</span><a href="#">Back to top ↑</a></footer>
+</body></html>

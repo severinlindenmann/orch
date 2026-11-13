@@ -35,3 +35,22 @@ Shared-system fix requested: `input.switch` needs explicit 36 × 24 px dimension
 - Replaced the copy-location disclosure with an always-visible, plainly titled group of choices.
 - Preserved the saved Off setting, status warning, retry action, empty state, loading skeleton and shared Preview pill.
 
+
+
+## Revised after the owner's comment (13 Nov)
+
+### sync.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+
+## Revised after the owner's comment (13 Nov)
+
+Round 2 — working shared components.
+
+### sync.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+
+Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.

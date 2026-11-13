@@ -1,0 +1,42 @@
+[
+  {
+    "label": "Backdrop closes dialog",
+    "ok": true
+  },
+  {
+    "label": "Scroll unlocked",
+    "ok": true
+  },
+  {
+    "label": "Menu arrow focuses first item",
+    "ok": true
+  },
+  {
+    "label": "Menu Escape restores opener",
+    "ok": true
+  },
+  {
+    "label": "Copy success toast",
+    "ok": true
+  },
+  {
+    "label": "Select Escape keeps parent dialog open",
+    "ok": true
+  },
+  {
+    "label": "Helper select focus returns",
+    "ok": true
+  },
+  {
+    "label": "Many toolbar aligned",
+    "ok": true
+  },
+  {
+    "label": "Direct full screen exit visible",
+    "ok": true
+  },
+  {
+    "label": "Direct full screen returns shell",
+    "ok": true
+  }
+]

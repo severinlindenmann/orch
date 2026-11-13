@@ -23,7 +23,7 @@
 ## settings-helper.html — Helper
 
 - Unavailable helpers offer setup guidance instead of a misleading Test action (SN-19).
-- Your own helper uses a human label; existing Claude and Codex unavailable states are preserved (SN-19; BP-78).
+- Your own helper uses a human label; the existing "helper unavailable" states are preserved (SN-19; BP-78).
 - Permission choices use a visible radio and strong teal selection; Full explains its consequence (SN-20; BP-13, BP-77).
 - Product data: Needs installation capability and authoritative permission value. Auto is a proposed preview default; not verified in the provided snapshot. Tests and installation cannot run in static HTML.
 
@@ -168,3 +168,73 @@ Validation: browser checked the four reviewed routes at 1280, 1920 and 390 px in
 - Updated the embedded General panel to show the folder path and sharing settings without disclosure triangles.
 - Kept the pairing dialog, demo QR code, and its loading and empty behavior intact.
 
+
+
+## Revised after the owner's comment (13 Nov)
+
+### addon-detail.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### settings-addons.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### settings-helper.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### settings-phone-pair.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### settings-phone.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### settings.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+
+## Revised after the owner's comment (13 Nov)
+
+Round 2 — working shared components.
+
+### addon-detail.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Phone pairing now has a working demo confirmation and a phone question preview; cancel leaves questions off.
+
+### settings-addons.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Phone pairing now has a working demo confirmation and a phone question preview; cancel leaves questions off.
+
+### settings-helper.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Phone pairing now has a working demo confirmation and a phone question preview; cancel leaves questions off.
+
+### settings-phone-pair.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Phone pairing now has a working demo confirmation and a phone question preview; cancel leaves questions off.
+
+### settings-phone.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Phone pairing now has a working demo confirmation and a phone question preview; cancel leaves questions off.
+
+### settings.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+- Phone pairing now has a working demo confirmation and a phone question preview; cancel leaves questions off.
+
+Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
