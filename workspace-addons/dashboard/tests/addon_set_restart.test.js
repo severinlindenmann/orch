@@ -39,3 +39,33 @@ test('a real refusal is not retried', async () => {
   const r = await page({ok: false, status: 422, text: 'That add-on is not installed.'}, []).addonSet('factory', true);
   assert.equal(r.status, 422);
 });
+
+const ssrc = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+const ps = ssrc.indexOf('function pageStopped('), pe = ssrc.indexOf('function pageFrame(');
+function stoppedPage(services, snap = false) {
+  const el = (tag, props, ...kids) => ({tag, props: props || {}, kids: kids.flat().filter(k => k != null)});
+  const c = vm.createContext({
+    state: {services}, snapshot: snap, h: el, fragment: (...k) => ({tag: 'frag', kids: k}),
+    array: v => Array.isArray(v) ? v : [],
+    addons: () => [{name: 'factory', dashboard: {label: 'Factory'}}],
+    addonLabel: a => a?.dashboard?.label || a?.name,
+  });
+  vm.runInContext(ssrc.slice(ps, pe) + '\nthis.f = pageStopped;', c);
+  return c.f({id: 'factory', path: 'index.html'});
+}
+const text = n => n == null ? '' : typeof n === 'string' ? n : (n.kids || []).map(text).join('');
+const find = (n, key) => !n || typeof n === 'string' ? null : n.props?.['data-key'] === key ? n : (n.kids || []).map(k => find(k, key)).find(Boolean) || null;
+
+test('a stopped background add-on page says so and offers Start (not the raw "not found")', () => {
+  const page = stoppedPage([{addon: 'factory', running: false}]);
+  assert.match(text(page), /Factory isn’t running\./);
+  const start = find(page, 'page-start');
+  assert.equal(start.props['data-action'], 'start');
+  assert.equal(text(start), 'Start');
+});
+
+test('running, no service, or a shared copy: the page itself', () => {
+  assert.equal(stoppedPage([{addon: 'factory', running: true}]), null);
+  assert.equal(stoppedPage([]), null);
+  assert.equal(stoppedPage([{addon: 'factory', running: false}], true), null);
+});

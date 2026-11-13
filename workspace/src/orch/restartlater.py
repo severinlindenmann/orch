@@ -1,8 +1,8 @@
 """Restart the running services a moment after an add-on add/remove ended (addons._restart_later).
 
-`python -I -P -m orch.restartlater <workspace> <pid>`: waits until <pid> (the orch command that changed the
-add-ons, started by the dashboard) has exited, then one more second so the dashboard has sent its answer, then
-restarts what runs, like `orch update` does."""
+`python -I -P -m orch.restartlater <workspace> <pid> [add-on ...]`: waits until <pid> (the orch command
+that changed the add-ons, started by the dashboard) has exited, then one more second so the dashboard has
+sent its answer, then restarts what runs, like `orch update` does, and starts the add-ons just added."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ def main(argv: list[str]) -> int:
         time.sleep(0.2)
     time.sleep(1)
     addons._restart_updated(root)
+    addons._start_added(root, [n for n in argv[2:] if addons.NAME_RE.fullmatch(n)])
     return 0
 
 

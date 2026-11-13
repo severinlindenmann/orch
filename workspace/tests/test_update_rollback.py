@@ -312,7 +312,7 @@ def test_restart_waits_until_the_calling_service_has_answered(tmp_path, monkeypa
     monkeypatch.setattr(addons, "_save_registry", lambda entries: None)
     now, later = [], []
     monkeypatch.setattr(addons, "_restart_updated", lambda root=None: now.append(root) or [])
-    monkeypatch.setattr(addons, "_restart_later", lambda root: later.append(root))
+    monkeypatch.setattr(addons, "_restart_later", lambda root, start=(): later.append(root))
     monkeypatch.setattr(services, "pid_alive", lambda pid: True)
     monkeypatch.setattr(
         services, "running", lambda: [{"pid": os.getppid(), "addon": "dashboard", "workspace": "w"}]
@@ -330,7 +330,41 @@ def test_restartlater_waits_for_the_command_then_restarts(tmp_path, monkeypatch)
     alive = iter([True, True, False])
     monkeypatch.setattr(services, "pid_alive", lambda pid: next(alive))
     monkeypatch.setattr(restartlater.time, "sleep", lambda s: None)
-    seen = []
+    seen, started = [], []
     monkeypatch.setattr(addons, "_restart_updated", lambda root=None: seen.append(root) or [])
-    assert restartlater.main([str(tmp_path), "4242"]) == 0
-    assert seen == [tmp_path]
+    monkeypatch.setattr(addons, "_start_added", lambda root, names: started.append(list(names)) or [])
+    assert restartlater.main([str(tmp_path), "4242", "factory", "../x"]) == 0
+    assert seen == [tmp_path] and started == [["factory"]]
+
+
+def test_an_added_addon_starts_its_service(tmp_path, monkeypatch):
+    """(c) After an add-on add the restart also starts the new add-on's background service (what "Start now"
+    did), from a terminal at once and from the dashboard in the detached helper."""
+    from orch import services
+
+    monkeypatch.setattr(winfinish, "needed", lambda: False)
+    monkeypatch.setattr(addons, "tool_env_change_ok", lambda: None)
+    monkeypatch.setattr(addons, "_install_tool", lambda entries: None)
+    monkeypatch.setattr(addons, "_save_registry", lambda entries: None)
+    monkeypatch.setattr(addons, "_restart_updated", lambda root=None: [])
+    calls = []
+    monkeypatch.setattr(
+        services,
+        "start",
+        lambda root, only=None, envs=None: (
+            calls.append(sorted(only)) or [{"addon": "factory", "running": True}]
+        ),
+    )
+    monkeypatch.setattr(addons, "_called_by_a_service", lambda: False)
+    addons._reinstall([], save=True, then=[], root=tmp_path, done="x", start=["factory"])
+    assert calls == [["factory"]]
+    assert addons._start_added(tmp_path, []) == []  # a removal starts nothing
+    later = []
+    monkeypatch.setattr(addons, "_called_by_a_service", lambda: True)
+    monkeypatch.setattr(addons, "_restart_later", lambda root, start=(): later.append(list(start)))
+    addons._reinstall([], save=True, then=[], root=tmp_path, done="x", start=["factory"])
+    assert later == [["factory"]] and calls == [["factory"]]
+    monkeypatch.setattr(
+        services, "start", lambda root, only=None, envs=None: [{"addon": "factory", "error": "boom"}]
+    )
+    assert addons._start_added(tmp_path, ["factory"]) == ["factory did not start: boom"]

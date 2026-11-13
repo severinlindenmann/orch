@@ -689,7 +689,19 @@ let addonTimer, activeAddon = null;
 // The label comes from the add-on's own manifest; `panel` is a capability the manifest declares (repeats | links | phone).
 const panelOf = id => addons().find(a => a.name === id)?.dashboard?.panel || null;
 const addonLabel = a => a?.dashboard?.label || a?.label || a?.name || 'Add-on';
+// A page served by the add-on's background service: while that service is stopped the page shows why and a Start
+// button (addon.start, like Start now in the catalogue) instead of the proxy's bare "not found".
+function pageStopped(r) {
+  const svc = array(state?.services).filter(s => s && s.addon === r.id);
+  if (snapshot || !svc.length || svc.some(s => s.running === true)) return null;
+  const label = addonLabel(addons().find(a => a.name === r.id));
+  return fragment(h('section', {className:'card pad stack', 'data-key':'page-stopped'},
+    h('div', {className:'row'}, h('p', {className:'grow'}, label + ' isn’t running.'),
+      h('button', {type:'button', className:'btn primary sm', 'data-action':'start', 'data-key':'page-start'}, 'Start'))));
+}
 function pageFrame(r) {
+  const stopped = pageStopped(r);
+  if (stopped) return stopped;
   const src = '/addon/' + r.id + '/' + r.path;
   const frame = h('iframe', {className:'embed', 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
   // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session
