@@ -1375,3 +1375,23 @@ def test_insights_can_be_added_and_removed(proj, monkeypatch, run, uv_calls):
     code, _, err = run("addon", "remove", "insights")
     assert code == 0, err
     assert "insights" not in addons.active(proj)
+
+
+def test_factory_is_shipped_and_its_manifest_is_valid():
+    import tomllib
+
+    import jsonschema
+
+    base = Path(__file__).resolve().parents[2]
+    folder = base / "workspace-addons" / "factory"
+    manifest = folder / "src" / "orch_factory" / addons.MANIFEST
+    jsonschema.validate(
+        tomllib.loads(manifest.read_text()),
+        json.loads((base / "contracts" / "addon-manifest.schema.json").read_text()),
+    )
+    assert "factory" in addons.SHIPPED_ADDONS and addons._builtin_ok("factory")
+    m = addons.folder_manifest(folder)
+    assert m["name"] == "factory"
+    assert m["requires"] == ["automation"]
+    assert m["dashboard"]["label"] == "Factory"
+    assert m["needs"] is True

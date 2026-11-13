@@ -62,7 +62,7 @@ EXT_SCHEMA_MAX = 32 * 1024
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
 # Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
-SHIPPED_ADDONS = ("automation", "dashboard", "focus", "insights", "sync")
+SHIPPED_ADDONS = ("automation", "dashboard", "factory", "focus", "insights", "sync")
 
 
 # ---------------------------------------------------------------- sources
