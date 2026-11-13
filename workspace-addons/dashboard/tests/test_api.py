@@ -404,7 +404,8 @@ def test_files_are_shown_as_text_or_picture_only(art):
     for name in ("data.json", "feed.xml"):  # never served with their own type
         h = _get(art, q + name)[2]
         assert h["Content-Type"].startswith("text/plain") and h["X-Content-Type-Options"] == "nosniff"
-    assert _get(art, q + "pic.svg")[0] == 404  # svg can run code: no preview
+    h = _get(art, q + "pic.svg")[2]  # an svg is a picture, and even opened by itself it cannot run code
+    assert h["Content-Type"] == "image/svg+xml" and "sandbox" in h["Content-Security-Policy"]
     assert _get(art, q + "sub/a.txt")[1] == b"deep"
     assert _get(art, "/api/file?t=t_other000x&k=evidence&n=proof.txt")[1] == b"proof"
     assert _get(art, q + "pic.svg&dl=1")[2]["Content-Disposition"].startswith("attachment")
@@ -882,3 +883,142 @@ def test_links_say_so_when_the_sharing_server_cannot_be_reached(monkeypatch, tmp
 def test_page_csp_allows_blob_pictures(server):
     _code, _body, h = get(server + "/")
     assert "img-src 'self' data: blob:" in h["Content-Security-Policy"]
+
+
+def _zip(files: dict) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_pdf_sound_and_video_are_shown_and_a_download_ignores_the_preview_limit(art, ws):
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts"
+    (d / "doc.pdf").write_bytes(b"%PDF-1.4 /Type /Page /Type /Pages /Type /Page")
+    (d / "clip.webm").write_bytes(b"0123456789" * 10)
+    (d / "jingle.wav").write_bytes(b"RIFF" + b"0" * 50)
+    (d / "huge.bin").write_bytes(b"x" * (3 * 1024 * 1024))
+    q = "/api/file?t=t_other000x&k=artifacts&n="
+    code, _, h = _get(art, q + "doc.pdf")
+    assert (
+        code == 200
+        and h["Content-Type"] == "application/pdf"
+        and "sandbox" not in h["Content-Security-Policy"]
+    )
+    assert _get(art, q + "jingle.wav")[2]["Content-Type"] == "audio/wav"
+    code, body, h = _get(art, q + "clip.webm", {"Range": "bytes=10-19"})
+    assert code == 206 and body == b"0123456789" and h["Content-Range"] == "bytes 10-19/100"
+    assert _get(art, q + "huge.bin")[0] == 404  # no preview for an unknown type ...
+    code, body, h = _get(art, q + "huge.bin&dl=1")  # ... but Download works past the 2 MB preview limit
+    assert code == 200 and len(body) == 3 * 1024 * 1024 and h["Content-Disposition"].startswith("attachment")
+    assert _get(art, q + "big.txt")[0] == 413  # a text preview is still bounded
+
+
+def test_file_info_gives_pdf_pages_archive_listing_and_workbook_cells(art, ws):
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts"
+    (d / "doc.pdf").write_bytes(b"%PDF-1.4 /Type /Page /Type /Pages /Type /Page")
+    (d / "pack.zip").write_bytes(_zip({"a.txt": "hi", "sub/b.txt": "there"}))
+    (d / "bad.xlsx").write_bytes(b"not a zip")
+    sheet = (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+        '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="inlineStr"><is><t>Qty</t></is></c></row>'
+        '<row r="2"><c r="A2"><v>7</v></c><c r="C2"><v>9</v></c></row></sheetData></worksheet>'
+    )
+    (d / "book.xlsx").write_bytes(
+        _zip(
+            {
+                "xl/workbook.xml": '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+                'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                '<sheets><sheet name="Stock" sheetId="1" r:id="rId1"/></sheets></workbook>',
+                "xl/_rels/workbook.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+                "xl/sharedStrings.xml": '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                "<si><t>Item</t></si></sst>",
+                "xl/worksheets/sheet1.xml": sheet,
+            }
+        )
+    )
+    q = "/api/file-info?t=t_other000x&k=artifacts&n="
+    assert json.loads(_get(art, q + "doc.pdf")[1]) == {"pages": 2}
+    got = json.loads(_get(art, q + "pack.zip")[1])
+    assert got["count"] == 2 and got["entries"][1] == {"name": "sub/b.txt", "size": 5}
+    got = json.loads(_get(art, q + "book.xlsx")[1])
+    assert (
+        got["sheets"] == ["Stock"]
+        and got["columns"] == ["Item", "", "Qty"]
+        and got["rows"] == [["7", "", "9"]]
+    )
+    assert got["rowCount"] == 1
+    assert _get(art, q + "bad.xlsx")[0] == 422  # a broken workbook is a plain "cannot be shown"
+    assert _get(art, q + "notes.md")[0] == 404 and _get(art, q + "..%2fx.zip")[0] == 404
+
+
+def test_a_web_page_is_served_sandboxed_with_its_own_stylesheet_and_script(art, ws):
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts" / "site"
+    d.mkdir()
+    (d / "index.html").write_text('<link rel="stylesheet" href="style.css"><script src="app.js"></script>')
+    (d / "style.css").write_text("body{color:red}")
+    (d / "app.js").write_text("1")
+    (d / "secret.pem").write_text("no")
+    base = "/view/t_other000x/artifacts/site/"
+    code, _, h = _get(art, base + "index.html")
+    assert code == 200 and h["Content-Type"].startswith("text/html")
+    csp = h["Content-Security-Policy"]
+    assert "sandbox allow-scripts" in csp and "allow-same-origin" not in csp and "connect-src 'none'" in csp
+    assert _get(art, base + "style.css")[2]["Content-Type"].startswith("text/css")
+    assert _get(art, base + "app.js")[2]["Content-Type"].startswith("text/javascript")
+    assert h["Cross-Origin-Resource-Policy"] == "same-origin"  # the page itself is for this app's own frame
+    assert _get(art, base + "style.css")[2]["Cross-Origin-Resource-Policy"] == "cross-origin"
+    # the frame has an opaque origin, so its own stylesheet, script and pictures arrive as cross-site: allowed
+    for dest, name in (("style", "style.css"), ("script", "app.js")):
+        got = _get(art, base + name, {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": dest})
+        assert got[0] == 200
+    # but nothing else is: not the page, not a fetch, not a navigation, not another site's frame
+    for dest in ("document", "iframe", "empty", None):
+        hd = {"Sec-Fetch-Site": "cross-site", **({"Sec-Fetch-Dest": dest} if dest else {})}
+        assert _get(art, base + "index.html", hd)[0] == 403
+        assert _get(art, base + "style.css", hd)[0] == 403
+    assert (
+        _get(art, base + "index.html", {"Sec-Fetch-Site": "same-site", "Sec-Fetch-Dest": "iframe"})[0] == 403
+    )
+    # this app's own frame, a typed address and tools without Fetch Metadata are fine
+    assert (
+        _get(art, base + "index.html", {"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "iframe"})[0]
+        == 200
+    )
+    assert _get(art, base + "index.html", {"Sec-Fetch-Site": "none", "Sec-Fetch-Dest": "document"})[0] == 200
+    assert _get(art, base + "secret.pem")[0] == 404  # only what a page may load
+    assert _get(art, "/view/t_other000x/artifacts/link.txt")[0] == 404
+    assert _get(art, "/view/t_other000x/artifacts/..%2f..%2fsecret.txt")[0] == 404
+    assert _get(art, "/view/t_other000x/other/site/index.html")[0] == 404
+
+
+def test_a_crafted_workbook_cannot_grow_memory_through_a_far_cell_reference(art, ws):
+    import time
+
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts"
+    rows = "".join(
+        f'<row r="{r}"><c r="A{r}"><v>1</v></c><c r="ZZZZZZ{r}"><v>2</v></c><c r="XFD{r}"><v>3</v></c></row>'
+        for r in range(1, 400)
+    )
+    sheet = f'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{rows}</sheetData></worksheet>'
+    (d / "wide.xlsx").write_bytes(
+        _zip(
+            {
+                "xl/workbook.xml": '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+                'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                '<sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>',
+                "xl/worksheets/sheet1.xml": sheet,
+            }
+        )
+    )
+    t0 = time.monotonic()
+    code, body, _ = _get(art, "/api/file-info?t=t_other000x&k=artifacts&n=wide.xlsx")
+    got = json.loads(body)
+    assert code == 200 and time.monotonic() - t0 < 2
+    assert len(got["rows"]) <= 200 and got["rowCount"] == 398 and got["colCount"] <= 200
+    assert all(len(r) <= 200 for r in got["rows"]) and len(got["columns"]) <= 200

@@ -537,7 +537,7 @@ test('a file is listed once per list, and Overview chips skip the file already i
   assert.ok(!tree.some(n => n.attrs.className === 'ticket-file-chips'), 'no chip row: the Files tab lists files');
   assert.deepEqual(tree.filter(n => n.attrs.className === 'task-proofs row').map(n => n.children.length), [1, 1], 'one chip per file per task, one Tasks list');
   const filesTab = tree.find(n => n.attrs.id === 'ticket-panel-files');
-  assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'file-row').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
+  assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'file-tile').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
   assert.ok(nodes(filesTab).some(n => n.tag === 'h2' && n.children.includes('Files')));
   assert.ok(tree.some(n => n.attrs.id === 'ticket-tab-files' && JSON.stringify(n).includes('"3"')));
 });
