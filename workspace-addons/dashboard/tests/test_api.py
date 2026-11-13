@@ -1022,3 +1022,14 @@ def test_a_crafted_workbook_cannot_grow_memory_through_a_far_cell_reference(art,
     assert code == 200 and time.monotonic() - t0 < 2
     assert len(got["rows"]) <= 200 and got["rowCount"] == 398 and got["colCount"] <= 200
     assert all(len(r) <= 200 for r in got["rows"]) and len(got["columns"]) <= 200
+
+
+def test_a_workbook_with_entity_declarations_is_refused_before_parsing(art, ws):
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts"
+    bomb = (
+        '<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;">]>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets>&lol2;</sheets></workbook>'
+    )
+    (d / "bomb.xlsx").write_bytes(_zip({"xl/workbook.xml": bomb, "xl/worksheets/sheet1.xml": "<worksheet/>"}))
+    code, body, _ = _get(art, "/api/file-info?t=t_other000x&k=artifacts&n=bomb.xlsx")
+    assert code == 422 and json.loads(body) == {"error": "unreadable"}
