@@ -141,8 +141,8 @@ def _valid_ticket(t, stem: str | None = None) -> bool:
     )
 
 
-def _file_here(root: Path, tid: str, ref: str) -> bool:
-    """Is this proof file on this computer? Looked up under the workspace or the ticket's evidence folder, never outside."""
+def _file_here(root: Path, tid: str, ref: str) -> int | None:
+    """Size of this proof file if it is on this computer, else None. Looked up under the workspace or the ticket's evidence folder, never outside."""
     base = root.resolve()
     for cand in (root / ref, root / ".orch" / "tickets" / tid / "evidence" / Path(ref).name):
         try:
@@ -151,8 +151,11 @@ def _file_here(root: Path, tid: str, ref: str) -> bool:
         except (OSError, ValueError, RuntimeError):
             continue
         if p.is_file():
-            return True
-    return False
+            try:
+                return p.stat().st_size
+            except OSError:
+                return 0
+    return None
 
 
 def _mark_missing_proofs(root: Path, t: dict) -> None:
@@ -166,7 +169,10 @@ def _mark_missing_proofs(root: Path, t: dict) -> None:
                 and isinstance(ev.get("ref"), str)
                 and "\x00" not in ev["ref"]
             ):
-                ev["missing"] = not _file_here(root, str(t["id"]), ev["ref"])
+                size = _file_here(root, str(t["id"]), ev["ref"])
+                ev["missing"] = size is None
+                if size is not None:
+                    ev["size"] = size
 
 
 SYNC_BY = "agent:sync"  # orch.history.SYNC_BY (the dashboard needs it when the core cannot be imported)
