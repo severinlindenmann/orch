@@ -42,7 +42,7 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
     for e in d["pending"]:
         q = e["q"]
         if authority.human(q) and q["id"] not in woken:
-            why.append(f"{q['answered_by'].split(':', 1)[1]} answered {e['row']['kind'].split(':')[1]}")
+            why.append(f"{authority.who(q).split(':', 1)[1]} answered {e['row']['kind'].split(':')[1]}")
             ids.append(q["id"])
     crew = {t["ext"]["factory"]["task"]: t.get("status") for t in d["crew"].values()}
     if d["phase"] == "started" and d["kind"] == "run" and not d["shipped"]:
