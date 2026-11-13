@@ -90,6 +90,10 @@ enum GroupRoomRules {
         }
     }
 
+    /// A member's question in this group is still open (by question message id).
+    static func needsYou(_ group: PhoneGroup, open: Set<String>) -> Bool {
+        group.messages.contains { m in [m.task?.questionMessage, m.event?.questionMessage].contains { $0.map(open.contains) == true } }
+    }
     static func readKey(_ group: PhoneGroup) -> String { "group:\(group.key.host)|\(group.key.id)" }
     static func readItems(_ group: PhoneGroup) -> [ChatItem] {
         group.messages.map { message in
@@ -200,17 +204,39 @@ struct GroupListRow: View {
 
 struct GroupsSection: View {
     @Environment(AppModel.self) private var model
+    var filter = "All"
+
+    /// Open groups that pass the list filter (same rule as workspace rows).
+    static func shown(_ model: AppModel, filter: String) -> [PhoneGroup] {
+        let open = Set(ChatsRowRules.openQuestions(model.questions, answers: model.answers).map(\.id))
+        return GroupRoomRules.rows(model.groups).filter { group in
+            let unread = model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group))
+            return ChatsRowRules.matches(filter, unread: unread, needsYou: GroupRoomRules.needsYou(group, open: open))
+        }
+    }
+
+    /// Groups already filtered by the caller (the list computes them once per render).
+    var groups: [PhoneGroup]
+
     var body: some View {
-        let groups = GroupRoomRules.rows(model.groups)
         if !groups.isEmpty {
             Text("Groups").themeFont(13, .semibold).foregroundStyle(Theme.muted).padding(.top, 12)
             ForEach(groups, id: \.key) { GroupListRow(group: $0) }
         }
-        if !model.workspaceSummaries.isEmpty || !GroupRoomRules.rows(model.groups, closed: true).isEmpty {
+        let finished = GroupRoomRules.rows(model.groups, closed: true).count
+        // Helper-chat days stay reachable from each chat's "Earlier" button, so the row only appears with finished groups.
+        if filter == "All" && finished > 0 {
             NavigationLink(value: ChatRoute.groupHistory) {
-                HStack { Text("Earlier"); Spacer(); ShellChevron() }
-                    .themeFont(15).foregroundStyle(Theme.brand).frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-            }.accessibilityIdentifier("group-history")
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle").themeFont(20).foregroundStyle(Theme.muted).frame(width: 24).accessibilityHidden(true)
+                    Text("Finished groups").themeFont(17, .semibold)
+                    Spacer()
+                    Text("\(finished)").themeFont(15).foregroundStyle(Theme.muted)
+                    ShellChevron()
+                }.frame(minHeight: 44).padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).padding(.top, 6)
+                .accessibilityIdentifier("group-history").accessibilityLabel("Finished groups").accessibilityValue("\(finished)")
         }
     }
 }

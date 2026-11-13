@@ -36,3 +36,7 @@
 Added Chats Groups, open / sent / read-only group rooms and Done groups. Redrew PIL-12 info to the shipped layout, with collapsible agent / job Results, one dated label per card, fitted previews, counted text tabs and right-aligned numeric cells. Replaced the publishing question demo with a Result artifact and Accept / Ask for changes bar; finished work without a question keeps Ready for review and no bar. Standardized tasks and References. All new states have right-panel jumps and connected in-phone navigation; existing question kinds remain available.
 
 11 Nov: helper wording
+
+12 Nov phone UX, batch 1: chats list. Removed the summary strip and its NEW pill; a busy workspace row says "Working…". Pinned Needs your OK shows at most 3 (each with its workspace avatar and name), then "See all (n)" opens the filter. Titles are one line (two at XL text). Unread / Needs your OK filters also apply to groups. "Earlier" link is now a "Finished groups" row with a count. Avatars no longer use the status colours (amber, teal, green). Workspace screen: Chat card in the same margins with one status line; "Done" is a plain disclosure row with a count.
+
+12 Nov phone UX, batch 1 review: an unread reply now shows instead of "Working…" on a workspace row and on the Chat card; the Chat card shows the last message or "X is working…" like the app. "Working…" counts only started topics with status Working. Groups follow the Unread / Needs your OK filters. "Finished groups" shows only when there are finished groups (helper-chat days stay under each chat's "Earlier").

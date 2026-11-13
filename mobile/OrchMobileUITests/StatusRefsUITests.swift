@@ -33,7 +33,7 @@ final class StatusRefsUITests: XCTestCase {
         let q3 = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
         XCTAssertTrue(q3.waitForExistence(timeout: 5))
         app.reveal(q3)
-        XCTAssertFalse(app.staticTexts["Done"].exists, "Done is shown once: the toggle, no second header above the rows")
+        XCTAssertLessThanOrEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Done")).count, 1, "Done is shown once: the toggle, no second header above the rows")
         XCTAssertLessThan(done.frame.minY, q3.frame.minY, "the finished chat sits under the toggle")
         shot(app, "2-workspace-done-open")
     }
