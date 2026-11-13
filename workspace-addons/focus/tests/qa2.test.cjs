@@ -42,3 +42,14 @@ test('wont do outcome hides evidence and never describes active work', () => {
   assert.equal(H.outcome({wont_do:true, done:false, state:'doing', reason:'Later', evidence:[{text:'Old proof'}]}), "Won't do");
   assert.equal(H.outcome({wont_do:true, done:false}), "Won't do");
 });
+test('the review bar shows in every view while the ticket waits for review, not only on the Results tab', () => {
+  const v = {state:'review', ticket:{status:'review', questions:[]}, run:{running:false}};
+  assert.equal(H.reviewBarShown(v), true);
+  assert.equal(H.reviewBarShown({...v, run:{running:true}}), false);
+  assert.equal(H.reviewBarShown({...v, state:'needs'}), false);
+  assert.equal(H.reviewBarShown({...v, ticket:{status:'review', questions:[{answer:null}]}}), false);
+  assert.equal(H.reviewBarShown({...v, ticket:{status:'active', questions:[]}}), false);
+  // the page code must not tie the bar to a tab again
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/orch_focus/web/focus.js'), 'utf8');
+  assert.ok(!/els\.review\.hidden = [^;]*tab/.test(src) && !/els\.review\.hidden = i !== 1/.test(src));
+});

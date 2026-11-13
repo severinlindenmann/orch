@@ -34,13 +34,13 @@
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Pause work' : 'Continue';
     els.stop.setAttribute('aria-label', running ? 'Pause work' : 'Continue');
-    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (S.state.tab === 1 && t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
     els.stop.hidden = (asking && !running) || (!running && !hasStarted);
     els.fresh.disabled = running || asking || !hasStarted;
-    els.review.hidden = S.state.tab !== 1 || t.status !== 'review' || asking || running;
+    els.review.hidden = !window.FocusHelpers.reviewBarShown(v);
     els.complete.hidden = v.state !== 'done';
     els.attachBtn.disabled = !(running && v.live);
     els.sub.textContent = '';
@@ -112,7 +112,7 @@
     /* The composer is pinned at the bottom on a phone: the pane keeps that much room below its last row. */
     if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => root.style.setProperty('--fx-compose-h', els.compose.offsetHeight + 'px')).observe(els.compose);
     const toggleHelp = force => { els.help.hidden = force === undefined ? !els.help.hidden : !force; if (!els.help.hidden) els.help.querySelector('button').focus(); else els.moreBtn.focus(); };
-    const selectTab = i => { if (els.tabs[i].hidden) return; S.state.tab = i; els.review.hidden = i !== 1 || S.state.view?.ticket.status !== 'review' || S.state.view?.run.running || S.state.view?.state === 'needs'; els.compose.hidden = S.state.view?.state === 'done' || i >= 2 || (i === 1 && S.state.view?.ticket.status === 'review' && !S.state.changesRequested); els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; }); };
+    const selectTab = i => { if (els.tabs[i].hidden) return; S.state.tab = i; els.review.hidden = !S.state.view || !window.FocusHelpers.reviewBarShown(S.state.view); els.compose.hidden = S.state.view?.state === 'done' || i >= 2 || (S.state.view?.ticket.status === 'review' && !S.state.changesRequested); els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; }); };
     els.tabs.forEach((b, i) => b.addEventListener('click', () => selectTab(i)));
     const setPopover = (panel, button, open) => {
       panel.hidden = !open;
