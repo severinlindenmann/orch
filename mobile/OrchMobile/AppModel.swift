@@ -409,7 +409,8 @@ final class AppModel {
                 answerSentAt[qid] = Date()
                 answers[qid] = opt; answerTick += 1; announcement = "Answer sent: \(opt)"
             case .answerTaken(_, let qid, let text):
-                answers[qid] = text; answeredElsewhere.insert(qid); message = nil
+                // Only the answer value is kept; "" = answered elsewhere, value unknown (the card then shows no chip).
+                answers[qid] = Outbox.takenAnswer(from: text) ?? ""; answeredElsewhere.insert(qid); message = nil
             case .sent: sendTick += 1; announcement = "Message sent"
             case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
             case .unauthorized: handle(RelayError.unauthorized)

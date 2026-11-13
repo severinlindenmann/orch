@@ -309,7 +309,8 @@ final class RealRelayE2ETests: XCTestCase {
         XCTAssertTrue(r.hasPrefix("20"), "second phone answered: \(r)")
         el(app, "answer-Red").tap()
         sleep(3); shot("63-answered-elsewhere")
-        XCTAssertTrue(text(app, "Already answered on your computer").waitForExistence(timeout: 40), "stale answer shows who answered")
+        XCTAssertTrue(text(app, "Answered on your computer").waitForExistence(timeout: 40), "stale answer shows who answered")
+        XCTAssertFalse(text(app, "already answered:").exists, "the server error text is never shown as the answer")
         shot("64-stale-answer-note")
     }
 

@@ -305,5 +305,31 @@ final class TicketModelTests: XCTestCase {
         await model.answer(q, with: "TIMESTAMP")
         XCTAssertTrue(model.answeredElsewhere.contains(q.id))
         XCTAssertTrue(model.answers[q.id]?.contains("DATE") == true)
+        XCTAssertEqual(model.answers[q.id], "DATE", "only the answer value, never the 409 message")
+    }
+
+    func testTakenAnswerKeepsOnlyTheValue() {
+        XCTAssertEqual(Outbox.takenAnswer(from: "This question was already answered: Blue."), "Blue")
+        XCTAssertEqual(Outbox.takenAnswer(from: "This question was already answered: In the total"), "In the total")
+        XCTAssertNil(Outbox.takenAnswer(from: "Conflict"))
+        XCTAssertNil(Outbox.takenAnswer(from: "This question was already answered: ."))
+    }
+
+    func testQuestionCardRules() {
+        XCTAssertEqual(QuestionCardRules.optionText("DATE"), "Date")
+        XCTAssertEqual(QuestionCardRules.optionText("TIMESTAMP"), "Timestamp")
+        XCTAssertEqual(QuestionCardRules.optionText("CSV"), "CSV")
+        XCTAssertEqual(QuestionCardRules.optionText("Yes"), "Yes")
+        XCTAssertEqual(QuestionCardRules.optionText("Version A"), "Version A")
+        XCTAssertEqual(QuestionCardRules.sendingText(remaining: 5), "Sending in 5 s")
+        XCTAssertEqual(QuestionCardRules.sendingText(remaining: 0.2), "Sending in 1 s")
+        XCTAssertEqual(QuestionCardRules.sendingText(remaining: -3), "Sending in 1 s")
+        XCTAssertTrue(QuestionCardRules.selectedAnnouncement("Blue", seconds: 5).hasPrefix("Blue selected. Sending in 5 seconds"))
+    }
+
+    func testQuestionContextIsTheTitleOnly() async {
+        let model = await ready()
+        let q = model.questions[0]
+        XCTAssertEqual(QuestionCardRules.context(q), "Rename field X in ingestion job")
     }
 }

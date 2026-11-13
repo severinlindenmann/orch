@@ -342,6 +342,17 @@ final class Outbox {
         return events
     }
 
+    /// The answer value inside a 409 "already answered" message ("This question was already answered: Blue." -> "Blue").
+    /// Nil when the text has no recognisable value: the error text must never be shown as the answer.
+    nonisolated static func takenAnswer(from message: String) -> String? {
+        guard message.range(of: "already answered", options: .caseInsensitive) != nil,
+              let colon = message.range(of: ": ") else { return nil }
+        var value = message[colon.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasSuffix(".") { value.removeLast() }
+        value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
     private static func clearBlobIds(_ i: inout OutboxItem) {
         for k in i.files.indices { i.files[k].blobId = nil }
         i.voice?.file.blobId = nil
