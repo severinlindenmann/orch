@@ -10,8 +10,12 @@ def test_settings_navigation_and_cards():
         "'data-action':'settings-tab'",
         "'data-key':'settings-switch-'",
         "a.dashboard?.panel === 'phone'",
-        "panel('phone', settingsTab === 'phone' ? addonView(phoneAddon) : null)",
+        "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
+        "'1. Relay connection'",
+        "'Connect to your relay first'",
+        "function addonDetailPage(addon)",
+        "'About this add-on'",
         "OrchLook?.settingsSection()",
         "agent-card",
         "role:'status', className:'meta test-note'",
@@ -26,12 +30,15 @@ def test_settings_navigation_and_cards():
     assert "className:'settings-details'" not in src
     # the phone tab is a real tab that stays in Settings (no link away to the add-on page)
     assert "href:'#addon/' + phoneAddon.name" not in src
+    # the add-on detail page has no Details toggle; "Pair a phone" stays disabled until the relay is connected
+    detail = src[src.index("function addonDetailPage(addon)") :][:3500]
+    assert "h('summary'" not in detail and "'Details'" not in detail
+    assert "connected ? {} : {disabled:true}" in src
     assert "history.replaceState(null, '', '#settings/' + tab)" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
-    # owner fb11 (11 Nov): the folder path is on the row without a click; plain words + full path under Details
-    folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:700]
-    assert folder.index("middleShort(settings.folder)") < folder.index("h('summary', {}, 'Details')")
-    assert folder.index("h('summary', {}, 'Details')") < folder.index("'Stored on this computer'")
+    # folder: plain name + Copy path + quiet full path, no Details toggle
+    folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:900]
+    assert "'Copy path'" in folder and "h('summary'" not in folder
     assert "['agent', 'Helper']" in src and "['agent', 'Agent']" not in src
     css = (webjs.WEB / "pages/settings.css").read_text()
     assert "@media(max-width:760px)" in css
@@ -50,9 +57,7 @@ def test_switch_rows_choices_and_closed_details_owner_pass():
     narrow = css[css.index("@media(max-width:720px)") :]
     stacked = ".settings .copies-choices{justify-self:stretch;flex-direction:column;align-items:stretch}"
     assert stacked in narrow
-    # a closed Details has no empty band under it
     assert ".settings .copies-details{padding:0 16px;" in css
-    assert ".settings .copies-details[open]{padding-bottom:8px}" in css
 
 
 def test_repeat_window_offers_plain_choices_and_open_tickets():
@@ -77,9 +82,9 @@ def test_shared_links_are_optional_and_use_plain_actions():
         "Couldn't reach the sharing server; try again in a moment.",
         "sharedLinks !== null",
         "No shared links yet.",
-        "Link valid until ",
+        "Valid until ",
         "No end date",
-        "'Expired'",
+        "'Expired '",
         "if (!link.copy) return;",
         "navigator.clipboard.writeText(link.link)",
         "act('link.extend', {id:link.id, days:7})",

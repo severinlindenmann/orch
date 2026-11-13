@@ -15,7 +15,7 @@ from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 from . import actions, reffiles, selfupdate, ticketfiles
 from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
@@ -42,6 +42,8 @@ KIT = (
     "question-card-state.js",
     "question-card.js",
     "evidence.js",
+    "fileviewer.js",
+    "fileviewer.css",
     "blocks.js",
     "blocks.css",
 )
@@ -247,6 +249,24 @@ class Handler(BaseHTTPRequestHandler):
             if cross and not PAGE_PATH.fullmatch(px.group(2) or ""):
                 return self._send(403, b"forbidden", "text/plain")
             return self._proxy("GET", px.group(1), px.group(2) or "/", query, cross)
+        pv = re.fullmatch(r"/view/(t_[a-z0-9]{6,16})/(artifacts|evidence|files)/(.+)", path)
+        if (
+            pv
+        ):  # a ticket's web page and its own assets, only ever inside a sandboxed frame (no cookie, no /api)
+            site = self.headers.get("Sec-Fetch-Site")
+            if site not in (None, "same-origin", "none"):
+                # The page itself and anything a script fetches must come from this app. Only a sandboxed page's own
+                # stylesheet, script, picture, font or media arrives as cross-site (its origin is opaque).
+                last = pv.group(3).rsplit(".", 1)[-1].lower()
+                if self.headers.get("Sec-Fetch-Dest") not in ticketfiles.PAGE_SUBRESOURCE_DEST or last in (
+                    "html",
+                    "htm",
+                ):
+                    return self._send(403, b"forbidden", "text/plain")
+            code, body, ctype, extra = ticketfiles.read_page(
+                self.root, pv.group(1), pv.group(2), unquote(pv.group(3))
+            )
+            return self._send(code, body, ctype, extra, csp=ticketfiles.PAGE_CSP)
         if path.startswith("/api/") and not self._same_origin():  # a foreign page must not trigger pulls
             return self._send(403, b"forbidden", "text/plain")
         if (
@@ -321,6 +341,13 @@ class Handler(BaseHTTPRequestHandler):
                 json.dumps(ticketfiles.listing(self.root, self.orch_bin, m.group(1))).encode(),
                 "application/json",
             )
+        if path == "/api/file-info":
+            q = parse_qs(query, keep_blank_values=True)
+            one = lambda k: (q.get(k) or [""])[0]
+            code, data = ticketfiles.info(
+                self.root, one("t"), one("k"), one("n"), int(one("s")) if one("s").isdigit() else 0
+            )
+            return self._send(code, json.dumps(data).encode(), "application/json")
         if (
             path == "/api/file"
         ):  # one file of a ticket's artifacts or evidence folder: plain text and pictures only
@@ -331,7 +358,11 @@ class Handler(BaseHTTPRequestHandler):
             )
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
             if (
-                code == 200 and rng and ctype.startswith("audio/") and body and (rng.group(1) or rng.group(2))
+                code == 200
+                and rng
+                and ctype.startswith(("audio/", "video/"))
+                and body
+                and (rng.group(1) or rng.group(2))
             ):  # Safari plays a sound only with byte ranges
                 size = len(body)
                 if rng.group(1):
@@ -353,8 +384,12 @@ class Handler(BaseHTTPRequestHandler):
                 code,
                 body,
                 ctype,
-                {"Accept-Ranges": "bytes", **extra} if ctype.startswith("audio/") else extra,
-                csp="default-src 'none'; img-src 'self'; sandbox",
+                {"Accept-Ranges": "bytes", **extra} if ctype.startswith(("audio/", "video/")) else extra,
+                csp=(
+                    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'self'"
+                    if ctype == "application/pdf"
+                    else "default-src 'none'; img-src 'self'; media-src 'self'; sandbox"
+                ),
             )
         if path.startswith("/api/addon/"):  # only names that are active here and have a tab
             name = path[len("/api/addon/") :]

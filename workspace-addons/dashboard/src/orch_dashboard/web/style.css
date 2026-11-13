@@ -457,5 +457,10 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .strip .day-head{gap:8px;color:var(--text-muted)}
 .strip .day.today{background:var(--surface-2)}.strip .day.today .day-head b{color:var(--brand)}
 @media(max-width:950px){.strip{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.strip .day{border-width:0 0 1px 0}}
+
+/* Page not found (errors/not-found.html). */
+.error-hero{min-height:320px;display:grid;align-content:center;justify-items:start;gap:16px;padding:40px}
+.error-number{font-size:48px;line-height:1;color:var(--text-faint);font-weight:600}
+@media(max-width:600px){.error-hero{padding:24px;min-height:240px}}
 /* Page heading with an actions slot: actions sit at the end of the title row */
 .page-heading:has(>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}

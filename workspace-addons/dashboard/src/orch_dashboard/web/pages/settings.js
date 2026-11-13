@@ -1,6 +1,6 @@
 'use strict';
 // Settings, add-on pages and add-on actions.
-let settingsTab = 'general';
+let settingsTab = 'general', settingsAddon = null;
 const settingsBusy = new Set();
 // A long path keeps its start and its end: "/Users/me/…/team/pilatus". The full path is in the row's title.
 const middleShort = (value, max = 48) => {
@@ -9,6 +9,10 @@ const middleShort = (value, max = 48) => {
   const tail = Math.ceil((max - 1) / 2), head = max - 1 - tail;
   return text.slice(0, head) + '…' + text.slice(-tail);
 };
+// The add-on's name as the sidebar shows it (its manifest label), from the live add-on list.
+const rowLabel = a => addonLabel(addons().find(x => x.name === a.name) || a);
+const asList = value => Array.isArray(value) ? value : [value];
+const folderName = path => String(path || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
 const settingsText = (tag, attrs, value) => {
   const node = h(tag, attrs);
   node.textContent = String(value ?? '');
@@ -50,7 +54,7 @@ function permissionsCard(settings) {
 // Share with team: off by default; on writes one short entry into the team's AGENTS.md (the orch files stay local).
 function shareCard(settings) {
   const on = settings.share === true;
-  return h('div', {className:'stack', 'data-key':'settings-share'}, h('h2', {className:'set-sub'}, 'Team'),
+  return h('div', {className:'stack', 'data-key':'settings-share'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Share with team'),
         settingsText('p', {className:'meta'}, on ? 'AGENTS.md has a short orch entry. Turn off to remove it.' : 'Off: orch files stay on this computer and your team sees nothing.')),
@@ -80,7 +84,7 @@ function privateCard(settings) {
       settingsText('p', {className:'meta'}, hidden + (hidden === 1 ? " request" : " requests") + " orch can't show safely. Not allowed.")))) : null);
 }
 function workflowCard(settings) {
-  return h('div', {className:'stack', 'data-key':'settings-workflow'}, h('h2', {className:'set-sub'}, 'Finished work'),
+  return h('div', {className:'stack', 'data-key':'settings-workflow'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
       h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers may mark tickets Done'),
         settingsText('p', {className:'meta'}, 'On: a helper marks its finished work Done. Off: helpers send finished work to Review and you decide when it is Done.')),
@@ -136,7 +140,7 @@ function copiesDiskText(d) {
 }
 function copiesCard(settings) {
   const mode = copiesModeOf(settings), on = mode !== 'off', busy = settingsBusy.has('copies');
-  const disk = settings.copies_disk, problems = array(disk?.stuck).length + array(disk?.orphaned).length > 0, off = snapshot || busy;
+  const disk = settings.copies_disk, off = snapshot || busy;
   const cap = h('select', {className:'input copies-max', 'aria-label':'Most copies at the same time', 'data-key':'settings-copies-max', disabled:off},
     [1, 2, 3, 4, 5, 6, 8, 10, 20].map(n => h('option', {value:String(n)}, String(n))));
   cap.value = String(settings.copies_max || 3);
@@ -147,12 +151,12 @@ function copiesCard(settings) {
     : h('div', {className:'row copies-setup-view'}, settingsText('p', {className:settings.copy_setup ? 'grow mono' : 'grow meta'}, settings.copy_setup || 'Nothing'),
       snapshot ? null : h('button', {type:'button', className:'btn sm', 'data-key':'settings-copy-setup-edit', 'data-action':'copies-setup-edit'}, 'Edit'));
   const row = (title, hint, ...rest) => h('div', {className:'copies-sub'}, settingsText('h3', {}, title), hint ? settingsText('p', {className:'meta'}, hint) : null, ...rest);
-  return h('div', {className:'stack', 'data-key':'settings-copies'}, h('h2', {className:'set-sub'}, 'Copies of your files'),
+  return h('div', {className:'stack', 'data-key':'settings-copies'},
     h('div', {className:'card'},
       h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers working at the same time: each gets its own copy of your files')),
         h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Each helper gets its own copy of your files', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
       reviewPanel('copies-switch', settings),
-      h('details', {className:'copies-details', 'data-key':'settings-copies-details', open:problems ? '' : null}, h('summary', {}, 'Details'),
+      h('div', {className:'copies-details', 'data-key':'settings-copies-details'},
         h('div', {className:'stack copies-more'},
           row('When', '', h('div', {className:'row copies-choices', role:'radiogroup', 'aria-label':'When each helper gets its own copy'}, COPY_CHOICES.map(([id, label]) =>
             h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:off || !on}, label)))),
@@ -294,7 +298,7 @@ function syncCard(settings) {
       await syncLoad();
     }))) : null;
   const notSynced = array(card?.not_synced);
-  const details = card && card.mode !== 'off' ? h('details', {className:'sync-details', id:'sync-details', 'data-key':'sync-details', open:syncUi.details ? '' : null}, h('summary', {}, 'Details'),
+  const details = card && card.mode !== 'off' ? h('div', {className:'sync-details', id:'sync-details', 'data-key':'sync-details'},
     h('ul', {}, h('li', {'data-key':'sync-last-error'}, syncLastError(card)), notSynced.map((f, i) => h('li', {'data-key':'sync-not-synced-' + i}, 'Not synced: ' + f.name + (f.why ? ' (' + f.why + ')' : ''))))) : null;
   return wrap([
     h('div', {className:'sync-head'}, h('h3', {}, 'Sync'), card && card.mode !== 'off' ? syncStatusLine(card) : null),
@@ -372,6 +376,95 @@ function signStep({title, body, here, there, value, done, run}) {
   window.orch.open(d);
   return d;
 }
+// Short summaries with a direct way to the place that changes them (draft: Everyday settings).
+function everydayCard(settings, phoneAddon) {
+  const chosen = array(settings.agents).find(a => a.chosen);
+  const go = (tab, label, key) => h('button', {type:'button', className:'btn ghost sm', 'data-action':'settings-tab', 'data-tab':tab, 'data-key':key}, label + ' →');
+  const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
+  return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
+    row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (state.mobile_mode.on ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Pair a phone and choose which workspaces may reach this one.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+}
+// Phone & workspaces (drafts settings-phone / settings-phone-pair): 1. the relay connection, 2. pairing + delivery,
+// then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
+function relayInfo(phoneAddon) {
+  const row = array(state.settings?.addons).find(a => a.name === phoneAddon.name), d = row?.detail;
+  return {connected:!!(row?.active && d?.connected), address:d?.address || '', workspaces:array(d?.workspaces)};
+}
+function phonePanel(phoneAddon, settings) {
+  const {connected, address, workspaces} = relayInfo(phoneAddon);
+  const mm = snapshot ? null : window.OrchMobileMode?.settingsSection(h);
+  const rowOf = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), h('div', {className:'grow set-ctl'}, ...asList(value)), action);
+  const btn = (label, cls, name, extra = {}) => snapshot ? null : h('button', {type:'button', className:'btn sm ' + cls, 'data-action':name, 'data-key':'phone-' + name, ...extra}, label);
+  const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, '1. Relay connection'), h('div', {className:'card'},
+    rowOf('Status', [connected ? h('strong', {className:'on-dot', 'data-key':'phone-relay-status'}, 'Connected') : h('strong', {className:'muted', 'data-key':'phone-relay-status'}, 'Not set up'),
+      settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, connected && address ? address : 'No relay connected')],
+      h('div', {className:'row'}, connected ? btn('Reconnect', 'outline', 'relay-reconnect') : null, btn('Set up relay', connected ? 'ghost' : 'primary', 'relay-setup')), 'phone-relay-row'),
+    settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your relay.')));
+  const pair = h('div', {className:'stack', 'data-key':'phone-pair'}, h('h2', {className:'set-sub'}, '2. Pair a phone'), h('div', {className:'card'},
+    rowOf('Pairing', [settingsText('p', {}, 'Link a phone to this workspace'), connected ? null : settingsText('p', {className:'meta', 'data-key':'phone-relay-hint'}, 'Connect to your relay first')],
+      btn('Pair a phone', 'primary', 'phone-pair', connected ? {} : {disabled:true}), 'phone-pairing-row'),
+    mm));
+  const allowed = h('div', {className:'stack', 'data-key':'phone-allowed'}, h('div', {className:'row between'}, h('h2', {className:'set-sub'}, 'Allowed workspaces'),
+    settingsText('span', {className:'meta'}, (connected ? workspaces.length : 0) + ' allowed')),
+    connected && workspaces.length ? h('div', {className:'card'}, workspaces.map(w => h('div', {className:'card-row', 'data-key':'phone-ws-' + w.name}, h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))))
+      : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Allow a workspace to send it messages and files.')));
+  return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed,
+    h('div', {className:'row between'}, settingsText('p', {className:'meta'}, 'Messages have their own page.'), h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
+}
+// The pairing dialog stays inside Settings. A pairing code comes from the relay and this page has no way to ask
+// for one yet, so it shows no code (never a made-up QR), only the relay the phone would go through.
+function phonePairDialog() {
+  const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
+  const info = phoneAddon ? relayInfo(phoneAddon) : null;
+  if (!info?.connected) return;
+  const {d, actions} = dialog('Pair a phone', 'dialog', 'settings-other');
+  actions.firstChild.textContent = 'Close';
+  d.append(settingsText('p', {className:'meta', 'data-key':'phone-pair-relay'}, 'Through your relay: ' + (info.address || 'your relay')),
+    settingsText('p', {className:'meta'}, 'A phone is paired with a one-time code from your relay. This page cannot create that code yet, so no code is shown.'),
+    settingsText('p', {className:'meta'}, 'Your phone talks to this workspace through your relay.'), actions);
+  window.orch.open(d);
+}
+function relaySetupDialog() {
+  const {d, actions} = dialog('Set up relay', 'dialog', 'settings-other');
+  actions.firstChild.textContent = 'Close';
+  d.append(settingsText('p', {className:'meta'}, 'Connecting a relay needs its address, a setup code from its administrator and your signature. This page cannot do that yet.'),
+    settingsText('p', {className:'meta'}, 'Once a relay is connected, its address and status show here.'), actions);
+  window.orch.open(d);
+}
+async function relayReconnect(control) {
+  if (control.disabled) return;
+  control.disabled = true;
+  await refresh();
+  const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
+  const ok = phoneAddon && relayInfo(phoneAddon).connected;
+  window.orch.toast(ok ? 'Checked. Your relay is connected.' : 'Your relay is not connected.', ok ? 'ok' : 'error');
+  control.disabled = false;
+}
+// One add-on's own settings page (draft addon-detail): the switch, the connection, what it holds, and a quiet
+// always-visible "About this add-on" at the bottom. Reached from a row of the Add-ons tab (#settings/addons/<name>).
+function addonDetailPage(addon) {
+  const d = addon.detail, live = addons().find(a => a.name === addon.name), label = rowLabel(addon);
+  const connected = addon.active && d?.connected;
+  const row = (title, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, title), h('div', {className:'grow set-ctl'}, ...asList(value)), action);
+  const links = live?.dashboard?.panel === 'links';
+  const shown = state.look ? state.look.shared_pages !== false : null;
+  const settingsRows = [
+    row('Add-on', settingsText('p', {}, addon.description || label),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off'), 'addon-detail-switch'),
+    addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
+    links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
+  ];
+  const where = live && (live.dashboard || live.page)
+    ? h('div', {className:'card'}, row('Open', settingsText('p', {}, 'See what ' + label + ' holds.'), h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(addon.name), 'data-key':'addon-detail-open'}, 'Open ' + label + ' →'), 'addon-detail-open-row')) : null;
+  return fragment(h('div', {className:'settings stack', 'data-key':'settings-addon-detail'},
+    heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
+    h('div', {className:'card'}, settingsRows),
+    where,
+    h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
+      settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
+}
 function settingsPage() {
   const settings = state.settings;
   const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
@@ -380,42 +473,57 @@ function settingsPage() {
     const radio = h('input', {type:'radio', 'aria-label':agent.label, name:'settings-agent', value:agent.name, 'data-key':'settings-agent-' + agent.name, 'data-settings-agent':agent.name, disabled:settingsBusy.has('agent') || (!agent.found && agent.status !== 'your command')});
     radio.checked = !!agent.chosen;
     const missing = !agent.found && agent.status !== 'your command';
-    const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer';
+    const status = agent.status === 'your command' ? 'Your own helper' : agent.found ? 'Found' + (agent.version ? ' · version ' + agent.version : '') : 'Not found on this computer. Install it, then it shows up here.';
     return h('div', {className:'card card-row agent-opt agent-card' + (missing ? ' off' : '') + (agent.chosen ? ' sel' : ''), 'data-key':'settings-agent-row-' + agent.name}, radio,
       h('div', {className:'grow'}, settingsText('h3', {}, agent.label), settingsText('p', {className:'meta'}, status)),
       agent.chosen ? h('span', {className:'chip active def'}, 'Default') : null);
   }).map(row => row);
   array(settings.agents).forEach((agent, i) => {
-    if (snapshot) return;
+    // An unavailable helper has nothing to test: its row already says how to get it.
+    if (snapshot || (!agent.found && agent.status !== 'your command')) return;
     const test = h('button', {type:'button', className:'btn ghost sm', 'data-action':'agent-test', 'data-name':agent.name, 'data-key':'settings-test-' + agent.name, disabled:settingsBusy.has('test-' + agent.name)}, 'Test');
     const note = agentTests[agent.name] ? h('p', {role:'status', className:'meta test-note'}, plainTest(agentTests[agent.name].reason)) : null;
     agents[i].append(test);
     if (note) agents[i].append(note);
   });
   const panel = (id, body) => h('section', {className:'set-sec', id:'settings-panel-' + id, 'data-key':'settings-panel-' + id, role:'tabpanel', 'aria-labelledby':'settings-tab-' + id, hidden:settingsTab !== id, tabindex:'0'}, body);
+  // One tidy aligned list: the same name as the sidebar, one plain line, the connection status, the switch.
   const addonRow = addon => {
-    const more = addon.name !== 'dashboard' && addon.active && addon.detail?.connected, open = addonOpen.has(addon.name);
-    return h('div', {className:'card ad-row', 'data-key':'settings-addon-' + addon.name},
-      h('div', {className:'ad-h'}, h('div', {className:'grow'}, settingsText('h3', {}, addonLabel(addon)), settingsText('p', {className:'meta'}, addon.description)),
-        more ? h('button', {type:'button', className:'ad-more', 'aria-expanded':open, 'data-action':'addon-more', 'data-name':addon.name}, h('span', {className:'chevron'}, iconEl('down')), 'Details') : null,
-        addon.name === 'dashboard' ? h('span', {className:'always'}, 'Always on') : h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':addonLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')),
-      more ? h('div', {className:'ad-b', hidden:!open}, addonFacts(addon)) : null);
+    const d = addon.detail, connected = addon.active && d?.connected;
+    const status = !addon.active || !d ? null : connected ? h('span', {className:'on-dot ad-status'}, 'Connected') : h('span', {className:'off-dot ad-status'}, 'Not connected yet');
+    const about = connected && d.address ? settingsText('p', {className:'meta ad-about', 'data-key':'settings-addon-about-' + addon.name}, 'Connection address: ' + d.address) : null;
+    return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
+      h('div', {className:'grow'}, settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
+      h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off'));
   };
+  const optional = array(settings.addons).filter(a => a.name !== 'dashboard');
+  const addonsPanel = h('div', {className:'stack', 'data-key':'settings-addon-list'},
+    h('div', {className:'row between ad-head'}, h('h2', {className:'set-sub'}, 'Installed add-ons'),
+      snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'addon-catalog', 'data-key':'settings-addon-catalog'}, 'Add an add-on')),
+    optional.length ? h('div', {className:'card'}, optional.map(addonRow))
+      : h('div', {className:'card pad empty-note', 'data-key':'settings-addons-empty'}, settingsText('h3', {}, 'No optional add-ons installed'), settingsText('p', {className:'meta'}, 'Add tools for schedules, shared links and more.')),
+    settingsText('p', {className:'meta', 'data-key':'settings-addon-foot'}, 'The dashboard is always on. Turn an add-on off without removing its settings.'));
+  const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
+  if (detailAddon) return addonDetailPage(detailAddon);
   return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings'),
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
-    panel('general', [privateCard(settings), snapshot ? null : window.OrchMobileMode?.settingsSection(h), snapshot ? null : window.OrchLook?.settingsSection(), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
+    panel('general', [privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-      // Owner fb11: the folder is visible on the row without a click (long paths shortened in the middle, the full
-      // path on hover); the plain words and the full path stay under Details.
-      h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
-        settingsText('p', {className:'mono folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder)),
-        h('details', {className:'folder-details', 'data-key':'settings-folder-details'}, h('summary', {}, 'Details'), h('p', {className:'meta'}, 'Stored on this computer'), settingsText('p', {className:'mono meta'}, settings.folder)))))),
-      syncCard(settings), shareCard(settings), workflowCard(settings), copiesCard(settings)]),
+      // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
+      h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
+        settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),
+        settingsText('p', {className:'mono meta folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder))),
+        snapshot || !settings.folder ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')))),
+      snapshot ? null : window.OrchLook?.settingsSection(),
+      syncCard(settings),
+      everydayCard(settings, phoneAddon),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings))]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),
-    phoneAddon ? panel('phone', settingsTab === 'phone' ? addonView(phoneAddon) : null) : null,
-    panel('addons', h('div', {className:'settings-addon-grid'}, array(settings.addons).map(addonRow)))))
+    phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
+    panel('addons', addonsPanel)))
   ));
 }
 // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
@@ -462,6 +570,14 @@ function openAgentForm(control) {
   slot.replaceChildren(form);
   nameIn.focus();
 }
+// The catalogue is not connected yet: say so plainly and list what is installed (nothing invented).
+function addonCatalog() {
+  const {d, actions} = dialog('Add an add-on', 'dialog', 'settings-other');
+  const names = array(state.settings?.addons).filter(a => a.name !== 'dashboard').map(rowLabel);
+  d.append(settingsText('p', {className:'meta'}, names.length ? names.join(', ') + ' are already installed.' : 'No add-ons are installed yet.'),
+    settingsText('p', {className:'meta'}, 'The add-on catalogue is not connected yet. Available add-ons will appear here.'), actions);
+  window.orch.open(d);
+}
 function settingsConfirm(title, text, cls, label, send) {
   const {d, actions} = dialog(title, 'dialog', 'settings-other');
   d.querySelector('h2').textContent = title;
@@ -478,7 +594,7 @@ function settingsConfirm(title, text, cls, label, send) {
   actions.append(confirm);
   const [lead, ...rest] = String(text).split('\n');
   if (rest.length && cls === 'preserve-lines') {
-    d.append(settingsText('p', {}, lead), h('details', {className:'consent-details'}, h('summary', {}, 'Details'), settingsText('pre', {className:cls}, rest.join('\n'))), actions);
+    d.append(settingsText('p', {}, lead), settingsText('pre', {className:cls + ' consent-details'}, rest.join('\n')), actions);
   } else d.append(settingsText('pre', {className:cls}, text), actions);
   window.orch.open(d);
 }
@@ -543,18 +659,15 @@ function addonTab(id) {
   }
   return fragment(heading(addonLabel(addons().find(a => a.name === id))), addonHost(id));
 }
-// The add-on's own page (#addon/<name>), shown inside another page: its iframe, or the host its blocks are painted into.
-const addonView = a => a.page ? pageFrame({id:a.name, path:''}) : addonHost(a.name);
-// The add-on whose blocks view is on screen: its own tab, or the phone tab in Settings.
+// The add-on whose blocks view is on screen: its own tab.
 function shownAddon() {
   const r = route();
-  if (r.kind === 'addon') return r.id;
-  const phone = r.kind === 'settings' && settingsTab === 'phone' ? addons().find(a => a.dashboard?.panel === 'phone') : null;
-  return phone && !phone.page ? phone.name : null;
+  return r.kind === 'addon' ? r.id : null;
 }
 // Choosing a Settings tab stays on Settings: the address becomes #settings/<tab> without a navigation.
 function settingsGo(tab) {
   settingsTab = tab;
+  settingsAddon = null;
   settingsReview = null;
   history.replaceState(null, '', '#settings/' + tab);
   render();
@@ -768,20 +881,23 @@ async function loadSharedLinks() {
     sharedLinksDown = data.unreachable === true;
   } catch (_) { sharedLinks = null; sharedLinksDown = false; }
 }
+// Compact rows, one line per file: name, expiry shown once, then Copy link / Extend / Stop sharing.
+function linkExpiry(link) {
+  const expiry = link.expires_at, date = expiry ? new Date(typeof expiry === 'number' ? expiry * 1000 : expiry) : null;
+  const expired = link.expired === true || (date && date.getTime() <= Date.now());
+  const text = date ? (expired ? 'Expired ' : 'Valid until ') + (Number.isNaN(date.getTime()) ? String(expiry) : date.toLocaleDateString()) : 'No end date';
+  return {expired, text};
+}
 function sharedLinksCard() {
   return h('section', {className:'card pad stack addon-native', 'data-key':'shared-links'}, h('h2', {}, 'Links'),
     sharedLinksDown ? h('p', {className:'meta'}, "Couldn't reach the sharing server; try again in a moment.") : sharedLinks.length ? sharedLinks.map(link => {
-      const expiry = link.expires_at;
-      const date = expiry ? new Date(typeof expiry === 'number' ? expiry * 1000 : expiry) : null;
-      const expired = link.expired === true || (date && date.getTime() <= Date.now());
-      const control = (verb, label) => h('button', {type:'button', className:'btn outline', 'data-native':verb, 'data-link-id':link.id,
+      const {expired, text} = linkExpiry(link);
+      const control = (verb, label) => h('button', {type:'button', className:'btn outline sm', 'data-native':verb, 'data-link-id':link.id,
         disabled:verb === 'link-copy' && !link.copy, title:verb === 'link-copy' && !link.copy ? 'This link is not available to copy.' : null}, label);
-      return h('article', {className:'shared-link stack', 'data-key':'shared-link-' + link.id},
-        settingsText('h3', {}, link.name), expired ? h('span', {className:'chip'}, 'Expired') : null,
-        settingsText('p', {className:'meta'}, date ? 'Link valid until ' + (Number.isNaN(date.getTime()) ? String(expiry) : date.toLocaleDateString()) : 'No end date'),
-        link.size != null ? settingsText('p', {className:'meta'}, typeof link.size === 'number' ? link.size.toLocaleString() + ' bytes' : link.size) : null,
-        h('div', {className:'actions'}, control('link-copy', 'Copy link'), control('link-extend', 'Extend'), control('link-stop', 'Stop sharing')),
-        h('details', {}, h('summary', {}, 'Details'), settingsText('p', {className:'meta'}, link.id), link.details ? settingsText('p', {}, link.details) : null));
+      const meta = [text, link.size != null ? (typeof link.size === 'number' ? link.size.toLocaleString() + ' bytes' : link.size) : null].filter(Boolean).join(' · ');
+      return h('article', {className:'shared-link link-row', 'data-key':'shared-link-' + link.id},
+        h('div', {className:'link-main'}, settingsText('h3', {}, link.name), settingsText('span', {className:'meta' + (expired ? ' bad' : '')}, meta)),
+        h('div', {className:'actions'}, control('link-copy', 'Copy link'), control('link-extend', 'Extend'), control('link-stop', 'Stop sharing')));
     }) : h('p', {className:'meta'}, 'No shared links yet.'));
 }
 async function sharedLinkAction(control) {
