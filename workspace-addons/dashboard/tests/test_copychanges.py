@@ -1,11 +1,15 @@
 import subprocess
-from pathlib import Path
 
 from orch_dashboard import copychanges
 
 
 def git(root, *args):
-    subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@e.x", *args], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=T", "-c", "user.email=t@e.x", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
 
 
 def make(tmp_path):
