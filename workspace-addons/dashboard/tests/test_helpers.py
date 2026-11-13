@@ -225,7 +225,7 @@ def test_a_file_proof_shows_when_it_was_added():
 def test_proof_mark_you_or_agent_says():
     assert call("proofMark", {"by": "human:Mia"})["label"] == "You"
     assert (
-        call("proofMark", {"by": "agent:claude"})["label"] == "Agent says"
+        call("proofMark", {"by": "agent:claude"})["label"] == "Helper says"
         and call("proofMark", {})["mark"] == "○"
     )
 

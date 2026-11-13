@@ -14,7 +14,7 @@ function changeError(result) {
 // Home rows sit under a heading that already says their status, so a row shows no status chip, and no ticket key
 // (that is under the ticket's Technical details). `tail` is what a row adds instead, e.g. when it finished.
 function ticketTitle(t, tail = null) {
-  return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, clean(t.title))), tail);
+  return h('div', {className:'row ticket-title'}, h('h3', {className:'grow'}, h('a', {href:href(t.id)}, clean(t.title)), titleTag(t)), tail);
 }
 function parentLine(t) {
   const parent = ticketOf(t.parent || tickets().find(p => array(p.children).includes(t.id))?.id);

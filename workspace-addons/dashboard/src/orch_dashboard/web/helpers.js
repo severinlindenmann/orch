@@ -313,7 +313,7 @@
   /* The line under an agent's "waiting" chip, in plain words: no command text, a login named as signing in. */
   function plainWhy(why, label) {
     const w = String(why || '');
-    if (/wants a login|log in to|login method/i.test(w)) return (label || 'The agent') + ' needs you to sign in';
+    if (/wants a login|log in to|login method/i.test(w)) return (label || 'The helper') + ' needs you to sign in';
     return plainNames(w).replace(/\s*(Open the live session[^:]*:\s*)?orch run attach\s+\S+/gi, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
   }
 
@@ -392,7 +392,7 @@
   }
   /* FO-14: who stands behind a proof. */
   function proofMark(ev) {
-    return String((ev && ev.by) || '').startsWith('human:') ? {mark: '●', label: 'You'} : {mark: '○', label: 'Agent says'};
+    return String((ev && ev.by) || '').startsWith('human:') ? {mark: '●', label: 'You'} : {mark: '○', label: 'Helper says'};
   }
   /* Leaving the page: every answer still in its Undo window is sent now. entries: [{state, send}]. Returns how many. */
   function flushPending(entries) {

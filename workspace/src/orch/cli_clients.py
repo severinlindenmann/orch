@@ -696,6 +696,7 @@ def run_relay(args, root: Path, out) -> None:
         else:
             raise Refused("Nothing to send. Give a text or --file.")
         out(args, m, _sent_line(root, m, "Message sent to {}."))
+        _view_hint(m, t, args.update)
     elif sub == "topic":
         r = relay.topic(root, args.message, args.title, tickets.current_actor())
         out(args, r, f"Started {r['key'] or r['ticket']} ({r['ticket']}). The phone shows it as a topic now.")
@@ -745,6 +746,21 @@ def run_relay(args, root: Path, out) -> None:
 
 
 NOT_SENT = "Not sent yet - the relay can't be reached. It goes out with the next orch relay command."
+
+
+def _view_hint(m: dict, ticket: str | None, update: str | None) -> None:
+    """Tell the sender when a text to a phone went without the ticket page (stderr, after the result line)."""
+    if m.get("sent") is False or not (m.get("to") == "phones" or str(m.get("to", "")).startswith("ph_")):
+        return
+    if not update:
+        if ticket:
+            print(
+                "Sent as a plain text, without the ticket page. Add --update result (or note, question, "
+                "failure) so the phone shows the ticket page.",
+                file=sys.stderr,
+            )
+    elif m.get("view_note"):
+        print(f"Sent without the ticket page: {m['view_note']}.", file=sys.stderr)
 
 
 def _sent_line(root: Path, m: dict, ok: str) -> str:

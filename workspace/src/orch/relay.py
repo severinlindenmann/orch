@@ -733,6 +733,9 @@ def send_text(
         tv = view
     else:
         tv = view and update and ticket and phone_view.view_for(root, ticket)
+    note = ""  # why a wanted ticket page is not in this message (the sender is told; never on the wire)
+    if view and not isinstance(view, dict) and update and ticket and not tv:
+        note = "orch could not read the ticket or check the stored keys"
     if update and ticket and tv:
         mid = mid or new_id()  # the fallback reuses it: the relay drops a message it already stored
         try:
@@ -742,6 +745,7 @@ def send_text(
             # connection error is ambiguous (the relay may have stored it) and is never sent a second time
             if isinstance(view, dict) or _unreachable(e) or getattr(e, "status", None) is None:
                 raise  # a light update without its view says nothing: refused means refused
+            note = "the relay refused it"
             try:
                 if tv.get(
                     "results"
@@ -780,6 +784,8 @@ def send_text(
                 }
     else:
         msg = _message(root, to, "text", body, ticket, reply_to, mid)
+    if note:
+        msg["view_note"] = note
     if update and ticket and to_phone and not isinstance(view, dict):  # a light update follows nothing new
         phone_view.remember(root, ticket, to)
     if general and not update and not sender == "you":

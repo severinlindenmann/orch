@@ -64,15 +64,20 @@ const pendingText = p => [['Helper', p.name], ['Adapter', p.adapter], ['Command'
 function privateCard(settings) {
   const info = settings.git_private;
   const pending = array(info?.pending);
+  const hidden = pending.filter(p => !p.showable).length;
   if (!info || !(info.count > 0 || pending.length)) return null;
   const lines = array(info.lines);
   return h('div', {className:'stack', 'data-key':'settings-private'},
     info.count > 0 ? h('div', {className:'card'}, h('div', {className:'card-row'}, h('div', {className:'grow'},
       settingsText('h3', {}, 'Private files are in your team repo'), settingsText('p', {className:'meta'}, lines[0])),
       snapshot ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-move', 'data-key':'settings-private-move', disabled:settingsBusy.has('private')}, 'Move to private'))) : null,
-    ...pending.map(p => h('div', {className:'card', 'data-key':'settings-private-pending-' + p.name}, h('div', {className:'card-row'}, h('div', {className:'grow'},
-      settingsText('h3', {}, 'This workspace asks to run a command'), p.showable ? settingsText('pre', {className:'meta mono preserve-lines'}, pendingText(p)) : settingsText('p', {className:'meta'}, "This workspace asks to run a command orch can't show safely. Not allowed.")),
-      snapshot || !p.showable ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-allow', 'data-name':p.name, 'data-key':'settings-private-allow-' + p.name, disabled:settingsBusy.has('private')}, 'Allow on this computer')))));
+    ...pending.filter(p => p.showable).map(p => h('div', {className:'card', 'data-key':'settings-private-pending-' + p.name}, h('div', {className:'card-row'}, h('div', {className:'grow'},
+      settingsText('h3', {}, 'This workspace asks to run a command'), settingsText('pre', {className:'meta mono preserve-lines'}, pendingText(p))),
+      snapshot ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-allow', 'data-name':p.name, 'data-key':'settings-private-allow-' + p.name, disabled:settingsBusy.has('private')}, 'Allow on this computer')))),
+    /* Requests orch cannot show safely cannot be allowed: one card for all of them, not N identical ones. */
+    hidden ? h('div', {className:'card', 'data-key':'settings-private-pending-hidden'}, h('div', {className:'card-row'}, h('div', {className:'grow'},
+      settingsText('h3', {}, 'This workspace asks to run a command'),
+      settingsText('p', {className:'meta'}, hidden + (hidden === 1 ? " request" : " requests") + " orch can't show safely. Not allowed.")))) : null);
 }
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'}, h('h2', {className:'set-sub'}, 'Finished work'),
