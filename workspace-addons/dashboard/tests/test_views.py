@@ -450,13 +450,12 @@ def test_settings_wording_and_one_toast_at_a_time():
     for text in (
         "Off: helpers send finished work to Review and you decide when it is Done.",
         "On: a helper marks its finished work Done.",
-        "'Finished work'",
+        "'Sharing and finished work'",
         "Shared. Your team can now see this workspace.",
         "The helper is not signed in yet.",
         "Type the command you use to start your tool. {prompt} is where the ticket text goes.",
         "Only use this if you trust it.",
         "Copy path",
-        "'Details'",
     ):
         assert text in js, text
     assert "'Workflow'" not in js  # a plain word for the heading
