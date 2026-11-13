@@ -64,7 +64,7 @@
 
 - Six installed optional add-ons become aligned rows, using sidebar names (SN-09, SN-26).
 - The always-on dashboard is reduced to a footnote, freeing space for useful controls (SN-09).
-- Add an add-on opens a catalogue state; no imaginary products or installation results are shown (SN-09; BP-55).
+- Add an add-on opens the catalogue: one card per add-on that ships with orch but is not installed (label, plain description, "What this does" disclosure, Add). Add turns it on in place ("Turned on.", background add-ons: "It starts with orch start." + Start now). When nothing is left: "Every add-on that comes with orch is already here." Rows come from `orch addon list --json` with `installed: false` (SN-09; BP-55).
 - Product data: Needs catalogue availability, friendly labels, install progress and per-add-on configuration. All six existing optional add-ons are On; empty preview represents a fresh installation.
 
 ### MOTION and performance

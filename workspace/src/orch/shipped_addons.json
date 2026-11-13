@@ -1,0 +1,204 @@
+{
+ "automation": {
+  "acts": {},
+  "agents_block": "skills/orch-automation/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "clock",
+   "label": "Automation",
+   "order": 10,
+   "panel": "repeats"
+  },
+  "description": "Starts agent runs at a set time, on a repeat, and when the phone or another workspace sends work.",
+  "gitignore": [],
+  "name": "automation",
+  "needs": true,
+  "orch_api": 1,
+  "recommended": true,
+  "requires": [],
+  "run": "orch_automation",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-automation",
+  "ticket_ext": "ext.schema.json",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [
+   {
+    "field": "cron",
+    "format": "cron-human",
+    "label": "Repeats"
+   },
+   {
+    "field": "agent",
+    "format": "text",
+    "label": "Runs with"
+   },
+   {
+    "field": "last_run",
+    "format": "time",
+    "label": "Last run"
+   }
+  ],
+  "version": "0.2.0"
+ },
+ "dashboard": {
+  "acts": {},
+  "agents_block": "skills/orch-dashboard/AGENTS-block.md",
+  "background": true,
+  "description": "Shows your tickets in a web page, with a tab for each add-on that is turned on.",
+  "gitignore": [],
+  "name": "dashboard",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": true,
+  "requires": [],
+  "run": "orch_dashboard",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-dashboard",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.2.0"
+ },
+ "factory": {
+  "acts": {},
+  "agents_block": "skills/orch-factory/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "box",
+   "label": "Factory",
+   "order": 15
+  },
+  "description": "Turn an idea into finished work: your agent proposes the run, you press Start.",
+  "gitignore": [],
+  "name": "factory",
+  "needs": true,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Factory",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_factory",
+  "runs_agents": true,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-factory",
+  "ticket_ext": "ext.schema.json",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [
+   {
+    "field": "stage",
+    "format": "text",
+    "label": "Factory stage"
+   },
+   {
+    "field": "eta",
+    "format": "time",
+    "label": "ETA"
+   }
+  ],
+  "version": "0.1.0"
+ },
+ "focus": {
+  "acts": {},
+  "agents_block": "skills/orch-focus/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "bolt",
+   "label": "Focus",
+   "order": 20
+  },
+  "description": "A live page for one ticket: watch the agent work, answer its questions, send it a message.",
+  "gitignore": [],
+  "name": "focus",
+  "needs": true,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Focus",
+   "path": "/"
+  },
+  "recommended": true,
+  "requires": [],
+  "run": "orch_focus",
+  "runs_agents": true,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-focus",
+  "ticket_ext": "ext.schema.json",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [
+   {
+    "field": "page",
+    "format": "open-page",
+    "label": "Focus page"
+   }
+  ],
+  "version": "0.1.0"
+ },
+ "insights": {
+  "acts": {},
+  "agents_block": "skills/orch-insights/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "chart",
+   "label": "Insights",
+   "order": 30
+  },
+  "description": "See what your helpers used in the last 30 days.",
+  "gitignore": [],
+  "name": "insights",
+  "needs": false,
+  "orch_api": 1,
+  "page": {
+   "label": "Open Insights",
+   "path": "/"
+  },
+  "recommended": false,
+  "requires": [],
+  "run": "orch_insights",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-insights",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
+ "sync": {
+  "acts": {},
+  "agents_block": "skills/orch-sync/AGENTS-block.md",
+  "background": true,
+  "dashboard": {
+   "icon": "link",
+   "label": "Sync",
+   "order": 50,
+   "subtitle": "Keep another copy of tickets and their files."
+  },
+  "description": "Keeps a copy of tickets and their files, never secrets or private files, on this computer or a remote. Off any time.",
+  "gitignore": [],
+  "name": "sync",
+  "needs": true,
+  "orch_api": 1,
+  "recommended": false,
+  "requires": [],
+  "run": "orch_sync",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-sync",
+  "ticket_ext": "ext.schema.json",
+  "ticket_ext_inert": true,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ }
+}

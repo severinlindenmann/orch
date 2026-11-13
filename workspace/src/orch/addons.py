@@ -1092,11 +1092,29 @@ def core_manifests() -> dict[str, dict]:
     return {n: parse_manifest(base / n / MANIFEST, core=True) for n in CORE_ADDONS}
 
 
-def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
-    """Manifests of the shipped add-ons that are not installed yet and say recommended = true.
-    From the local source folder when there is one; else (fetch=True) the manifest is previewed from the
-    repo (one small download each), and with fetch=False the answer is empty."""
+def bundled_manifests() -> dict[str, dict]:
+    """The manifests of the shipped add-ons as they were when this orch was built (shipped_addons.json, from
+    scripts/gen_shipped_addons.py). Read from the package: no source folder and no network needed."""
+    try:
+        data = json.loads(
+            (Path(__file__).resolve().parent / "shipped_addons.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return {}
+    return (
+        {n: m for n, m in data.items() if n in SHIPPED_ADDONS and isinstance(m, dict)}
+        if isinstance(data, dict)
+        else {}
+    )
+
+
+def shipped_available(fetch: bool = True) -> dict[str, dict]:
+    """Manifests of the shipped add-ons that are not installed yet.
+    From the local source folder when there is one; else with fetch=True the manifest is previewed from the
+    repo (one small download each), and with fetch=False it comes from the bundle inside the package (never
+    the network). An add-on whose manifest cannot be read is left out."""
     have = set(discover())
+    bundle = {} if _is_local(repo()) or fetch else bundled_manifests()
     local = _is_local(repo())
     out = {}
     for name in SHIPPED_ADDONS:
@@ -1104,16 +1122,19 @@ def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
             continue
         try:
             if local:
-                m = folder_manifest(Path(repo()) / "workspace-addons" / name)
+                out[name] = folder_manifest(Path(repo()) / "workspace-addons" / name)
             elif fetch:
-                m = preview_builtin(name)
-            else:
-                continue
+                out[name] = preview_builtin(name)
+            elif name in bundle:
+                out[name] = bundle[name]
         except Refused:
             continue
-        if m.get("recommended"):
-            out[name] = m
     return out
+
+
+def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
+    """Manifests of the shipped add-ons that are not installed yet and say recommended = true."""
+    return {n: m for n, m in shipped_available(fetch).items() if m.get("recommended")}
 
 
 def discover() -> dict[str, dict]:
@@ -1524,32 +1545,40 @@ def _running_here(root: Path) -> set[str]:
     return out
 
 
+def _row(name: str, m: dict, source: str, installed: bool, active: bool, running: bool) -> dict:
+    return {
+        "name": name,
+        "version": m["version"],
+        "description": m["description"],
+        "source": "built-in" if source == "built-in" else "local",
+        "installed": installed,
+        "active": active,
+        "dashboard": m.get("dashboard"),
+        "ticket_view": m["ticket_view"],
+        "background": m["background"],
+        "recommended": m["recommended"],
+        "page": m.get("page"),
+        "running": running,
+        "ticket_links": [dict(x) for x in m["ticket_links"]],
+        "ticket_fields": m["ticket_fields_section"] if "ticket_fields_section" in m else fields.section(m),
+        "acts": sorted(m["acts"]),
+    }
+
+
 def listing(root: Path) -> list[dict]:
-    """`orch addon list --json`: the one source the dashboard uses."""
+    """`orch addon list --json`: the one source the dashboard uses. Installed add-ons first (sorted), then the
+    shipped add-ons that are not installed yet (`installed: false`, never active or running), sorted by name.
+    Never touches the network: the not-installed ones come from the local source folder, else from the bundle
+    in the package; one that is in neither is left out of the list (it can still be added by name)."""
     act = active(root)
     reg = {e["name"]: e for e in registry()}
     up = _running_here(root)
-    out = []
-    for name, m in sorted(discover().items()):
-        src = reg.get(name, {}).get("source", "built-in")
-        out.append(
-            {
-                "name": name,
-                "version": m["version"],
-                "description": m["description"],
-                "source": "built-in" if src == "built-in" else "local",
-                "active": name in act,
-                "dashboard": m.get("dashboard"),
-                "ticket_view": m["ticket_view"],
-                "background": m["background"],
-                "recommended": m["recommended"],
-                "page": m.get("page"),
-                "running": name in up,
-                "ticket_links": [dict(x) for x in m["ticket_links"]],
-                "ticket_fields": fields.section(m),
-                "acts": sorted(m["acts"]),
-            }
-        )
+    out = [
+        _row(name, m, reg.get(name, {}).get("source", "built-in"), True, name in act, name in up)
+        for name, m in sorted(discover().items())
+    ]
+    for name, m in sorted(shipped_available(fetch=False).items()):
+        out.append(_row(name, m, "built-in", False, False, False))
     return out
 
 
