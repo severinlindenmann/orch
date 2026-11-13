@@ -63,6 +63,8 @@ test('a page is shown in a sandboxed frame', () => {
   assert.doesNotMatch(html, /Agent preview/);
 });
 
-test('technical details hold the raw ref', () => {
-  assert.match(E.full({type: 'command', ref: 'pytest -q'}, {}), /<details[\s\S]*Technical details[\s\S]*pytest -q/);
+test('a command shows its command line plainly, never behind a Details toggle (owner rule)', () => {
+  const html = E.full({type: 'command', ref: 'pytest -q'}, {});
+  assert.match(html, /pytest -q/);
+  assert.doesNotMatch(html, /<details|Technical details/);
 });
