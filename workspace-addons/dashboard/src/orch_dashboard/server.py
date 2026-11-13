@@ -402,7 +402,7 @@ class Handler(BaseHTTPRequestHandler):
         ):  # the orch_ui kit, copied next to the page (a test keeps it in sync)
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|notes)\.(js|css)", name
+            r"pages/(home|tickets|ticket|newticket|settings|chat|notes|desktop)\.(js|css)", name
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (

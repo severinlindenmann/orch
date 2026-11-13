@@ -687,7 +687,7 @@ input.switch[type=checkbox]{appearance:none;width:36px;height:24px;min-width:36p
   .fx.fx-terminal .fx-body{grid-template-rows:minmax(0,1fr);grid-template-columns:var(--rail) minmax(0,1fr) minmax(400px,460px)}
   .fx.fx-terminal.rail-closed .fx-body{grid-template-columns:0 minmax(0,1fr) minmax(400px,460px)}
 }
-@media(min-width:1001px) and (max-width:1499px){
+@media(min-width:761px) and (max-width:1499px){
   .fx.fx-terminal .fx-body,.fx.fx-terminal.rail-closed .fx-body{grid-template-columns:minmax(0,1fr) minmax(340px,420px);grid-template-rows:auto minmax(0,1fr);grid-template-areas:"rail human" "stage human"}
   .fx.fx-terminal .fx-rail{grid-area:rail;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 16px;border-right:0;border-bottom:1px solid var(--border);overflow:visible}
   .fx.fx-terminal.rail-closed .fx-rail{display:none;visibility:visible}
@@ -705,7 +705,7 @@ input.switch[type=checkbox]{appearance:none;width:36px;height:24px;min-width:36p
   .fx.fx-terminal .fx-add-wrap{margin:0;flex:0 1 220px}
   .fx.fx-terminal .fx-add-task{margin:0;padding:0}
 }
-@media(max-width:1000px){
+@media(max-width:760px){
   .fx.fx-terminal .fx-human{order:-1;border-left:0;overflow:visible}
 }
 @media(max-width:720px){
