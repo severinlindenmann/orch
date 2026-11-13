@@ -3345,9 +3345,14 @@ def take_resume_session(root: Path, server: str) -> tuple[str, str] | None:
         with _key_lock(d):
             try:
                 lines = _read_guarded(f).decode("utf-8").split()
-            finally:
+            except winacl.Unknown:
+                return None  # Windows could not read it just now: keep the file for the next start (15 min)
+            except (FileNotFoundError, LooseFile, ValueError):
                 with contextlib.suppress(OSError):
                     f.unlink()
+                return None
+            with contextlib.suppress(OSError):
+                f.unlink()  # one use, whatever it holds
     except (Refused, OSError, ValueError):
         return None
     if (

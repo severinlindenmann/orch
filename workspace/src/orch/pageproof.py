@@ -37,6 +37,7 @@ _SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 # dashboard: their behaviour before 2.11); Insights mints only its two (human-proof.md, step 3).
 SERVER_OPS = {"insights": frozenset({"insights.settings", "record.delete_detail"})}
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
+RESTARTED_MSG = "orch restarted after the update. Reload this page to keep working."
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 
 
@@ -100,6 +101,7 @@ class PageSession:
         self.key: bytes | None = None
         self.spent: set[str] = set()  # sha256 of launch tokens already used in this server run
         self.revoked = False
+        self.resumed = False  # True when this start adopted the open tab's session (after an update restart)
         self._lock = threading.Lock()  # one lock across check, consume and spent.add (no race on reuse)
         if tickets.agent_tool():
             return
@@ -111,6 +113,8 @@ class PageSession:
             resumed = humanproof.take_resume_session(root, server)
             if resumed:
                 self.cookie, self.secret = resumed
+                self.resumed = True
+                print(f"orch {server}: kept the open page's session after the restart.", file=sys.stderr)
 
     # -- the launch token (one time, 120 s) ----------------------------------------------------------
     def launch(self, token) -> str | None:
@@ -158,6 +162,17 @@ class PageSession:
             return False
         c = jar.get(name)
         return bool(c and hmac.compare_digest(c.value, self.cookie))
+
+    def stale(self, headers, port: int) -> bool:
+        """The page presents a session (this server's cookie name or the page secret) that this server does
+        not know: the server restarted without adopting it. A page that never signed in presents neither."""
+        if self.key is None or self.authed(headers, port):
+            return False
+        try:
+            has_cookie = self.cookie_name(port) in SimpleCookie(headers.get("Cookie") or "")
+        except Exception:  # noqa: BLE001
+            has_cookie = False
+        return bool(headers.get(PAGE_HEADER)) or has_cookie
 
     def can_mint(self, headers, port: int) -> bool:
         """Session (cookie + page secret) + loopback Host + no proxy headers + a key."""

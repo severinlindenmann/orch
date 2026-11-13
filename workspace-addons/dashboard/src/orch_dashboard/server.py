@@ -107,6 +107,19 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
+    def _refused_text(self, text: str) -> str:
+        """The words of a 403 for a missing page session: a sign-in link that was used twice, a tab whose
+        session the restarted server does not know (after an update), or the plain default."""
+        from orch.pageproof import RESTARTED_MSG, REVOKED_MSG
+
+        if self.session is None:
+            return text
+        if self.session.revoked:
+            return REVOKED_MSG
+        if self.session.stale(self.headers, self.server.server_address[1]):
+            return RESTARTED_MSG
+        return text
+
     def _act_log(self, text: str) -> None:
         """One line per /api/act on stderr (op name, status, ms): never the arguments."""
         try:
@@ -519,6 +532,8 @@ class Handler(BaseHTTPRequestHandler):
                     session=self.session,
                 )  # 202 = started in the background (an update): the answer is sent below as it is
                 if code != 200:
+                    if code == 403:
+                        text = self._refused_text(text)
                     return self._send(code, text.encode(), "text/plain; charset=utf-8")
                 return self._send(
                     200,
@@ -531,9 +546,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint
             )
         except actions.NeedsPerson as e:
-            from orch.pageproof import REVOKED_MSG
-
-            msg = REVOKED_MSG if self.session is not None and self.session.revoked else str(e)
+            msg = self._refused_text(str(e))
             return self._send(403, msg.encode(), "text/plain; charset=utf-8")
         except actions.BadRequest as e:
             return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
@@ -591,14 +604,18 @@ class _Server(ThreadingHTTPServer):
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
     # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
     # test harness passes a fake path. None = standalone, reads files only.
-    session = None
+    handler = partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin), session=None)
+    # The session is made AFTER the port is bound. A restarted server adopts the open tab's session ONCE
+    # (PageSession reads and removes the resume file): made before the bind, a port that is still busy right
+    # after the restart (Windows) would spend the file and the auto-port retry would start without it.
+    srv = _Server(("127.0.0.1", port), handler)
     if orch_bin == actions.SELF:
         from orch.pageproof import PageSession
 
-        session = PageSession(root, "dashboard")
-    srv = _Server(
-        ("127.0.0.1", port),
-        partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin), session=session),
-    )
+        try:
+            handler.keywords["session"] = PageSession(root, "dashboard")
+        except BaseException:
+            srv.server_close()
+            raise
     srv.revisions = Revisions(root)
     return srv
