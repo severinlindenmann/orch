@@ -76,7 +76,8 @@ const SCREENS = [
   { name: 'ticket-steps', url: '/t/t_pil2bbbb', wait: '.fx-history', async setup(p) { await settle(p); await p.waitForSelector('.fx-history .fx-step'); } },
   { name: 'ticket-used', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-used'); } },
   { name: 'ticket-files', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-files'); } },
-  { name: 'ticket-helpers', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) {
+  // the helper tree shows from 1500 px wide only (narrower it is folded away), so the smoke loads this screen at 1600
+  { name: 'ticket-helpers', smokeWidth: 1600, url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) {
     await terminal(p);
     if (!(await p.locator('.fx-agent').first().isVisible())) await p.click('.fx-mobile-tasks'); // the rail is folded on a phone
     await p.click('.fx-agent >> nth=1');
