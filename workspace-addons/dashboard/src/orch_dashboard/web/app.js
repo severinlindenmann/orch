@@ -204,7 +204,7 @@ const nodeKey = node => node?.nodeType === 1 ? node.dataset.key || node.id || (n
 function sync(target, source) {
   if (target.nodeType === 3) { if (target.data !== source.data) target.data = source.data; return; }
   if (target.nodeType !== 1) return;
-  if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body') return;
+  if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body' || target.classList.contains('fv-pthumb')) return;  // a live thumbnail keeps its frame
   for (const attr of [...target.attributes]) {
     if (attr.name === 'open' && target.tagName === 'DETAILS') continue;
     if (target.classList.contains('ui-native-select') && ['class', 'tabindex', 'aria-hidden'].includes(attr.name)) continue;  // set by kit/select.js
@@ -536,6 +536,11 @@ main.addEventListener('keydown', event => {
   selectTicketTab(tab.dataset.ticket, next.dataset.tab);
   document.getElementById(next.id)?.focus();
 });
+// A choice in an add-on view (radio block): the saved one is redrawn from the add-on's answer, never from the click.
+main.addEventListener('change', event => {
+  const radio = event.target.closest?.('input[data-radio-verb],input[data-radio-go]');
+  if (radio) addonRadio(radio);
+});
 main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
   if (menu && event.target.closest('button,a')) menu.open = false;
@@ -543,6 +548,8 @@ main.addEventListener('click', async event => {
   if (sendControl) { messageSend(sendControl); return; }
   const row = event.target.closest('[data-addon-act]');
   if (row) { if (!snapshot) addonAct(row); return; }
+  const edit = event.target.closest('[data-addon-edit]');
+  if (edit) { if (!snapshot) repeatsDialog(edit.dataset.addonEdit, shownAddon()); return; }
   const copy = event.target.closest('[data-copy]');
   if (copy) { copyText(copy); return; }
   const control = event.target.closest('[data-action]');

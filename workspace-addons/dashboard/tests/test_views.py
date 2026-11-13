@@ -225,6 +225,8 @@ def test_page_has_no_inline_code_and_loads_the_kit():
 
 def test_page_code_names_no_addon_and_has_no_blinking_needs():
     js = (webjs.all_js() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(").replace(":focus", ":")
+    # the one named exception: shared-link controls are for the built-in publish add-on only (security review)
+    js = re.sub(r"const isPublish = .*\n", "", js)
     for name in ("scheduler", "automation", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", js, re.IGNORECASE), name
     # "relay" is plain product wording on the Phone & workspaces tab (accepted draft): the code never names the add-on

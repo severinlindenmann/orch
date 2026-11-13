@@ -957,6 +957,18 @@ def test_file_info_gives_pdf_pages_archive_listing_and_workbook_cells(art, ws):
     assert _get(art, q + "notes.md")[0] == 404 and _get(art, q + "..%2fx.zip")[0] == 404
 
 
+def test_a_web_page_tells_the_viewer_when_esc_is_pressed_inside_it(art, ws):
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts"
+    d.mkdir(exist_ok=True)
+    (d / "a.html").write_text("<html><body><p>x</p></body></html>")
+    (d / "b.html").write_text("<p>no body tag</p>")
+    code, body, _ = _get(art, "/view/t_other000x/artifacts/a.html")
+    text = body.decode() if isinstance(body, bytes) else body
+    assert code == 200 and "orch-viewer-escape" in text and text.index("<script>") < text.index("</body>")
+    code, body, _ = _get(art, "/view/t_other000x/artifacts/b.html")
+    assert code == 200 and b"orch-viewer-escape" in (body if isinstance(body, bytes) else body.encode())
+
+
 def test_a_web_page_is_served_sandboxed_with_its_own_stylesheet_and_script(art, ws):
     d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts" / "site"
     d.mkdir()

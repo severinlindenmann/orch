@@ -18,10 +18,10 @@ from .data import _argv0, _child_env
 TIMEOUT = 10.0  # a view that starts other orch commands (Focus with live sessions) needs more than 2 s on a busy machine
 MAX_BYTES = 256 * 1024
 TONES = ("neutral", "good", "warn", "needs-you", "bad")
-BLOCKS = ("stat", "list", "calendar", "timeline", "chips", "table")
+BLOCKS = ("stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio")
 # Same pattern as `link` in contracts/addon-view.schema.json (tests/test_views.py compares them).
 _LINK = re.compile(
-    r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300})$"""
+    r"""^(t_[a-z0-9]{6,16}|https://[^\s<>"'`]+|addon:(?![/\\])(?!.*\.\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$"""
 )
 _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -73,6 +73,34 @@ def _action(a):
             )
             for k, v in args.items()
         )
+    )
+
+
+def _pagelink(v, n=40):
+    return _keys_only(v, ("label", "to")) and _text(v.get("label"), n) and _link(v.get("to"))
+
+
+def _meta(b):
+    return _opt(b, "meta", lambda v: _text(v, 60))
+
+
+def _empty(e):
+    return (
+        _keys_only(e, ("title", "text", "mark", "button", "link"))
+        and _text(e.get("title"), 60)
+        and _opt(e, "text", _text)
+        and e.get("mark", "arrow") in ("arrow", "repeat", "dash")
+        and _opt(e, "button", _pagelink)
+        and _opt(e, "link", _pagelink)
+    )
+
+
+def _header(h):
+    return (
+        _keys_only(h, ("status", "link", "button"))
+        and _opt(h, "status", _chip)
+        and _opt(h, "link", _pagelink)
+        and _opt(h, "button", _button)
     )
 
 
@@ -164,6 +192,12 @@ def _block_ok(b) -> bool:
             and isinstance(items, list)
             and len(items) <= 50
             and _opt(b, "more", _int)
+            and _meta(b)
+            and _opt(b, "count", _int)
+            and b.get("span", "half") == "half"
+            and _opt(b, "compact", lambda v: isinstance(v, bool))
+            and _opt(b, "above", lambda v: isinstance(v, bool))
+            and _opt(b, "empty", _empty)
             and all(
                 _item_ok(
                     i,
@@ -171,6 +205,9 @@ def _block_ok(b) -> bool:
                     lambda i: (
                         _text(i["title"])
                         and _opt(i, "subtitle", _text)
+                        and _opt(
+                            i, "meta", lambda m: isinstance(m, list) and len(m) <= 3 and all(map(_text, m))
+                        )
                         and _opt(
                             i, "chips", lambda c: isinstance(c, list) and len(c) <= 6 and all(map(_chip, c))
                         )
@@ -183,7 +220,9 @@ def _block_ok(b) -> bool:
     if t == "calendar":
         days = b.get("days")
         return (
-            isinstance(days, list)
+            _opt(b, "title", lambda v: _text(v, 60))
+            and _meta(b)
+            and isinstance(days, list)
             and len(days) <= 14
             and all(
                 isinstance(d, dict)
@@ -211,6 +250,7 @@ def _block_ok(b) -> bool:
         items = b.get("items")
         return (
             _opt(b, "title", lambda v: _text(v, 60))
+            and _meta(b)
             and isinstance(items, list)
             and len(items) <= 50
             and all(
@@ -226,6 +266,7 @@ def _block_ok(b) -> bool:
         items = b.get("items")
         return (
             _opt(b, "title", lambda v: _text(v, 60))
+            and _meta(b)
             and isinstance(items, list)
             and len(items) <= 30
             and all(map(_chip, items))
@@ -236,7 +277,7 @@ def _block_ok(b) -> bool:
             isinstance(cols, list) and 1 <= len(cols) <= 6 and isinstance(rows, list) and len(rows) <= 100
         ):
             return False
-        if not (_opt(b, "title", lambda v: _text(v, 60)) and _opt(b, "more", _int)):
+        if not (_opt(b, "title", lambda v: _text(v, 60)) and _opt(b, "more", _int) and _meta(b)):
             return False
         if not all(
             isinstance(c, dict)
@@ -263,7 +304,46 @@ def _block_ok(b) -> bool:
             )
             for r in rows
         )
+    if t == "footnote":
+        return _keys_only(b, ("type", "text", "link")) and _text(b.get("text")) and _opt(b, "link", _pagelink)
+    if t == "settings":
+        rows = b.get("rows")
+        return (
+            _keys_only(b, ("type", "title", "rows"))
+            and _text(b.get("title"), 60)
+            and isinstance(rows, list)
+            and 1 <= len(rows) <= 12
+            and all(
+                _keys_only(r, ("label", "value", "note", "tone", "button"))
+                and _text(r.get("label"), 30)
+                and _text(r.get("value"), 120)
+                and _opt(r, "note", _text)
+                and _opt(r, "tone", _tone)
+                and _opt(r, "button", _row_button)
+                for r in rows
+            )
+        )
+    if t == "radio":
+        opts = b.get("options")
+        return (
+            _keys_only(b, ("type", "title", "options"))
+            and _text(b.get("title"), 60)
+            and isinstance(opts, list)
+            and 2 <= len(opts) <= 5
+            and all(
+                _keys_only(o, ("label", "selected", "action", "link"))
+                and _text(o.get("label"), 60)
+                and isinstance(o.get("selected"), bool)
+                and _opt(o, "action", _action)
+                and _opt(o, "link", _link)
+                for o in opts
+            )
+        )
     return False
+
+
+def _row_button(b):
+    return _keys_only(b, ("label", "action")) and _text(b.get("label"), 30) and _action(b.get("action"))
 
 
 def _int(v):
@@ -282,6 +362,7 @@ def check_view(v) -> dict | None:
         and _opt(v, "notice", _text)
         and _opt(v, "notice_tone", _tone)
         and _opt(v, "button", _button)
+        and _opt(v, "header", _header)
         and ("button" not in v or "notice" in v)
     ):
         return None
@@ -294,7 +375,9 @@ def check_view(v) -> dict | None:
         elif not isinstance(b, dict) or not isinstance(b.get("type"), str):
             return None
     return {
-        **{k: v[k] for k in ("schema", "generated_at", "notice", "notice_tone", "button") if k in v},
+        **{
+            k: v[k] for k in ("schema", "generated_at", "notice", "notice_tone", "button", "header") if k in v
+        },
         "blocks": blocks,
     }
 

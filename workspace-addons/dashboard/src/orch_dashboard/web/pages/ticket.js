@@ -409,12 +409,16 @@ function linkGroups(links) {
 }
 // Preview text is cached by file revision; snapshot copies never request local files.
 const ticketPreviewText = new Map(), ticketPreviewDone = new Map(), ticketPreviewPending = new Set();
+// A web page or PDF shows its first screen, small, over the type icon (kit/fileviewer.js); other files have none.
+const shownThumb = (t, kind, file) => snapshot || !window.FileViewer?.thumb ? null : window.FileViewer.thumb({tid:t.id, kind, name:file.name, size:file.size, mtime:file.mtime || ''});
 function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
   const html = /\.html?$/i.test(file.name), picture = /\.(png|jpe?g|webp)$/i.test(file.name);
   if (snapshot || html || (!picture && !PREVIEW_EXT.text.test(file.name))) {
     tile.append(h('p', {className:'meta'}, html ? title : 'Preview available when opened'));
+    const live = shownThumb(t, kind, file);
+    if (live) { tile.classList.add('has-thumb'); tile.append(live); }
     return tile;
   }
   const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name);
@@ -559,7 +563,7 @@ function ticketFileActions(t, kind, file) {
 }
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
-    h('span', {className:'file-type', 'aria-hidden':'true'}, fileBadge(file.name)),
+    h('span', {className:'file-type' + (shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), shownThumb(t, kind, file)),
     h('div', {className:'grow'}, h('p', {className:'file-name'}, fileTitle(file.name)), h('p', {className:'meta'}, fileMeta(file))),
     ticketFileActions(t, kind, file));
 }
@@ -612,6 +616,8 @@ function fileThumb(t, f) {
     p.classList.add('file-snippet'); thumb.append(p); return thumb;
   }
   thumb.append(h('span', {className:'file-sym'}, iconEl(fileIcon(f.name)), h('span', {}, viewerWord(f.fileKind))));
+  const live = shownThumb(t, f.kind, f);
+  if (live) thumb.append(live);
   return thumb;
 }
 function fileTile(t, f) {
@@ -873,6 +879,50 @@ function ticketBringBackDialog(t) {
   actions.append(go); d.append(...body, actions); window.orch.open(d);
   return d;
 }
+// "Review changes": a read-only list of what the copy changed (files with + and - counts) and one file's diff.
+const keptCopies = new Set();
+function keptKey(t) { return 'orch.keptcopy.' + t.id + '.' + String(t.bring_back?.tip || ''); }
+function isKept(t) {
+  if (keptCopies.has(keptKey(t))) return true;
+  try { return sessionStorage.getItem(keptKey(t)) === '1'; } catch (_) { return false; }
+}
+function ticketChangesDialog(t) {
+  const {d, actions} = dialog('What the copy changed');
+  const body = el('div', 'stack'), diffBox = el('pre', 'preserve-lines copy-diff');
+  diffBox.hidden = true; diffBox.tabIndex = 0;
+  body.append(el('p', 'meta', 'Reading the copy…'));
+  const showDiff = async file => {
+    diffBox.hidden = false; diffBox.textContent = 'Loading…';
+    try {
+      const r = await fetch('/api/copy-changes?t=' + encodeURIComponent(t.id) + '&path=' + encodeURIComponent(file.path), {cache:'no-store'});
+      const data = r.ok ? await r.json() : null;
+      diffBox.replaceChildren();
+      if (!data) { diffBox.textContent = 'This file could not be shown.'; return; }
+      String(data.diff).split('\n').forEach(line => {
+        const row = el('span', /^\+(?!\+\+)/.test(line) ? 'diff-add' : /^-(?!--)/.test(line) ? 'diff-del' : '', line + '\n');
+        diffBox.append(row);
+      });
+      if (data.cut) diffBox.append(el('span', 'meta', '\n(The rest of this file is not shown.)'));
+    } catch (_) { diffBox.textContent = 'This file could not be shown.'; }
+  };
+  fetch('/api/copy-changes?t=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : {files:[]}).catch(() => ({files:[]})).then(data => {
+    const files = array(data.files);
+    body.replaceChildren();
+    if (!files.length) { body.append(el('p', 'muted', 'No changed files could be listed.')); return; }
+    const list = el('ul', 'copy-files');
+    files.forEach(f => {
+      const li = el('li'), b = button('', 'ghost sm copy-file', () => showDiff(f));
+      b.append(el('span', 'grow', clean(f.path)), el('span', 'meta', f.added == null ? 'binary' : '+' + f.added + ' −' + f.removed));
+      li.append(b); list.append(li);
+    });
+    body.append(list);
+    if (data.more) body.append(el('p', 'meta', 'and ' + data.more + ' more files'));
+  });
+  d.append(body, diffBox, actions);
+  actions.firstChild.textContent = 'Close';
+  window.orch.open(d);
+  return d;
+}
 function ticketBringBackRow(t) {
   const b = t.bring_back;
   if (b?.state !== 'waiting') return null;
@@ -880,8 +930,17 @@ function ticketBringBackRow(t) {
     const r = await act('copies.ask-update', {ticket:t.id});
     window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
   }) : null;
-  return h('div', {className:'row', 'data-key':'bring-back'}, h('span', {}, 'Changes to add'), h('span', {}, clean(b.reason)),
-    !snapshot && b.tip ? ticketButton('Add to my files', 'outline sm', () => ticketBringBackDialog(t)) : null, ask);
+  const add = !snapshot && b.tip ? ticketButton('Add to my files', 'primary sm', () => ticketBringBackDialog(t)) : null;
+  // "Keep as is" is only this page's choice: nothing is changed or signed; the copy stays where it is.
+  if (!snapshot && b.tip && isKept(t)) return h('p', {className:'meta kept-line', 'data-key':'bring-back'}, 'Changes kept in a copy · ', ticketButton('Add to my files', 'ghost sm', () => ticketBringBackDialog(t)));
+  const review = !snapshot && b.tip ? ticketButton('Review changes', 'outline sm', () => ticketChangesDialog(t)) : null;
+  const keep = !snapshot && b.tip ? ticketButton('Keep as is', 'ghost sm', () => {
+    keptCopies.add(keptKey(t)); try { sessionStorage.setItem(keptKey(t), '1'); } catch (_) { /* optional */ }
+    render();
+  }) : null;
+  return h('section', {className:'card attention decision bring-back-card', 'data-key':'bring-back'},
+    h('p', {className:'meta'}, 'Approval needed'), h('h2', {}, 'Changes to add'), h('p', {className:'muted'}, clean(b.reason)),
+    h('div', {className:'actions'}, add, review, keep, ask));
 }
 const ticketHistoryTechnical = false;
 let ticketHistoryActor = 'All';
@@ -1172,11 +1231,29 @@ function ticketReviewCard(t) {
     h('p', {className:'review-check'}, t.done_when ? 'Does this match “' + clean(t.done_when) + '”?' : 'Does this look right?'),
     ticketProofLine(t), snapshot ? null : ticketChangesEditor(t));
 }
+// What the helper (or you) said when a task was finished: the note shown in Results of a Done ticket.
+function completionNotes(t) {
+  if (t.status !== 'done') return [];
+  const notes = [];
+  array(t.checklist).forEach(c => { if (c.done && !c.wont_do) array(c.evidence).forEach(ev => {
+    if ((ev.type || ev.kind) !== 'note') return;
+    const body = clean(window.DashHelpers.cleanOutcome(ev.text) || window.DashHelpers.cleanOutcome(ev.ref)), head = clean(window.DashHelpers.cleanOutcome(ev.summary));
+    if (head || body) notes.push({at:ev.at, head:head || body, body:head && body !== head ? body : ''});
+  }); });
+  notes.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+  return notes.slice(0, 3);
+}
+function ticketCompletionNote(n) {
+  return h('article', {className:'completion-note', 'data-key':'completion-note'}, h('p', {className:'meta eyebrow'}, 'Completion note' + (n.at ? ' · ' + time(n.at) : '')),
+    h('h2', {}, n.head), n.body ? h('p', {className:'muted preserve-lines'}, n.body) : null);
+}
 function ticketResultsCard(t) {
-  const files = artifactFiles(t);
-  if (!files.length) return null;
-  return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Results'), h('span', {className:'meta'}, files.length + (files.length === 1 ? ' file' : ' files'))),
-    t.status === 'done' ? ticketResultFrame(t, 'artifacts', files[0]) : ticketFileRow(t, 'artifacts', files[0]), files.slice(1, 4).map(f => ticketFileRow(t, 'artifacts', f)), headerProof(t));
+  const files = artifactFiles(t), notes = completionNotes(t);
+  if (!files.length && !notes.length) return null;
+  const count = [notes.length ? notes.length + (notes.length === 1 ? ' note' : ' notes') : '', files.length ? files.length + (files.length === 1 ? ' file' : ' files') : ''].filter(Boolean).join(' · ');
+  return h('section', {className:'card results', 'data-key':'results'}, h('div', {className:'section-head'}, h('h2', {}, 'Results'), h('span', {className:'meta'}, count)),
+    notes.map(ticketCompletionNote),
+    files.length ? (t.status === 'done' ? ticketResultFrame(t, 'artifacts', files[0]) : ticketFileRow(t, 'artifacts', files[0])) : null, files.slice(1, 4).map(f => ticketFileRow(t, 'artifacts', f)), files.length ? headerProof(t) : null);
 }
 // A change you asked for: what you asked, and that new changes wait for your approval.
 function ticketRequestCard(t) {
@@ -1241,6 +1318,7 @@ function detail(t) {
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
   const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;
   const overview = [
+    ticketBringBackRow(t),
     t.status !== 'done' && openQuestions.length ? (planQ ? ticketPlan(t, planQ, children) : ticketQuestion(t, openQuestions[0], true)) : null,
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
     t.status === 'review' ? ticketReviewCard(t) : null,
@@ -1260,7 +1338,7 @@ function detail(t) {
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
     h('header', {className:'ticket-heading'},
       parent ? h('a', {href:href(parent.id), className:'muted'}, 'Step of ' + partName(parent)) : null,
-      ticketBringBackRow(t), actions,
+      actions,
       h('h1', {}, inlineField(t, 'title')), stateLine, ticketStepper(t, run)),
     snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,

@@ -1,0 +1,15 @@
+{
+  "schema": "orch.addon-view/1",
+  "generated_at": "2026-11-13T10:00:00Z",
+  "header": {"button": {"label": "Share a file", "action": {"op": "link.share"}}},
+  "blocks": [
+    {"type": "list", "title": "Shared", "meta": "1 link", "compact": true, "items": [
+      {"title": "survey-results.html", "meta": ["Anyone with the link", "Expires 13 Dec 2026, 12:47"], "actions": [
+        {"label": "Copy link", "action": {"op": "link.copy", "args": {"id": "f_abc123"}}},
+        {"label": "Extend", "action": {"op": "link.extend", "args": {"id": "f_abc123"}}},
+        {"label": "Stop sharing", "action": {"op": "link.stop", "args": {"id": "f_abc123"}}}
+      ]}
+    ]},
+    {"type": "footnote", "text": "Stopping sharing closes the link and keeps your original file.", "link": {"label": "Shared link settings", "to": "app:settings/addons"}}
+  ]
+}

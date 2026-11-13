@@ -10,6 +10,7 @@ agents_block = "skills/orch-publish/AGENTS-block.md"
 
 [dashboard]
 label = "Shared links"
+subtitle = "Manage the files you share outside this workspace."
 icon = "link"
 order = 60
 panel = "links"
