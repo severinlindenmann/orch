@@ -6,6 +6,9 @@ struct ReceiptView: View {
     var note: String? = nil
     var onRetry: (() -> Void)? = nil
     var onDiscard: (() -> Void)? = nil
+    /// Sits at the bottom-right inside the bubble next to the text (no own full-width line).
+    var inline = false
+    var tint: Color = Theme.muted
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -15,12 +18,12 @@ struct ReceiptView: View {
                 VStack(alignment: .trailing, spacing: 0) { stamp; recovery }
             }
             if case .queued = receipt, let note {
-                Text(note).foregroundStyle(Theme.warn).accessibilityIdentifier("receipt-wait")
+                Text(note).foregroundStyle(Theme.muted).accessibilityIdentifier("receipt-wait")
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .themeFont(13).foregroundStyle(Theme.muted)
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .themeFont(inline ? 12 : 13).foregroundStyle(tint)
+        .frame(maxWidth: inline ? nil : .infinity, alignment: .trailing)
     }
 
     private var stamp: some View {
@@ -29,7 +32,7 @@ struct ReceiptView: View {
             Group {
                 switch receipt {
                 case .queued:
-                    Label("Sending…", systemImage: "clock").accessibilityIdentifier("receipt-queued")
+                    Image(systemName: "clock").accessibilityLabel("Waiting to send").accessibilityIdentifier("receipt-queued")
                 case .sent:
                     Image(systemName: "checkmark").accessibilityLabel("Sent").accessibilityIdentifier("receipt-sent")
                 case .delivered:

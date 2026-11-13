@@ -104,11 +104,20 @@ function renderTopics(){
  contentRoot().innerHTML=nav(names[currentWorkspace],'back',presence(currentWorkspace).label)+`<div class="scroll"><button class="row-content general" data-action="navigate" data-value="general:${currentWorkspace}">${avatar(currentWorkspace)}<span class="fill"><span class="title">Your helper <small>⌖</small></span><span class="preview">Talk to ${esc(names[currentWorkspace])}</span></span>${icon('chevron')}</button>${['Needs your OK','Working','Ready for review','Not started'].map(group).join('')}${count?`<details class="done-topics"><summary id="done-toggle">Done (${count})</summary><div class="topic-group">${ids.filter(c=>finished.includes(status(c))).map(topicRow).join('')}</div></details>`:''}${!ids.length?'<div class="empty"><img class="quiet-logo" src="logo.svg" alt=""><h3>Nothing here yet.</h3><p>Start a topic when you have something to work on.</p></div>':''}</div>${actionButton('new-chat','New topic',currentWorkspace,'wide-btn topic-compose')}`;
 }
 
+// Header subtitle: the topic status (one colour set: Working green, Needs you amber, Done grey) or the helper's presence; never the phone's network (the banner says that).
+function chatSubtitle(){
+ if(parent[chat]){const st=statusFor(chat),tone={'Working':'working','Needs your OK':'needs','Review':'needs'}[st]||'done';return `<span class="status-dot ${tone}"></span><span class="status-${tone}" aria-label="Status: ${esc(st)}">${esc(st)}</span> · ${esc(names[parent[chat]]||'')}`;}
+ const off=state.offline;state.offline=false;const p=chatPresence();state.offline=off;return p;
+}
 renderChat=function(){
  baseChat();if(["Didn't work",'Stopped'].includes(statusFor(chat)))$('#composer').insertAdjacentHTML('afterbegin',actionButton('retry-topic','Try again','','wide-btn'));const heading=$('.nav h2');heading.dataset.title=state.topics[chat]?.pending?'Getting started…':parent[chat]?topicTitle(chat):'Your helper';heading.innerHTML=title(heading.dataset.title);
  $('.nav [data-action="navigate"]').dataset.value='back';
- $('.nav .subtitle').innerHTML=chatPresence();
- if(parent[chat])$('.nav').insertAdjacentHTML('afterend',actionButton('checklist',`${state.topics[chat]?.done||0} of ${state.topics[chat]?.total||5} · ${statusFor(chat)} <span>⌄</span>`,'','progress-pin'));
+ $('.nav .subtitle').innerHTML=chatSubtitle();
+ const steps=state.topics[chat]?.total||5,stepsDone=state.topics[chat]?.done||0;
+ if(parent[chat]&&steps>=2)$('.nav').insertAdjacentHTML('afterend',actionButton('checklist',`${stepsDone} of ${steps} steps done <span>⌄</span>`,'','progress-pin'));
+ const open=(state.messages[chat]||[]).filter(m=>m.type==='question'&&!state.answers?.[m.id]);
+ if(open.length>=2)$('.nav').insertAdjacentHTML('afterend',`<button class="progress-pin questions-banner" onclick="document.getElementById('${open[0].id}')?.scrollIntoView({block:'center'})"><span class="status-dot needs"></span>${open.length} questions <span>⌄</span></button>`);
+ if(!parent[chat]&&$('#messages')&&!$('.fresh-start'))$('#messages').insertAdjacentHTML('afterbegin','<details class="fresh-start"><summary>Today · fresh start ⓘ</summary><p>Every day at 04:00 your helper starts fresh: it no longer remembers what you said on earlier days, so mention again what it needs to know. Past chats stay in Earlier.</p></details>');
  if(state.pinned?.[chat]&&findMessage(state.pinned[chat]))$('.nav').insertAdjacentHTML('afterend',actionButton('quote','⌖ '+esc(findMessage(state.pinned[chat]).m.text||'Voice memo'),state.pinned[chat],'progress-pin'));
  
 };

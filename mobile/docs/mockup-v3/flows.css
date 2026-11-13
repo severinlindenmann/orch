@@ -6,3 +6,12 @@
 /* Hit areas remain 44 pt even for compact pin markers and metadata. */
 #phone .feedback-pin{width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important}.highlight{outline:2px solid var(--brand);animation:focus-message 1.7s}.shimmer{background:none;color:var(--muted);-webkit-text-fill-color:currentColor;animation:blink 1.5s infinite}.switch,.switch:after{transition:transform .2s}.record-controls .mic{animation:mic-in .3s}.sheet{animation:slide .3s cubic-bezier(.2,.9,.25,1.1)}@keyframes focus-message{0%,100%{opacity:1}35%{opacity:.6}}
 .voice .transcript-toggle{color:var(--muted)}.bubble.mine:has(.voice) .stamp{margin-top:-44px;min-height:44px;pointer-events:none}.bubble.mine:has(.voice) .stamp .tiny-language{pointer-events:auto}.bubble.mine .voice .transcript-toggle{max-width:55px;position:relative;z-index:1}
+
+/* Batch 3 topic chat: status tokens, inline stamp, filled bubbles, day separator */
+.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;vertical-align:middle}.status-dot.working{background:#2fc6a3}.status-dot.needs{background:#fbbf24}.status-dot.done{background:#8a94a3}
+.status-working{color:#2fc6a3}.status-needs{color:#fbbf24}.status-done{color:var(--muted)}
+.nav .icon-button{background:none!important;border:0!important;box-shadow:none!important}
+.bubble.mine{background:#1d5446!important;border-color:transparent!important}.bubble .stamp{display:inline-flex;float:right;margin:6px 0 0 10px;font-size:12px}
+.bubble.media-only{padding:0;overflow:hidden;position:relative}.bubble.media-only .stamp{position:absolute;right:8px;bottom:8px;background:#0009;color:#fff;border-radius:99px;padding:2px 8px}
+.fresh-start{text-align:center;color:var(--muted);font-size:13px;margin:8px auto}.fresh-start summary{cursor:pointer;list-style:none;min-height:44px;display:flex;align-items:center;justify-content:center}.fresh-start p{max-width:30ch;margin:0 auto 8px}
+.questions-banner{display:flex;align-items:center;gap:6px}

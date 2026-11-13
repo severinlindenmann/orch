@@ -12,18 +12,27 @@ final class DoneReviewUITests: XCTestCase {
         return app
     }
 
-    private func assertReviewStatus(_ app: XCUIApplication) {
-        XCTAssertTrue(app.descendants(matching: .any)["tasks-toggle"].firstMatch.waitForExistence(timeout: 20))
-        let status = app.staticTexts["Ready for review"].firstMatch
-        XCTAssertTrue(status.waitForExistence(timeout: 10))
-        XCTAssertTrue(status.isHittable)
-        XCTAssertEqual(status.label, "Ready for review")
+    /// P31: the topic says "Ready for review" exactly once. With a review bar the bar says it and the header stays quiet;
+    /// without the bar the header status line says it.
+    private func assertReviewStatus(_ app: XCUIApplication, reviewBar: Bool) {
+        XCTAssertTrue(app.descendants(matching: .any)["conversation-view"].firstMatch.waitForExistence(timeout: 20))
+        let said = app.staticTexts.matching(NSPredicate(format: "label == %@", "Ready for review"))
+        if reviewBar {
+            XCTAssertTrue(app.descendants(matching: .any)["review-bar"].firstMatch.waitForExistence(timeout: 10))
+            XCTAssertFalse(app.descendants(matching: .any)["chat-status"].firstMatch.exists, "the review bar already says it: no header status")
+        } else {
+            let status = said.firstMatch
+            XCTAssertTrue(status.waitForExistence(timeout: 10), "header status line")
+            XCTAssertTrue(status.isHittable)
+            XCTAssertTrue(app.descendants(matching: .any)["chat-status"].firstMatch.exists)
+        }
+        XCTAssertLessThanOrEqual(said.count, 1, "Ready for review is shown once")
         XCTAssertFalse(app.staticTexts["Done"].exists)
     }
 
     func testDoneWithVerdictQuestionShowsReviewBar() {
         let app = launch(ticket: "t_donerev1")
-        assertReviewStatus(app)
+        assertReviewStatus(app, reviewBar: true)
         XCTAssertTrue(app.descendants(matching: .any)["review-bar"].firstMatch.waitForExistence(timeout: 10))
         for (id, label) in [("review-accept", "Accept"), ("review-changes", "Ask for changes")] {
             let button = app.buttons[id]
@@ -35,7 +44,7 @@ final class DoneReviewUITests: XCTestCase {
 
     func testDoneWithoutQuestionShowsReviewOnly() {
         let app = launch(ticket: "t_donerev2")
-        assertReviewStatus(app)
+        assertReviewStatus(app, reviewBar: false)
         for id in ["review-bar", "review-accept", "review-changes"] {
             let element = app.descendants(matching: .any)[id].firstMatch
             let absent = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)

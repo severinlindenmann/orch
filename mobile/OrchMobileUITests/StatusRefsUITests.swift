@@ -77,7 +77,10 @@ final class StatusRefsUITests: XCTestCase {
         for _ in 0..<3 where !el(app, "info-ref-ref1").isHittable { app.swipeDown() }
         el(app, "info-ref-ref1").tap()   // opens that topic
         // The referenced topic opened: its ticket chat status line (tasks toggle); "tasks-card" no longer exists.
-        XCTAssertTrue(app.descendants(matching: .any)["tasks-toggle"].waitForExistence(timeout: 10))
+        // The referenced topic opened: a ticket chat (conversation view) with that topic's title in its header.
+        XCTAssertTrue(app.descendants(matching: .any)["conversation-view"].firstMatch.waitForExistence(timeout: 10))
+        let openedTitle = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Rename field X in ingestion job")).firstMatch
+        XCTAssertTrue(openedTitle.waitForExistence(timeout: 10), "the referenced topic's chat is open")
         shot(app, "5-reference-opened")
     }
 

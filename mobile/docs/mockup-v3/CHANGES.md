@@ -36,3 +36,7 @@
 Added Chats Groups, open / sent / read-only group rooms and Done groups. Redrew PIL-12 info to the shipped layout, with collapsible agent / job Results, one dated label per card, fitted previews, counted text tabs and right-aligned numeric cells. Replaced the publishing question demo with a Result artifact and Accept / Ask for changes bar; finished work without a question keeps Ready for review and no bar. Standardized tasks and References. All new states have right-panel jumps and connected in-phone navigation; existing question kinds remain available.
 
 11 Nov: helper wording
+
+## 12 Nov phone UX, batch 3: topic chat
+
+Topic header: plain icons of one size; the subtitle shows the status (Working green, Needs your OK amber, Done grey) or the helper's presence, never the network. Steps row "2 of 5 steps done", hidden for a single step. "N questions" banner only with 2+ open questions. Own bubbles filled, time and ticks inline; photos edge to edge with the time on a dark backing. No "Working" or "Waiting · will send when online" caption (the clock and the banner say it). General: "Today · fresh start ⓘ" separator explains what the helper forgets.

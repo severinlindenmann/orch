@@ -79,9 +79,52 @@ final class ConversationViewTests: XCTestCase {
 
     func testTopicSummaryHidesTheCountWithoutAChecklist() {
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Working"), "")
-        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 tasks done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 5, status: "Working"), "2 of 5 steps done")
         XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 0, status: "Ready for review"), "")
-        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 tasks done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 3, total: 3, status: "Ready for review"), "3 of 3 steps done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 1, status: "Working"), "1 step")
+        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 1, status: "Working"), "1 step, done")
+    }
+
+    func testStepsRowOnlyWhenItSaysSomething() {
+        XCTAssertFalse(ConversationRules.showsStepsRow(total: 0, wontDo: 0))
+        XCTAssertTrue(ConversationRules.showsStepsRow(total: 1, wontDo: 0), "one step still opens the sheet")
+        XCTAssertTrue(ConversationRules.showsStepsRow(total: 1, wontDo: 1), "a won't-do still needs saying")
+        XCTAssertTrue(ConversationRules.showsStepsRow(total: 2, wontDo: 0))
+    }
+
+    func testQuestionsBannerOnlyWithTwoOrMore() {
+        func q(_ id: String, answer: String? = nil) -> ConvItem {
+            var i = ConvItem(id: id, at: "2026-11-06T10:00:00Z", side: .them, kind: .question); i.answer = answer; return i
+        }
+        XCTAssertNil(ConversationRules.questionsBanner(in: [q("a")]), "one card says it by itself")
+        XCTAssertNil(ConversationRules.questionsBanner(in: [q("a"), q("b", answer: "Yes")]))
+        XCTAssertEqual(ConversationRules.questionsBanner(in: [q("a"), q("b")]), "2 questions")
+    }
+
+    func testHeaderStatusHiddenWhenACardSaysIt() {
+        XCTAssertNil(ConversationRules.headerStatus(.waitingOnYou, openQuestions: 1, reviewBar: false))
+        XCTAssertEqual(ConversationRules.headerStatus(.waitingOnYou, openQuestions: 0, reviewBar: false), .waitingOnYou)
+        XCTAssertNil(ConversationRules.headerStatus(.review, openQuestions: 0, reviewBar: true))
+        XCTAssertEqual(ConversationRules.headerStatus(.working, openQuestions: 2, reviewBar: false), .working)
+    }
+
+    func testOneStatusColourSet() {
+        XCTAssertEqual(TopicStatus.working.tone, Theme.brand)
+        XCTAssertEqual(TopicStatus.waitingOnYou.tone, Theme.warn)
+        XCTAssertEqual(TopicStatus.review.tone, Theme.warn)
+        XCTAssertEqual(TopicStatus.done.tone, Theme.muted)
+    }
+
+    func testFreshStartDayLabel() {
+        XCTAssertEqual(ConversationRules.freshStartLabel("Today"), "Today · fresh start")
+    }
+
+    func testBlobImageStates() {
+        XCTAssertEqual(BlobImageState.after(data: nil, isImage: false), .failed)
+        XCTAssertEqual(BlobImageState.after(data: Data([1]), isImage: false), .unavailable)
+        XCTAssertEqual(BlobImageState.after(data: Data([1]), isImage: true), .loaded)
+        XCTAssertEqual(BlobImageState.failed.text, "Couldn't load · Tap to try again")
     }
 
     func testSummaryRepeatsResultAfterTrimming() {
