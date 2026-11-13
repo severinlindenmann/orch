@@ -83,9 +83,13 @@ Measured active time (agent run time on the order and its crew; waiting for the 
 The watcher process also serves the Factory page on `127.0.0.1:<port>` (`orch factory status --json` gives `url`;
 manifest `[page] path = "/"`). The dashboard embeds it as `#addon/factory/<path>` through its `/addon/factory/` proxy
 (`X-Forwarded-Prefix`), same pattern and fences as Insights: Host/Origin checks, GET only, no human key, CSP
-`default-src 'self'`, kit CSS/JS from `orch_ui` (fallback: the dashboard's copy). Decisions are never made on this page:
-every decision button is a link `target="_top"` to the dashboard ticket page of the order (`/#ticket/<order>`), where
-the native question card asks for the person's proof.
+`default-src 'self'`, kit CSS/JS from `orch_ui` (fallback: the dashboard's copy). Decisions are never made on this page
+(phase 2b): inside the dashboard, a decision button posts `{type: "orch.question", ticket, question}` (the order's open
+question `open.q`) to the parent window; the dashboard accepts it only from the embedded shipped add-on iframe of its own
+origin, opens its own native question card for that ticket's question in a dialog (text and options come from the
+dashboard's data, the person presses the option and the proof path is the ticket page's), then posts
+`{type: "orch.question.done", ticket, question}` back and the page refreshes. Outside the dashboard (or with no open
+question) the button stays a link `target="_top"` to `/#ticket/<order>`. The Factory server stays read only.
 
 | GET | Answer (JSON) |
 |---|---|
