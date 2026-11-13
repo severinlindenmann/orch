@@ -25,16 +25,25 @@
       return r;
     });
   };
-  // After an update the restarted server may not know this tab's session: say so in plain words, with a Reload button.
+  // After a restart (an update, an add-on change) the server may not know this tab's session: say so in plain words, with a Reload button.
   function restartedNotice(r) {
     r.clone().text().then(function (t) {
-      if (t.indexOf("orch restarted after the update") !== 0 || document.getElementById("orch-restarted")) return;
+      if (t.indexOf("orch restarted") !== 0 || document.getElementById("orch-restarted")) return;
+      // never under an open dialog (a modal sits above the page): close it so Reload can be reached
+      Array.prototype.forEach.call(document.querySelectorAll("dialog[open]"), function (d) { try { d.close(); } catch (e) { /* gone */ } });
       var b = document.createElement("div");
       b.id = "orch-restarted"; b.className = "banner info orch-notice"; b.setAttribute("role", "alert");
       b.style.cssText = "margin:8px 16px 0";
       var d = document.createElement("div"); d.textContent = t; b.appendChild(d);
       var x = document.createElement("button"); x.type = "button"; x.textContent = "Reload"; x.style.marginTop = "8px";
-      x.onclick = function () { location.reload(); };
+      // A restarted server that kept this tab's session: a reload is enough. One that did not: it opens the
+      // dashboard again in a new window through the OS (a fresh sign-in link, like orch start); else reload.
+      x.onclick = function () {
+        realFetch("/session/reopen", { method: "POST", headers: { "Content-Type": "application/json", "X-Orch-Page": stored() }, body: "{}" })
+          .then(function (r) { return r.text().then(function (t) { return {r: r, t: t}; }); })
+          .then(function (o) { if (o.r.status === 202) { d.textContent = o.t; x.remove(); } else location.reload(); })
+          .catch(function () { location.reload(); });
+      };
       b.appendChild(x);
       (document.body || document.documentElement).insertBefore(b, (document.body || document.documentElement).firstChild);
     }).catch(function () {});

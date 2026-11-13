@@ -371,6 +371,25 @@ async function actRetry(op, args, applies) {
   return act(op, args());
 }
 window.orchAct = (op, args) => act(op, args);
+// Turning an add-on on or off restarts the running services, this page's server too. When the answer is lost on
+// the way (the server restarted), read the state again once it is back: the add-on's switch says if it worked.
+async function addonSet(name, on, tries = 20, pause = 1500) {
+  const result = await act('addon.set', {name, on});
+  if (result.ok || result.status !== 0 || snapshot) return result;
+  for (let i = 0; i < tries; i++) {
+    await new Promise(done => setTimeout(done, pause));
+    let next = null;
+    try {
+      const res = await fetch('/api/state', {cache:'no-store'});
+      if (res.ok) next = await res.json();
+    } catch (_) { /* still restarting */ }
+    if (!next) continue;
+    accept(next);
+    const row = array(next.settings?.addons).find(a => a && a.name === name);
+    return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : result;
+  }
+  return result;
+}
 async function act(op, args) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
@@ -609,7 +628,7 @@ main.addEventListener('click', async event => {
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;
-    const send = () => settingsSend('addon.set', {name:addon.name, on:!addon.active}, 'addon-' + addon.name);
+    const send = () => settingsSend('addon.set', {name:addon.name, on:!addon.active}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
     if (addon.active) await send();
     else settingsConfirm('Turn on ' + capitalise(addon.name) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
     return;
