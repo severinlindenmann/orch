@@ -79,15 +79,16 @@ const SCREENS = [
     if (!(await p.locator('.fx-agent').first().isVisible())) await p.click('.fx-mobile-tasks'); // the rail is folded on a phone
     await p.click('.fx-agent >> nth=1');
   } },
-  { name: 'insights-overview', url: '/', ...INS, wait: '#rows .row:not(.head)', setup: p => settle(p, 800) }, // cards + Skills list
-  { name: 'insights-connections', url: '/', ...INS, wait: '#rows .row:not(.head)', setup: insTab('connections') },
-  { name: 'insights-keys', url: '/', ...INS, wait: '#rows .row:not(.head)', setup: insTab('keys') },
-  { name: 'insights-detail', url: '/', ...INS, wait: '#rows .row:not(.head)', async setup(p) {
+  { name: 'insights-overview', url: '/', ...INS, wait: '#rows tr[data-name]', setup: p => settle(p, 800) }, // metrics + skill use + What helpers use table
+  { name: 'insights-connections', url: '/', ...INS, wait: '#rows tr[data-name]', setup: insTab('connections') },
+  { name: 'insights-keys', url: '/', ...INS, wait: '#rows tr[data-name]', setup: insTab('keys') },
+  { name: 'insights-detail', url: '/', ...INS, wait: '#rows tr[data-name]', async setup(p) {
     await settle(p, 800);
-    await p.click('#rows .row:not(.head)');
+    // the redesigned page has no side panel: the numbers sit in the table row and the services block under it
+    await p.locator('#services').scrollIntoViewIfNeeded();
     await settle(p, 500);
   } },
-  { name: 'insights-settings', url: '/', ...INS, wait: '#rows .row:not(.head)', async setup(p) {
+  { name: 'insights-settings', url: '/', ...INS, wait: '#rows tr[data-name]', async setup(p) {
     await settle(p, 800);
     await p.click('#settings-link');
     await p.waitForSelector('#settings-body *', { timeout: 20000 });

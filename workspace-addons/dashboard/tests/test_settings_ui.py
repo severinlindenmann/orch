@@ -60,13 +60,15 @@ def test_switch_rows_choices_and_closed_details_owner_pass():
     assert ".settings .copies-details{padding:0 16px;" in css
 
 
-def test_repeat_uses_only_presets_and_open_tickets():
+def test_repeat_window_offers_plain_choices_and_open_tickets():
     src = webjs.all_js()
-    assert "['every day at 9', 'every weekday at 9', 'every monday at 9', 'every hour']" in src
+    assert (
+        "const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];"
+        in src
+    )
     assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
-    assert "{addon:addonName || route().id, verb, target:ticket.value}" in src
-    assert "if (!once) args.value = preset.value;" in src
-    assert "await act('addon.act', args)" in src
+    assert "{addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase}" in src
+    assert "verb:'copy', target:ticket.value" in src
     assert "if (route().kind === 'addon') await loadAddon(route().id)" in src
 
 
@@ -134,18 +136,21 @@ global.window = {orch:{open() {}, close:async () => {}, toast() {}}};
 global.act = async (op, args) => { calls.push({op, args}); return {ok:true}; };
 loadAddon = async () => {};
 (async () => {
-  repeatsDialog();
-  assert.equal(selects.at(-1).options[0].text, 'Just once, now');
-  assert.equal(selects.at(-1).value, 'once');
-  selects.at(-1).value = 'every day at 9';
-  await controls.at(-1).onclick();
-  assert.deepEqual(calls.pop(), {op:'addon.act', args:{addon:'automation', verb:'repeat', target:'t_open', value:'every day at 9'}});
-  repeatsDialog();
-  selects.at(-1).value = 'once';
-  await controls.at(-1).onclick();
-  repeatsDialog('t_open', 'automation');
-  assert.equal(selects.at(-1).value, 'every day at 9');
-  assert.deepEqual(calls.pop(), {op:'addon.act', args:{addon:'automation', verb:'copy', target:'t_open'}});
+  const plan = repeatPlan;
+  assert.deepEqual(plan({freq:'daily', time:'07:30'}), {phrase:'daily 07:30', summary:'Runs every day at 07:30', hint:''});
+  assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).phrase, 'every monday 08:00');
+  assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).summary, 'Runs every Monday at 08:00');
+  assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).phrase, '5 8 * * 1,3,5');
+  assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).summary, 'Runs every Monday, Wednesday and Friday at 08:05');
+  assert.equal(plan({freq:'weekly', days:[0], time:'09:00'}).phrase, 'every sunday 09:00');
+  assert.equal(plan({freq:'weekly', days:[], time:'08:00'}).phrase, null);
+  assert.equal(plan({freq:'monthly', monthday:15, time:'09:00'}).phrase, 'monthly 15 09:00');
+  assert.equal(plan({freq:'monthly', monthday:31, time:'09:00'}).phrase, null);
+  assert.equal(plan({freq:'custom', every:3, time:'06:10'}).phrase, '10 6 */3 * *');
+  assert.equal(plan({freq:'custom', every:1, time:'06:10'}).phrase, 'daily 06:10');
+  assert.equal(plan({freq:'custom', every:0, time:'06:10'}).phrase, null);
+  assert.equal(plan({freq:'daily', time:''}).phrase, null);
+  assert.equal(plan({freq:'daily', time:'25:00'}).phrase, null);
   global.location = {hash:''};
   messageSend({dataset:{sendTo:'ws_abcdefghij'}});
   assert.equal(location.hash, '#chat/ws_abcdefghij');
