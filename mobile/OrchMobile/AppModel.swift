@@ -318,7 +318,7 @@ final class AppModel {
             if questions != newQuestions { questions = newQuestions }
             if updates != newUpdates { updates = newUpdates }
             if let st = await st, settings != st { settings = st }
-            for qid in QuestionClosing.closedByTicket(questions: questions, updates: updates, answers: answers) {
+            for qid in QuestionClosing.closedByTicket(questions: questions, updates: updates, answers: answers, pending: Set(pendingAnswers.keys)) {
                 answers[qid] = ""; answeredElsewhere.insert(qid)
             }
             await reloadMessages()
@@ -453,7 +453,7 @@ final class AppModel {
     func refreshUpdates() async {
         if let u = try? await client.updates() {
             updates = u
-            for qid in QuestionClosing.closedByTicket(questions: questions, updates: u, answers: answers) {
+            for qid in QuestionClosing.closedByTicket(questions: questions, updates: u, answers: answers, pending: Set(pendingAnswers.keys)) {
                 answers[qid] = ""; answeredElsewhere.insert(qid)
             }
         }

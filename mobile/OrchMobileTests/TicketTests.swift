@@ -137,6 +137,8 @@ final class TicketTests: XCTestCase {
         open = TicketBuilder.build(updates: [done], questions: [q], answers: answers)
         XCTAssertEqual(open.map(\.status), [.done])
         XCTAssertEqual(ChatsRowRules.openQuestions([q], answers: answers).count, 0, "the Needs your OK count drops")
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [upd("blocked", at: later)], answers: [:]).isEmpty, "unknown status keeps it open")
+        XCTAssertTrue(QuestionClosing.closedByTicket(questions: [q], updates: [done], answers: [:], pending: [q.id]).isEmpty, "a pending phone answer is left alone")
         XCTAssertEqual(QuestionClosing.closedByTicket(questions: [q], updates: [upd("review", at: later)], answers: [:]), [q.id])
     }
 

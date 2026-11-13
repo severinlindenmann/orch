@@ -76,11 +76,11 @@ struct Ticket: Identifiable, Equatable, Sendable {
 enum QuestionClosing {
     /// Ids of open questions the ticket has moved past: a newer update of the same ticket carries a status that is not
     /// "waiting" (active, review, done, ...), so the question was answered or closed elsewhere (on the computer).
-    static func closedByTicket(questions: [Question], updates: [TicketUpdate], answers: [String: String]) -> [String] {
+    static func closedByTicket(questions: [Question], updates: [TicketUpdate], answers: [String: String], pending: Set<String> = []) -> [String] {
         questions.compactMap { q in
-            guard !q.isReview, !q.isMakeTicket, answers[q.id] == nil, let t = q.message.ticket else { return nil }
+            guard !q.isReview, !q.isMakeTicket, answers[q.id] == nil, !pending.contains(q.id), let t = q.message.ticket else { return nil }
             let newer = updates.filter { $0.workspace == q.message.from && $0.ticket == t && $0.at > q.message.createdAt && $0.ticketView?.status != nil }
-            guard let last = newer.max(by: { $0.at < $1.at }), Ticket.Status(ticketStatus: last.ticketView?.status) != .needsYou else { return nil }
+            guard let last = newer.max(by: { $0.at < $1.at }), let st = Ticket.Status(ticketStatus: last.ticketView?.status), st != .needsYou else { return nil }
             return q.id
         }
     }
