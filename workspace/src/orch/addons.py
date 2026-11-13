@@ -557,10 +557,15 @@ _REAL_RUN_UV = run_uv
 
 
 def _same_python() -> list[str]:
-    """On Windows a reinstall keeps the Python orch runs on. On Windows on ARM the installer chose an x64
-    Python (cryptography has no ARM64 Windows wheel); uv's own pick would try to compile it and fail."""
+    """A reinstall keeps the Python orch runs on, on every platform. Otherwise uv may pick a newer one and
+    rebuild the env (lib/python3.11 -> 3.13): running services, still on the old paths, then failed every
+    request. On Windows on ARM the installer chose an x64 Python (cryptography has no ARM64 Windows wheel);
+    uv's own pick would try to compile it and fail. The interpreter itself when it is there, else its
+    version."""
     base = getattr(sys, "_base_executable", None)
-    return ["--python", base] if sys.platform == "win32" and base else []
+    if base and os.path.isfile(base):
+        return ["--python", base]
+    return ["--python", f"{sys.version_info.major}.{sys.version_info.minor}"]
 
 
 def _reinstall_flags() -> list[str]:
@@ -717,7 +722,14 @@ def _running_workspaces(root: Path) -> list[str]:
 
 
 def _reinstall(
-    entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str, consents: list[str] = ()
+    entries: list[dict],
+    *,
+    save: bool,
+    then: list[list[str]],
+    root: Path,
+    done: str,
+    consents: list[str] = (),
+    restart: bool = True,
 ) -> bool:
     """Reinstall orch with these add-ons, then (if `save`) store them as the registry and run the orch
     commands in `then` with the new code. Returns False when that happens later: on Windows orch can not
@@ -749,6 +761,10 @@ def _reinstall(
                     except Exception as e:
                         print(f"Note: could not put orch's add-ons back as they were: {e}", file=sys.stderr)
             raise
+        if restart:  # what runs still uses the old files (an add-on add/remove replaced them): restart it
+            lines = _restart_updated(root)
+            if lines:
+                _say("\n".join(lines))
         return True
     if winfinish.pending(home()):
         raise Refused(
@@ -2504,6 +2520,7 @@ def update(
                 ],
                 root=root,
                 done="orch updated",
+                restart=False,  # the project step restarts what runs (with the update's own text)
             )
         except BaseException:
             before_path.unlink(missing_ok=True)  # a failed install leaves no stale snapshot
