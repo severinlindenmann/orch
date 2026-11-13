@@ -8,11 +8,11 @@ enum MobileModeBannerState: Equatable {
 
     var text: String {
         switch self {
-        case .on(let pc): return "\(pc) is away · questions come to your phone"
+        case .on(let pc): return "You're away from \(pc) · questions come to your phone"
         case .unreachable(let pc, let since):
             return since.map { "\(pc) · Can't reach since \($0)" }
                 ?? "\(pc) · Can't reach"
-        case .muted(let pc): return "\(pc) is away · questions muted"
+        case .muted(let pc): return "You're away from \(pc) · questions muted"
         }
     }
     // Tints are layered over Theme.surface by the banner.
@@ -59,6 +59,7 @@ enum MobileModeBannerState: Equatable {
 /// Mobile mode banner below the workspace header.
 struct MobileModeBanner: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var typeSize
     var workspaceId: String? = nil
 
     /// "Can't reach" depends on the clock (last call > 5 min), not only on data: re-evaluate every 15 s, because an unchanged
@@ -84,7 +85,7 @@ struct MobileModeBanner: View {
             HStack(spacing: 10) {
                 Circle().fill(state.dotColor).frame(width: 7, height: 7).accessibilityHidden(true)
                 Text(state.text).themeFont(13).foregroundStyle(Theme.text)
-                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if state.canTurnOff {
                     Button { Task { await model.turnOffMobileMode(id) } } label: {

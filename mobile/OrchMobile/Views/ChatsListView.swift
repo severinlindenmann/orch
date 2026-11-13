@@ -397,7 +397,7 @@ enum ChatsRowRules {
     /// Chat headers drop their subtitle (status, last seen) at accessibility sizes so the title stays readable; Info has it.
     static func showsHeaderSubtitle(_ accessibilitySize: Bool) -> Bool { !accessibilitySize }
     /// VoiceOver words for the amber needs-you count, kept apart from the unread badge ("3 unread").
-    static func needsYouSpoken(_ count: Int) -> String? { count > 0 ? "\(count) needs your OK" : nil }
+    static func needsYouSpoken(_ count: Int) -> String? { count > 0 ? (count == 1 ? "1 question needs your OK" : "\(count) questions need your OK") : nil }
     /// One filter rule for every conversation kind on the list (workspaces and groups).
     static func matches(_ filter: String, unread: Int, needsYou: Bool) -> Bool {
         switch filter { case "Unread": unread > 0; case "Needs your OK": needsYou; default: true }

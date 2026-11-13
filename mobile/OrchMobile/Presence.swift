@@ -52,11 +52,13 @@ enum WorkspaceStatus: Equatable, Sendable {
 
     var isOnline: Bool { self == .online }
 
-    /// VoiceOver words for the presence dot on a workspace badge: "online", "last seen 14:02", "offline".
+    /// VoiceOver words for the presence dot on a workspace badge: "online", "last seen 14:02", "not reachable" (computer never
+    /// seen), "offline" (this phone has no connection).
     func dotLabel(now: Date = Date(), calendar: Calendar = .current) -> String {
         switch self {
         case .online: return "online"
         case .offline: return "offline"
+        case .notReachable(.unknown): return "not reachable"
         case .notReachable(let p): return p.line(now: now, calendar: calendar)
         }
     }

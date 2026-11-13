@@ -229,6 +229,8 @@ struct ConversationView: View {
                         if ChatsRowRules.showsHeaderSubtitle(typeSize.isAccessibilitySize) { presence }
                     }
                     .padding(.vertical, 8)
+                    // The toolbar slot has a fixed height: two title lines fit up to AX2, larger sizes would clip.
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 }
                 if isGeneral && historyDay == nil {
                     ToolbarItem(placement: .topBarTrailing) {
