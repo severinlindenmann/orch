@@ -92,6 +92,11 @@ PAGE_CSP = (
 )
 
 
+# Esc typed inside a ticket's web page never reaches the viewer around its sandboxed frame. This one line tells the
+# viewer that Esc was pressed (it can only ask the viewer to leave full screen or close; the frame stays sandboxed).
+PAGE_ESC = b'<script>addEventListener("keydown",function(e){if(e.key==="Escape")parent.postMessage("orch-viewer-escape","*")})</script>'
+
+
 def listing(root: Path, orch_bin: str | None, tid: str) -> dict:
     """{"available": bool, "files": [{name, size, mtime}]}. `available` is False when orch cannot list files."""
     rows = run_orch(orch_bin, ["ticket", "artifacts", tid, "--json"], root)
@@ -187,6 +192,10 @@ def read_page(root: Path, tid: str, kind: str, name) -> tuple[int, bytes, str, d
         return 413, b"That file is too large to show.", "text/plain", {}
     if data is None:
         return nope
+    if ext in ("html", "htm"):
+        low = data.lower()
+        at = low.rfind(b"</body>")
+        data = data + PAGE_ESC if at < 0 else data[:at] + PAGE_ESC + data[at:]
     # A page is only for this app's own frame. What it loads next to itself comes from the frame's opaque origin,
     # which can only be allowed by "cross-origin"; those files are inert (style, script, picture, font, media).
     return (

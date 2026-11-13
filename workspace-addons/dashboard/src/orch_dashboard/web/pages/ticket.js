@@ -409,12 +409,16 @@ function linkGroups(links) {
 }
 // Preview text is cached by file revision; snapshot copies never request local files.
 const ticketPreviewText = new Map(), ticketPreviewDone = new Map(), ticketPreviewPending = new Set();
+// A web page or PDF shows its first screen, small, over the type icon (kit/fileviewer.js); other files have none.
+const shownThumb = (t, kind, file) => snapshot || !window.FileViewer?.thumb ? null : window.FileViewer.thumb({tid:t.id, kind, name:file.name, size:file.size, mtime:file.mtime || ''});
 function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
   const html = /\.html?$/i.test(file.name), picture = /\.(png|jpe?g|webp)$/i.test(file.name);
   if (snapshot || html || (!picture && !PREVIEW_EXT.text.test(file.name))) {
     tile.append(h('p', {className:'meta'}, html ? title : 'Preview available when opened'));
+    const live = shownThumb(t, kind, file);
+    if (live) { tile.classList.add('has-thumb'); tile.append(live); }
     return tile;
   }
   const url = '/api/file?t=' + encodeURIComponent(t.id) + '&k=' + kind + '&n=' + encodeURIComponent(file.name);
@@ -559,7 +563,7 @@ function ticketFileActions(t, kind, file) {
 }
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
-    h('span', {className:'file-type', 'aria-hidden':'true'}, fileBadge(file.name)),
+    h('span', {className:'file-type' + (shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), shownThumb(t, kind, file)),
     h('div', {className:'grow'}, h('p', {className:'file-name'}, fileTitle(file.name)), h('p', {className:'meta'}, fileMeta(file))),
     ticketFileActions(t, kind, file));
 }
@@ -612,6 +616,8 @@ function fileThumb(t, f) {
     p.classList.add('file-snippet'); thumb.append(p); return thumb;
   }
   thumb.append(h('span', {className:'file-sym'}, iconEl(fileIcon(f.name)), h('span', {}, viewerWord(f.fileKind))));
+  const live = shownThumb(t, f.kind, f);
+  if (live) thumb.append(live);
   return thumb;
 }
 function fileTile(t, f) {

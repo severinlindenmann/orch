@@ -310,6 +310,60 @@
     return {columns: records.shift() || [], rows: records};
   }
 
+  // ---- thumbnails: a first-screen picture of a web page or a PDF, drawn small over the type icon.
+  // The page runs in a sandboxed frame (the same one the viewer uses), the PDF in the browser's own viewer; both are
+  // scaled down, cannot be clicked, and exist only while their tile is on screen (at most THUMB_MAX at once).
+  // While it loads, and when it fails, the icon under it stays. A file that failed once is remembered for the tab.
+  const THUMB_MAX = 14;
+  let thumbLive = 0, thumbWatch = null;
+  const thumbKey = f => [f.tid, f.kind, f.name, f.size, f.mtime].join('|');
+  const failed = new Set();
+  try { for (const k of JSON.parse(sessionStorage.getItem('orch.thumb.fail') || '[]')) failed.add(k); } catch (_) { /* no storage */ }
+  const rememberFail = k => { failed.add(k); try { sessionStorage.setItem('orch.thumb.fail', JSON.stringify([...failed].slice(-200))); } catch (_) { /* no storage */ } };
+  function thumbStart(box) {
+    if (box._frame || thumbLive >= THUMB_MAX || !box.isConnected) return;
+    const f = box._file, kind = kindOf(f.name), key = thumbKey(f);
+    if (failed.has(key)) return;
+    thumbLive++;
+    const fr = kind === 'pdf' ? el('object', 'fv-pframe') : el('iframe', 'fv-pframe');
+    if (kind === 'pdf') { fr.type = 'application/pdf'; fr.data = urlOf(f) + '#toolbar=0&navpanes=0&scrollbar=0&view=FitH'; }
+    else { fr.setAttribute('sandbox', 'allow-scripts'); fr.setAttribute('referrerpolicy', 'no-referrer'); fr.tabIndex = -1; fr.src = pageUrl(f); }
+    fr.setAttribute('aria-hidden', 'true');
+    const W = kind === 'pdf' ? 900 : 1280;
+    const fit = () => { const w = box.clientWidth, h = box.clientHeight; if (!w || !h) return; const s = w / W; fr.style.width = (W + (kind === 'pdf' ? 24 : 0)) + 'px'; fr.style.height = Math.ceil(h / s) + 'px'; fr.style.transform = 'scale(' + s + ')'; };
+    box._fit = fit; box._frame = fr; box._key = key;
+    fit();
+    if (kind === 'pdf') box.classList.add('on');
+    else { fr.addEventListener('load', () => box.classList.add('on')); fr.addEventListener('error', () => { rememberFail(key); thumbStop(box); }); }
+    box.append(fr);
+  }
+  function thumbStop(box) {
+    if (!box._frame) return;
+    box._frame.remove(); box._frame = null; box.classList.remove('on'); thumbLive = Math.max(0, thumbLive - 1);
+  }
+  function thumbWatcher() {
+    if (thumbWatch) return thumbWatch;
+    const io = new IntersectionObserver(list => list.forEach(e => {
+      const box = e.target;
+      if (!box.isConnected) { io.unobserve(box); thumbStop(box); return; }
+      e.isIntersecting ? thumbStart(box) : thumbStop(box);
+    }), {rootMargin: '120px'});
+    const ro = new ResizeObserver(list => list.forEach(e => { if (!e.target.isConnected) { ro.unobserve(e.target); io.unobserve(e.target); thumbStop(e.target); } else e.target._fit?.(); }));
+    return (thumbWatch = {io, ro});
+  }
+  // f: {tid, kind, name, size, mtime}. Returns an overlay to put inside a positioned box that already shows the icon,
+  // or null for a file that has no picture of itself.
+  function thumb(f) {
+    const kind = kindOf(f.name);
+    if (kind !== 'page' && kind !== 'pdf') return null;
+    if (kind === 'pdf' && navigator.pdfViewerEnabled === false) return null;  // no built-in PDF viewer: the icon stays
+    const box = el('span', 'fv-pthumb'); box.setAttribute('aria-hidden', 'true'); box._file = f;
+    box.dataset.key = 'pthumb-' + f.kind + '-' + f.name;
+    // The page redraws often: a box that was never put on the page is dropped without being watched.
+    requestAnimationFrame(() => { if (!box.isConnected) return; const w = thumbWatcher(); w.io.observe(box); w.ro.observe(box); });
+    return box;
+  }
+
   // ---- the dialog
   let open = null;
   function show(opts) {
@@ -332,8 +386,29 @@
     left.append(open1, dl, copy);
     const prev = btn('← Prev', 'outline sm', () => go(index - 1)), next = btn('Next →', 'outline sm', () => go(index + 1));
     right.append(prev, next); actions.append(left, right);
+    // Full screen: the same dialog fills the window. The button says what it does; Esc leaves full screen first,
+    // and × Close, Esc (when not full screen) and a click outside still close the viewer.
+    const fs = btn('Full screen', 'outline sm fv-fs', () => setFull(!d.classList.contains('fs')), {'aria-pressed': 'false'});
+    head.append(fs);
+    const setFull = on => {
+      d.classList.toggle('fs', on); fs.textContent = on ? 'Exit full screen' : 'Full screen'; fs.setAttribute('aria-pressed', String(on));
+      fs.focus({preventScroll: true});
+    };
+    const escFull = e => {
+      if (e.key !== 'Escape' || !d.classList.contains('fs') || window.UI?.overlay?.top() !== d) return;
+      e.preventDefault(); e.stopImmediatePropagation(); setFull(false);
+    };
+    window.addEventListener('keydown', escFull, true);
+    // Esc typed inside a web page in the frame (the page sends this message, see ticketfiles.PAGE_ESC): leave full
+    // screen first, otherwise close, like the keyboard Esc anywhere else in the viewer.
+    const escFrame = e => {
+      if (e.data !== 'orch-viewer-escape' || ![...d.querySelectorAll('iframe.fv-page')].some(f => f.contentWindow === e.source)) return;
+      if (d.classList.contains('fs')) setFull(false); else close();
+    };
+    window.addEventListener('message', escFrame);
+    d.addEventListener('cancel', e => { if (d.classList.contains('fs')) { e.preventDefault(); e.stopImmediatePropagation(); setFull(false); } }, true);
     const stage = el('div', 'fv-stage'); stage.setAttribute('aria-live', 'polite');
-    const foot = el('footer', 'fv-foot'); foot.append(el('span', '', '← → Browse files'), el('span', '', 'Esc Close'));
+    const foot = el('footer', 'fv-foot'); foot.append(el('span', '', '← → Browse files'), el('span', '', 'Esc Close (or leave full screen)'));
     d.append(head, actions, stage, foot);
     document.body.append(d);
 
@@ -346,6 +421,7 @@
     function finish(restore) {
       if (done) return; done = true; open = null;
       token++;
+      window.removeEventListener('keydown', escFull, true); window.removeEventListener('message', escFrame);
       d.remove();
       if (restore && trigger && trigger.isConnected) trigger.focus({preventScroll: true});
       if (opts.onClose) opts.onClose();
@@ -383,5 +459,5 @@
     (d.querySelector('.ui-overlay-close') || d).focus();
     return d;
   }
-  window.FileViewer = {open: show, kindOf, word: k => WORD[k], urlOf, extOf, parseDelimited};
+  window.FileViewer = {open: show, thumb, kindOf, word: k => WORD[k], urlOf, extOf, parseDelimited};
 })();

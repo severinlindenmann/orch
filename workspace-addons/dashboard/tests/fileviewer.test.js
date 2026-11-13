@@ -28,3 +28,17 @@ test('csv parsing keeps quoted commas, quotes and line breaks in one cell', () =
   assert.equal(JSON.stringify(columns), JSON.stringify(['name', 'note']));
   assert.equal(JSON.stringify(rows), JSON.stringify([['Smith, A', 'said "hi"'], ['two\nlines', 'x']]));
 });
+
+test('only web pages and PDFs get a thumbnail; the box has a stable key so a redraw keeps its frame', () => {
+  const el = () => { const n = {className: '', dataset: {}, classList: {add() {}}, setAttribute() {}, append() {}, set textContent(v) {}, isConnected: false}; return n; };
+  const w2 = {};
+  vm.runInNewContext(source, {window: w2, document: {createElement: el}, navigator: {pdfViewerEnabled: true}, requestAnimationFrame() {}});
+  const f = name => ({tid: 't_x', kind: 'artifacts', name, size: 1, mtime: ''});
+  assert.equal(w2.FileViewer.thumb(f('a.png')), null);
+  assert.equal(w2.FileViewer.thumb(f('a.csv')), null);
+  assert.equal(w2.FileViewer.thumb(f('a.html')).dataset.key, 'pthumb-artifacts-a.html');
+  assert.equal(w2.FileViewer.thumb(f('a.pdf')).dataset.key, 'pthumb-artifacts-a.pdf');
+  const w3 = {};
+  vm.runInNewContext(source, {window: w3, document: {createElement: el}, navigator: {pdfViewerEnabled: false}, requestAnimationFrame() {}});
+  assert.equal(w3.FileViewer.thumb(f('a.pdf')), null);  // no built-in PDF viewer: the icon stays
+});

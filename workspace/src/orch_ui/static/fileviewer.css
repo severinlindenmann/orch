@@ -3,6 +3,9 @@ dialog.fv{position:fixed;inset:0;margin:auto;width:min(1152px,calc(100vw - 48px)
 dialog.fv[open]{display:flex;flex-direction:column;animation:fv-in var(--dur-base) var(--ease-enter)}
 dialog.fv::backdrop{background:rgb(0 0 0 / .8)}
 dialog.fv[data-kind=page],dialog.fv[data-kind=pdf]{width:min(1600px,calc(100vw - 32px));height:calc(100dvh - 48px)}
+dialog.fv.fs,dialog.fv.fs[data-kind=page],dialog.fv.fs[data-kind=pdf]{width:100vw;height:100dvh;border:0;border-radius:0}
+.fv-fs{position:absolute;top:16px;right:128px;z-index:6;margin:0}
+.fv-head{padding-right:290px}
 .fv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:20px 24px 12px;flex-shrink:0}
 .fv-titles{min-width:0}
 .fv-eyebrow{margin:0 0 4px;font-size:12px;line-height:20px;color:var(--text-muted)}
@@ -10,7 +13,6 @@ dialog.fv[data-kind=page],dialog.fv[data-kind=pdf]{width:min(1600px,calc(100vw -
 .fv-head h2{margin:0 0 6px;font-size:20px;line-height:28px;overflow-wrap:anywhere}
 .fv-meta{margin:0;line-height:1.65;overflow-wrap:anywhere}
 dialog.fv>.ui-overlay-close{position:absolute;top:16px;right:24px;margin:0;z-index:6}
-.fv-head{padding-right:140px}
 .fv-actions{display:flex;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;padding:0 24px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
 .fv-actions .row{display:flex;gap:8px;flex-wrap:wrap}
 .fv-actions .btn[disabled]{opacity:.45}
@@ -75,8 +77,12 @@ dialog.fv>.ui-overlay-close{position:absolute;top:16px;right:24px;margin:0;z-ind
 .fv-fallback{flex:1;display:grid;place-content:center;justify-items:center;gap:8px;padding:48px 24px;text-align:center}
 .fv-fb-title{margin:0;font-weight:600}
 .fv-fallback .meta{margin:0 0 8px}
+/* thumbnails (kit/fileviewer.js thumb()): a scaled first screen over the type icon */
+.fv-pthumb{position:absolute;inset:0;overflow:hidden;background:transparent;pointer-events:none;opacity:0;transition:opacity var(--dur-fast) var(--ease-enter)}
+.fv-pthumb.on{opacity:1;background:#fff}
+.fv-pframe{position:absolute;left:0;top:0;border:0;background:#fff;transform-origin:0 0;pointer-events:none}
 @keyframes fv-in{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
 @keyframes fv-fade{from{opacity:.65}to{opacity:1}}
 @keyframes fv-shimmer{to{background-position:-200% 0}}
-@media(max-width:760px){dialog.fv,dialog.fv[data-kind=page],dialog.fv[data-kind=pdf]{width:calc(100vw - 16px);height:calc(100dvh - 16px)}.fv-head,.fv-actions,.fv-foot,.fv-bar,.fv-tablebar,.fv-note{padding-left:16px;padding-right:16px}.fv-eyebrow{display:none}.fv-foot{display:none}}
-@media(prefers-reduced-motion:reduce){dialog.fv[open],.fv-body,.fv-skeleton{animation:none}}
+@media(max-width:760px){dialog.fv,dialog.fv[data-kind=page],dialog.fv[data-kind=pdf]{width:calc(100vw - 16px);height:calc(100dvh - 16px)}.fv-head,.fv-actions,.fv-foot,.fv-bar,.fv-tablebar,.fv-note{padding-left:16px;padding-right:16px}.fv-eyebrow{display:none}.fv-head{padding-right:16px;padding-top:56px}.fv-fs{top:12px;right:auto;left:16px}.fv-foot{display:none}}
+@media(prefers-reduced-motion:reduce){dialog.fv[open],.fv-body,.fv-skeleton{animation:none}.fv-pthumb{transition:none}}
