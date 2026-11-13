@@ -41,7 +41,8 @@ final class R8V2ShotsUITests: XCTestCase {
         let general = app.buttons["general-ws_pilatus001"]; if general.waitForExistence(timeout: 15) { general.tap() }
         let field = el(app, "composer-field"); XCTAssertTrue(field.waitForExistence(timeout: 15))
         field.tap(); field.typeText("Please remind me about the car tax."); el(app, "composer-send").tap()
-        XCTAssertTrue(app.staticTexts["Waiting · will send when online"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["receipt-queued"].waitForExistence(timeout: 10), "the clock marks the waiting message")
+        XCTAssertFalse(app.staticTexts["Waiting · will send when online"].exists, "the offline banner says it; no caption per bubble")
         try shot(app, "offline-wait")
     }
 
