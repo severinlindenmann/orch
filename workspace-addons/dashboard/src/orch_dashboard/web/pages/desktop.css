@@ -1,0 +1,43 @@
+/* Desktop density (1280 and wider, mouse): the accepted drafts use 32 px controls and compact rows.
+   The 44 px touch targets stay for phones and touch screens (max-width 720 px or no hover). Loaded last. */
+@media (min-width:721px) and (hover:hover) {
+  .btn,.btn.sm{min-height:32px}
+  .btn.xs{min-height:28px}
+  .btn.icon,.btn.icon.sm{width:32px;min-width:32px}
+  .input{min-height:36px;font-size:14px}
+  .board-tools .btn,.ticket-row .btn,.ticket-card .btn,.ticket-not-found .btn,.ticket-table .btn{min-height:32px}
+  .ticket-row .move-button,.ticket-card .move-button{width:28px;min-width:28px;min-height:28px}
+  .ticket-row .menu-item,.ticket-card .menu-item{min-height:36px}
+  .ticket-filters input,.ticket-select{min-height:36px}
+  .ticket-row h3 a,.ticket-card h3 a,.board-parent a,.board-part{min-height:0}
+  .board-parent a{line-height:20px}
+  .board-part{min-height:32px}
+  .ticket-card h3 a{display:inline;line-height:20px}
+  .home-columns .btn,.home-columns summary,#connection .btn,#connection summary{min-height:32px}
+  .home-columns .ticket-title a,.home-columns .home-need>p a,.home-columns .see-all{min-height:0}
+  .message-field input,.message-field textarea,.notes-tools input{min-height:36px}
+  .ticket-page :is(button,summary,.ticket-part,.ab-actions a):not(.ticket-tabs button){min-height:32px}
+  .ticket-page .input{min-height:36px}
+  .live-strip .btn{min-height:32px}
+  .settings button,.addon-native button,.settings-other button,.settings .sync-chip{min-height:32px}
+  .settings-nav button,.settings-nav a,.settings details summary,.addon-native summary{min-height:36px}
+  .settings .switch{min-height:20px}
+  .chat-page button,.chat-page a,.chat-page summary,.chat-page input{min-height:32px}
+  .chat-page .chat-button,.chat-page .chat-delivery .chat-button,.chat-page .chat-bubble > .btn.outline{min-height:32px}
+  .chat-page .chat-card,.chat-page .chat-day-row,.chat-page .chat-contact{min-height:40px}
+  .answer-option{min-height:40px}
+  /* Board: columns are lanes, cards carry a state accent (accepted Tickets draft) */
+  .board .kanban-col{background:var(--lane,#14171c);border:1px solid var(--border);border-top:2px solid var(--border-strong);border-radius:10px;padding:0 8px 8px}
+  .board .kanban-col .col-head{padding:12px 4px;border:0}
+  .board .kanban-col[data-status=active]{border-top-color:var(--working)}
+  .board .kanban-col[data-status=waiting],.board .kanban-col[data-status=review]{border-top-color:var(--warning)}
+  .board .kanban-col[data-status=done]{border-top-color:var(--success)}
+  .board .ticket-card{padding:12px 12px 10px;margin-bottom:0;background:var(--surface-raised,#1b1f26);border-color:var(--border-card,#3a414b)}
+  .board .ticket-card h3{margin:0 0 6px}
+  .board .ticket-card[data-col=active]{border-left:2px solid var(--working)}
+  .board .ticket-card[data-col=waiting],.board .ticket-card[data-col=review]{border-left:2px solid var(--warning)}
+  .board .ticket-card[data-col=done]{border-left:2px solid var(--success)}
+  .board .col-body{gap:8px;padding-bottom:0}
+  /* Ticket: Progress and What was asked read as plain sections, not boxed cards (accepted Ticket draft) */
+  .ticket-page .progress-card,.ticket-page .card.asked{background:none;border:0;padding:0}
+}
