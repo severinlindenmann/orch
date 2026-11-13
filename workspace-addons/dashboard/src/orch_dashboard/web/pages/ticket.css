@@ -238,3 +238,15 @@
 .ticket-page .preview-body.live .preview-expand{bottom:12px}
 .ticket-page .skeleton-tile{height:200px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:fv-shimmer 1.4s linear infinite}
 @media(prefers-reduced-motion:reduce){.ticket-page .skeleton-tile{animation:none}}
+.ticket-page .completion-note{padding:24px;display:grid;gap:16px;border:1px solid var(--border);border-top:2px solid var(--done);border-radius:var(--radius-lg,8px);background:var(--surface)}
+.ticket-page .completion-note h2{font-size:20px;line-height:28px;margin:0}
+.ticket-page .completion-note .eyebrow{margin:0}
+.ticket-page .bring-back-card{padding:16px;display:grid;gap:12px}
+.ticket-page .bring-back-card h2{font-size:20px;line-height:28px;margin:0}
+.ticket-page .bring-back-card .actions{display:flex;flex-wrap:wrap;gap:8px}
+.ticket-page .kept-line,.kept-line{margin:0}
+.copy-files{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.copy-file{width:100%;display:flex;gap:12px;justify-content:space-between;text-align:left}
+.copy-diff{max-height:320px;overflow:auto;font-size:12px;line-height:18px;padding:12px;border:1px solid var(--border);border-radius:8px;margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.copy-diff .diff-add{color:var(--success)}
+.copy-diff .diff-del{color:var(--danger,var(--error,#e5484d))}
