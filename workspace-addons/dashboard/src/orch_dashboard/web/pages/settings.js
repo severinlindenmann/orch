@@ -581,12 +581,8 @@ function addonCatalog() {
     const label = row.label || row.name;
     const body = [settingsText('h3', {}, label), settingsText('p', {className:'meta'}, row.description || '')];
     if (row.consent) body.push(h('details', {className:'meta'}, settingsText('summary', {}, 'What this does'), settingsText('pre', {className:'preserve-lines consent-details'}, row.consent)));
-    if (done) {
-      body.push(h('div', {className:'catalog-done'},
-        settingsText('p', {className:'on-dot', 'data-key':'catalog-done-' + row.name}, row.background ? 'Turned on. It starts with orch start.' : 'Turned on.'),
-        row.background ? h('button', {type:'button', className:'btn outline sm', 'data-key':'catalog-start-' + row.name, disabled:busy.has('start')},
-          busy.has('start') ? 'Starting…' : 'Start now') : null));
-    }
+    // its background service (if any) starts with the add: no separate Start step (a stopped page offers Start)
+    if (done) body.push(h('div', {className:'catalog-done'}, settingsText('p', {className:'on-dot', 'data-key':'catalog-done-' + row.name}, 'Turned on.')));
     return h('div', {className:'card-row ad-row', 'data-key':'catalog-card-' + row.name},
       h('div', {className:'grow'}, ...body),
       done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':'Add ' + label, disabled:busy.has(row.name)},
@@ -602,13 +598,6 @@ function addonCatalog() {
     const control = event.target.closest('button[data-key]');
     if (!control || control.disabled || snapshot) return;
     const key = control.dataset.key;
-    if (key.startsWith('catalog-start-')) {
-      busy.add('start'); fill();
-      const result = await act('addon.start', {});
-      busy.delete('start'); fill();
-      window.orch.toast(result.ok ? 'Started.' : result.text, result.ok ? 'ok' : 'error');
-      return;
-    }
     if (!key.startsWith('catalog-add-')) return;
     const name = key.slice('catalog-add-'.length);
     const row = array(state.settings?.available).find(r => r.name === name);
