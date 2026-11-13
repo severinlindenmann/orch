@@ -1123,7 +1123,7 @@ def ask_for_changes(
         ticket["checklist"].append(
             {
                 "id": _next_id(ticket["checklist"], "c"),
-                "text": "Change: " + note,
+                "text": note,
                 "done": False,
                 "evidence": [],
             }

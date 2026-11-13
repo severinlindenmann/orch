@@ -10,6 +10,7 @@
     "generated_at": { "$ref": "#/$defs/time", "description": "When the add-on computed this view. The dashboard shows it as 'as of HH:MM'." },
     "notice": { "$ref": "#/$defs/text", "description": "Optional one-line state, e.g. 'The scheduler is stopped: nothing starts by itself.'" },
     "notice_tone": { "$ref": "#/$defs/tone" },
+    "button": { "type": "object", "required": ["label", "action"], "additionalProperties": false, "description": "Optional: one button shown with the notice. `action.op` must be one the dashboard knows (today only `addon.start`, which starts background work, args none); unknown ops are not drawn.", "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "$ref": "#/$defs/action" } } },
     "blocks": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/block" } }
   },
   "$defs": {

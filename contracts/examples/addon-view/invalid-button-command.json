@@ -1,0 +1,4 @@
+{ "schema": "orch.addon-view/1", "generated_at": "2026-11-05T08:00:03Z",
+  "notice": "Automation is stopped: nothing starts by itself.", "notice_tone": "warn",
+  "button": { "label": "Start", "action": { "op": "addon.start" }, "command": "orch automation start" },
+  "blocks": [] }

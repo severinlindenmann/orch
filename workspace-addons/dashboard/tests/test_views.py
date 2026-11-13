@@ -48,6 +48,30 @@ def test_bad_views_fail_both_checks(mutate):
     assert check_view(v) is None
 
 
+BUTTON = {"label": "Start", "action": {"op": "addon.start"}}
+
+
+def test_notice_button_is_passed_through():
+    v = {**example(), "notice": "Automation is stopped: nothing starts by itself.", "notice_tone": "warn", "button": BUTTON}
+    assert not list(VALIDATOR.iter_errors(v))
+    assert check_view(v)["button"] == BUTTON
+
+
+@pytest.mark.parametrize(
+    "button",
+    [
+        {**BUTTON, "command": "orch automation start"},
+        {**BUTTON, "label": "<b>Start</b>"},
+        {**BUTTON, "label": "x" * 31},
+        {"label": "Start", "action": {"op": "addon.start", "command": "rm -rf /"}},
+    ],
+)
+def test_bad_button_breaks_the_view(button):
+    v = {**example(), "button": button}
+    assert list(VALIDATOR.iter_errors(v)), "the schema should refuse it"
+    assert check_view(v) is None
+
+
 def test_unknown_block_type_is_skipped_not_fatal():
     v = example()
     v["blocks"].insert(1, {"type": "hologram", "x": 1})
