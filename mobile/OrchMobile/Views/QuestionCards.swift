@@ -25,6 +25,11 @@ struct QuestionCard: View {
                         Text(position.map { ConversationRules.needsYouText(position: $0.n, of: $0.of) } ?? "Needs your OK")
                     }.themeFont(13, .semibold).foregroundStyle(isStale ? Theme.muted : Theme.warn)
                 }
+                if let context = QuestionCardRules.context(q) {
+                    Text(context).themeFont(13).foregroundStyle(Theme.muted).lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("question-context")
+                }
                 questionText(q)
                 if isStale {
                     Text("This question is no longer open.").themeFont(13).foregroundStyle(Theme.muted)
@@ -39,7 +44,8 @@ struct QuestionCard: View {
                         options(q)
                     }
                     if let answer = model.pendingAnswers[q.id] {
-                        undo(q).id(answer)
+                        UndoCountdown(answer: label(q, answer), seconds: undoSeconds, start: model.pendingAnswerAt[q.id] ?? Date(),
+                                      undoId: "undo-\(q.id)") { model.undoAnswer(q) }.id(answer)
                     }
                 }
                 if item.answer == nil {
@@ -70,8 +76,10 @@ struct QuestionCard: View {
             })
     }
 
-    private func label(_ q: Question, _ option: String) -> String {
-        q.isAllow && option == "No" ? "Don't allow" : q.label(option)
+    private func label(_ q: Question, _ option: String) -> String { QuestionCardRules.label(q, option) }
+
+    private var undoSeconds: Double {
+        Double(model.undoDelay.components.seconds) + Double(model.undoDelay.components.attoseconds) / 1e18
     }
 
     @ViewBuilder private func options(_ q: Question) -> some View {
@@ -85,12 +93,12 @@ struct QuestionCard: View {
         } else if q.isAllow {
             VStack(spacing: 12) {
                 ForEach(q.message.body.options, id: \.self) { option in
-                    optionButton(q, option: option, fullWidth: true)
+                    optionButton(q, option: option)
                 }
             }
         } else if previews.count == 1, let option = previews.first, let id = q.previewId(for: option) {
             preview(q, id: id, suggested: q.message.body.recommended == option)
-            FlowLayout(spacing: 12) {
+            VStack(spacing: 12) {
                 ForEach(q.message.body.options, id: \.self) { value in
                     optionButton(q, option: value, primary: value == option)
                 }
@@ -103,12 +111,13 @@ struct QuestionCard: View {
                         if let id = q.previewId(for: option) {
                             preview(q, id: id, suggested: q.message.body.recommended == option)
                         }
-                        optionButton(q, option: option, title: "Choose " + previewHeading(option), fullWidth: true)
+                        optionButton(q, option: option, title: "Choose " + previewHeading(option))
                     }
                 }
             }
         } else {
-            FlowLayout(spacing: 12) {
+            // Equal-width full rows, stacked: they grow with Dynamic Type instead of squeezing side by side.
+            VStack(spacing: 12) {
                 ForEach(q.message.body.options, id: \.self) { option in optionButton(q, option: option) }
             }
         }
@@ -125,25 +134,30 @@ struct QuestionCard: View {
         option.hasPrefix("Version ") ? String(option.dropFirst("Version ".count)) : option
     }
 
-    private func optionButton(_ q: Question, option: String, title: String? = nil,
-                              fullWidth: Bool = false, primary: Bool = false) -> some View {
+    /// A full-row button; "Recommended" is a small tag above it, never inside it.
+    private func optionButton(_ q: Question, option: String, title: String? = nil, primary: Bool = false) -> some View {
         let pending = model.pendingAnswers[q.id]
         let recommended = q.message.body.recommended == option
-        return Button { model.chooseAnswer(q, option) } label: {
-            HStack(spacing: 6) {
-                if pending == option { Image(systemName: "checkmark") }
-                Text(title ?? label(q, option)).fixedSize(horizontal: false, vertical: true)
-                if recommended {
-                    if fullWidth { Spacer(minLength: 8) }
-                    Text("Recommended").themeFont(13).foregroundStyle(Theme.brand)
-                }
-            }.themeFont(15, .medium).padding(.horizontal, 12).padding(.vertical, 10)
-                .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 44)
-                .foregroundStyle(primary && !recommended ? Theme.onBrand : Theme.text)
-                .background(recommended ? Theme.brand.opacity(0.16) : primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(q.message.body.recommended == option ? Theme.brand : .clear))
-                .opacity(pending != nil && pending != option ? 0.45 : 1)
-        }.disabled(pending != nil).accessibilityLabel(option + (recommended ? ", recommended" : "")).accessibilityIdentifier("answer-\(option)")
+        let text = title ?? label(q, option)
+        return VStack(alignment: .leading, spacing: 4) {
+            if recommended {
+                // VoiceOver hears ", recommended" on the button itself.
+                Text("Recommended").themeFont(13, .medium).foregroundStyle(Theme.brand).accessibilityHidden(true)
+            }
+            Button { model.chooseAnswer(q, option) } label: {
+                HStack(spacing: 6) {
+                    if pending == option { Image(systemName: "checkmark").accessibilityHidden(true) }
+                    Text(text).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                }.themeFont(15, .medium).padding(.horizontal, 12).padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .foregroundStyle(primary && !recommended ? Theme.onBrand : Theme.text)
+                    .background(recommended ? Theme.brand.opacity(0.16) : primary ? Theme.brand : Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(recommended ? Theme.brand : .clear))
+                    .opacity(pending != nil && pending != option ? 0.45 : 1)
+                    .contentShape(Rectangle())
+            }.disabled(pending != nil).accessibilityLabel(text + (recommended ? ", recommended" : ""))
+                .accessibilityValue(pending == option ? "Selected" : "").accessibilityIdentifier("answer-\(option)")
+        }
     }
 
     private func selectedChip(_ q: Question, answer: String, checked: Bool = true) -> some View {
@@ -152,14 +166,15 @@ struct QuestionCard: View {
             Text(label(q, answer))
         }.themeFont(15).padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44)
             .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
-            .accessibilityElement(children: .ignore).accessibilityLabel(answer)
+            .accessibilityElement(children: .ignore).accessibilityLabel(label(q, answer))
             .accessibilityValue(checked ? "Selected" : "")
     }
 
     private func answered(_ q: Question, answer: String) -> some View {
         let hasOptions = !q.message.body.options.isEmpty
         return VStack(alignment: .leading, spacing: 8) {
-            selectedChip(q, answer: answer)
+            // "" = answered on the computer and the value is unknown: no chip rather than an error text.
+            if !answer.isEmpty { selectedChip(q, answer: answer) }
             if !q.message.body.options.isEmpty {
                 Button {
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { showOther.toggle() }
@@ -177,7 +192,7 @@ struct QuestionCard: View {
                 }
             }
             if model.answeredElsewhere.contains(q.id) {
-                Text("Already answered on your computer: \(label(q, answer))")
+                Text("Answered on your computer")
                     .themeFont(13).foregroundStyle(Theme.muted).frame(minHeight: 44, alignment: .leading)
             }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("answered-\(q.id)")
@@ -193,18 +208,6 @@ struct QuestionCard: View {
                 if queued != nil { Image(systemName: "clock") } else { ProgressView().tint(Theme.muted) }
                 Text(queued != nil ? "Waiting to send" : "Sending…")
             }.themeFont(13).foregroundStyle(Theme.muted)
-        }
-    }
-
-    private func undo(_ q: Question) -> some View {
-        HStack(spacing: 8) {
-            Text("Sent in a moment").themeFont(13).foregroundStyle(Theme.muted)
-            AnswerUndoRing(seconds: Double(model.undoDelay.components.seconds) + Double(model.undoDelay.components.attoseconds) / 1e18)
-            Spacer(minLength: 0)
-            Button { model.undoAnswer(q) } label: {
-                Text("Undo").themeFont(15, .medium).foregroundStyle(Theme.brand)
-                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-            }.accessibilityIdentifier("undo-\(q.id)")
         }
     }
 
@@ -237,16 +240,101 @@ struct QuestionCard: View {
     }
 }
 
+/// Pure display rules for question cards (unit tested).
+enum QuestionCardRules {
+    /// Acronyms that keep their capitals even on a fully shouted card.
+    static let acronyms: Set<String> = ["JSON", "HTML", "UUID", "CSV", "API", "URL", "PDF", "XML", "SQL", "HTTP", "HTTPS",
+                                        "YAML", "UTC", "ISO", "ID", "UI", "CSS", "SVG", "PNG", "JPEG", "JPG", "GIF", "ZIP", "TXT", "AI", "OK"]
+
+    /// What a button reads for an option: the allow wording for permissions, otherwise `optionText` among the card's options.
+    static func label(_ q: Question, _ option: String) -> String {
+        if q.isAllow { return option == "No" ? "Don't allow" : q.label(option) }
+        return optionText(option, among: q.message.body.options)
+    }
+
+    /// Capitals carry meaning (JSON, NULL, DATE as a type), so an option is shown as sent. Only when every option on
+    /// the card is shouted ("DATE" / "TIMESTAMP") do the words read in sentence case, and known acronyms stay.
+    /// Only the label changes; the raw option is what the relay receives.
+    static func optionText(_ option: String, among options: [String]) -> String {
+        guard !options.isEmpty, options.allSatisfy(isShouted) else { return option }
+        return option.split(separator: " ", omittingEmptySubsequences: false).enumerated().map { (i: Int, word: Substring) -> String in
+            let w = String(word)
+            if acronyms.contains(w.uppercased()) || !w.contains(where: \.isLetter) { return w }
+            let lower = w.lowercased()
+            return i == 0 ? lower.prefix(1).uppercased() + String(lower.dropFirst()) : lower
+        }.joined(separator: " ")
+    }
+
+    /// All letters capital and at least one word that is not a known acronym ("TIMESTAMP" yes; "CSV", "Yes" no).
+    static func isShouted(_ option: String) -> Bool {
+        let letters = option.filter(\.isLetter)
+        guard !letters.isEmpty, letters.allSatisfy(\.isUppercase) else { return false }
+        return option.split(separator: " ").contains { w in w.contains(where: \.isLetter) && !acronyms.contains(String(w)) }
+    }
+
+    /// The one plain line of context the agent gave (the question title), when it adds something to the question.
+    static func context(_ q: Question) -> String? {
+        guard !q.isMakeTicket, !q.isReview, let title = q.message.body.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty, title.caseInsensitiveCompare(q.message.body.text.trimmingCharacters(in: .whitespacesAndNewlines)) != .orderedSame
+        else { return nil }
+        return title
+    }
+
+    /// Visible countdown text; it does not depend on motion, so Reduce Motion still shows the sending state.
+    static func sendingText(remaining: Double) -> String {
+        "Sending in \(max(1, Int(remaining.rounded(.up)))) s"
+    }
+
+    static func announcesSelection(tappedAt: Date, now: Date) -> Bool { now.timeIntervalSince(tappedAt) < 0.5 }
+
+    static func selectedAnnouncement(_ answer: String, seconds: Double) -> String {
+        "\(answer) selected. Sending in \(max(1, Int(seconds.rounded(.up)))) seconds. Undo to change."
+    }
+}
+
+/// "Sending in 5 s · Undo": a text countdown (also with Reduce Motion), the ring as an extra cue, and a VoiceOver announcement.
+private struct UndoCountdown: View {
+    let answer: String
+    let seconds: Double
+    /// When the answer was tapped (AppModel.pendingAnswerAt), so scrolling away and back does not restart the count.
+    let start: Date
+    let undoId: String
+    var onUndo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TimelineView(.periodic(from: start, by: 1)) { context in
+                Text(QuestionCardRules.sendingText(remaining: seconds - context.date.timeIntervalSince(start)))
+                    .themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("undo-countdown")
+            }
+            AnswerUndoRing(seconds: seconds, start: start)
+            Spacer(minLength: 0)
+            Button(action: onUndo) {
+                Text("Undo").themeFont(15, .medium).foregroundStyle(Theme.brand)
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+            }.accessibilityLabel("Undo \(answer)").accessibilityIdentifier(undoId)
+        }.onAppear {
+            // Announce once, right after the tap; reappearing (scroll back, return to the chat) stays quiet.
+            guard QuestionCardRules.announcesSelection(tappedAt: start, now: Date()) else { return }
+            UIAccessibility.post(notification: .announcement, argument: QuestionCardRules.selectedAnnouncement(answer, seconds: seconds))
+        }
+    }
+}
+
 private struct AnswerUndoRing: View {
     let seconds: Double
+    let start: Date
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var remaining: CGFloat = 1
     var body: some View {
         Circle().trim(from: 0, to: remaining).stroke(Theme.brand, style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .rotationEffect(.degrees(-90)).frame(width: 16, height: 16).accessibilityHidden(true)
             .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.linear(duration: max(0, seconds))) { remaining = 0 }
+                guard !reduceMotion, seconds > 0 else { return }
+                let left = max(0, seconds - Date().timeIntervalSince(start))
+                var transaction = Transaction(); transaction.disablesAnimations = true
+                withTransaction(transaction) { remaining = CGFloat(left / seconds) }
+                withAnimation(.linear(duration: left)) { remaining = 0 }
             }
             .onChange(of: reduceMotion) { _, reduced in
                 if reduced { var transaction = Transaction(); transaction.disablesAnimations = true
