@@ -39,7 +39,7 @@ final class OwnerTF1SettingsUITests: XCTestCase {
         }
         XCTAssertTrue(limit.isHittable)
         limit.tap()
-        XCTAssertTrue(app.buttons["$10"].waitForExistence(timeout: 5))
-        app.buttons["$10"].tap()
+        XCTAssertTrue(app.buttons["limit-10"].waitForExistence(timeout: 5))
+        app.buttons["limit-10"].tap()
     }
 }
