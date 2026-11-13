@@ -47,3 +47,31 @@ Shared-system fix requested: `input.switch` needs explicit 36 × 24 px dimension
 - Copied the Home sidebar, including Home badge 3 and its phone toggle; marked the relevant destination current (none for an unknown page).
 - Aligned title/subtitle headers and “Updated just now”, New ticket links, and generic “Your helper” wording.
 - Removed local preview-bar markup, CSS and event handlers; loaded `../system/preview-controls.js` after page scripts. Query-driven loading/empty views and skeletons remain; entry and Replay now use shared motion with reduced-motion support.
+
+
+## Revised after the owner's comment (13 Nov)
+
+### not-found.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+### offline.html
+
+- Reviewed the page for disclosure links and crowded text; the existing plain sections and shared layout remain in place.
+- Checked at 1280 × 800 in loaded, loading and empty states; kept the shared navigation, Preview pill, demo data and motion.
+
+
+## Revised after the owner's comment (13 Nov)
+
+Round 2 — working shared components.
+
+### not-found.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+
+### offline.html
+- Connected this page to the shared dialog, menu, dropdown, switch, toast, keyboard and motion behaviour.
+- Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
+
+Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.

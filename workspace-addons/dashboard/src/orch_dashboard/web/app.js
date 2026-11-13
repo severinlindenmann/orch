@@ -201,9 +201,11 @@ function sync(target, source) {
   if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body') return;
   for (const attr of [...target.attributes]) {
     if (attr.name === 'open' && target.tagName === 'DETAILS') continue;
+    if (target.classList.contains('ui-native-select') && ['class', 'tabindex', 'aria-hidden'].includes(attr.name)) continue;  // set by kit/select.js
     if (!source.hasAttribute(attr.name)) target.removeAttribute(attr.name);
   }
   for (const attr of [...source.attributes]) {
+    if (target.classList.contains('ui-native-select') && attr.name === 'class') continue;
     if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
   }
   reconcile(target, source);
@@ -217,11 +219,13 @@ function reconcile(target, source) {
   const old = [...target.childNodes], used = new Set();
   for (const fresh of [...source.childNodes]) {
     const key = nodeKey(fresh);
-    const existing = old.find(n => !used.has(n) && n.nodeType === fresh.nodeType && n.nodeName === fresh.nodeName && (key ? nodeKey(n) === key : !nodeKey(n)));
+    // A select enhanced by kit/select.js sits inside a .ui-select wrapper: match the wrapper to the plain select of the new tree.
+    const base = n => n.classList?.contains('ui-select') ? n.querySelector('select') || n : n;
+    const existing = old.find(n => !used.has(n) && n.nodeType === fresh.nodeType && base(n).nodeName === fresh.nodeName && (key ? nodeKey(base(n)) === key : !nodeKey(base(n))));
     const node = existing || fresh;
     const at = target.childNodes[used.size];
     if (node !== at) target.insertBefore(node, at || null);
-    if (existing) sync(existing, fresh);
+    if (existing) sync(base(existing), fresh);
     used.add(node);
   }
   for (const node of old) if (!used.has(node) && !locks.has(node.dataset?.key)) node.remove();
@@ -330,7 +334,8 @@ function render(arrived = new Set()) {
 // Every notice goes through one scrub: no raw ids, actor names or UTC times reach a person.
 if (window.orch && !window.orch.__scrubbed) {
   const rawToast = window.orch.toast.bind(window.orch);
-  window.orch.toast = (text, kind) => rawToast(window.DashHelpers.scrubText(text), kind);
+  // One shared toast (kit/components.js): one at a time, Dismiss, paused while hovered or focused, errors stay.
+  window.orch.toast = (text, kind, undo) => window.UI?.toast ? window.UI.toast(window.DashHelpers.scrubText(text), undo, kind) : rawToast(window.DashHelpers.scrubText(text), kind);
   window.orch.__scrubbed = true;
 }
 // One automatic retry for a change that raced with someone else (typically the agent that just finished):
