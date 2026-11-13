@@ -229,6 +229,7 @@ def test_add_needs_consent_then_installs_and_activates(proj, run, hello, uv_call
             "version": "0.1.0",
             "description": "Says hello.",
             "source": "local",
+            "installed": True,
             "active": True,
             "dashboard": {"label": "Hello", "icon": "star", "order": 20},
             "ticket_view": [{"field": "greeting", "label": "Greeting", "format": "text"}],
@@ -1395,3 +1396,45 @@ def test_factory_is_shipped_and_its_manifest_is_valid():
     assert m["requires"] == []  # its own watcher wakes the agent
     assert m["dashboard"]["label"] == "Factory"
     assert m["needs"] is True
+
+
+def test_list_shows_shipped_addons_not_installed_yet(proj, run, tmp_path, monkeypatch):
+    """The catalogue lists a shipped add-on that is not installed (installed false, never active), read
+    from the local source folder with no network; installed ones keep installed true."""
+    repo = tmp_path / "repo"
+    make_addon(repo / "workspace-addons", name="factory")
+    monkeypatch.setenv("ORCH_REPO", str(repo))
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+
+    def no_network(name):
+        raise AssertionError("addon list must not fetch")
+
+    monkeypatch.setattr(addons, "preview_builtin", no_network)
+    code, out, _ = run("addon", "list", "--json")
+    rows = {r["name"]: r for r in json.loads(out)}
+    assert code == 0
+    assert rows["factory"]["installed"] is False and rows["factory"]["active"] is False
+    assert rows["factory"]["running"] is False and rows["factory"]["source"] == "built-in"
+    assert rows["factory"]["description"] == "Says hello."
+    assert all(r["installed"] is True for n, r in rows.items() if n in addons.CORE_ADDONS)
+    text = run("addon", "list")[1]
+    assert "Available" in text and "factory" in text.split("Available", 1)[1]
+    assert "factory" not in text.split("Available", 1)[0]
+    # an installed shipped add-on is not listed twice and is installed true
+    monkeypatch.setattr(addons, "_entry_points", lambda: {"factory": "orch_factory"})
+    addons._save_registry([{"name": "factory", "source": "built-in", "version": "0.1.0"}])
+    sys.path.insert(0, str(repo / "workspace-addons" / "factory" / "src"))
+    try:
+        rows = [r for r in json.loads(run("addon", "list", "--json")[1]) if r["name"] == "factory"]
+    finally:
+        sys.path.remove(str(repo / "workspace-addons" / "factory" / "src"))
+    assert len(rows) == 1 and rows[0]["installed"] is True
+
+
+def test_list_leaves_out_an_available_addon_it_cannot_read_locally(proj, run, tmp_path, monkeypatch):
+    monkeypatch.delenv("ORCH_REPO", raising=False)
+    monkeypatch.setattr(addons, "_install_origin", lambda: {})
+    monkeypatch.setattr(addons, "_entry_points", lambda: {})
+    monkeypatch.setattr(addons, "preview_builtin", lambda n: pytest.fail("no network in list"))
+    names = [r["name"] for r in json.loads(run("addon", "list", "--json")[1])]
+    assert "factory" not in names

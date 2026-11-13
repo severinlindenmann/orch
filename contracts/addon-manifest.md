@@ -73,8 +73,13 @@ record. The installed list (`addons.json` in the same folder) is the registry of
    `--purge` also deletes `.orch/addons/<name>/` and the `[<name>]` table of `.orch/config.toml`.
 The package stays in the tool env (other workspaces may use it); `orch addon uninstall <name>` removes it from the machine.
 
-`orch addon list --json`: a JSON list with one entry per installed add-on (active or not), sorted by name:
-`[{"name", "version", "description", "source": "built-in"|"local", "active": bool,
+`orch addon list --json`: a JSON list with one entry per installed add-on (active or not), sorted by name
+(`"installed": true`), followed by one entry per shipped add-on that is **not installed yet** (`"installed": false`,
+always `active: false` and `running: false`, `source: "built-in"`; sorted by name). The available entries are read
+from the local source folder only (never the network); one whose manifest cannot be read there is left out. Adding one
+is still `orch addon add <name>`. Consumers that mean "installed" must check `installed`; `orch addon list` (text)
+shows them in a separate "Available" group:
+`[{"name", "version", "description", "source": "built-in"|"local", "installed": bool, "active": bool,
 "dashboard": {label, icon, order, panel} | null, "ticket_view": [{field, label, format}], "background": bool}]` — the one source the
 dashboard uses (it shows the entries with `active: true`).
 

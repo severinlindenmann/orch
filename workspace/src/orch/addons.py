@@ -1073,10 +1073,11 @@ def core_manifests() -> dict[str, dict]:
     return {n: parse_manifest(base / n / MANIFEST, core=True) for n in CORE_ADDONS}
 
 
-def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
-    """Manifests of the shipped add-ons that are not installed yet and say recommended = true.
+def shipped_available(fetch: bool = True) -> dict[str, dict]:
+    """Manifests of the shipped add-ons that are not installed yet.
     From the local source folder when there is one; else (fetch=True) the manifest is previewed from the
-    repo (one small download each), and with fetch=False the answer is empty."""
+    repo (one small download each), and with fetch=False the answer is empty. An add-on whose manifest cannot
+    be read is left out."""
     have = set(discover())
     local = _is_local(repo())
     out = {}
@@ -1085,16 +1086,17 @@ def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
             continue
         try:
             if local:
-                m = folder_manifest(Path(repo()) / "workspace-addons" / name)
+                out[name] = folder_manifest(Path(repo()) / "workspace-addons" / name)
             elif fetch:
-                m = preview_builtin(name)
-            else:
-                continue
+                out[name] = preview_builtin(name)
         except Refused:
             continue
-        if m.get("recommended"):
-            out[name] = m
     return out
+
+
+def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
+    """Manifests of the shipped add-ons that are not installed yet and say recommended = true."""
+    return {n: m for n, m in shipped_available(fetch).items() if m.get("recommended")}
 
 
 def discover() -> dict[str, dict]:
@@ -1505,32 +1507,40 @@ def _running_here(root: Path) -> set[str]:
     return out
 
 
+def _row(name: str, m: dict, source: str, installed: bool, active: bool, running: bool) -> dict:
+    return {
+        "name": name,
+        "version": m["version"],
+        "description": m["description"],
+        "source": "built-in" if source == "built-in" else "local",
+        "installed": installed,
+        "active": active,
+        "dashboard": m.get("dashboard"),
+        "ticket_view": m["ticket_view"],
+        "background": m["background"],
+        "recommended": m["recommended"],
+        "page": m.get("page"),
+        "running": running,
+        "ticket_links": [dict(x) for x in m["ticket_links"]],
+        "ticket_fields": fields.section(m),
+        "acts": sorted(m["acts"]),
+    }
+
+
 def listing(root: Path) -> list[dict]:
-    """`orch addon list --json`: the one source the dashboard uses."""
+    """`orch addon list --json`: the one source the dashboard uses. Installed add-ons first (sorted), then the
+    shipped add-ons that are not installed yet (`installed: false`, never active or running), sorted by name.
+    Never touches the network: an available add-on whose manifest is not readable from the local source folder
+    is left out of the list (it can still be added by name)."""
     act = active(root)
     reg = {e["name"]: e for e in registry()}
     up = _running_here(root)
-    out = []
-    for name, m in sorted(discover().items()):
-        src = reg.get(name, {}).get("source", "built-in")
-        out.append(
-            {
-                "name": name,
-                "version": m["version"],
-                "description": m["description"],
-                "source": "built-in" if src == "built-in" else "local",
-                "active": name in act,
-                "dashboard": m.get("dashboard"),
-                "ticket_view": m["ticket_view"],
-                "background": m["background"],
-                "recommended": m["recommended"],
-                "page": m.get("page"),
-                "running": name in up,
-                "ticket_links": [dict(x) for x in m["ticket_links"]],
-                "ticket_fields": fields.section(m),
-                "acts": sorted(m["acts"]),
-            }
-        )
+    out = [
+        _row(name, m, reg.get(name, {}).get("source", "built-in"), True, name in act, name in up)
+        for name, m in sorted(discover().items())
+    ]
+    for name, m in sorted(shipped_available(fetch=False).items()):
+        out.append(_row(name, m, "built-in", False, False, False))
     return out
 
 
