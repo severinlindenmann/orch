@@ -201,7 +201,8 @@ more often than hourly is one item per day with `every` ("Every 5 min", shown in
 `timeline`, `chips`, `table` (typed columns text/number/duration/date/tone). Items may have a `link`: a ticket id (opens the
 ticket), an `https://` URL (new tab), or `addon:<path>` — a page of **this** add-on: the dashboard resolves it only against
 the same add-on's checked `[page]` url (`http://127.0.0.1:<port>/<path>`); no `..`, no leading `/`, never another add-on or
-host. No buttons, no actions. Tone: `neutral` · `good` · `warn` · `needs-you` · `bad`.
+host. The only ways back are list rows' `toggle`/`actions` (fixed ops) and one optional `button` next to `notice` (op
+`addon.start`); never a command line. Tone: `neutral` · `good` · `warn` · `needs-you` · `bad`.
 
 **One product:** the dashboard renders blocks with the orch design system only (tokens, the fixed icon set, motion, skeleton
 while loading, the same empty and error states and wording); add-on tabs sit in the same nav list as Tickets/Inbox, ordered by

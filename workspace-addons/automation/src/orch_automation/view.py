@@ -511,7 +511,8 @@ def build(root: Path, now: datetime | None = None) -> dict:
         view.update(notice=line, notice_tone="good")
     else:
         view.update(
-            notice="Automation is stopped: nothing starts by itself. Ask your helper to start background work.",
+            notice="Automation is stopped: nothing starts by itself.",
             notice_tone="warn",
+            button={"label": "Start", "action": {"op": "addon.start"}},
         )
     return view

@@ -108,7 +108,7 @@ def test_changes_from_the_phone_is_ask_for_changes(proj, run, new_ticket, conn):
     assert "asked for changes" in run("relay", "inbox")[1]
     t = status(run, tid)
     assert t["status"] == "ready"
-    assert t["checklist"][-1]["text"] == "Change: Please also rename Y"
+    assert t["checklist"][-1]["text"] == "Please also rename Y"
     (item,) = runs._pending_read(proj, tid)
     assert item["by"] == "human:iPhone" and item["text"] == "Please also rename Y"
 

@@ -535,7 +535,14 @@ function addonBody(a, res) {
   if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'No answer.', ' Nothing here was changed.'), retry));
   return fragment(h('p', {className:'meta'}, 'As of ', time(res.as_of)),
     res.state === 'stale' ? h('div', {className:'banner attn', role:'status'}, h('p', {className:'grow'}, 'Not up to date. Showing the last answer from ', time(res.as_of), '.', res.message ? ' ' + clean(res.message) + ' Newer items may be missing.' : ''), retry) : null,
-    res.view.notice ? h('p', {className:'banner ' + (res.view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(res.view.notice_tone) ? 'attn' : '')}, clean(res.view.notice)) : null, h('div', {id:'addon-blocks'}));
+    addonNotice(res.view), h('div', {id:'addon-blocks'}));
+}
+function addonNotice(view) {
+  if (!view.notice) return null;
+  const tone = 'banner ' + (view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(view.notice_tone) ? 'attn' : '');
+  const b = view.button;
+  if (snapshot || b?.action?.op !== 'addon.start') return h('p', {className:tone}, clean(view.notice));
+  return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, clean(b.label)));
 }
 function paintAddon(id) {
   const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);

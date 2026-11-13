@@ -42,7 +42,8 @@ def test_empty_view_is_valid(ws):
         sch["title"] == "Schedules · 0 on"
         and sch["items"][0]["subtitle"] == "Ask your helper to repeat a ticket."
     )
-    assert "stopped" in v["notice"] and "start background work" in v["notice"] and "Press" not in v["notice"]
+    assert "stopped" in v["notice"] and "Ask your helper" not in v["notice"] and "Press" not in v["notice"]
+    assert v["button"] == {"label": "Start", "action": {"op": "addon.start"}}
 
 
 def test_schedule_listed_and_old_blocks_gone(ws, monkeypatch):
@@ -132,6 +133,7 @@ def test_notice_says_next_run_when_running(ws, monkeypatch):
     v = build(ws, T(8))
     check(v)
     assert v["notice"].startswith("Running. Next run in ")
+    assert "button" not in v
 
 
 @pytest.mark.parametrize(
