@@ -13,6 +13,11 @@ function ticketFileError(file, files) {
 function ticketTextTitle(text, limit) {
   return (text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '').slice(0, limit);
 }
+// "Pasted text (about 3 pages)": about 3000 characters to a page.
+function pastedLabel(text) {
+  const pages = Math.round(String(text || '').length / 3000);
+  return 'Pasted text' + (pages <= 1 ? ' (about 1 page)' : ' (about ' + pages + ' pages)');
+}
 function ticketBase64(dataURL) {
   return dataURL.slice(dataURL.indexOf(',') + 1);
 }
@@ -22,7 +27,7 @@ function ticketForm(t) {
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
   let optionalFields = fields;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
-  let updateAttachments = () => {};
+  let updateAttachments = () => {}, grow = () => {};
   const updateValidity = () => {
     if (t) return;
     const empty = !inputs.text.value.trim() && !pastedText && !files.length;
@@ -37,11 +42,13 @@ function ticketForm(t) {
     const label = el('label', '', 'What needs doing?');
     const input = el('textarea', 'input new-ticket-text');
     input.name = 'text'; input.id = 'field-' + serial + '-text';
-    input.rows = 10; input.maxLength = 500000; input.required = true;
+    input.rows = 4; input.maxLength = 500000; input.required = true;
     input.placeholder = 'Paste or write it here. A short title or a long text with many points: the agent splits it into tasks.';
-    input.addEventListener('input', updateValidity);
+    // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
+    grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
+    input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
-    const zone = button('Drop files here (e.g. .md, .txt) or paste any amount of text', 'new-ticket-drop', () => picker.click());
+    const zone = button('Attach file', 'new-ticket-attach', () => picker.click());
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
     picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
     const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
@@ -63,8 +70,8 @@ function ticketForm(t) {
       const addChip = (file, remove, pasted = false) => {
         const row = el('div', 'chip new-ticket-file');
         const body = button('', 'new-ticket-file-main', () => preview(file));
-        body.append(el('span', '', file.name), el('span', 'meta', sizeText(file.size) + (pasted ? ' (pasted text)' : '')));
-        const x = button('×', 'new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + file.name);
+        body.append(el('span', '', pasted ? pastedLabel(file.text) : file.name));
+        const x = button('×', 'new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + (pasted ? 'pasted text' : file.name));
         row.append(body, x); chips.append(row);
       };
       if (pastedText) addChip({name:'note.md', text:pastedText, size:new Blob([pastedText]).size, type:'text'}, () => { pastedText = ''; updateAttachments(); }, true);
@@ -104,7 +111,7 @@ function ticketForm(t) {
       });
     };
     picker.addEventListener('change', () => { addFiles(Array.from(picker.files)); picker.value = ''; });
-    for (const target of [input, zone]) {
+    for (const target of [form]) {
       target.addEventListener('dragover', event => { if (Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault(); });
       target.addEventListener('drop', event => {
         if (!event.dataTransfer?.files.length) return;
@@ -145,13 +152,20 @@ function ticketForm(t) {
   const error = el('p', 'bad'); error.setAttribute('role', 'alert');
   const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
   reload.hidden = true;
-  const submit = el('button', 'btn primary', t ? 'Save changes' : 'Create & Start'); submit.type = 'submit';
-  let startAfter = !t, planFirst = false;
-  const plain = t ? null : el('button', 'btn outline', 'Create');
-  if (plain) { plain.type = 'button'; plain.addEventListener('click', () => { startAfter = false; planFirst = false; form.requestSubmit(); }); submit.addEventListener('click', () => { startAfter = true; planFirst = false; }); }
-  const plan = t ? null : button('Show plan first', 'outline', () => { startAfter = true; planFirst = true; form.requestSubmit(); });
-  actions.append(...(plain ? [plain, submit, plan] : [submit]));
-  if (plan) fields.append(el('p', 'meta', '"Show plan first" waits for you before work starts.'));
+  const submit = el('button', 'btn primary', t ? 'Save changes' : 'Start'); submit.type = 'submit';
+  let startAfter = !t;
+  // One main button (Start) and Cancel; the plan choice is a box in More options, "Create without starting" a text link.
+  let planBox = null;
+  if (!t) {
+    const planLabel = el('label', 'new-ticket-check');
+    planBox = el('input'); planBox.type = 'checkbox'; planBox.name = 'plan_first';
+    planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', 'The helper waits for your OK before work starts.'));
+    optionalFields.append(planLabel);
+  }
+  const plain = t ? null : button('Create without starting', 'new-ticket-link', () => { startAfter = false; form.requestSubmit(); });
+  if (plain) submit.addEventListener('click', () => { startAfter = true; });
+  actions.append(submit);
+  if (plain) fields.append(plain);
   const startNow = async () => {
     if (t || !startAfter || !created) return;
     const run = await act('run.start', {ticket:created.id});
@@ -174,7 +188,7 @@ function ticketForm(t) {
       if (fullText.length > 1500) {
         const combined = pastedText ? pastedText + '\n\n' + fullText : fullText;
         if (combined.length > 500000) { error.textContent = 'Text is over 500000 characters'; submit.disabled = false; return; }
-        pastedText = combined; inputs.text.value = ''; updateAttachments();
+        pastedText = combined; inputs.text.value = ''; grow(); updateAttachments();
       }
       const longText = pastedText, shortText = inputs.text.value;
       values.title = ticketTextTitle(fullText.trim() ? fullText : longText || files[0]?.name.replace(/\.[^.]+$/, '') || '', longText || files.length ? 80 : 200);
@@ -184,6 +198,7 @@ function ticketForm(t) {
       values.note = shortText.length <= 1500 && (/[\r\n]/.test(shortText) || shortText.trim() !== values.title) ? shortText : '';
       if (!created) {
         const previous = new Set(tickets().map(t => t.id));
+        const planFirst = startAfter && !!planBox?.checked;
         const args = {title:values.title, ...(planFirst ? {plan_first:true} : {}), title_auto:titleAuto, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})};
         if (new Blob([JSON.stringify({op:'ticket.new', args})]).size > 4900000) {  // the server takes 5 MB per request
           error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
@@ -210,7 +225,7 @@ function ticketForm(t) {
     if (!result.ok) {
       error.textContent = window.DashHelpers.scrubText(result.text);
       reload.hidden = !(t && result.status === 409);
-      if (created) { inputs.text.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; if (plan) plan.hidden = true; }
+      if (created) { inputs.text.disabled = true; submit.textContent = 'Save details'; if (plain) plain.hidden = true; }
       return;
     }
     window.orch.toast(t ? 'Ticket updated' : 'Ticket created', 'ok');
