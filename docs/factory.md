@@ -30,6 +30,11 @@ The Factory watcher (started with `orch start`, or `orch factory start`) checks 
 Factory's questions, or a crew task finishes, it starts the agent's run on the order, once per answer and never while a run is
 already going. With the watcher off, answers simply wait until it runs (the Factory tab says so).
 
+## Answering on the Factory page
+On the Factory tab a decision (Start, Ship it and the other stops) opens the dashboard's own question card in a dialog, so
+you answer without leaving the page; the page refreshes when you have answered. The Factory page itself never answers: you
+press the option in the card, where orch confirms it is you. Outside the dashboard the button links to the ticket.
+
 ## What protects your decisions
 Only your own answers count (the core records a person's answer only with proof from your dashboard, Focus or phone), and
 only for questions Factory itself asked about a frozen proposal. A proposal cannot change after Start; more scope is always

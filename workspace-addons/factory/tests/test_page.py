@@ -570,3 +570,15 @@ def test_page_script_never_writes_html():
     assert not re.search(r"innerHTML|outerHTML|insertAdjacent|document\.write|srcdoc|eval\(|new Function", js)
     for target in re.findall(r"""['"](/#[a-z]+)""", js):
         assert target in ("/#ticket", "/#chat"), target
+
+
+def test_page_decisions_only_post_the_open_question():
+    """Inside the dashboard a decision posts {orch.question, ticket, question} to the parent (same origin); the page never sends an answer."""
+    import re
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
+    posts = re.findall(r"postMessage\(([^;]*)\);", js)
+    assert len(posts) == 1 and "'orch.question'" in posts[0] and "location.origin" in posts[0]
+    assert "window.top !== window" in js
+    assert not re.search(r"fetch\([^)]*method|method:\s*['\"]POST", js)
