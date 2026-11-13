@@ -457,3 +457,5 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .strip .day-head{gap:8px;color:var(--text-muted)}
 .strip .day.today{background:var(--surface-2)}.strip .day.today .day-head b{color:var(--brand)}
 @media(max-width:950px){.strip{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.strip .day{border-width:0 0 1px 0}}
+/* Page heading with an actions slot: actions sit at the end of the title row */
+.page-heading:has(>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}

@@ -143,6 +143,34 @@
   .chat-page .chat-composer-area{padding:8px 12px}
   .chat-page .chat-history{padding:16px}
 }
+/* Simple view: the simple helper conversation, no list and no extra frame (accepted Chat draft). */
+.chat-page.chat-simple{grid-template-columns:minmax(0,1fr);border:0;border-radius:0;background:transparent}
+.chat-page.chat-simple .chat-thread-head{padding:16px 0}
+.chat-page.chat-simple .chat-log,.chat-page.chat-simple .chat-composer-area{width:100%;max-width:1000px;margin-inline:auto}
+.chat-page .chat-head-text{flex:1;min-width:0}
+.chat-page .chat-head-text h1{font-size:20px;line-height:28px}
+.chat-page .chat-eyebrow{font-size:11px;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase}
+.chat-page .chat-head-meta{font-size:13px}
+.chat-page .chat-head-meta a{min-height:0;color:inherit}
+.chat-page .chat-helper-mark{background:var(--brand-soft);color:var(--brand);font-size:18px}
+.chat-page .chat-check{display:inline-flex;align-items:center;gap:8px;padding:0 8px;border:0;background:transparent;color:var(--text-muted)}
+.chat-page .chat-check:before{content:"";width:16px;height:16px;border:1px solid var(--border-strong);border-radius:4px;flex:none}
+.chat-page .chat-check[aria-checked=true]:before{background:var(--brand);border-color:var(--brand);box-shadow:inset 0 0 0 3px var(--surface)}
+.chat-page .chat-phone-link{display:inline-flex;align-items:center;color:var(--text-muted);padding:0 8px}
+.chat-page .chat-ws-label{font-size:11px;color:var(--text-muted);padding:1px 6px;border:1px solid var(--border-strong);border-radius:4px;font-weight:400}
+.chat-page .chat-list-row small{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.5}
+.chat-page .chat-welcome{margin:auto;width:100%;max-width:880px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:24px 0}
+.chat-page .chat-welcome-mark{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;background:var(--brand-soft);color:var(--brand);font-size:28px}
+.chat-page .chat-prompts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;width:100%;margin-top:16px}
+.chat-page .chat-prompt{min-height:112px;text-align:left;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface);padding:16px;transition:background 100ms ease,border-color 100ms ease}
+.chat-page .chat-prompt:hover{border-color:var(--brand);background:var(--surface-2)}
+.chat-page .chat-prompt span{display:block;font-size:12px;color:var(--text-faint);margin-bottom:8px}
+.chat-page .chat-message{animation:chat-enter 180ms ease both}
+@keyframes chat-enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media(max-width:800px){
+  .chat-page .chat-prompts{grid-template-columns:1fr}
+  .chat-page .chat-prompt{min-height:64px}
+}
 @media(prefers-reduced-motion:reduce){
   .chat-page *,.chat-page *:before,.chat-page *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
@@ -159,3 +187,8 @@
 .chat-page .chat-compose>.chat-primary:disabled{opacity:1;background:var(--surface-3);border-color:var(--border-strong);color:var(--text-muted);cursor:default}
 .chat-page .chat-compose>.chat-primary[data-state=sending]{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
 .chat-page .chat-compose>.chat-primary .spinner{border-color:rgb(6 35 28 / .35);border-top-color:var(--on-brand)}
+/* Second pass (accepted Chat drafts): no outer frame in the grouped view either; the list is a quiet column with a divider */
+.chat-page{border:0;border-radius:0;background:transparent}
+.chat-page .chat-list{background:transparent;padding:0 12px 0 0}
+.chat-page .chat-list-row{border-radius:8px}
+.chat-page .chat-thread{background:transparent}

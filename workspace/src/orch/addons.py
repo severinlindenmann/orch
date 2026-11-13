@@ -581,22 +581,47 @@ def _tool_args(entries: list[dict]) -> list[str]:
     return args
 
 
+def _receipt_bins(env: Path) -> list[str]:
+    """Where uv put this tool environment's commands (bin/orch ...), from its receipt; [] when unreadable."""
+    try:
+        data = tomllib.loads((env / "uv-receipt.toml").read_text(encoding="utf-8"))
+        eps = data["tool"]["entrypoints"]
+        return [str(e["install-path"]) for e in eps if isinstance(e.get("install-path"), str)]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def _pin_env(env: Path) -> dict[str, str]:
+    """UV_TOOL_DIR (the record's root's parent) and UV_TOOL_BIN_DIR (where the receipt says orch's commands
+    are). A service runs with the account's HOME, which can differ from the HOME orch was installed with (a
+    test home): without the bin pin uv looked at the account's ~/.local/bin, found another orch there
+    ("Executable already exists") and failed after it had removed this one."""
+    out = {"UV_TOOL_DIR": os.path.dirname(os.path.realpath(env))}
+    bins = {os.path.dirname(b) for b in _receipt_bins(env)}
+    if len(bins) == 1:
+        out["UV_TOOL_BIN_DIR"] = bins.pop()
+    return out
+
+
 @contextlib.contextmanager
 def _pinned_tool_dir(env: Path, active: bool):
-    """uv reinstalls into the place the person installed to (the record's root's parent), never into where
-    the caller's UV_TOOL_DIR or XDG_DATA_HOME would send it."""
+    """uv reinstalls into the place the person installed to (the record's root's parent, and the bin folder of
+    the receipt), never into where the caller's UV_TOOL_DIR, XDG_DATA_HOME or HOME would send it."""
     if not active:
         yield
         return
-    keep = os.environ.get("UV_TOOL_DIR")
-    os.environ["UV_TOOL_DIR"] = os.path.dirname(os.path.realpath(env))
+    pins = _pin_env(env)
+    keep = {k: os.environ.get(k) for k in ("UV_TOOL_DIR", "UV_TOOL_BIN_DIR")}
+    os.environ.pop("UV_TOOL_BIN_DIR", None)
+    os.environ.update(pins)
     try:
         yield
     finally:
-        if keep is None:
-            os.environ.pop("UV_TOOL_DIR", None)
-        else:
-            os.environ["UV_TOOL_DIR"] = keep
+        for k, v in keep.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _reinstall_anywhere() -> bool:
@@ -633,7 +658,24 @@ def _install_tool(entries: list[dict]) -> None:
     from orch import winfinish
 
     with winfinish.replacing(home()), _pinned_tool_dir(Path(sys.prefix), plan is not None):
-        run_uv(_tool_args(entries))
+        kept = None
+        if plan is not None:  # keep the old orch: uv removes it before it installs the new one
+            try:
+                kept = winfinish.backup_tool(plan["env"], _receipt_bins(plan["env"]))
+            except OSError as e:
+                raise Refused(
+                    "Could not keep a copy of orch before the update, so nothing was changed. "
+                    "Try again later."
+                ) from e
+        try:
+            run_uv(_tool_args(entries))
+        except Exception as e:
+            restored = winfinish.restore_tool(kept) if kept else plan is None
+            detail = str(e)
+            if detail:
+                print(detail, file=sys.stderr)  # uv's own words stay in the terminal / update log
+            raise Refused(winfinish.plain_reason(detail, restored)) from e
+        winfinish.discard_backup(kept)
     if plan and ((plan["env"] / "bin").exists() or (plan["env"] / "Scripts").exists()):
         humanproof.write_install_record(plan["env"], plan["kind"])
 
@@ -705,8 +747,9 @@ def _reinstall(
             raise Refused("orch is not running from its tool folder, so it does not reinstall it.")
         extra = (
             {
-                "env": {"UV_TOOL_DIR": plan["pin"]},
+                "env": _pin_env(plan["env"]),
                 "record": [str(plan["env"] / "orch-install.json"), _record_text(plan)],
+                "bins": _receipt_bins(plan["env"]),
             }
             if plan
             else {}

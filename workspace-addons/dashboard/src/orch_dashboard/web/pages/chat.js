@@ -63,7 +63,8 @@ function chatAvatar(member, helper = false) {
   const label = clean(member?.name || member || 'Workspace');
   const palette = ['var(--brand)', 'var(--warning)', 'var(--info)', 'var(--chart-4)'];
   const hash = [...label].reduce((n, c) => n + c.charCodeAt(0), 0);
-  const badge = h('span', {className:'chat-avatar', 'aria-hidden':'true'}, clean(member?.look?.letter || label[0]).slice(0, 1), helper ? h('span', {className:'chat-spark'}, '✦') : null);
+  const initials = member?.look?.letter ? clean(member.look.letter).slice(0, 1) : label.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  const badge = h('span', {className:'chat-avatar', 'aria-hidden':'true'}, initials, helper ? h('span', {className:'chat-spark'}, '✦') : null);
   const color = member?.look?.color;
   badge.style.color = palette[hash % palette.length];
   badge.style.backgroundColor = 'color-mix(in srgb, ' + palette[hash % palette.length] + ' 14%, transparent)';
@@ -86,20 +87,40 @@ const chatHelpers = g => { const n = chatObjects(g.members).length; return n + (
 function chatListRow(g) {
   const id = g?.id || 'chat', messages = chatObjects(state?.chat?.messages), last = messages[messages.length - 1];
   return h('button', {type:'button', className:'chat-list-row', 'data-key':'row-' + id, 'data-chat-action':'select', 'data-id':id,
-    'aria-current':(chatUi.open === id || (id === 'chat' && chatUi.open !== 'history' && !chatGroup())) ? 'true' : null},
-    g ? h('span', {className:'chat-stack'}, chatObjects(g.members).slice(0, 3).map(m => chatAvatar(m))) : chatAvatar(chatWorkspace()),
-    h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : chatWorkspace()),
+    'aria-current':(chatUi.open === id || (id === 'chat' && chatUi.open !== 'history' && !chatGroup() && !chatDmId(chatUi.open))) ? 'true' : null},
+    g ? h('span', {className:'chat-stack'}, chatObjects(g.members).slice(0, 3).map(m => chatAvatar(m))) : h('span', {className:'chat-avatar chat-helper-mark', 'aria-hidden':'true'}, '✧'),
+    h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : CHAT_HELPER),
       g ? chatText('small', 'chat-row-meta', [chatHelpers(g), g.started ? 'started ' + chatWhen(g.started) : ''].filter(Boolean).join(' · ')) : null,
       chatText('small', '', chatPreview(g ? g.last : last?.text) || (g ? '' : 'No messages yet.'))),
     h('span', {className:'chat-row-time'}, time(g ? g.last_at : last?.at), g && chatCount(g.unread) ? h('span', {className:'count', 'aria-label':chatCount(g.unread) + ' unread'}, chatCount(g.unread)) : null));
 }
+// With other workspaces or groups: one list grouped as the draft — This workspace (your helper), Other workspaces (direct chats), Groups.
+function chatDmRow(c) {
+  const last = chatDmMessages(c.ws).at(-1);
+  return h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-dm', 'data-id':c.ws, 'data-key':'row-' + c.ws,
+    'aria-current':chatUi.open === c.ws ? 'true' : null}, chatAvatar(c),
+    h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', chatPreview(last?.text))),
+    h('span', {className:'chat-row-time'}, time(last?.shown_at || last?.at || c.last_at)));
+}
 function chatList() {
-  const groups = chatGroups(), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
-  const rows = [chatListRow(null), ...groups.filter(g => !chatFinished(g)).map(chatListRow)];
+  const groups = chatGroups().filter(g => !chatFinished(g)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
+  const dms = chatDm.contacts.filter(c => c.count > 0 || chatDmMessages(c.ws).length || chatUi.open === c.ws)
+    .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0));
+  const helperRow = chatListRow(null), dmRows = dms.map(chatDmRow), groupRows = groups.map(chatListRow), rows = [helperRow, ...dmRows, ...groupRows];
   rows.forEach(row => { row.hidden = !history && !row.textContent.toLowerCase().includes(query); });
-  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'), history ? null : chatSearch(), rows[0],
-    rows.length > 1 ? h('h2', {}, 'Groups') : null, rows.slice(1),
+  const heading = (text, list) => list.length && list.some(row => !row.hidden) ? h('h2', {}, text) : null;
+  return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'),
+    snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), history ? null : chatSearch(),
+    heading('This workspace', [helperRow]), helperRow, heading('Other workspaces', dmRows), dmRows, heading('Groups', groupRows), groupRows,
     rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null);
+}
+// The grouped list shows only when there is something besides the helper chat (a live group or a workspace chat); an open
+// group or workspace chat (a deep link) always keeps it, so nothing becomes unreachable.
+const chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().some(g => !chatFinished(g)) || chatDm.contacts.length > 0;
+function chatPhoneLink() {
+  if (snapshot) return null;
+  const phone = chatObjects(state?.addons).find(a => /phone/i.test(String(a.label || a.title || '')));
+  return h('a', {className:'chat-phone-link', href:phone?.name ? '#addon/' + phone.name : '#settings', 'data-key':'phone-link'}, 'Phone & workspaces');
 }
 function chatOpenAgent() {
   if (snapshot) return;
@@ -120,21 +141,25 @@ function chatMovedBanner(moved) {
 }
 // "Show: All | From my phone" replaces the old counter chips; "Working on N tickets" shows only when N > 0.
 function chatFilter() {
-  return h('div', {className:'chat-filter', role:'group', 'aria-label':'Show', 'data-key':'chat-filter'}, chatText('span', 'chat-filter-label', 'Show:'),
-    [['all', 'All'], ['phone', 'From my phone']].map(([id, label]) => chatButton(label, 'filter', {className:'chat-button chat-seg', 'data-key':'filter-' + id, 'data-id':id, 'aria-pressed':String(chatUi.filter === id)})));
+  const on = chatUi.filter === 'phone';
+  return chatButton('From my phone', 'filter', {className:'chat-check', role:'checkbox', 'aria-checked':String(on), 'data-key':'chat-filter', 'data-id':on ? 'all' : 'phone'});
 }
 function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const running = !g && !history && !agent ? chatCount(state?.chat?.activity?.running) : 0;
-  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent ? 'New conversation with your helper' : chatWorkspace());
+  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent ? 'New conversation with your helper' : CHAT_HELPER);
+  const helper = !g && !history, others = g ? chatObjects(g.members).filter(m => m.ws !== 'you').length : 0;
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
-    h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}),
-      h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
+    h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
+      helper ? h('span', {className:'chat-avatar chat-helper-mark', 'aria-hidden':'true'}, '✧') : null,
+      h('div', {className:'chat-head-text'}, g ? chatText('p', 'chat-eyebrow', 'Group · ' + others + (others === 1 ? ' workspace' : ' workspaces')) : null,
+        h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
+        helper && !agent ? h('p', {className:'chat-muted chat-head-meta'}, chatWorkspace() + ' workspace',
+          running ? fragment(' · ', h('a', {className:'chat-running', href:'#tickets'}, 'Working on ' + running + (running === 1 ? ' ticket' : ' tickets'))) : null) : null),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null,
       history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g ? null : chatButton('Earlier', 'history')),
-    // Few header rows: "Working on N tickets" sits on the Show row, right.
-    !g && !history && !agent ? h('div', {className:'chat-head-row'}, chatFilter(),
-      running ? chatText('span', 'chat-muted chat-running', 'Working on ' + running + (running === 1 ? ' ticket' : ' tickets')) : null) : null,
+    // The phone filter and the workspace link stay visible, no options disclosure.
+    helper && !agent ? h('div', {className:'chat-head-row'}, chatFilter(), chatPhoneLink()) : null,
     agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
     moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(chatPlainTitle(moved.title, moved.key))) : null,
     g ? h('div', {className:'chat-member-chips'}, chatObjects(g.members).map(m =>
@@ -235,7 +260,7 @@ function chatMessage(m, previous, g, index, readOnly, lastMine) {
   const sender = mine ? 'You' : clean(g ? m.name || (member.name ? member.name + ' helper' : 'Helper') : CHAT_HELPER);
   const grouped = previous && !previous.group_event && previous.by === m.by;
   return h('article', {className:'chat-message' + (mine ? ' chat-out' : '') + (grouped ? ' chat-grouped' : ''), 'data-key':key, 'data-message-id':m.id, tabindex:'-1'},
-    !mine && !grouped ? h('div', {className:'chat-who'}, chatAvatar(member, true), sender) : null,
+    !mine && !grouped ? h('div', {className:'chat-who'}, chatAvatar(member, true), sender, g && member.ws ? chatText('span', 'chat-ws-label', member.name + ' workspace') : null) : null,
     h('div', {className:'chat-bubble'}, m.question_to ? chatText('small', 'chat-question', 'Question to ' + clean(m.question_to)) : null,
       chatText('div', 'chat-message-text', m.text), chatRefs(m.refs, key, m.id, readOnly),
       g && m.task ? chatTask(m.task, g, readOnly) : null,
@@ -244,6 +269,13 @@ function chatMessage(m, previous, g, index, readOnly, lastMine) {
     // How a message travelled is shown only when it came from your phone ("13:00 · helper" said nothing).
     chatText('small', 'chat-message-time' + (m.via === 'phone' ? ' chat-from-phone' : ''), [mine ? 'You' : '', time(m.at), m.via === 'phone' ? 'from your phone' : '', m.to_everyone ? 'to everyone' : ''].filter(Boolean).join(' · ')),
     mine && index === lastMine && g?.delivered?.text ? chatText('small', 'chat-delivery', g.delivered.text) : null);
+}
+const CHAT_PROMPTS = [['Plan something', 'Help me plan my week'], ['Compare options', 'Help me compare two options'], ['Check a result', 'What is still open this week?']];
+function chatWelcome() {
+  return h('div', {className:'chat-welcome', 'data-key':'welcome'}, h('span', {className:'chat-welcome-mark', 'aria-hidden':'true'}, '✧'),
+    h('h2', {}, 'Talk it through with your helper'), chatText('p', 'chat-muted', 'No messages yet. Say hello below.'),
+    h('div', {className:'chat-prompts'}, CHAT_PROMPTS.map(([kind, text]) => h('button', {type:'button', className:'chat-prompt', 'data-chat-action':'prompt', 'data-prompt':text, 'data-key':'prompt-' + kind},
+      chatText('span', '', kind), clean(text)))));
 }
 function chatThinking(who, plain = false) {
   const label = plain || / helper$/.test(who) ? who : who + ' helper';
@@ -268,7 +300,8 @@ function chatThread(g, archived) {
     g?.done || g?.closed ? chatText('div', 'chat-archive-banner', 'Finished · you can read, not reply') : g?.readOnly ? chatText('div', 'chat-archive-banner', 'You can read here. Write in ' + chatHost(g) + '.') : null,
     h('div', {className:'chat-log', 'data-key':logKey, role:'log', 'aria-live':'polite', 'aria-label':g ? 'Group messages' : 'Chat messages'},
       h('div', {className:'chat-divider'}, archived ? date(chatUi.day) : 'Today'),
-      messages.length ? messages.map((m, i) => fragment(m.moved_to && m.moved_to.id !== messages[i - 1]?.moved_to?.id ? chatMovedBanner(m.moved_to) : null, chatMessage(m, messages[i - 1], g, i, readOnly, lastMine))) : chatUi.agentConversation && !g && !archived ? null : chatText('p', 'chat-empty', phoneOnly ? 'Nothing from your phone today.' : readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(w => chatThinking(w, !g))),
+      !g && !archived && state && !state.chat ? chatHistoryStatus('loading') :
+      messages.length ? messages.map((m, i) => fragment(m.moved_to && m.moved_to.id !== messages[i - 1]?.moved_to?.id ? chatMovedBanner(m.moved_to) : null, chatMessage(m, messages[i - 1], g, i, readOnly, lastMine))) : !g && !archived && !phoneOnly && !readOnly ? chatWelcome() : chatText('p', 'chat-empty', phoneOnly ? 'Nothing from your phone today.' : readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(w => chatThinking(w, !g))),
     readOnly ? snapshot ? chatText('p', 'chat-readonly', 'This is a shared copy.') : null : chatComposer(g));
 }
 function chatComposer(g) {
@@ -279,8 +312,9 @@ function chatComposer(g) {
       g ? chatButton('+', 'menu', {'aria-label':'Add to conversation', 'aria-haspopup':'menu', 'aria-expanded':String(chatUi.menu), 'aria-controls':'chat-compose-menu'}) : null,
       h('textarea', {rows:1, className:'chat-draft', 'data-key':'draft-' + id, 'data-chat-input':'draft', 'data-thread':id, 'aria-label':g ? 'Message the group' : 'Message your helper', placeholder:g ? 'Message the group' : 'Message your helper'}, draft),
       h('button', {type:'submit', className:'chat-button chat-primary', 'data-key':'send', disabled:sending || !draft.trim(), 'data-state':sending ? 'sending' : draft.trim() ? 'ready' : 'empty'}, sending ? h('span', {className:'spinner', 'aria-hidden':'true'}) : iconEl('send'), sending ? 'Sending' : 'Send')),
-    !g && chatUi.agentConversation ? null : h('div', {className:'chat-context'}, g ? 'Everyone in this group sees what you write here · ' : 'Starts fresh each day at 04:00 · ',
-      h('details', {'data-key':'context-details'}, h('summary', {}, 'Details'), h('p', {}, g ? "Members see the group's messages from when they joined. They do not see the rest of the " + chatHost(g) + ' ticket.' : "Every night at 04:00 your helper starts fresh. Today's messages move to Earlier; nothing is deleted."))));
+    !g && chatUi.agentConversation ? null : h('div', {className:'chat-context'}, g
+      ? "Everyone in this group sees what you write here. Members see the group's messages from when they joined, not the rest of the " + chatHost(g) + ' ticket.'
+      : 'A new conversation starts each day at 04:00. Today’s messages move to Earlier; nothing is deleted.'));
 }
 function chatDayLabel(day) {
   const today = new Date((state?.chat?.day || new Date().toISOString().slice(0, 10)) + 'T12:00:00');
@@ -324,8 +358,8 @@ function chatSheet(g, readOnly) {
     chatText('footer', 'chat-muted', 'Only workspaces connected to ' + host + ' can be added. A removed workspace keeps what it already received.'));
 }
 function chatPage() {
-  const g = chatGroup(), history = chatUi.open === 'history';
-  const page = h('section', {className:'chat-page' + (chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'}, chatList(),
+  const g = chatGroup(), history = chatUi.open === 'history', rich = chatRich();
+  const page = h('section', {className:'chat-page' + (rich ? '' : ' chat-simple') + (rich && chatUi.listOpen ? ' chat-list-open' : ' chat-thread-open'), 'data-key':'chat-page'}, rich ? chatList() : null,
     h('div', {className:'chat-main', 'data-key':'chat-main'}, chatHeader(g, history), history ? chatHistory() : chatThread(g, null),
       g && chatUi.sheet ? chatSheet(g, snapshot || g.done || g.closed || g.readOnly) : null));
   page.addEventListener('click', chatClick);
@@ -403,6 +437,10 @@ async function chatClick(event) {
   if (action === 'retry-days') { chatDays.status = 'idle'; return chatLoad(); }
   if (action === 'retry-day') { chatArchive.delete(chatUi.day); return chatLoad(chatUi.day); }
   if (action === 'today') { chatSelect('chat'); return; }
+  if (action === 'prompt') {
+    chatUi.drafts.chat = control.dataset.prompt || ''; render();
+    const field = document.querySelector('.chat-page .chat-draft'); if (field) { field.value = chatUi.drafts.chat; field.focus(); } return;
+  }
   if (action === 'filter') { chatUi.filter = control.dataset.id === 'phone' ? 'phone' : 'all'; return render(); }
   if (action === 'answer') {
     // The same answer a question card sends (op "answer"); the buttons wait while it is on its way.
@@ -517,24 +555,6 @@ window.addEventListener('hashchange', chatDmRoute);
 window.addEventListener('orch:state', chatDmRoute);
 window.addEventListener('DOMContentLoaded', chatDmRoute);
 
-const chatListWithoutDm = chatList;
-chatList = function () {
-  const list = chatListWithoutDm();
-  if (!snapshot) list.prepend(chatButton('New chat', 'contacts', {'data-key':'new-chat'}));
-  const rows = chatDm.contacts.filter(c => c.count > 0 || chatDmMessages(c.ws).length || chatUi.open === c.ws)
-    .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0));
-  if (rows.length) {
-    list.append(h('h2', {}, 'Workspaces'));
-    rows.filter(c => c.name.toLowerCase().includes(chatUi.search.toLowerCase())).forEach(c => {
-      const last = chatDmMessages(c.ws).at(-1);
-      list.append(h('button', {type:'button', className:'chat-list-row', 'data-chat-action':'select-dm', 'data-id':c.ws, 'data-key':'row-' + c.ws,
-        'aria-current':chatUi.open === c.ws ? 'true' : null}, chatAvatar(c),
-        h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', last?.text || ''))));
-    });
-  }
-  if (chatDmId(chatUi.open)) list.querySelector('[data-id="chat"]')?.removeAttribute('aria-current');
-  return list;
-};
 function chatDmContacts() {
   const {d, actions} = dialog('Contacts', 'dialog');
   d.classList.add('chat-page', 'chat-contacts');
@@ -575,7 +595,9 @@ function chatDmThread() {
   const ws = chatUi.open, c = chatDmContact(ws), title = c?.name || 'Workspace', messages = chatDmMessages(ws);
   const draft = chatUi.drafts[ws] || '';
   return h('div', {className:'chat-main', 'data-key':'dm-' + ws},
-    h('header', {className:'chat-thread-head'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}), h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title))),
+    h('header', {className:'chat-thread-head'}, h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}), chatAvatar(c || title),
+      h('div', {className:'chat-head-text'}, chatText('p', 'chat-eyebrow', 'Workspace · ' + title), h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
+        chatText('p', 'chat-muted chat-head-meta', 'You (' + chatWorkspace() + ') · ' + title)))),
     chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
