@@ -19,7 +19,7 @@ struct ConversationInfoView: View {
     init(conversation: ConversationID) { self.conversation = conversation }
 
     private var workspaceName: String {
-        model.workspace(conversation.workspace)?.displayName ?? "Workspace"
+        model.workspace(conversation.workspace).map(WorkspaceAlias.name(for:)) ?? "Workspace"
     }
 
     private var topic: TopicSummary? {
@@ -94,10 +94,18 @@ struct ConversationInfoView: View {
                     }
                 }
                 resultsSection
-                VStack(spacing: 16) {
-                    segments(all, referenceCount: references.count + links.count)
-                    if selection == .links { referenceContent(references, links: links) }
-                    else { content(entries(in: selection, from: all)) }
+                let counts = Dictionary(uniqueKeysWithValues: InfoGroup.allCases.map { g in
+                    (g, g == .links ? references.count + links.count : entries(in: g, from: all).count)
+                })
+                let shown = InfoGroup.visible(counts: counts)
+                if let current = InfoGroup.current(selection, visible: shown) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Shared").themeFont(15, .semibold).accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("info-shared")
+                        if InfoGroup.showsTabs(shown) { segments(shown, counts: counts, current: current) }
+                        if current == .links { referenceContent(references, links: links) }
+                        else { content(entries(in: current, from: all), group: current) }
+                    }
                 }
             }
             .padding(16).padding(.top, 8)
@@ -170,8 +178,18 @@ struct ConversationInfoView: View {
                             return .handled
                         })
                 }
-                Text("\(ticket.view?.totalCount ?? 0) tasks · \(refs.count) references")
-                    .themeFont(13).foregroundStyle(Theme.muted)
+                if let progress = InfoGroup.progressText(done: ticket.view?.done ?? ticket.view.map { $0.checklist.filter(\.done).count },
+                                                         total: ticket.view?.totalCount ?? 0) {
+                    HStack {
+                        Text("Progress").themeFont(16, .medium)
+                        Spacer(minLength: 8)
+                        Text(progress).themeFont(15).foregroundStyle(Theme.muted)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 16)
+                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("info-progress")
+                }
             }.frame(maxWidth: .infinity, alignment: .leading)
         } else {
             VStack(spacing: 16) {
@@ -187,44 +205,42 @@ struct ConversationInfoView: View {
 
     /// One row of short tabs. They share the width
     /// when they fit; with large text the same row scrolls sideways instead of wrapping a label onto two lines.
-    private func segments(_ all: [InfoEntry], referenceCount: Int) -> some View {
-        let tabs = InfoGroup.allCases.map { g in (g, g == .links ? referenceCount : entries(in: g, from: all).count) }
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 4) { ForEach(tabs, id: \.0) { tabButton($0.0, count: $0.1, fill: true) } }
+    private func segments(_ tabs: [InfoGroup], counts: [InfoGroup: Int], current: InfoGroup) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) { ForEach(tabs) { tabButton($0, count: counts[$0] ?? 0, fill: true, current: current) } }
             ScrollViewReader { reader in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) { ForEach(tabs, id: \.0) { tabButton($0.0, count: $0.1, fill: false).id($0.0) } }
+                    HStack(spacing: 4) { ForEach(tabs) { tabButton($0, count: counts[$0] ?? 0, fill: false, current: current).id($0) } }
                 }
-                .onAppear { reader.scrollTo(selection, anchor: .center) }   // the selected tab is always in view
+                .onAppear { reader.scrollTo(current, anchor: .center) }   // the selected filter is always in view
                 .onChange(of: selection) { _, new in withAnimation { reader.scrollTo(new, anchor: .center) } }
             }
         }
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
-    private func tabButton(_ group: InfoGroup, count: Int, fill: Bool) -> some View {
+    private func tabButton(_ group: InfoGroup, count: Int, fill: Bool, current: InfoGroup) -> some View {
         Button { selection = group } label: {
             HStack(spacing: 5) {
                 Text(group.tabLabel(count: count)).themeFont(13, .semibold).lineLimit(1).fixedSize()
             }
-            .foregroundStyle(selection == group ? Theme.brand : Theme.muted)
+            .foregroundStyle(current == group ? Theme.brand : Theme.muted)
             .padding(.horizontal, 10).frame(maxWidth: fill ? .infinity : nil, minHeight: 44)
             .contentShape(Rectangle())
             .overlay(alignment: .bottom) {
-                Rectangle().fill(selection == group ? Theme.brand : .clear).frame(height: 2)
+                Rectangle().fill(current == group ? Theme.brand : .clear).frame(height: 2)
             }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(group.tabLabel(count: count))
-        .accessibilityAddTraits(selection == group ? .isSelected : [])
+        .accessibilityAddTraits(current == group ? .isSelected : [])
         .accessibilityIdentifier("info-tab-\(group.rawValue)")
     }
 
-    @ViewBuilder private func content(_ selected: [InfoEntry]) -> some View {
+    @ViewBuilder private func content(_ selected: [InfoEntry], group: InfoGroup) -> some View {
         if selected.isEmpty {
-            Text("Nothing shared yet.").themeFont(15).foregroundStyle(Theme.muted)
-                .frame(maxWidth: .infinity).padding(.vertical, 32)
-        } else if selection == .photos {
+            EmptyView()
+        } else if group == .photos {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                 ForEach(selected) { entry in
                     Button { viewer = entry.item } label: { InfoThumbnail(blobID: entry.item.blobId) }
@@ -237,7 +253,7 @@ struct ConversationInfoView: View {
             LazyVStack(spacing: 12) {
                 ForEach(selected) { entry in
                     Button { open(entry) } label: {
-                        if selection == .artifacts || selection == .files { artifactCard(entry) }
+                        if group == .artifacts || group == .files { artifactCard(entry) }
                         else { row(entry) }
                     }
                     .buttonStyle(.plain)
@@ -312,11 +328,11 @@ struct ConversationInfoView: View {
 
     private func row(_ entry: InfoEntry) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: selection == .links ? "link" : "doc")
+            Image(systemName: entry.group == .links ? "link" : "doc")
                 .themeFont(22).foregroundStyle(Theme.brand).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.item.title).themeFont(16, .medium)
-                Text(selection == .links ? (entry.item.url?.host ?? "Link") : entry.fileDetail)
+                Text(entry.group == .links ? (entry.item.url?.host ?? "Link") : entry.fileDetail)
                     .themeFont(13).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 0)
@@ -393,8 +409,22 @@ struct ConversationInfoView: View {
 enum InfoGroup: String, CaseIterable, Identifiable {
     case photos, files, links, artifacts
     var id: String { rawValue }
-    var title: String { self == .links ? "References" : rawValue.capitalized }
+    /// Plain words: "References" became "Links", "Artifacts" became "Previews" ("Results" is the section above).
+    var title: String {
+        switch self { case .photos: "Photos"; case .files: "Files"; case .links: "Links"; case .artifacts: "Previews" }
+    }
     func tabLabel(count: Int) -> String { count > 0 ? "\(title) (\(count))" : title }
+    /// Only filters that have something in them, in the fixed order.
+    static func visible(counts: [InfoGroup: Int]) -> [InfoGroup] { allCases.filter { (counts[$0] ?? 0) > 0 } }
+    /// The chosen filter if it still has content, else the first one that has; nil hides the whole Shared list.
+    /// A single filter needs no tabs.
+    static func showsTabs(_ visible: [InfoGroup]) -> Bool { visible.count > 1 }
+    static func current(_ chosen: InfoGroup, visible: [InfoGroup]) -> InfoGroup? { visible.contains(chosen) ? chosen : visible.first }
+    /// "3 of 4 done"; nil (no row) when the topic has no tasks.
+    static func progressText(done: Int?, total: Int) -> String? {
+        guard total > 0 else { return nil }
+        return "\(min(done ?? 0, total)) of \(total) done"
+    }
 }
 
 struct InfoEntry: Identifiable {

@@ -18,3 +18,5 @@
 .workspace-entry .row-content{background:transparent;border:0}
 .workspace-entry > .icon-button{background:transparent}
 .sheet .setting-block{padding:0}
+.sheet-head:has(.icon-button+.icon-button) h3{flex:1}.sheet-head .icon-button+.icon-button{margin-left:8px}.audio-failed{color:var(--muted)}
+.artifact-viewer .artifact-stage{position:relative;margin-inline:-16px;background:var(--bg)}.artifact-viewer .pdf-paper{border-radius:0;margin:0 0 8px}.artifact-viewer .page-count{position:sticky;bottom:8px;display:table;margin:0 auto;padding:4px 10px;border-radius:var(--r-pill);background:color-mix(in srgb,var(--surface3) 90%,transparent);font-size:.8125rem}.artifact-viewer .artifact-actions{margin-inline:-16px;padding:8px 16px;background:var(--surface)}

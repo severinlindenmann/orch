@@ -208,10 +208,14 @@ struct GroupRoomView: View {
         }
         if let task = message.task, GroupRoomRules.showsTaskCard(message, group: group) { GroupTaskView(task: group.tasks[task.delegate] ?? task, group: group) }
         ForEach(message.ticketView?.attachments.filter { message.sharedFiles.contains($0.blobId ?? "") } ?? []) { attachment in
-            Button {
-                viewer = ArtifactItem(attachment, in: .topic(workspace: key.host, ticket: group.ticket ?? ""))
-            } label: { AttachmentTile(attachment: attachment).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m)) }
-                .buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.label ?? "file")")
+            let open = { viewer = ArtifactItem(attachment, in: .topic(workspace: key.host, ticket: group.ticket ?? "")) }
+            if AttachmentTile.opensItself(attachment) {
+                // The picture is its own button: a failed one tries again on a tap.
+                AttachmentTile(attachment: attachment, onOpen: open).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
+            } else {
+                Button(action: open) { AttachmentTile(attachment: attachment).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m)) }
+                    .buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.label ?? "file")")
+            }
         }
     }
 

@@ -95,10 +95,25 @@ struct Waveform: View {
     }
 }
 
+/// Outcome of loading a sent note: only a real failure shows "Audio not available"; a note still uploading (no blob yet) waits.
+enum VoiceLoadResult: Equatable {
+    case noSource, loaded, failed
+    static func from(blobId: String?, data: Data?, loaded: Bool) -> VoiceLoadResult {
+        guard let blobId, !blobId.isEmpty else { return .noSource }
+        return data != nil && loaded ? .loaded : .failed
+    }
+}
+
 func voiceRateText(_ rate: Double) -> String { rate == 1.5 ? "1.5x" : "\(Int(rate))x" }
 private func voiceDurationText(_ duration: Double) -> String { clockText(duration) }
 /// Nothing is shown until the length is known (never "00:00" for a real note).
 func voiceDurationLabel(_ duration: Double) -> String? { duration > 0 ? clockText(duration) : nil }
+/// The full length when stopped; the time left (counting down) once playback has started.
+func voiceTimeLabel(duration: Double, progress: Double, started: Bool) -> String? {
+    guard duration > 0 else { return nil }
+    guard started, progress > 0, progress < 1 else { return clockText(duration) }
+    return clockText(max(0, duration * (1 - progress)).rounded(.up))
+}
 
 struct OwnVoiceBubble: View {
     let item: ConvItem
@@ -109,6 +124,8 @@ struct OwnVoiceBubble: View {
     var waitNote: String? = nil
     @Environment(AppModel.self) private var model
     @State private var player = NotePlayer()
+    @State private var loadFailed = false
+    @State private var reload = 0
 
     private var duration: Double {
         item.attachments.first(where: { $0.kind == .voice })?.duration
@@ -116,18 +133,21 @@ struct OwnVoiceBubble: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Button {
-                    if player.isPlaying { player.pause() } else { player.play(model: model) }
+                    if loadFailed { reload += 1 }
+                    else if player.isPlaying { player.pause() } else { player.play(model: model) }
                 } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play")
+                    Image(systemName: loadFailed ? "arrow.clockwise" : (player.isPlaying ? "pause.fill" : "play.fill"))
                         .themeFont(16).frame(width: 44, height: 44)
                         .foregroundStyle(Theme.onBrand).background(Theme.brand, in: Circle())
-                }.disabled(!player.isAvailable).opacity(player.isAvailable ? 1 : 0.45)
+                        .opacity(player.isAvailable || loadFailed ? 1 : 0.45)   // still loading: looks waiting, not tappable
+                }.disabled(!player.isAvailable && !loadFailed)
                     .accessibilityIdentifier("voice-play")
-                    .accessibilityLabel(player.isAvailable ? "Play voice message" + (voiceDurationLabel(duration).map { ", \($0)" } ?? "") : "Audio not available")
-                    .accessibilityValue(player.isPlaying ? "Pause" : "Play")
+                    .accessibilityLabel(loadFailed ? "Audio not available, try again"
+                        : "Play voice message" + (voiceDurationLabel(duration).map { ", \($0)" } ?? ""))
+                    .accessibilityValue(loadFailed ? "" : (player.isPlaying ? "Pause" : "Play"))
                 scrubber
                 Button { player.cycleRate() } label: {
                     Text(voiceRateText(player.rate)).themeFont(13)
@@ -136,10 +156,13 @@ struct OwnVoiceBubble: View {
                     .accessibilityValue(voiceRateText(player.rate))
             }
             HStack(spacing: 5) {
-                if let t = voiceDurationLabel(duration) { Text(t).foregroundStyle(Theme.muted) }
+                if loadFailed { Text("Audio not available").foregroundStyle(Theme.muted) }
+                else if let t = voiceTimeLabel(duration: duration, progress: player.progress, started: player.isPlaying || player.progress > 0) {
+                    Text(t).monospacedDigit().foregroundStyle(Theme.muted).accessibilityIdentifier("voice-time")
+                }
                 Circle().fill(Theme.brand).frame(width: 10, height: 10).accessibilityHidden(true)
                 Text("Voice memo").foregroundStyle(Theme.brand)
-            }.themeFont(13).padding(.leading, 48)
+            }.themeFont(13).padding(.leading, 52)
             Text(item.voice?.transcript ?? item.text).themeFont(17).textSelection(.enabled)
                 .accessibilityIdentifier("voice-transcript")
             ViewThatFits(in: .horizontal) {
@@ -152,7 +175,11 @@ struct OwnVoiceBubble: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(Theme.brand.opacity(0.3)))
             .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .task(id: item.voice?.blobId) { await loadAudio() }
+            .task(id: "\(item.voice?.blobId ?? "")#\(reload)") {
+                loadFailed = false
+                let result = await loadAudio()
+                if !Task.isCancelled { loadFailed = result == .failed }
+            }
             .onDisappear { player.stop() }
             .accessibilityAction(named: "Reply") { onReply?() }
             .accessibilityActions {
@@ -182,14 +209,18 @@ struct OwnVoiceBubble: View {
                 player.seek(to: player.progress + (direction == .increment ? 0.1 : -0.1))
             }.allowsHitTesting(player.isAvailable)
     }
-    private func loadAudio() async {
+    private func loadAudio() async -> VoiceLoadResult {
         if let queued = model.outbox.item(clientId: item.clientId ?? ""),
            let file = queued.voice?.file ?? item.queuedFiles.first(where: { $0.kind == .voice }),
            let data = try? Data(contentsOf: model.outbox.fileURL(queued, file)) {
-            player.load(data); return
+            player.load(data); return .from(blobId: "local", data: data, loaded: player.isAvailable)
         }
         let blob = item.voice?.blobId ?? item.attachments.first(where: { $0.kind == .voice })?.blobId
-        if let blob, !blob.isEmpty, let data = await model.blob(blob), !Task.isCancelled { player.load(data) }
+        var data: Data?
+        if let blob, !blob.isEmpty { data = await model.blob(blob) }
+        if Task.isCancelled { return .noSource }
+        if let data { player.load(data) }
+        return .from(blobId: blob, data: data, loaded: player.isAvailable)
     }
 }
 
@@ -216,7 +247,7 @@ struct AgentMemoBubble: View {
                     Button(action: toggle) {
                         Group {
                             if model.speech.state == .loading(item.id) { ProgressView().tint(Theme.onBrand) }
-                            else { Image(systemName: playing ? "pause.fill" : "play") }
+                            else { Image(systemName: playing ? "pause.fill" : "play.fill") }
                         }.themeFont(16).frame(width: 44, height: 44)
                             .foregroundStyle(listened ? Theme.brand : Theme.onBrand)
                             .background(listened ? Theme.surface3 : Theme.brand, in: Circle())
@@ -230,7 +261,15 @@ struct AgentMemoBubble: View {
                             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                                 if current { model.speech.seek(to: value.location.x / max(1, proxy.size.width)) }
                             })
-                    }.frame(height: 44).accessibilityIdentifier("voice-scrub")
+                    }.frame(height: 44).accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Voice message position")
+                        .accessibilityValue("\(Int((current ? model.speech.progress : 0) * 100)) percent")
+                        .accessibilityHint(current ? "" : "Play the message first")
+                        .accessibilityAdjustableAction { direction in
+                            guard current else { return }
+                            model.speech.seek(to: min(1, max(0, model.speech.progress + (direction == .increment ? 0.1 : -0.1))))
+                        }
+                        .accessibilityIdentifier("voice-scrub")
                     Button { model.speech.cycleRate() } label: {
                         Text(voiceRateText(model.speech.rate)).themeFont(13).frame(width: 44, height: 44)
                             .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
@@ -238,10 +277,12 @@ struct AgentMemoBubble: View {
                         .accessibilityValue(voiceRateText(model.speech.rate))
                 }
                 HStack(spacing: 5) {
-                    if duration > 0 { Text(voiceDurationText(duration)).foregroundStyle(Theme.muted) }
+                    if let t = voiceTimeLabel(duration: duration, progress: current ? model.speech.progress : 0, started: current) {
+                        Text(t).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
                     Circle().fill(listened ? Theme.muted : Theme.brand).frame(width: 10, height: 10).accessibilityHidden(true)
                     Text(listened ? "Listened" : "Voice memo").foregroundStyle(listened ? Theme.muted : Theme.brand)
-                }.themeFont(13).padding(.leading, 48)
+                }.themeFont(13).padding(.leading, 52)
                 HStack {
                     Button {
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { showText.toggle() }

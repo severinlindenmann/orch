@@ -76,7 +76,8 @@ final class RealRelayUITests: XCTestCase {
         }
         row.tap()
         XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10))
-        XCTAssertTrue(any(app, "tasks-toggle").waitForExistence(timeout: 10), "ticket status line")
+        // The ticket says its status in the header (chat-status) or, when it has steps, in the steps row (tasks-toggle).
+        XCTAssertTrue(any(app, "chat-status").waitForExistence(timeout: 10) || any(app, "tasks-toggle").waitForExistence(timeout: 5), "ticket status line or steps row")
         XCTAssertTrue(any(app, "attachment-image").waitForExistence(timeout: 10), "image attachment")
         shot("08-ticket-chat")
         let yes = app.buttons["answer-yes"]

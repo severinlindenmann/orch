@@ -1,4 +1,12 @@
-# Workspace look (7 Nov)
+# 12 Nov phone UX, batch 4
+- Info: one "Shared" list; filters (Photos, Files, Links, Previews) only when they have content and only when there are two or more, zero counts hidden, "Progress · 3 of 4 done" row; no "N tasks · N references"; phone-local workspace name.
+- Result viewer: subtitle "PDF · 3 pages · 12:38" (time as the app prints it), version behind "Details", no status chip; PDF edge to edge on dark with page shadows and page count; share icon next to close; action bar on the composer band.
+- Location: centred spinner with "Finding your location…"; on denial "Location is off for orch" + Open Settings + Try again.
+- Voice: real length counting down while playing; same filled play button for sent and received; failed audio shows a retry button; received audio has an adjustable VoiceOver scrubber; speed button kept.
+- Add sheet: "Add to chat" (sentence case), close button only (no grabber), Camera hidden when there is none.
+- Review fixes: info and viewer changes now live in round3b.js / visual-challenge.js (the screens that actually render); dead edits in app.js / flows.js removed. Share shown for links and web pages too. Jump flags (No camera, Location off) are no longer saved and reset on navigation.
+- Mockup jumps: Voice › "Audio not available" (shows "Audio not available" with a retry button), Media › "No camera", Media › "Location off".
+
 - Workspace badges show the picked icon and colour (Pilatus wallet/amber, Home house/teal) in the chats list, workspace screen and Conversation info; Rigi has no pick: letter + Automatic colour. Styles and the override live in `look.css` / `look.js`.
 
 # Info tabs (TestFlight 10 + 14, 7 Nov)
@@ -47,3 +55,8 @@ Added Chats Groups, open / sent / read-only group rooms and Done groups. Redrew 
 12 Nov phone UX, batch 6: group room. Header subtitle lists the members ("Finance, Home, Bank"); the topic link moved into the members (info) sheet as "Open the Finance topic". First pill: "Finance started this group". Members sheet: "You" with an avatar and "Owner" under it, "Started the group" as a subtitle, one note behind an i icon ("What members see") ending in a full stop. Group approval card: a choice waits out the same 5-second undo window as topic answers ("Always · sent in a moment" + Undo). A card this phone cannot answer links to the member's topic when it is paired here, else says "Only the owner of Bank can answer this, on their phone." The room opens at an open approval card, above the composer.
 
 12 Nov phone UX, batch 6 review: the room opens at an open approval card without marking the messages below it read (Jump to latest keeps its count). New states "Group · answer in Bank" ("Answer in Bank ›") and "Group · answer on another phone" ("Only someone with Bank on their phone can answer this."). The info sheet is titled "Group info"; the topic sheet "Finance topic"; "You" has a person avatar as in the app. Undo reads "Undo Always" to VoiceOver; an offline answer shows "Always · waiting to send" (app).
+## 12 Nov phone UX, batch 3: topic chat
+
+Topic header: plain icons of one size; the subtitle shows the status (Working green, Needs your OK amber, Done grey) or the helper's presence, never the network. Steps row "2 of 5 steps done", shown from 1 step on ("1 step" / "1 step · done"). "N questions" banner only with 2+ open questions. Own bubbles filled, time and ticks inline; photos edge to edge with the time on a dark backing. No "Working" or "Waiting · will send when online" caption (the clock and the banner say it). General: "Today · fresh start ⓘ" separator explains what the helper forgets.
+
+12 Nov phone UX, batch 3 review: the status reads "Ready for review" and Stopped / Didn't work in red; no status while an open question card says it. "N questions" banner skips stale questions. "Today · fresh start ⓘ" only when earlier days exist. A queued own message shows "Waiting ◷" when there is no offline banner. Own bubbles #1d5446 with stamp #bfcccb (5.3:1). A failed picture retries on a tap instead of opening.
