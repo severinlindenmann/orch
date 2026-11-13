@@ -1,0 +1,7 @@
+{"role": "order", "kind": "run", "stage": "running", "draft": 2,
+ "proposal": {"n": 1, "hash": "3f1d9c0e5b7a2468ace0f13579bdf2468ace0f13579bdf2468ace0f13579bdf2"},
+ "line": [{"stage": "draft", "state": "done"}, {"stage": "build", "state": "doing"},
+          {"stage": "check", "state": "todo"}, {"stage": "ship", "stop": true, "state": "todo"}],
+ "crew": ["t_a1b2c3d4", "t_e5f6a7b8"],
+ "budget": {"preset": "standard", "active_min_cap": 150, "active_min_used": 82, "api_usd_target": 12},
+ "eta": "2026-11-13T18:30:00Z", "tiny": {"count": 2, "minutes": 10}}

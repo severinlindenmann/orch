@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/factory/ext.schema.json",
+  "title": "orch factory ticket data: ext.factory",
+  "description": "Owned by the factory add-on (its ticket_ext; the add-on ships a byte-identical copy). The core never reads it. A CACHE for the dashboard and the manager: every authority decision (start, stops, changes, autopilot) is derived again from the ticket's human-answered factory:* questions and the add-on journal, never from these fields (contracts/addons/factory/README.md, Authority). On an order (parent ticket) role = order; on a crew sub-ticket role = crew.",
+  "type": "object",
+  "required": ["role"],
+  "additionalProperties": false,
+  "properties": {
+    "role": { "enum": ["order", "crew"] },
+    "kind": { "enum": ["run", "autopilot"], "description": "Order only. run = a normal Factory run; autopilot = an autopilot order (the agent may decide routine/taste items itself while its grant is valid)." },
+    "stage": {
+      "enum": ["draft", "proposed", "running", "waiting", "shipped", "cancelled"],
+      "description": "Order only. draft = idea being polished; proposed = a Run proposal waits for Start; running = the crew works; waiting = a stop or change waits for the owner; shipped / cancelled = finished."
+    },
+    "draft": { "type": "integer", "minimum": 1, "description": "Order only. Newest draft version (.orch/addons/factory/drafts/<order>/v<N>.md)." },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["n", "hash"],
+      "properties": {
+        "n": { "type": "integer", "minimum": 1, "description": "Proposal number (.orch/addons/factory/proposals/<order>/p<N>.json)." },
+        "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "sha256 of the frozen proposal file." }
+      }
+    },
+    "line": {
+      "type": "array",
+      "maxItems": 12,
+      "description": "Order only. The stages of the started proposal with their state (for the stage bar).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "state"],
+        "properties": {
+          "stage": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+          "stop": { "type": "boolean", "description": "true = the owner decides at the end of this stage." },
+          "state": { "enum": ["todo", "doing", "waiting", "done", "skipped"] },
+          "by": { "type": "string", "pattern": "^(human|agent):[A-Za-z0-9._-]{1,64}$", "description": "Who answered the stop (agent:factory only under an autopilot grant)." }
+        }
+      }
+    },
+    "crew": {
+      "type": "array",
+      "maxItems": 40,
+      "description": "Order only. Crew sub-ticket ids (their parent is this order).",
+      "items": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preset": { "enum": ["small", "standard", "large"] },
+        "active_min_cap": { "type": "integer", "minimum": 1, "maximum": 10080 },
+        "active_min_used": { "type": "integer", "minimum": 0, "description": "Measured agent run time on this order and its crew; waiting for the owner never counts." },
+        "api_usd_target": { "type": "number", "minimum": 0, "description": "A planning target, not a cap (no usage contract yet)." }
+      }
+    },
+    "eta": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "tiny": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Order only. Small changes the manager did without a change proposal (cap: 3 changes or 30 min).",
+      "properties": {
+        "count": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "minutes": { "type": "integer", "minimum": 0, "maximum": 30 }
+      }
+    },
+    "grant_until": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "Autopilot order only: when its grant ends (display; checked against the journal and the answer)." },
+    "order": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Crew only: the order (same as the ticket's parent)." },
+    "task": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$", "description": "Crew only: the proposal task slug this sub-ticket does (one sub-ticket per order + task)." },
+    "crew_role": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,23}$", "description": "Crew only: builder, reviewer, writer, designer, checker …" },
+    "agent": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Crew only: the adapter or [agents.<name>] entry its runs use." }
+  },
+  "allOf": [
+    { "if": { "properties": { "role": { "const": "crew" } } }, "then": { "required": ["order", "task"], "not": { "anyOf": [{ "required": ["stage"] }, { "required": ["crew"] }, { "required": ["proposal"] }] } } },
+    { "if": { "properties": { "role": { "const": "order" } } }, "then": { "required": ["stage"], "not": { "anyOf": [{ "required": ["order"] }, { "required": ["task"] }] } } }
+  ]
+}

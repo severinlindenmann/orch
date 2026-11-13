@@ -1,0 +1,3 @@
+{"schema": "orch.factory.proposal/1", "kind": "autopilot", "title": "Do everything", "goal": "All of it.",
+ "may_decide": ["routine", "ship"], "limits": {"days": 30, "max_orders": 9, "active_min_per_day": 60},
+ "done_means": ["x"]}
