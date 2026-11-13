@@ -96,6 +96,12 @@ def write_ready(f: Path, port: int) -> None:
     runfiles.write_json(f, {"pid": os.getpid(), "port": port})
 
 
+def _preferred_port() -> int | None:
+    """ORCH_PREFERRED_PORT (set by `orch start`: the port this service had last time), only when valid."""
+    v = os.environ.get("ORCH_PREFERRED_PORT", "")
+    return int(v) if v.isdigit() and 1024 <= int(v) < 65536 else None
+
+
 def start(root: Path, port: int | None = None) -> dict:
     """The child binds the port itself (8420, else any free one) and writes the bound port to a ready file;
     the start counts only when that port answers with this start's nonce and the child's pid."""
@@ -108,7 +114,8 @@ def start(root: Path, port: int | None = None) -> dict:
     ready = d / f"ready-{nonce[:12]}.json"
     from orch.procs import background_popen_kwargs, wait_port_free
 
-    if not wait_port_free(port or DEFAULT_PORT) and port:
+    first = port or _preferred_port() or DEFAULT_PORT  # sticky: `orch start` passes this service's last port
+    if not wait_port_free(first) and port:
         raise RuntimeError(f"Something else answers on port {port}; try again in a moment.")
 
     # -P: the workspace folder is never on the import path (a planted orch_focus.py there is not run)
@@ -123,7 +130,7 @@ def start(root: Path, port: int | None = None) -> dict:
         "serve",
         "--ready-file",
         str(ready),
-        *(["--port", str(port)] if port else ["--port", str(DEFAULT_PORT), "--auto-port"]),
+        *(["--port", str(port)] if port else ["--port", str(first), "--auto-port"]),
     ]
     with runfiles.open_append(d / "server.log") as out:
         proc = subprocess.Popen(
