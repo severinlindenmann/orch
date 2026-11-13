@@ -171,19 +171,21 @@ sendMessage=function(type,text='',extra={}){
 };
 
 // Invitation URLs preserve the existing contract; code entry supplies the local demo relay.
-function renderStart(){screen='start';contentRoot().innerHTML=`<div class="onboarding"><img class="quiet-logo" src="logo.svg" alt="orch"><h1>Let's get connected.</h1><p>Use your invitation to bring your workspaces along.</p>${actionButton('scan-invite','Scan invitation QR code','','wide-btn primary')}${actionButton('paste-invite','Paste invitation link')}<p class="sheet-note">Ask the person who invited you for a link or QR code.</p></div>`;}
-function pair(){newTopicDraft=false;sheet('Add workspace',`<p class="sheet-note">Use the invitation for your workspace.</p>${actionButton('scan-invite','Scan invitation QR code','','wide-btn primary')}${actionButton('paste-invite','Paste invitation link')}`);}
-function scanInvite(){sheet('Scan invitation QR code',`<div class="viewfinder"><div class="qr-art">▦</div><div class="scan-line"></div></div><p class="sheet-note">Point your camera at the invitation.</p>${actionButton('found-invite','Use sample invitation','','wide-btn primary')}<p class="sheet-note">No camera here. Use the invitation link.</p>${actionButton('paste-invite','Paste invitation link')}`,true);}
-function pasteInvite(manual=false){sheet(manual?'Enter invitation code':'Paste invitation link',`<label>${manual?'Invitation code':'Invitation link'}<input id="invitation" class="caption-input" placeholder="${manual?'pc_…':'orch://pair?…'}" autocomplete="off"></label><p id="invitation-error" class="error-line" role="alert"></p>${actionButton(manual?'validate-code':'validate-invite','Continue','','wide-btn primary')}`);}
-function foundInvite(){sheet('Add Rigi Shop?',`<h2>Add Rigi Shop?</h2><p class="sheet-note">Server: relay.orch.local</p><details><summary>Connection details</summary><p class="sheet-note">Server: relay.orch.local<br>This phone: iPhone · invitation access</p></details><label>Workspace name<input class="caption-input" id="workspace-name" value="Rigi Shop" maxlength="40"></label><p id="pair-error" class="error-line" role="alert"></p>${actionButton('connect-phone','Add workspace','','wide-btn primary')}`);}
+function renderStart(){screen='start';contentRoot().innerHTML=`<div class="onboarding"><img class="quiet-logo" src="logo.svg" alt="orch"><h1>Let's get connected.</h1><p>Bring your workspaces along with an invitation.</p>${actionButton('scan-invite','Scan QR code','','wide-btn primary')}${actionButton('paste-invite','Paste link')}<p class="sheet-note">You get an invitation from orch on your computer.</p><details><summary>Get an invitation</summary><ol class="sheet-note"><li>On your computer, open the orch portal. orch must be set up and running there.</li><li>Choose Add phone and pick the workspaces you want on this phone.</li><li>Scan the QR code it shows, or send the link to this phone and paste it here.</li></ol></details>${actionButton('found-invite','Try a demo <small>(debug builds only)</small>','','wide-btn')}</div>`;}
+// Same words as MuteRules.endText: "8:00", "tomorrow 8:00", "Sunday 8:00", "1 Dec 8:00".
+function muteEnd(iso){const e=new Date(iso),d0=new Date();d0.setHours(0,0,0,0);const d1=new Date(e);d1.setHours(0,0,0,0);const days=Math.round((d1-d0)/864e5),t=e.getHours()+':'+String(e.getMinutes()).padStart(2,'0');return days<=0?t:days===1?'tomorrow '+t:days<7?e.toLocaleDateString('en-US',{weekday:'long'})+' '+t:e.getDate()+' '+e.toLocaleDateString('en-US',{month:'short'})+' '+t;}
+function pair(){newTopicDraft=false;sheet('Add workspace',`${actionButton('scan-invite','Scan QR code','','wide-btn primary')}${actionButton('paste-invite','Paste link')}<p class="sheet-note">You get an invitation from orch on your computer.</p><details><summary>Get an invitation</summary><ol class="sheet-note"><li>On your computer, open the orch portal. orch must be set up and running there.</li><li>Choose Add phone and pick the workspaces you want on this phone.</li><li>Scan the QR code it shows, or send the link to this phone and paste it here.</li></ol></details>`);}
+function scanInvite(){sheet('Scan invitation QR code',`<div class="viewfinder"><div class="qr-art">▦</div><div class="scan-line"></div></div><p class="sheet-note">Point your camera at the invitation.</p>${actionButton('found-invite','Use sample invitation','','wide-btn primary')}<p class="sheet-note">If orch can't use the camera: Open Settings to allow it, or paste the link instead.</p>${actionButton('paste-invite','Paste link')}`,true);}
+function pasteInvite(manual=false){sheet(manual?'Enter invitation code':'Paste link',`<label>${manual?'Invitation code':'Invitation link'}<input id="invitation" class="caption-input" placeholder="${manual?'pc_…':'orch://pair?…'}" autocomplete="off"></label><p id="invitation-error" class="error-line" role="alert"></p>${actionButton(manual?'validate-code':'validate-invite','Continue','','wide-btn primary')}`);}
+function foundInvite(){sheet('Add this workspace?',`<h2>Add this workspace?</h2><p class="sheet-note">You were invited to add it to this phone.</p><details><summary>Connection details</summary><p class="sheet-note">relay.orch.local</p></details><input type="hidden" id="workspace-name" value="Rigi Shop"><p id="pair-error" class="error-line" role="alert"></p>${actionButton('connect-phone','Add','','wide-btn primary')}${actionButton('different-link','Use a different link')}`);}
 async function connectPhone(){const epoch=reviewEpoch;
- if(pairingError||!online()){$('#pair-error').textContent=pairingError==='expired'?'This invitation has expired or was already used. Ask the person who invited you for a new one.':"Can't reach the server. Check your connection, then tap Connect this phone again.";return;}
+ if(pairingError||!online()){$('#pair-error').textContent=pairingError==='expired'?'This invitation has expired or was already used. Create a new one in orch on your computer.':"Can't reach the server. Check your connection, then tap Connect this phone again.";if(pairingError==='expired')$('[data-action="connect-phone"]').outerHTML=actionButton('different-link','Use a new invitation','','wide-btn primary');return;}
  const name=$('#workspace-name').value.trim()||'Studio';$('[data-action="connect-phone"]').textContent='Connecting this phone…';await delay(800);if(epoch!==reviewEpoch)return;
  state.signedOut=false;const id='workspace-'+uid();state.workspaces[id]={name};state.messages[id]=[];names[id]=name;persist();
  sheet("You're connected.",`<div class="pair-success">✓</div><h2>You're connected.</h2><p class="sheet-note">${workspaces().length} workspaces are ready.</p><div class="setting-block"><h3>Know when you're needed.</h3><p class="sheet-note">Get notified when your work needs an answer.</p><p>${workspaces().map(c=>esc(names[c])).join(' · ')}</p></div>${actionButton('allow-notifications','Allow notifications','','wide-btn primary')}${actionButton('finish-pair','Not now')}`);
 }
 renderSettings=function(){
- contentRoot().innerHTML=nav('Settings','chats')+`<div class="scroll settings-body"><p class="sheet-note">Your connection, in one place.</p><h3>Connection</h3><div class="setting-block">${actionButton('connection-details',`<span>Your workspace server<small>${phase?'● Checking…':online()? '● Online':'● Offline, no connection'}</small></span><span>Details ›</span>`,'','setting-row')}</div><h3>Your workspaces · ${workspaces().length}</h3><div class="setting-block">${workspaces().map(c=>actionButton('manage-workspace',`<span>${esc(names[c])}<small>${presenceHTML(c)}</small></span><span>›</span>`,c,'setting-row')).join('')}${actionButton('pair','Add workspace +','','setting-row')}</div><h3>Preferences</h3><div class="setting-block">${actionButton('global-voice','<span>Voice</span><span>›</span>','','setting-row')}${actionButton('notify-toggle',`<span>Notify me when I'm needed</span><span class="ios-toggle ${state.settings.notify?'on':''}"></span>`,'','setting-row')}</div>${actionButton('signout','Sign out','','wide-btn danger')}<p class="settings-footer"><img src="logo.svg" alt=""> orch for iOS · 3.0 (mockup)</p></div>`;
+ contentRoot().innerHTML=nav('Settings','chats')+`<div class="scroll settings-body"><h3>Your workspaces · ${workspaces().length}</h3><div class="setting-block"><div class="setting-row"><span>Connection</span><span>${phase?'● Checking…':online()? '● Connected':"● Can't reach the server"}</span></div>${workspaces().map(c=>actionButton('manage-workspace',`<span>${esc(names[c])}<small>${presenceHTML(c)}</small></span><span>›</span>`,c,'setting-row')).join('')}${actionButton('pair','Add workspace +','','setting-row')}</div><h3>Preferences</h3><div class="setting-block">${actionButton('global-voice','<span>Voice</span><span>›</span>','','setting-row')}${actionButton('notify-toggle',`<span>Notify me when I'm needed</span><span class="ios-toggle ${state.settings.notify?'on':''}"></span>`,'','setting-row')}</div>${actionButton('signout','Sign out','','wide-btn danger')}<p class="settings-footer"><img src="logo.svg" alt=""> orch for iOS 3.0</p></div>`;
 };
 renderInfo=function(){
  const ms=state.messages[chat]||[],ids=tab==='Artifacts'?ms.filter(m=>m.type==='artifact').map(m=>m.artifact):tab==='Files'?ms.filter(m=>m.type==='file').map(m=>m.text.endsWith('.pdf')?'pdf':'file'):ms.filter(m=>m.type==='link').map(()=> 'url');
@@ -198,8 +200,8 @@ const reviewGroups=[
  ['Topic chat',[['ticket','Board summary'],['general','Your helper'],['checklist-demo','Task checklist']]],
  ['Artifacts & feedback',[['artifact-demo','HTML preview'],['feedback-demo','Comment pins'],['gallery','All artifact kinds'],['info','Artifacts · Files · References']]],
  ['Questions',[['question-options','Options'],['question-allow','Permission'],['question-free','Free text'],['question-variants','A / B previews'],['question-approval','Accept preview'],['stale-demo-view','Already answered']]],
- ['Voice',[['rigi-voice','My voice note'],['record','Hold to record'],['locked','Hands-free'],['voice-errors','Capture errors']]],
- ['Media',[['attach','Attachments'],['camera','Camera & scan'],['preview','Photo caption'],['files','Documents'],['location','Location']]],
+ ['Voice',[['rigi-voice','My voice note'],['record','Hold to record'],['locked','Hands-free'],['voice-errors','Capture errors'],['voice-failed','Audio not available']]],
+ ['Media',[['attach','Attachments'],['camera','Camera & scan'],['preview','Photo caption'],['files','Documents'],['attach-nocam','No camera'],['location','Location'],['location-off','Location off']]],
  ['New topic',[['new-chat-demo','Choose & compose']]],
  ['Add workspace',[['pair-demo','QR / invitation link'],['pair-errors','Pairing errors']]],
  ['Settings',[['settings','Connection & workspaces'],['voice-settings-demo','Voice defaults'],['signed-out','Signed out · 401']]],
@@ -224,7 +226,7 @@ review=function(key){
  else if(key==='artifact-demo'){navigate('rig4');openArtifact('landing');}
  else if(key==='feedback-demo'){navigate('rig4');openArtifact('landing');viewer.comment=true;openArtifact('landing',true);}
  else if(key==='gallery')artifactGallery();
- else if(key==='info'){tab='Artifacts';navigate('ticket');navigate('info');}
+ else if(key==='info'){tab='Previews';navigate('ticket');navigate('info');}
  else if(key==='rigi-voice'){navigate('general:rigi');jumpTo('r2');}
  else if(key==='stale-demo-view'){state.answers.t4={value:'In the total',stale:true};navigate('ticket');jumpTo('t4');}
  else if(key==='voice-errors')showVoiceErrors();
@@ -236,6 +238,9 @@ review=function(key){
  else if(key==='settings')navigate('settings');
  else if(key==='computer-off-demo'){state.computerOn=false;persist();navigate('ticket');}
  else if(key==='push'){navigate('push');}
+ else if(key==='voice-failed'){const m=state.messages.pilatus.find(x=>x.id==='p4');if(m){m.audioFailed=true;persist();}navigate('pilatus');}
+ else if(key==='attach'||key==='attach-nocam'){navigate('ticket');flags.noCamera=key==='attach-nocam';attach();}
+ else if(key==='location'||key==='location-off'){navigate('ticket');flags.locationOff=key==='location-off';flags.locationOff?showLocationOff():showLocation();}
  else if(['record','locked','attach','camera','preview','files','location','offline'].includes(key)){
   navigate('ticket');
   if(key==='record'||key==='locked')startRecord(key==='locked');
@@ -287,6 +292,9 @@ document.addEventListener('click',async e=>{
  case 'message-forward':menuMessage=v;sheet('Forward to topic',Object.keys(parent).filter(c=>state.workspaces[parent[c]]).map(c=>actionButton('forward-to',esc(topicTitle(c)),c)).join(''));break;
  case 'forward-to':{const m=findMessage(menuMessage)?.m;if(m){navigate(v);sendMessage(m.type,m.text,{clip:m.clip,lang:m.lang,transcript:m.transcript,artifact:m.artifact,pins:m.pins});}break;}
  case 'pair':pair();break;
+ case 'different-link':if(screen==='start')closeModal(true);else pair();break;
+ case 'voice-menu':sheet('Voice replies',`<div class="setting-block">${['Auto (long answers)','Always','Never'].map(o=>actionButton('set-voice',`<span>${o}</span><span>${state.settings.voice===o?'✓':''}</span>`,o,'setting-row')).join('')}</div>`);break;
+ case 'set-voice':state.settings.voice=v;persist();closeModal(true);renderVoiceSettings();break;
  case 'scan-invite':scanInvite();break;
  case 'paste-invite':pasteInvite();break;
  case 'manual-invite':pasteInvite(true);break;
@@ -298,14 +306,14 @@ document.addEventListener('click',async e=>{
  case 'finish-pair':query='';filter='All';navigate('chats');break;
  case 'notify-toggle':state.settings.notify=!state.settings.notify;persist();renderSettings();break;
  case 'connection-details':sheet('Connection details',`<div class="setting-block"><p class="sheet-note">Server</p><p>relay.orch.local</p><p class="sheet-note">This phone</p><p>iPhone · connected</p></div><p class="sheet-note">Access is managed by whoever invited you.</p>${actionButton('check-connection','Check connection')}`);break;
- case 'check-connection':{const epoch=reviewEpoch;toast('Checking…');await delay(700);if(epoch===reviewEpoch)toast(online()?'Connected · last updated just now':"Can't reach the server");break;}
- case 'manage-workspace':sheet('Workspace',`<label>Name<input id="rename-workspace" class="caption-input" value="${esc(names[v])}"></label>${actionButton('rename-workspace','Save name',v)}${actionButton('mute-workspace',state.workspaces[v].muted?'Unmute workspace':'Mute workspace',v)}${actionButton('remove-workspace','Remove workspace',v,'wide-btn danger')}`);break;
+ case 'check-connection':{const epoch=reviewEpoch;toast('Checking…');await delay(700);if(epoch===reviewEpoch)toast(online()?'Connected':"Can't reach the server");break;}
+ case 'manage-workspace':sheet('Workspace',`<label>Name<input id="rename-workspace" class="caption-input" value="${esc(names[v])}"></label>${actionButton('rename-workspace','Save name',v)}${actionButton('mute-workspace',`<span>Notifications</span><span>${state.workspaces[v].muted?(state.workspaces[v].muted_until==='forever'?'Muted':'Muted until '+muteEnd(state.workspaces[v].muted_until)):'On'} ⌄</span>`,v,'setting-row')}${actionButton('remove-workspace','Remove workspace',v,'wide-btn danger')}`);break;
  case 'rename-workspace':{const name=$('#rename-workspace').value.trim();if(!name){toast('Enter a name');break;}state.workspaces[v].name=names[v]=name;persist();closeModal(true);render();break;}
  case 'remove-workspace':sheet('Remove workspace?',`<p>Remove ${esc(names[v])} from this phone? You can pair it again with a new invitation.</p>${actionButton('confirm-remove','Remove workspace',v,'wide-btn danger')}${actionButton('close','Cancel')}`);break;
  case 'confirm-remove':delete state.workspaces[v];persist();closeModal(true);navigate('settings');break;
  case 'workspace-menu':sheet(names[v],`${actionButton('pin-workspace',state.workspaces[v].pinned?'Unpin':'Pin',v)}${actionButton('unread-workspace','Mark unread',v)}${actionButton('mute-workspace',state.workspaces[v].muted?'Unmute':'Mute',v)}${actionButton('manage-workspace','Workspace settings',v)}`);break;
  case 'pin-workspace':state.workspaces[v].pinned=!state.workspaces[v].pinned;persist();closeModal(true);renderChats();break;
- case 'mute-workspace':sheet('Mute workspace', ['1 h','Until tomorrow','Always','Unmute'].map(t=>actionButton('mute-duration',t,v+'|'+t)).join(''));break;
+ case 'mute-workspace':sheet('Notifications', [...(state.workspaces[v].muted?['Turn on']:[]),'1 hour','Until tomorrow','Until I turn it on'].map(t=>actionButton('mute-duration',t,v+'|'+t)).join(''));break;
  case 'unread-workspace':{const m=[v,...children(v)].flatMap(c=>state.messages[c]).findLast(m=>!m.mine);if(m)m.unread=true;persist();closeModal(true);renderChats();break;}
  case 'signout':(()=>{const q=Object.values(state.messages).flat().filter(m=>m.demoQueue).length+Object.values(state.answers).filter(a=>a.queued).length;sheet('Disconnect this phone?',`<p>You will need a new invitation to connect again.</p>${q?`<p>${q===1?'1 message is':q+' messages are'} still waiting to be sent and will be lost.</p>`:''}${actionButton('confirm-signout','Sign out of this phone','','wide-btn danger')}${actionButton('close','Cancel')}`);})();break;
  case 'confirm-signout':state.signedOut=true;persist();navigate('start');break;

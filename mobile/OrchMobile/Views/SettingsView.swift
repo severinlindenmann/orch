@@ -56,7 +56,7 @@ struct SettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
     private var statusText: String {
         switch model.connection {
-        case .ok: "Connected · " + (model.lastUpdatedText?.lowercased() ?? "last updated just now")
+        case .ok: "Connected"
         case .unreachable: "Can't reach the server"
         case .checking: "Checking…"
         }
@@ -74,13 +74,12 @@ struct SettingsView: View {
                     section("WORKSPACES") {
                         VStack(spacing: 0) {
                             HStack {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Your computer").themeFont(17)
-                                    if model.connection != .ok { Text(statusText).themeFont(13).foregroundStyle(statusColor) }
-                                }
+                                Text("Connection").themeFont(17)
                                 Spacer()
-                                Circle().fill(statusColor).frame(width: 8, height: 8)
-                            }.padding(16).accessibilityLabel(statusText)
+                                Circle().fill(statusColor).frame(width: 8, height: 8).accessibilityHidden(true)
+                                Text(statusText).themeFont(15).foregroundStyle(model.connection == .unreachable ? Theme.danger : Theme.muted)
+                            }.padding(16).frame(minHeight: 52).accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Connection, \(statusText)").accessibilityIdentifier("settings-connection")
                             ShellDivider()
                             ForEach(model.workspaceSummaries) { summary in
                                 NavigationLink { WorkspaceSettingsView(workspaceId: summary.id) } label: {
@@ -151,13 +150,11 @@ struct SettingsView: View {
                                 }.buttonStyle(PressStyle()).accessibilityIdentifier("auto-archive-days")
                                     .accessibilityLabel("Archive after").accessibilityValue("\(model.archive.autoDays) days")
                             }
-                            Text("Only finished (Done) chats with no new message move to Archived. Chats waiting for you, in Review, and Your helper never do. A new message brings a chat back.")
+                            Text("Finished chats move to Archived after a while. A new message brings them back.")
                                 .themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
                         }
                     }
-                    Text("Tickets started from your phone send answers here, even when Send questions to my phone is off.")
-                        .themeFont(13).foregroundStyle(Theme.muted)
                     Button { confirmSignOut = true } label: {
                         Text("Sign out").themeFont(17).foregroundStyle(Theme.danger).padding(.horizontal, 12)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).contentShape(Rectangle())
@@ -176,7 +173,7 @@ struct SettingsView: View {
                     }
                     HStack(spacing: 8) {
                         OrbitMark().frame(width: 24, height: 24)
-                        Text("orch for iOS · \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))")
+                        Text("orch for iOS \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
                             .themeFont(11).foregroundStyle(Theme.muted)
                     }.frame(maxWidth: .infinity)
                 }.padding(16)
@@ -211,17 +208,6 @@ struct WorkspaceSettingsView: View {
     @State private var busy = false
     private var workspace: Workspace? { model.workspaceSummaries.first { $0.id == workspaceId }?.workspace }
     private var displayName: String { workspace.map { WorkspaceAlias.name(for: $0) } ?? "Workspace" }
-    private var tomorrow: Date {
-        let calendar = Calendar.current
-        let next = calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-        return calendar.date(bySettingHour: 8, minute: 0, second: 0, of: next) ?? next
-    }
-    private var selectedMute: String {
-        guard let workspace, workspace.isMuted() else { return "Off" }
-        if workspace.mutedUntil == "forever" { return "Always" }
-        if let date = ShellTime.date(workspace.mutedUntil), abs(date.timeIntervalSince(tomorrow)) < 60 { return "Until tomorrow" }
-        return "For 1 hour"
-    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -233,23 +219,20 @@ struct WorkspaceSettingsView: View {
                         .submitLabel(.done).onSubmit { WorkspaceAlias.set(name, for: workspaceId) }
                     Text("Only changes how it looks on this phone.").themeFont(13).foregroundStyle(Theme.muted)
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    Eyebrow(text: "MUTE")
-                    VStack(spacing: 0) {
-                        ForEach(["Off", "For 1 hour", "Until tomorrow", "Always"], id: \.self) { option in
-                            Button { changeMute(option) } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(option)
-                                        if option == "Until tomorrow" { Text("08:00").themeFont(13).foregroundStyle(Theme.muted) }
-                                    }
-                                    Spacer()
-                                    if selectedMute == option { Image(systemName: "checkmark").foregroundStyle(Theme.brand) }
-                                }.themeFont(17).padding(16).frame(minHeight: 48).contentShape(Rectangle())
-                            }.buttonStyle(PressStyle()).accessibilityAddTraits(selectedMute == option ? .isSelected : []).accessibilityIdentifier("mute-\(option)")
-                            if option != "Always" { ShellDivider().padding(.leading, 16) }
-                        }
+                TimelineView(.everyMinute) { context in
+                    let value = MuteRules.notificationsValue(workspace?.mutedUntil, now: context.date)
+                    Menu {
+                        if value != "On" { Button("Turn on", systemImage: "bell") { changeMute(.off) } }
+                        MuteChoices { changeMute($0) }
+                    } label: {
+                        HStack {
+                            Text("Notifications").foregroundStyle(Theme.text)
+                            Spacer()
+                            Text(value).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
+                            Image(systemName: "chevron.up.chevron.down").themeFont(13).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        }.themeFont(17).padding(16).frame(minHeight: 52).contentShape(Rectangle())
                     }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(busy)
+                        .accessibilityLabel("Notifications").accessibilityValue(value).accessibilityIdentifier("workspace-notifications")
                 }
                 Button("Remove from this phone") { removing = true }.buttonStyle(WideButtonStyle(color: Theme.danger, bordered: true)).disabled(busy).accessibilityIdentifier("remove-workspace")
             }.padding(16)
@@ -268,15 +251,8 @@ struct WorkspaceSettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Its chats disappear from this phone. You can add it again with a new invitation.") }
     }
-    private func changeMute(_ option: String) {
+    private func changeMute(_ mute: Mute) {
         busy = true
-        let mute: Mute
-        switch option {
-        case "Always": mute = .forever
-        case "For 1 hour": mute = .until(Date().addingTimeInterval(3600))
-        case "Until tomorrow": mute = .until(tomorrow)
-        default: mute = .off
-        }
         Task { await model.setMute(workspaceId, mute); busy = false }
     }
 }
@@ -306,40 +282,47 @@ struct VoiceSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Defaults for all chats").themeFont(13).foregroundStyle(Theme.muted)
                 ModelMessage()
                 VStack(alignment: .leading, spacing: 10) {
-                    Eyebrow(text: "VOICE REPLIES")
-                    Picker("Voice replies", selection: Binding(get: { model.settings.speak }, set: { update(SettingsPatch(speak: $0)) })) {
-                        ForEach(PhoneSettings.Speak.allCases, id: \.self) { option in
-                            Text(option == .auto ? "Auto (long answers)" : option == .always ? "Always" : "Never")
-                                .tag(option).accessibilityIdentifier("speak-\(option.rawValue)")
+                    VStack(spacing: 0) {
+                        row("Voice replies") {
+                            Picker("Voice replies", selection: Binding(get: { model.settings.speak }, set: { update(SettingsPatch(speak: $0)) })) {
+                                ForEach(PhoneSettings.Speak.allCases, id: \.self) { option in
+                                    Text(option == .auto ? "Auto (long answers)" : option == .always ? "Always" : "Never")
+                                        .tag(option).accessibilityIdentifier("speak-\(option.rawValue)")
+                                }
+                            }.accessibilityIdentifier("voice-replies-menu")
                         }
-                    }.pickerStyle(.menu).tint(Theme.text).themeFont(17).padding(16)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-                        .disabled(saving).accessibilityIdentifier("voice-replies-menu")
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    Eyebrow(text: "LISTENING & SPEECH")
-                    Toggle("I speak Swiss German", isOn: Binding(get: { model.settings.swissGerman }, set: { update(SettingsPatch(swissGerman: $0)) }))
-                        .themeFont(17).tint(Theme.brand).padding(16).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
+                        ShellDivider().padding(.leading, 16)
+                        Toggle("I speak Swiss German", isOn: Binding(get: { model.settings.swissGerman }, set: { update(SettingsPatch(swissGerman: $0)) }))
+                            .themeFont(17).tint(Theme.brand).padding(16).frame(minHeight: 52)
+                    }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
+                    Text("Defaults for all chats").themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 16)
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     Eyebrow(text: "VOICE BUDGET")
-                    Picker("Monthly limit", selection: Binding(get: { model.settings.ttsCapUsd }, set: { update(SettingsPatch(ttsCapUsd: $0)) })) {
-                        ForEach([0, 5, 10, 20, 50], id: \.self) { amount in
-                            Text("$\(amount)").tag(Double(amount))
-                        }
-                    }.pickerStyle(.menu).tint(Theme.text).themeFont(17).padding(16)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-                        .disabled(saving).accessibilityIdentifier("voice-limit-menu")
-                    Text(String(format: "Used this month $%.2f · left $%.2f", model.settings.ttsUsedUsdMonth, model.settings.ttsLeftUsd))
-                        .themeFont(13).foregroundStyle(Theme.muted)
+                    row("Monthly limit (USD)") {
+                        Picker("Monthly limit (USD)", selection: Binding(get: { model.settings.ttsCapUsd }, set: { update(SettingsPatch(ttsCapUsd: $0)) })) {
+                            ForEach([0, 5, 10, 20, 50], id: \.self) { amount in
+                                Text("$\(amount)").tag(Double(amount))
+                            }
+                        }.accessibilityIdentifier("voice-limit-menu")
+                    }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
+                    Text(String(format: "Used this month US$%.2f · left US$%.2f", model.settings.ttsUsedUsdMonth, model.settings.ttsLeftUsd))
+                        .themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 16)
                 }
             }.padding(16)
         }.background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
             .navigationTitle("Voice").navigationBarTitleDisplayMode(.inline)
 
+    }
+    /// A Settings row: label left, value and menu right.
+    private func row<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack {
+            Text(label).themeFont(17)
+            Spacer(minLength: 8)
+            control().pickerStyle(.menu).tint(Theme.muted).labelsHidden()
+        }.padding(.horizontal, 16).frame(minHeight: 52).accessibilityElement(children: .combine)
     }
     private func update(_ patch: SettingsPatch) {
         saving = true

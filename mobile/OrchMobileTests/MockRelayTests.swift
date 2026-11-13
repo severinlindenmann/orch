@@ -66,7 +66,7 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(useMock: true, voiceMode: .scripted)
         model.openInvite("orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_expired0000000000000000")
         await model.connect(phoneName: "Test phone")
-        XCTAssertEqual(model.message, "This invitation has expired or was already used. Ask the person who invited you for a new one.")
+        XCTAssertEqual(model.message, "This invitation has expired or was already used. Create a new one in orch on your computer.")
         XCTAssertEqual(model.inviteState, .found(host: "relay.severin.io"))
         XCTAssertEqual(model.phase, .onboarding)
     }

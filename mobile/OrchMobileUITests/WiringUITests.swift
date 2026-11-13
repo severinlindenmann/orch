@@ -51,7 +51,7 @@ final class WiringUITests: XCTestCase {
         let app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"])
         let info = el(app, "chat-info")
         must(app, info, "info button"); info.tap()
-        must(app, app.buttons["info-tab-photos"], "conversation info tabs")
+        must(app, app.navigationBars["Conversation info"], "conversation info")
         app.navigationBars.buttons.firstMatch.tap()
         must(app, el(app, "composer"), "back in the conversation")
     }
@@ -72,7 +72,7 @@ final class WiringUITests: XCTestCase {
         func snap(_ app: XCUIApplication, _ name: String) throws { sleep(2); try app.screenshot().pngRepresentation.write(to: out.appendingPathComponent("app-\(name).png")) }
         var app = launch(["-openChat", "ws_pilatus001", "-openTicket", "t_q3sum1"])
         must(app, el(app, "artifact-a_bbbbbbbbbbbb"), "card"); try snap(app, "1-topic-result-card")
-        el(app, "chat-info").tap(); must(app, app.buttons["info-tab-photos"], "info"); try snap(app, "2-info")
+        el(app, "chat-info").tap(); must(app, app.navigationBars["Conversation info"], "info"); try snap(app, "2-info")
         app.terminate()
         app = launch(["-openChat", "ws_pilatus001"])
         must(app, app.buttons["general-ws_pilatus001"], "general"); app.buttons["general-ws_pilatus001"].tap()
