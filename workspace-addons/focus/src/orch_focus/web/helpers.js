@@ -33,7 +33,7 @@
   /* "2 agents are working. One question needs you." The agent part is left out while no agent works. */
   function pickerLine(agents, attention) {
     const n = Number(agents) || 0;
-    const working = n ? (n === 1 ? '1 agent is working.' : n + ' agents are working.') : '';
+    const working = n ? (n === 1 ? '1 helper is working.' : n + ' helpers are working.') : '';
     return [working, attention || ''].filter(Boolean).join(' ');
   }
   /* A small picture for a file by its kind: 📊 sheets, 📝 writing, 📄 PDF, 🖼 pictures, 📁 the rest. */

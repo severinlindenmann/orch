@@ -248,3 +248,26 @@ def test_start_waits_for_old_listener_before_spawn(ws, monkeypatch):
     monkeypatch.setattr(service.subprocess, "Popen", spawn)
     with pytest.raises(RuntimeError, match="reached spawn after port freed"):
         service.start(ws, port=8430)
+
+
+def test_start_prefers_the_last_port_then_falls_back(ws, monkeypatch):
+    pref = _free_port()
+    monkeypatch.setenv("ORCH_PREFERRED_PORT", str(pref))
+    cur = service.start(ws)
+    try:
+        assert cur["port"] == pref  # sticky: the port it had last time
+    finally:
+        assert service.stop(ws) == "stopped"
+    for _ in range(50):
+        if not service.alive(cur["pid"]):
+            break
+        time.sleep(0.1)
+    with socket.socket() as busy:  # taken by something else: any free port, no failure
+        busy.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        busy.bind(("127.0.0.1", pref))
+        busy.listen()
+        cur2 = service.start(ws)
+        try:
+            assert cur2["port"] != pref
+        finally:
+            assert service.stop(ws) == "stopped"

@@ -49,6 +49,7 @@ def test_web_scripts_are_served_and_loaded_in_order():
         "settings",
         "live",
         "ticket",
+        "compose",
         "focus",
     ]
     assert scripts[-len(names) :] == [f"__P__/web/{name}.js" for name in names]

@@ -44,6 +44,12 @@
     els.complete.hidden = v.state !== 'done';
     els.attachBtn.disabled = !(running && v.live);
     els.sub.textContent = '';
+    /* whose turn it is, and where the work is */
+    const turn = v.state === 'done' ? 'Finished' : asking || t.status === 'review' ? 'Your turn' : running ? 'Helper’s turn' : '';
+    const base = els.stateText.textContent.split(' · ')[0];
+    if (turn && !base.startsWith('Finished') && turn !== 'Finished') els.stateText.textContent = base + ' · ' + turn;
+    const now = t.checklist.find(c => !c.done && !c.wont_do);
+    els.taskLine.textContent = v.total && now ? 'Task ' + (v.done + 1) + ' of ' + v.total + ' · ' + now.text : '';
     if (!S.state.changesRequested) els.msg.placeholder = 'Write a message…';
     els.feed.setAttribute('aria-label', 'What ' + els.agent.textContent + ' is doing');
     els.railNote.textContent = '';
@@ -58,13 +64,27 @@
     S.views.live.renderWorking(v);
     S.views.session.tickTimer();
     S.views.session.renderSession(v);
-    if ((S.state.firstRender && (['review', 'done'].includes(t.status) || location.hash === '#results')) || (t.status === 'done' && prev?.ticket.status !== 'done')) els.tabs[1].click();
+    if (root.classList.contains('fx-terminal') && ((S.state.firstRender && (['review', 'done'].includes(t.status) || location.hash === '#results')) || (t.status === 'done' && prev?.ticket.status !== 'done'))) els.tabs[1].click();
     S.state.firstRender = false;
     S.notify(v);
   }
 
+  /* Compact is the default; Terminal mode adds the task rail and the tabs. The choice is remembered. */
+  function setMode(terminal) {
+    root.classList.toggle('fx-terminal', terminal);
+    els.modeBtn.setAttribute('aria-pressed', String(terminal));
+    els.modeBtn.textContent = terminal ? 'Compact view' : 'Terminal mode';
+    try { localStorage.setItem('focus-mode', terminal ? 'terminal' : 'compact'); } catch (e) { /* not kept */ }
+  }
+  async function copyLink() {
+    const url = location.origin + location.pathname;
+    try { await navigator.clipboard.writeText(url); toast('Link copied', 'ok'); } catch (e) { toast('Copy this address: ' + url, 'error'); }
+  }
+
   function wire() {
-    const markFull = on => { root.classList.toggle('is-full', on); els.full.setAttribute('aria-pressed', String(on)); els.full.lastElementChild.textContent = on ? 'Leave full screen' : 'Full screen'; els.full.setAttribute('aria-label', on ? 'Leave full screen' : 'Full screen'); document.body.style.overflow = on ? 'hidden' : ''; };
+    let saved = ''; try { saved = localStorage.getItem('focus-mode') || ''; } catch (e) { /* none */ }
+    setMode(saved === 'terminal');
+    const markFull = on => { root.classList.toggle('is-full', on); els.fullBtn.setAttribute('aria-pressed', String(on)); els.fullBtn.textContent = on ? 'Exit full screen' : 'Full screen'; els.full.setAttribute('aria-pressed', String(on)); els.full.lastElementChild.textContent = on ? 'Leave full screen' : 'Full screen'; els.full.setAttribute('aria-label', on ? 'Leave full screen' : 'Full screen'); document.body.style.overflow = on ? 'hidden' : ''; };
     const setFull = async on => {
       if (on) { try { await root.requestFullscreen?.(); } catch (e) { /* CSS fallback */ } markFull(true); }
       else { if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch (e) { /* ignore */ } } markFull(false); }
@@ -122,7 +142,9 @@
       /* Start fresh asks once: the first click turns the row into its own confirm, the second starts */
       if (a === 'fresh' && !els.fresh.disabled && !els.fresh.classList.contains('fx-confirm')) { armFresh(true); return; }
       if (els.menu.contains(e.target) && e.target.closest('button')) { closePopovers(); els.moreBtn.focus(); }
-      if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
+      if (a === 'mode') setMode(!root.classList.contains('fx-terminal'));
+      else if (a === 'copy') copyLink();
+      else if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
       else if (a === 'answer') S.views.live.focusQuestion(); else if (a === 'stop') S.views.live.stopToggle(); else if (a === 'fresh') { armFresh(false); S.views.live.startFresh(); } else if (a === 'attach') S.views.session.showAttach();
       else if (a === 'all-work') { S.views.used.pickAgent(null, false); const head = els.feed.querySelector('h2'); if (head) { head.tabIndex = -1; head.focus(); } }
       else if (a === 'changes') { S.state.changesRequested = true; els.compose.hidden = false; els.msg.placeholder = 'What would you like changed?'; els.msg.focus(); }
@@ -135,15 +157,6 @@
     const grow = () => { els.msg.style.height = 'auto'; els.msg.style.height = Math.min(els.msg.scrollHeight, 120) + 'px'; };
     els.msg.addEventListener('input', grow);
     els.msg.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); els.form.requestSubmit(); } if (e.key === 'Escape') els.msg.blur(); });
-    els.form.addEventListener('submit', async e => {
-      e.preventDefault();
-      const text = els.msg.value.trim();
-      if (!text) return;
-      els.msg.value = ''; grow();
-      const r = await act('run.send', {ticket: TID, text});
-      if (!r.ok) { els.msg.value = text; toast(r.message, 'error'); return; }
-      toast(r.note || 'Saved for the next run.', 'ok');
-    });
     els.addForm.addEventListener('submit', async e => {
       e.preventDefault();
       const text = els.addInput.value.trim();
@@ -213,5 +226,5 @@
     window.addEventListener('pagehide', () => { stream.close(); live = false; });
     window.addEventListener('pageshow', e => { if (e.persisted) connect(); });
   }
-  S.views.ticket.build(); wire(); poll();
+  S.views.ticket.build(); S.views.compose.mount(); wire(); poll();
 })();

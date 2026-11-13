@@ -510,3 +510,7 @@ QA follow-up: Full screen opens a separate dialog and returns to the same file p
 ### review-card.html
 - Expand now opens the catalogue in a dialog on the same page.
 - Exit full screen, Escape and a backdrop click return to the review card and restore keyboard focus.
+
+Additional validation: all 90 viewer checks passed across 15 file viewers, Loaded / Loading / Empty states, and both requested widths. The review card also passed Escape, Exit full screen and backdrop closing checks.
+
+Manager click-through validation: ran both requested `qa-components.cjs` commands. All 19 previews pages report zero problems at 1280 px and 1920 px, including open, Escape, Exit full screen and bottom-left backdrop checks. The full sweeps reported five problems each in other folders, which were left to their owners. Only previews source files were edited.

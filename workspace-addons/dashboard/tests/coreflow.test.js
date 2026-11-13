@@ -144,13 +144,14 @@ test('offline answers do not send; network failures show the plain message; snap
   assert.ok(toasts.every(text => text === "Can't reach orch. Your change was not sent."));
   assert.equal(pageContext(true).ctx.needRow(data).querySelectorAll('button').length, 0);
 });
-test('connection notice offers retry and details', () => {
+test('connection notice keeps the saved view and offers Try again', () => {
   const {ctx, connection, calls} = pageContext();
   connection.replaceChildren = (...children) => { connection.children = children; };
   ctx.connectionNotice(connection, false);
-  assert.equal(connection.hidden, false); assert.match(connection.children[0].children[0], /Can't reach orch yet/);
+  assert.equal(connection.hidden, false); assert.match(connection.children[0].children[1].children[0], /Reconnect to load your workspace/);
   connection.children[1].click(); assert.deepEqual(calls, ['refresh']);
-  ctx.connectionNotice(connection, true); assert.match(connection.children[0].children[0], /Showing the last update/);
+  ctx.connectionNotice(connection, true); assert.match(connection.children[0].children[1].children[0], /Showing the last saved view/);
+  assert.equal(connection.children[0].children[0].children[0], 'Can’t reach the workspace');
 });
 
 test('act keeps small requests alive and omits keepalive for large bodies', async () => {

@@ -17,12 +17,12 @@ function page(now, store, reply) {
   return {c, banners};
 }
 
-test('the page stops waiting after 3 minutes with "still the old version"', () => {
+test('the page stops waiting after 3 minutes with "still the old version" when the server says running', () => {
   const store = {'orch-update-started': '1000'};
   const early = page(1000 + 60000, store, {state: 'running'});
   early.c.S();
   assert.deepEqual(early.banners, []);
-  const late = page(1000 + 181000, store, 'down');  // the server never came back
+  const late = page(1000 + 181000, store, {state: 'running'});  // still running after the wait
   late.c.S();
   assert.equal(late.banners.length, 1);
   assert.match(late.banners[0], /did not finish\. orch is still the old version\./);
@@ -34,5 +34,13 @@ test('a failed update shows the plain reason once', () => {
   const p = page(2000, store, {state: 'failed', reason: 'No internet connection to GitHub - orch is still the old version. Try again later.'});
   p.c.S();
   assert.deepEqual(p.banners, ['Update failed: No internet connection to GitHub - orch is still the old version. Try again later.']);
+  assert.ok(!('orch-update-started' in store));
+});
+
+test('a server that cannot be reached after the wait says "orch restarted", not "did not finish"', () => {
+  const store = {'orch-update-started': '1000'};
+  const late = page(1000 + 181000, store, 'down');
+  late.c.S();
+  assert.deepEqual(late.banners, ['orch restarted. Reload the dashboard.']);
   assert.ok(!('orch-update-started' in store));
 });
