@@ -17,9 +17,9 @@ struct WorkspaceView: View {
 
     static let activeOrder: [TopicStatus] = [.waitingOnYou, .review, .working, .paused, .backlog]
 
-    /// The Chat card's one status line: working beats the last message; nothing yet invites a first message.
-    static func helperLine(name: String, anyWorking: Bool, lastLine: String) -> String {
-        if anyWorking { return "\(name) is working…" }
+    /// The Chat card's one status line: an unread helper reply wins, then working, then the last message; nothing yet invites a first message.
+    static func helperLine(name: String, anyWorking: Bool, lastLine: String, unread: Int = 0) -> String {
+        if anyWorking && unread == 0 { return "\(name) is working…" }
         let line = lastLine.trimmingCharacters(in: .whitespacesAndNewlines)
         return line.isEmpty ? "Talk to \(name)" : line
     }
@@ -167,7 +167,7 @@ struct WorkspaceView: View {
                         Text("Your helper").themeFont(17, .semibold)
                         Image(systemName: "bubble.right").themeFont(12).foregroundStyle(Theme.muted).accessibilityHidden(true)
                     }
-                    Text(Self.helperLine(name: name, anyWorking: runningCount > 0, lastLine: summary?.general.lastLine ?? ""))
+                    Text(Self.helperLine(name: name, anyWorking: runningCount > 0, lastLine: summary?.general.lastLine ?? "", unread: summary?.general.unread ?? 0))
                         .themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 4)

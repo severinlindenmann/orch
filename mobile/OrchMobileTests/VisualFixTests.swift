@@ -80,6 +80,9 @@ final class VisualFixTests: XCTestCase {
         XCTAssertEqual(WorkspaceView.helperLine(name: "Finance", anyWorking: true, lastLine: "Hi"), "Finance is working…")
         XCTAssertEqual(WorkspaceView.helperLine(name: "Finance", anyWorking: false, lastLine: " Hi "), "Hi")
         XCTAssertEqual(WorkspaceView.helperLine(name: "Finance", anyWorking: false, lastLine: ""), "Talk to Finance")
+        XCTAssertEqual(ChatsRowRules.preview("New reply", working: true, unread: 1), "New reply")
+        XCTAssertEqual(WorkspaceView.helperLine(name: "Finance", anyWorking: true, lastLine: "New reply", unread: 2), "New reply")
+        XCTAssertEqual(WorkspaceView.activeOrder, [.waitingOnYou, .review, .working, .paused, .backlog])
         for token in LookData.colors.map(\.id) {
             XCTAssertFalse(["amber", "teal", "green", "lime"].contains(WorkspaceBadge.identityColor(token)), token)
         }

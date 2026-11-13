@@ -208,29 +208,30 @@ struct GroupsSection: View {
 
     /// Open groups that pass the list filter (same rule as workspace rows).
     static func shown(_ model: AppModel, filter: String) -> [PhoneGroup] {
-        GroupRoomRules.rows(model.groups).filter { group in
+        let open = Set(ChatsRowRules.openQuestions(model.questions, answers: model.answers).map(\.id))
+        return GroupRoomRules.rows(model.groups).filter { group in
             let unread = model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group))
-            return ChatsRowRules.matches(filter, unread: unread, needsYou: GroupRoomRules.needsYou(group, open: openQuestionIDs(model)))
+            return ChatsRowRules.matches(filter, unread: unread, needsYou: GroupRoomRules.needsYou(group, open: open))
         }
     }
-    private static func openQuestionIDs(_ model: AppModel) -> Set<String> {
-        Set(ChatsRowRules.openQuestions(model.questions, answers: model.answers).map(\.id))
-    }
+
+    /// Groups already filtered by the caller (the list computes them once per render).
+    var groups: [PhoneGroup]
 
     var body: some View {
-        let groups = Self.shown(model, filter: filter)
         if !groups.isEmpty {
             Text("Groups").themeFont(13, .semibold).foregroundStyle(Theme.muted).padding(.top, 12)
             ForEach(groups, id: \.key) { GroupListRow(group: $0) }
         }
         let finished = GroupRoomRules.rows(model.groups, closed: true).count
-        if filter == "All" && (!model.workspaceSummaries.isEmpty || finished > 0) {
+        // Helper-chat days stay reachable from each chat's "Earlier" button, so the row only appears with finished groups.
+        if filter == "All" && finished > 0 {
             NavigationLink(value: ChatRoute.groupHistory) {
                 HStack(spacing: 12) {
                     Image(systemName: "checkmark.circle").themeFont(20).foregroundStyle(Theme.muted).frame(width: 24).accessibilityHidden(true)
                     Text("Finished groups").themeFont(17, .semibold)
                     Spacer()
-                    if finished > 0 { Text("\(finished)").themeFont(15).foregroundStyle(Theme.muted) }
+                    Text("\(finished)").themeFont(15).foregroundStyle(Theme.muted)
                     ShellChevron()
                 }.frame(minHeight: 44).padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))

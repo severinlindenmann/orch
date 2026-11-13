@@ -148,7 +148,7 @@ struct ChatsListView: View {
                     }
                 }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             }
-            GroupsSection(filter: filter)
+            GroupsSection(filter: filter, groups: groupsShown)
             if model.archivedCount > 0 && filter == "All" { archivedRow }
         }
     }
@@ -221,7 +221,7 @@ struct ChatsListView: View {
         let newest = summary.topics.max { ($0.lastAt ?? "") < ($1.lastAt ?? "") }
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
         let working = ChatsRowRules.isWorking(summary.topics)
-        let preview = ChatsRowRules.preview(summary.lastLine, starting: starting, working: working)
+        let preview = ChatsRowRules.preview(summary.lastLine, starting: starting, working: working, unread: summary.unread)
         return TimelineView(.everyMinute) { context in
             let muted = model.notificationsMuted(workspace: summary.id, now: context.date)
             NavigationLink(value: ChatRoute.workspace(summary.id)) {
@@ -404,9 +404,10 @@ enum ChatsRowRules {
     static func questionLabel(_ count: Int) -> String? {
         count > 0 ? (count == 1 ? "1 question" : "\(count) questions") : nil
     }
-    static func preview(_ text: String, starting: Bool = false, working: Bool = false) -> String {
+    /// An unread reply wins over "Working…" (the spinner still shows the helper is busy).
+    static func preview(_ text: String, starting: Bool = false, working: Bool = false, unread: Int = 0) -> String {
         if starting { return "Getting started…" }
-        if working { return "Working…" }
+        if working && unread == 0 { return "Working…" }
         return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No messages yet" : text
     }
 }
