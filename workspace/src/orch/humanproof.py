@@ -3471,7 +3471,7 @@ def take_update_status(root: Path) -> dict | None:
                 ok = winfinish.result_ok_since(home, data["finish_offset"])
                 data = {
                     "state": "finished" if ok else "failed",
-                    "reason": "" if ok else "The background update failed; see finish.log.",
+                    "reason": "" if ok else winfinish.fail_reason_since(home, data["finish_offset"]),
                 }
             if isinstance(data, dict) and data.get("state") in ("finished", "failed"):
                 with contextlib.suppress(OSError):

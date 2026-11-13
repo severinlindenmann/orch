@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import sys
 import threading
 import time
 from functools import partial
@@ -106,7 +107,18 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
+    def _act_log(self, text: str) -> None:
+        """One line per /api/act on stderr (op name, status, ms): never the arguments."""
+        try:
+            print("act " + text, file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            pass
+
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None, csp: str | None = None):
+        act = getattr(self, "_act", None)
+        if act is not None:
+            self._act = None
+            self._act_log(f"{act[0]} end status={code} ms={int((time.monotonic() - act[1]) * 1000)}")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -473,6 +485,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        op_name = re.sub(r"[^A-Za-z0-9_.-]", "?", str(body.get("op"))[:40])
+        self._act = (op_name, time.monotonic())
+        self._act_log(f"{op_name} start")
         try:
             mint = None
             if self.session is not None and self.session.can_mint(

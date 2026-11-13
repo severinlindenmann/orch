@@ -8,6 +8,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const MAX_LEN = 2000;
   const UNDO_MS = 5000;
+  const SEND_TIMEOUT_MS = 30000; /* no answer from the server: say so and let the person try again */
 
   /* opts: {key, send(answer, actionId) -> Promise<{status, who?, via?, other?:{text, who, via}, message?}>,
             clock:{setTimeout, clearTimeout, now}, storage:{getItem,setItem,removeItem}, newId(), undoMs} */
@@ -81,8 +82,12 @@
       stopTimers();
       const {answer, actionId} = state;
       set({phase: 'sending', answer, actionId});
-      let res;
-      try { res = await opts.send(answer, actionId); } catch (e) { res = {status: 0, message: 'Could not reach orch.'}; }
+      let res, waitTimer = null;
+      const timedOut = new Promise(resolve => {
+        waitTimer = clock.setTimeout(() => resolve({status: 0, message: 'orch did not answer in time. Your answer may not have been sent. Try again.'}), opts.sendTimeoutMs || SEND_TIMEOUT_MS);
+      });
+      try { res = await Promise.race([opts.send(answer, actionId), timedOut]); } catch (e) { res = {status: 0, message: 'Could not reach orch.'}; }
+      if (waitTimer !== null) clock.clearTimeout(waitTimer);
       clear();
       if (res && res.status >= 200 && res.status < 300) set({phase: 'sent', answer, who: res.who, via: res.via});
       else if (res && res.status === 409) set({phase: 'conflict', answer, other: res.other || {}});
