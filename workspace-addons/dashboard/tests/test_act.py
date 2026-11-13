@@ -405,7 +405,8 @@ def _fake_with_addons(act_orch):
         'if a[:2] in (["addon", "list"]',
         'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "claude"}]))\n    sys.exit(0)\n'
         'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}, {"name": "beta", "active": False},'
-        ' {"name": "dashboard", "active": True}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]',
+        ' {"name": "dashboard", "active": True}, {"name": "avail", "installed": False, "active": False}]))\n'
+        '    sys.exit(0)\nif a[:2] in (["addon", "list"]',
     )
     act_orch.write_text(src)
 
@@ -454,6 +455,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 {"op": "addon.set", "args": {"name": "alpha", "on": False}},
                 ["addon", "remove", "alpha", *common],
             ),
+            (  # the Add of the catalogue: an available (not installed) add-on, same op as the switch
+                {"op": "addon.set", "args": {"name": "avail", "on": True}},
+                ["addon", "add", "avail", "--yes", *common],
+            ),
         ]
         for body, want in cases:
             code, text, _ = post(base, body)
@@ -490,6 +495,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             {"op": "addon.set", "args": {"name": "ticket", "on": True}},
             {"op": "addon.set", "args": {"name": "alpha", "on": "yes"}},
             {"op": "addon.set", "args": {"name": "alpha"}},
+            {
+                "op": "addon.set",
+                "args": {"name": "avail", "on": False},
+            },  # available, not added: nothing to turn off
         ]
         for body in bad:
             assert post(base, body)[0] == 400, body

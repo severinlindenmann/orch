@@ -235,3 +235,46 @@ def test_settings_pending_carries_every_hashed_field_in_full(ws, monkeypatch):
         ),
     )
     assert data.load_settings(ws, "orch")["git_private"]["pending"] == [row]
+
+
+def test_settings_splits_installed_and_available(ws, monkeypatch):
+    """`installed: false` rows (shipped, not installed) go to settings.available; a missing key still means installed."""
+    from orch_dashboard import data
+
+    rows = [
+        {"name": "old", "description": "Old mock row", "active": True},  # no `installed` key = installed
+        {"name": "alpha", "installed": True, "active": False, "description": "A"},
+        {
+            "name": "factory",
+            "installed": False,
+            "active": False,
+            "version": "0.1.0",
+            "description": "Shows the plan.",
+            "background": True,
+            "recommended": True,
+            "dashboard": {"label": "Factory", "icon": "link", "order": 5, "panel": None},
+        },
+        {"name": "Bad Name", "installed": False},
+        "junk",
+    ]
+
+    def run(binary, args, root):
+        return rows if args == ["addon", "list", "--json"] else None
+
+    monkeypatch.setattr(data, "run_orch", run)
+    out = data.load_settings(ws, "orch")
+    assert [a["name"] for a in out["addons"]] == ["old", "alpha"]
+    assert len(out["available"]) == 1
+    f = out["available"][0]
+    assert (f["name"], f["label"], f["recommended"], f["background"]) == ("factory", "Factory", True, True)
+    assert f["description"] == "Shows the plan." and "Adds a dashboard tab: Factory" in f["consent"]
+
+
+def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
+    src = webjs.all_js()
+    body = src[src.index("function addonCatalog()") :][:4200]
+    assert "act('addon.set', {name, on:true})" in body  # same op as the switch
+    assert "'Every add-on that comes with orch is already here.'" in body
+    assert "'Turned on. It starts with orch start.'" in body and "act('addon.start', {})" in body
+    assert "state.settings?.available" in body
+    assert "not connected yet" not in body and "innerHTML" not in body

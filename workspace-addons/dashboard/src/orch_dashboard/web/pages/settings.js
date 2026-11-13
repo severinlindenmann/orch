@@ -570,12 +570,58 @@ function openAgentForm(control) {
   slot.replaceChildren(form);
   nameIn.focus();
 }
-// The catalogue is not connected yet: say so plainly and list what is installed (nothing invented).
+// The catalogue: add-ons that ship with orch but are not installed here yet (`settings.available`). Add sends the same
+// op as the switch (`addon.set` on), so the person's click is the proof. Nothing is invented: no rows, no cards.
 function addonCatalog() {
   const {d, actions} = dialog('Add an add-on', 'dialog', 'settings-other');
-  const names = array(state.settings?.addons).filter(a => a.name !== 'dashboard').map(rowLabel);
-  d.append(settingsText('p', {className:'meta'}, names.length ? names.join(', ') + ' are already installed.' : 'No add-ons are installed yet.'),
-    settingsText('p', {className:'meta'}, 'The add-on catalogue is not connected yet. Available add-ons will appear here.'), actions);
+  const list = h('div', {className:'catalog', 'data-key':'catalog-list'});
+  const added = new Map(), busy = new Set();
+  const card = row => {
+    const done = added.get(row.name);
+    const label = row.label || row.name;
+    const body = [settingsText('h3', {}, label), settingsText('p', {className:'meta'}, row.description || '')];
+    if (row.consent) body.push(h('details', {className:'meta'}, settingsText('summary', {}, 'What this does'), settingsText('pre', {className:'preserve-lines consent-details'}, row.consent)));
+    if (done) {
+      body.push(h('div', {className:'catalog-done'},
+        settingsText('p', {className:'on-dot', 'data-key':'catalog-done-' + row.name}, row.background ? 'Turned on. It starts with orch start.' : 'Turned on.'),
+        row.background ? h('button', {type:'button', className:'btn outline sm', 'data-key':'catalog-start-' + row.name, disabled:busy.has('start')},
+          busy.has('start') ? 'Starting…' : 'Start now') : null));
+    }
+    return h('div', {className:'card-row ad-row', 'data-key':'catalog-card-' + row.name},
+      h('div', {className:'grow'}, ...body),
+      done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':'Add ' + label, disabled:busy.has(row.name)},
+        busy.has(row.name) ? 'Adding…' : 'Add'));
+  };
+  const fill = () => {
+    const rows = array(state.settings?.available).filter(r => r && typeof r.name === 'string');
+    const shown = rows.concat([...added.values()].filter(r => !rows.some(x => x.name === r.name)));
+    list.replaceChildren(...(shown.length ? shown.map(card)
+      : [settingsText('p', {className:'meta', 'data-key':'catalog-empty'}, 'Every add-on that comes with orch is already here.')]));
+  };
+  list.addEventListener('click', async event => {
+    const control = event.target.closest('button[data-key]');
+    if (!control || control.disabled || snapshot) return;
+    const key = control.dataset.key;
+    if (key.startsWith('catalog-start-')) {
+      busy.add('start'); fill();
+      const result = await act('addon.start', {});
+      busy.delete('start'); fill();
+      window.orch.toast(result.ok ? 'Started.' : result.text, result.ok ? 'ok' : 'error');
+      return;
+    }
+    if (!key.startsWith('catalog-add-')) return;
+    const name = key.slice('catalog-add-'.length);
+    const row = array(state.settings?.available).find(r => r.name === name);
+    if (!row || busy.has(name)) return;
+    busy.add(name); fill();
+    const result = await act('addon.set', {name, on:true});
+    busy.delete(name);
+    if (result.ok) added.set(name, row); else window.orch.toast(result.text, 'error');
+    fill();
+    if (result.ok) render();
+  });
+  fill();
+  d.append(list, actions);
   window.orch.open(d);
 }
 function settingsConfirm(title, text, cls, label, send) {
