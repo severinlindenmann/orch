@@ -1287,8 +1287,32 @@ function ticketProperties(t, parent, agent) {
     h('p', {className:'meta ticket-meta-line'}, [typeof t.key === 'string' && t.key ? 'Ticket ' + t.key : '', agent ? 'Helper: ' + agent : ''].filter(Boolean).join(' · ')));
 }
 
+// A ticket made outside this page (command line, a helper) may not be in the state we hold yet: read the workspace
+// fresh, a few times for about 5 s, before saying it is gone.
+const ticketLookups = new Map();
+let ticketLookupWait = 1000, ticketLookupLimit = 5000;
+async function lookupTicket(id, entry) {
+  const stop = Date.now() + ticketLookupLimit;
+  for (;;) {
+    try {
+      const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+      if (res.ok) { mutation++; accept(await res.json()); if (ticketOf(id)) { ticketLookups.delete(id); return; } }
+    } catch (_) { /* Try again until the time is up. */ }
+    if (Date.now() >= stop) break;
+    await new Promise(done => setTimeout(done, ticketLookupWait));
+  }
+  entry.gone = true;
+  render();
+}
+function missingTicket(id) {
+  if (snapshot || !id) return ticketNotFound();
+  let entry = ticketLookups.get(id);
+  if (!entry) { entry = {gone:false}; ticketLookups.set(id, entry); lookupTicket(id, entry); }
+  return entry.gone ? ticketNotFound() : skeletonFor('ticket');
+}
 function detail(t) {
-  if (!t) return ticketNotFound();
+  if (!t) return missingTicket(route().id);
+  ticketLookups.delete(t.id);
   const openQuestions = questions(t), selected = ticketSelectedTab(t);
   const run = state.runs?.[t.id], sessions = array(t.sessions);
   const agent = window.DashHelpers.agentLabel(state.settings, run?.claim);
