@@ -1569,7 +1569,16 @@ function embedQuestionRequest(e) {
   return {ticket:data.ticket, question:data.question, frame};
 }
 let embedDialog = null;  // one embed question at a time: repeated asks never stack dialogs
-function openEmbedQuestion(req) {
+let embedReading = false;
+// The question may be seconds old: read the workspace fresh (never the cached copy) before saying it is gone.
+async function openEmbedQuestion(req) {
+  if (embedReading || (embedDialog && embedDialog.isConnected && embedDialog.open)) return;
+  embedReading = true;
+  try {
+    const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+    if (res.ok) { mutation++; accept(await res.json()); }
+  } catch (_) { /* Fall back to what the page already has. */ }
+  finally { embedReading = false; }
   if (embedDialog && embedDialog.isConnected && embedDialog.open) return;
   const t = ticketOf(req.ticket);
   const q = array(t?.questions).find(x => x.id === req.question);
