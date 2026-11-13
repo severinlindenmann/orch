@@ -19,6 +19,7 @@ from urllib.parse import parse_qs
 from . import actions, reffiles, selfupdate, ticketfiles
 from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
+from .state_cache import StateCache
 from .views import ViewPuller
 
 DEFAULT_PORT = 8420
@@ -259,10 +260,9 @@ class Handler(BaseHTTPRequestHandler):
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
         if path == "/api/state":
+            state, age = self.server.state_cache.get()
             return self._send(
-                200,
-                json.dumps(load_state(self.root, orch_bin=self.orch_bin, with_settings=True)).encode(),
-                "application/json",
+                200, json.dumps(state).encode(), "application/json", {"X-State-Age-Ms": str(int(age * 1000))}
             )
         if path == "/api/chat/contacts" or re.fullmatch(r"/api/chat/thread/ws_[a-z0-9]{10}", path):
             from .data import load_chat_contacts, load_chat_thread
@@ -505,13 +505,9 @@ class Handler(BaseHTTPRequestHandler):
                 )  # 202 = started in the background (an update): the answer is sent below as it is
                 if code != 200:
                     return self._send(code, text.encode(), "text/plain; charset=utf-8")
-                return self._send(
-                    200,
-                    json.dumps(
-                        load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
-                    ).encode(),
-                    "application/json",
-                )
+                state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+                self.server.state_cache.invalidate(state)
+                return self._send(200, json.dumps(state).encode(), "application/json")
             code, text, extra = actions.run_op(
                 self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint
             )
@@ -528,6 +524,7 @@ class Handler(BaseHTTPRequestHandler):
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
         state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+        self.server.state_cache.invalidate(state)  # before the reply's own keys are added
         if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
             state["chat_dm_result"] = extra
         if body.get("op") == "config.agent.test" and isinstance(
@@ -566,6 +563,8 @@ class _Server(ThreadingHTTPServer):
     def server_close(self):
         if hasattr(self, "revisions"):
             self.revisions.close()
+        if hasattr(self, "state_cache"):
+            self.state_cache.close()
         super().server_close()
 
     request_queue_size = (
@@ -586,4 +585,5 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
         partial(Handler, root=root, orch_bin=orch_bin, puller=ViewPuller(root, orch_bin), session=session),
     )
     srv.revisions = Revisions(root)
+    srv.state_cache = StateCache(root, orch_bin, srv.revisions)
     return srv
