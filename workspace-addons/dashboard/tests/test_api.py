@@ -971,9 +971,54 @@ def test_a_web_page_is_served_sandboxed_with_its_own_stylesheet_and_script(art, 
     assert "sandbox allow-scripts" in csp and "allow-same-origin" not in csp and "connect-src 'none'" in csp
     assert _get(art, base + "style.css")[2]["Content-Type"].startswith("text/css")
     assert _get(art, base + "app.js")[2]["Content-Type"].startswith("text/javascript")
-    # the frame has an opaque origin, so its own requests arrive as cross-site: they are still allowed here
-    assert _get(art, base + "style.css", {"Sec-Fetch-Site": "cross-site"})[0] == 200
+    assert h["Cross-Origin-Resource-Policy"] == "same-origin"  # the page itself is for this app's own frame
+    assert _get(art, base + "style.css")[2]["Cross-Origin-Resource-Policy"] == "cross-origin"
+    # the frame has an opaque origin, so its own stylesheet, script and pictures arrive as cross-site: allowed
+    for dest, name in (("style", "style.css"), ("script", "app.js")):
+        got = _get(art, base + name, {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": dest})
+        assert got[0] == 200
+    # but nothing else is: not the page, not a fetch, not a navigation, not another site's frame
+    for dest in ("document", "iframe", "empty", None):
+        hd = {"Sec-Fetch-Site": "cross-site", **({"Sec-Fetch-Dest": dest} if dest else {})}
+        assert _get(art, base + "index.html", hd)[0] == 403
+        assert _get(art, base + "style.css", hd)[0] == 403
+    assert (
+        _get(art, base + "index.html", {"Sec-Fetch-Site": "same-site", "Sec-Fetch-Dest": "iframe"})[0] == 403
+    )
+    # this app's own frame, a typed address and tools without Fetch Metadata are fine
+    assert (
+        _get(art, base + "index.html", {"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "iframe"})[0]
+        == 200
+    )
+    assert _get(art, base + "index.html", {"Sec-Fetch-Site": "none", "Sec-Fetch-Dest": "document"})[0] == 200
     assert _get(art, base + "secret.pem")[0] == 404  # only what a page may load
     assert _get(art, "/view/t_other000x/artifacts/link.txt")[0] == 404
     assert _get(art, "/view/t_other000x/artifacts/..%2f..%2fsecret.txt")[0] == 404
     assert _get(art, "/view/t_other000x/other/site/index.html")[0] == 404
+
+
+def test_a_crafted_workbook_cannot_grow_memory_through_a_far_cell_reference(art, ws):
+    import time
+
+    d = ws / ".orch" / "tickets" / "t_other000x" / "artifacts"
+    rows = "".join(
+        f'<row r="{r}"><c r="A{r}"><v>1</v></c><c r="ZZZZZZ{r}"><v>2</v></c><c r="XFD{r}"><v>3</v></c></row>'
+        for r in range(1, 400)
+    )
+    sheet = f'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{rows}</sheetData></worksheet>'
+    (d / "wide.xlsx").write_bytes(
+        _zip(
+            {
+                "xl/workbook.xml": '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+                'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                '<sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>',
+                "xl/worksheets/sheet1.xml": sheet,
+            }
+        )
+    )
+    t0 = time.monotonic()
+    code, body, _ = _get(art, "/api/file-info?t=t_other000x&k=artifacts&n=wide.xlsx")
+    got = json.loads(body)
+    assert code == 200 and time.monotonic() - t0 < 2
+    assert len(got["rows"]) <= 200 and got["rowCount"] == 398 and got["colCount"] <= 200
+    assert all(len(r) <= 200 for r in got["rows"]) and len(got["columns"]) <= 200

@@ -232,3 +232,9 @@
 @media(prefers-reduced-motion:reduce){.ticket-page .file-tile,.ticket-page .files-collection .file-group>summary:before{transition:none}}
 .ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-layout.wide .ticket-side{display:none}
 .ticket-page .files-toolbar h2 .meta{margin-left:8px}
+.ticket-page .preview-body.live{max-height:none}
+.ticket-page .preview-body.live:after{content:none}
+.ticket-page .preview-live{display:block;width:100%;height:340px;border:0;background:#fff}
+.ticket-page .preview-body.live .preview-expand{bottom:12px}
+.ticket-page .skeleton-tile{height:200px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:fv-shimmer 1.4s linear infinite}
+@media(prefers-reduced-motion:reduce){.ticket-page .skeleton-tile{animation:none}}

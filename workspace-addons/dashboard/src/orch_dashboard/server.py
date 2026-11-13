@@ -253,6 +253,16 @@ class Handler(BaseHTTPRequestHandler):
         if (
             pv
         ):  # a ticket's web page and its own assets, only ever inside a sandboxed frame (no cookie, no /api)
+            site = self.headers.get("Sec-Fetch-Site")
+            if site not in (None, "same-origin", "none"):
+                # The page itself and anything a script fetches must come from this app. Only a sandboxed page's own
+                # stylesheet, script, picture, font or media arrives as cross-site (its origin is opaque).
+                last = pv.group(3).rsplit(".", 1)[-1].lower()
+                if self.headers.get("Sec-Fetch-Dest") not in ticketfiles.PAGE_SUBRESOURCE_DEST or last in (
+                    "html",
+                    "htm",
+                ):
+                    return self._send(403, b"forbidden", "text/plain")
             code, body, ctype, extra = ticketfiles.read_page(
                 self.root, pv.group(1), pv.group(2), unquote(pv.group(3))
             )

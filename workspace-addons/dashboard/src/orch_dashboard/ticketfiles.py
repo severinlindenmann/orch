@@ -84,6 +84,7 @@ PAGE_ASSETS = {
     **AUDIO,
     **VIDEO,
 }
+PAGE_SUBRESOURCE_DEST = ("style", "script", "image", "font", "audio", "video")
 PAGE_CSP = (
     "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data:; font-src 'self' data:; media-src 'self'; connect-src 'none'; "
@@ -186,13 +187,29 @@ def read_page(root: Path, tid: str, kind: str, name) -> tuple[int, bytes, str, d
         return 413, b"That file is too large to show.", "text/plain", {}
     if data is None:
         return nope
-    return 200, data, ctype, {"Cross-Origin-Resource-Policy": "cross-origin"}
+    # A page is only for this app's own frame. What it loads next to itself comes from the frame's opaque origin,
+    # which can only be allowed by "cross-origin"; those files are inert (style, script, picture, font, media).
+    return (
+        200,
+        data,
+        ctype,
+        {"Cross-Origin-Resource-Policy": "same-origin" if ext in ("html", "htm") else "cross-origin"},
+    )
+
+
+PREVIEW_COLS = 200
+MAX_CELL_TEXT = 500
 
 
 def _col(ref: str) -> int:
+    """Zero-based column of a cell reference like "C7"; never loops past the preview width."""
     n = 0
-    for ch in re.match(r"[A-Z]+", ref).group(0) if re.match(r"[A-Z]+", ref) else "":
+    for ch in ref:
+        if not ("A" <= ch <= "Z"):
+            break
         n = n * 26 + ord(ch) - 64
+        if n > 100_000:
+            return 100_000
     return max(n - 1, 0)
 
 
@@ -217,16 +234,23 @@ def _xlsx(zf, sheet: int) -> dict:
     strings: list[str] = []
     if "xl/sharedStrings.xml" in zf.namelist():
         for si in ET.fromstring(read("xl/sharedStrings.xml")).iter(ns + "si"):
-            strings.append("".join(t.text or "" for t in si.iter(ns + "t")))
+            if len(strings) >= 100_000:
+                break
+            strings.append("".join(t.text or "" for t in si.iter(ns + "t"))[:MAX_CELL_TEXT])
     sheet = sheet if 0 <= sheet < len(sheets) else 0
     target = rels.get(sheets[sheet][1], f"worksheets/sheet{sheet + 1}.xml").lstrip("/")
     member = target if target.startswith("xl/") else "xl/" + target
     rows, total, width = [], 0, 0
     for row in ET.fromstring(read(member)).iter(ns + "row"):
         total += 1
+        if len(rows) > PREVIEW_ROWS:  # counted, not read: the preview holds the first rows only
+            continue
         cells: list[str] = []
         for c in row.iter(ns + "c"):
             idx = _col(c.get("r") or "A1")
+            if idx >= PREVIEW_COLS:  # a crafted reference (XFD1, ZZZZZZ1) must not grow anything
+                width = PREVIEW_COLS
+                continue
             while len(cells) < idx:
                 cells.append("")
             v = c.find(ns + "v")
@@ -237,10 +261,10 @@ def _xlsx(zf, sheet: int) -> dict:
                 val = "".join(x.text or "" for x in c.iter(ns + "t"))
             else:
                 val = v.text if v is not None and v.text is not None else ""
-            cells.append(val)
+            if len(cells) == idx:
+                cells.append(val[:MAX_CELL_TEXT])
         width = max(width, len(cells))
-        if len(rows) <= PREVIEW_ROWS:
-            rows.append(cells)
+        rows.append(cells)
     columns = rows[0] if rows else []
     return {
         "sheets": [n for n, _ in sheets],

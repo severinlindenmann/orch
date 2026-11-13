@@ -444,7 +444,7 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
   return tile;
 }
 // A real artifact: its name, what kind it is, a preview and Open. A proof without a file shows no "Completed" filler.
-const KIND_WORD = [[/\.(png|jpe?g|gif|webp)$/i, 'Picture'], [/\.(csv|tsv)$/i, 'Table'], [/\.md$/i, 'Note'], [/\.html?$/i, 'Page'], [/\.(js|py|css|json|xml|ya?ml|toml|ini)$/i, 'Code'], [/\.(txt|log)$/i, 'Text file']];
+const KIND_WORD = [[/\.(png|jpe?g|gif|webp|svg)$/i, 'Picture'], [/\.pdf$/i, 'PDF'], [/\.xlsx$/i, 'Spreadsheet'], [/\.zip$/i, 'Archive'], [/\.(m4a|aac|mp3|wav|caf|ogg)$/i, 'Sound'], [/\.(mp4|webm|mov|m4v|ogv)$/i, 'Video'], [/\.(csv|tsv)$/i, 'Table'], [/\.md$/i, 'Note'], [/\.html?$/i, 'Page'], [/\.(js|py|css|json|xml|ya?ml|toml|ini)$/i, 'Code'], [/\.(txt|log)$/i, 'Text file']];
 const kindWord = fileName => KIND_WORD.find(([re]) => re.test(fileName))?.[1] || 'File';
 const evidenceFile = (t, ev) => {
   const prefix = '.orch/tickets/' + t.id + '/evidence/', ref = String(ev.ref || '');
@@ -564,9 +564,20 @@ function ticketFileRow(t, kind, file) {
     ticketFileActions(t, kind, file));
 }
 // The result frame: the file heading, then a bounded preview with Expand (the shared viewer).
+// A PDF shows as the PDF and a web page as the page (in a frame that cannot reach this app); other files as a short excerpt.
+function ticketLivePreview(t, file, kind) {
+  if (snapshot) return null;
+  const type = viewerKind(file.name), title = fileTitle(file.name);
+  if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+    h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.'));
+  if (type === 'page') return h('iframe', {className:'preview-live', sandbox:'allow-scripts', referrerpolicy:'no-referrer', title, loading:'lazy',
+    src:'/view/' + encodeURIComponent(t.id) + '/' + encodeURIComponent(kind) + '/' + file.name.split('/').map(encodeURIComponent).join('/')});
+  return null;
+}
 function ticketResultFrame(t, kind, file) {
+  const live = ticketLivePreview(t, file, kind);
   return h('article', {className:'result-frame', 'data-key':'result-frame-' + file.name}, ticketFileRow(t, kind, file),
-    h('div', {className:'preview-body'}, ticketPreviewTile(t, file, kind),
+    h('div', {className:'preview-body' + (live ? ' live' : '')}, live || ticketPreviewTile(t, file, kind),
       snapshot ? null : ticketButton('Expand ↗', 'outline sm preview-expand', () => previewFile(t.id, kind, file.name), {'data-key':'expand-' + file.name})));
 }
 // Files grouped by the task that produced them; result files no task claims come first.
@@ -677,6 +688,8 @@ function artifactsPanel(t) {
         : h('p', {className:'muted'}, 'No files attached yet.')];
   }
   const all = ticketFileEntries(t);
+  if (!all.length && !artifactData.get(t.id)?.data) return [filesToolbar(0), h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
+    [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
   return [filesToolbar(all.length), filesPanelBody(t, all)];
 }
 function ticketActor(by) {
