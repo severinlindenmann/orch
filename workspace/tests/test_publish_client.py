@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import sys
 import tarfile
 from pathlib import Path
@@ -482,12 +483,20 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
     code, out, _ = run("publish", "view", "--json")
     v = json.loads(out)
     assert code == 0 and v["schema"] == "orch.addon-view/1" and key not in out and "#k=" not in out
-    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"] == "Files")
+    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"] == "Shared")
+    row = files["items"][0]
+    assert files["compact"] is True and files["meta"] == "1 link"
     assert (
-        files["items"][0]["title"] == "a.txt" and "link" not in files["items"][0]
-    )  # http test server: no https link
-    assert "12 B" in files["items"][0]["subtitle"]
-    assert "agent" not in v["notice"] and "here" in v["notice"]
+        row["title"] == "a.txt" and "link" not in row
+    )  # no https link: it is copied by its id, with the key kept here
+    assert row["meta"][0] == "Anyone with the link" and row["meta"][1].startswith(
+        ("Expires ", "Kept until")
+    )  # expiry shown once
+    ops = [(a["label"], a["action"]["op"]) for a in row["actions"]]
+    assert ops == [("Copy link", "link.copy"), ("Extend", "link.extend"), ("Stop sharing", "link.stop")]
+    assert re.fullmatch(r"f_[a-z0-9]+", row["actions"][0]["action"]["args"]["id"])
+    assert v["header"]["button"] == {"label": "Share a file", "action": {"op": "link.share"}}
+    assert v["blocks"][-1]["type"] == "footnote"
 
 
 def test_publish_has_a_shared_tab():

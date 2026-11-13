@@ -11,7 +11,12 @@
     "generated_at": { "$ref": "#/$defs/time", "description": "When the add-on computed this view. The dashboard shows it as 'as of HH:MM'." },
     "notice": { "$ref": "#/$defs/text", "description": "Optional one-line state, e.g. 'The scheduler is stopped: nothing starts by itself.'" },
     "notice_tone": { "$ref": "#/$defs/tone" },
-    "button": { "type": "object", "required": ["label", "action"], "additionalProperties": false, "description": "Optional: one button shown with the notice. `action.op` must be one the dashboard knows (today only `addon.start`, which starts background work, args none); unknown ops are not drawn.", "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "allOf": [ { "$ref": "#/$defs/action" }, { "properties": { "args": { "maxProperties": 0 } } } ] } } },
+    "button": { "type": "object", "required": ["label", "action"], "additionalProperties": false, "description": "Optional: one button shown with the notice. `action.op` must be one the dashboard knows (`addon.start`, which starts background work, or `addon.refresh`, which reads the view again; args none); unknown ops are not drawn.", "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "allOf": [ { "$ref": "#/$defs/action" }, { "properties": { "args": { "maxProperties": 0 } } } ] } } },
+    "header": { "type": "object", "additionalProperties": false, "description": "Optional, drawn at the right of the page heading: a status pill, one quiet link and/or one primary button. A button's `action.op` must be one the dashboard knows (`link.share`, `addon.refresh`); unknown ops are not drawn.", "properties": {
+      "status": { "$ref": "#/$defs/chip" },
+      "link": { "$ref": "#/$defs/pagelink" },
+      "button": { "type": "object", "required": ["label", "action"], "additionalProperties": false, "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "allOf": [ { "$ref": "#/$defs/action" }, { "properties": { "args": { "maxProperties": 0 } } } ] } } }
+    } },
     "blocks": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/block" } }
   },
   "$defs": {
@@ -20,10 +25,19 @@
     "tone": { "enum": ["neutral", "good", "warn", "needs-you", "bad"], "default": "neutral" },
     "link": {
       "type": "string", "maxLength": 500,
-      "pattern": "^(t_[a-z0-9]{6,16}|https://[^\\s<>\"'`]+|addon:(?![/\\\\])(?!.*\\.\\.)[A-Za-z0-9_./?=&%-]{0,300})$",
-      "description": "A ticket id (opens the ticket detail), an https URL (opens in a new tab, rel=noopener noreferrer), or addon:<path>: a page of THIS add-on, resolved only against its own checked [page] url (no '..', no leading '/'). Nothing else."
+      "pattern": "^(t_[a-z0-9]{6,16}|https://[^\\s<>\"'`]+|addon:(?![/\\\\])(?!.*\\.\\.)[A-Za-z0-9_./?=&%-]{0,300}|app:(home|tickets|notes|chat|settings|addon)(/[a-z][a-z0-9-]{0,31}){0,2})$",
+      "description": "A ticket id (opens the ticket detail), an https URL (opens in a new tab, rel=noopener noreferrer), addon:<path>: a page of THIS add-on, resolved only against its own checked [page] url (no '..', no leading '/'), or app:<page>[/<sub>]: a page of the dashboard itself (home, tickets, notes, chat, settings, addon), e.g. app:settings/phone. Nothing else."
     },
     "action": {"type": "object", "required": ["op"], "additionalProperties": false, "description": "A request the dashboard may send back, never a command line. `op` names one entry of the dashboard's fixed op table; unknown ops are not shown. For an add-on's own verbs the op is `addon.act`: the dashboard runs `orch <this add-on> act <verb> -- <target>` for the add-on whose view this is (it cannot name another add-on).", "properties": {"op": {"type": "string", "pattern": "^[a-z][a-z.]{0,31}$"}, "args": {"type": "object", "maxProperties": 6, "propertyNames": {"pattern": "^[a-z_][a-z0-9_]{0,31}$"}, "additionalProperties": {"oneOf": [{"type": "boolean"}, {"type": "number"}, {"type": "string", "maxLength": 200, "pattern": "^[^<>]*$"}]}}}},
+    "pagelink": { "type": "object", "required": ["label", "to"], "additionalProperties": false, "description": "A quiet link with a label: `to` is a link (see $defs/link).", "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 40 }, "to": { "$ref": "#/$defs/link" } } },
+    "meta": { "$ref": "#/$defs/text", "maxLength": 60, "description": "Optional quiet text at the right of the block heading, e.g. '13-19 November'." },
+    "empty": { "type": "object", "required": ["title"], "additionalProperties": false, "description": "Optional. What a block with no rows shows: a mark, a title, one sentence and one button or link.", "properties": {
+      "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+      "text": { "$ref": "#/$defs/text" },
+      "mark": { "enum": ["arrow", "repeat", "dash"], "default": "arrow" },
+      "button": { "$ref": "#/$defs/pagelink" },
+      "link": { "$ref": "#/$defs/pagelink" }
+    } },
     "chip": {
       "type": "object", "required": ["label"], "additionalProperties": false,
       "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 40 }, "tone": { "$ref": "#/$defs/tone" } }
@@ -31,10 +45,11 @@
     "block": {
       "type": "object",
       "required": ["type"],
-      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table"] } },
+      "properties": { "type": { "enum": ["stat", "list", "calendar", "timeline", "chips", "table", "footnote", "settings", "radio"] } },
       "oneOf": [
         { "$ref": "#/$defs/stat" }, { "$ref": "#/$defs/list" }, { "$ref": "#/$defs/calendar" },
-        { "$ref": "#/$defs/timeline" }, { "$ref": "#/$defs/chips" }, { "$ref": "#/$defs/table" }
+        { "$ref": "#/$defs/timeline" }, { "$ref": "#/$defs/chips" }, { "$ref": "#/$defs/table" },
+        { "$ref": "#/$defs/footnote" }, { "$ref": "#/$defs/settings" }, { "$ref": "#/$defs/radio" }
       ]
     },
     "stat": {
@@ -51,6 +66,12 @@
       "properties": {
         "type": { "const": "list" },
         "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "meta": { "$ref": "#/$defs/meta" },
+        "count": { "type": "integer", "minimum": 0, "description": "Optional number shown quietly at the right of the heading." },
+        "span": { "enum": ["half"], "description": "Optional: two consecutive `half` blocks are drawn side by side (stacked on a narrow window)." },
+        "compact": { "type": "boolean", "description": "Optional: one line per row; `meta` cells in columns, `actions` shown on hover or focus." },
+        "above": { "type": "boolean", "description": "Optional: the heading sits above the card instead of inside it." },
+        "empty": { "$ref": "#/$defs/empty" },
         "items": {
           "type": "array", "maxItems": 50,
           "items": {
@@ -58,6 +79,7 @@
             "properties": {
               "title": { "$ref": "#/$defs/text" },
               "subtitle": { "$ref": "#/$defs/text" },
+              "meta": { "type": "array", "maxItems": 3, "items": { "$ref": "#/$defs/text" }, "description": "Quiet cells after the title in a `compact` list." },
               "chips": { "type": "array", "maxItems": 6, "items": { "$ref": "#/$defs/chip" } },
               "tone": { "$ref": "#/$defs/tone" },
               "link": { "$ref": "#/$defs/link" },
@@ -75,6 +97,8 @@
       "type": "object", "required": ["type", "days"], "additionalProperties": false,
       "properties": {
         "type": { "const": "calendar" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "meta": { "$ref": "#/$defs/meta" },
         "days": {
           "type": "array", "maxItems": 14,
           "items": {
@@ -105,6 +129,7 @@
       "properties": {
         "type": { "const": "timeline" },
         "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "meta": { "$ref": "#/$defs/meta" },
         "items": {
           "type": "array", "maxItems": 50,
           "items": {
@@ -124,6 +149,7 @@
       "properties": {
         "type": { "const": "chips" },
         "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "meta": { "$ref": "#/$defs/meta" },
         "items": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/chip" } }
       }
     },
@@ -132,6 +158,7 @@
       "properties": {
         "type": { "const": "table" },
         "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "meta": { "$ref": "#/$defs/meta" },
         "columns": {
           "type": "array", "minItems": 1, "maxItems": 6,
           "items": {
@@ -149,11 +176,64 @@
             "type": "object", "required": ["cells"], "additionalProperties": false,
             "properties": {
               "cells": { "type": "object", "propertyNames": { "pattern": "^[a-z_][a-z0-9_]{0,31}$" }, "additionalProperties": { "oneOf": [{ "type": "number" }, { "type": "string", "maxLength": 200, "pattern": "^[^<>]*$" }, { "type": "null" }] } },
-              "link": { "$ref": "#/$defs/link" }
+              "link": { "$ref": "#/$defs/link" },
+              "subtitle": { "$ref": "#/$defs/text", "description": "A quiet line under the first cell." },
+              "toggle": {"type": "object", "required": ["on", "label", "action"], "additionalProperties": false, "description": "An On/Off switch on the collapsed row. `action` carries the NEW state in its args when sent.", "properties": {"on": {"type": "boolean"}, "label": {"$ref": "#/$defs/text", "maxLength": 60}, "action": {"$ref": "#/$defs/action"}}},
+              "actions": {"type": "array", "maxItems": 4, "description": "Buttons in the expanded part. `confirm` = a short question; the dashboard shows a small Yes/No (no typed word) before sending.", "items": {"type": "object", "required": ["label", "action"], "additionalProperties": false, "properties": {"label": {"$ref": "#/$defs/text", "maxLength": 30}, "action": {"$ref": "#/$defs/action"}, "confirm": {"$ref": "#/$defs/text", "maxLength": 80}, "tone": {"enum": ["neutral", "bad"]}}}}
             }
           }
         },
         "more": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "footnote": {
+      "type": "object", "required": ["type", "text"], "additionalProperties": false,
+      "description": "One quiet line under the page, with an optional link.",
+      "properties": {
+        "type": { "const": "footnote" },
+        "text": { "$ref": "#/$defs/text" },
+        "link": { "$ref": "#/$defs/pagelink" }
+      }
+    },
+    "settings": {
+      "type": "object", "required": ["type", "title", "rows"], "additionalProperties": false,
+      "description": "A card of settings rows: a quiet label on the left, the value (and a note) next to it, an optional button at the right. A `radio` block that follows is drawn inside the same card.",
+      "properties": {
+        "type": { "const": "settings" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "rows": {
+          "type": "array", "minItems": 1, "maxItems": 12,
+          "items": {
+            "type": "object", "required": ["label", "value"], "additionalProperties": false,
+            "properties": {
+              "label": { "$ref": "#/$defs/text", "maxLength": 30 },
+              "value": { "$ref": "#/$defs/text", "maxLength": 120 },
+              "note": { "$ref": "#/$defs/text" },
+              "tone": { "$ref": "#/$defs/tone" },
+              "button": { "type": "object", "required": ["label", "action"], "additionalProperties": false, "properties": { "label": { "$ref": "#/$defs/text", "maxLength": 30 }, "action": { "$ref": "#/$defs/action" } } }
+            }
+          }
+        }
+      }
+    },
+    "radio": {
+      "type": "object", "required": ["type", "title", "options"], "additionalProperties": false,
+      "description": "One choice out of a few. The option with `selected` is the saved one. Choosing another sends its `action` (`addon.act`, a plain verb and a plain-word target) or, with `link`, goes to the page where that choice is made. The new state shows after the add-on answers: nothing changes on screen first.",
+      "properties": {
+        "type": { "const": "radio" },
+        "title": { "$ref": "#/$defs/text", "maxLength": 60 },
+        "options": {
+          "type": "array", "minItems": 2, "maxItems": 5,
+          "items": {
+            "type": "object", "required": ["label", "selected"], "additionalProperties": false,
+            "properties": {
+              "label": { "$ref": "#/$defs/text", "maxLength": 60 },
+              "selected": { "type": "boolean" },
+              "action": { "$ref": "#/$defs/action" },
+              "link": { "$ref": "#/$defs/link" }
+            }
+          }
+        }
       }
     }
   }

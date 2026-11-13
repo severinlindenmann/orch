@@ -125,10 +125,9 @@
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(box, anchor); else document.body.insertBefore(box, document.body.firstChild);
     return box;
   }
-  function source() {  // where the request came from: behind a small click
-    var d = el("details"), s = el("summary", "Technical details", "meta"), p = el("p", "Requested from a terminal on this computer.", "meta");
-    s.style.cssText = "font-size:12px;cursor:pointer;min-height:44px;display:flex;align-items:center"; p.style.cssText = "margin:4px 0 0;font-size:12px";
-    d.appendChild(s); d.appendChild(p); return d;
+  function source() {  // where the request came from: one plain line, no disclosure
+    var p = el("p", "Requested from a terminal on this computer.", "meta"); p.style.cssText = "margin:0;font-size:12px";
+    return p;
   }
   function render(items) {
     var key = JSON.stringify(items) + open;
@@ -193,22 +192,26 @@
   var UPDATE_WAIT = 180000, UPDATE_KEY = "orch-update-started";
   function updateStarted() { try { sessionStorage.setItem(UPDATE_KEY, String(Date.now())); } catch (e) {} }
   function updateDone() { try { sessionStorage.removeItem(UPDATE_KEY); } catch (e) {} }
-  function updateOverdue() {
+  function updateOverdue(unreachable) {
     var at = 0;
     try { at = Number(sessionStorage.getItem(UPDATE_KEY)) || 0; } catch (e) {}
     if (!at || Date.now() - at < UPDATE_WAIT) return;
     updateDone();
-    var t = "The update did not finish. orch is still the old version. Start the update again when you are ready.";
+    // unreachable = this page's server is gone (restarted, maybe on another address): not a failed update
+    var t = unreachable === true
+      ? "orch restarted. Reload the dashboard."
+      : "The update did not finish. orch is still the old version. Start the update again when you are ready.";
     if (t !== shown) { shown = t; banner(t); }
   }
   function updateStatus() {
-    fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : {}; }).then(function (s) {
-      if (!s || !s.state || s.state === "running") { updateOverdue(); return; }
+    var gone = false;
+    fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { gone = !r.ok; return r.ok ? r.json() : {}; }).then(function (s) {
+      if (!s || !s.state || s.state === "running") { updateOverdue(gone); return; }
       updateDone();
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
       var t = s.state === "finished" ? "Update finished." : "Update failed: " + why + ".";
       if (t !== shown) { shown = t; banner(t); }
-    }).catch(updateOverdue);
+    }).catch(function () { updateOverdue(true); });
   }
   notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
 })();

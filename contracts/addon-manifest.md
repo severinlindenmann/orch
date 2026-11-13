@@ -24,7 +24,7 @@ Lives inside the add-on's top-level Python package, next to `__init__.py`
 | `agents_block` | block body for .orch/harness/AGENTS.orch.md (default `<skill>/AGENTS-block.md`) |
 | `ticket_ext` | Local JSON Schema for `ext.<name>` (no remote `$ref`, ≤ 32 KB) |
 | `background` | `true` = has a long-running process; must implement `orch <name> start\|stop\|status --json` (Background, below) |
-| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `panel` (`repeats`, `links` or `phone`: an extra native card the dashboard draws on the tab): the add-on has a tab filled by `orch <name> view --json` |
+| `[dashboard]` | `label` (≤ 24 chars), `icon` (fixed set in the schema), `order`, optional `title` (page heading when it differs from the label, ≤ 40) and `subtitle` (one sentence, ≤ 120), optional `panel` (`repeats`, `links` or `phone`: an extra native card the dashboard draws on the tab): the add-on has a tab filled by `orch <name> view --json` |
 | `[[ticket_view]]` | Ticket detail rows from `ext.<name>`: `field`, `label`, `format` = `text` · `time` · `cron-human` · `chips` · `yes-no` · `open-page` (an "Open" button to `[page]` `path` + `/` + the value; needs `[page]`) |
 | `recommended` | `true` = `orch init --recommended` turns it on (the core names no add-on; it reads this key) |
 | `gitignore` | Lines kept out of git (own block of `.git/info/exclude`, never the team `.gitignore`), added by `orch addon add`, removed by `orch addon remove`: relative paths inside the workspace, no leading `/`, no `..`, no `\`, no drive letter |
@@ -73,9 +73,14 @@ record. The installed list (`addons.json` in the same folder) is the registry of
    `--purge` also deletes `.orch/addons/<name>/` and the `[<name>]` table of `.orch/config.toml`.
 The package stays in the tool env (other workspaces may use it); `orch addon uninstall <name>` removes it from the machine.
 
-`orch addon list --json`: a JSON list with one entry per installed add-on (active or not), sorted by name:
-`[{"name", "version", "description", "source": "built-in"|"local", "active": bool,
-"dashboard": {label, icon, order, panel} | null, "ticket_view": [{field, label, format}], "background": bool}]` — the one source the
+`orch addon list --json`: a JSON list with one entry per installed add-on (active or not), sorted by name
+(`"installed": true`), followed by one entry per shipped add-on that is **not installed yet** (`"installed": false`,
+always `active: false` and `running: false`, `source: "built-in"`; sorted by name). The available entries are read
+from the local source folder only (never the network); one whose manifest cannot be read there is left out. Adding one
+is still `orch addon add <name>`. Consumers that mean "installed" must check `installed`; `orch addon list` (text)
+shows them in a separate "Available" group:
+`[{"name", "version", "description", "source": "built-in"|"local", "installed": bool, "active": bool,
+"dashboard": {label, icon, order, panel, title?, subtitle?} | null, "ticket_view": [{field, label, format}], "background": bool}]` — the one source the
 dashboard uses (it shows the entries with `active: true`).
 
 `orch update` updates orch **and every installed add-on together** (one `uv tool install --reinstall` with all of them),
@@ -203,6 +208,15 @@ ticket), an `https://` URL (new tab), or `addon:<path>` — a page of **this** a
 the same add-on's checked `[page]` url (`http://127.0.0.1:<port>/<path>`); no `..`, no leading `/`, never another add-on or
 host. The only ways back are list rows' `toggle`/`actions` (fixed ops) and one optional `button` next to `notice` (op
 `addon.start`); never a command line. Tone: `neutral` · `good` · `warn` · `needs-you` · `bad`.
+
+**Page layout (all optional, older dashboards ignore them):** `header` (a status pill, one quiet link, one primary button at
+the right of the page heading), block `meta` (quiet text at the right of a block heading), `calendar.title`, list `count`,
+`span: "half"` (two consecutive half lists sit side by side), `compact` (one line per row, `meta` cells, `actions` on hover) and
+`empty` (mark, title, sentence, one button or link when a list has no rows), blocks `footnote` (one quiet line plus a link),
+`settings` (label / value / note rows) and `radio` (one choice, drawn in the card of the `settings` block before it). Links may
+also be `app:<page>[/<sub>]`, a page of the dashboard (`app:settings/phone`). The extra ops the dashboard draws are fixed:
+`addon.edit` (the schedule dialog of a ticket), `addon.refresh` (read the view again), `link.share|copy|extend|stop` (the shared
+links of the publish add-on) and, for `radio`, `addon.act` with a plain verb and a plain-word target.
 
 **One product:** the dashboard renders blocks with the orch design system only (tokens, the fixed icon set, motion, skeleton
 while loading, the same empty and error states and wording); add-on tabs sit in the same nav list as Tickets/Inbox, ordered by

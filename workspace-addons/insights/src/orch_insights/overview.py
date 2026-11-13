@@ -142,6 +142,8 @@ def _row(item, inventory, generated):
         "label": LABELS[health],
         "uses": None if health == "unknown" else item["uses"],
         "numbers": "Can't tell yet" if health == "unknown" else f"{runs['used']} of {runs['of']} runs",
+        "runs_used": None if health == "unknown" else runs["used"],
+        "runs_of": None if health == "unknown" else runs["of"],
         "unseen": f"{unseen} {'run' if unseen == 1 else 'runs'} can't tell" if unseen else None,
         "detail": "Not used in 30 days" if health == "idle" else "",
     }

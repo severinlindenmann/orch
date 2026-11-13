@@ -425,5 +425,90 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .sk-story{height:200px}
 .sk-row{height:40px}
 @media(max-width:899px){.sk-columns{grid-template-columns:minmax(0,1fr)}}
+/* Schedules page (add-on view): table with switch and buttons, week strip, status line, "How often" window. */
+.status-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0}
+.blk-table.data-table td{padding-top:12px;padding-bottom:12px}
+.blk .table-wrap{border:0;border-radius:0}
+.blk-table .subline{display:block;font-size:12px;line-height:16px;color:var(--text-faint);margin-top:4px}
+.blk-table td .row{flex-wrap:nowrap}
+.blk-table .cell-link{color:var(--text);font-weight:500;text-decoration:none}.blk-table .cell-link:hover{text-decoration:underline}
+.repeat-dialog{width:min(640px,calc(100% - 32px))}
+.repeat-dialog .form-fields{display:grid;gap:24px}
+.repeat-block{border:0;padding:0;margin:0;min-width:0}.repeat-block legend{margin-bottom:8px;padding:0}
+.repeat-block .frequency-control{display:flex;flex-wrap:nowrap;width:100%;box-sizing:border-box}
+.frequency-control label{flex:1;justify-content:center;position:relative;white-space:nowrap;font-weight:500}
+.frequency-control input,.day-chip input{position:absolute;opacity:0;width:1px;height:1px}
+.schedule-fields{display:grid;gap:16px;margin-top:24px}
+.schedule-row{display:grid;grid-template-columns:112px minmax(0,1fr);gap:16px;align-items:start}
+.schedule-row>span{padding-top:9px}
+.schedule-value{display:grid;gap:8px}
+.schedule-value select,.schedule-value input{width:160px;max-width:100%}
+.day-chips{display:flex;gap:6px;flex-wrap:wrap}
+.day-chip{position:relative;display:flex;align-items:center;justify-content:center;min-height:36px;min-width:38px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--sidebar);cursor:pointer;transition:background-color var(--dur-fast) var(--ease-move)}
+.day-chip:has(input:checked){background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
+.day-chip:focus-within{outline:2px solid var(--brand);outline-offset:2px}
+.custom-interval{display:flex;align-items:center;gap:12px}.custom-interval input{width:100px}
+.repeat-summary{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);color:var(--text-muted)}
+@media(max-width:599px){.frequency-control label{padding:4px 6px;font-size:12px}.schedule-row{grid-template-columns:92px minmax(0,1fr);gap:12px}}
+.strip-panel{overflow:hidden}
+.strip{grid-template-columns:repeat(7,minmax(0,1fr))}
+.strip .day{display:flex;flex-direction:column;align-items:stretch;gap:12px;min-height:116px;border-width:0 1px 0 0}
+.strip .day:last-child{border-right:0}
+.strip .day-head{gap:8px;color:var(--text-muted)}
+.strip .day.today{background:var(--surface-2)}.strip .day.today .day-head b{color:var(--brand)}
+.page:has(.strip-panel){max-width:none}
+.blk-pair .blk-title,.blk-compact .blk-title{font-size:14px;line-height:20px;padding:16px}
+.blk-pair>.blk>.blk-title,.blk-compact>.blk-title{border-bottom:1px solid var(--border)}
+.blk-above .empty.blk-empty{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:16px;row-gap:4px;text-align:left;justify-items:start;align-content:center;min-height:0;padding:24px;background:var(--surface);border-radius:10px}
+.blk-above .blk-empty .empty-mark{grid-row:1/span 3;background:none;width:auto;height:auto;font-size:20px;color:var(--text-faint)}
+.blk-above .blk-empty h3{font-size:14px;line-height:20px}
+.strip .day-head{justify-content:flex-start;gap:4px;font-size:12px}.strip .day-head b{font-weight:600;color:var(--text)}
+.strip .day.empty::after{content:"\2014";color:var(--text-faint);font-size:12px}
+.strip .run{display:block;padding:0 0 0 8px;border-left:2px solid var(--brand);font-size:12px;line-height:16px}
+.strip .run time,.strip .run>span{display:block}
+@media(max-width:950px){.strip{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.strip .day{border-width:0 0 1px 0}}
+
+/* Add-on page layout blocks (contract: addon-view.schema.json "Page layout"): headings with quiet text, two cards side by side,
+   a compact list with hover actions, settings rows with a choice, a footnote. */
+.blk-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.blk-head .blk-title{padding-left:0;padding-right:0;font-size:14px;line-height:20px}
+.card>.blk-head{padding:0 16px 0 0}
+.blk-above>.blk-head{padding:0 4px 8px}.blk-above>.blk-head .blk-title,.blk-above>.blk-title{padding:0;font-size:14px;line-height:20px}
+.blk-above{display:block;margin-top:8px}
+.blk-above .blk-list{padding:0}
+.blk-pair{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:24px;align-items:start}
+@media(min-width:1600px){.blk-pair{grid-template-columns:minmax(0,1fr) 320px}}
+.share-dialog .field{margin-top:16px}
+.blk-pair>.blk{min-width:0}
+.blk-pair .blk-head{border-bottom:1px solid var(--border)}.blk-pair .blk-head .blk-title{padding:16px}.blk-pair .blk-head .meta{padding-right:16px}
+.blk-empty.empty{min-height:192px}
+.empty-mark{display:grid;place-items:center;width:40px;height:40px;background:var(--surface-2);color:var(--text-muted);border-radius:10px;font-size:20px}
+.blk-compact .blk-head{border-bottom:1px solid var(--border)}.blk-compact .blk-head .blk-title{padding:16px}.blk-compact .blk-head .meta{padding-right:16px}
+.compact-li+.compact-li{border-top:1px solid var(--border)}
+.compact-row{display:grid;grid-template-columns:minmax(170px,1fr) 150px 180px auto;align-items:center;gap:16px;padding:12px 16px;min-height:60px}
+.compact-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text);text-decoration:none}
+.compact-actions{display:flex;gap:4px;opacity:0;transition:opacity 100ms var(--ease-move,ease)}
+.compact-row:hover .compact-actions,.compact-row:focus-within .compact-actions{opacity:1}
+@media(hover:none){.compact-actions{opacity:1}}
+@media(max-width:1150px){.compact-row{grid-template-columns:minmax(150px,1fr) 140px 170px;gap:12px}.compact-actions{grid-column:1/-1;justify-content:flex-end;opacity:1}}
+@media(max-width:600px){.compact-row{grid-template-columns:1fr}.compact-actions{grid-column:1;justify-content:flex-start;flex-wrap:wrap}}
+.blk-footnote{display:flex;gap:12px;flex-wrap:wrap;align-items:baseline;padding:0 4px;margin:0;font-size:12px;line-height:16px;color:var(--text-faint)}
+.blk-footnote a{color:var(--text-muted);text-decoration:underline}
+.blk-settings>.card-h h3,.blk-radio .card-h h3{font-size:14px;line-height:20px}
+.blk-settings .setting-row{display:grid;grid-template-columns:136px minmax(0,1fr) auto;gap:16px;align-items:center;padding:16px;border-top:1px solid var(--border);min-height:64px}
+.setting-row .row-label{color:var(--text-muted)}.setting-row .row-value p{margin-top:4px}
+.setting-row .row-action{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.setting-row .row-action:empty{display:none}
+.blk-settings .card-h{border-bottom:0}
+.blk-settings .card-h+.setting-row{border-top:1px solid var(--border)}
+.blk-settings .blk-radio-card-h,.blk-settings>.card-h~.card-h{border-top:1px solid var(--border);border-bottom:0}
+.sync-options label{display:flex;gap:12px;align-items:center;padding:16px;border-top:1px solid var(--border);cursor:pointer}
+.sync-options label:hover{background:var(--surface-2)}
+@media(max-width:1000px){.blk-pair{grid-template-columns:1fr}.blk-settings .setting-row{grid-template-columns:112px minmax(0,1fr)}.setting-row .row-action{grid-column:2;justify-content:flex-start}}
+@media(max-width:600px){.blk-settings .setting-row{grid-template-columns:1fr}.setting-row .row-action{grid-column:1}}
+@media(prefers-reduced-motion:reduce){.compact-actions{transition:none}}
+/* Page not found (errors/not-found.html). */
+.error-hero{min-height:320px;display:grid;align-content:center;justify-items:start;gap:16px;padding:40px}
+.error-number{font-size:48px;line-height:1;color:var(--text-faint);font-weight:600}
+@media(max-width:600px){.error-hero{padding:24px;min-height:240px}}
 /* Page heading with an actions slot: actions sit at the end of the title row */
 .page-heading:has(>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}

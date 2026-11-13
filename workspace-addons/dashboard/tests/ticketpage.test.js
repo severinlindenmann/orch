@@ -119,14 +119,14 @@ test('Accept shows the reviewed tip and sends the full tip with the Done (B13g)'
   const text = JSON.stringify(editor);
   assert.match(text, /0123456789ab/);  // the short tip the person looks at
   assert.doesNotMatch(text, new RegExp(tip));
-  nodes(editor).find(n => n.tag === 'button' && n.children.includes('Accept')).onclick();
+  nodes(editor).find(n => n.tag === 'button' && n.children.includes('Looks good')).onclick();
   assert.equal(JSON.stringify(moves), JSON.stringify([['t_abc123', 'done', false, {review_tip:tip}]]));
   // No recorded tip, or something that is no tip: no line, and the Done carries nothing.
   for (const bad of [undefined, 'HEAD', 'A'.repeat(40), 'a'.repeat(39), '<b>' + 'a'.repeat(40)]) {
     moves.length = 0;
     const plain = c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:bad});
     assert.equal(nodes(plain).filter(n => n.attrs?.['data-key'] === 'ticket-review-tip').length, 0);
-    nodes(plain).find(n => n.tag === 'button' && n.children.includes('Accept')).onclick();
+    nodes(plain).find(n => n.tag === 'button' && n.children.includes('Looks good')).onclick();
     assert.equal(JSON.stringify(moves), JSON.stringify([['t_abc123', 'done', false, {}]]));
   }
 });
@@ -152,26 +152,21 @@ test('the review buttons show whenever the status is Review, an open question fi
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
   vm.createContext(ctx); vm.runInContext(source, ctx);
   const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
-  assert.match(text, /Accept/);
+  assert.match(text, /Looks good/);
   assert.match(text, /Ask for changes/);
-  assert.ok(text.indexOf('Which colour?') < text.indexOf('Accept'), 'the question comes first');
-  assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Accept/);
+  assert.ok(text.indexOf('Which colour?') < text.indexOf('Looks good'), 'the question comes first');
+  assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Looks good/);
   ctx.state.settings = {agents:[{name:'claude', label:'Claude', chosen:true}]};
   vm.runInContext("artifactData.set('t_test', {at:Date.now(), data:{files:[{name:'next-steps.html', size:24576, mtime:'2026-11-09T07:30:00Z'}]}})", ctx);
   const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
   const all = nodes(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]}));
-  const review = all.find(n => n.attrs.className === 'card next-step');
+  const review = all.find(n => /review-card/.test(n.attrs.className || ''));
   const reviewText = JSON.stringify(review);
-  assert.match(reviewText, /Claude finished: Next steps/);
-  assert.equal((reviewText.match(/Next steps/g) || []).length, 2, 'title once, tile once, no preview box');
-  assert.doesNotMatch(reviewText, /Completed\.|ticket-preview|ticket-result/);
-  const tile = nodes(review).find(n => n.attrs.className === 'ticket-review-tile');
-  assert.match(JSON.stringify(tile), /Next steps/);
-  assert.doesNotMatch(JSON.stringify(tile), /\.html/);
-  assert.match(JSON.stringify(tile), /Page · 24 KB/);
-  assert.equal(nodes(tile).filter(n => n.tag === 'button').length, 1);
-  assert.ok(nodes(review).some(n => n.children.some(c => typeof c === 'string' && c.startsWith('Completed '))));
-
+  assert.match(reviewText, /Your review/);
+  assert.match(reviewText, /Next steps/);
+  assert.match(reviewText, /Looks good/);
+  assert.ok(reviewText.indexOf('Next steps') < reviewText.indexOf('Looks good'), 'the result comes above the verdict buttons');
+  assert.doesNotMatch(JSON.stringify(all), /Technical details|Show technical/);
 });
 test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats add-on is on', () => {
   const h = (tag, attrs = {}, ...children) => { const n = {tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false)}; n.append = (...c) => n.children.push(...c); n.dataset = {}; n.setAttribute = () => {}; n.addEventListener = () => {}; n.classList = {add(){}, remove(){}}; return n; };
@@ -244,7 +239,7 @@ test('next question stays above every tab and Answer scrolls and focuses it', ()
     assert.equal(all.filter(n => n.attrs['data-question'] === 'q1').length,1);
     assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length,0, 'no Steps card without steps');
     assert.ok(!all.some(n => n.children.includes('No parent ticket')));
-    assert.ok(!all.some(n => n.attrs.id === 'ticket-tab-tasks'), 'no Tasks tab');
+    assert.ok(all.some(n => n.attrs.id === 'ticket-tab-tasks'), 'Tasks tab');
     all.find(n => n.tag === 'button' && n.children.includes('Answer')).onclick();
   }
   assert.ok(scrolled && focused);
@@ -361,8 +356,9 @@ test("won't-do tasks render resolved, hide activity and reasons, and reopen", as
   const nodes = n => n && typeof n === 'object' ? [n,...n.children.flatMap(nodes)] : [];
   let all = c.taskRows(t).flatMap(nodes);
   assert.ok(all.some(n => n.attrs.className === 'task-wont' && n.children.includes('Skip this')));
-  assert.ok(all.some(n => n.attrs.className === 'chip' && n.children.includes("Won't do")));
-  assert.ok(all.some(n => n.tag === 'details' && !n.attrs.open && JSON.stringify(n).includes('No longer needed')));
+  assert.ok(all.some(n => n.attrs.className === 'meta task-word' && n.children.includes('Skipped')));
+  assert.ok(all.some(n => JSON.stringify(n.children).includes('Skipped: No longer needed')), 'the reason shows plainly, no disclosure');
+  assert.ok(!all.some(n => n.tag === 'details'));
   assert.doesNotMatch(JSON.stringify(all), /ticket-spinner|Not started yet|Working on this task/);
   assert.equal(t.checklist.filter(helpers.resolved).length, 1);
   assert.equal(helpers.outcome(t.checklist[0]), '');
@@ -446,7 +442,7 @@ test('plan-first waiting card answers and edits only unstarted steps', async () 
   assert.match(JSON.stringify(tree), /Done when It works/);
   const json = JSON.stringify(tree);
   assert.equal((json.match(/work hasn't started/g) || []).length, 1);  // the waiting state shows once
-  assert.equal((json.match(/Needs you/g) || []).length, 0);
+  assert.equal((json.match(/Needs you/g) || []).length, 1, 'the status word, once');
   assert.equal((json.match(/"First"/g) || []).length, 1);  // each step once
   assert.equal(nodes(tree).filter(n => n.tag === 'button' && n.children.includes('Answer')).length, 0);
   t.note = 'Build it';
@@ -516,7 +512,7 @@ test('the Accept button is keyed by the shown tip, so a refresh never keeps a st
   const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
   const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), moveTicket:() => Promise.resolve()});
   const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
-  const key = tip => nodes(c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:tip})).find(n => n.tag === 'button' && n.children.includes('Accept')).attrs['data-key'];
+  const key = tip => nodes(c.ticketChangesEditor({id:'t_abc123', status:'review', review_tip:tip})).find(n => n.tag === 'button' && n.children.includes('Looks good')).attrs['data-key'];
   assert.notEqual(key(undefined), key('a'.repeat(40)));
   assert.notEqual(key('a'.repeat(40)), key('b'.repeat(40)));
 });
@@ -538,13 +534,12 @@ test('a file is listed once per list, and Overview chips skip the file already i
     "artifactData.set('t_dup', {at:Date.now(), data:{files:[{name:'report.pdf', size:10}, {name:'report.pdf', size:10}, {name:'notes.pdf', size:5}]}});", ctx);
   const nodes = n => typeof n === 'object' && n ? [n,...n.children.flatMap(nodes)] : [];
   const tree = nodes(ctx.detail(t));
-  const fileChips = tree.filter(n => n.attrs.className === 'ticket-file-chips').flatMap(n => n.children.map(c => c.children.find(k => k.tag === 'span').children[0]));
-  assert.deepEqual(fileChips, ['notes.pdf'], 'the review card already shows report.pdf');
+  assert.ok(!tree.some(n => n.attrs.className === 'ticket-file-chips'), 'no chip row: the Files tab lists files');
   assert.deepEqual(tree.filter(n => n.attrs.className === 'task-proofs row').map(n => n.children.length), [1, 1], 'one chip per file per task, one Tasks list');
-  const filesTab = tree.find(n => n.attrs.id === 'ticket-panel-artifacts');
-  assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'card ticket-result').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
+  const filesTab = tree.find(n => n.attrs.id === 'ticket-panel-files');
+  assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'file-tile').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
   assert.ok(nodes(filesTab).some(n => n.tag === 'h2' && n.children.includes('Files')));
-  assert.ok(tree.some(n => n.attrs.id === 'ticket-tab-artifacts' && n.children.includes('Files 3')));
+  assert.ok(tree.some(n => n.attrs.id === 'ticket-tab-files' && JSON.stringify(n).includes('"3"')));
 });
 
 test('a file that is both an artifact and a proof shows once in the Files tab and counts once', () => {
@@ -557,4 +552,28 @@ test('a file that is both an artifact and a proof shows once in the Files tab an
   vm.runInContext("artifactData.set('t_both', {at:Date.now(), data:{files:[{name:'shot.pdf', size:10}]}});", ctx);
   ctx.tt = t;
   assert.deepEqual(Array.from(vm.runInContext('[artifactEntries(tt).length, artifactCount(tt)]', ctx)), [1, 1]);
+});
+test('Results of a Done ticket shows the completion note, newest first, and nothing for other states', () => {
+  const c = context({clean:v => String(v ?? ''), time:v => String(v).slice(11, 16), artifactFiles:() => [], headerProof:() => null});
+  const note = (at, summary, ref) => ({done:true, evidence:[{type:'note', at, summary, ref}]});
+  const t = {id:'t_x', status:'done', checklist:[note('2026-11-13T12:26:00Z', 'The typo is fixed.', 'Page now says 9:00 - 13:00'), note('2026-11-13T12:20:00Z', 'Older note', 'x'), {done:true, evidence:[{type:'file', ref:'a.md'}]}]};
+  const notes = c.completionNotes(t);
+  assert.equal(notes[0].head, 'The typo is fixed.');
+  assert.equal(notes[0].body, 'Page now says 9:00 - 13:00');
+  const json = JSON.stringify(c.ticketResultsCard(t));
+  assert.match(json, /Completion note · 12:26/);
+  assert.match(json, /2 notes/);
+  assert.equal(c.completionNotes({...t, status:'review'}).length, 0);
+  assert.equal(c.ticketResultsCard({id:'t_x', status:'done', checklist:[]}), null);
+});
+test('the Changes to add card offers Review changes and Keep as is; a kept copy collapses to one quiet line', () => {
+  const c = context({render:() => {}, clean:v => String(v ?? '')});
+  const t = {id:'t_k1', bring_back:{state:'waiting', reason:'Needs review', tip:'d'.repeat(40)}};
+  const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
+  const labels = r => nodes(r).filter(n => n.tag === 'button').map(n => n.children.join(''));
+  assert.deepEqual(labels(c.ticketBringBackRow(t)), ['Add to my files', 'Review changes', 'Keep as is']);
+  nodes(c.ticketBringBackRow(t)).find(n => n.tag === 'button' && n.children.includes('Keep as is')).onclick();
+  const kept = c.ticketBringBackRow(t);
+  assert.match(JSON.stringify(kept), /Changes kept in a copy/);
+  assert.deepEqual(labels(kept), ['Add to my files']);
 });

@@ -56,6 +56,7 @@ KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.j
              "question-card.js", "evidence.js")  # fmt: skip
 WEB_FILES = (
     "index.html",
+    "compose.js",
     "focus.js",
     "store.js",
     "jobs.js",

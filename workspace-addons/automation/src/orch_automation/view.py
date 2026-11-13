@@ -267,7 +267,19 @@ def _linked(t: dict, tickets: list[dict]) -> list[dict]:
     return out
 
 
-def _schedules(tickets: list[dict], now: datetime, running: bool = True) -> list[dict]:
+def _last_result(runs: list[dict], tid: str) -> str | None:
+    """The newest recorded run of a ticket in words (\"Done · Mon 09:00\"), or None when it never ran."""
+    mine = [r for r in runs if r.get("ticket") == tid]
+    if not mine:
+        return None
+    r = mine[-1]
+    when = parse(r["at"]).astimezone().strftime("%a %H:%M")
+    return f"{'Done' if r['exit'] == 0 else 'Stopped'} · {when}"
+
+
+def _schedules(
+    tickets: list[dict], now: datetime, running: bool = True, runs: list[dict] | None = None
+) -> list[dict]:
     """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown."""
     rows = []
     for t in tickets:
@@ -281,71 +293,28 @@ def _schedules(tickets: list[dict], now: datetime, running: bool = True) -> list
         here = local_next(cron, tz, now)
         nxt_s = here[0].strftime("%a %d %b, %H:%M") if here else "none"
         last = parse(sched.get("last_run"))
-        # the cron's own zone only when it is not the person's (then it explains the technical cron)
-        other = here and (tz or UTC).utcoffset(nxt) != here[0].utcoffset()
-        detail = [
-            {"label": "Repeats", "value": clean(words, 200)},
-            *([{"label": "Time zone", "value": clean(sched.get("tz") or "UTC", 60)}] if other else []),
-            {
-                "label": "Next run",
-                "value": f"Off · would run {nxt_s}"
-                if paused
-                else nxt_s
-                if running
-                else f"Paused · would run {nxt_s}",
-            },
-            {
-                "label": "Last run",
-                "value": last.astimezone().strftime("%a %d %b, %H:%M") if last else "Not yet",
-            },
-            {"label": "Agent", "value": clean(sched.get("agent") or "The workspace agent", 60)},
-        ]
-        # a plain sentence made from the schedule itself (the ticket's own note may hold command text)
-        own = " Every run gets its own sub-ticket." if sched.get("each_run") == "sub-ticket" else ""
-        detail.append(
-            {
-                "label": "What it does",
-                "value": clean(
-                    f"Starts an agent on this ticket, {words[:1].lower()}{words[1:]}.{own}"
-                    if not paused
-                    else f"Switched off. When it is on, it starts an agent on this ticket, {words[:1].lower()}{words[1:]}.{own}",
-                    300,
-                ),
-            }
-        )
+        result = _last_result(runs or [], t["id"])
         rows.append(
             (
                 nxt or now,
                 {
-                    "title": _name(t),
-                    "subtitle": clean(
-                        f"{words} · "
-                        + (
-                            "off"
-                            if paused
-                            else "Paused"
-                            if not running
-                            else f"next {_in(nxt - now)}"
-                            if nxt
-                            else "never"
-                        ),
-                        200,
-                    ),
+                    "cells": {
+                        "schedule": _name(t),
+                        "repeats": clean(words, 200),
+                        "next": "Off" if paused else "Paused" if not running else clean(nxt_s, 40),
+                        "last": result
+                        or (last.astimezone().strftime("%a %d %b, %H:%M") if last else "Not yet"),
+                    },
+                    "link": t["id"],
+                    "subtitle": clean(sched.get("agent") or "The workspace agent", 60),
                     "toggle": {
                         "on": not paused,
                         "label": clean(t["title"], 40) + " on or off",
                         "action": _act("toggle", t["id"]),
                     },
-                    "detail": detail,
-                    "tickets": _linked(t, tickets),
                     "actions": [
                         {"label": "Run now", "action": _act("run", t["id"])},
-                        {
-                            "label": "Delete",
-                            "tone": "bad",
-                            "confirm": "Stop and remove this schedule? Its tickets stay.",
-                            "action": _act("delete", t["id"]),
-                        },
+                        {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
                     ],
                 },
             )
@@ -423,41 +392,58 @@ def build(root: Path, now: datetime | None = None) -> dict:
     pid = service.running_pid(root, clean=False)
     blocks: list[dict] = []
 
-    sched_rows = _schedules(tickets, now, bool(pid))
-    on = sum(1 for r in sched_rows if r["toggle"]["on"])
+    sched_rows = _schedules(tickets, now, bool(pid), runs)
     if sched_rows:
         blocks.append(
             {
-                "type": "list",
-                "title": f"Schedules · {on} on" + ("" if pid or not on else ", paused"),
-                "items": sched_rows[:20],
+                "type": "table",
+                "columns": [
+                    {"key": "schedule", "label": "Schedule", "type": "text"},
+                    {"key": "repeats", "label": "Repeats", "type": "text"},
+                    {"key": "next", "label": "Next run", "type": "text"},
+                    {"key": "last", "label": "Last result", "type": "text"},
+                ],
+                "rows": sched_rows[:20],
                 "more": max(0, len(sched_rows) - 20),
             }
+        )
+        days = []
+        local_now = now.astimezone()
+        for n in range(7):
+            start = (local_now + timedelta(days=n)).replace(hour=0, minute=0, second=0, microsecond=0)
+            days.append(
+                {
+                    "date": start.strftime("%Y-%m-%d"),
+                    "items": _day_items(tickets, now, start, start + timedelta(days=1), n == 0),
+                }
+            )
+        first, last = local_now.date(), (local_now + timedelta(days=6)).date()
+        span = (
+            f"{first.day}\u2013{last.day} {last:%B}"
+            if first.month == last.month
+            else f"{first.day} {first:%B} \u2013 {last.day} {last:%B}"
+        )
+        blocks.append(
+            {"type": "calendar", "title": "Coming up", "meta": f"{span} \u00b7 Workspace time", "days": days}
         )
     else:
         blocks.append(
             {
                 "type": "list",
-                "title": "Schedules · 0 on",
-                "items": [
-                    {
-                        "title": "No repeats yet",
-                        "subtitle": "Ask your helper to repeat a ticket.",
-                    }
-                ],
+                "title": "Schedules",
+                "items": [],
+                "empty": {
+                    "title": "No schedules yet",
+                    "text": "Repeat any ticket on a plan you choose. Your upcoming work and results will appear here.",
+                    "mark": "repeat",
+                },
             }
         )
 
     ls = listen.read(root) if pid else {}
     sources = _sources(tickets, ls, bool(pid))
-    blocks.append(
-        {
-            "type": "list",
-            "title": f"Listen · {len(sources)} source{'' if len(sources) == 1 else 's'}",
-            "items": sources[:20],
-            "more": max(0, len(sources) - 20),
-        }
-    )
+    # the first row is the phone and workspaces inbox: with nothing arrived it is just the footnote below
+    waiting_hooks = sources if (ls.get("recent") or []) else sources[1:]
     warn = needs.rows(root, now)
     if warn:
         blocks.append(
@@ -497,17 +483,65 @@ def build(root: Path, now: datetime | None = None) -> dict:
         if r["ticket"] in by_id:
             row["link"] = r["ticket"]
         recent.append(row)
-    if recent:
-        blocks.append({"type": "list", "title": "Recent runs", "items": recent})
+    if waiting_hooks:
+        blocks.append(
+            {
+                "type": "list",
+                "title": "Incoming work",
+                "items": waiting_hooks[:20],
+                "more": max(0, len(waiting_hooks) - 20),
+            }
+        )
+    if recent or sched_rows:
+        nxt_row = sched_rows[0] if sched_rows else None
+        soon = None
+        if nxt_row:
+            tid = nxt_row["link"]
+            t = by_id.get(tid)
+            here = local_next(_repeats(t, True), _tz(t), now) if t and _repeats(t, True) else None
+            soon = f"{_name(t)} is scheduled for {here[0]:%A}. " if here else None
+        blocks.append(
+            {
+                "type": "list",
+                "title": "Recent runs",
+                "meta": "Latest activity",
+                "above": True,
+                "items": recent,
+                "empty": {
+                    "title": "Nothing has run yet",
+                    "text": (soon or "") + "You can also run it now.",
+                    "mark": "repeat",
+                },
+            }
+        )
+    state = (
+        "Listening"
+        if ls.get("listening")
+        else clean(ls.get("note") or ("Not listening" if pid else "Automation is stopped"), 80)
+    )
+    arrived = (ls.get("recent") or [None])[-1] if ls.get("recent") else None
+    blocks.append(
+        {
+            "type": "footnote",
+            "text": clean(
+                "Incoming from your phone and other workspaces \u00b7 "
+                + (state if not arrived else f"{state}, last message {_arrival(arrived)['subtitle']}"),
+                200,
+            ),
+            "link": {"label": "Manage incoming work", "to": "app:addon/relay"},
+        }
+    )
 
     today = now.strftime("%Y-%m-%d")
     ran = sum(r["at"].startswith(today) for r in runs)
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
     if pid:
         nxt = events[0][0] if events else None
-        line = "Running." + (f" Next run {_in(nxt - now)}." if nxt else " Nothing planned.")
+        line = "On." + (
+            f" Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}" if nxt else " Nothing planned"
+        )
         if ran >= 5:
-            line += f" Ran {ran} times today."
+            line += f". Ran {ran} times today"
         view.update(notice=line, notice_tone="good")
     else:
         view.update(

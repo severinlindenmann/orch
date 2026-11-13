@@ -10,8 +10,12 @@ def test_settings_navigation_and_cards():
         "'data-action':'settings-tab'",
         "'data-key':'settings-switch-'",
         "a.dashboard?.panel === 'phone'",
-        "panel('phone', settingsTab === 'phone' ? addonView(phoneAddon) : null)",
+        "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
+        "'1. Relay connection'",
+        "'Connect to your relay first'",
+        "function addonDetailPage(addon)",
+        "'About this add-on'",
         "OrchLook?.settingsSection()",
         "agent-card",
         "role:'status', className:'meta test-note'",
@@ -19,19 +23,22 @@ def test_settings_navigation_and_cards():
         "'data-action':'settings-addon'",
         "settingsText('p', {className:'meta'}, addon.description)",
         "panelOf(id) === 'repeats'",
-        "panelOf(id) === 'links'",
+        "isPublish(id)",
         "a?.dashboard?.label",
     ):
         assert text in src
     assert "className:'settings-details'" not in src
     # the phone tab is a real tab that stays in Settings (no link away to the add-on page)
     assert "href:'#addon/' + phoneAddon.name" not in src
+    # the add-on detail page has no Details toggle; "Pair a phone" stays disabled until the relay is connected
+    detail = src[src.index("function addonDetailPage(addon)") :][:3500]
+    assert "h('summary'" not in detail and "'Details'" not in detail
+    assert "connected ? {} : {disabled:true}" in src
     assert "history.replaceState(null, '', '#settings/' + tab)" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
-    # owner fb11 (11 Nov): the folder path is on the row without a click; plain words + full path under Details
-    folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:700]
-    assert folder.index("middleShort(settings.folder)") < folder.index("h('summary', {}, 'Details')")
-    assert folder.index("h('summary', {}, 'Details')") < folder.index("'Stored on this computer'")
+    # folder: plain name + Copy path + quiet full path, no Details toggle
+    folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:900]
+    assert "'Copy path'" in folder and "h('summary'" not in folder
     assert "['agent', 'Helper']" in src and "['agent', 'Agent']" not in src
     css = (webjs.WEB / "pages/settings.css").read_text()
     assert "@media(max-width:760px)" in css
@@ -50,18 +57,18 @@ def test_switch_rows_choices_and_closed_details_owner_pass():
     narrow = css[css.index("@media(max-width:720px)") :]
     stacked = ".settings .copies-choices{justify-self:stretch;flex-direction:column;align-items:stretch}"
     assert stacked in narrow
-    # a closed Details has no empty band under it
     assert ".settings .copies-details{padding:0 16px;" in css
-    assert ".settings .copies-details[open]{padding-bottom:8px}" in css
 
 
-def test_repeat_uses_only_presets_and_open_tickets():
+def test_repeat_window_offers_plain_choices_and_open_tickets():
     src = webjs.all_js()
-    assert "['every day at 9', 'every weekday at 9', 'every monday at 9', 'every hour']" in src
+    assert (
+        "const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];"
+        in src
+    )
     assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
-    assert "{addon:addonName || route().id, verb, target:ticket.value}" in src
-    assert "if (!once) args.value = preset.value;" in src
-    assert "await act('addon.act', args)" in src
+    assert "{addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase}" in src
+    assert "verb:'copy', target:ticket.value" in src
     assert "if (route().kind === 'addon') await loadAddon(route().id)" in src
 
 
@@ -72,12 +79,6 @@ def test_shared_links_are_optional_and_use_plain_actions():
         "if (res.status !== 200) { sharedLinks = null; sharedLinksDown = false; return; }",
         "Array.isArray(data.links)",
         "catch (_) { sharedLinks = null; sharedLinksDown = false; }",
-        "Couldn't reach the sharing server; try again in a moment.",
-        "sharedLinks !== null",
-        "No shared links yet.",
-        "Link valid until ",
-        "No end date",
-        "'Expired'",
         "if (!link.copy) return;",
         "navigator.clipboard.writeText(link.link)",
         "act('link.extend', {id:link.id, days:7})",
@@ -85,6 +86,7 @@ def test_shared_links_are_optional_and_use_plain_actions():
         "'The link stops working.'",
         "'Stop sharing', send",
         "bindAddonControls(host)",
+        "'data-native':'link-share'",  # the page heading's "Share a file"
     ):
         assert text in src
 
@@ -129,18 +131,21 @@ global.window = {orch:{open() {}, close:async () => {}, toast() {}}};
 global.act = async (op, args) => { calls.push({op, args}); return {ok:true}; };
 loadAddon = async () => {};
 (async () => {
-  repeatsDialog();
-  assert.equal(selects.at(-1).options[0].text, 'Just once, now');
-  assert.equal(selects.at(-1).value, 'once');
-  selects.at(-1).value = 'every day at 9';
-  await controls.at(-1).onclick();
-  assert.deepEqual(calls.pop(), {op:'addon.act', args:{addon:'automation', verb:'repeat', target:'t_open', value:'every day at 9'}});
-  repeatsDialog();
-  selects.at(-1).value = 'once';
-  await controls.at(-1).onclick();
-  repeatsDialog('t_open', 'automation');
-  assert.equal(selects.at(-1).value, 'every day at 9');
-  assert.deepEqual(calls.pop(), {op:'addon.act', args:{addon:'automation', verb:'copy', target:'t_open'}});
+  const plan = repeatPlan;
+  assert.deepEqual(plan({freq:'daily', time:'07:30'}), {phrase:'daily 07:30', summary:'Runs every day at 07:30', hint:''});
+  assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).phrase, 'every monday 08:00');
+  assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).summary, 'Runs every Monday at 08:00');
+  assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).phrase, '5 8 * * 1,3,5');
+  assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).summary, 'Runs every Monday, Wednesday and Friday at 08:05');
+  assert.equal(plan({freq:'weekly', days:[0], time:'09:00'}).phrase, 'every sunday 09:00');
+  assert.equal(plan({freq:'weekly', days:[], time:'08:00'}).phrase, null);
+  assert.equal(plan({freq:'monthly', monthday:15, time:'09:00'}).phrase, 'monthly 15 09:00');
+  assert.equal(plan({freq:'monthly', monthday:31, time:'09:00'}).phrase, null);
+  assert.equal(plan({freq:'custom', every:3, time:'06:10'}).phrase, '10 6 */3 * *');
+  assert.equal(plan({freq:'custom', every:1, time:'06:10'}).phrase, 'daily 06:10');
+  assert.equal(plan({freq:'custom', every:0, time:'06:10'}).phrase, null);
+  assert.equal(plan({freq:'daily', time:''}).phrase, null);
+  assert.equal(plan({freq:'daily', time:'25:00'}).phrase, null);
   global.location = {hash:''};
   messageSend({dataset:{sendTo:'ws_abcdefghij'}});
   assert.equal(location.hash, '#chat/ws_abcdefghij');
@@ -230,3 +235,47 @@ def test_settings_pending_carries_every_hashed_field_in_full(ws, monkeypatch):
         ),
     )
     assert data.load_settings(ws, "orch")["git_private"]["pending"] == [row]
+
+
+def test_settings_splits_installed_and_available(ws, monkeypatch):
+    """`installed: false` rows (shipped, not installed) go to settings.available; a missing key still means installed."""
+    from orch_dashboard import data
+
+    rows = [
+        {"name": "old", "description": "Old mock row", "active": True},  # no `installed` key = installed
+        {"name": "alpha", "installed": True, "active": False, "description": "A"},
+        {
+            "name": "factory",
+            "installed": False,
+            "active": False,
+            "version": "0.1.0",
+            "description": "Shows the plan.",
+            "background": True,
+            "recommended": True,
+            "dashboard": {"label": "Factory", "icon": "link", "order": 5, "panel": None},
+        },
+        {"name": "Bad Name", "installed": False},
+        "junk",
+    ]
+
+    def run(binary, args, root):
+        return rows if args == ["addon", "list", "--json"] else None
+
+    monkeypatch.setattr(data, "run_orch", run)
+    out = data.load_settings(ws, "orch")
+    assert [a["name"] for a in out["addons"]] == ["old", "alpha"]
+    assert len(out["available"]) == 1
+    f = out["available"][0]
+    assert (f["name"], f["label"], f["recommended"], f["background"]) == ("factory", "Factory", True, True)
+    assert f["description"] == "Shows the plan." and "Adds a dashboard tab: Factory" in f["consent"]
+
+
+def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
+    src = webjs.all_js()
+    start = src.index("function addonCatalog()")
+    body = src[start : src.index("function settingsConfirm", start)]
+    assert "act('addon.set', {name, on:true})" in body  # same op as the switch
+    assert "'Every add-on that comes with orch is already here.'" in body
+    assert "'Turned on. It starts with orch start.'" in body and "act('addon.start', {})" in body
+    assert "state.settings?.available" in body
+    assert "not connected yet" not in body and "innerHTML" not in body

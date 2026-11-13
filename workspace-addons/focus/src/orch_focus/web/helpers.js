@@ -33,7 +33,7 @@
   /* "2 agents are working. One question needs you." The agent part is left out while no agent works. */
   function pickerLine(agents, attention) {
     const n = Number(agents) || 0;
-    const working = n ? (n === 1 ? '1 agent is working.' : n + ' agents are working.') : '';
+    const working = n ? (n === 1 ? '1 helper is working.' : n + ' helpers are working.') : '';
     return [working, attention || ''].filter(Boolean).join(' ');
   }
   /* A small picture for a file by its kind: 📊 sheets, 📝 writing, 📄 PDF, 🖼 pictures, 📁 the rest. */
@@ -92,6 +92,13 @@
   function resultCount(checklist) {
     return (checklist || []).filter(c => c.done && !c.wont_do && (c.evidence || []).length).length;
   }
-  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
+  /* The review bar (Accept / Ask for changes) shows whenever the ticket waits for review and nothing else needs
+     the person first: in compact, terminal and full-screen views alike, never only on the Results tab. */
+  function reviewBarShown(v) {
+    const t = (v && v.ticket) || {};
+    const asking = (t.questions || []).some(q => q.answer == null) || (v && v.state === 'needs');
+    return t.status === 'review' && !asking && !(v && v.run && v.run.running);
+  }
+  root.FocusHelpers = {reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);

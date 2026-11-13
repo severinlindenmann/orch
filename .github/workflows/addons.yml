@@ -31,6 +31,20 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q -n auto
+  factory:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workspace-addons/factory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q -n 2
   sync:
     runs-on: ubuntu-latest
     defaults:

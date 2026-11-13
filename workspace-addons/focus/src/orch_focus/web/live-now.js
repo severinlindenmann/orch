@@ -9,6 +9,9 @@
   function mount(box) {
     if (!box || box.querySelector('.fx-livenow')) return;
     const section = h('section', {class: 'fx-livenow', hidden: true, 'aria-label': 'Live now'});
+    /* what waits for you comes first, with its answer buttons; the rest of the live work follows, each with its real current step */
+    const askSection = h('section', {class: 'fx-livenow fx-livenow-ask', hidden: true, 'aria-label': 'Needs you'});
+    box.insertBefore(askSection, box.querySelector('.fx-pick-group, .fx-procs'));
     box.insertBefore(section, box.querySelector('.fx-pick-group, .fx-procs'));
     let last = '', loading = false, sending = 0, generation = 0;
 
@@ -86,7 +89,7 @@
     /* A ticket shown as a live card is not listed again under "Working". */
     let shown = new Set();
     function hideListed() {
-      for (const group of box.querySelectorAll('.fx-group-active')) {
+      for (const group of box.querySelectorAll('.fx-group-active, .fx-group-waiting')) {
         let left = 0;
         for (const a of group.querySelectorAll('.card > a')) {
           const id = (a.getAttribute('href') || '').split('/').pop();
@@ -100,15 +103,18 @@
     function paint(cards) {
       shown = new Set(cards.map(c => c.ticket));
       hideListed();
-      section.hidden = !cards.length;
+      const asking = cards.filter(c => c.question), working = cards.filter(c => !c.question);
+      section.hidden = !working.length; askSection.hidden = !asking.length;
       box.classList.toggle('fx-pick-live', !!cards.length);
       // keep the keyboard where it was: the cards are drawn again
-      const at = section.contains(document.activeElement) ? [...section.querySelectorAll('a,button')].indexOf(document.activeElement) : -1;
-      section.replaceChildren(...(cards.length ? [
-        h('h2', {text: 'Live now '}, h('span', {class: 'meta', text: '(' + cards.length + ')'})),
-        h('div', {class: 'fx-ln-grid' + (cards.length > 4 ? ' compact' : '')}, cards.map(cardView))
+      const both = [askSection, section];
+      const at = both.map(x => x.contains(document.activeElement) ? [...x.querySelectorAll('a,button')].indexOf(document.activeElement) : -1);
+      const draw = (node, list, title) => node.replaceChildren(...(list.length ? [
+        h('h2', {text: title + ' '}, h('span', {class: 'meta', text: '(' + list.length + ')'})),
+        h('div', {class: 'fx-ln-grid' + (list.length > 4 ? ' compact' : '')}, list.map(cardView))
       ] : []));
-      if (at >= 0) section.querySelectorAll('a,button')[at]?.focus();
+      draw(askSection, asking, 'Needs you'); draw(section, working, 'Live now');
+      both.forEach((x, i) => { if (at[i] >= 0) x.querySelectorAll('a,button')[at[i]]?.focus(); });
       S.state.pickAgents = cards.length;  // "2 agents are working." in the line under the title
       if (S.views.ticket && S.views.ticket.pickerSub) S.views.ticket.pickerSub();
     }

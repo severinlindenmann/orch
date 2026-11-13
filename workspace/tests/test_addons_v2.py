@@ -138,3 +138,24 @@ def test_shipped_local_addons_are_recommended_and_server_ones_are_not():
         got[m["name"]] = m.get("recommended", False)
     assert got["dashboard"] and got["automation"] and got["focus"], got
     assert not any(v for k, v in got.items() if k not in ("dashboard", "automation", "focus")), got
+
+
+def test_dashboard_title_and_subtitle_are_optional_plain_text(tmp_path):
+    """A page heading that differs from the nav label (Phone & workspaces / Messages), and one sentence."""
+
+    def with_(extra):
+        return lambda t: t.replace("order = 20\n", "order = 20\n" + extra)
+
+    ok = addons.folder_manifest(
+        make_addon(
+            tmp_path / "a", mutate=with_('title = "Messages"\nsubtitle = "Send messages and files."\n')
+        )
+    )
+    assert (
+        ok["dashboard"]["title"] == "Messages" and ok["dashboard"]["subtitle"] == "Send messages and files."
+    )
+    assert "title" not in addons.folder_manifest(make_addon(tmp_path / "b"))["dashboard"]
+    bads = ('title = "<b>x</b>"\n', 'title = ""\n', 'subtitle = "' + "x" * 121 + '"\n', "title = 3\n")
+    for n, bad in enumerate(bads):
+        with pytest.raises(Refused):
+            addons.folder_manifest(make_addon(tmp_path / f"c{n}", mutate=with_(bad)))

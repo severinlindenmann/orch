@@ -26,7 +26,7 @@ const EXPECT_GLOBALS = ['FocusStore', 'FocusHelpers'];
   try {
     for (const s of SCREENS) {
       const srv = servers[s.server || 'focus'];
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const page = await browser.newPage({ viewport: { width: s.smokeWidth || 1280, height: 900 } });
       const note = what => problems.push(`${s.name}: ${what}`);
       page.on('console', m => { if (m.type() === 'error') note(`console error: ${m.text().slice(0, 300)}`); });
       page.on('pageerror', e => note(`uncaught exception: ${String(e.message).slice(0, 300)}`));

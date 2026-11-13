@@ -36,38 +36,89 @@ def local_time(iso):
 
 
 def build(root, settings, now=None):
-    s = act.status(root, settings)
+    """The Sync page: the saved setting as rows, the three places to keep a copy as one choice, then what was kept
+    here. When the status can't be read the saved setting still shows, with one plain line and Try again."""
     now = now or datetime.now(UTC)
-    text, tone = STATE.get(s["shown"], STATE["never"])
-    blocks = [
-        {"type": "stat", "label": "Sync", "value": MODE.get(s["mode"], "Off")[:24], "tone": tone},
-        {"type": "stat", "label": "Last synced", "value": local_time(s["last_ok"])},
-    ]
-    if s["mode"] == "remote" and s["remote"]:
-        blocks.append({"type": "stat", "label": "Where", "value": clean(s["remote"], 24)})
-    problems = s["not_synced"]
-    items = [
-        {"title": clean(p["name"]), "subtitle": clean(p["why"]), "tone": "warn"}
-        if p["why"]
-        else {"title": clean(p["name"]), "tone": "warn"}
-        for p in problems[:50]
-    ]
-    blocks.append(
-        {
-            "type": "list",
-            "title": f"Kept here, not synced · {len(problems)}",
-            "items": items or [{"title": "Nothing was left out", "tone": "good"}],
-            "more": max(0, len(problems) - 50),
+    saved = settings.get("mode") if settings.get("mode") in MODE else "off"
+    try:
+        s = act.status(root, settings)
+        unreadable = False
+    except Exception:  # noqa: BLE001 - the setting is known even when the live status is not
+        s = {
+            "mode": saved,
+            "shown": "never",
+            "last_ok": None,
+            "remote": None,
+            "not_synced": [],
+            "last_error": None,
         }
-    )
+        unreadable = True
+    text, tone = STATE.get(s["shown"], STATE["never"])
+    rows = [
+        {
+            "label": "Current setting",
+            "value": MODE.get(s["mode"], "Off")[:120],
+            "note": "Tickets and their files can be copied. Secrets and private files are never included.",
+        }
+    ]
+    if s["mode"] != "off" and not unreadable:
+        rows.append({"label": "Status", "value": clean(text, 120), "tone": tone})
+        rows.append({"label": "Last synced", "value": local_time(s["last_ok"])})
+        if s["mode"] == "remote" and s["remote"]:
+            rows.append({"label": "Where", "value": clean(s["remote"], 120)})
+    blocks = [
+        {"type": "settings", "title": "Keep a copy of my tickets", "rows": rows},
+        {
+            "type": "radio",
+            "title": "Where to keep a copy",
+            "options": [
+                {
+                    "label": "Off",
+                    "selected": s["mode"] == "off",
+                    "action": {"op": "addon.act", "args": {"verb": "set", "target": "off"}},
+                },
+                {
+                    "label": "On this computer only",
+                    "selected": s["mode"] == "local",
+                    "action": {"op": "addon.act", "args": {"verb": "set", "target": "local"}},
+                },
+                {
+                    "label": "Also on another computer or server",
+                    "selected": s["mode"] == "remote",
+                    "link": "app:settings",  # the address is chosen and signed in Settings > General
+                },
+            ],
+        },
+    ]
+    problems = s["not_synced"]
+    if problems:
+        blocks.append(
+            {
+                "type": "list",
+                "title": f"Kept here, not synced \u00b7 {len(problems)}",
+                "items": [
+                    {"title": clean(p["name"]), "subtitle": clean(p["why"]), "tone": "warn"}
+                    if p["why"]
+                    else {"title": clean(p["name"]), "tone": "warn"}
+                    for p in problems[:50]
+                ],
+                "more": max(0, len(problems) - 50),
+            }
+        )
     view = {
         "schema": "orch.addon-view/1",
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "notice": clean(text),
-        "notice_tone": tone,
+        "header": {"link": {"label": "\u2190 General settings", "to": "app:settings"}},
         "blocks": blocks,
     }
-    if s["last_error"] and s["last_error"] != "offline":
-        view["notice"] = clean(f"{text}. Last problem: {s['last_error']}")
-        view["notice_tone"] = "warn"
+    if unreadable:
+        view.update(
+            notice="Can\u2019t read sync status. The saved setting is shown above. Nothing here was changed.",
+            notice_tone="warn",
+            button={"label": "Try again", "action": {"op": "addon.refresh"}},
+        )
+    elif s["shown"] in ("paused", "offline"):
+        view.update(notice=clean(text), notice_tone=tone)
+    elif s["last_error"] and s["last_error"] != "offline":
+        view.update(notice=clean(f"{text}. Last problem: {s['last_error']}"), notice_tone="warn")
     return view

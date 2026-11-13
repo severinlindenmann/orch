@@ -186,18 +186,31 @@ def view(root: Path) -> dict:
     except Refused:
         out["notice"] = "Relay not connected. Connect it in Settings."
         out["notice_tone"] = "warn"
-        out["blocks"].append(
+        out["header"] = {"status": {"label": "Not connected", "tone": "warn"}}
+        out["blocks"] += [
             {
                 "type": "list",
-                "title": "Relay",
-                "items": [
-                    {
-                        "title": "Not connected",
-                        "subtitle": "Then you see the workspaces you can talk to and their messages here.",
-                    }
-                ],
-            }
-        )
+                "title": "Recent messages",
+                "span": "half",
+                "items": [],
+                "empty": {
+                    "title": "Not connected",
+                    "text": "Connect the relay in Settings to send and receive messages.",
+                    "button": {"label": "Open phone settings", "to": "app:settings/phone"},
+                },
+            },
+            {
+                "type": "list",
+                "title": "Workspaces you can talk to",
+                "span": "half",
+                "count": 0,
+                "items": [],
+                "empty": {
+                    "title": "No workspaces yet",
+                    "text": "The workspaces you allow show here once the relay is connected.",
+                },
+            },
+        ]
         return out
     with contextlib.suppress(Exception):  # the admin's settings changed: pick them up now
         relay.auto_refresh(root)
@@ -212,22 +225,11 @@ def view(root: Path) -> dict:
             else f"{waiting} message{s} wait to be sent. They go out as soon as the relay can be reached."
         )
         out["notice_tone"] = "warn"
+        out["header"] = {"status": {"label": "Waiting to send", "tone": "warn"}}
     else:
         out["notice"] = "Connected. Send messages and files to other workspaces."
-        out["notice_tone"] = "good"
-    out["blocks"].append(
-        {
-            "type": "list",
-            "title": f"Workspaces you can talk to · {len(peers)}",
-            "items": peers[:50]
-            or [
-                {
-                    "title": "Nobody yet",
-                    "subtitle": "Ask your admin to allow this workspace to talk to others.",
-                }
-            ],
-        }
-    )
+        out["notice_tone"] = "good"  # the page shows the pill instead of a banner for this one
+        out["header"] = {"status": {"label": "Connected", "tone": "good"}}
     rows: list[tuple[str, dict]] = []
 
     def row(at: str, who: str, arrow: str, type_: str, line: str, extra: str) -> tuple[str, dict]:
@@ -259,17 +261,34 @@ def view(root: Path) -> dict:
             )
         )
     rows.sort(key=lambda r: r[0], reverse=True)
-    items = [r for _, r in rows[:20]] or [
+    out["blocks"] += [
         {
-            "title": "No messages yet",
-            "subtitle": (
-                "Send one from the phone or from another workspace."
-                if peers
-                else "First add a workspace you can talk to (ask your admin)."
-            ),
-        }
+            "type": "list",
+            "title": "Recent messages",
+            "span": "half",
+            "items": [r for _, r in rows[:20]],
+            "more": max(0, len(rows) - 20),
+            "empty": {
+                "title": "No messages yet",
+                "text": (
+                    "Send one from the phone or from another workspace."
+                    if peers
+                    else "Pair a phone or allow a workspace in Settings to start a conversation."
+                ),
+                "button": {"label": "Open phone settings", "to": "app:settings/phone"},
+            },
+        },
+        {
+            "type": "list",
+            "title": "Workspaces you can talk to",
+            "span": "half",
+            "count": len(peers),
+            "items": peers[:50],
+            "empty": {
+                "title": "No workspaces allowed",
+                "text": "Allow a workspace to send it messages and files.",
+                "link": {"label": "Allow a workspace", "to": "app:settings/phone"},
+            },
+        },
     ]
-    out["blocks"].append(
-        {"type": "list", "title": "Recent messages", "items": items, "more": max(0, len(rows) - 20)}
-    )
     return out

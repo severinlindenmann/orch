@@ -35,6 +35,36 @@
     items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
     return items.slice(-80);
   }
+  /* Where each task's work sits in the output: the task.start / task.done events carry the task's id (check). */
+  function taskRuns(v) {
+    const marks = (v.events || []).filter(e => (e.kind === 'task.start' || e.kind === 'task.done') && e.data && e.data.check).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    const runs = new Map();
+    for (const e of marks) {
+      const r = runs.get(e.data.check) || {start: null, end: null};
+      if (e.kind === 'task.start' && !r.start) r.start = e.at;
+      if (e.kind === 'task.done') r.end = e.at;
+      runs.set(e.data.check, r);
+    }
+    return runs;
+  }
+  /* "6 min" from the recorded start and end (a task still working counts to the newest event); '' when unknown */
+  function taskMinutes(v, id) {
+    const r = taskRuns(v).get(id);
+    if (!r || !r.start) return '';
+    const last = (v.events || []).reduce((m, e) => (String(e.at) > m ? String(e.at) : m), '');
+    const ms = new Date(r.end || last).getTime() - new Date(r.start).getTime();
+    return ms >= 30000 ? Math.max(1, Math.round(ms / 60000)) + ' min' : '';
+  }
+  /* the main agent's steps, by the task they happened in */
+  function stepsByTask(v) {
+    const runs = [...taskRuns(v)].filter(([, r]) => r.start).sort((a, b) => String(b[1].start).localeCompare(String(a[1].start)));
+    const out = new Map();
+    for (const it of feedItems(v, 'main')) {
+      const own = runs.find(([, r]) => String(it.at) >= String(r.start) && (!r.end || String(it.at) <= String(r.end)));
+      if (own) out.set(own[0], [...(out.get(own[0]) || []), it]);
+    }
+    return out;
+  }
   const usedChip = used => (used && S.views.used ? S.views.used.chip(used) : null);
   /* A step only the agent reported: a small plain mark; a checked step shows nothing extra. */
   const UNCHECKED_WHY = {agent: 'Reported by the agent, not checked by orch.', before: 'Made before orch checked records.'};
@@ -43,8 +73,8 @@
   const recordNotes = v => (v.record_notes || []).map(t => h('p', {class: 'fx-record-note', role: 'note', text: t}));
 
   /* The plain step list right under the task: the newest first and marked, each with what it used (never raw names). */
-  function stepList(v, agent, max) {
-    const items = feedItems(v, agent).slice(-max).reverse();
+  function stepList(v, agent, max, own) {
+    const items = (own || feedItems(v, agent)).slice(-max).reverse();
     if (!items.length) return null;
     return h('ol', {class: 'fx-now-steps', 'aria-label': 'Latest steps'}, items.map((it, i) => h('li', {class: 'fx-now-step' + (i === 0 ? ' newest' : '') + (it.ok === false ? ' bad' : '')},
       h('time', {datetime: it.at, text: hhmm(it.at)}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used), uncheckedMark(it.unchecked)))));
@@ -91,22 +121,24 @@
     const nodes = [h('h2', {text: st.headline}), ...recordNotes(v)];
     if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
     let now = null;
+    const perTask = stepsByTask(v), runs = taskRuns(v);
     for (const c of story) {
-      const node = h('article', {class: 'fx-story' + (!c.done && active ? ' now' : '')},
+      const node = h('article', {class: 'fx-story' + (!c.done && active ? ' now' : ''), 'data-check': c.id, 'data-at': (runs.get(c.id) || {}).start || null},
         h('h3', {}, h('span', {text: (c.done ? '✓ ' : active ? 'Now: ' : '') + c.text})),
         h('p', {text: evText(c) || (!c.done && active ? v.board.step || 'Working on this task.' : '')}));
       if (!c.done && active && !now) now = node;
+      const own = perTask.get(c.id);
+      if (own) node.append(stepList(v, 'main', 8, own));
       nodes.push(node);
     }
     if (active && !now) nodes.push(now = h('article', {class: 'fx-story now'}, h('h3', {}, h('span', {text: v.board.step || 'Waiting for the first step…'}))));
     /* the step lines sit right under the task they belong to; while the agent rests, after the last task */
     const steps = stepList(v, 'main', 6);
-    if (steps && now) now.append(steps);
-    else if (steps) nodes.push(h('section', {class: 'fx-latest'}, h('h3', {text: 'Latest steps'}), steps));
+    if (steps && now) { if (!now.querySelector('.fx-now-steps')) now.append(steps); }
+    else if (steps && !perTask.size) nodes.push(h('section', {class: 'fx-latest'}, h('h3', {text: 'Latest steps'}), steps));
     if (!v.run.running && !asking && v.state !== 'done' && v.ticket.status !== 'review' && !v.ticket.started && !v.run.run) nodes.push(h('button', {class: 'btn primary', 'data-act': 'stop', text: 'Start ' + els.agent.textContent}));
     /* Details: the full history, the ticket's own lines included */
-    const details = h('details', {class: 'fx-history', open: !!S.state.detailsOpen}, h('summary', {text: 'Details'}));
-    details.addEventListener('toggle', () => { S.state.detailsOpen = details.open; });  // a poll draws it again; it stays as the person left it
+    const details = h('section', {class: 'fx-history'}, h('h3', {text: 'Earlier steps'}));  // plain, a quiet section at the bottom
     for (const it of feedItems(v, null)) details.append(h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used), uncheckedMark(it.unchecked))));
     nodes.push(details);
     keepFocus(els.feed, () => els.feed.replaceChildren(...nodes));
@@ -142,13 +174,66 @@
       const own = node.querySelector('.qoptions .quiet');
       if (own) own.textContent = 'Write your own…';
       const card = node.querySelector('.qcard');
-      if (card) card.prepend(h('p', {class: 'meta', text: 'Next step · Answer ' + els.agent.textContent}));
       const receipt = h('span', {class: 'fx-receipt', hidden: !delivered, title: 'Also sent to your phone', 'aria-label': 'Also sent to your phone', role: 'img'});
       receipt.innerHTML = '<svg width=16 height=16 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.5 aria-hidden=true><rect x=7 y=2 width=10 height=20 rx=2 /><path d="M10 18h4" /></svg>';
       (card || node).append(receipt);
       S.state.shownQs.set(q.id, {node, receipt});
       if (!S.state.firstRender && window.orch) window.orch.needsIn(node);
     }
+  }
+
+  /* ---- the compact trace, "With Helper", follow / "N new" ---- */
+  function renderTrace(v) {
+    const items = feedItems(v, 'main');
+    const last = items[items.length - 1];
+    const asking = v.ticket.questions.some(q => q.answer == null);
+    const text = last ? hhmm(last.at) + ' · ' + last.text : (v.board && v.board.step) || '';
+    els.traceText.textContent = text;
+    els.trace.hidden = !text && !asking;
+    return items;
+  }
+  function renderWith(v) {
+    const msgs = (v.ticket.history || []).filter(e => e.text && !/^(Created|Added check|Check c\d+ done|Marked c\d+|Asked q|Set ext\.|Patched status|Status )/.test(String(e.text)));
+    const key = keyOf(msgs);
+    if (key === els.withList.dataset.k) return;
+    els.withList.dataset.k = key;
+    els.withH.hidden = !msgs.length;
+    els.withList.replaceChildren(...msgs.slice(-12).map(e => h('article', {class: 'fx-with-item'},
+      h('p', {class: 'meta', text: (/^human:/.test(e.by || '') ? 'You' : 'Helper') + ' · ' + hhmm(e.at)}), h('p', {text: plainLine(String(e.text), v.ticket.checklist)}))));
+  }
+  function renderNext(v) {
+    const open = v.ticket.questions.filter(q => q.answer == null);
+    els.next.hidden = !open.length;
+    els.qCount.textContent = open.length === 1 ? '1 open question' : open.length + ' open questions';
+    const phone = !!(v.capabilities && v.capabilities.phone_mode && v.phone_mode);
+    els.phoneBtn.hidden = !open.length || !phone;
+    if (els.phoneBtn.hidden) els.phoneNote.hidden = true;
+  }
+  const scroller = () => els.paneLive;
+  const atBottom = () => { const p = scroller(); return p.scrollHeight - p.scrollTop - p.clientHeight < 48; };
+  const toEnd = () => { const p = scroller(); p.scrollTo({top: p.scrollHeight, behavior: S.reduce ? 'auto' : 'smooth'}); };
+  /* Following scrolls to new output; otherwise a small "N new" pill says there is more below. */
+  function followUpdate(items, first) {
+    const keyOfItem = it => it.at + '|' + it.text;
+    const seen = S.state.seenKey;
+    const at = seen ? items.findIndex(it => keyOfItem(it) === seen) : -1;
+    const fresh = first || !items.length ? 0 : (at < 0 ? (seen ? items.length : 0) : items.length - at - 1);
+    const mark = () => { S.state.seenKey = items.length ? keyOfItem(items[items.length - 1]) : ''; };
+    if (first || !seen) mark();
+    if (fresh > 0 && S.state.follow) { mark(); requestAnimationFrame(toEnd); els.newPill.hidden = true; return; }
+    if (fresh > 0) { els.newPill.hidden = false; els.newPill.textContent = fresh + ' new'; S.state.freshMark = mark; return; }
+    els.newPill.hidden = true;
+  }
+  function jumpToNew() { if (S.state.freshMark) S.state.freshMark(); els.newPill.hidden = true; toEnd(); }
+  /* a step of the work log: the output scrolls to where that task started */
+  function scrollToTask(id) {
+    els.tabs[0].click();
+    const v = S.state.view, start = (taskRuns(v).get(id) || {}).start;
+    let target = els.feed.querySelector('.fx-story[data-check="' + id + '"]');
+    if (!target && start) target = [...els.feed.querySelectorAll('time[datetime]')].find(t => String(t.getAttribute('datetime')) >= String(start));
+    if (!target) { toast('Nothing has happened in this step yet.', 'ok'); return; }
+    target.scrollIntoView({block: 'start', behavior: S.reduce ? 'auto' : 'smooth'});
+    target.classList.add('hit'); setTimeout(() => target.classList.remove('hit'), 1600);
   }
 
   function renderLine(v) {
@@ -180,5 +265,5 @@
     els.working.replaceChildren(...(running && v.board.step ? [h('span', {class: 'fx-dot'}), h('span', {text: v.board.step})] : []));
   }
 
-  S.register('live', {plainLine, feedItems, renderFeed, renderQuestions, renderLine, focusQuestion, stopToggle, startFresh, renderWorking});
+  S.register('live', {renderTrace, renderWith, renderNext, followUpdate, jumpToNew, scrollToTask, atBottom, taskMinutes, plainLine, feedItems, renderFeed, renderQuestions, renderLine, focusQuestion, stopToggle, startFresh, renderWorking});
 })();

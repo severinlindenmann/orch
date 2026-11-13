@@ -55,9 +55,9 @@ def init(root: Path, code: str | None = None) -> list[str]:
 def has_recommended(root: Path) -> bool:
     from orch import addons
 
-    return any(r["recommended"] and not r["active"] for r in addons.listing(root)) or bool(
-        addons.shipped_recommended(fetch=False)
-    )
+    return any(
+        r.get("installed", True) and r["recommended"] and not r["active"] for r in addons.listing(root)
+    ) or bool(addons.shipped_recommended(fetch=False))
 
 
 def recommended(root: Path, yes: bool = False, interactive: bool = False) -> list[str]:
@@ -69,7 +69,9 @@ def recommended(root: Path, yes: bool = False, interactive: bool = False) -> lis
 
     from orch import addons
 
-    rows = [r for r in addons.listing(root) if r["recommended"] and not r["active"]]
+    rows = [
+        r for r in addons.listing(root) if r.get("installed", True) and r["recommended"] and not r["active"]
+    ]
     mans = addons.discover()
     installed = (set(addons.installed_names()) & set(mans)) | set(addons.CORE_ADDONS)
     for name, m in addons.shipped_recommended().items():  # shipped with orch, not installed yet

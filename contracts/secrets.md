@@ -52,7 +52,7 @@ disallowed-tools flag (any spelling in the existing flags, `--disallowedTools X`
 merged into one; an existing list is extended, never replaced; added when there is none). The rules are added whatever the permission
 mode, including `full`. Without a workspace orch **refuses to start** such a tool. The tool that is really started must be found and report a version of
 2.0.0 or newer (patterns with `*` inside, `Read(//..)`); not found, no output, unreadable output and older all **refuse** (deny by
-default, no override): `Claude could not be checked for the deny rules: update or reinstall it, then try again.` The one flag is placed
+default, no override): `Claude Code is missing or too old on this computer. Install or update it, then press Continue.` The one flag is placed
 **last** before the `--` that precedes the prompt (it takes a list, so nothing positional may follow it).
 - Candidate homes, always: `<account home>/.orch-tool` and `ORCH_HOME` (when set), plus the guarded/trusted home when it resolves. A
   candidate that is or contains the workspace **refuses the start** (`orch's folder contains this workspace: move the workspace out of it,

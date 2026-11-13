@@ -12,7 +12,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
+import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -194,6 +197,7 @@ FREE_OPS = frozenset(
     {
         "ticket.new",
         "ticket.paste",
+        "ticket.attach",
         "ticket.edit",
         "ticket.field",
         "ticket.patch",
@@ -329,7 +333,7 @@ def _ticket_new(a):
 def attachments(op, args) -> list[tuple[str, bytes]]:
     """The files a new ticket brings along: (name hint, bytes), checked before anything is created. The name is
     only a hint, orch picks the real one; type, content and size are checked again by orch itself."""
-    if op not in ("ticket.new", "ticket.paste") or not isinstance(args, dict):
+    if op not in ("ticket.new", "ticket.paste", "ticket.attach") or not isinstance(args, dict):
         return []
     out: list[tuple[str, bytes]] = []
     long_text = args.get("long_text")
@@ -343,7 +347,7 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
     if files is None:
         return out
     # No count limit: each file stays under ATTACH_MAX and the request under the server's body limit.
-    if op != "ticket.new" or not isinstance(files, list):
+    if op not in ("ticket.new", "ticket.attach") or not isinstance(files, list):
         raise BadRequest("Those files could not be read.")
     for f in files:
         if not isinstance(f, dict) or set(f) - {"name", "text", "data"} or not isinstance(f.get("name"), str):
@@ -369,6 +373,15 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
             raise BadRequest(f"{f['name'][:60]} is over 2 MB.")
         out.append((f["name"], raw))
     return out
+
+
+def _ticket_attach(a):
+    """Files added to a ticket that already exists (a ticket page composer): one line in the history, the files go through
+    `orch ticket attach` after it (see attachments / run_op)."""
+    _only(a, ("ticket", "files"))
+    if not isinstance(a.get("files"), list) or not a["files"]:
+        raise BadRequest("Choose a file to add.")
+    return ["log", _tid(a.get("ticket"))], [], ["Added files to the ticket"]
 
 
 def _ticket_paste(a):
@@ -878,6 +891,7 @@ OPS = {
     "answer": _answer,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
+    "ticket.attach": _ticket_attach,
     "ticket.patch": _ticket_patch,
     "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
@@ -947,11 +961,17 @@ def _addon_is_on(root: Path, orch_bin: str, name: str) -> bool:
     )
 
 
-def _addon_known(root: Path, orch_bin: str, name: str) -> bool:
+def _addon_row(root: Path, orch_bin: str, name: str) -> dict | None:
     rows = run_orch(orch_bin, ["addon", "list", "--json"], root)
-    return any(
-        isinstance(r, dict) and r.get("name") == name for r in (rows if isinstance(rows, list) else [])
-    )
+    for r in rows if isinstance(rows, list) else []:
+        if isinstance(r, dict) and r.get("name") == name:
+            return r
+    return None
+
+
+def _addon_known(root: Path, orch_bin: str, name: str) -> bool:
+    """Listed by core: installed, or shipped with orch and available (`installed: false`; turning it on is the Add)."""
+    return _addon_row(root, orch_bin, name) is not None
 
 
 def _agent_exists(root: Path, orch_bin: str, name: str) -> bool:
@@ -1045,9 +1065,102 @@ def human_env(root: Path, orch_bin: str) -> dict:
     return child_env({**env, "ORCH_ROOT": str(root), "ORCH_VIA": "dashboard"}, orch_bin)
 
 
+SHARE_MAX = (
+    3 * 1024 * 1024
+)  # raw bytes of a file picked in the browser (the request body is capped at 5 MB as base64)
+
+
+def _sweep_shares(parent: Path, older_than: float = 600.0) -> None:
+    """Remove copies a crashed share left behind (folders s-* older than 10 minutes, inside the share folder)."""
+    now = time.time()
+    for d in parent.glob("s-*"):
+        try:
+            if d.is_dir() and not runfiles.is_link(d) and now - d.stat().st_mtime > older_than:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            continue
+
+
+def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, str, dict | None]:
+    """Share a file picked in the browser: `orch publish file` on a private copy under .orch/run/share, removed
+    right after. The link (which holds the key) never goes back to the page: the list shows the new row."""
+    if not isinstance(args, dict) or set(args) - {"name", "data", "days"}:
+        raise BadRequest("That file could not be read.")
+    name = args.get("name")
+    if not isinstance(name, str) or not name.strip() or len(name) > 240 or "\x00" in name:
+        raise BadRequest("That file name is not allowed.")
+    base = re.sub(r"[^A-Za-z0-9._ -]", "_", name.replace("\\", "/").rsplit("/", 1)[-1]).lstrip(".")[:120]
+    if not base:
+        raise BadRequest("That file name is not allowed.")
+    days = args.get("days", 7)
+    if type(days) is not int or not 1 <= days <= 90:
+        raise BadRequest("Choose a whole number of days from 1 to 90.")
+    try:
+        raw = base64.b64decode(args.get("data") or "", validate=True)
+    except (ValueError, TypeError):
+        raise BadRequest("That file could not be read.") from None
+    if not raw:
+        raise BadRequest("That file is empty.")
+    if len(raw) > SHARE_MAX:
+        raise BadRequest("That file is over 3 MB. Share bigger files with `orch publish file` in a terminal.")
+    if not orch_bin:
+        raise Unavailable("The orch command is not available here.")
+    if orch_bin == SELF and mint is None:
+        raise NeedsPerson("Open the dashboard from this computer to do this.")
+    if not publish_connected(root, orch_bin):
+        raise BadRequest("Sharing is not set up here.")
+    try:  # no link at any level, 0700; anything else fails closed in plain words
+        parent = runfiles.run_dir(root, "share")
+        _sweep_shares(parent)
+        folder = Path(tempfile.mkdtemp(prefix="s-", dir=parent))
+    except (RuntimeError, OSError):
+        raise BadRequest("This folder can't be used to share a file right now.") from None
+    try:
+        os.chmod(folder, 0o700)
+        path = folder / base
+        path.write_bytes(raw)
+        os.chmod(path, 0o600)
+        r = _run(
+            [*argv0(orch_bin), "publish", "file", str(path), "--days", str(days), "--json"],
+            check=False,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            stdin=subprocess.DEVNULL,
+            env=human_env(root, orch_bin),
+        )
+    except subprocess.TimeoutExpired:
+        return 504, "That took too long. Please try again.", None
+    except OSError:
+        raise Unavailable("The orch command could not be started.") from None
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        out = None
+    if r.returncode == 0 and isinstance(out, dict):
+        _audit(root, "link.share", {"id": out.get("id"), "days": days})
+        return 200, "", {"id": out.get("id"), "name": out.get("name")}
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not msg:
+        msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    return 422, str(msg)[:500], None
+
+
+def _op_timeout(op, args) -> int:
+    """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
+    if op == "addon.set" and args.get("on") is True:
+        return 180
+    return 75 if op == "config.agent.test" else 60
+
+
 def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None). `mint(core op, target)` gives an hp1
     proof for a request that carries a page session; None = watch-only (the click is refused)."""
+    if op == "link.share":
+        return share_file(root, orch_bin, args, mint)
     argv = build_argv(op, args)
     if orch_bin == SELF and needs_session(op) and mint is None:  # before anything is read, hashed or run (F8)
         raise NeedsPerson("Open the dashboard from this computer to do this.")
@@ -1066,6 +1179,10 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
         raise BadRequest("That add-on is not installed.")
+    if op == "addon.set" and args.get("on") is False:
+        row = _addon_row(root, orch_bin, args["name"])
+        if row is not None and row.get("installed") is False:
+            raise BadRequest("That add-on is not added yet, so there is nothing to turn off.")
     if op == "config.agent.test" and not _agent_exists(root, orch_bin, args["name"]):
         raise BadRequest("That agent is not set up.")
     if op == "config.agent.add" and _agent_exists(root, orch_bin, args["name"]):
@@ -1090,7 +1207,12 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
     try:
         if need:
             r = run_with_proof(
-                argv, mint(*need), orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=60
+                argv,
+                mint(*need),
+                orch_bin=orch_bin,
+                cwd=root,
+                env=human_env(root, orch_bin),
+                timeout=_op_timeout(op, args),
             )
         else:
             r = _run(
@@ -1099,11 +1221,14 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
                 cwd=root,
                 capture_output=True,
                 text=True,
-                timeout=75 if op == "config.agent.test" else 60,
+                timeout=_op_timeout(op, args),
                 stdin=subprocess.DEVNULL,
                 env=human_env(root, orch_bin),
             )
     except subprocess.TimeoutExpired:
+        if op == "addon.set" and args.get("on") is True:  # the install may still finish on its own
+            forget_static()
+            return 504, "Still adding it. Check again in a minute.", None
         return 504, "That took too long. Please try again.", None
     except OSError:
         raise Unavailable("The orch command could not be started.") from None
@@ -1118,6 +1243,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "",
             out,
         )  # `orch agents test` exits 1 when the agent does not work; the JSON is the answer either way
+    forget_static()  # a poll during a slow change (an add-on install) may have cached the old answer meanwhile
     if r.returncode == 0:
         if op.startswith("look."):
             look_forget(root)
@@ -1142,6 +1268,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             from . import data as _data
 
             _data.copies_disk_forget(root)
+        if files and op == "ticket.attach":
+            out = {**(out if isinstance(out, dict) else {}), "id": args["ticket"]}
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             out["attached"] = _attach_all(root, orch_bin, out["id"], files)
         return 200, "", out if isinstance(out, dict) else None

@@ -11,6 +11,8 @@ gitignore = ["received/", ".orch/outbox/", ".orch/relay.lock*", ".orch/inbox/", 
 
 [dashboard]
 label = "Phone & workspaces"
+title = "Messages"
+subtitle = "Send messages and files to other workspaces."
 icon = "link"
 order = 70
 panel = "phone"

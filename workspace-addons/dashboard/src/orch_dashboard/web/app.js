@@ -147,21 +147,25 @@ function skeletonFor(kind) {
   const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(3), stack(1))]
     : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
+    : kind === 'notes' ? [bar('sk-title'), bar('sk-toolbar'), stack(3, 'sk-row')]
     : kind === 'section' ? [stack(3, 'sk-row')]
+    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-stack sk-side'}, stack(4, 'sk-tab')), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
 // The skeleton for an address before the state is there (no state needed).
 function hashKind(hash) {
   const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
-  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : ['addon', 'open', 'notes', 'chat', 'general', 'settings'].includes(k) ? 'page' : 'home';
+  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : k === 'settings' ? 'settings' : k === 'notes' || k === 'note' ? 'notes' : ['addon', 'open', 'chat', 'general'].includes(k) ? 'page' : 'home';
 }
 function notFoundPage() {
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
     h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
-      h('h2', {}, 'We couldn’t find that page'), h('p', {className:'muted'}, 'The link may be out of date, or the page may have moved.'),
+      h('span', {className:'error-number', 'aria-hidden':'true'}, '404'),
+      h('h2', {}, 'We couldn’t find that page'),
+      h('p', {className:'muted'}, 'The link may be out of date, or the page may have moved.', h('br'), 'Your workspace is still here.'),
       h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#home'}, 'Go to Home'),
-        addons().filter(a => a.dashboard || a.page).map(a => h('a', {className:'btn outline sm', href:'#addon/' + encodeURIComponent(a.name)}, addonLabel(a)))))));
+        h('a', {className:'btn ghost sm', href:'#settings/addons'}, 'Check installed add-ons')))));
 }
 // Sidebar icons (trusted constants, same drawings as the design).
 const NAV_ICON = {
@@ -200,7 +204,7 @@ const nodeKey = node => node?.nodeType === 1 ? node.dataset.key || node.id || (n
 function sync(target, source) {
   if (target.nodeType === 3) { if (target.data !== source.data) target.data = source.data; return; }
   if (target.nodeType !== 1) return;
-  if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body') return;
+  if (locks.has(target.dataset.key) || mounts.has(target) || target.id === 'addon-body' || target.classList.contains('fv-pthumb')) return;  // a live thumbnail keeps its frame
   for (const attr of [...target.attributes]) {
     if (attr.name === 'open' && target.tagName === 'DETAILS') continue;
     if (target.classList.contains('ui-native-select') && ['class', 'tabindex', 'aria-hidden'].includes(attr.name)) continue;  // set by kit/select.js
@@ -247,12 +251,13 @@ function route() {
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|phone|addons))?$/.exec(hash);
-  if (settingsHash && !snapshot && state?.settings) return {kind:'settings', hash:'#settings', tab:settingsHash[1] || 'general'};
+  const settingsHash = /^#settings(?:\/(general|agent|phone|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) { const [tab, addon] = (settingsHash[1] || 'general').split('/'); return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
+    if (hash.startsWith('#note/')) return {kind:'note', id:decodeURIComponent(hash.slice(6)), hash};
     // One address per add-on page: #addon/<name>[/<path>]. The old #open/<name>/<path> forwards to it.
     const open = /^#open\/([a-z][a-z0-9-]{1,31})\/([A-Za-z0-9_./-]*)$/.exec(hash);
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
@@ -270,12 +275,12 @@ function route() {
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
-  if (r.kind === 'settings') settingsTab = r.tab;
+  if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
   if (r.kind === 'page' && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'notes' ? 'Notes' : r.kind === 'notfound' ? 'Page not found' : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : (r.kind === 'notes' || r.kind === 'note') ? 'Notes' : r.kind === 'notfound' ? 'Page not found' : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -284,6 +289,10 @@ function render(arrived = new Set()) {
     const tk = ticketOf(r.id);
     title = clean(tk?.title) || 'Ticket';
     crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' › ', title);
+  } else if (r.kind === 'note') {
+    const nt = ticketOf(r.id), words = nt && typeof noteWords === 'function' ? noteWords(nt).headline : '';
+    title = clean(words) || 'Note';
+    crumb.replaceChildren(h('a', {href:'#notes'}, 'Notes'), ' › ', title);
   } else if (r.kind === 'page') {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     title = clean(tk?.title) || last || pageName;
@@ -297,7 +306,7 @@ function render(arrived = new Set()) {
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
-  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
+  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'note' ? '#notes' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount);
   reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), navLink('#notes', 'Notes', 'notes'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
@@ -316,7 +325,7 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'notes' ? notesPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'notes' ? notesPage() : r.kind === 'note' ? notePage(ticketOf(r.id)) : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
@@ -527,6 +536,11 @@ main.addEventListener('keydown', event => {
   selectTicketTab(tab.dataset.ticket, next.dataset.tab);
   document.getElementById(next.id)?.focus();
 });
+// A choice in an add-on view (radio block): the saved one is redrawn from the add-on's answer, never from the click.
+main.addEventListener('change', event => {
+  const radio = event.target.closest?.('input[data-radio-verb],input[data-radio-go]');
+  if (radio) addonRadio(radio);
+});
 main.addEventListener('click', async event => {
   const menu = event.target.closest('details.menu');
   if (menu && event.target.closest('button,a')) menu.open = false;
@@ -534,6 +548,8 @@ main.addEventListener('click', async event => {
   if (sendControl) { messageSend(sendControl); return; }
   const row = event.target.closest('[data-addon-act]');
   if (row) { if (!snapshot) addonAct(row); return; }
+  const edit = event.target.closest('[data-addon-edit]');
+  if (edit) { if (!snapshot) repeatsDialog(edit.dataset.addonEdit, shownAddon()); return; }
   const copy = event.target.closest('[data-copy]');
   if (copy) { copyText(copy); return; }
   const control = event.target.closest('[data-action]');
@@ -585,6 +601,11 @@ main.addEventListener('click', async event => {
     settingsConfirm('Move to private?', 'Removes them from the team repo and keeps your files.', '', 'Move to private', send);
     return;
   }
+  if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
+  if (action === 'phone-pair') { phonePairDialog(); return; }
+  if (action === 'relay-setup') { relaySetupDialog(); return; }
+  if (action === 'relay-reconnect') { await relayReconnect(control); return; }
+  if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;

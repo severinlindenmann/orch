@@ -1966,9 +1966,12 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
 
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
-    people, recent = v["blocks"]
-    assert v["notice"] == "Connected. Send messages and files to other workspaces."
-    assert people["title"] == "Workspaces you can talk to · 1"
+    recent, people = v["blocks"]  # messages first, then who you can talk to
+    assert v["notice"].startswith("Connected.") and v["header"] == {
+        "status": {"label": "Connected", "tone": "good"}
+    }
+    assert recent["span"] == people["span"] == "half"  # two cards side by side
+    assert people["title"] == "Workspaces you can talk to" and people["count"] == 1
     first = people["items"][0]
     assert first["title"] == "Reports" and first["subtitle"] == "Workspace · messages and files"
     assert all(c["label"] != "Messages and files" for c in first["chips"])  # plain text, not a pill
@@ -1996,11 +1999,9 @@ def test_view_not_connected_says_so(proj, run):
     turn_on(proj, "relay")
     code, out, _ = run("relay", "view", "--json")
     v = json.loads(out)
-    assert (
-        code == 0
-        and "not connected" in v["notice"]
-        and v["blocks"][0]["items"][0]["title"] == "Not connected"
-    )
+    assert code == 0 and "not connected" in v["notice"]
+    assert v["header"]["status"] == {"label": "Not connected", "tone": "warn"}
+    assert v["blocks"][0]["empty"]["title"] == "Not connected"
 
 
 def test_sent_log_is_private_untracked_and_refuses_links(proj, run, rel):
@@ -2026,7 +2027,9 @@ def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
-    assert v["blocks"][1]["items"][0]["subtitle"] == "Send one from the phone or from another workspace."
+    assert v["blocks"][0]["items"] == []
+    assert v["blocks"][0]["empty"]["text"] == "Send one from the phone or from another workspace."
+    assert v["blocks"][0]["empty"]["button"] == {"label": "Open phone settings", "to": "app:settings/phone"}
 
 
 @pytest.mark.parametrize(

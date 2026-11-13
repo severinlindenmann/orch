@@ -311,22 +311,41 @@ def _plain(text: str, limit: int = 200) -> str:
     return t or "(unnamed)"
 
 
-def view(root: Path) -> dict:
-    """`orch publish view --json` (addon-view.schema.json): read-only, links without any key."""
+def _expires(iso) -> str:
+    """'Expires 13 Dec 2026, 12:47' in local time (the expiry is shown once, never repeated)."""
     import datetime as dt
 
-    from orch.cli_clients import _exp, _size
+    try:
+        t = dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        return "Expires later"
+    return f"Expires {t.day} {t:%b %Y, %H:%M}"
+
+
+def view(root: Path) -> dict:
+    """`orch publish view --json` (addon-view.schema.json): read-only, links without any key.
+    One compact row per shared file: name, who can open it, when it ends, and fixed ops on its id."""
+    import datetime as dt
+
+    from orch.cli_clients import _exp
 
     r = list_all(root)
-    base = _cfg(root)["url"]
     cap = 50
     files = [
         {
             "title": _plain(f.get("name") or "(unnamed file)"),
-            "subtitle": _plain(f"{_size(f['size'])} · {_exp(f['expires_at'])}"),
-            **({"link": f"{base}/f/{f['id']}"} if base.startswith("https://") else {}),
+            "meta": [
+                "Anyone with the link",
+                _expires(f["expires_at"]) if f.get("expires_at") else "Kept until you delete it",
+            ],
+            "actions": [
+                {"label": "Copy link", "action": {"op": "link.copy", "args": {"id": f["id"]}}},
+                {"label": "Extend", "action": {"op": "link.extend", "args": {"id": f["id"]}}},
+                {"label": "Stop sharing", "action": {"op": "link.stop", "args": {"id": f["id"]}}},
+            ],
         }
         for f in r["files"]
+        if re.fullmatch(r"f_[a-z0-9]+", str(f.get("id")))
     ]
     apps = [
         {
@@ -339,20 +358,29 @@ def view(root: Path) -> dict:
         for a in r["apps"]
     ]
     blocks: list = [
-        {"type": "stat", "label": "Files", "value": len(files)},
-        {"type": "stat", "label": "Apps", "value": len(apps)},
+        {
+            "type": "list",
+            "title": "Shared",
+            **({"meta": f"{len(files)} link{'s' if len(files) != 1 else ''}"} if files else {}),
+            "compact": True,
+            "items": files[:cap],
+            "more": max(0, len(files) - cap),
+            "empty": {"title": "No shared links", "text": "Share a file to create a private link."},
+        }
     ]
-    if files:
-        blocks.append(
-            {"type": "list", "title": "Files", "items": files[:cap], "more": max(0, len(files) - cap)}
-        )
     if apps:
         blocks.append({"type": "list", "title": "Apps", "items": apps[:cap], "more": max(0, len(apps) - cap)})
+    blocks.append(
+        {
+            "type": "footnote",
+            "text": "Stopping sharing closes the link and keeps your original file.",
+            "link": {"label": "Shared link settings", "to": "app:settings/addons"},
+        }
+    )
     return {
         "schema": "orch.addon-view/1",
         "generated_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "notice": "Copy, extend or stop a link here.",
-        "notice_tone": "neutral",
+        "header": {"button": {"label": "Share a file", "action": {"op": "link.share"}}},
         "blocks": blocks,
     }
 

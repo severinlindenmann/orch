@@ -36,12 +36,17 @@ def dispatch(args, root: Path) -> bool:
     sub = getattr(args, "sub", None)
     if sub == "list":
         rows = addons.listing(root)
-        _out(
-            args,
-            rows,
-            "\n".join(f"  {r['name']:<12}{'on' if r['active'] else 'off':<6}{r['description']}" for r in rows)
-            or "No add-ons are installed. Turn one on with: orch addon add <name>",
+        have = [r for r in rows if r["installed"]]
+        avail = [r for r in rows if not r["installed"]]
+        text = "\n".join(
+            f"  {r['name']:<12}{'on' if r['active'] else 'off':<6}{r['description']}" for r in have
         )
+        text = text or "No add-ons are installed. Turn one on with: orch addon add <name>"
+        if avail:
+            text += "\n\nAvailable (not installed yet; add one with: orch addon add <name>)\n" + "\n".join(
+                f"  {r['name']:<12}{r['description']}" for r in avail
+            )
+        _out(args, rows, text)
     elif sub == "add":
         if not args.project_only and (addons._is_path(args.name) or args.name not in addons.CORE_ADDONS):
             addons.tool_env_change_ok()  # first, before any snapshot or hand-off: a click cannot fix this

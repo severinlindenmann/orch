@@ -62,7 +62,7 @@ EXT_SCHEMA_MAX = 32 * 1024
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
 # Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
-SHIPPED_ADDONS = ("automation", "dashboard", "focus", "insights", "sync")
+SHIPPED_ADDONS = ("automation", "dashboard", "factory", "focus", "insights", "sync")
 
 
 # ---------------------------------------------------------------- sources
@@ -557,10 +557,35 @@ _REAL_RUN_UV = run_uv
 
 
 def _same_python() -> list[str]:
-    """On Windows a reinstall keeps the Python orch runs on. On Windows on ARM the installer chose an x64
-    Python (cryptography has no ARM64 Windows wheel); uv's own pick would try to compile it and fail."""
+    """A reinstall keeps the Python orch runs on, on every platform. Otherwise uv may pick a newer one and
+    rebuild the env (lib/python3.11 -> 3.13): running services, still on the old paths, then failed every
+    request. On Windows on ARM the installer chose an x64 Python (cryptography has no ARM64 Windows wheel);
+    uv's own pick would try to compile it and fail. The interpreter itself when it is there, else its
+    version."""
     base = getattr(sys, "_base_executable", None)
-    return ["--python", base] if sys.platform == "win32" and base else []
+    if base and os.path.isfile(base):
+        return ["--python", base]
+    return ["--python", f"{sys.version_info.major}.{sys.version_info.minor}"]
+
+
+def _reinstall_flags() -> list[str]:
+    """Reinstall orch's own packages (named in this tool env's receipt) in place. A whole-env `--reinstall`
+    removes the env's Scripts/bin folder: on Windows that fails while any orch runs ("Access is denied",
+    "Executable already exists: orch.exe") and leaves the env without its packages. Per-package reinstall
+    swaps the packages only (uv drops add-ons that are no longer asked for either way). No receipt: the whole
+    env, as before."""
+    names: list[str] = []
+    try:
+        data = tomllib.loads((Path(sys.prefix) / "uv-receipt.toml").read_text(encoding="utf-8"))
+        for r in data["tool"]["requirements"]:
+            n = r.get("name") if isinstance(r, dict) else None
+            if isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", n) and n not in names:
+                names.append(n)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    if "orch-workspace" not in names:
+        return ["--reinstall"]
+    return [a for n in names for a in ("--reinstall-package", n)]
 
 
 def _tool_args(entries: list[dict]) -> list[str]:
@@ -568,7 +593,7 @@ def _tool_args(entries: list[dict]) -> list[str]:
     installed any more is left out with a note (it stays in the registry), so one stale entry never blocks
     the rest."""
     # --refresh: a branch zip has the same URL after every push, so never take it from uv's cache
-    args = ["tool", "install", "--reinstall", "--refresh", *_same_python(), spec("workspace")]
+    args = ["tool", "install", *_reinstall_flags(), "--refresh", *_same_python(), spec("workspace")]
     for e in entries:
         why = _missing_source(e)
         if why:
@@ -697,7 +722,14 @@ def _running_workspaces(root: Path) -> list[str]:
 
 
 def _reinstall(
-    entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str, consents: list[str] = ()
+    entries: list[dict],
+    *,
+    save: bool,
+    then: list[list[str]],
+    root: Path,
+    done: str,
+    consents: list[str] = (),
+    restart: bool = True,
 ) -> bool:
     """Reinstall orch with these add-ons, then (if `save`) store them as the registry and run the orch
     commands in `then` with the new code. Returns False when that happens later: on Windows orch can not
@@ -729,6 +761,10 @@ def _reinstall(
                     except Exception as e:
                         print(f"Note: could not put orch's add-ons back as they were: {e}", file=sys.stderr)
             raise
+        if restart:  # what runs still uses the old files (an add-on add/remove replaced them): restart it
+            lines = _restart_updated(root)
+            if lines:
+                _say("\n".join(lines))
         return True
     if winfinish.pending(home()):
         raise Refused(
@@ -959,8 +995,11 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     m["background"] = bg
     d = m.get("dashboard")
     if d is not None:
-        if not isinstance(d, dict) or set(d) - {"label", "icon", "order", "panel"}:
-            raise _bad("[dashboard] has label, icon, order and panel")
+        if not isinstance(d, dict) or set(d) - {"label", "icon", "order", "panel", "title", "subtitle"}:
+            raise _bad("[dashboard] has label, icon, order, panel, title and subtitle")
+        for key, size in (("title", 40), ("subtitle", 120)):
+            if key in d and not _text_ok(d[key], size):
+                raise _bad(f"dashboard {key} is at most {size} plain characters")
         if not _text_ok(d.get("label"), 24):
             raise _bad("dashboard label is at most 24 characters")
         # `panel`: an extra native card the dashboard knows how to draw (a fixed set)
@@ -1053,11 +1092,29 @@ def core_manifests() -> dict[str, dict]:
     return {n: parse_manifest(base / n / MANIFEST, core=True) for n in CORE_ADDONS}
 
 
-def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
-    """Manifests of the shipped add-ons that are not installed yet and say recommended = true.
-    From the local source folder when there is one; else (fetch=True) the manifest is previewed from the
-    repo (one small download each), and with fetch=False the answer is empty."""
+def bundled_manifests() -> dict[str, dict]:
+    """The manifests of the shipped add-ons as they were when this orch was built (shipped_addons.json, from
+    scripts/gen_shipped_addons.py). Read from the package: no source folder and no network needed."""
+    try:
+        data = json.loads(
+            (Path(__file__).resolve().parent / "shipped_addons.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return {}
+    return (
+        {n: m for n, m in data.items() if n in SHIPPED_ADDONS and isinstance(m, dict)}
+        if isinstance(data, dict)
+        else {}
+    )
+
+
+def shipped_available(fetch: bool = True) -> dict[str, dict]:
+    """Manifests of the shipped add-ons that are not installed yet.
+    From the local source folder when there is one; else with fetch=True the manifest is previewed from the
+    repo (one small download each), and with fetch=False it comes from the bundle inside the package (never
+    the network). An add-on whose manifest cannot be read is left out."""
     have = set(discover())
+    bundle = {} if _is_local(repo()) or fetch else bundled_manifests()
     local = _is_local(repo())
     out = {}
     for name in SHIPPED_ADDONS:
@@ -1065,16 +1122,19 @@ def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
             continue
         try:
             if local:
-                m = folder_manifest(Path(repo()) / "workspace-addons" / name)
+                out[name] = folder_manifest(Path(repo()) / "workspace-addons" / name)
             elif fetch:
-                m = preview_builtin(name)
-            else:
-                continue
+                out[name] = preview_builtin(name)
+            elif name in bundle:
+                out[name] = bundle[name]
         except Refused:
             continue
-        if m.get("recommended"):
-            out[name] = m
     return out
+
+
+def shipped_recommended(fetch: bool = True) -> dict[str, dict]:
+    """Manifests of the shipped add-ons that are not installed yet and say recommended = true."""
+    return {n: m for n, m in shipped_available(fetch).items() if m.get("recommended")}
 
 
 def discover() -> dict[str, dict]:
@@ -1485,32 +1545,40 @@ def _running_here(root: Path) -> set[str]:
     return out
 
 
+def _row(name: str, m: dict, source: str, installed: bool, active: bool, running: bool) -> dict:
+    return {
+        "name": name,
+        "version": m["version"],
+        "description": m["description"],
+        "source": "built-in" if source == "built-in" else "local",
+        "installed": installed,
+        "active": active,
+        "dashboard": m.get("dashboard"),
+        "ticket_view": m["ticket_view"],
+        "background": m["background"],
+        "recommended": m["recommended"],
+        "page": m.get("page"),
+        "running": running,
+        "ticket_links": [dict(x) for x in m["ticket_links"]],
+        "ticket_fields": m["ticket_fields_section"] if "ticket_fields_section" in m else fields.section(m),
+        "acts": sorted(m["acts"]),
+    }
+
+
 def listing(root: Path) -> list[dict]:
-    """`orch addon list --json`: the one source the dashboard uses."""
+    """`orch addon list --json`: the one source the dashboard uses. Installed add-ons first (sorted), then the
+    shipped add-ons that are not installed yet (`installed: false`, never active or running), sorted by name.
+    Never touches the network: the not-installed ones come from the local source folder, else from the bundle
+    in the package; one that is in neither is left out of the list (it can still be added by name)."""
     act = active(root)
     reg = {e["name"]: e for e in registry()}
     up = _running_here(root)
-    out = []
-    for name, m in sorted(discover().items()):
-        src = reg.get(name, {}).get("source", "built-in")
-        out.append(
-            {
-                "name": name,
-                "version": m["version"],
-                "description": m["description"],
-                "source": "built-in" if src == "built-in" else "local",
-                "active": name in act,
-                "dashboard": m.get("dashboard"),
-                "ticket_view": m["ticket_view"],
-                "background": m["background"],
-                "recommended": m["recommended"],
-                "page": m.get("page"),
-                "running": name in up,
-                "ticket_links": [dict(x) for x in m["ticket_links"]],
-                "ticket_fields": fields.section(m),
-                "acts": sorted(m["acts"]),
-            }
-        )
+    out = [
+        _row(name, m, reg.get(name, {}).get("source", "built-in"), True, name in act, name in up)
+        for name, m in sorted(discover().items())
+    ]
+    for name, m in sorted(shipped_available(fetch=False).items()):
+        out.append(_row(name, m, "built-in", False, False, False))
     return out
 
 
@@ -2481,6 +2549,7 @@ def update(
                 ],
                 root=root,
                 done="orch updated",
+                restart=False,  # the project step restarts what runs (with the update's own text)
             )
         except BaseException:
             before_path.unlink(missing_ok=True)  # a failed install leaves no stale snapshot

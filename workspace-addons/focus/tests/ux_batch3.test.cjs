@@ -66,7 +66,7 @@ test('dash27: a fixed menu: greyed when n/a, desktop rows hidden on phones, Star
   assert.match(f, /els\.fresh\.disabled = /);
   assert.match(f, /els\.attachBtn\.disabled = /);
   assert.doesNotMatch(f, /els\.(fresh|attachBtn)\.hidden/);
-  assert.match(t, /Technical details'\}\), els\.attachBtn/);
+  assert.doesNotMatch(t, /Technical details/);  // owner: no Details toggles, the row is plain
   assert.match(t, /fx-menu-divider/);
   assert.match(f, /Click again to start fresh/);
   assert.match(css, /\.fx-action-menu \.fx-desktop\{display:none\}/);
@@ -94,6 +94,7 @@ function fakeEl(name, act) {
     classList: {toggle(c, f) { f = f === undefined ? !cls.has(c) : f; if (f) cls.add(c); else cls.delete(c); return f; }, contains: c => cls.has(c), add: c => cls.add(c), remove: c => cls.delete(c)},
     addEventListener(t, f) { (on[t] = on[t] || []).push(f); }, fire(t, ev) { (on[t] || []).forEach(f => f(ev)); },
     setAttribute(k, v) { attrs[k] = String(v); }, getAttribute: k => (k in attrs ? attrs[k] : null),
+    insertBefore() {}, replaceChildren() {}, remove() {}, before() {}, scrollTo() {}, checked: false, scrollHeight: 0, scrollTop: 0, clientHeight: 0,
     focus() {}, click() { e.fire('click', {target: e}); }, contains: x => x === e || e.kids.includes(x),
     closest: sel => (sel === '[data-act]' ? (e.dataset.act ? e : null) : sel === 'button' ? e : null),
     querySelector: () => fakeEl(), querySelectorAll: () => [], getBoundingClientRect: () => ({left: 0, right: 100}),
@@ -112,6 +113,7 @@ function focusPage() {
     proof: {isOpen: () => false}, keyOf: JSON.stringify, state: {firstRender: true, tab: 0}, views: {}, register: (n, m) => { S.views[n] = m; }};
   S.views.live = {startFresh: () => calls.push('fresh'), stopToggle() {}, focusQuestion() {}};
   S.views.session = {showAttach: () => calls.push('attach')};
+  S.views.compose = {mount() {}};
   const ctx = vm.createContext({
     window: {FocusStore: S, addEventListener() {}}, matchMedia: () => ({matches: false, addEventListener() {}}), innerWidth: 1000,
     document: {addEventListener(t, f) { (docOn[t] = docOn[t] || []).push(f); }, getElementById: () => Object.assign(fakeEl(), {hidden: true}), hidden: true}, location: {hash: ''},

@@ -34,16 +34,22 @@
     els.stopIc.innerHTML = ic(running ? 'pause' : 'play');
     els.stopL.textContent = running ? 'Pause work' : 'Continue';
     els.stop.setAttribute('aria-label', running ? 'Pause work' : 'Continue');
-    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (S.state.tab === 1 && t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
     els.stop.hidden = (asking && !running) || (!running && !hasStarted);
     els.fresh.disabled = running || asking || !hasStarted;
-    els.review.hidden = S.state.tab !== 1 || t.status !== 'review' || asking || running;
+    els.review.hidden = !window.FocusHelpers.reviewBarShown(v);
     els.complete.hidden = v.state !== 'done';
     els.attachBtn.disabled = !(running && v.live);
     els.sub.textContent = '';
+    /* whose turn it is, and where the work is */
+    const turn = v.state === 'done' ? 'Finished' : asking || t.status === 'review' ? 'Your turn' : running ? 'Helper’s turn' : '';
+    const base = els.stateText.textContent.split(' · ')[0];
+    if (turn && !base.startsWith('Finished') && turn !== 'Finished') els.stateText.textContent = base + ' · ' + turn;
+    const now = t.checklist.find(c => !c.done && !c.wont_do);
+    els.taskLine.textContent = v.total && now ? 'Task ' + (v.done + 1) + ' of ' + v.total + ' · ' + now.text : '';
     if (!S.state.changesRequested) els.msg.placeholder = 'Write a message…';
     els.feed.setAttribute('aria-label', 'What ' + els.agent.textContent + ' is doing');
     els.railNote.textContent = '';
@@ -51,6 +57,9 @@
     S.views.ticket.renderHelpers(v);
     S.views.live.renderFeed(v, !S.state.firstRender);
     S.views.live.renderQuestions(v);
+    S.views.live.renderNext(v);
+    S.views.live.renderWith(v);
+    S.views.live.followUpdate(S.views.live.renderTrace(v), S.state.firstRender);
     S.views.ticket.renderProof(v);
     S.views.used.renderUsed(v);
     S.views.used.renderFiles(v);
@@ -58,13 +67,39 @@
     S.views.live.renderWorking(v);
     S.views.session.tickTimer();
     S.views.session.renderSession(v);
-    if ((S.state.firstRender && (['review', 'done'].includes(t.status) || location.hash === '#results')) || (t.status === 'done' && prev?.ticket.status !== 'done')) els.tabs[1].click();
+    if (root.classList.contains('fx-terminal') && ((S.state.firstRender && (['review', 'done'].includes(t.status) || location.hash === '#results')) || (t.status === 'done' && prev?.ticket.status !== 'done'))) els.tabs[1].click();
     S.state.firstRender = false;
     S.notify(v);
   }
 
+  /* Compact is the default; Terminal mode adds the task rail and the tabs. The choice is remembered. */
+  /* In Terminal mode the person's side (next move, sent back, With Helper, composer) is its own column beside the
+     output; in compact it sits in the one column, as before. The same nodes move, so nothing is drawn twice. */
+  function placeHuman(terminal) {
+    if (terminal) els.human.replaceChildren(els.next, els.sent, els.withH, els.review, els.complete, els.compose);
+    else {
+      els.paneLive.insertBefore(els.next, els.line); els.paneLive.insertBefore(els.sent, els.line);
+      els.paneLive.insertBefore(els.withH, els.line);
+      els.help.before(els.compose, els.review, els.complete);  /* back in the stage: composer, then the review bar */
+    }
+  }
+  function setMode(terminal) {
+    placeHuman(terminal);
+    root.classList.toggle('fx-terminal', terminal);
+    els.modeBtn.setAttribute('aria-pressed', String(terminal));
+    els.modeBtn.textContent = terminal ? 'Compact view' : 'Terminal mode';
+    els.showTerm.hidden = terminal;
+    try { localStorage.setItem('focus-mode', terminal ? 'terminal' : 'compact'); } catch (e) { /* not kept */ }
+  }
+  async function copyLink() {
+    const url = location.origin + location.pathname;
+    try { await navigator.clipboard.writeText(url); toast('Link copied', 'ok'); } catch (e) { toast('Copy this address: ' + url, 'error'); }
+  }
+
   function wire() {
-    const markFull = on => { root.classList.toggle('is-full', on); els.full.setAttribute('aria-pressed', String(on)); els.full.lastElementChild.textContent = on ? 'Leave full screen' : 'Full screen'; els.full.setAttribute('aria-label', on ? 'Leave full screen' : 'Full screen'); document.body.style.overflow = on ? 'hidden' : ''; };
+    let saved = ''; try { saved = localStorage.getItem('focus-mode') || ''; } catch (e) { /* none */ }
+    setMode(saved === 'terminal');
+    const markFull = on => { root.classList.toggle('is-full', on); els.fullBtn.setAttribute('aria-pressed', String(on)); els.fullBtn.textContent = on ? 'Exit full screen' : 'Full screen'; els.full.setAttribute('aria-pressed', String(on)); els.full.lastElementChild.textContent = on ? 'Leave full screen' : 'Full screen'; els.full.setAttribute('aria-label', on ? 'Leave full screen' : 'Full screen'); document.body.style.overflow = on ? 'hidden' : ''; };
     const setFull = async on => {
       if (on) { try { await root.requestFullscreen?.(); } catch (e) { /* CSS fallback */ } markFull(true); }
       else { if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch (e) { /* ignore */ } } markFull(false); }
@@ -77,7 +112,7 @@
     /* The composer is pinned at the bottom on a phone: the pane keeps that much room below its last row. */
     if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => root.style.setProperty('--fx-compose-h', els.compose.offsetHeight + 'px')).observe(els.compose);
     const toggleHelp = force => { els.help.hidden = force === undefined ? !els.help.hidden : !force; if (!els.help.hidden) els.help.querySelector('button').focus(); else els.moreBtn.focus(); };
-    const selectTab = i => { if (els.tabs[i].hidden) return; S.state.tab = i; els.review.hidden = i !== 1 || S.state.view?.ticket.status !== 'review' || S.state.view?.run.running || S.state.view?.state === 'needs'; els.compose.hidden = S.state.view?.state === 'done' || i >= 2 || (i === 1 && S.state.view?.ticket.status === 'review' && !S.state.changesRequested); els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; }); };
+    const selectTab = i => { if (els.tabs[i].hidden) return; S.state.tab = i; els.review.hidden = !S.state.view || !window.FocusHelpers.reviewBarShown(S.state.view); els.compose.hidden = S.state.view?.state === 'done' || i >= 2 || (S.state.view?.ticket.status === 'review' && !S.state.changesRequested); els.tabs.forEach((b, j) => { const on = i === j; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; document.getElementById(b.getAttribute('aria-controls')).hidden = !on; }); };
     els.tabs.forEach((b, i) => b.addEventListener('click', () => selectTab(i)));
     const setPopover = (panel, button, open) => {
       panel.hidden = !open;
@@ -97,6 +132,11 @@
       setPopover(els.menu, els.moreBtn, false);
       setPopover(els.session, els.live, false);
     };
+    /* Following starts off; reading pauses it (scroll away) and it never scrolls the view while it is off. */
+    try { S.state.follow = localStorage.getItem('focus-follow') === '1'; } catch (e) { S.state.follow = false; }
+    els.follow.checked = S.state.follow;
+    els.follow.addEventListener('change', () => { S.state.follow = els.follow.checked; try { localStorage.setItem('focus-follow', S.state.follow ? '1' : '0'); } catch (e) { /* not kept */ } if (S.state.follow) S.views.live.jumpToNew(); });
+    els.paneLive.addEventListener('scroll', () => { if (!els.newPill.hidden && S.views.live.atBottom()) S.views.live.jumpToNew(); }, {passive: true});
     els.moreBtn.addEventListener('click', () => {
       const open = els.menu.hidden; closePopovers(); setPopover(els.menu, els.moreBtn, open);
       if (open) [...els.menu.querySelectorAll('button:not(:disabled)')].find(b => b.offsetParent !== null)?.focus();
@@ -122,7 +162,11 @@
       /* Start fresh asks once: the first click turns the row into its own confirm, the second starts */
       if (a === 'fresh' && !els.fresh.disabled && !els.fresh.classList.contains('fx-confirm')) { armFresh(true); return; }
       if (els.menu.contains(e.target) && e.target.closest('button')) { closePopovers(); els.moreBtn.focus(); }
-      if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
+      if (a === 'mode') setMode(!root.classList.contains('fx-terminal'));
+      else if (a === 'jump') S.views.live.jumpToNew();
+      else if (a === 'phone') { els.phoneNote.hidden = !els.phoneNote.hidden; els.phoneBtn.setAttribute('aria-expanded', String(!els.phoneNote.hidden)); }
+      else if (a === 'copy') copyLink();
+      else if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
       else if (a === 'answer') S.views.live.focusQuestion(); else if (a === 'stop') S.views.live.stopToggle(); else if (a === 'fresh') { armFresh(false); S.views.live.startFresh(); } else if (a === 'attach') S.views.session.showAttach();
       else if (a === 'all-work') { S.views.used.pickAgent(null, false); const head = els.feed.querySelector('h2'); if (head) { head.tabIndex = -1; head.focus(); } }
       else if (a === 'changes') { S.state.changesRequested = true; els.compose.hidden = false; els.msg.placeholder = 'What would you like changed?'; els.msg.focus(); }
@@ -135,15 +179,6 @@
     const grow = () => { els.msg.style.height = 'auto'; els.msg.style.height = Math.min(els.msg.scrollHeight, 120) + 'px'; };
     els.msg.addEventListener('input', grow);
     els.msg.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); els.form.requestSubmit(); } if (e.key === 'Escape') els.msg.blur(); });
-    els.form.addEventListener('submit', async e => {
-      e.preventDefault();
-      const text = els.msg.value.trim();
-      if (!text) return;
-      els.msg.value = ''; grow();
-      const r = await act('run.send', {ticket: TID, text});
-      if (!r.ok) { els.msg.value = text; toast(r.message, 'error'); return; }
-      toast(r.note || 'Saved for the next run.', 'ok');
-    });
     els.addForm.addEventListener('submit', async e => {
       e.preventDefault();
       const text = els.addInput.value.trim();
@@ -213,5 +248,5 @@
     window.addEventListener('pagehide', () => { stream.close(); live = false; });
     window.addEventListener('pageshow', e => { if (e.persisted) connect(); });
   }
-  S.views.ticket.build(); wire(); poll();
+  S.views.ticket.build(); S.views.compose.mount(); wire(); poll();
 })();

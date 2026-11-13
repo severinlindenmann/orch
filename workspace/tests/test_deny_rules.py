@@ -336,7 +336,7 @@ def test_unreadable_version_fails_closed(monkeypatch, tmp_path, out):
     from orch.errors import Refused
 
     _fake_tool(monkeypatch, tmp_path, out)
-    with pytest.raises(Refused, match="could not be checked for the deny rules"):
+    with pytest.raises(Refused, match="is missing or too old on this computer"):
         adapters.deny_version_check(_A)
 
 
@@ -345,7 +345,7 @@ def test_tool_not_found_fails_closed(monkeypatch, tmp_path):
 
     monkeypatch.setenv("PATH", str(tmp_path))  # no claude here
     adapters._binary_version.cache_clear()
-    with pytest.raises(Refused, match="could not be checked for the deny rules"):
+    with pytest.raises(Refused, match="is missing or too old on this computer"):
         adapters.deny_version_check(_A)
 
 
@@ -515,3 +515,17 @@ def test_a_non_dot_home_is_matched_in_shell_text_by_name_and_parent():
     assert "Bash(*orch-tool*)" in pats
     assert "Bash(*bob/orch-tool*)" in pats
     assert "Bash(*bob\\orch-tool*)" in pats
+
+
+def test_missing_claude_code_message_is_plain(monkeypatch, tmp_path):
+    from orch.errors import Refused
+
+    monkeypatch.setenv("PATH", str(tmp_path))  # no claude here
+    adapters._binary_version.cache_clear()
+    a = {"label": "Claude", "detect": {"binary": "claude"}}
+    with pytest.raises(Refused) as e:
+        adapters.deny_version_check(a)
+    assert (
+        str(e.value)
+        == "Claude Code is missing or too old on this computer. Install or update it, then press Continue."
+    )

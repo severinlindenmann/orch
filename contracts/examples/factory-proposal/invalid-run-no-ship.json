@@ -1,0 +1,3 @@
+{"schema": "orch.factory.proposal/1", "kind": "run", "title": "x", "goal": "x", "line": [], "crew": [],
+ "time": {"active_min": 1}, "budget": {"preset": "huge", "active_min_cap": 1}, "done_means": [], "wont_do": [],
+ "ship": {"does": "x"}, "tasks": []}

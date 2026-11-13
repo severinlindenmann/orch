@@ -3,6 +3,7 @@ import http.client
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -405,9 +406,31 @@ def _fake_with_addons(act_orch):
         'if a[:2] in (["addon", "list"]',
         'if a[:1] == ["agents"]:\n    print(json.dumps([{"name": "claude"}]))\n    sys.exit(0)\n'
         'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}, {"name": "beta", "active": False},'
-        ' {"name": "dashboard", "active": True}]))\n    sys.exit(0)\nif a[:2] in (["addon", "list"]',
+        ' {"name": "dashboard", "active": True}, {"name": "avail", "installed": False, "active": False}]))\n'
+        '    sys.exit(0)\nif a[:2] in (["addon", "list"]',
     )
     act_orch.write_text(src)
+
+
+def test_adding_an_addon_gets_a_longer_timeout_and_a_plain_message_when_it_runs_out(
+    act_orch, ws, monkeypatch
+):
+    _fake_with_addons(act_orch)
+    seen = []
+
+    def slow(argv, **kw):
+        if argv[-2:-1] == ["add"] or "add" in argv[:4]:
+            seen.append(kw["timeout"])
+            raise subprocess.TimeoutExpired(argv, kw["timeout"])
+        return real(argv, **kw)
+
+    real = actions._run
+    monkeypatch.setattr(actions, "_run", slow)
+    code, text, _ = actions.run_op(ws, str(act_orch), "addon.set", {"name": "avail", "on": True})
+    assert code == 504 and seen == [180]
+    assert text == "Still adding it. Check again in a minute."
+    assert actions._op_timeout("addon.set", {"on": False}) == 60
+    assert actions._op_timeout("config.agent.test", {}) == 75
 
 
 def test_settings_ops_argv_and_checks(act_orch, ws):
@@ -454,6 +477,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 {"op": "addon.set", "args": {"name": "alpha", "on": False}},
                 ["addon", "remove", "alpha", *common],
             ),
+            (  # the Add of the catalogue: an available (not installed) add-on, same op as the switch
+                {"op": "addon.set", "args": {"name": "avail", "on": True}},
+                ["addon", "add", "avail", "--yes", *common],
+            ),
         ]
         for body, want in cases:
             code, text, _ = post(base, body)
@@ -490,6 +517,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             {"op": "addon.set", "args": {"name": "ticket", "on": True}},
             {"op": "addon.set", "args": {"name": "alpha", "on": "yes"}},
             {"op": "addon.set", "args": {"name": "alpha"}},
+            {
+                "op": "addon.set",
+                "args": {"name": "avail", "on": False},
+            },  # available, not added: nothing to turn off
         ]
         for body in bad:
             assert post(base, body)[0] == 400, body
@@ -1228,3 +1259,27 @@ def test_copies_retry_takes_one_ticket_id_only():
     for bad in ({}, {"ticket": "../x"}, {"ticket": "t_abc123", "force": True}, {"ticket": 5}):
         with pytest.raises(BadRequest):
             build_argv("copies.retry", bad)
+
+
+def test_attach_files_to_an_existing_ticket():
+    import base64
+
+    args = {
+        "ticket": "t_abcdef12",
+        "files": [{"name": "s.png", "data": base64.b64encode(b"\x89PNG").decode()}],
+    }
+    argv = actions.build_argv("ticket.attach", args)
+    assert argv[:2] == ["log", "t_abcdef12"] and "Added files to the ticket" in argv
+    assert actions.attachments("ticket.attach", args) == [("s.png", b"\x89PNG")]
+    assert "ticket.attach" in actions.FREE_OPS
+    for bad in (
+        {"ticket": "t_abcdef12"},
+        {"ticket": "t_abcdef12", "files": []},
+        {"ticket": "nope", "files": [{"name": "a.md", "text": "x"}]},
+    ):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("ticket.attach", bad)
+    with pytest.raises(actions.BadRequest):  # a program file is refused before orch is asked
+        actions.attachments(
+            "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]}
+        )

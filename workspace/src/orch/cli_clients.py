@@ -474,7 +474,10 @@ def run_publish(args, root: Path, out) -> None:
     elif sub == "view":
         v = publish.view(root)
         rows = [
-            f"{i['title']}  {i['subtitle']}" for b in v["blocks"] if b["type"] == "list" for i in b["items"]
+            f"{i['title']}  {i.get('subtitle') or ' · '.join(i.get('meta', []))}"
+            for b in v["blocks"]
+            if b["type"] == "list"
+            for i in b["items"]
         ]
         out(args, v, "\n".join(rows) or "Nothing shared yet.")
     elif sub == "app":

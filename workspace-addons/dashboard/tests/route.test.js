@@ -15,6 +15,7 @@ const FOCUS = {name:'focus', page:{path:'/'}, dashboard:{label:'Focus'}};
 const OTHER = {name:'automation', dashboard:{label:'Automation'}};
 test('#addon/focus is the Focus page; #open/focus/ and #open/focus/t/<id> forward to it', () => {
   assert.deepEqual({...route('#addon/focus', [FOCUS, OTHER])}, {kind:'page', id:'focus', path:'', hash:'#addon/focus'});
+  assert.deepEqual({...route('#note/t_1', [])}, {kind:'note', id:'t_1', hash:'#note/t_1'});
   assert.deepEqual({...route('#open/focus/', [FOCUS])}, {kind:'page', id:'focus', path:'', hash:'#addon/focus'});
   assert.deepEqual({...route('#open/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
   assert.deepEqual({...route('#addon/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
@@ -50,6 +51,8 @@ test('skeletonFor draws the page shape, busy, with one status text and hidden sh
   assert.equal(count(ctx.skeletonFor('ticket'), 'sk-side'), 1);
   assert.equal(ctx.hashKind('#ticket/t_1'), 'ticket');
   assert.equal(ctx.hashKind('#tickets?view=x'), 'tickets');
+  assert.equal(ctx.hashKind('#notes'), 'notes');
+  assert.equal(ctx.hashKind('#note/t_1'), 'notes');
 });
 test('the sidebar: Home has the needs badge, Settings is last in the foot', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/index.html'), 'utf8');
@@ -76,8 +79,10 @@ test('shared words: status, steps and the updated time', () => {
   assert.equal(H.updatedText(now - 3 * 60000, now), 'Updated 3 min ago');
 });
 test('#settings is General; #settings/<tab> opens that tab on the same Settings page', () => {
-  assert.deepEqual({...route('#settings', [])}, {kind:'settings', hash:'#settings', tab:'general'});
-  for (const tab of ['general', 'agent', 'phone', 'addons']) assert.deepEqual({...route('#settings/' + tab, [])}, {kind:'settings', hash:'#settings', tab});
+  assert.deepEqual({...route('#settings', [])}, {kind:'settings', hash:'#settings', tab:'general', addon:null});
+  for (const tab of ['general', 'agent', 'phone', 'addons']) assert.deepEqual({...route('#settings/' + tab, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
+  assert.deepEqual({...route('#settings/addons/publish', [])}, {kind:'settings', hash:'#settings', tab:'addons', addon:'publish'});  // one add-on's own settings page
+  assert.equal(route('#settings/phone/publish', []).kind, 'notfound');
   assert.equal(route('#settings/nope', []).kind, 'notfound');  // an unknown tab is an unknown address: Page not found
 });
 test('the phone tab is role=tab and choosing it keeps Settings open at #settings/phone', () => {

@@ -505,6 +505,8 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "icon": d["icon"],
                         "order": d.get("order", 50),
                         "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
+                        "title": str(d["title"])[:40] if isinstance(d.get("title"), str) else None,
+                        "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
                     "ticket_view": tv,
                     "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
@@ -821,10 +823,38 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
                 "consent": _consent(r),
                 "detail": _addon_detail(root, r["name"]),
             }
-            for r in (rows if isinstance(rows, list) else [])
-            if isinstance(r, dict) and isinstance(r.get("name"), str) and _NAME.match(r["name"])
+            for r in _addon_rows(rows)
+            if r.get("installed") is not False
+        ],
+        # shipped with orch but not installed yet (`installed: false`): the catalogue lists them, Add turns one on
+        "available": [
+            {
+                "name": r["name"],
+                "label": _label(r),
+                "description": str(r.get("description") or "")[:200],
+                "version": str(r.get("version") or "")[:20],
+                "recommended": r.get("recommended") is True,
+                "background": r.get("background") is True,
+                "consent": _consent(r),
+            }
+            for r in _addon_rows(rows)
+            if r.get("installed") is False
         ],
     }
+
+
+def _addon_rows(rows) -> list[dict]:
+    return [
+        r
+        for r in (rows if isinstance(rows, list) else [])
+        if isinstance(r, dict) and isinstance(r.get("name"), str) and _NAME.match(r["name"])
+    ]
+
+
+def _label(r: dict) -> str:
+    d = r.get("dashboard") if isinstance(r.get("dashboard"), dict) else None
+    lab = d.get("label") if d else None
+    return lab[:40] if isinstance(lab, str) and lab.strip() else r["name"]
 
 
 def load_services(root: Path, orch_bin: str | None) -> list[dict]:

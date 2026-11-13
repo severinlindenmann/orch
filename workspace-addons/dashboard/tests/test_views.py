@@ -225,8 +225,12 @@ def test_page_has_no_inline_code_and_loads_the_kit():
 
 def test_page_code_names_no_addon_and_has_no_blinking_needs():
     js = (webjs.all_js() + (WEBDIR / "style.css").read_text()).replace(".focus(", ".(").replace(":focus", ":")
-    for name in ("scheduler", "automation", "relay", "focus", "publish", "wiki"):
+    # the one named exception: shared-link controls are for the built-in publish add-on only (security review)
+    js = re.sub(r"const isPublish = .*\n", "", js)
+    for name in ("scheduler", "automation", "focus", "publish", "wiki"):
         assert not re.search(rf"\b{name}\b", js, re.IGNORECASE), name
+    # "relay" is plain product wording on the Phone & workspaces tab (accepted draft): the code never names the add-on
+    assert not re.search(r"""['"]relay['"]""", js), "relay"
     assert "needs-pulse" not in js
     assert "activity-pulse" in js and "prefers-reduced-motion:reduce" in js
     assert ".activity-pulse::before{animation:none}" in js
@@ -432,7 +436,7 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
 
 def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
     js = webjs.all_js()
-    assert "'/api/artifacts/'" in js and "'/api/file'" in js
+    assert "'/api/artifacts/'" in js and "'/api/file?t='" in js
     assert "innerHTML" not in js[js.index("function artifactsPanel") : js.index("function detail(")]
     assert "pre.textContent" in js  # file text is never parsed as html
 
@@ -448,13 +452,12 @@ def test_settings_wording_and_one_toast_at_a_time():
     for text in (
         "Off: helpers send finished work to Review and you decide when it is Done.",
         "On: a helper marks its finished work Done.",
-        "'Finished work'",
+        "'Sharing and finished work'",
         "Shared. Your team can now see this workspace.",
         "The helper is not signed in yet.",
         "Type the command you use to start your tool. {prompt} is where the ticket text goes.",
         "Only use this if you trust it.",
-        "Stored on this computer",
-        "'Details'",
+        "Copy path",
     ):
         assert text in js, text
     assert "'Workflow'" not in js  # a plain word for the heading
@@ -476,7 +479,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "' is now the default helper.'",
         "ticketButton('Start helper'",
         "'Ask the helper to check again'",
-        "field('Helper', agent)",
+        "'Helper: ' + agent",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
         "plainWhy(question, 'The helper')",

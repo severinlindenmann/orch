@@ -1,0 +1,23 @@
+{
+  "schema": "orch.addon-view/1",
+  "generated_at": "2026-11-13T10:00:00Z",
+  "blocks": [
+    {
+      "type": "table",
+      "title": "Schedules",
+      "columns": [{"key": "schedule", "label": "Schedule", "type": "text"}, {"key": "next", "label": "Next run", "type": "text"}],
+      "rows": [
+        {
+          "cells": {"schedule": "Weekly report", "next": "Mon 16 Nov, 08:00"},
+          "link": "t_abc12345",
+          "subtitle": "Workspace helper",
+          "toggle": {"on": true, "label": "Weekly report on or off", "action": {"op": "addon.act", "args": {"verb": "toggle", "target": "t_abc12345"}}},
+          "actions": [
+            {"label": "Run now", "action": {"op": "addon.act", "args": {"verb": "run", "target": "t_abc12345"}}},
+            {"label": "Delete", "tone": "bad", "confirm": "Stop and remove this schedule?", "action": {"op": "addon.act", "args": {"verb": "delete", "target": "t_abc12345"}}}
+          ]
+        }
+      ]
+    }
+  ]
+}

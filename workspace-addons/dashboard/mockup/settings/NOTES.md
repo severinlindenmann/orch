@@ -23,7 +23,7 @@
 ## settings-helper.html — Helper
 
 - Unavailable helpers offer setup guidance instead of a misleading Test action (SN-19).
-- Your own helper uses a human label; the existing "helper unavailable" states are preserved (SN-19; BP-78).
+- Your own helper uses a human label; existing unavailable states for each helper program are preserved (SN-19; BP-78).
 - Permission choices use a visible radio and strong teal selection; Full explains its consequence (SN-20; BP-13, BP-77).
 - Product data: Needs installation capability and authoritative permission value. Auto is a proposed preview default; not verified in the provided snapshot. Tests and installation cannot run in static HTML.
 
@@ -64,7 +64,7 @@
 
 - Six installed optional add-ons become aligned rows, using sidebar names (SN-09, SN-26).
 - The always-on dashboard is reduced to a footnote, freeing space for useful controls (SN-09).
-- Add an add-on opens a catalogue state; no imaginary products or installation results are shown (SN-09; BP-55).
+- Add an add-on opens the catalogue: one card per add-on that ships with orch but is not installed (label, plain description, "What this does" disclosure, Add). Add turns it on in place ("Turned on.", background add-ons: "It starts with orch start." + Start now). When nothing is left: "Every add-on that comes with orch is already here." Rows come from `orch addon list --json` with `installed: false` (SN-09; BP-55).
 - Product data: Needs catalogue availability, friendly labels, install progress and per-add-on configuration. All six existing optional add-ons are On; empty preview represents a fresh installation.
 
 ### MOTION and performance

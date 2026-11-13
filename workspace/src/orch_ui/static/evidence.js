@@ -66,7 +66,7 @@
       const data = tableData(ev, ctx);
       body = data.columns.length ? `<div class="ev-table" tabindex="0" role="region" aria-label="${esc(caption)}"><table><thead><tr>${data.columns.map(c => `<th scope="col">${esc(c)}</th>`).join('')}</tr></thead><tbody>${data.rows.slice(0, 50).map(row => `<tr>${row.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>${data.rows.length > 50 ? `<p class="ev-cap">Showing 50 of ${data.rows.length} rows.</p>` : ''}` : '<p class="muted">No table rows to show.</p>';
     } else body = ev.type === 'note' ? `<p class="ev-note">${esc(ev.text || ev.summary || ev.ref)}</p>` : `<pre class="ev-text">${esc(ev.text || ev.summary || ev.ref)}</pre>`;
-    return `<div class="ev-full">${body}<details class="ev-technical"><summary>Technical details</summary><dl class="tech-dl"><dt>Type</dt><dd>${esc(ev.type)}</dd><dt>${ev.type === 'command' ? 'Command' : 'Ref'}</dt><dd class="mono">${esc(ev.ref)}</dd></dl></details></div>`;
+    return `<div class="ev-full">${body}${ev.type === 'command' && ev.ref ? `<p class="mono ev-cmd">${esc(ev.ref)}</p>` : ''}</div>`;
   }
   return {kindOf, parseCsv, chip, full, esc};
 });
