@@ -432,7 +432,7 @@ def test_board_moves_use_ticket_patch_with_the_revision_and_keyboard_menu():
 
 def test_artifacts_tab_reads_files_only_through_the_checked_endpoints():
     js = webjs.all_js()
-    assert "'/api/artifacts/'" in js and "'/api/file'" in js
+    assert "'/api/artifacts/'" in js and "'/api/file?t='" in js
     assert "innerHTML" not in js[js.index("function artifactsPanel") : js.index("function detail(")]
     assert "pre.textContent" in js  # file text is never parsed as html
 
@@ -476,7 +476,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "' is now the default helper.'",
         "ticketButton('Start helper'",
         "'Ask the helper to check again'",
-        "field('Helper', agent)",
+        "'Helper: ' + agent",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
         "plainWhy(question, 'The helper')",
