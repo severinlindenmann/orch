@@ -103,10 +103,57 @@ enum GroupRoomRules {
         }
     }
 
+    /// Header subtitle: the member names, as a messenger group shows them.
+    static func subtitle(_ group: PhoneGroup) -> String { group.members.map { group.name(of: $0.ws) }.joined(separator: ", ") }
+
+    static func membersNote(_ group: PhoneGroup) -> String {
+        "Members see the group's messages from when they joined. They do not see the rest of the \(group.hostName) topic. People removed keep the files they already fetched."
+    }
+
+    /// The row id ("m-" + message id) of the newest approval card this phone can still answer; the room opens there.
+    static func openRowID(_ group: PhoneGroup, questions: [Question], answered: Set<String>) -> String? {
+        guard !group.closed else { return nil }
+        let decided = Set(group.messages.compactMap(\.event).filter { ["approved", "denied"].contains($0.kind) }.compactMap(\.delegate))
+        return group.messages.last { message in
+            guard let event = message.event, event.kind == "approval_needed", let delegate = event.delegate, !decided.contains(delegate),
+                  case .buttons(let question) = GroupStore.approvalCard(for: event, in: group, questions: questions, late: message.late)
+            else { return false }
+            return !answered.contains(question.id)
+        }.map { "m-" + $0.id }
+    }
+
+    /// Answers still in their undo window whose group card can no longer be answered (group closed, or the card came
+    /// late): they are dropped, not sent. One already sending is left alone.
+    static func answersToCancel(_ groups: [PhoneGroup], pending: Set<String>, sending: Set<String>) -> Set<String> {
+        guard !pending.isEmpty else { return [] }
+        var out: Set<String> = []
+        for group in groups {
+            for message in group.messages {
+                guard let event = message.event, event.kind == "approval_needed", let id = event.questionMessage,
+                      pending.contains(id), !sending.contains(id), group.closed || message.late else { continue }
+                out.insert(id)
+            }
+        }
+        return out
+    }
+
+    /// An approval this phone cannot answer: link to the member's topic (or chat) when it is paired here, else say who answers.
+    static func answerElsewhere(_ event: GroupEvent, group: PhoneGroup, paired: [String]) -> (route: ChatRoute?, text: String) {
+        let ws = event.ws ?? ""
+        let name = group.name(of: ws)
+        guard paired.contains(ws), !group.isExternal(ws) else {
+            return (nil, "Only someone with \(name) on their phone can answer this.")
+        }
+        if let delegate = event.delegate, let ticket = group.tasks[delegate]?.ticket {
+            return (.ticket(workspace: ws, ticket: ticket), "Answer in \(name)")
+        }
+        return (.workspace(ws), "Answer in \(name)")
+    }
+
     static func eventText(_ event: GroupEvent, group: PhoneGroup, ownAnswer: String?) -> String {
         let name = group.name(of: event.ws ?? "")
         switch event.kind {
-        case "created": return "Group started"
+        case "created": return "\(group.hostName) started this group"
         case "member_added": return "\(group.hostName) added \(name) to this group"
         case "member_left": return "\(name) left this group"
         case "approved":
