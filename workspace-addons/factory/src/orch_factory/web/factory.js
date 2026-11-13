@@ -195,7 +195,7 @@
       ? card(o.title, meta('Autopilot order'), p('Routine stops answered by your agent · Ship still asks you'), tail(link('What it decided', '#/autopilot')))
       : card(o.title, stages(o), budget(o), meta('ETA ' + when(o.eta)), tail(orderLink(o))), 'No running orders.');
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
-    section(secondary, 'Shipped this week', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
+    section(secondary, 'Shipped', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
     secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
     section(secondary, 'Saved ideas', orders.filter(o => ['draft','edit','parked','cancelled','broken'].includes(o.phase)), o => card(o.title, badge(capital(o.phase)), tail(orderLink(o))), 'No saved ideas.');
     view.append(group('f-grid', primary, secondary));

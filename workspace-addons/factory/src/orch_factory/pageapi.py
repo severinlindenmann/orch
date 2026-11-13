@@ -153,6 +153,13 @@ def _derive(root, store, ticket, tickets):
     return d
 
 
+def _day(row):
+    try:
+        return datetime.fromisoformat(row["at"]).astimezone().date()
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _decisions(journal, ok):
     rows = [
         {"order": r["order"], "q": r["q"], "answer": r.get("answer"), "why": r.get("why", ""), "at": r["at"]}
@@ -203,9 +210,7 @@ def home(root):
             "on": any(g["live"] for g in grants),
             "until": max(g["until"] for g in grants),
             "decided_today": sum(
-                1
-                for r in _decisions(journal, ok)
-                if datetime.fromisoformat(r["at"]).astimezone().date() == today
+                1 for r in journal if r["type"] == "decided" and r["q"] in ok and _day(r) == today
             ),
         }
     return {

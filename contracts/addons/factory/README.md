@@ -95,6 +95,9 @@ the native question card asks for the person's proof.
 | `/api/order/<id>/file/<name>` | an image of a stop round (`png`, `jpg`, `webp`, `gif` only, from `stops/<id>/`; no other path) |
 | `/api/autopilot` | `{"grants": [{"order", "until", "may", "limits"}], "decisions": [{"order", "q", "answer", "why", "at"}]}` |
 
-Order summary: `{"id", "title", "kind": "run"\|"autopilot", "phase": "draft"\|"proposed"\|"started"\|"edit"\|"parked"\|"shipped"\|"cancelled", "stage", "line": [{"stage", "stop", "state"}], "budget": {"used", "cap", "warn"}, "eta", "due", "open": {"q", "kind", "text", "options"} \| null, "owner_min"}` — every field derived through `flow.derive` (never `ext.factory`). `line[].label` comes from the frozen proposal; `open.data` carries the frozen stop/change data for stop and change questions.
+Order summary: `{"id", "title", "kind": "run"\|"autopilot", "phase": "draft"\|"proposed"\|"started"\|"edit"\|"parked"\|"shipped"\|"cancelled", "stage", "line": [{"stage", "stop", "state"}], "budget": {"used", "cap", "warn"}, "eta", "due", "open": {"q", "kind", "text", "options"} \| null, "owner_min"}` — every field derived through `flow.derive` (never `ext.factory`). `line[].label` comes from the frozen proposal; `open.data` carries the frozen stop/change data for stop and change questions. `phase` may also be `broken` (the add-on refused the order's files as tampered; the summary then has `problem`).
+Also: `/api/home` `watcher` is `true` only while a verified watcher runs (else `false`); grants carry `live`; a draft answer
+may carry `truncated: true` (over 256 KB); any answer may carry `stale: true` (a slow build gave the last good answer); with no
+earlier answer a slow or failed build is `503 {"error", "stale": true}`.
 Page routes (hash inside the page): `#/` home · `#/order/<id>` · `#/order/<id>/proposal` · `#/order/<id>/stop/<n>` ·
 `#/order/<id>/draft/<v>` · `#/autopilot`.

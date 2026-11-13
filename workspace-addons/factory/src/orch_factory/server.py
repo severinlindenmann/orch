@@ -58,7 +58,9 @@ def _kit(name):
         return None
 
 
-def _local_check(method, headers, port, *, api=False):
+def _local_check(  # keep in sync with orch_ui.origin (test_fallback_fence_matches_shared_rules)
+    method, headers, port, *, api=False
+):
     """The Host/Origin rules of orch_ui.origin, for installs where orch_ui is not importable."""
     one = {}
     for name in ("host", "origin", "sec-fetch-site"):
@@ -120,17 +122,17 @@ class Answers:
                     if self.running.get(key) is future:
                         del self.running[key]
 
-        with self.lock:
+        with self.lock:  # check and register under one hold: two requests never start two builds
+            running = self.running.get(key)
+            if running is not None:
+                return running
             self.running[key] = future
         threading.Thread(target=work, daemon=True).start()
         return future
 
     def get(self, key, fn):
         """(answer or None, error text or None). A slow or failed build gives the last good answer (stale)."""
-        with self.lock:
-            future = self.running.get(key)
-        if future is None:
-            future = self._start(key, fn)
+        future = self._start(key, fn)
         try:
             return future.result(timeout=self.budget if self.budget is not None else BUDGET), None
         except TimeoutError:

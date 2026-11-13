@@ -559,3 +559,14 @@ def test_threads_do_not_block_each_other(ws, run, srv):
     [t.start() for t in threads]
     [t.join(20) for t in threads]
     assert results == [200] * 5
+
+
+def test_page_script_never_writes_html():
+    """API text reaches the DOM only as text; links stay inside the allowlist (static check of web/factory.js)."""
+    import re
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
+    assert not re.search(r"innerHTML|outerHTML|insertAdjacent|document\.write|srcdoc|eval\(|new Function", js)
+    for target in re.findall(r"""['"](/#[a-z]+)""", js):
+        assert target in ("/#ticket", "/#chat"), target
