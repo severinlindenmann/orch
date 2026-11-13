@@ -3351,14 +3351,20 @@ def take_resume_session(root: Path, server: str, why: list | None = None) -> tup
                 return None  # Windows could not read it just now: keep the file for the next start (15 min)
             except FileNotFoundError:
                 return None  # nothing to adopt (a normal start)
-            except (LooseFile, ValueError) as e:
+            except Exception as e:  # noqa: BLE001 - any other refusal: the file is spent, nothing is adopted
                 if why is not None:
                     why.append(f"the resume file was refused ({type(e).__name__})")
                 with contextlib.suppress(OSError):
                     f.unlink()
                 return None
-            with contextlib.suppress(OSError):
+            try:
                 f.unlink()  # one use, whatever it holds
+            except FileNotFoundError:
+                pass
+            except OSError:  # cannot prove it is spent (Windows: a scanner holds it): adopt nothing, no replay
+                if why is not None:
+                    why.append("the resume file could not be removed")
+                return None
     except (Refused, OSError, ValueError):
         return None
     if (

@@ -37,6 +37,7 @@ _SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 # dashboard: their behaviour before 2.11); Insights mints only its two (human-proof.md, step 3).
 SERVER_OPS = {"insights": frozenset({"insights.settings", "record.delete_detail"})}
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
+EXPIRED_MSG = "This request expired. Run the update again."
 RESTARTED_MSG = "orch restarted after the update. Reload this page to keep working."
 REVOKED_MSG = "Someone else tried to use this sign-in link. Open the dashboard again from orch."
 
@@ -88,6 +89,14 @@ def host_ok(headers, port: int) -> bool:
     return host in (f"127.0.0.1:{port}", f"localhost:{port}")
 
 
+def _say(line: str) -> None:
+    """One diagnostic line on stderr; a closed stderr (detached start) must never stop a server from starting."""
+    try:
+        print(line, file=sys.stderr)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class PageSession:
     """One per server start. `key` is None (watch-only) when there is no key or an agent tool is in the
     environment of the server."""
@@ -113,11 +122,11 @@ class PageSession:
             why: list = []
             resumed = humanproof.take_resume_session(root, server, why)
             for line in why:  # a restart that had a session to adopt and did not: say why (no secrets)
-                print(f"orch {server}: did not keep the open page's session: {line}.", file=sys.stderr)
+                _say(f"orch {server}: did not keep the open page's session: {line}.")
             if resumed:
                 self.cookie, self.secret = resumed
                 self.resumed = True
-                print(f"orch {server}: kept the open page's session after the restart.", file=sys.stderr)
+                _say(f"orch {server}: kept the open page's session after the restart.")
 
     # -- the launch token (one time, 120 s) ----------------------------------------------------------
     def launch(self, token) -> str | None:
@@ -262,8 +271,10 @@ def start_detached(argv: list[str], proof: str, *, orch_bin: str, cwd: Path, env
 
 def _short_reason(text: str) -> str:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    last = lines[-1] if lines else "it did not finish"
-    return re.sub(r"^Refused:\s*", "", last)[:120]
+    last = re.sub(r"^Refused:\s*", "", lines[-1]) if lines else "it did not finish"
+    if last == humanproof.HANDOFF:  # the core did not accept the click's proof (expired or used): say that
+        return EXPIRED_MSG
+    return last[:120]
 
 
 def _runner(cmd: list[str]) -> int:

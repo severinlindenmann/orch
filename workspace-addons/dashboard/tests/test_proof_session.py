@@ -1015,3 +1015,29 @@ def test_a_transient_read_failure_keeps_the_resume_file(live, monkeypatch):
     assert hp.take_resume_session(root, "dashboard") is None
     monkeypatch.setattr(hp, "_read_guarded", real)
     assert hp.take_resume_session(root, "dashboard") == ("c" * 40, "s" * 40)
+
+
+def test_a_resume_file_that_cannot_be_removed_is_not_adopted(live, monkeypatch):
+    """No replay: when the one use cannot be proven (the unlink fails), nothing is adopted."""
+    root, _ = live
+    assert hp.write_resume_cookie(root, "dashboard", "c" * 40, "s" * 40)
+    f = hp.key_dir(root) / "resume-dashboard.cookie"
+    real = type(f).unlink
+
+    def deny(self, *a, **k):
+        if self.name == f.name:
+            raise PermissionError("in use")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(type(f), "unlink", deny)
+    why = []
+    assert hp.take_resume_session(root, "dashboard", why) is None and why
+    monkeypatch.setattr(type(f), "unlink", real)
+
+
+def test_an_update_the_core_refused_for_its_proof_says_the_request_expired():
+    assert (
+        pageproof._short_reason("Refused: " + hp.HANDOFF + "\n")
+        == "This request expired. Run the update again."
+    )
+    assert pageproof._short_reason("Refused: disk full\n") == "disk full"
