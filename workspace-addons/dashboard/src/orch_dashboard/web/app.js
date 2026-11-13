@@ -144,7 +144,7 @@ const heading = (title, sub = '', {eyebrow = '', actions = null} = {}) => h('hea
 function skeletonFor(kind) {
   const bar = cls => h('div', {className:'skeleton ' + cls, 'aria-hidden':'true'});
   const stack = (n, cls = 'sk-card') => h('div', {className:'sk-stack', 'aria-hidden':'true'}, Array.from({length:n}, () => bar(cls)));
-  const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(2), stack(1))]
+  const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(3), stack(1))]
     : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
     : kind === 'section' ? [stack(3, 'sk-row')]
@@ -179,6 +179,8 @@ function navIcon(name) {
   return node;
 }
 const ADDONS_OPEN = 'orch.nav.addons';
+const VIEWS_OPEN = 'orch.nav.views';
+const viewsOpen = () => { try { return localStorage.getItem(VIEWS_OPEN) === 'open'; } catch (_) { return false; } };
 const addonsOpen = () => { try { return localStorage.getItem(ADDONS_OPEN) !== 'closed'; } catch (_) { return true; } };
 let lastOk = 0, lastFetch = 0;
 function paintUpdated() {
@@ -298,7 +300,12 @@ function render(arrived = new Set()) {
   const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount);
-  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), navLink('#notes', 'Notes', 'notes'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null));
+  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), navLink('#notes', 'Notes', 'notes'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
+    // Saved ticket views: the same list with a filter on the address (#tickets?view=...)
+    array(state.tickets).length ? h('details', {className:'nav-group', 'data-key':'nav-views', open:viewsOpen() || /[?&]view=/.test(r.hash || '') ? '' : null},
+      h('summary', {className:'nav-item', 'aria-label':'Ticket views'}, navIcon('tickets'), h('span', {className:'nav-label'}, 'Ticket views')),
+      h('nav', {'aria-label':'Saved ticket views'}, [['needs-you', 'Needs me'], ['working', 'Working now'], ['done-week', 'Done this week']].map(([id, label]) =>
+        h('a', {className:'nav-item', href:'#tickets?view=' + id, 'aria-label':label, 'aria-current':String(r.hash || '').includes('view=' + id) ? 'page' : null}, h('span', {className:'nav-label'}, label))))) : null));
   const pages = addons().filter(a => a.dashboard);
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
@@ -657,6 +664,10 @@ window.addEventListener('hashchange', async () => {
   for (const d of document.querySelectorAll('dialog[open]')) await window.orch.close(d);
   render();
 });
+document.getElementById('side-nav')?.addEventListener('toggle', event => {
+  if (!event.target.matches?.('details.nav-group')) return;
+  try { localStorage.setItem(VIEWS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }
+}, true);
 document.getElementById('side-addons')?.addEventListener('toggle', event => {
   if (!event.target.matches?.('details.nav-group')) return;
   try { localStorage.setItem(ADDONS_OPEN, event.target.open ? 'open' : 'closed'); } catch (_) { /* fine without storage */ }

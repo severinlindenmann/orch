@@ -10,6 +10,7 @@ const source = read('pages/newticket.js');
 class Node {
   constructor(tag, cls = '', text = '') { this.tag = tag; this.className = cls; this.textContent = text; this.children = []; this.listeners = {}; this.dataset = {}; this.value = ''; this.isConnected = true; }
   append(...nodes) { for (const n of nodes) { n.parent?.children.splice(n.parent.children.indexOf(n), 1); n.parent = this; this.children.push(n); } }
+  prepend(...nodes) { const old = [...this.children]; for (const n of old) n.parent = null; this.children = []; this.append(...nodes, ...old); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   get firstChild() { return this.children[0]; }
   setAttribute(k, v) { this[k] = v; }
@@ -23,7 +24,8 @@ class Node {
   remove() { this.isConnected = false; this.parent.children.splice(this.parent.children.indexOf(this), 1); }
 }
 const walk = n => [n, ...n.children.flatMap(walk)];
-function setup() {
+function setup() { return setupWith(null); }
+function setupWith(settings, extra = {}) {
   const body = new Node('body'), calls = [], revoked = [], toasts = [], items = [];
   const c = {Blob, TextDecoder, Uint8Array, btoa, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
     el:(...args) => new Node(...args), document:{body, activeElement:null}, render:() => { c.renders++; }, renders:0,
@@ -31,8 +33,9 @@ function setup() {
     FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,YQ=='; this.onload(); } },
     tickets:() => items, ticketOf:() => null, refresh:async () => {},
     act:async (op, args) => { calls.push({op, args}); if (op === 'ticket.new') items.push({id:'new', title:args.title}); return {ok:true, state:{attached:{failed:['bad.txt']}}}; },
-    window:{DashHelpers:{scrubText:x => x}, orch:{open:d => { d.open = true; }, close:async d => { d.open = false; await d.fire('close'); }, toast:(...x) => toasts.push(x)}}};
+    window:{DashHelpers:{scrubText:x => x}, orch:{open:d => { d.open = true; }, close:async d => { d.open = false; await d.fire('close'); }, toast:(...x) => toasts.push(x)}, ...extra}};
   c.button = (text, cls, fn) => { const b = c.el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
+  if (settings) c.state = {settings};
   vm.createContext(c);
   const app = read('app.js');
   vm.runInContext(app.slice(app.indexOf('function dialog('), app.indexOf("document.getElementById('new-ticket')")), c);
@@ -50,7 +53,7 @@ test('file validation, first nonempty title, and base64 stripping', () => {
   assert.equal(c.ticketFileError({name:'x.html',size:1}, []), 'x.html: only text files and pictures');
   assert.equal(c.ticketFileError({name:'x.md',size:2097153}, []), 'x.md is over 2 MB');
   assert.equal(c.ticketFileError({name:'x.md',size:2097152}, []), '');
-  assert.equal(c.ticketFileError({name:'x.md',size:1}, Array(4).fill({size:1})), 'At most 4 files');
+  assert.equal(c.ticketFileError({name:'x.md',size:1}, Array(12).fill({size:1})), '');  // no file-count limit
   assert.equal(c.ticketFileError({name:'x.md',size:2*1024*1024}, [{size:2*1024*1024}]), 'Files are over 3.5 MB');
   assert.equal(c.ticketTextTitle('\n  hello\r\nworld', 3), 'hel');
   assert.equal(c.ticketTextTitle('  \n ', 80), '');
@@ -147,12 +150,11 @@ test('a typed title stays: with a 20 KB paste or files title_auto is false and t
   assert.equal(u.calls[0].args.title_auto, true);
 });
 
-test('Show me the plan first is a box in More options; Start creates a plan-first ticket and starts it', async () => {
+test('Show me the plan first is a plain box; Start creates a plan-first ticket and starts it', async () => {
   const s = setup();
   s.form.requestSubmit = () => s.form.fire('submit');
   s.input.value = 'Make a plan'; await s.input.fire('input');
-  const options = walk(s.d).find(n => n.className === 'new-ticket-options');
-  const box = walk(options).find(n => n.name === 'plan_first');
+  const box = walk(s.d).find(n => n.name === 'plan_first');
   assert.equal(box.type, 'checkbox');
   box.checked = true;
   await s.form.fire('submit');
@@ -174,10 +176,10 @@ test('long typed text moved to a chip on submit shrinks the text box back', asyn
   assert.equal(s.input.style.height, 'auto');
 });
 
-test('one Start button; Create without starting is a text link; neither sends plan_first by default', async () => {
+test('one Start button; Save without starting is a text link; neither sends plan_first by default', async () => {
   const labels = walk(setup().d).filter(n => n.tag === 'button' && /btn/.test(n.className)).map(n => n.textContent);
   assert.ok(labels.includes('Start') && !labels.includes('Create & Start') && !labels.includes('Show plan first'));
-  for (const label of ['Create without starting', 'Start']) {
+  for (const label of ['Save without starting', 'Start']) {
     const s = setup();
     s.form.requestSubmit = () => s.form.fire('submit');
     s.input.value = 'Work'; await s.input.fire('input');
@@ -191,12 +193,53 @@ test('one Start button; Create without starting is a text link; neither sends pl
 
 test('attach is a link, drops land anywhere on the form, pasted text reads in pages', async () => {
   const s = setup();
-  assert.ok(walk(s.d).some(n => n.textContent === 'Attach file' && n.className === 'new-ticket-attach'));
-  assert.equal(s.input.rows, 4);
+  assert.ok(walk(s.d).some(n => n.textContent === '＋ Add files or drop them here' && n.className === 'new-ticket-attach'));
+  assert.equal(s.input.rows, 8);
   assert.equal((await s.form.fire('drop', {dataTransfer:{files:[{name:'plan.md', size:3, arrayBuffer:async () => new TextEncoder().encode('abc').buffer}]}})).prevented, true);
   await s.paste('x'.repeat(9000));
   walk(s.d).find(n => n.type === 'submit').disabled = true; await s.form.fire('submit');
   const labels = s.chips().map(n => n.children.map(c => c.textContent).join('|'));
-  assert.deepEqual(labels, ['Pasted text (about 3 pages)', 'plan.md']);
+  assert.deepEqual(labels, ['Pasted text (about 3 pages)', 'plan.md|3 B']);
   assert.equal(s.c.pastedLabel('x'.repeat(100)), 'Pasted text (about 1 page)');
+});
+
+test('helper choice: only real helpers, distinct labels, default first', () => {
+  const c = setup().c;
+  const hs = c.ticketHelpers({agents:[{name:'claude', label:'Helper', found:true}, {name:'codex', label:'Helper', chosen:true, found:true, description:'Builds code'}, {name:'gone', found:false}, {name:'claude', label:'Helper'}]});
+  assert.deepEqual([...hs.map(h => h.name)], ['codex', 'claude']);
+  assert.equal(new Set(hs.map(h => h.label.toLowerCase())).size, 2);
+  assert.equal(hs[0].description, 'Builds code');
+  assert.equal(c.ticketHelpers(null).length, 0);
+});
+test('several helpers: a select, each once; a non-default choice is the owner. One helper: fixed text. None: empty state', async () => {
+  const s = setupWith({agents:[{name:'claude', label:'Claude', chosen:true}, {name:'codex', label:'Codex', description:'Websites and code'}]});
+  const select = walk(s.d).find(n => n.name === 'helper');
+  assert.deepEqual([...select.children.map(o => o.textContent)], ['Claude (default)', 'Codex']);
+  select.value = 'codex'; await select.fire('change');
+  assert.equal(walk(s.d).find(n => n.className.includes('new-ticket-helper-about')).textContent, 'Websites and code');
+  s.input.value = 'Work'; await s.input.fire('input'); await s.form.fire('submit');
+  assert.equal(s.calls[0].args.owner, 'agent:codex');
+  const one = setupWith({agents:[{name:'claude', label:'Claude'}]});
+  assert.equal(walk(one.d).some(n => n.name === 'helper'), false);
+  assert.equal(walk(one.d).find(n => n.className === 'new-ticket-helper-fixed').textContent, 'Claude');
+  const none = setupWith({agents:[]});
+  assert.match(walk(none.d).find(n => n.className.includes('new-ticket-empty')).textContent, /No helper is set up yet/);
+});
+test('due date uses the shared date picker; the chosen day is sent with the ticket', async () => {
+  const seen = [], s = setupWith(null, {UI:{date:(value, toggle) => seen.push([value, toggle])}});
+  const toggle = walk(s.d).find(n => n.className.includes('new-ticket-date-toggle'));
+  assert.equal(toggle.textContent, '▦ No date');
+  assert.deepEqual(seen.map(([value, t]) => [value.type, value.name, t === toggle]), [['hidden', 'due', true]]);
+  seen[0][0].value = '2026-11-20';
+  s.input.value = 'Work'; await s.input.fire('input'); await s.form.fire('submit');
+  assert.equal(s.calls[0].args.due, '2026-11-20');
+  assert.ok(setup().d, 'without the shared picker the window still opens');
+});
+test('window closes through the shared overlay; an empty submit shows the plain message', async () => {
+  const s = setup();
+  await s.form.fire('submit');
+  assert.equal(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, 'Describe what needs doing before you continue.');
+  assert.equal(s.calls.length, 0);
+  assert.ok(!walk(s.d).some(n => /^Close/.test(n['aria-label'] || '')), 'the Close button comes from the shared overlay, not from the page');
+  await s.c.window.orch.close(s.d); assert.equal(s.d.open, false);
 });

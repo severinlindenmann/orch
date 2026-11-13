@@ -27,7 +27,7 @@ def test_groups_render_only_when_data_exists():
         "'Back to today'",
         "Search chats",
         "Search earlier chats",
-        "Starts fresh each day at 04:00",
+        "A new conversation starts each day at 04:00",
         "'From my phone'",
         "'Needs your OK'",
         "is thinking…",

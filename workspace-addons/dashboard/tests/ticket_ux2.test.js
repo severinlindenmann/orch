@@ -15,7 +15,7 @@ const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMa
 function listCtx(extra = {}) {
   const c = {h, window:{DashHelpers:helpers}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
     shown:t => t, chip:(t, cls) => h('span', {className:'chip ' + cls}, t), statusChip:t => h('span', {className:'chip'}, t.status), state:{runs:{}}, starting:new Set(),
-    needsList:() => [], snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
+    needsList:() => [], tickets:() => [], name:v => String(v || ''), location:{hash:'#tickets'}, snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
     button:(label, cls, fn) => { const b = h('button', {className:'btn ' + cls}, label); b.onclick = fn; return b; }, ...extra};
   vm.createContext(c); vm.runInContext(listSrc, c); return c;
 }
@@ -40,12 +40,12 @@ test('the list takes the finish day from the done history entry, like the ticket
   const t = {status:'done', updated_at:'2026-12-20T10:00:00Z', history:[{at:'2026-11-03T10:00:00Z', text:'open -> done'}]};
   assert.equal(text(c.ticketAttentionChip(t, 'done')), 'Finished ' + new Date('2026-11-03T10:00:00Z').toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}));
 });
-test('Dash 49: All / Mine is a segmented control with aria-pressed', () => {
-  const c = listCtx();
-  const segs = nodes(c.ticketFilters()).filter(n => n.attrs.className === 'btn ghost seg');
-  assert.deepEqual(segs.map(n => [text(n), n.attrs['aria-pressed']]), [['All', 'true'], ['Mine', 'false']]);
-  segs[1].onclick();
-  assert.deepEqual(nodes(c.ticketFilters()).filter(n => n.attrs.className === 'btn ghost seg').map(n => n.attrs['aria-pressed']), ['false', 'true']);
+test('Tickets toolbar: search and a Person choice when there is more than one owner', () => {
+  const c = listCtx({tickets:() => [{id:'a', owner:'anna'}, {id:'b', owner:'ben'}]});
+  const parts = nodes(h('div', {}, c.ticketFilters()));
+  assert.ok(parts.some(n => n.attrs.type === 'search' && n.attrs['aria-label'] === 'Search tickets'));
+  assert.ok(parts.some(n => n.attrs['data-key'] === 'ticket-person'), 'a Person choice');
+  assert.ok(!parts.some(n => n.attrs.className === 'btn ghost seg'), 'no All / Mine toggle');
 });
 test('Dash 02: rows, board cards and step names carry no ticket key', () => {
   assert.doesNotMatch(listSrc, /t\.key \+ ' '|mono key|part\.key/);
