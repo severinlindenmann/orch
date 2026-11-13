@@ -66,3 +66,7 @@
 .board .col-head{margin-bottom:12px;padding:12px 0 0}
 @media(max-width:720px){.board-toolbar .search-field{width:100%}}
 .ticket-table .ticket-actions-row{display:flex;align-items:center;justify-content:flex-end;gap:4px}
+.page:has(.board-toolbar){max-width:none}
+.page:has(.board-toolbar)>.table-wrap{min-width:0;max-width:100%;overflow-x:auto}
+@media(max-width:899px){.ticket-table{min-width:680px}.ticket-table .ticket-cell{min-width:220px}.ticket-table .who{white-space:nowrap}}
+.table-wrap{position:relative}

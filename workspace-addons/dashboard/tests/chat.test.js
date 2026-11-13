@@ -61,7 +61,7 @@ test('"Your helper" is the thread title, the Chat row title, the bubble, the com
   const times = nodes(c.chatThread(null, null), n => /chat-message-time/.test(n.attrs?.className || '')).map(n => n.textContent);
   assert.ok(times.every(t => !/helper/.test(t)), 'the time line never says "helper"');
   assert.ok(times.some(t => /from your phone/.test(t)));
-  assert.match(thread, /Starts fresh each day at 04:00/);
+  assert.match(thread, /A new conversation starts each day at 04:00/);
   assert.doesNotMatch(thread, /Context cleared/);
   const head = JSON.stringify(c.chatHeader(null, false));
   const title = nodes(c.chatHeader(null, false), n => n.attrs?.['data-key'] === 'chat-title')[0].textContent;

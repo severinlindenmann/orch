@@ -54,3 +54,12 @@ Round 2 — working shared components.
 - Replaced the local calendar with the shared date picker; arrow keys move between days and choosing a date returns to the form.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+## Revised after the owner's comment (13 Nov)
+
+### new.html
+
+- Kept the shared calendar and connected its popover to the shared Escape handling; Escape closes only the calendar and leaves the New ticket window open.
+- The No date button stays clickable and toggles the calendar; clicking outside closes it and returns focus to the button.
+- Checked date selection, arrow keys, clearing the date, focus return, and loaded, loading and empty previews at 1280 × 800.
+- Ran `node /Users/lume/orch-dev/state/ux-challenge-1113/mockup/base/scripts/qa-components.cjs 1280`: all 60 pages passed, including `board/new.html`, with no reported problems.
