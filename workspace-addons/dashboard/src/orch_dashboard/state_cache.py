@@ -20,6 +20,7 @@ class StateCache:
         self.sig: str | None = None
         self.busy = False
         self.closed = False
+        self.rebuild = threading.Lock()  # single flight for a synchronous rebuild after a change
         self.gen = 0  # bumped by every put(): a rebuild started earlier never overwrites a newer copy
 
     def _signature(self):
@@ -53,8 +54,10 @@ class StateCache:
             stale = served[1] >= MAX_AGE
             start = not self.busy and not self.closed
             gen = self.gen
-        if start and not stale and self.revisions is not None:
-            stale = self._signature() != self.sig
+        if self.revisions is not None and not stale and not self.closed and self._signature() != self.sig:
+            # A file that matters changed (new question, new helper request): the page asks because it was told so,
+            # and a stale copy would be the last answer it gets. Rebuild now, once; others wait for that build.
+            return self.fresh()
         if start and stale:
             with self.lock:
                 if self.busy or gen != self.gen:
@@ -62,6 +65,21 @@ class StateCache:
                 self.busy = True
             threading.Thread(target=self._refresh, args=(gen,), daemon=True).start()
         return served
+
+    def fresh(self) -> tuple[dict, float]:
+        """Rebuild now (single flight) unless a build that started after this call began has just finished."""
+        began = time.monotonic()
+        with self.rebuild:
+            with self.lock:
+                done = self.at >= began and self.sig == self._signature()
+            if not done:
+                try:
+                    self._store(*self._build())
+                except Exception:  # keep the old copy; the caller still gets an answer
+                    if self.state is None:
+                        raise
+            with self.lock:
+                return self._served()
 
     def _refresh(self, gen):
         try:

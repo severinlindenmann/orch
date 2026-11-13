@@ -976,6 +976,62 @@ def test_open_tab_keeps_its_session_after_the_update_restart(live, monkeypatch):
         new.server_close()
 
 
+def test_open_tab_keeps_its_session_after_an_addon_change_restart(live, monkeypatch):
+    """An add-on add/remove (addon.set) restarts the services like an update: the click arms the same one-use
+    resume, so the same tab's next action works on the restarted server without a reload."""
+    from orch_dashboard import actions
+
+    root, port = live
+    ck = session(root, port)
+    monkeypatch.setattr(actions, "run_op", lambda *a, **k: (200, "", None))
+    st, _, _ = post(
+        port, "/api/act", {"op": "addon.set", "args": {"name": "factory", "on": True}}, {"Cookie": ck}
+    )
+    assert st == 200
+    assert list(hp.key_dir(root).glob("resume-dashboard.cookie"))  # armed before the op ran
+    old = SERVERS[port]
+    old.shutdown()
+    old.server_close()
+    new = _restart(port, root)
+    try:
+        st, _, body = _answer(port, ck)
+        assert st != 403 and b"Reload" not in body
+    finally:
+        new.shutdown()
+        new.server_close()
+
+
+def test_an_addon_change_without_a_session_arms_nothing(live, monkeypatch):
+    from orch_dashboard import actions
+
+    root, port = live
+    monkeypatch.setattr(actions, "run_op", lambda *a, **k: (200, "", None))
+    post(
+        port, "/api/act", {"op": "addon.set", "args": {"name": "factory", "on": True}}, {"X-Orch-Page": None}
+    )
+    assert not list(hp.key_dir(root).glob("resume-dashboard.cookie"))
+
+
+def test_reload_of_an_unknown_session_opens_a_fresh_sign_in_window(live, monkeypatch):
+    """Reload when the restarted server did not keep the tab's session: the server opens a fresh launch link in
+    the person's browser (like orch start); the token never travels in the answer. Only for a stale session,
+    at most once per 30 s."""
+    root, port = live
+    ck = session(root, port)
+    opened = []
+    monkeypatch.setattr(hp, "open_browser", lambda url: opened.append(url) or True)
+    st, _, _ = post(port, "/session/reopen", {}, {"Cookie": ck})  # a known session: nothing to do
+    assert st == 403 and opened == []
+    st, _, _ = post(port, "/session/reopen", {}, {"X-Orch-Page": None})  # never signed in: nothing
+    assert st == 403 and opened == []
+    stale = {"Cookie": ck, "X-Orch-Page": "z" * 43}
+    st, _, body = post(port, "/session/reopen", {}, stale)
+    assert st == 202 and b"launch" not in body and b"new window" in body
+    assert len(opened) == 1 and opened[0].startswith(f"http://127.0.0.1:{port}/#launch=")
+    assert post(port, "/session/reopen", {}, stale)[0] == 429 and len(opened) == 1
+    assert post(port, "/session/reopen", {}, {**stale, "Origin": "http://evil.test"})[0] == 403
+
+
 def test_a_busy_port_does_not_spend_the_resume_file(live):
     root, port = live
     assert hp.write_resume_cookie(root, "dashboard", "c" * 40, "s" * 40)

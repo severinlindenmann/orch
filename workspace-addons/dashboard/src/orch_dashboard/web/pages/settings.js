@@ -581,12 +581,8 @@ function addonCatalog() {
     const label = row.label || row.name;
     const body = [settingsText('h3', {}, label), settingsText('p', {className:'meta'}, row.description || '')];
     if (row.consent) body.push(h('details', {className:'meta'}, settingsText('summary', {}, 'What this does'), settingsText('pre', {className:'preserve-lines consent-details'}, row.consent)));
-    if (done) {
-      body.push(h('div', {className:'catalog-done'},
-        settingsText('p', {className:'on-dot', 'data-key':'catalog-done-' + row.name}, row.background ? 'Turned on. It starts with orch start.' : 'Turned on.'),
-        row.background ? h('button', {type:'button', className:'btn outline sm', 'data-key':'catalog-start-' + row.name, disabled:busy.has('start')},
-          busy.has('start') ? 'Starting…' : 'Start now') : null));
-    }
+    // its background service (if any) starts with the add: no separate Start step (a stopped page offers Start)
+    if (done) body.push(h('div', {className:'catalog-done'}, settingsText('p', {className:'on-dot', 'data-key':'catalog-done-' + row.name}, 'Turned on.')));
     return h('div', {className:'card-row ad-row', 'data-key':'catalog-card-' + row.name},
       h('div', {className:'grow'}, ...body),
       done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':'Add ' + label, disabled:busy.has(row.name)},
@@ -602,21 +598,14 @@ function addonCatalog() {
     const control = event.target.closest('button[data-key]');
     if (!control || control.disabled || snapshot) return;
     const key = control.dataset.key;
-    if (key.startsWith('catalog-start-')) {
-      busy.add('start'); fill();
-      const result = await act('addon.start', {});
-      busy.delete('start'); fill();
-      window.orch.toast(result.ok ? 'Started.' : result.text, result.ok ? 'ok' : 'error');
-      return;
-    }
     if (!key.startsWith('catalog-add-')) return;
     const name = key.slice('catalog-add-'.length);
     const row = array(state.settings?.available).find(r => r.name === name);
     if (!row || busy.has(name)) return;
     busy.add(name); fill();
-    const result = await act('addon.set', {name, on:true});
+    const result = await addonSet(name, true);
     busy.delete(name);
-    if (result.ok) added.set(name, row); else window.orch.toast(result.text, 'error');
+    if (result.ok) { added.set(name, row); window.orch.toast('Turned on.', 'ok'); } else window.orch.toast(result.text, 'error');
     fill();
     if (result.ok) render();
   });
@@ -644,12 +633,13 @@ function settingsConfirm(title, text, cls, label, send) {
   } else d.append(settingsText('pre', {className:cls}, text), actions);
   window.orch.open(d);
 }
-async function settingsSend(op, args, key) {
+async function settingsSend(op, args, key, run) {
   settingsBusy.add(key);
   render();
-  const result = await act(op, args);
+  const result = await (run ? run(op, args) : act(op, args));
   settingsBusy.delete(key);
   if (!result.ok) window.orch.toast(result.text, 'error');
+  else if (op === 'addon.set') window.orch.toast(args.on ? 'Turned on.' : 'Turned off.', 'ok');
   render();
   return result;
 }
@@ -688,7 +678,19 @@ let addonTimer, activeAddon = null;
 // The label comes from the add-on's own manifest; `panel` is a capability the manifest declares (repeats | links | phone).
 const panelOf = id => addons().find(a => a.name === id)?.dashboard?.panel || null;
 const addonLabel = a => a?.dashboard?.label || a?.label || a?.name || 'Add-on';
+// A page served by the add-on's background service: while that service is stopped the page shows why and a Start
+// button (addon.start, like Start now in the catalogue) instead of the proxy's bare "not found".
+function pageStopped(r) {
+  const svc = array(state?.services).filter(s => s && s.addon === r.id);
+  if (snapshot || !svc.length || svc.some(s => s.running === true)) return null;
+  const label = addonLabel(addons().find(a => a.name === r.id));
+  return fragment(h('section', {className:'card pad stack', 'data-key':'page-stopped'},
+    h('div', {className:'row'}, h('p', {className:'grow'}, label + ' isn’t running.'),
+      h('button', {type:'button', className:'btn primary sm', 'data-action':'start', 'data-key':'page-start'}, 'Start'))));
+}
 function pageFrame(r) {
+  const stopped = pageStopped(r);
+  if (stopped) return stopped;
   const src = '/addon/' + r.id + '/' + r.path;
   const frame = h('iframe', {className:'embed', 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
   // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session

@@ -273,6 +273,7 @@ test('task proof chips: only plain evidence files and http(s) links get a chip, 
   const hostile = ['../../t_b/artifacts/x.md', 'a/../../b', '/etc/passwd', 'a\\b.txt', 'a\0b', 'C:x.txt', 'a//b', './a.txt'];
   for (const name of hostile) assert.equal(c.evidenceFile(t, {type:'file', ref:base + name}), null, name);
   assert.equal(JSON.stringify(c.evidenceFile(t, {type:'file', ref:base + 'ok/plan.md', at:'x'})), JSON.stringify({name:'ok/plan.md', mtime:'x'}));
+  assert.equal(JSON.stringify(c.evidenceFile(t, {type:'file', ref:base + 'ok/plan.md', at:'x', size:42})), JSON.stringify({name:'ok/plan.md', mtime:'x', size:42}));
   assert.equal(c.evidenceFile(t, {type:'file', ref:'.orch/tickets/t_b/evidence/x.md'}), null);
   const row = ev => JSON.stringify(c.taskProofChips(t, {evidence:[ev]}));
   assert.equal(row({type:'url', ref:'javascript:alert(1)'}), 'null');

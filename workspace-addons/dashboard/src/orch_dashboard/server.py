@@ -104,6 +104,22 @@ def _link_msg(session, name: str) -> bytes:
     return f"This link was already used. Open the {name} again from orch.".encode()
 
 
+# Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
+RESTARTING_OPS = ("addon.set",)
+REOPEN_EVERY = 30  # seconds between two "open the dashboard again" windows
+
+
+def _arm_resume(root: Path, session) -> None:
+    """Like the update hand-off: the restarted server adopts this tab's session once (15 min, one use), so the
+    open tabs keep working after the add-on change restarts it. Written only for a click with a page session."""
+    import contextlib
+
+    with contextlib.suppress(Exception):  # without it the tab shows "orch restarted. Reload ..." as before
+        from orch import humanproof
+
+        humanproof.write_resume_cookie(root, session.server, session.cookie, session.secret)
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 10  # a short body must not hold a thread
 
@@ -310,7 +326,10 @@ class Handler(BaseHTTPRequestHandler):
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
         if path == "/api/state":
-            state, age = self.server.state_cache.get()
+            fresh = "fresh=1" in query.split(
+                "&"
+            )  # the question card: the ticket as it is now, not a cached copy
+            state, age = self.server.state_cache.fresh() if fresh else self.server.state_cache.get()
             return self._send(
                 200, json.dumps(state).encode(), "application/json", {"X-State-Age-Ms": str(int(age * 1000))}
             )
@@ -513,10 +532,44 @@ class Handler(BaseHTTPRequestHandler):
             {"Set-Cookie": self.session.set_cookie(self.server.server_address[1], cookie)},
         )
 
+    def _session_reopen(self):
+        """POST /session/reopen: a tab whose session this (restarted) server does not know asks for a new one. The
+        supported way, as `orch start` does it: a fresh launch link opened in the person's own browser by the OS;
+        the token never goes into this answer. Only a page that presents a stale session, same fence as an action,
+        at most once per 30 s."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        from orch import humanproof
+        from orch.pageproof import forwarded, host_ok
+
+        port = self.server.server_address[1]
+        if (
+            self.session is None
+            or forwarded(self.headers)
+            or not host_ok(self.headers, port)
+            or not self.session.stale(self.headers, port)
+        ):
+            return self._send(403, b"forbidden", "text/plain")
+        now = time.monotonic()
+        if now - getattr(self.server, "reopened_at", -1e9) < REOPEN_EVERY:
+            return self._send(429, b"A new window was opened a moment ago.", "text/plain; charset=utf-8")
+        self.server.reopened_at = now
+        url = humanproof.launch_url(self.root, self.session.server, f"http://127.0.0.1:{port}/")
+        if "#launch=" not in url or not humanproof.open_browser(url):
+            return self._send(503, b"Open the dashboard again from orch.", "text/plain; charset=utf-8")
+        self._send(
+            202,
+            b"The dashboard opened again in a new window. Keep working there.",
+            "text/plain; charset=utf-8",
+        )
+
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path == "/session":
             return self._session_post()
+        if path == "/session/reopen":
+            return self._session_reopen()
         px = PROXY.fullmatch(path)
         if path != "/api/act" and not (px and px.group(2) == "/api/act"):
             return self._refuse()
@@ -586,6 +639,8 @@ class Handler(BaseHTTPRequestHandler):
                 state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
                 self.server.state_cache.invalidate(state)
                 return self._send(200, json.dumps(state).encode(), "application/json")
+            if body.get("op") in RESTARTING_OPS and mint is not None:
+                _arm_resume(self.root, self.session)
             code, text, extra = actions.run_op(
                 self.root, self.orch_bin, body.get("op"), body.get("args", {}), mint=mint
             )

@@ -721,6 +721,56 @@ def _running_workspaces(root: Path) -> list[str]:
     return sorted(found)
 
 
+def _called_by_a_service() -> bool:
+    """This command was started by one of the running services (the dashboard answering a click): restarting
+    it now would kill the request before its answer is sent."""
+    from orch import services
+
+    try:
+        parent = os.getppid()
+        return any(e.get("pid") == parent and services.pid_alive(parent) for e in services.running())
+    except Exception:
+        return False
+
+
+def _start_added(root: Path, names) -> list[str]:
+    """Start the background service of add-ons just added here (what "Start now" in the catalogue does), so a
+    page that needs it works at once. Add-ons without a service are skipped by services.start."""
+    if not names:
+        return []
+    from orch import services
+
+    try:
+        rows = services.start(root, only=set(names))
+    except Exception as e:
+        return [f"Could not start {', '.join(sorted(names))}: {services._printable(e)}"]
+    lines = [f"Started: {r['addon']}" for r in rows if r.get("running")]
+    lines += [f"{r['addon']} did not start: {r['error']}" for r in rows if r.get("error")]
+    return lines
+
+
+def _restart_later(root: Path, start=()) -> None:
+    """Restart the running services (and start the add-ons in `start`) from a detached helper once this
+    command has ended (+1 s), so the service that started it answers first. If it can not start: now."""
+    argv = [sys.executable, "-I", "-P", "-m", "orch.restartlater", str(root), str(os.getpid()), *start]
+    kw: dict = {"start_new_session": True}
+    if sys.platform == "win32":
+        kw = {"creationflags": 0x00000008 | 0x00000200}  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen(  # noqa: S603
+            argv,
+            cwd=str(root),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            **kw,
+        )
+    except OSError:
+        _restart_updated(root)
+        _start_added(root, start)
+
+
 def _reinstall(
     entries: list[dict],
     *,
@@ -730,6 +780,7 @@ def _reinstall(
     done: str,
     consents: list[str] = (),
     restart: bool = True,
+    start: list[str] = (),
 ) -> bool:
     """Reinstall orch with these add-ons, then (if `save`) store them as the registry and run the orch
     commands in `then` with the new code. Returns False when that happens later: on Windows orch can not
@@ -762,9 +813,13 @@ def _reinstall(
                         print(f"Note: could not put orch's add-ons back as they were: {e}", file=sys.stderr)
             raise
         if restart:  # what runs still uses the old files (an add-on add/remove replaced them): restart it
-            lines = _restart_updated(root)
-            if lines:
-                _say("\n".join(lines))
+            if _called_by_a_service():
+                _restart_later(root, start)
+                _say("The running services restart in a moment.")
+            else:
+                lines = _restart_updated(root) + _start_added(root, start)
+                if lines:
+                    _say("\n".join(lines))
         return True
     if winfinish.pending(home()):
         raise Refused(
@@ -1809,6 +1864,7 @@ def batch_install(root: Path):
             root=root,
             done=f"{', '.join(sorted(taken))} installed and turned on",
             consents=sorted(taken - before),  # a failed Windows finisher drops them, like the except below
+            start=sorted(taken),
         )
     except Exception as e:
         undone = []
@@ -1915,10 +1971,20 @@ def add(root: Path, source: str, yes: bool = False, project_only: bool = False) 
         # before the install: its follow-up step (now, or in the Windows finisher) needs the consent. If the
         # install fails, the record does not match the unchanged registry, so it turns nothing on.
         record_consent(root, entry["name"], new)
-        _reinstall(new, save=True, then=then, root=root, done=f"{entry['name']} installed and turned on")
+        _reinstall(
+            new,
+            save=True,
+            then=then,
+            root=root,
+            done=f"{entry['name']} installed and turned on",
+            start=[entry["name"]],
+        )
         return
     record_consent(root, entry["name"])
     reexec(then[0])
+    lines = _start_added(root, [entry["name"]])  # turned on again: its background service runs at once
+    if lines:
+        _say("\n".join(lines))
 
 
 def _check_requires(root: Path, m: dict) -> None:

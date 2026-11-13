@@ -217,6 +217,7 @@ def test_file_proof_knows_if_it_is_on_this_computer(ws):
         True,
         None,
     ]  # outside the workspace counts as not here
+    assert [e.get("size") for e in ev] == [1, None, None, None]  # the size of a file that is here
 
 
 def test_file_proof_symlink_and_absolute_path_outside_the_workspace_count_as_missing(ws):

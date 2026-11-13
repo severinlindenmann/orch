@@ -455,7 +455,7 @@ const evidenceFile = (t, ev) => {
   if ((ev.type || ev.kind) !== 'file' || ev.missing || !ref.startsWith(prefix)) return null;
   const name = ref.slice(prefix.length);  // the server checks again; a path that climbs or is not plain never gets a chip
   if (!name || /[\\\0:]/.test(name) || name.startsWith('/') || name.split('/').some(part => ['', '.', '..'].includes(part))) return null;
-  return {name, mtime:ev.at};
+  return Number.isFinite(ev.size) && ev.size >= 0 ? {name, mtime:ev.at, size:ev.size} : {name, mtime:ev.at};
 };
 // One file = one entry: lists keep the first item per key; items without a key (notes) all stay.
 const uniqueBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
@@ -611,7 +611,7 @@ function sortedEntries(list) {
 function fileThumb(t, f) {
   const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
   if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name), alt:'', loading:'lazy'})); return thumb; }
-  if (['md', 'text', 'code', 'table'].includes(f.fileKind) && f.size <= 2 * 1048576) {
+  if (['md', 'text', 'code', 'table'].includes(f.fileKind) && !(f.size > 2 * 1048576)) {  // size unknown: still draw the capped snippet
     const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
     p.classList.add('file-snippet'); thumb.append(p); return thumb;
   }
@@ -1569,7 +1569,16 @@ function embedQuestionRequest(e) {
   return {ticket:data.ticket, question:data.question, frame};
 }
 let embedDialog = null;  // one embed question at a time: repeated asks never stack dialogs
-function openEmbedQuestion(req) {
+let embedReading = false;
+// The question may be seconds old: read the workspace fresh (never the cached copy) before saying it is gone.
+async function openEmbedQuestion(req) {
+  if (embedReading || (embedDialog && embedDialog.isConnected && embedDialog.open)) return;
+  embedReading = true;
+  try {
+    const res = await fetch('/api/state?fresh=1', {cache:'no-store'});
+    if (res.ok) { mutation++; accept(await res.json()); }
+  } catch (_) { /* Fall back to what the page already has. */ }
+  finally { embedReading = false; }
   if (embedDialog && embedDialog.isConnected && embedDialog.open) return;
   const t = ticketOf(req.ticket);
   const q = array(t?.questions).find(x => x.id === req.question);

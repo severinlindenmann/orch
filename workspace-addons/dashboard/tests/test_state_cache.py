@@ -149,3 +149,24 @@ def test_worker_exception_propagates(ws, monkeypatch):
     monkeypatch.setattr(data, "load_chat", boom)
     with pytest.raises(RuntimeError, match="chat broke"):
         load_state(ws, with_settings=True)
+
+
+def test_changed_ticket_file_is_served_fresh_at_once(server, ws, counted):
+    """The page is told about a change and fetches once: that answer must already hold the change."""
+    _get(server + "/api/state")
+    n = len(counted)
+    from orch_dashboard import events
+
+    tickets = ws / ".orch" / "tickets"
+    tickets.mkdir(parents=True, exist_ok=True)
+    (tickets / "t_zzzzzz.json").write_text("{}")
+    _get(server + "/api/state")
+    assert len(counted) == n + 1, "a changed file rebuilds the state before answering"
+    assert events.Revisions(ws).signature()  # sanity: the signature saw the file
+
+
+def test_fresh_flag_always_rebuilds(server, counted):
+    _get(server + "/api/state")
+    n = len(counted)
+    _get(server + "/api/state?fresh=1")
+    assert len(counted) == n + 1
