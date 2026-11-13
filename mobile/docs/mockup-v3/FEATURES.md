@@ -1,14 +1,14 @@
 # orch iPhone app: feature inventory (develop @812c1b7, 6 Nov 2026)
 
 ## 1. Screens today (exact visible labels)
-**Onboarding**: orch logo. "Let's get connected." / "Use your invitation to bring your workspaces along."
-- Buttons "Scan invitation QR code" (primary, camera sheet), "Paste invitation link" (uses clipboard if it holds orch://, else sheet).
-  Hint "Ask the person who invited you for a link or QR code."
-- Paste sheet: "Paste invitation link", field "Invitation link" placeholder "orch://pair?…", "Continue", "Close". Errors:
-  "Paste the link you were sent first. It starts with orch://." / "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
-- QR sheet: viewfinder "Scan invitation QR code", fallback "No camera here. Use the invitation link.", "Close".
-- Found: card "Your invitation is ready" / "You were invited to connect this phone." / disclosure "Connection details" (relay host). Button "Connect this phone" → "Connecting this phone…".
-- Errors: "This invitation has expired or was already used. Ask the person who invited you for a new one." / "Can't reach the server. Check your connection, then tap Connect this phone again."
+**Onboarding**: orch logo. "Let's get connected." / "Bring your workspaces along with an invitation."
+- Buttons "Scan QR code" (primary, camera sheet), "Paste link" (uses clipboard if it holds orch://, else sheet).
+  Hint "You get an invitation from orch on your computer." + disclosure "Get an invitation" (3 steps). DEBUG builds only: "Try a demo".
+- Paste sheet: "Paste link", field "Invitation link" placeholder "orch://pair?…", "Continue", "Close". Errors:
+  "Paste the link you were sent first. It starts with orch://." / "That link does not look right. Check you copied the whole link, or create a new one in orch on your computer."
+- QR sheet: camera viewfinder; problems: "orch can't use the camera. Allow it in Settings, or paste the link instead." (+ "Open Settings") / "The camera is blocked on this phone. Paste the link instead." / "This device has no camera. Paste the link instead." / "The camera didn't start. Close and try again, or paste the link instead."; "Paste link", "Close".
+- Found: card "Your invitation is ready" / "You were invited to connect this phone." / disclosure "Connection details". Buttons "Connect this phone" → "Connecting this phone…", "Use a different link".
+- Errors: "This invitation has expired or was already used. Create a new one in orch on your computer." (button "Use a new invitation") / "Can't reach the server. Check your connection, then tap Connect this phone again."
 
 **Notify step**: "You're connected." / "N workspaces are ready." Card "Know when you're needed." / "Get notified when your work needs an answer." + workspace names. "Allow notifications" / "Not now".
 

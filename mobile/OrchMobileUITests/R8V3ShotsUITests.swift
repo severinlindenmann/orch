@@ -25,8 +25,8 @@ final class R8V3ShotsUITests: XCTestCase {
         let app = launch([], paired: false)
         XCTAssertTrue(app.buttons.firstMatch.waitForExistence(timeout: 15))
         try shot(app, "welcome")
-        let use = app.buttons["Use invitation"]
-        if use.exists { use.tap(); try shot(app, "invite") }
+        app.buttons["invite-paste"].tap()
+        if app.textFields["invite-field"].waitForExistence(timeout: 10) { try shot(app, "invite") }
     }
 
     func testSettings() throws {

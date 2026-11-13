@@ -31,7 +31,7 @@ final class MuteUITests: XCTestCase {
         let mute = app.buttons["chat-mute"]
         XCTAssertTrue(mute.waitForExistence(timeout: 15))
         mute.tap()
-        let forever = app.buttons["Until I turn it back on"]
+        let forever = app.buttons["Until I turn it on"]
         XCTAssertTrue(forever.waitForExistence(timeout: 5))
         forever.tap()
         let unmuting = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Unmute'"), object: mute)
@@ -57,7 +57,7 @@ final class MuteUITests: XCTestCase {
         XCTAssertTrue(mute.waitForExistence(timeout: 15))
         waitForLabel("Mute", on: mute)
         mute.tap()
-        let forever = app.buttons["Until I turn it back on"]
+        let forever = app.buttons["Until I turn it on"]
         XCTAssertTrue(forever.waitForExistence(timeout: 5))
         forever.tap()
         waitForLabel("Unmute", on: mute)

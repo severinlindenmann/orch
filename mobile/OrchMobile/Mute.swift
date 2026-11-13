@@ -22,28 +22,46 @@ enum MuteRules {
         isMuted(all, now: now) || isMuted(workspace, now: now) ||
         groups.contains { $0.key == group && isMuted($0.mutedUntil, now: now) }
     }
-    static func endLabel(_ value: String?, banner: Bool = false) -> String {
-        guard let value, let date = date(value) else {
-            return banner ? "until you turn them on" : "Until you turn it back on"
+    static func endLabel(_ value: String?, banner: Bool = false, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard let value, let end = date(value) else {
+            return banner ? "until I turn them on" : "Until I turn it on"
         }
+        return (banner ? "until " : "Until ") + endText(end, now: now, calendar: calendar)
+    }
+    /// "8:00" today, "tomorrow 8:00", "Sunday 8:00" within a week, else "1 Dec 8:00".
+    static func endText(_ end: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "H:mm"
-        return (banner ? "until " : "Until ") + formatter.string(from: date)
+        formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.calendar = calendar; formatter.timeZone = calendar.timeZone
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: end)).day ?? 0
+        switch days {
+        case ...0: formatter.dateFormat = "H:mm"; return formatter.string(from: end)
+        case 1: formatter.dateFormat = "H:mm"; return "tomorrow " + formatter.string(from: end)
+        case 2...6: formatter.dateFormat = "EEEE H:mm"
+        default: formatter.dateFormat = "d MMM H:mm"
+        }
+        return formatter.string(from: end)
+    }
+    /// The value of a "Notifications" row: "On", "Muted until 8:00", "Muted until tomorrow 8:00", "Muted".
+    static func notificationsValue(_ value: String?, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard isMuted(value, now: now) else { return "On" }
+        guard let value, let end = date(value) else { return "Muted" }
+        return "Muted until " + endText(end, now: now, calendar: calendar)
     }
 }
 
 enum MuteChoice: String, CaseIterable, Identifiable {
     case hour = "1 hour"
-    case morning = "Until tomorrow 8:00"
-    case forever = "Until I turn it back on"
+    case morning = "Until tomorrow"
+    case forever = "Until I turn it on"
     var id: String { rawValue }
     func mute(now: Date = Date(), calendar: Calendar = .current) -> Mute {
         switch self {
         case .hour: return .until(now.addingTimeInterval(3600))
         case .forever: return .forever
         case .morning:
-            let next = calendar.nextDate(after: now, matching: DateComponents(hour: 8, minute: 0, second: 0), matchingPolicy: .nextTime)!
-            return .until(next)
+            // Always the next day at 8:00, also when chosen before 8:00.
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
+            return .until(calendar.date(bySettingHour: 8, minute: 0, second: 0, of: tomorrow)!)
         }
     }
 }
