@@ -105,8 +105,7 @@
     else if (steps) nodes.push(h('section', {class: 'fx-latest'}, h('h3', {text: 'Latest steps'}), steps));
     if (!v.run.running && !asking && v.state !== 'done' && v.ticket.status !== 'review' && !v.ticket.started && !v.run.run) nodes.push(h('button', {class: 'btn primary', 'data-act': 'stop', text: 'Start ' + els.agent.textContent}));
     /* Details: the full history, the ticket's own lines included */
-    const details = h('details', {class: 'fx-history', open: !!S.state.detailsOpen}, h('summary', {text: 'Details'}));
-    details.addEventListener('toggle', () => { S.state.detailsOpen = details.open; });  // a poll draws it again; it stays as the person left it
+    const details = h('section', {class: 'fx-history'}, h('h3', {text: 'Earlier steps'}));  // plain, a quiet section at the bottom
     for (const it of feedItems(v, null)) details.append(h('div', {class: 'fx-step'}, h('time', {text: hhmm(it.at)}), h('span', {icon: it.icon}), h('span', {class: 'fx-step-t'}, h('span', {text: it.text}), usedChip(it.used), uncheckedMark(it.unchecked))));
     nodes.push(details);
     keepFocus(els.feed, () => els.feed.replaceChildren(...nodes));

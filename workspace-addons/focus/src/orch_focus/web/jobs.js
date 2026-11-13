@@ -43,7 +43,7 @@
             h('div', {class: 'row'}, h('span', {class: 'grow'}, h('strong', {text: x.label}), ' on ', h('span', {class: 'mono key', text: x.key || x.ticket}), ' ', x.title),
               h('span', {class: 'chip ' + tone, text: word}), h('span', {class: 'meta', text: minutes(x.started_at)}),
               h('button', {class: 'btn ghost sm', 'data-act': 'stop-one', 'aria-label': 'Stop ' + x.label + ' on ' + (x.key || x.title), text: 'Stop', onclick: () => stopCall('proc.stop', {ticket: x.ticket, run: x.run})})),
-            h('details', {}, h('summary', {text: 'Details'}),
+            h('div', {},
               h('p', {class: 'meta'}, x.started_at ? 'Started ' + new Date(x.started_at).toLocaleString([], {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false}) + ' · ' : '', h('a', {href: P + '/t/' + x.ticket, text: x.key || 'Open ticket'}), x.pid ? ' · process ' + x.pid : '')));
         }))] : []));
     }

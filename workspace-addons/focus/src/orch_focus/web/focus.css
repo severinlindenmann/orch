@@ -588,3 +588,52 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
  .fx-top .btn,.fx-mobile-tasks,.fx-tech summary,.fx-action-menu button{min-height:44px;align-items:center}
  .fx-action-menu button{height:auto}
 }
+
+/* ---- UX phase 5: Focus start page in the dashboard's look (draft focus/focus.html) ---- */
+.fx-pick{max-width:1200px;padding:32px 24px 80px}
+.fx-pick h1{font-size:28px;line-height:36px;font-weight:600;margin:0 0 4px}
+.fx-pick>.meta.fx-sub{font-size:14px;color:var(--text);margin:0 0 24px}
+.fx-pick-group h2{display:flex;align-items:baseline;gap:8px;font-size:16px;font-weight:600;color:var(--text);margin:0 0 12px}
+.fx-pick-group h2 .meta{font-weight:400}
+.fx-pick-group .card{border-radius:var(--radius-lg,12px);overflow:hidden}
+.fx-pick a.fx-pick-row{min-height:56px;transition:background 150ms var(--ease-move,ease)}
+.fx-pick a.fx-pick-row:hover{background:var(--surface-2)}
+.fx-group-waiting .card{border-color:var(--warning,#e0b050)}
+.fx-skel{display:grid;gap:12px;margin-top:8px}
+.fx-skel-row{height:56px;border-radius:var(--radius-lg,12px)}
+@media(prefers-reduced-motion:reduce){.fx-pick a.fx-pick-row{transition:none}}
+
+/* ---- UX phase 5: the ticket (draft focus-ticket*.html): compact by default, Terminal mode adds tasks + tabs ---- */
+.fx:not(.fx-terminal) .fx-rail,.fx:not(.fx-terminal) .fx-rail-toggle,.fx:not(.fx-terminal) [data-act=rail],.fx:not(.fx-terminal) .fx-stage-h{display:none}
+.fx:not(.fx-terminal) .fx-body{grid-template-columns:minmax(0,1fr)}
+.fx:not(.fx-terminal) .fx-pane{max-width:960px;margin:0 auto}
+.fx-tools .btn{white-space:nowrap}
+.fx-taskline{margin-left:auto;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.fx-sent{margin:24px 0}
+.fx-sent .row{margin-bottom:12px}
+.fx-sent h2{font-size:16px;font-weight:600;margin:0}
+.fx-sent-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;align-items:start}
+.fx-sent-note{padding:12px 16px;display:grid;gap:4px}
+.fx-sent-grid .fx-ptile{width:100%}
+/* composer files */
+.fx-compose{flex-direction:column;align-items:stretch}
+#fx-form{flex-wrap:wrap;align-items:flex-end;gap:8px}
+#fx-form #fx-msg{flex:1 1 240px;min-width:0}
+.fx-chips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px;flex:1 0 100%}
+.fx-chip-file{display:flex;align-items:center;gap:8px;padding:4px 4px 4px 4px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);max-width:280px}
+.fx-thumb{width:36px;height:36px;border-radius:6px;object-fit:cover;flex:none;background:var(--surface-3)}
+.fx-thumb-file{display:grid;place-items:center;font-size:10px;color:var(--text-muted)}
+.fx-chip-text{display:grid;min-width:0}
+.fx-chip-name{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fx-file-error{margin:4px 0 0;font-size:13px;color:var(--danger,#e5776b)}
+.fx-compose-hint{margin:4px 0 0;font-size:12px}
+.fx-drop{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:color-mix(in srgb,var(--bg,#0e1013) 80%,transparent);border:2px dashed var(--brand);pointer-events:none}
+.fx-drop p{font-size:18px;font-weight:600}
+@media(max-width:720px){.fx-desktop{display:none}}
+@media(prefers-reduced-motion:no-preference){.fx-sent-grid>*{animation:fx-enter 150ms var(--ease-move,ease) both}@keyframes fx-enter{from{opacity:0;transform:translateY(4px)}}}
+.fx-history{margin-top:32px;padding-top:16px;border-top:1px solid var(--border)}
+.fx-history h3{font-size:13px;color:var(--text-muted);font-weight:600;margin:0 0 8px}
+.fx:not(.fx-terminal) .fx-sent,.fx:not(.fx-terminal) .fx-feed,.fx:not(.fx-terminal) .fx-qwrap{max-width:848px;width:100%;box-sizing:border-box;margin-left:auto;margin-right:auto;padding-left:32px;padding-right:32px}
+.fx-compose .fx-compose-hint,.fx-compose .fx-file-error{max-width:820px;margin-left:auto;margin-right:auto}
+.fx-sent{max-width:848px;width:100%;box-sizing:border-box;margin-left:auto;margin-right:auto;padding-left:32px;padding-right:32px}
+.fx-compose .fx-compose-hint,.fx-compose .fx-file-error{width:100%;box-sizing:border-box;padding:0 12px}
