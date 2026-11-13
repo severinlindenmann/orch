@@ -501,48 +501,52 @@ async function copyFileLink(url) {
   try { await navigator.clipboard.writeText(new URL(url, location.href).href); window.orch.toast('Link copied', 'ok'); }
   catch (_) { window.orch.toast('Could not copy the link.', 'error'); }
 }
-function viewerClose(d, trigger) {
-  let done = false;
-  return () => {
-    if (done) return;
-    done = true;
-    window.orch.close(d);
-    if (trigger && trigger.isConnected) trigger.focus({preventScroll:true});
-  };
+// Every file of a ticket the viewer can step through, with the words the Files tab shows for it.
+// The shared viewer (kit/fileviewer.js) names the kind of a file; without it every file is just a file.
+const viewerKind = name => window.FileViewer ? window.FileViewer.kindOf(name) : 'other';
+const viewerWord = kind => window.FileViewer ? window.FileViewer.word(kind) : 'File';
+function ticketFileEntries(t) {
+  const entries = ticketFileGroups(t).flatMap(g => g.files.map(file => fileEntry(t, g, file)));
+  // A web page with its own stylesheet, script and pictures in a folder is ONE website, not four files.
+  const sites = new Map(entries.filter(f => f.fileKind === 'page' && f.name.includes('/')).map(f => [f.name.slice(0, f.name.lastIndexOf('/') + 1), f]));
+  const parts = new Map();
+  const kept = entries.filter(f => {
+    const dir = [...sites.keys()].find(d => f.name.startsWith(d) && sites.get(d) !== f);
+    if (!dir || f.fileKind === 'page') return true;
+    (parts.get(dir) || parts.set(dir, []).get(dir)).push(f);
+    return false;
+  });
+  for (const [dir, rest] of parts) {
+    const site = sites.get(dir);
+    site.size = (site.size || 0) + rest.reduce((n, f) => n + (f.size || 0), 0);
+    site.meta = site.meta.replace(/ · [\d.,]+ (B|KB|MB)/, ' · ' + sizeText(site.size)) + ' · ' + (rest.length + 1) + ' files';
+    if (/^index\./i.test(site.name.slice(dir.length))) site.title = fileTitle(dir.slice(0, -1)) + ' website';
+  }
+  return kept;
 }
-function bindViewer(d, close) {
-  const x = d.querySelector('.viewer-close');
-  if (x) x.onclick = close;
-  d.addEventListener('click', event => { if (event.target === d) close(); });
-  d.addEventListener('cancel', event => { event.preventDefault(); close(); });
-  d.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); close(); } });
-  return d;
+function fileEntry(t, group, file) {
+  const kind = viewerKind(file.name);
+  const role = group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
+  const at = file.mtime ? createdText(file.mtime) : '';
+  return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
+    title:fileTitle(file.name),
+    meta:[viewerWord(kind), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', at, task ? 'Task: ' + task : '', role].filter(Boolean).join(' · ')};
 }
-async function previewFile(tid, kind, fileName) {
+function createdText(at) {
+  const d = new Date(at);
+  if (!Number.isFinite(d.getTime())) return '';
+  return 'Created ' + d.toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) + ' · ' + d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+function previewFile(tid, kind, fileName) {
   if (snapshot || !tid || !fileName) return;
-  const trigger = document.activeElement;
-  const {d, actions} = dialog(fileTitle(fileName), 'sheet ticket-viewer');
-  const title = d.querySelector('h2') || h('h2', {}, fileTitle(fileName));
-  const url = fileUrl(tid, kind, fileName), stage = el('div', 'viewer-stage');
-  const meta = el('p', 'meta', kindWord(fileName));
-  const known = array(artifactData.get(tid)?.data?.files).find(f => f.name === fileName);
-  if (known) meta.textContent = fileMeta(known);
-  const x = h('button', {type:'button', className:'btn ghost icon sm viewer-close', 'aria-label':'Close'}, '×');
-  actions.replaceChildren(h('a', {className:'btn outline sm', href:url, target:'_blank', rel:'noopener noreferrer'}, 'Open in new tab ↗'),
-    h('a', {className:'btn outline sm', href:fileUrl(tid, kind, fileName, true), download:fileName.split('/').pop()}, 'Download'),
-    ticketButton('Copy link', 'outline sm', () => copyFileLink(url), {'data-key':'viewer-copy'}));
-  d.replaceChildren(h('header', {className:'viewer-head'}, h('div', {className:'grow'}, title, meta), x), actions, stage);
-  bindViewer(d, viewerClose(d, trigger));
-  window.orch.open(d);
-  x.focus();
-  if (PREVIEW_EXT.image.test(fileName)) { const img = el('img'); img.alt = fileTitle(fileName); img.src = url; stage.append(img); return; }
-  if (!PREVIEW_EXT.text.test(fileName)) { stage.append(el('p', 'meta', 'This file cannot be shown here. Open it in a new tab or download it.')); return; }
-  try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error('no');
-    const pre = el('pre'); pre.textContent = (await r.text()).slice(0, 200000);
-    stage.append(pre);
-  } catch (_) { stage.append(el('p', 'meta', 'This file cannot be shown here.')); }
+  const t = ticketOf(tid);
+  let files = t ? visibleFileEntries(t, ticketFileEntries(t)) : [];
+  let index = files.findIndex(f => f.kind === kind && f.name === fileName);
+  if (index < 0) {
+    const known = array(artifactData.get(tid)?.data?.files).find(f => f.name === fileName) || {name:fileName};
+    files = [fileEntry(t || {id:tid}, {kind}, known)]; index = 0;
+  }
+  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : ''});
 }
 // One compact file row: type badge, name, meta, Open / Download / Copy link.
 function ticketFileActions(t, kind, file) {
@@ -577,12 +581,103 @@ function ticketFileGroups(t) {
   if (rest.length) groups.unshift({label:'Results', kind:'artifacts', files:rest});
   return groups;
 }
-const ticketFileCount = t => ticketFileGroups(t).reduce((n, g) => n + g.files.length, 0);
+const ticketFileCount = t => ticketFileEntries(t).length;
+// ---- Files tab: toolbar (find, type, sort, group, grid/list), groups of picture tiles, one shared viewer.
+const filesUI = {q:'', type:'all', sort:'important', group:'task', view:'grid', all:false, open:new Map(), more:new Set()};
+const FILE_TYPES = [['all', 'All types'], ['image', 'Pictures'], ['docs', 'Documents'], ['table', 'Tables'], ['code', 'Code'], ['media', 'Sound and video'], ['other', 'Other']];
+const typeGroup = kind => ({image:'image', pdf:'docs', page:'docs', md:'docs', text:'docs', table:'table', xlsx:'table', code:'code', audio:'media', video:'media'}[kind] || 'other');
+const SORTS = [['important', 'Most important'], ['newest', 'Newest'], ['oldest', 'Oldest'], ['name', 'Name']];
+const GROUPS = [['task', 'By task'], ['role', 'By role'], ['none', 'None']];
+function sortedEntries(list) {
+  const time = f => Date.parse(f.mtime) || 0;
+  const by = {important:(a, b) => (a.role === b.role ? 0 : a.role === 'Result' ? -1 : 1) || time(b) - time(a), newest:(a, b) => time(b) - time(a), oldest:(a, b) => time(a) - time(b), name:(a, b) => a.title.localeCompare(b.title)};
+  return list.slice().sort(by[filesUI.sort] || by.important);
+}
+function fileThumb(t, f) {
+  const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
+  if (f.fileKind === 'image') { thumb.append(h('img', {src:fileUrl(f.tid, f.kind, f.name), alt:'', loading:'lazy'})); return thumb; }
+  if (['md', 'text', 'code', 'table'].includes(f.fileKind) && f.size <= 2 * 1048576) {
+    const p = ticketPreviewTile(t, {name:f.name, mtime:f.mtime}, f.kind);
+    p.classList.add('file-snippet'); thumb.append(p); return thumb;
+  }
+  thumb.append(h('span', {className:'file-sym'}, iconEl(fileIcon(f.name)), h('span', {}, viewerWord(f.fileKind))));
+  return thumb;
+}
+function fileTile(t, f) {
+  // Read the list when clicked: a redraw keeps this button, so a list captured now could be out of date.
+  const open = () => previewFile(t.id, f.kind, f.name);
+  const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + f.meta.split(' · ').slice(0, 2).join(' · '), 'data-key':'file-open-' + f.kind + '-' + f.name},
+    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), h('span', {className:'meta'}, [viewerWord(f.fileKind), Number.isFinite(f.size) ? sizeText(f.size) : ''].filter(Boolean).join(' · '))));
+  link.onclick = open;
+  const task = f.task ? h('button', {type:'button', className:'task-link', 'data-key':'file-task-' + f.kind + '-' + f.name}, 'Task: ' + f.task) : null;
+  if (task) task.onclick = () => { ticketTabs.set(t.id, 'tasks'); render(); };
+  return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link,
+    h('div', {className:'file-context'}, h('span', {className:'role-chip', 'data-role':f.role}, f.role), task, f.created ? h('span', {className:'created-time meta'}, f.created) : null));
+}
+function fileGroups(entries) {
+  if (filesUI.group === 'none') return [{label:'', files:entries, key:'all'}];
+  const map = new Map();
+  for (const f of entries) {
+    const label = filesUI.group === 'role' ? (f.role === 'Result' ? 'Results' : 'Evidence') : (f.task || 'Results');
+    if (!map.has(label)) map.set(label, []);
+    map.get(label).push(f);
+  }
+  return [...map].map(([label, files]) => ({label, files, key:label}));
+}
+function visibleFileEntries(t, all) {
+  const q = filesUI.q.trim().toLowerCase();
+  return sortedEntries(all.filter(f => (filesUI.type === 'all' || typeGroup(f.fileKind) === filesUI.type) && (!q || (f.title + ' ' + f.name + ' ' + f.task).toLowerCase().includes(q))));
+}
+function filesPanelBody(t, all) {
+  const entries = visibleFileEntries(t, all);
+  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? 'No files match. Clear the search or choose All types.' : 'No files attached yet. Files your helper attaches appear here, with the task they belong to.');
+  const groups = fileGroups(entries), tasks = new Set(entries.map(f => f.task).filter(Boolean)).size;
+  const summary = h('div', {className:'collection-summary'}, h('p', {className:'meta'}, entries.length + (entries.length === 1 ? ' file' : ' files') + (tasks ? ' · ' + tasks + (tasks === 1 ? ' finished step' : ' finished steps') : '')),
+    groups.length > 2 && filesUI.group !== 'none' ? ticketButton(filesUI.all ? 'Collapse groups' : 'Show all files', 'ghost sm', () => { filesUI.all = !filesUI.all; filesUI.open.clear(); render(); }, {'data-key':'files-show-all'}) : null);
+  const body = groups.map((g, gi) => {
+    const grid = open => {
+      const limit = 8, more = !filesUI.more.has(g.key) && !filesUI.all && g.files.length > limit && filesUI.view === 'grid';
+      const shown = more ? g.files.slice(0, 5) : g.files;
+      const tiles = open ? shown.map(f => fileTile(t, f)) : [];
+      if (more) {
+        const rest = h('button', {type:'button', className:'file-tile file-more', 'data-key':'file-more-' + g.key}, '+' + (g.files.length - 5) + ' more');
+        rest.onclick = () => { filesUI.more.add(g.key); render(); };
+        tiles.push(rest);
+      }
+      return h('div', {className:'file-grid'}, tiles);
+    };
+    if (filesUI.group === 'none') return h('div', {className:'file-group flat', 'data-key':'file-group-all'}, grid(true));
+    const isOpen = filesUI.open.has(g.key) ? filesUI.open.get(g.key) : filesUI.all || gi < 2;
+    const det = h('details', {className:'file-group', 'data-key':'file-group-' + g.key}, h('summary', {}, h('strong', {}, g.label), h('span', {className:'meta group-count'}, g.files.length + (g.files.length === 1 ? ' file' : ' files'))), grid(isOpen));
+    det.open = isOpen;
+    det.addEventListener('toggle', () => { if (filesUI.open.get(g.key) !== det.open) { filesUI.open.set(g.key, det.open); render(); } });
+    return det;
+  });
+  return h('div', {className:'files-collection', 'data-view-mode':filesUI.view, 'data-key':'files-collection'}, summary, body);
+}
+function filesToolbar(count) {
+  const select = (label, opts, key, extra) => {
+    const s = h('select', {'aria-label':label, 'data-key':'files-' + key, 'data-label':label, ...(extra || {})}, opts.map(([v, text]) => h('option', {value:v}, text)));
+    s.value = filesUI[key]; s.onchange = () => { filesUI[key] = s.value; render(); };
+    return s;
+  };
+  const search = h('input', {type:'search', className:'files-search', placeholder:'Find a file…', 'aria-label':'Find a file', 'data-key':'files-search', value:filesUI.q});
+  search.value = filesUI.q;
+  search.oninput = () => { filesUI.q = search.value; render(); };
+  const view = (id, label) => { const b = h('button', {type:'button', className:'btn sm', 'aria-pressed':String(filesUI.view === id), 'data-key':'files-view-' + id}, label); b.onclick = () => { filesUI.view = id; render(); }; return b; };
+  return h('div', {className:'files-toolbar', 'data-key':'files-toolbar'}, h('h2', {}, 'Files', h('span', {className:'meta'}, count)), search,
+    select('File type', FILE_TYPES, 'type'), select('Sort', SORTS, 'sort', {'data-prefix':'Sort'}), select('Group', GROUPS, 'group', {'data-prefix':'Group'}),
+    h('div', {className:'view-switch', role:'group', 'aria-label':'File view'}, view('grid', '▦ Grid'), view('list', '☰ List')));
+}
 function artifactsPanel(t) {
-  const groups = ticketFileGroups(t);
-  const body = groups.length ? groups.map(g => h('section', {className:'file-group', 'data-key':'file-group-' + g.label}, h('h3', {className:'meta'}, g.kind === 'evidence' ? 'For: ' + g.label : g.label), g.files.map(f => ticketFileRow(t, g.kind, f))))
-    : h('p', {className:'muted'}, 'No files attached yet. Files your helper attaches appear here, with the task they belong to.');
-  return [h('div', {className:'section-head'}, h('h2', {}, 'Files'), h('span', {className:'meta'}, ticketFileCount(t) + (ticketFileCount(t) === 1 ? ' file' : ' files'))), body];
+  if (snapshot) {  // a saved copy cannot read files: names only, no controls
+    const groups = ticketFileGroups(t);
+    return [h('div', {className:'section-head'}, h('h2', {}, 'Files'), h('span', {className:'meta'}, ticketFileCount(t) + (ticketFileCount(t) === 1 ? ' file' : ' files'))),
+      groups.length ? groups.map(g => h('section', {className:'file-group', 'data-key':'file-group-' + g.label}, h('h3', {className:'meta'}, g.kind === 'evidence' ? 'For: ' + g.label : g.label), g.files.map(f => ticketFileRow(t, g.kind, f))))
+        : h('p', {className:'muted'}, 'No files attached yet.')];
+  }
+  const all = ticketFileEntries(t);
+  return [filesToolbar(all.length), filesPanelBody(t, all)];
 }
 function ticketActor(by) {
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(by);
@@ -1157,7 +1252,7 @@ function detail(t) {
     snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))),
-    h('div', {className:'columns ticket-layout'},
+    h('div', {className:'columns ticket-layout' + (selected === 'files' ? ' wide' : '')},
       h('div', {className:'stack story'},
         panel('overview', 'Overview', overview),
         panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
