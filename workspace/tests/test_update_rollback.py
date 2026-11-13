@@ -267,3 +267,35 @@ def test_reinstall_swaps_orch_packages_in_place(tmp_path, monkeypatch):
     args = addons._tool_args([])
     assert "--reinstall" not in args
     assert args[:4] == ["tool", "install", "--reinstall-package", "orch-workspace"]
+
+
+def test_addon_add_or_remove_restarts_what_runs(tmp_path, monkeypatch):
+    """An add-on add/remove replaces the shared tool env: running services (still on the old files) are
+    restarted like after an update; the update itself restarts in its project step (no second restart)."""
+    monkeypatch.setattr(winfinish, "needed", lambda: False)
+    monkeypatch.setattr(addons, "tool_env_change_ok", lambda: None)
+    monkeypatch.setattr(addons, "_install_tool", lambda entries: None)
+    monkeypatch.setattr(addons, "_save_registry", lambda entries: None)
+    seen = []
+    monkeypatch.setattr(addons, "_restart_updated", lambda root=None: seen.append(root) or ["Restarted"])
+    assert addons._reinstall([], save=True, then=[], root=tmp_path, done="x") is True
+    assert seen == [tmp_path]
+    addons._reinstall([], save=False, then=[], root=tmp_path, done="orch updated", restart=False)
+    assert seen == [tmp_path]
+
+
+def test_tool_args_keep_the_python(tmp_path, monkeypatch):
+    """Both reinstall forms (whole env, and #679's per package) carry the --python pin."""
+    exe = tmp_path / "py" / "python3.11"
+    exe.parent.mkdir()
+    exe.write_text("")
+    monkeypatch.setattr(addons.sys, "_base_executable", str(exe))
+    env = tmp_path / "orch-workspace"
+    env.mkdir()
+    monkeypatch.setattr(addons.sys, "prefix", str(env))
+    for receipt in (None, '[tool]\nrequirements = [{ name = "orch-workspace" }]\n'):
+        if receipt:
+            (env / "uv-receipt.toml").write_text(receipt)
+        args = addons._tool_args([])
+        i = args.index("--python")
+        assert args[i + 1] == str(exe)
