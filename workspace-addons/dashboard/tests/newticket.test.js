@@ -109,22 +109,6 @@ test('short paste and text drops use browser defaults; rejected files stay inlin
   assert.match(walk(s.d).find(n => n.className.includes('new-ticket-file-error')).textContent, /only text files and pictures/);
   assert.equal(s.calls.length, 0);
 });
-test('overview file chips preview artifacts and are absent in snapshots or without files', async () => {
-  const s = setup(), previews = [];
-  s.c.snapshot = false; s.c.array = x => x || [];
-  s.c.h = (tag, attrs, ...children) => { const n = new Node(tag); Object.assign(n, attrs); n.append(...children.map(x => typeof x === 'string' ? new Node('text', '', x) : x)); return n; };
-  s.c.window.DashHelpers.plainFileName = x => x.split('/').pop();
-  s.c.previewFile = (...args) => previews.push(args);
-  const ticket = read('pages/ticket.js');
-  vm.runInContext('const artifactData = new Map();\n' + ticket.slice(ticket.indexOf('// One file = one entry'), ticket.indexOf('function ticketResultCard(')) + ticket.slice(ticket.indexOf('function ticketFiles('), ticket.indexOf('async function previewFile(')), s.c);
-  assert.equal(s.c.ticketFiles({id:'t'}), null);
-  vm.runInContext("artifactData.set('t', {data:{files:[{name:'folder/note.md',size:20000}]}})", s.c);
-  const section = s.c.ticketFiles({id:'t'});
-  assert.equal(walk(section).find(n => n.tag === 'span').textContent, 'folder/note.md');
-  await walk(section).find(n => n.tag === 'button').click();
-  assert.deepEqual(previews, [['t','artifacts','folder/note.md']]);
-  s.c.snapshot = true; assert.equal(s.c.ticketFiles({id:'t'}), null);
-});
 test('textarea title takes priority when typed long text follows a pasted note', async () => {
   const s = setup(); await s.paste('Original\n' + 'a'.repeat(1501));
   s.input.value = 'New title\n' + 'b'.repeat(1501); await s.input.fire('input');

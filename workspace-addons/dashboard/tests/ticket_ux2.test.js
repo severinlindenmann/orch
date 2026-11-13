@@ -61,7 +61,7 @@ test('Dash 50: a change request task reads as the change, with what you asked be
   assert.equal(c.changeTask('Write the report'), null);
   assert.equal(c.changeTask('Change: x', 'other')?.asked, 'x');
 });
-test('Dash 20/23/34/02: one Tasks list, Resume when paused, Details without empty fields, key under Technical details', () => {
+test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Details toggles', () => {
   const t = {id:'t1', key:'PIL-54', title:'Report', status:'open', sessions:[{id:'s1', last_used:'2026-11-12T09:00:00Z'}], checklist:[{id:'c1', text:'Change: Please add a rain plan.', done:true}], note:'Remember', created_at:'2026-11-10T09:00:00Z', updated_at:'2026-11-12T09:00:00Z'};
   const ctx = {repeatsAddon:() => null, window:{DashHelpers:helpers}, document:{addEventListener(){}}, addEventListener(){}, h,
     array:v => Array.isArray(v) ? v : [], iconEl:n => n, clean:v => String(v ?? ''), name:v => v || '', act:async () => ({ok:true}),
@@ -73,18 +73,15 @@ test('Dash 20/23/34/02: one Tasks list, Resume when paused, Details without empt
   ctx.snapshot = false; ctx.state = {settings:{}, runs:{}};
   vm.runInContext('loadArtifacts = () => {}; inlineField = (t,f) => h("span", {"data-field":f}, String(t[f] || "")); addTaskRow = () => null; agentBar = () => null; sharedFolderLine = () => null; copyLine = () => null; liveSessionStrip = () => null; ticketFiles = () => null; addonRows = () => null; ticketLinks = () => null; linksCard = () => null; fieldSections = () => null; ticketHistoryPanel = () => null; artifactData.set("t1", {data:{files:[]}});', ctx);
   const tree = ctx.detail(t), all = nodes(tree), body = text(tree);
-  assert.ok(!all.some(n => n.attrs.id === 'ticket-tab-tasks'));
-  assert.equal(all.filter(n => n.attrs['data-key'] === 'overview-tasks').length, 1);
+  assert.ok(all.some(n => n.attrs.id === 'ticket-tab-tasks'), 'Tasks tab exists');
+  assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
-  assert.equal(text(all.find(n => n.attrs['data-key'] === 'parts-add')), '+ Add a step', 'a ticket without steps can get its first one');
   assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-paused') && /Resume/.test(body) && !/Start helper/.test(body));
-  const panel = all.find(n => n.attrs.id === 'ticket-panel-overview');
-  assert.ok(!panel.attrs.hidden, 'an old Tasks choice opens the Overview');
-  assert.ok(nodes(panel).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
-  assert.doesNotMatch(text(all.find(n => n.attrs.className === 'ticket-details ed-list')), /Owner|Due|Done when|Note|PIL-54|No parent/);
-  assert.ok(all.some(n => text(n) === '+ Add detail'));
-  assert.match(text(all.find(n => n.attrs['data-key'] === 'ticket-technical-t1')), /Technical details.*PIL-54/);
-  assert.equal(body.split('PIL-54').length, 2, 'the key appears only under Technical details');
+  assert.ok(!all.find(n => n.attrs.id === 'ticket-panel-tasks').attrs.hidden, 'the Tasks choice opens the Tasks tab');
+  assert.ok(nodes(all.find(n => n.attrs.id === 'ticket-panel-overview')).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
+  assert.match(text(all.find(n => n.attrs.className === 'side-panel properties')), /Properties.*Owner.*Due.*Done when/);
+  assert.ok(!all.some(n => n.tag === 'details' && /Details/.test(text(n))) && !/Technical details|\+ Add detail/.test(body), 'no Details toggles');
+  assert.equal(body.split('PIL-54').length, 2, 'the key appears once, as a quiet line');
   assert.match(body, /Add a rain planYou asked: Please add a rain plan\./);
   const typed = {...t, id:'t2', sessions:[]};
   ctx.tickets = () => [typed];

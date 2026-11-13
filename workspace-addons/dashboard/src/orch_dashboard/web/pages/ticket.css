@@ -96,3 +96,95 @@
 .ticket-plan-steps li { padding: 10px 0; overflow-wrap: anywhere; }
 .ticket-plan-steps p { margin: 0; }
 .ticket-plan-actions { flex-wrap: wrap; }
+
+/* ---- Redesign (ux/ticket): header, tabs, review card, tasks, files, Properties, viewer. Matches mockup/ticket. ---- */
+.ticket-page{gap:0;padding-bottom:64px}
+.ticket-page .ticket-heading{display:grid;gap:0;margin-bottom:16px}
+.ticket-page .ticket-heading h1{margin:4px 0 12px;font-size:28px;line-height:36px}
+.ticket-page .plain-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.ticket-page .plain-actions .menu summary{min-height:32px}
+.ticket-page .state-line{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;color:var(--text-muted);font-size:12px;line-height:20px;margin:0 0 16px}
+.ticket-page .state-line .status-word{font-size:14px;font-weight:500}
+.ticket-page .state-line .status-word.warn{color:var(--needs-you)}
+.ticket-page .state-line .status-word.good{color:var(--done)}
+.ticket-page .state-line .status-word.working{color:var(--working)}
+.ticket-page .state-line .btn{margin-left:auto}
+.ticket-page .status-change{animation:status-in var(--dur-base) var(--ease-enter)}
+@keyframes status-in{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
+.ticket-page .stepper{display:flex;gap:16px;list-style:none;margin:0;padding:0;flex-wrap:wrap;color:var(--text-muted);font-size:12px}
+.ticket-page .stepper li{display:inline-flex;align-items:center;gap:8px}
+.ticket-page .phase{display:inline-grid;place-items:center;width:20px;height:20px;border:1px solid var(--border-strong);border-radius:50%;font-size:12px}
+.ticket-page .phase.done{color:var(--success);border-color:var(--success)}
+.ticket-page .phase.current{color:var(--working);border-color:var(--working)}
+.ticket-page .ticket-tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);margin:0 0 24px;overflow-x:auto;flex-wrap:nowrap}
+.ticket-page .ticket-tabs button{border-radius:0;white-space:nowrap;padding:10px 14px;border:0;border-bottom:2px solid transparent;min-height:44px}
+.ticket-page .ticket-tabs [aria-selected=true]{color:var(--text);border-bottom-color:var(--brand);background:var(--surface-2)}
+.ticket-page .tab-count{font:12px var(--font-mono);color:var(--text-muted);margin-left:2px}
+.ticket-page .ticket-layout{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:24px;align-items:start}
+.ticket-page .ticket-panel[hidden]{display:none!important}
+.ticket-page .story{display:grid;gap:24px;min-width:0}
+.ticket-page .ticket-side{position:sticky;top:80px}
+.ticket-page .section-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ticket-page .section-head h2,.ticket-page .properties h2{font-size:14px;line-height:20px;margin:0}
+.ticket-page .card{padding:16px;display:grid;gap:12px}
+.ticket-page .attention{border-left:3px solid var(--needs-you)}
+.ticket-page .review-card{gap:16px}
+.ticket-page .review-card .section-head h2{font-size:20px;line-height:28px}
+.ticket-page .review-check{font-weight:500;margin:0}
+.ticket-page .result-frame{border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)}
+.ticket-page .result-frame .file-row{border-bottom:1px solid var(--border);padding:12px 16px}
+.ticket-page .preview-body{position:relative;overflow:hidden;max-height:260px;min-height:120px;background:var(--surface)}
+.ticket-page .preview-body:after{content:'';position:absolute;inset:auto 0 0;height:36px;background:linear-gradient(transparent,var(--surface));pointer-events:none}
+.ticket-page .preview-body .ticket-preview{border:0;border-radius:0;max-height:244px}
+.ticket-page .preview-expand{position:absolute;right:12px;bottom:8px;z-index:1;background:var(--surface);min-height:32px}
+.ticket-page .file-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.ticket-page .file-row:last-child{border-bottom:0}
+.ticket-page .file-row .grow{min-width:0}
+.ticket-page .file-row p{margin:0;overflow-wrap:anywhere}
+.ticket-page .file-name{font-weight:500}
+.ticket-page .file-type{display:inline-grid;place-items:center;min-width:32px;height:32px;border-radius:4px;background:var(--surface-3);color:var(--text-muted);font-size:12px;font-weight:600;flex:none}
+.ticket-page .file-actions{display:flex;gap:4px;flex-wrap:wrap}
+.ticket-page .file-actions .btn{font-size:12px;min-height:32px;padding:4px 8px}
+.ticket-page .file-group{display:grid;gap:4px;margin-bottom:16px}
+.ticket-page .file-group h3{margin:0}
+.ticket-page .task-list{list-style:none;margin:0;padding:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.ticket-page .task-row{display:flex;gap:12px;align-items:flex-start;min-height:40px;padding:8px 0;border-bottom:1px solid var(--border)}
+.ticket-page .task-row:last-child{border-bottom:0}
+.ticket-page .task-mark{width:20px;text-align:center;color:var(--text-muted);flex:none}
+.ticket-page .task-mark.good{color:var(--done)}
+.ticket-page .task-title{margin:0}
+.ticket-page .task-note{display:block;margin:4px 0 0}
+.ticket-page .current-task{display:flex;gap:12px;padding:16px 12px;background:var(--info-soft);border-left:2px solid var(--working)}
+.ticket-page .current-task h3{margin:0}
+.ticket-page .current-task p{margin:4px 0 0}
+.ticket-page .task-mark.working{color:var(--working)}
+.ticket-page .task-word{white-space:nowrap}
+.ticket-page .property-details,.ticket-page .next-up{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.ticket-page .next-up p{margin:8px 0 0}
+.ticket-page .properties{display:grid;gap:0;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.ticket-page .properties dl{margin:12px 0 0}
+.ticket-page .properties dl>div{display:grid;grid-template-columns:80px minmax(0,1fr);gap:8px;padding:12px 0;border-bottom:1px solid var(--border)}
+.ticket-page .properties dd{margin:0;font-size:14px;line-height:20px;min-width:0;overflow-wrap:anywhere}
+.ticket-page .ticket-meta-line{margin:12px 0 0}
+.ticket-page .change-request{border-left:3px solid var(--needs-you)}
+.ticket-page .change-request h2,.ticket-page .asked h2,.ticket-page .progress-card h2{font-size:14px;line-height:20px;margin:0}
+.ticket-page .request-row p{margin:0}
+.ticket-page .empty-ticket{min-height:240px;place-items:center;text-align:center;align-content:center}
+.ticket-page .empty-mark{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:4px;background:var(--surface-3)}
+.ticket-page .ticket-ask-label{font-weight:500}
+/* The shared file viewer: × Close, Esc, click outside */
+dialog.ticket-viewer{position:fixed;inset:0;margin:auto;width:min(1100px,calc(100vw - 48px));height:min(820px,calc(100dvh - 48px));max-width:none;max-height:none;padding:0;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+dialog.ticket-viewer[open]{display:flex;flex-direction:column;animation:ticket-reveal var(--dur-base) var(--ease-enter)}
+dialog.ticket-viewer::backdrop{background:rgb(0 0 0 / .7)}
+.ticket-viewer .viewer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:20px 24px;border-bottom:1px solid var(--border)}
+.ticket-viewer .viewer-head h2{font-size:20px;line-height:28px;margin:0 0 4px}
+.ticket-viewer .viewer-head .meta{margin:0}
+.ticket-viewer .viewer-close{flex:none;min-width:44px;min-height:44px;font-size:20px}
+.ticket-viewer .actions{display:flex;gap:8px;flex-wrap:wrap;padding:12px 24px;border-bottom:1px solid var(--border)}
+.ticket-viewer .viewer-stage{flex:1;min-height:0;overflow:auto;padding:20px}
+.ticket-viewer .viewer-stage img{max-width:100%}
+.ticket-viewer .viewer-stage pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+@keyframes ticket-reveal{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media(max-width:899px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-side{position:static}.ticket-page .ticket-heading h1{font-size:24px;line-height:32px}.ticket-page .state-line .btn{margin-left:0}dialog.ticket-viewer{width:calc(100vw - 20px);height:calc(100dvh - 20px)}}
+@media(min-width:1600px){.ticket-page .ticket-layout{grid-template-columns:minmax(0,1fr) 320px;gap:32px}}
+@media(prefers-reduced-motion:reduce){dialog.ticket-viewer[open],.ticket-page .status-change{animation:none}}

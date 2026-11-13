@@ -65,10 +65,10 @@ def test_optional_done_when_in_new_and_edit_dialog():
 
 def test_ticket_details_and_readonly_multiline():
     js = (WEB / "pages" / "ticket.js").read_text()
-    # Note sits in the Overview; empty Owner/Due/Done when hide behind "+ Add detail".
+    # Note sits in the Overview; Owner/Due/Done when are shown plainly in Properties (no Details toggles).
     assert "h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'))" in js
-    assert "[['owner', 'Owner'], ['due', 'Due'], ['done_when', 'Done when']]" in js
-    assert "'+ Add detail'" in js
+    assert "field('Owner', inlineField(t, 'owner'))" in js
+    assert "'+ Add detail'" not in js and "Technical details" not in js
     assert "done_when:'Say what should be true when it is done'" in js
     assert "const MULTILINE = ['note', 'done_when']" in js
     assert "if (snapshot) return el('span', MULTILINE.includes(field) ? 'ed-ro preserve-lines'" in js
