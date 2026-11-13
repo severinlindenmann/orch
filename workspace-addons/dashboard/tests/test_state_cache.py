@@ -160,7 +160,7 @@ def test_changed_ticket_file_is_served_fresh_at_once(server, ws, counted):
     tickets = ws / ".orch" / "tickets"
     tickets.mkdir(parents=True, exist_ok=True)
     (tickets / "t_zzzzzz.json").write_text("{}")
-    got, _h = _get(server + "/api/state")
+    _get(server + "/api/state")
     assert len(counted) == n + 1, "a changed file rebuilds the state before answering"
     assert events.Revisions(ws).signature()  # sanity: the signature saw the file
 

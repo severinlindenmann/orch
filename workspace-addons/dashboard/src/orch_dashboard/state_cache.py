@@ -75,7 +75,7 @@ class StateCache:
             if not done:
                 try:
                     self._store(*self._build())
-                except Exception:  # noqa: BLE001 - keep the old copy; the caller still gets an answer
+                except Exception:  # keep the old copy; the caller still gets an answer
                     if self.state is None:
                         raise
             with self.lock:
