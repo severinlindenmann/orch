@@ -339,3 +339,31 @@ def test_set_plain_words(root, monkeypatch, capsys):
     ):
         assert cli.main(["--dir", str(root), "set", *args]) == 0
         assert capsys.readouterr().out.strip() == expected
+
+
+def test_view_matches_the_addon_view_contract(root, capsys):
+    """`orch sync view --json` is what the dashboard's Sync tab pulls (it used to exit 2: no such command)."""
+    schema = json.loads(
+        (Path(__file__).resolve().parents[3] / "contracts/addon-view.schema.json").read_text()
+    )
+    check = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
+    assert run(root, "view") == 0
+    off = json.loads(capsys.readouterr().out)
+    assert not list(check.iter_errors(off))
+    assert off["notice"] == "Sync is off"
+    assert run(root, "set", "--mode", "local") == 0
+    (root / ".orch/run/sync/state.json").write_text(
+        json.dumps(
+            {
+                "skipped": ["Ticket t_abc123 has a problem and was not synced"],
+                "last_ok": "2026-11-13T10:00:00Z",
+            }
+        )
+    )
+    capsys.readouterr()
+    assert run(root, "view") == 0
+    view = json.loads(capsys.readouterr().out)
+    assert not list(check.iter_errors(view))
+    rows = next(b for b in view["blocks"] if b["type"] == "list")
+    assert rows["title"].endswith("· 1")
+    assert "t_abc123" in rows["items"][0]["title"]

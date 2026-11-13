@@ -394,7 +394,7 @@
     "history": {
       "type": "object",
       "required": ["at", "by", "text"],
-      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "$ref": "#/$defs/who" }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." } }
+      "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "anyOf": [{ "$ref": "#/$defs/who" }, { "const": "orch", "description": "orch itself (a system note such as 'The agent stopped before the work was finished'). Not a person and not an agent; sync treats it like any other line that needs no proof." }] }, "text": { "type": "string", "minLength": 1 }, "via": { "$ref": "#/$defs/token", "description": "Optional. Surface the change came from (free word)." } }
     },
     "tid": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
     "code": { "type": "string", "pattern": "^[A-Z0-9]{2,4}$", "description": "Workspace code: 2-4 uppercase letters or digits, e.g. DM1, MEC." },
