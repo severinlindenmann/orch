@@ -1,10 +1,14 @@
 .new-ticket .new-ticket-text {
   box-sizing: border-box;
   width: 100%;
-  min-height: 200px;
+  min-height: 6.5em;
+  max-height: 480px;
   resize: vertical;
   font-size: 16px;
 }
+.new-ticket-check { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; min-height: 44px; }
+.new-ticket-check .meta { grid-column: 2; }
+.new-ticket .new-ticket-check input { min-height: 0; width: 18px; height: 18px; }
 .new-ticket-options > summary {
   min-height: 44px;
   align-content: center;
@@ -12,10 +16,9 @@
   color: var(--text-muted);
 }
 .new-ticket .input, .new-ticket .btn { min-height: 44px; }
-.new-ticket .new-ticket-drop {
-  width: 100%; padding: 11px 10px; border: 1px dashed var(--border);
-  border-radius: 7px; background: transparent; color: var(--text-muted);
-  text-align: left; font-size: 12px; white-space: normal;
+.new-ticket .new-ticket-attach, .new-ticket .new-ticket-link {
+  align-self: flex-start; min-height: 44px; padding: 0; border: 0; background: transparent;
+  color: var(--brand); text-decoration: underline; cursor: pointer; font-size: 14px;
 }
 .new-ticket-files { display: flex; flex-direction: column; gap: 7px; }
 .new-ticket .new-ticket-file { display: flex; padding: 0; border-radius: 7px; min-width: 0; }

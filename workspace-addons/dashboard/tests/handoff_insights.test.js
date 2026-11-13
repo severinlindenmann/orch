@@ -29,3 +29,18 @@ test('delete detail names the ticket by title and says counts stay', () => {
   assert.match(t, /Delete the full detail of .Close March books.\? The counts stay\./);
   assert.doesNotMatch(t, /t_[a-z0-9]{6}/);
 });
+test('an answer request reads as one sentence with the answer, Send answer button, source behind Technical details', () => {
+  assert.equal(lines('ticket.answer', {title: 'Weekly report', question: 'Which colour'}), 'Send this answer to Weekly report? Which colour');
+  const el = (tag, text) => ({tag, textContent: text || '', kids: [], style: {}, appendChild(k) { this.kids.push(k); }});
+  const c = vm.createContext({el, document: {createTextNode: t => ({text: t})}, String, Number});
+  vm.runInContext(src.slice(start, end) + '\nthis.T = TEMPLATES;', c);
+  const text = n => typeof n === 'string' ? n : (n.textContent || n.text || '') + (n.kids || []).map(text).join('');
+  assert.equal(c.T['ticket.answer']({title: 'Weekly report', question: 'Which colour'}, {value: 'Blue'}).map(text).join(''), 'Send this answer to Weekly report? Which colour \u2192 Blue');
+  const exact = 'say  "yes"';
+  assert.equal(c.T['ticket.answer']({title: 'R'}, {value: exact}).map(text).join(''), 'Send this answer to R?  \u2192 ' + exact, 'the short answer is shown exactly as sent');
+  assert.match(src, /"Technical details", "meta"\)[^\n]*\n[^\n]*min-height:44px/);
+  assert.match(src, /"ticket.answer": "Send answer"/);
+  assert.match(src, /display:inline-flex;gap:8px/);
+  assert.match(src, /"Technical details"/);
+  assert.doesNotMatch(src, /"Requested by a command"/);
+});
