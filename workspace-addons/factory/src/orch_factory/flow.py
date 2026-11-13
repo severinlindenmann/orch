@@ -2,6 +2,7 @@
 
 import json
 import re
+from datetime import datetime
 
 from . import authority, autopilot, commands, orchcli
 from .render import clean
@@ -23,21 +24,31 @@ def freeze_ask(root, store, ticket, kind, data, value, ext=None):
     """Freeze the file (same bytes reuse their version), journal, ext, ask, journal. Safe to repeat."""
     folder, prefix, _ = authority.FOLDERS[kind]
     order, h = ticket["id"], digest(data)
+    rows = store.journal_read()
+    questions = {q["id"]: q for q in ticket.get("questions", [])}
     n = None
     base = store.path(f"{folder}/{order}")
     if base.exists():
-        for p in base.iterdir():
+        for p in sorted(base.iterdir()):
             m = re.fullmatch(rf"{prefix}([1-9][0-9]*)\.json", p.name)
-            if m and digest(store.read(f"{folder}/{order}/{p.name}")) == h:
+            if not m or digest(store.read(f"{folder}/{order}/{p.name}")) != h:
+                continue
+            asked = [
+                r
+                for r in rows
+                if r["type"] == "asked"
+                and r["order"] == order
+                and r.get("file") == f"{folder}/{order}/{p.name}"
+            ]
+            # An identical version is reused only while its question is still unanswered (or never asked).
+            if all(questions.get(r["q"], {}).get("answer") is None for r in asked):
                 n = int(m[1])
-    path = None
     if n is None:
         n = store.next_version(folder, order, prefix, "json")
     path = f"{folder}/{order}/{prefix}{n}.json"
-    store.write(path, data, frozen=True)
     text, options, action = authority.expected(order, kind, path, h, value)
+    store.write(path, data, frozen=True)
     entries = authority.entries(store, ticket)
-    rows = store.journal_read()
     recorded = next(
         (r for r in rows if r["type"] == "asked" and r["order"] == order and r.get("file") == path), None
     )
@@ -49,6 +60,15 @@ def freeze_ask(root, store, ticket, kind, data, value, ext=None):
         for e in entries:
             if e["row"]["kind"] == kind and e["q"].get("action") != action and not authority.human(e["q"]):
                 store.journal_append({"type": "superseded", "order": order, "q": e["q"]["id"], "kind": kind})
+    if kind in ("factory:stop", "factory:change"):
+        # A question only a non-person answered is burned (core takes no second answer): replace it.
+        for e in entries:
+            same = e["row"]["kind"] == kind and (
+                kind == "factory:change" or e["data"]["stage"] == value["stage"]
+            )
+            q = e["q"]
+            if same and q.get("answer") is not None and not authority.human(q):
+                store.journal_append({"type": "superseded", "order": order, "q": q["id"], "kind": kind})
     if ext:
         if kind == "factory:autopilot":
             ext = {**ext, "proposal": {"n": n, "hash": h}}
@@ -82,23 +102,46 @@ def derive(root, store, ticket, tickets=None):
     ents = authority.entries(store, ticket)
     rows = [r for r in store.journal_read() if r["order"] == tid]
     consumed = {r.get("q") for r in rows if r["type"] == "consumed"}
-    decided = {r["q"]: r for r in rows if r["type"] == "decided"}
+    decided = {}
+    for r in rows:
+        if r["type"] == "decided":
+            decided.setdefault(r["q"], r)  # the first row is the decision; later ones change nothing
     all_decided = [r for r in store.journal_read() if r["type"] == "decided"] if decided else []
     granted = autopilot.grants(store, tickets) if decided else []
-    at = clock()
+    now = clock()
+
+    def decided_ok(e, r):
+        """A decided row counts only for the moment it was written: a grant covering that moment, the core's
+        own log line after the grant began, and max_orders in journal order."""
+        try:
+            when = datetime.fromisoformat(r["at"])
+        except (KeyError, ValueError):
+            return False
+        if when > now or e["row"]["kind"] != "factory:stop" or r.get("by") != "agent:factory":
+            return False
+        before = all_decided[: all_decided.index(r)]
+        try:
+            live = autopilot.check(e, r.get("answer"), granted, when, tid, before)
+        except Refused:
+            return False
+        line = f"Decided by agent:factory · {r.get('why', '')}"
+        for h in ticket.get("history", []):
+            if h.get("text") != line:
+                continue
+            try:
+                logged = datetime.fromisoformat(h["at"])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if any(logged >= g["from"] for g in live):
+                return True
+        return False
 
     def effective(e):
         q = e["q"]
         if authority.human(q):
             return q["answer"], q["answered_by"]
         r = decided.get(q["id"])
-        if (
-            r
-            and q.get("answer") is None
-            and e["row"]["kind"] == "factory:stop"
-            and r.get("by") == "agent:factory"
-            and autopilot.allowed(e, r.get("answer"), granted, at, tid, all_decided[: all_decided.index(r)])
-        ):
+        if r and q.get("answer") is None and decided_ok(e, r):
             return r["answer"], "agent:factory"
         return None
 
@@ -115,7 +158,7 @@ def derive(root, store, ticket, tickets=None):
         "tid": tid,
         "ents": ents,
         "rows": rows,
-        "kind": "autopilot" if any(e["row"]["kind"] == "factory:autopilot" for e in ents) else "run",
+        "kind": authority.order_kind(ents) or "run",
         "phase": phase,
         "lead": answered[-1] if answered else (lead[-1] if lead else None),
         "start": start,
@@ -131,6 +174,7 @@ def derive(root, store, ticket, tickets=None):
         "crew": {},
         "cap": 0,
         "used": ticket.get("ext", {}).get("factory", {}).get("budget", {}).get("active_min_used", 0),
+        "edit": None,
         "last_answer": None,
         "last_stop": None,
     }
@@ -138,7 +182,7 @@ def derive(root, store, ticket, tickets=None):
     d["effective"] = effective
     if phase != "started" or d["kind"] == "autopilot":
         return d
-    p = json.loads(store.read(start["row"]["file"]))
+    p = start["data"]  # parsed from the bytes whose hash entries() checked; never read the file again
     accepted = [
         e
         for e in ents
@@ -169,10 +213,15 @@ def derive(root, store, ticket, tickets=None):
         (
             e
             for e in reversed(ents)
-            if e["row"]["kind"] in ("factory:change", "factory:stop") and effective(e) is None
+            if e["row"]["kind"] in ("factory:change", "factory:stop")
+            and effective(e) is None
+            and e["q"].get("answer") is None  # an agent-answered question is burned, not open
         ),
         None,
     )
+    changes = sorted((e for e in ents if e["row"]["kind"] == "factory:change"), key=lambda e: e["n"])
+    if changes and authority.human(changes[-1]["q"]) and changes[-1]["q"]["answer"] == "Edit":
+        d["edit"] = changes[-1]  # stays until the manager proposes a new change
     shipped_row = any(r["type"] == "shipped" for r in rows)
     line, current = [], None
     for st in p["line"]:
@@ -189,7 +238,7 @@ def derive(root, store, ticket, tickets=None):
         mine = [t for t in tasks.values() if t["stage"] == name]
         done_tasks = all(crew.get(t["slug"], {}).get("status") == "done" for t in mine)
         item = {"stage": name, "stop": st["stop"], "state": "todo"}
-        if answer and answer[0] in ("Continue", "Ship it"):
+        if answer and answer[0] == ("Ship it" if name == "ship" else "Continue"):
             item.update(state="done", by=answer[1])
         elif not st["stop"] and done_tasks:
             item["state"] = "done"
@@ -200,6 +249,14 @@ def derive(root, store, ticket, tickets=None):
         line.append(item)
     d["line"], d["stage"] = line, current
     d["finished"] = current is None
+    last_ship = max(
+        (e for e in ents if e["row"]["kind"] == "factory:stop" and e["data"]["stage"] == "ship"),
+        key=lambda e: e["n"],
+        default=None,
+    )
+    ship_answer = effective(last_ship) if last_ship else None
+    d["ship_ok"] = bool(ship_answer and ship_answer[0] == "Ship it" and ship_answer[1].startswith("human:"))
+    d["ship_by"] = ship_answer[1] if d["ship_ok"] else None
     d["shipped"] = d["finished"] and shipped_row
     return d
 
@@ -257,7 +314,7 @@ def _log_ignored(root, store, order, d):
             ticket = commands.order_ticket(root, order)
 
 
-def _step(d, edit):
+def _step(d):
     base = {"order": d["tid"]}
     if d["kind"] == "autopilot":
         if d["phase"] != "started":
@@ -274,23 +331,32 @@ def _step(d, edit):
         return {**base, "step": "done"}
     if d["open"]:
         return {**base, "step": "wait", "waiting_for": d["open"]["row"]["kind"].split(":")[1]}
-    if edit:
-        return {**base, "step": "edit", "file": edit["row"]["file"]}
-    if d["finished"]:
+    if d["edit"]:
+        return {**base, "step": "edit", "file": d["edit"]["row"]["file"]}
+    if d["finished"] and d["ship_ok"]:
         ship = d["proposal"]["ship"]
         return {**base, "step": "ship", "does": ship["does"], "undo": ship["undo"]}
     stage = d["stage"]
-    if d["last_answer"] and d["last_answer"][0] == "Send back":
-        items = d["last_stop"]["data"]["items"]
-        return {**base, "step": "work", "stage": stage, "comments": [i["title"] for i in items]}
+    sent_back = d["last_answer"] is not None and d["last_answer"][0] == "Send back"
+    comments = None
+    if sent_back:
+        asked = d["last_stop"]["q"].get("comment")
+        comments = (
+            [clean(asked, 400)]
+            if isinstance(asked, str) and clean(asked, 400)
+            else [i["title"] for i in d["last_stop"]["data"]["items"]]
+        )
     todo = [
         t
         for t in d["tasks"].values()
         if t["stage"] == stage and d["crew"].get(t["slug"], {}).get("status") != "done"
     ]
+    if sent_back and not todo:
+        return {**base, "step": "work", "stage": stage, "comments": comments}
     if todo:
         return {
             **base,
+            **({"comments": comments} if sent_back else {}),
             "step": "start-crew",
             "stage": stage,
             "budget": budget,
@@ -316,14 +382,13 @@ def next_step(root, order):
         tickets = orchcli.tickets(root)
         d = derive(root, store, ticket, tickets)
         _log_ignored(root, store, order, d)
-        edit = None
         for e in d["pending"]:
             kind, q = e["row"]["kind"], e["q"]
             answer, by = d["effective"](e)
             store.journal_append(
                 {"type": "consumed", "order": order, "q": q["id"], "kind": kind, "answer": answer, "by": by}
             )
-            if kind == "factory:start":
+            if kind == "factory:start" and answer == "Start":
                 store.journal_append({"type": "started", "order": order, "q": q["id"], "by": by})
             elif kind == "factory:autopilot" and answer == "Start":
                 g = next((x for x in autopilot.grants_of(store, ticket) if x["q"] == q["id"]), None)
@@ -348,8 +413,6 @@ def next_step(root, order):
                             "by": by,
                         }
                     )
-                elif answer == "Edit":
-                    edit = e
             elif kind == "factory:stop":
                 store.journal_append(
                     {"type": "stop-answered", "order": order, "q": q["id"], "answer": answer, "by": by}
@@ -358,7 +421,7 @@ def next_step(root, order):
         if d["kind"] == "autopilot":
             d["grant_valid"] = any(clock() < g["until"] for g in autopilot.grants_of(store, ticket))
         refresh(root, store, order, d)
-        return _step(d, edit)
+        return _step(d)
 
 
 # ---- crew, change, tiny, stop, ship ---------------------------------------------------------------------------
@@ -429,6 +492,9 @@ def change(root, order, data):
         roles = {c["role"] for c in d["proposal"]["crew"]}
         if value["lands_in"] not in stages:
             raise Refused("The change must land in a stage of the line.", "invalid")
+        done = {x["stage"] for x in d["line"] if x["state"] == "done"}
+        if value["lands_in"] in done or any(t["stage"] in done for t in value.get("adds_tasks", [])):
+            raise Refused("That stage is already finished; a change cannot land there.", "invalid")
         for t in value.get("adds_tasks", []):
             if t["stage"] not in stages or t["slug"] in d["tasks"]:
                 raise Refused("A new task needs a stage of the line and a new name.", "invalid")
@@ -493,10 +559,9 @@ def ship(root, order):
         d = started_state(root, store, ticket)
         if not d["finished"]:
             raise Refused("The owner has not said Ship it yet.", "not_allowed")
-        ans = d["effective"](next(e for e in reversed(d["ents"]) if e["row"]["kind"] == "factory:stop"))
-        if not ans or ans[0] != "Ship it" or not ans[1].startswith("human:"):
+        if not d["ship_ok"]:
             raise Refused("Only a person's Ship it ships.", "not_allowed")
-        store.journal_append({"type": "shipped", "order": d["tid"], "by": ans[1]})
+        store.journal_append({"type": "shipped", "order": d["tid"], "by": d["ship_by"]})
         d = derive(root, store, commands.order_ticket(root, d["tid"]))
         refresh(root, store, d["tid"], d)
         return {"order": d["tid"], "step": "done"}
@@ -511,7 +576,22 @@ def reconcile(root):
             ext = t.get("ext", {}).get("factory", {})
             if ext.get("role") != "order":
                 continue
-            item = {"order": t["id"], "problems": [], "consumed": [], "unconsumed": []}
+            item = {"order": t["id"], "problems": [], "consumed": [], "unconsumed": [], "orphans": []}
+            try:
+                recorded = {r.get("q") for r in store.journal_read() if r["type"] == "asked"}
+            except Refused:
+                recorded = None
+            if recorded is not None:
+                # Asked in core but never recorded (a crash between ask and journal): listed, never repaired.
+                item["orphans"] = [
+                    q["id"]
+                    for q in t.get("questions", [])
+                    if str(q.get("kind", "")).startswith("factory:") and q["id"] not in recorded
+                ]
+                for qid in item["orphans"]:
+                    item["problems"].append(
+                        f"Question {qid} has no Factory record (orphan); it has no authority."
+                    )
             try:
                 d = derive(root, store, t, tickets)
             except Refused as error:

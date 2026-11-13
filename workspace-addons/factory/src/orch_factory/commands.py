@@ -4,7 +4,7 @@ import json
 
 from . import authority, orchcli
 from .render import START_OPTIONS, question_text
-from .store import Refused, Store, digest, validate
+from .store import Refused, Store, digest
 
 
 def order_ticket(root, order):
@@ -41,14 +41,7 @@ def proposal(data):
         value = json.loads(data)
     except (ValueError, UnicodeError):
         raise Refused("The proposal must be valid JSON.", "invalid") from None
-    validate(value, "proposal")
-    if value["line"][-1]["stage"] != "ship" or value["line"][-1]["stop"] is not True:
-        raise Refused("The last stage must be ship, with a stop for you.", "invalid")
-    stages = {x["stage"] for x in value["line"]}
-    if any(t["stage"] not in stages for t in value["tasks"]):
-        raise Refused("Every task must belong to a stage in the line.", "invalid")
-    if any(i >= len(value["done_means"]) for t in value["tasks"] for i in t.get("proves", [])):
-        raise Refused("A task refers to a done-means point that does not exist.", "invalid")
+    authority.check_frozen("run", value)
     return value
 
 
@@ -58,7 +51,7 @@ def propose(root, order, data):
     with store.locked():
         ticket = order_ticket(root, order)
         order = ticket["id"]
-        if ticket["ext"]["factory"].get("kind") == "autopilot":
+        if authority.order_kind(authority.entries(store, ticket)) == "autopilot":
             raise Refused("This is an autopilot order. Use orch factory autopilot.", "invalid")
         # Read-only commands never log. A mutating proposal records ignored agent answers in core history.
         for q in authority.questions(store, ticket):
@@ -105,6 +98,10 @@ def propose(root, order, data):
             store.journal_append({"type": "proposed", "order": order, "file": path, "hash": h})
         action = {"order": order, "file": path, "hash": h}
         # Retrying an interrupted proposal also finishes superseding the previous open question.
+        # The person may have pressed Start since the ticket was read: look again right before hiding anything.
+        ticket = order_ticket(root, order)
+        if authority.from_ticket(store, ticket):
+            raise Refused("This order has started. Make a change proposal.")
         for q in authority.questions(store, ticket):
             if (
                 q.get("kind") == "factory:start"

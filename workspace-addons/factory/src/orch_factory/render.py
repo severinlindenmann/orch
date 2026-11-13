@@ -10,6 +10,7 @@ CHANGE_OPTIONS = ("Accept", "Edit", "Save for later")
 SHIP_OPTIONS = ("Ship it", "Send back")
 STOP_OPTIONS = ("Continue", "Send back")
 ALWAYS_ASKS = "Always asks you: ship, scope, budget, new connections, can't-undo, other workspaces."
+MAX_TASKS = 40  # schema maximum
 QUOTES = str.maketrans({"“": "'", "”": "'", "‘": "'", "’": "'"})
 
 
@@ -20,7 +21,7 @@ def clean(value, cap=120):
         for c in text
     )
     text = " ".join(text.split())
-    return text if len(text) <= cap else text[: cap - 1].rstrip() + "…"
+    return text if cap is None or len(text) <= cap else text[: cap - 1].rstrip() + "…"
 
 
 def minutes(n):
@@ -49,6 +50,8 @@ def start_text(p, n):
         "Goal: " + clean(p["goal"]),
         "Done means: " + lines(p["done_means"]),
         "Stops: " + ", ".join(clean(x["stage"], 40) for x in p["line"] if x["stop"]),
+        "Tasks: "
+        + "; ".join(f"{clean(t['title'])} ({clean(t['role'], 24)})" for t in p["tasks"][:MAX_TASKS]),
         "Crew: " + ", ".join(f"{clean(x['role'], 40)} {clean(x['agent'], 40)}" for x in p["crew"]),
         f"Cap: {minutes(p['budget']['active_min_cap'])} active",
         f"Ship: {clean(p['ship']['does'])} (undo: {clean(p['ship']['undo'])})",

@@ -300,12 +300,15 @@ def a19(e):
             r = f.f("tiny", order, "--minutes", "5", "--what", f"small fix {i}")
             check(r["count"] == i + 1, f"tiny count: {r}")
         f.refused("tiny", order, "--minutes", "1", "--what", "one more", why="change proposal")
-        # an agent answers a stop question: ignored, and the stop cannot be asked again for that stage (observed, not asserted)
+        # an agent answers a stop question: ignored; the stop is asked again (the burned question is superseded)
         s = f.f("stop", order, data=_stop("build", ("Form", "routine")))
         f.agent_answer(order, s["question"], "Continue")
-        check(f.f("next", order)["step"] == "wait", "an agent's Continue moved the run on")
-        rc, text = f.fac("stop", order, data=_stop("build", ("Form", "routine"), ("Header", "taste")), ok=False)
-        spoil = "re-asking the stop after an agent answer: " + ("refused" if rc else "ok")
+        nx = f.f("next", order)
+        check(nx.get("stage") == "build" and nx["step"] in ("stop", "start-crew"),
+              f"an agent's Continue moved the run on or blocked the stop: {nx}")
+        s2 = f.f("stop", order, data=_stop("build", ("Form", "routine"), ("Header", "taste")))
+        check(s2["question"] != s["question"], f"no new stop question after an agent answer: {s2}")
+        spoil = "an agent-answered stop is asked again"
         return f"started only by the person; {forged_note}; ext forgery, propose-after-start, tiny cap all refused; {spoil}"
 
 

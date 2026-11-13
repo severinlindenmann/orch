@@ -10,16 +10,7 @@ from .store import Refused, Store, clock, validate
 ALWAYS = "Only routine and taste stop items inside a valid grant can be decided by Factory."
 
 
-def answered_at(ticket, q):
-    """When a person answered: the core's own history line for that answer (never a Factory file)."""
-    want = f"Answered {q['id']}: {q['answer']}"
-    for h in ticket.get("history", []):
-        if h.get("text") == want and h.get("by") == q.get("answered_by"):
-            try:
-                return datetime.fromisoformat(h["at"])
-            except (KeyError, ValueError, TypeError):
-                return None
-    return None
+answered_at = authority.answered_at
 
 
 def grants_of(store, ticket):
@@ -74,6 +65,8 @@ def first_orders(grant, decided_rows):
 def check(entry, answer, granted, at, order=None, decided_rows=None):
     """Raise unless a grant covers every item of this stop and the answer is not the ship decision."""
     data = entry["data"]
+    if not data["items"]:
+        raise Refused("A stop with nothing to decide is always yours.", "not_allowed")
     options = [o for o in authority.render("factory:stop", data, entry["n"])[1]]
     if data["stage"] == "ship" or "Ship it" in options:
         raise Refused("The ship decision is always yours.", "not_allowed")
@@ -120,12 +113,11 @@ def propose(root, order, data):
     with store.locked():
         ticket = commands.order_ticket(root, order)
         order = ticket["id"]
-        ext = ticket["ext"]["factory"]
-        if ext.get("proposal") and ext.get("kind") != "autopilot":
+        # The kind comes from the first recorded lead question, never from the ext cache.
+        if authority.order_kind(authority.entries(store, ticket)) == "run":
             raise Refused(
                 "This order already has a run proposal. Use a new order for an autopilot.", "conflict"
             )
-        authority.entries(store, ticket)
         info = flow.freeze_ask(
             root,
             store,

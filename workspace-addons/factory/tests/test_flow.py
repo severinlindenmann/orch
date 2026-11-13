@@ -2,10 +2,11 @@ import json
 import os
 import subprocess
 
+import pytest
 from conftest import CONTRACTS
 
 from orch_factory import authority
-from orch_factory.store import Store
+from orch_factory.store import Refused, Store
 
 
 def core(ws, *args):
@@ -282,8 +283,172 @@ def test_send_back(ws, run):
 def test_agent_answer_to_stop_is_ignored(ws, run):
     order, q = waiting_stop(ws, run)
     core(ws, "answer", order, q, "Continue", "--by", "agent:worker")
-    assert run("next", order)["step"] == "wait"
+    assert run("next", order)["step"] == "stop"  # the burned question is not open any more
     assert run("ship", order, code=2)["code"] == "not_allowed"
+
+
+def test_burned_stop_is_replaced_and_person_counts(ws, run):
+    order, q = waiting_stop(ws, run)
+    core(ws, "answer", order, q, "Continue", "--by", "agent:worker")
+    q2 = ask_stop(ws, run, order, "build", {"title": "Other", "tag": "taste"})
+    assert q2 != q
+    rows = Store(ws).journal_read()
+    assert any(r["type"] == "superseded" and r["q"] == q for r in rows)
+    assert run("next", order)["step"] == "wait"
+    core(ws, "answer", order, q2, "Continue", "--by", "human:anna")
+    assert run("next", order)["stage"] == "ship"
+
+
+def test_burned_stop_same_bytes_gets_new_version(ws, run):
+    order, q = waiting_stop(ws, run)
+    core(ws, "answer", order, q, "Send back", "--by", "human:anna")
+    q2 = ask_stop(ws, run, order, "build")
+    assert q2 != q
+
+
+def test_person_answer_cannot_be_superseded(ws, run):
+    order, q = waiting_stop(ws, run)
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    Store(ws)  # forge a superseded row hiding the person's answer
+    store = Store(ws)
+    with store.locked():
+        store.journal_append({"type": "superseded", "order": order, "q": q, "kind": "factory:stop"})
+    assert run("next", order, code=2)["code"] == "tampered"
+
+
+def _freeze(ws, order, folder, name, data):
+    path = ws / ".orch/addons/factory" / folder / order
+    path.mkdir(parents=True, exist_ok=True)
+    (path / name).write_bytes(data)
+
+
+def test_forged_frozen_stop_without_stage_or_object_is_tampered(ws, run):
+    order, _q = waiting_stop(ws, run)
+    f = ws / ".orch/addons/factory"
+    stop = next((f / "stops" / order).glob("s*.json"))
+    stop.write_bytes(b"[1]")
+    assert run("next", order, code=2)["code"] == "tampered"
+
+
+def test_frozen_file_is_revalidated(ws, run):
+    order, _ = started(ws, run)
+    f = ws / ".orch/addons/factory"
+    p = next((f / "proposals" / order).glob("p*.json"))
+    value = json.loads(p.read_bytes())
+    value["line"][-1]["stop"] = False  # no ship stop: schema-valid but invalid
+    new = json.dumps(value).encode()
+    from orch_factory.store import digest
+
+    p.write_bytes(new)
+    store = Store(ws)
+    with store.locked():
+        rows = store.journal_read()
+        j = (f / "journal.jsonl").read_text().splitlines()
+        out = []
+        for line in j:
+            r = json.loads(line)
+            if r.get("file", "").startswith("proposals/") and "hash" in r:
+                r["hash"] = digest(new)
+            out.append(json.dumps(r))
+        (f / "journal.jsonl").write_text("\n".join(out) + "\n")
+    assert rows
+    edit(ws, order, lambda t: t["questions"][0]["action"].update(hash=digest(new)))
+    assert run("next", order, code=2)["code"] == "tampered"
+
+
+def test_duplicate_stage_and_long_field_refused_at_freeze(ws, run):
+    order = run("idea", "x")["order"]
+    p = json.loads(run_proposal())
+    p["line"].insert(0, {"stage": "build", "stop": False, "why": "a"})
+    p["line"].insert(0, {"stage": "build", "stop": False, "why": "a"})
+    assert run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)["code"] == "invalid"
+    q = json.loads(run_proposal())
+    q["goal"] = "g" * 200
+    assert run("propose", order, "--file", "-", data=json.dumps(q).encode(), code=2)["code"] == "invalid"
+
+
+def test_start_text_lists_tasks(ws, run):
+    order = run("idea", "x")["order"]
+    run("propose", order, "--file", "-", data=run_proposal())
+    text = core(ws, "ticket", "show", order)["questions"][0]["text"]
+    assert "Tasks: Booking form (builder); Prepare the release (builder)" in text
+
+
+def test_ship_step_needs_human_ship_it(ws, run):
+    order, _ = started(ws, run)
+    run("next", order)
+    finish_crew(ws, run, order, "booking-form")
+    q = ask_stop(ws, run, order, "build")
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")
+    run("next", order)
+    finish_crew(ws, run, order, "release")
+    q = ask_stop(ws, run, order, "ship")
+    core(ws, "answer", order, q, "Continue", "--by", "human:anna")  # not Ship it
+    assert run("next", order)["step"] != "ship"
+    assert run("ship", order, code=2)["code"] == "not_allowed"
+
+
+def test_mixed_kinds_tampered(ws, run):
+    order, _ = started(ws, run)
+    a = run("autopilot", order, "--file", "-", data=autopilot_file(), code=2)
+    assert a["code"] == "conflict"
+
+
+def test_started_row_only_for_start(ws, run):
+    order = run("idea", "x")["order"]
+    q = run("propose", order, "--file", "-", data=run_proposal())["question"]
+    core(ws, "answer", order, q, "Not now", "--by", "human:anna")
+    run("next", order)
+    assert [r["type"] for r in Store(ws).journal_read() if r["type"] == "started"] == []
+
+
+def test_edit_on_change_stays_pending_and_done_stage_refused(ws, run):
+    order, _ = started(ws, run)
+    run("next", order)
+    c = json.dumps(
+        {
+            "schema": "orch.factory.proposal/1",
+            "kind": "change",
+            "title": "More",
+            "what": "Add a thing",
+            "adds_min": 10,
+            "lands_in": "build",
+        }
+    ).encode()
+    q = run("change", order, "--file", "-", data=c)["question"]
+    core(ws, "answer", order, q, "Edit", "--by", "human:anna")
+    assert run("next", order)["step"] == "edit"
+    assert run("next", order)["step"] == "edit"
+
+
+def test_empty_stop_not_decidable(ws, run):
+    from orch_factory import autopilot
+
+    entry = {"data": {"stage": "build", "items": []}, "n": 1}
+    with pytest.raises(Refused) as error:
+        autopilot.check(entry, "Continue", [], None)
+    assert error.value.code == "not_allowed"
+
+
+def test_reconcile_lists_orphans(ws, run):
+    order = run("idea", "x")["order"]
+    edit(
+        ws,
+        order,
+        lambda t: t["questions"].append(
+            {
+                "id": "q9",
+                "text": "x",
+                "kind": "factory:start",
+                "action": {},
+                "options": [],
+                "answer": None,
+                "answered_by": None,
+            }
+        ),
+    )
+    out = run("reconcile")
+    assert out["orders"][0]["orphans"] == ["q9"]
 
 
 # ---- autopilot ----------------------------------------------------------------------------------------
@@ -434,12 +599,12 @@ def test_start_text_shows_what_matters(ws, run):
 def test_agent_strings_are_cleaned(ws, run):
     p = json.loads(run_proposal())
     p["title"] = "Booking\n“page”\x00" + chr(0x202E) + "  now"
-    p["goal"] = "x" * 200
+    p["goal"] = "x" * 120
     order, _ = started(ws, run, data=json.dumps(p).encode())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
     assert "Start 'Booking 'page' now'?" in text
     assert "\n" not in text and "\x00" not in text and chr(0x202E) not in text and "“" not in text
-    assert "Goal: " + "x" * 119 + "…" in text
+    assert "Goal: " + "x" * 120 + ". " in text
 
 
 def test_authority_accepts_own_text_and_refuses_edits(ws, run):
@@ -495,3 +660,52 @@ def test_first_orders_counts_in_journal_order_inside_the_grant():
         {"order": "t_c", "at": at(4)},
     ]
     assert first_orders(grant, rows) == ["t_a", "t_b"]
+
+
+def test_decided_row_without_core_log_line_is_void(ws, run):
+    autopilot_order(ws, run)
+    order, q = waiting_stop(ws, run, {"title": "Typo", "tag": "routine"})
+    store = Store(ws)
+    with store.locked():
+        store.journal_append(
+            {
+                "type": "decided",
+                "order": order,
+                "q": q,
+                "answer": "Continue",
+                "by": "agent:factory",
+                "why": "x",
+            }
+        )
+    assert run("next", order)["step"] == "wait"
+    core(ws, "log", order, "Decided by agent:factory · x", "--by", "agent:factory")
+    assert run("next", order)["step"] == "start-crew"
+
+
+def test_decision_stays_valid_after_the_grant_expires(ws, run, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    autopilot_order(ws, run)
+    order, q = waiting_stop(ws, run, {"title": "Typo", "tag": "routine"})
+    run("decide", order, q, "--answer", "Continue", "--why", "ok")
+    monkeypatch.setenv("FACTORY_NOW", (datetime.now(UTC) + timedelta(days=30)).isoformat())
+    assert run("next", order)["step"] == "start-crew"
+
+
+def test_decided_row_before_the_grant_never_counts(ws, run):
+    order, q = waiting_stop(ws, run, {"title": "Typo", "tag": "routine"})
+    store = Store(ws)
+    with store.locked():
+        store.journal_append(
+            {
+                "type": "decided",
+                "order": order,
+                "q": q,
+                "answer": "Continue",
+                "by": "agent:factory",
+                "why": "x",
+            }
+        )
+    core(ws, "log", order, "Decided by agent:factory · x", "--by", "agent:factory")
+    autopilot_order(ws, run)
+    assert run("next", order)["step"] == "wait"
