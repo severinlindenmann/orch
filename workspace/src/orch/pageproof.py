@@ -110,7 +110,10 @@ class PageSession:
         except (Refused, OSError):
             self.key = None
         if self.key is not None:  # a restart the person asked for (update) keeps the open tab's session
-            resumed = humanproof.take_resume_session(root, server)
+            why: list = []
+            resumed = humanproof.take_resume_session(root, server, why)
+            for line in why:  # a restart that had a session to adopt and did not: say why (no secrets)
+                print(f"orch {server}: did not keep the open page's session: {line}.", file=sys.stderr)
             if resumed:
                 self.cookie, self.secret = resumed
                 self.resumed = True
