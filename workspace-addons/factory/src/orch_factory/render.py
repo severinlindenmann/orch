@@ -121,10 +121,11 @@ def autopilot_text(a, n):
         f"Start autopilot '{clean(a['title'])}'? May decide: {', '.join(a['may_decide'])}",
         f"{limits['days']} days",
         f"up to {limits['max_orders']} orders",
-        f"{limits['active_min_per_day']} min active per day",
     ]
+    target = f"target {limits['active_min_per_day']} min active per day"
     if "api_usd_per_day" in limits:
-        head.append(f"${limits['api_usd_per_day']:g} per day")
+        target += f", ${limits['api_usd_per_day']:g} per day"
+    head.append(target + " (not enforced yet)")
     segments = [" · ".join(head), "Goal: " + clean(a["goal"])]
     if a.get("examples"):
         segments.append("Examples: " + lines(a["examples"]))

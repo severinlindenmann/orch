@@ -83,6 +83,7 @@ def derive(root, store, ticket, tickets=None):
     rows = [r for r in store.journal_read() if r["order"] == tid]
     consumed = {r.get("q") for r in rows if r["type"] == "consumed"}
     decided = {r["q"]: r for r in rows if r["type"] == "decided"}
+    all_decided = [r for r in store.journal_read() if r["type"] == "decided"] if decided else []
     granted = autopilot.grants(store, tickets) if decided else []
     at = clock()
 
@@ -96,7 +97,7 @@ def derive(root, store, ticket, tickets=None):
             and q.get("answer") is None
             and e["row"]["kind"] == "factory:stop"
             and r.get("by") == "agent:factory"
-            and autopilot.allowed(e, r.get("answer"), granted, at)
+            and autopilot.allowed(e, r.get("answer"), granted, at, tid, all_decided[: all_decided.index(r)])
         ):
             return r["answer"], "agent:factory"
         return None

@@ -57,7 +57,21 @@ def grants(store, tickets):
     return result
 
 
-def check(entry, answer, granted, at):
+def first_orders(grant, decided_rows):
+    """Orders this grant may decide for: the first max_orders distinct orders decided after the grant began,
+    in journal order (decision rows before the person's Start never count)."""
+    seen = []
+    for r in decided_rows:
+        try:
+            when = datetime.fromisoformat(r["at"])
+        except (KeyError, ValueError):
+            continue
+        if grant["from"] <= when < grant["until"] and r["order"] not in seen:
+            seen.append(r["order"])
+    return seen[: grant["limits"]["max_orders"]]
+
+
+def check(entry, answer, granted, at, order=None, decided_rows=None):
     """Raise unless a grant covers every item of this stop and the answer is not the ship decision."""
     data = entry["data"]
     options = [o for o in authority.render("factory:stop", data, entry["n"])[1]]
@@ -67,17 +81,23 @@ def check(entry, answer, granted, at):
         raise Refused("That is not one of the answers offered.", "not_allowed")
     if any(i["tag"] == "cant-undo" for i in data["items"]):
         raise Refused("Something here cannot be undone, so it is always yours to decide.", "not_allowed")
-    live = [g for g in granted if at < g["until"]]
+    live = [g for g in granted if g["from"] <= at < g["until"]]
     if not live:
         raise Refused("There is no autopilot you approved that is still running.", "not_allowed")
-    if not any(all(i["tag"] in g["may"] for i in data["items"]) for g in live):
+    live = [g for g in live if all(i["tag"] in g["may"] for i in data["items"])]
+    if not live:
         raise Refused("Your autopilot does not cover this kind of decision.", "not_allowed")
+    if order is not None:
+        rows = list(decided_rows or [])
+        live = [g for g in live if order in first_orders(g, rows + [{"order": order, "at": at.isoformat()}])]
+        if not live:
+            raise Refused("The autopilot already covers as many orders as you allowed.", "not_allowed")
     return live
 
 
-def allowed(entry, answer, granted, at):
+def allowed(entry, answer, granted, at, order=None, decided_rows=None):
     try:
-        check(entry, answer, granted, at)
+        check(entry, answer, granted, at, order, decided_rows)
     except Refused:
         return False
     return True
@@ -142,11 +162,7 @@ def decide(root, order, qid, answer, why):
             raise Refused("That stop is not waiting for a decision now.", "not_allowed")
         if entry["q"].get("answer") is not None:
             raise Refused("A person or an earlier decision already answered this.", "not_allowed")
-        live = check(entry, answer, grants(store, tickets), clock())
-        grant = max(live, key=lambda g: g["until"])
-        decided_orders = {r["order"] for r in rows if datetime.fromisoformat(r["at"]) >= grant["from"]}
-        if ticket["id"] not in decided_orders and len(decided_orders) >= grant["limits"]["max_orders"]:
-            raise Refused("The autopilot already covers as many orders as you allowed.", "not_allowed")
+        check(entry, answer, grants(store, tickets), clock(), ticket["id"], rows)
         store.journal_append(
             {
                 "type": "decided",

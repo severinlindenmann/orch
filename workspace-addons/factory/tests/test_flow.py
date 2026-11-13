@@ -452,10 +452,46 @@ def test_authority_accepts_own_text_and_refuses_edits(ws, run):
 def test_stop_change_autopilot_texts(ws, run):
     a, _ = autopilot_order(ws, run, api_usd_per_day=5)
     text = core(ws, "ticket", "show", a)["questions"][0]["text"]
-    assert "May decide: routine, taste · 3 days · up to 2 orders · 60 min active per day · $5 per day" in text
+    assert (
+        "May decide: routine, taste · 3 days · up to 2 orders · target 60 min active per day, $5 per day (not enforced yet)"
+        in text
+    )
     assert "Always asks you: ship, scope, budget, new connections, can't-undo, other workspaces." in text
     order, q = waiting_stop(ws, run, {"title": "Hero\nimage “v2”", "tag": "taste"})
     stop_text = next(x for x in core(ws, "ticket", "show", order)["questions"] if x["id"] == q)["text"]
     assert "Hero image 'v2' [taste]" in stop_text and stop_text.endswith("(Stop 1)")
     edit(ws, order, lambda t: t["questions"][-1].update(options=["Continue", "Send back", "Ship it"]))
     assert run("next", order, code=2)["code"] == "tampered"
+
+
+def test_clock_moves_only_forward(monkeypatch):
+    """An agent setting FACTORY_NOW to the past cannot revive an expired grant."""
+    from datetime import UTC, datetime, timedelta
+
+    from orch_factory.store import clock
+
+    monkeypatch.setenv("FACTORY_NOW", "2020-01-01T00:00:00+00:00")
+    assert clock() > datetime(2025, 1, 1, tzinfo=UTC)
+    later = datetime.now(UTC) + timedelta(days=30)
+    monkeypatch.setenv("FACTORY_NOW", later.isoformat())
+    assert clock() == later
+    monkeypatch.setenv("FACTORY_NOW", "not a time")
+    assert clock() <= datetime.now(UTC)
+
+
+def test_first_orders_counts_in_journal_order_inside_the_grant():
+    from datetime import UTC, datetime, timedelta
+
+    from orch_factory.autopilot import first_orders
+
+    start = datetime(2026, 11, 13, 12, tzinfo=UTC)
+    grant = {"from": start, "until": start + timedelta(days=1), "limits": {"max_orders": 2}}
+    at = lambda h: (start + timedelta(hours=h)).isoformat()
+    rows = [
+        {"order": "t_before", "at": (start - timedelta(hours=1)).isoformat()},
+        {"order": "t_a", "at": at(1)},
+        {"order": "t_a", "at": at(2)},
+        {"order": "t_b", "at": at(3)},
+        {"order": "t_c", "at": at(4)},
+    ]
+    assert first_orders(grant, rows) == ["t_a", "t_b"]

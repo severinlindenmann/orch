@@ -20,9 +20,17 @@ class Refused(Exception):
 
 
 def clock():
-    """Current time; FACTORY_NOW (ISO) only exists so tests can move time."""
+    """Current time. FACTORY_NOW (ISO, for tests) can only move time FORWARD: a later clock only shortens
+    autopilot grants, so an agent that sets it gains nothing."""
+    now = datetime.now(UTC)
     fixed = os.environ.get("FACTORY_NOW")
-    return datetime.fromisoformat(fixed) if fixed else datetime.now(UTC)
+    try:
+        later = datetime.fromisoformat(fixed) if fixed else None
+    except ValueError:
+        later = None
+    if later is not None and later.tzinfo is not None and later > now:
+        return later
+    return now
 
 
 def now():
