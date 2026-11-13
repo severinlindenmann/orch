@@ -25,7 +25,7 @@ class Node {
 }
 const walk = n => [n, ...n.children.flatMap(walk)];
 function setup() { return setupWith(null); }
-function setupWith(settings) {
+function setupWith(settings, extra = {}) {
   const body = new Node('body'), calls = [], revoked = [], toasts = [], items = [];
   const c = {Blob, TextDecoder, Uint8Array, btoa, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
     el:(...args) => new Node(...args), document:{body, activeElement:null}, render:() => { c.renders++; }, renders:0,
@@ -33,7 +33,7 @@ function setupWith(settings) {
     FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,YQ=='; this.onload(); } },
     tickets:() => items, ticketOf:() => null, refresh:async () => {},
     act:async (op, args) => { calls.push({op, args}); if (op === 'ticket.new') items.push({id:'new', title:args.title}); return {ok:true, state:{attached:{failed:['bad.txt']}}}; },
-    window:{DashHelpers:{scrubText:x => x}, orch:{open:d => { d.open = true; }, close:async d => { d.open = false; await d.fire('close'); }, toast:(...x) => toasts.push(x)}}};
+    window:{DashHelpers:{scrubText:x => x}, orch:{open:d => { d.open = true; }, close:async d => { d.open = false; await d.fire('close'); }, toast:(...x) => toasts.push(x)}, ...extra}};
   c.button = (text, cls, fn) => { const b = c.el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
   if (settings) c.state = {settings};
   vm.createContext(c);
@@ -241,31 +241,21 @@ test('several helpers: a select, each once; a non-default choice is the owner. O
   const none = setupWith({agents:[]});
   assert.match(walk(none.d).find(n => n.className.includes('new-ticket-empty')).textContent, /No helper is set up yet/);
 });
-test('due date picker: quick choices, arrow keys between days, Esc closes only the calendar', async () => {
-  const s = setup(), toggle = walk(s.d).find(n => n.className.includes('new-ticket-date-toggle'));
+test('due date uses the shared date picker; the chosen day is sent with the ticket', async () => {
+  const seen = [], s = setupWith(null, {UI:{date:(value, toggle) => seen.push([value, toggle])}});
+  const toggle = walk(s.d).find(n => n.className.includes('new-ticket-date-toggle'));
   assert.equal(toggle.textContent, '▦ No date');
-  await toggle.click();
-  const pop = walk(s.d).find(n => n.className === 'new-ticket-cal');
-  assert.equal(pop.hidden, false); assert.equal(toggle['aria-expanded'], 'true');
-  const tabbable = () => walk(pop).find(n => n.className === 'new-ticket-cal-day' && n.tabIndex === 0);
-  const start = Number(tabbable().textContent);
-  await pop.fire('keydown', {key:'ArrowRight', target:tabbable()});
-  const after = Number(tabbable().textContent);
-  assert.ok(after === start + 1 || after === 1);
-  await pop.fire('keydown', {key:'Escape', target:tabbable()});
-  assert.equal(pop.hidden, true); assert.equal(s.d.open, true);
-  await toggle.click();
-  await walk(s.d).find(n => n.textContent === 'Tomorrow').click();
-  const d = new Date(); d.setDate(d.getDate() + 1);
+  assert.deepEqual(seen.map(([value, t]) => [value.type, value.name, t === toggle]), [['hidden', 'due', true]]);
+  seen[0][0].value = '2026-11-20';
   s.input.value = 'Work'; await s.input.fire('input'); await s.form.fire('submit');
-  assert.equal(s.calls[0].args.due, s.c.ticketIso(d));
-  assert.notEqual(toggle.textContent, '▦ No date');
+  assert.equal(s.calls[0].args.due, '2026-11-20');
+  assert.ok(setup().d, 'without the shared picker the window still opens');
 });
-test('window closes with X and backdrop; an empty submit shows the plain message', async () => {
+test('window closes through the shared overlay; an empty submit shows the plain message', async () => {
   const s = setup();
   await s.form.fire('submit');
   assert.equal(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, 'Describe what needs doing before you continue.');
   assert.equal(s.calls.length, 0);
-  await s.d.fire('click', {target:s.d}); assert.equal(s.d.open, false);
-  const x = setup(); await walk(x.d).find(n => n['aria-label'] === 'Close new ticket').click(); assert.equal(x.d.open, false);
+  assert.ok(!walk(s.d).some(n => /^Close/.test(n['aria-label'] || '')), 'the Close button comes from the shared overlay, not from the page');
+  await s.c.window.orch.close(s.d); assert.equal(s.d.open, false);
 });

@@ -36,82 +36,13 @@ function ticketHelpers(settings) {
   }
   return out;
 }
-function ticketIso(d) {
-  return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
-}
-function ticketDueLabel(value) {
-  if (!value) return 'No date';
-  return new Date(value + 'T00:00').toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short', year:'numeric'});
-}
-// Due date: a month grid with quick choices; arrow keys move between days, Esc closes it.
-// FOLLOW-UP: move to kit (shared date picker from the foundation PR).
-function ticketDatePicker(input) {
-  const wrap = el('div', 'new-ticket-date');
-  const toggle = button('', 'btn new-ticket-date-toggle', () => (pop.hidden ? show() : hide()));
-  toggle.id = 'field-' + serial + '-due'; toggle.setAttribute('aria-expanded', 'false');
-  const pop = el('div', 'new-ticket-cal'); pop.hidden = true;
-  pop.setAttribute('role', 'group'); pop.setAttribute('aria-label', 'Choose due date');
-  const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
-  const shift = (base, days) => { const d = new Date(base); d.setDate(d.getDate() + days); return d; };
-  let view = today(), focusDay = today(), days = new Map();
-  const label = () => { toggle.textContent = '▦ ' + ticketDueLabel(input.value); };
-  const hide = () => { pop.hidden = true; toggle.setAttribute('aria-expanded', 'false'); };
-  const pick = value => { input.value = value; label(); hide(); toggle.focus(); };
-  const draw = () => {
-    pop.replaceChildren(); days = new Map();
-    const quick = el('div', 'new-ticket-cal-quick');
-    for (const [text, n] of [['Today', 0], ['Tomorrow', 1], ['Next week', 7], ['No date', null]]) quick.append(button(text, 'new-ticket-cal-quickday', () => pick(n === null ? '' : ticketIso(shift(today(), n)))));
-    const head = el('div', 'new-ticket-cal-head');
-    const nav = (text, name, delta) => {
-      const b = button(text, 'btn ghost sm', () => { view = new Date(view.getFullYear(), view.getMonth() + delta, 1); focusDay = new Date(view); draw(); });
-      b.setAttribute('aria-label', name); return b;
-    };
-    const month = el('strong', '', view.toLocaleDateString('en-GB', {month:'long', year:'numeric'})); month.setAttribute('aria-live', 'polite');
-    head.append(nav('‹', 'Previous month', -1), month, nav('›', 'Next month', 1));
-    const grid = el('div', 'new-ticket-cal-grid');
-    for (const w of ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']) { const s = el('span', 'new-ticket-cal-week', w); s.setAttribute('aria-hidden', 'true'); grid.append(s); }
-    const lead = (view.getDay() + 6) % 7, count = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
-    for (let i = 0; i < lead; i++) grid.append(el('span'));
-    const focusIso = ticketIso(focusDay), todayIso = ticketIso(today());
-    for (let n = 1; n <= count; n++) {
-      const day = new Date(view.getFullYear(), view.getMonth(), n), value = ticketIso(day);
-      const b = button(String(n), 'new-ticket-cal-day', () => pick(value));
-      b.setAttribute('aria-label', day.toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long', year:'numeric'}));
-      b.tabIndex = value === focusIso ? 0 : -1;
-      if (value === input.value) b.setAttribute('aria-pressed', 'true');
-      if (value === todayIso) b.setAttribute('aria-current', 'date');
-      days.set(value, b); grid.append(b);
-    }
-    pop.append(quick, head, grid);
-  };
-  const focusOn = d => {
-    focusDay = d;
-    if (d.getMonth() !== view.getMonth() || d.getFullYear() !== view.getFullYear()) { view = new Date(d.getFullYear(), d.getMonth(), 1); draw(); }
-    for (const [value, b] of days) b.tabIndex = value === ticketIso(d) ? 0 : -1;
-    days.get(ticketIso(d))?.focus();
-  };
-  const show = () => {
-    focusDay = input.value ? new Date(input.value + 'T00:00') : today();
-    view = new Date(focusDay.getFullYear(), focusDay.getMonth(), 1);
-    draw(); pop.hidden = false; toggle.setAttribute('aria-expanded', 'true'); focusOn(focusDay);
-  };
-  pop.addEventListener('keydown', event => {
-    const step = {ArrowLeft:-1, ArrowRight:1, ArrowUp:-7, ArrowDown:7}[event.key];
-    if (step && event.target?.className === 'new-ticket-cal-day') { event.preventDefault(); focusOn(shift(focusDay, step)); }
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation?.(); hide(); toggle.focus(); }  // closes the calendar, not the window
-  });
-  label(); wrap.append(toggle, input, pop);
-  return {wrap, toggle, pop, hide, show};
-}
+// The due date uses the shared date picker (kit/date.js: UI.date); a hidden input keeps the chosen day for the form.
 // New ticket / edit ticket dialog.
 function ticketForm(t) {
   const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
   if (!t) { d.className = (d.className ? d.className + ' ' : '') + 'new-ticket'; d.querySelector?.('h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
-  // The window closes with X, Esc (window.orch.open) and a click on the backdrop; dialog() puts the cursor back where it was.
-  const closeX = button('✕', 'btn ghost sm new-ticket-close', () => window.orch.close(d));
-  closeX.setAttribute('aria-label', t ? 'Close edit ticket' : 'Close new ticket'); d.append(closeX);
-  d.addEventListener('click', event => { if (event.target === d) window.orch.close(d); });
+  // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
   let helpers = [], helperSelect = null, doneWrap = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
   let updateAttachments = () => {}, grow = () => {};
@@ -240,11 +171,11 @@ function ticketForm(t) {
         if (helpers[0].description) helperBox.append(el('p', 'meta new-ticket-helper-about', helpers[0].description));
       } else helperBox.append(el('p', 'meta new-ticket-empty', 'No helper is set up yet. The ticket is kept and waits until one is ready.'));
     }
-    const dueInput = el('input'); dueInput.type = 'hidden'; dueInput.name = 'due'; inputs.due = dueInput;
-    const due = ticketDatePicker(dueInput);
-    const dueLabel = el('label', '', 'Due date (optional)'); dueLabel.htmlFor = due.toggle.id;
-    const dueBox = el('div', 'new-ticket-due'); dueBox.append(dueLabel, due.wrap);
-    form.addEventListener('mousedown', event => { if (!due.wrap.contains(event.target)) due.hide(); });
+    const dueInput = el('input'); dueInput.type = 'hidden'; dueInput.name = 'due'; dueInput.id = 'field-' + serial + '-due-value'; inputs.due = dueInput;
+    const dueToggle = el('button', 'btn outline new-ticket-date-toggle', '▦ No date'); dueToggle.type = 'button'; dueToggle.id = 'field-' + serial + '-due';
+    const dueLabel = el('label', '', 'Due date (optional)'); dueLabel.htmlFor = dueToggle.id;
+    const dueBox = el('div', 'new-ticket-due'); dueBox.append(dueLabel, dueToggle, dueInput);
+    if (window.UI?.date) window.UI.date(dueInput, dueToggle);
     const options = el('div', 'new-ticket-options'); options.append(helperBox, dueBox); fields.append(options);
     const doneLabel = el('label', '', 'Done when (optional)');
     const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';

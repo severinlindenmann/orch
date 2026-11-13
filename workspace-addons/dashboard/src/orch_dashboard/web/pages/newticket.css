@@ -36,7 +36,6 @@
 .new-ticket-preview pre { white-space: pre; font-size: 12px; }
 .new-ticket-preview img { max-width: 100%; height: auto; }
 .new-ticket { position: relative; }
-.new-ticket .new-ticket-close { position: absolute; top: 12px; right: 12px; }
 .new-ticket-drop { display: grid; gap: 4px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--surface); }
 .new-ticket-drop:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
 .new-ticket-file-hint { margin: 0; }
@@ -47,23 +46,10 @@ ul.new-ticket-files { list-style: none; margin: 0; padding: 0; max-height: 160px
 .new-ticket-helper, .new-ticket-due { display: grid; gap: 6px; align-content: start; }
 .new-ticket-helper p { margin: 0; }
 .new-ticket-helper-fixed { min-height: 44px; display: flex; align-items: center; }
-.new-ticket-date { position: relative; }
-.new-ticket-date-toggle { width: 100%; justify-content: flex-start; }
-.new-ticket-cal { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 5; width: 292px; max-width: calc(100vw - 64px); padding: 12px; background: var(--surface-2, var(--surface)); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / .5); }
-.new-ticket-cal[hidden] { display: none; }
-.new-ticket-cal-quick { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px; }
-.new-ticket-cal-head { display: flex; align-items: center; justify-content: space-between; }
-.new-ticket-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
-.new-ticket-cal-week { font-size: 11px; color: var(--text-muted); padding: 8px 0; }
-.new-ticket-cal-quickday, .new-ticket-cal-day { border: 0; border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px; font-size: 12px; cursor: pointer; }
-.new-ticket-cal-quickday:hover, .new-ticket-cal-day:hover { background: var(--brand-soft); color: var(--brand); }
-.new-ticket-cal-day[aria-pressed=true] { background: var(--brand); color: var(--bg); }
-.new-ticket-cal-day[aria-current=date] { box-shadow: inset 0 0 0 1px var(--brand); }
 /* Second pass (accepted New ticket draft): title + one line, X at the top right, footer with the quiet save at the left */
 .new-ticket{max-width:560px;width:calc(100vw - 32px)}
 .new-ticket h2{margin:0 40px 4px 0}
 .new-ticket .new-ticket-sub{margin:0 0 16px}
-.new-ticket .new-ticket-close{min-height:32px}
 .new-ticket .new-ticket-text{min-height:12em}
 dialog.new-ticket .actions{justify-content:flex-end;align-items:center}
 dialog.new-ticket .actions .new-ticket-link{margin-right:auto;min-height:32px;color:var(--text-muted);text-decoration:none}

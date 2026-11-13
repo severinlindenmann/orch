@@ -75,10 +75,8 @@ def test_paste_styles_are_scoped_to_new_ticket():
         assert rule in css
 
 
-def test_window_closes_with_x_esc_backdrop_and_has_date_picker():
+def test_window_closes_through_the_shared_overlay_and_uses_the_shared_date_picker():
     js = (WEB / "pages" / "newticket.js").read_text()
-    assert "'Close new ticket'" in js
-    assert "if (event.target === d) window.orch.close(d)" in js
-    assert "['Today', 0], ['Tomorrow', 1], ['Next week', 7], ['No date', null]" in js
-    assert "ArrowLeft:-1, ArrowRight:1, ArrowUp:-7, ArrowDown:7" in js
-    assert "FOLLOW-UP: move to kit" in js
+    assert "'Close new ticket'" not in js  # the Close button, Esc and backdrop come from kit/overlay.js
+    assert "window.UI.date(dueInput, dueToggle)" in js
+    assert "ticketDatePicker" not in js
