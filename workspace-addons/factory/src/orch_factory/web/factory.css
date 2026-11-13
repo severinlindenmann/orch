@@ -48,5 +48,5 @@
 .factory-page .meta{overflow-wrap:anywhere}
 .f-loading .skeleton{min-height:110px}
 .f-loading .skeleton.title{min-height:28px}
-@media(max-width:1050px){.f-three,.f-order{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:860px){.f-three,.f-order{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:700px){.f-grid,.factory-page .grid-2{grid-template-columns:minmax(0,1fr)}.f-compare{gap:8px}.f-compare img{height:200px}.f-draft{padding:16px}.f-stage{font-size:11px}.f-heading h1{font-size:24px;line-height:32px}}
