@@ -219,6 +219,7 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
     return out
 
 
+INSTALL_NAME = {"claude": "Claude Code"}  # the program people install, by binary (messages only)
 DENY_MIN_VERSION = (2, 0, 0)  # first build where Bash(*text*) patterns and Read(//path) rules are honoured
 
 
@@ -230,7 +231,8 @@ def _binary_version(binary: str) -> str | None:
 def deny_version_check(a: Mapping, binary: str | None = None) -> None:
     """Fail closed (deny by default): the tool must be found and report a version >= DENY_MIN_VERSION.
     Not found, no output, garbage output and too old all refuse."""
-    cannot = f"{a['label']} could not be checked for the deny rules: update or reinstall it, then try again."
+    tool = INSTALL_NAME.get((a.get("detect") or {}).get("binary") or "", a["label"])
+    cannot = f"{tool} is missing or too old on this computer. Install or update it, then press Continue."
     binary = binary or (a.get("detect") or {}).get("binary")
     path = shutil.which(binary) if binary else None
     v = _binary_version(path) if path else None
@@ -239,8 +241,8 @@ def deny_version_check(a: Mapping, binary: str | None = None) -> None:
         raise Refused(cannot)
     if tuple(int(x) for x in found) + (0,) * (3 - len(found)) < DENY_MIN_VERSION:
         raise Refused(
-            f"{a['label']} {v} is too old to keep orch's own folders out of reach "
-            f"(needs {'.'.join(map(str, DENY_MIN_VERSION))} or newer). Update it, then try again."
+            f"{tool} is too old on this computer ({v}; needs "
+            f"{'.'.join(map(str, DENY_MIN_VERSION))} or newer). Update it, then press Continue."
         )
 
 

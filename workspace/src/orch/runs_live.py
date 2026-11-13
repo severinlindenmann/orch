@@ -976,7 +976,7 @@ def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
         return runs.start(root, tid, by, agent=asker)
     except Refused as e:  # no agent set, sessions full (queued), ...: the answer is saved either way
         with contextlib.suppress(Exception):
-            tickets.log(root, tid, f"The agent could not be started again after the answer: {e}", "orch")
+            tickets.log(root, tid, f"The helper could not start: {e}", "orch")
         return None
 
 
