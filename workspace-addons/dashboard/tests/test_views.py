@@ -526,17 +526,17 @@ def test_v1_home_and_ticket_controls():
     js = webjs.all_js()
     home = js[js.index("function changeUnavailable") : js.index("// Chat (former General)")]
     tickets = js[js.index("function filterTickets") : js.index("function ticketNotFound")]
-    assert "row.answer.recommended" in home and "' · Suggested'" in home
-    assert "className:'row answer-options'" in home  # the question card carries answer buttons
+    assert "row.answer.recommended" in home and "'Suggested'" in home
+    assert "className:'answer-options'" in home  # the question card carries answer buttons
     assert (
         "act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:option})"
         in home
     )
     assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home
-    assert "function loadingView()" in home and "'data-key':'loading'" in home
+    assert "function skeletonFor(" in js and "'data-key':'loading'" in js
     assert "function connectionNotice(connectionEl, hadState)" in home
     assert "connectionNotice(connection, !!state)" in js
-    assert "main.replaceChildren(loadingView())" in js
+    assert "main.replaceChildren(skeletonFor(hashKind(location.hash)))" in js
     assert "[t.title, t.key, t.owner, t.note]" in tickets and "startsWith('agent:')" in tickets
     assert "'data-key':'ticket-search'" in tickets and "aria-pressed" in tickets
     # The shell's unused old delegation and shared CSS are outside this lane's edit scope.

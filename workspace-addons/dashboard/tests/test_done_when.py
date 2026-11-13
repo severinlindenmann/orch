@@ -54,12 +54,11 @@ def test_nontext_rejected(op):
 def test_optional_done_when_in_new_and_edit_dialog():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "'What should be true when it is done?'" in js
-    assert "t ? ['owner', 'due', 'note', 'done_when'] : ['owner', 'due', 'done_when']" in js
+    assert "t ? ['owner', 'due', 'note', 'done_when'] : []" in js
     assert "input.name = field" in js
     assert "input.rows = 4; input.maxLength = 2000" in js
     assert "Optional. Say it in your own words, the helper turns it into tasks." in js
-    assert js.index("'More options'") < js.index("field === 'done_when'")
-    assert "optionalFields.append(label)" in js
+    assert "'More options'" not in js  # the optional fields are shown plainly
     assert "key === 'done_when' ? input.value : input.value.trim()" in js
 
 

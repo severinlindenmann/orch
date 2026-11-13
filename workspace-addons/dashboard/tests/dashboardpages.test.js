@@ -47,7 +47,7 @@ test('list groups have owner order and every ticket belongs to exactly one group
   const items = ['done','review','ready','open','active','waiting'].map(status => ({id:status,status}));
   items.push({id:'question',status:'active',questions:[{text:'Choose?'}]});
   const groups = context(items).ticketGroups(items);
-  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','Not started','Ready for review','Done']);
+  assert.deepEqual(Array.from(groups, g => g.title), ['Needs you','Working','To do','Check','Done']);
   assert.deepEqual(Array.from(groups, g => Array.from(g.tickets, t => t.id)), [['waiting','question'],['active'],['ready','open'],['review'],['done']]);
 });
 test('home renders one need card per ticket with question count and yellow chip', () => {
@@ -56,7 +56,7 @@ test('home renders one need card per ticket with question count and yellow chip'
   const c = context([t], {needsList:() => needs});
   const home = c.home(), text = JSON.stringify(home);
   assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
-  assert.match(text, /2 questions/); assert.match(text, /Needs you \(1\)/); assert.doesNotMatch(text, /questions? for you/);
+  assert.match(text, /2 questions/); assert.match(text, /1 thing needs you/); assert.match(text, /! Question · 1/); assert.doesNotMatch(text, /questions? for you/);
   assert.match(text, /First\?/); assert.doesNotMatch(text, /Second\?/);
   assert.equal(nodes(home, n => /chip/.test(n.attrs?.className || '')).length, 0); // the section heading already says it
   needs.shift();
@@ -66,7 +66,7 @@ test('home: the Needs you heading shows the count (one per ticket plus failed st
   const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'active', questions:[{id:id + '1', text:'One?'}, {id:id + '2', text:'Two?'}]}));
   const needs = items.flatMap(t => t.questions.map(q => ({id:q.id, ticket:t.id, title:q.text, answer:{question:q.id}})));
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
-  assert.match(text, /Needs you \(3\)/);
+  assert.match(text, /3 things need you/);
   assert.equal(helpers.needsYouCount(needs, []), 3);
   assert.equal(helpers.needsYouCount([{id:'x'}, {id:'y', ticket:'a'}, {id:'z', ticket:'a'}], [['b']]), 3);
   assert.equal(helpers.needsYouCount([], []), 0);
@@ -78,16 +78,16 @@ test('home: the badge and Menu count (needsToday) equal the Needs you heading an
   const c = context(items, {needsList:() => needs, today:() => '2026-11-12', localStorage:{getItem:() => JSON.stringify(later)}, button:label => ({tag:'button', children:[label]})});
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 2);
-  assert.match(text, /Needs you \(2\)/);
+  assert.match(text, /2 things need you/);
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
-  assert.match(app, /const needCount = needsToday\(\)\.count/); assert.doesNotMatch(app, /needsList\(\)\.length/);
+  assert.match(app, /const needCount = needsYouTotal\(\)/); assert.doesNotMatch(app, /needsList\(\)\.length/);
 });
 test('home: Needs you counts a failed start on the page', () => {
   const items = [{id:'a', title:'T a', status:'active'}, {id:'f', title:'T f', status:'waiting', waiting_on:{start:true, ref:'x'}}];
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
   assert.match(text, /could not start/);
-  assert.match(text, /Needs you \(2\)/);
+  assert.match(text, /2 things need you/);
 });
 
 // Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.
@@ -332,8 +332,8 @@ test('home rows: no key or chip, no empty Working now, See all tickets (N), fini
   assert.doesNotMatch(text, /Working now|No tickets are being worked on/);
   assert.match(text, /Finished 9:05/);
   const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
-  assert.deepEqual(left.children.at(-1).children, ['See all tickets (2)']);
-  assert.equal(left.children.at(-1).attrs.className, 'see-all');
+  assert.ok(left); assert.match(text, /All 2 tickets →/); assert.match(text, /1 result to check/);
+  assert.match(text, /Check · 1/); assert.doesNotMatch(text, /Details|Technical details/);
 });
 // Dash 03/04/14: results fold to 3 one-link rows; same-name results stack with "Mark older as done".
 test('home results: one link per row, same-name stacked, newest first, 3 shown and Show all (N)', async () => {
@@ -382,7 +382,7 @@ test('home needs: fold shows the oldest card with answers; identical questions a
   const cards = nodes(home, n => n.attrs?.className === 'card-row home-need');
   assert.equal(cards.length, 1);
   const host = {querySelectorAll:() => []};
-  await nodes(cards[0], n => n.tag === 'button')[0].click({currentTarget:{closest:() => host}});
+  await nodes(cards[0], n => n.tag === 'button')[0].onclick({currentTarget:{closest:() => host}});
   assert.deepEqual(sent, ['a', 'b', 'c']); assert.deepEqual(toasts, ['Answered on 3 tickets']);
 });
 const sameNeeds = (n, act) => {
@@ -405,7 +405,7 @@ test('home needs: a failed answer on stacked questions says how many were answer
   const {c, toasts} = sameNeeds(3, async () => ++n === 2 ? {ok:false, status:409, text:'Nope'} : {ok:true});
   c.window.DashHelpers.scrubText = t => t;
   const card = nodes(c.home(), n => n.attrs?.className === 'card-row home-need')[0];
-  await nodes(card, n => n.tag === 'button')[0].click({currentTarget:{closest:() => ({querySelectorAll:() => []})}});
+  await nodes(card, n => n.tag === 'button')[0].onclick({currentTarget:{closest:() => ({querySelectorAll:() => []})}});
   assert.deepEqual(toasts, [['Answered on 2 of 3 tickets. Nope', 'error']]);
 });
 
@@ -442,4 +442,17 @@ test('shell: quiet footer, one phone control while on, Ask the helper', () => {
   assert.match(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/);
   assert.match(web('index.html'), />Ask the helper<\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
   assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
+});
+test('ticket saved views filter by status and the board shows Changes to add', () => {
+  const items = [{id:'w',title:'W',status:'active',owner:'anna'}, {id:'r',title:'R',status:'review',owner:'ben'},
+    {id:'d',title:'D',status:'done',owner:'anna',done_at:new Date().toISOString(),bring_back:{state:'waiting'}},
+    {id:'o',title:'O',status:'done',owner:'ben',done_at:'2000-01-01T00:00:00Z'}];
+  const c = context(items);
+  const ids = (view, person = '') => c.filterTickets(items, '', false, '', person, view).map(t => t.id).join();
+  assert.equal(ids('working'), 'w');
+  assert.equal(ids('needs-you'), 'r,d');
+  assert.equal(ids('done-week'), 'd');
+  assert.equal(ids('', 'ben'), 'r,o');
+  assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
+  assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
 });

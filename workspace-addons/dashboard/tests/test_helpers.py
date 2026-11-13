@@ -37,7 +37,7 @@ def call(fn, *args):
         ("Status open -> active", "Moved to Working"),
         ("Check c2 done", "Finished a task"),
         ("Status active -> done", "Moved to Done"),
-        ("Patched status (status done -> open)", "Moved to Not started"),
+        ("Patched status (status done -> open)", "Moved to To do"),
         ("Something the agent wrote", "Something the agent wrote"),
     ],
 )
@@ -364,7 +364,7 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     src = webjs.all_js()
     tree = src[src.index("function treeBranch") : src.index("let ticketView")]
-    assert tree.count("ticketAttentionChip(t, section)") == 1  # one chip, told which section the row sits in
+    assert tree.count("statusBadge(t)") == 1  # one status badge per table row
     assert "ticketAttentionChip(t)" not in tree
     chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
     assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
@@ -472,11 +472,11 @@ def test_first_run_note_is_not_shown_as_an_answer():
 @pytest.mark.parametrize(
     "status,word",
     [
-        ("open", "Not started"),
-        ("ready", "Not started"),
+        ("open", "To do"),
+        ("ready", "To do"),
         ("active", "Working"),
         ("waiting", "Needs you"),
-        ("review", "Ready for review"),
+        ("review", "Check"),
         ("done", "Done"),
     ],
 )
@@ -541,9 +541,9 @@ def test_the_move_to_control_is_a_visible_labelled_button():
     assert "status-sum-icon" not in src
     assert "'Move to'" in src
     assert [w for _, w in node_value("MOVE_CHOICES")] == [
-        "Not started",
+        "To do",
         "Working",
-        "Ready for review",
+        "Check",
         "Done",
     ]
     assert "Backlog" not in src
@@ -606,7 +606,7 @@ def test_ticket_screens_use_plain_wording_and_one_chip():
     assert (
         "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]
     )  # one label source
-    assert "Ideas to plan" in src and "Finished work" in src
+    assert "Finished tickets land here" in src  # the board columns show no hint lines, only an empty text
     assert (
         "hideStatus" not in src and "'Needs you'" in src
     )  # 10A: short board chip; 7A: no chip beside the banner
@@ -641,10 +641,10 @@ def test_needs_you_count_words_match_the_phone(n, want):
 def test_groups_follow_the_lifecycle_and_old_phrases_are_gone():
     src = webjs.all_js()
     assert [w for _, w in node_value("STATUS_CHOICES")] == [
-        "Not started",
+        "To do",
         "Working",
         "Needs you",
-        "Ready for review",
+        "Check",
         "Done",
     ]
     assert "question needs you" not in src and "questions need you" not in src
@@ -673,10 +673,10 @@ def test_one_label_per_status_single_sourced():
         assert word not in src and word not in (WEB / "helpers.js").read_text()
     # Lifecycle step names are separate from status labels.
     src = src.split("function ticketStepState")[0] + src.split("function ticketStepper")[1]
-    for pair in ("open:'Not started'", "active:'Working'", "review:'Ready for review'", "done:'Done'"):
+    for pair in ("open:'To do'", "active:'Working'", "review:'Check'", "done:'Done'"):
         assert pair not in src.replace(" ", "")
     words = node_value("STATUS_WORD")
-    assert words["ready"] == words["open"] == "Not started" and words["waiting"] == "Needs you"
+    assert words["ready"] == words["open"] == "To do" and words["waiting"] == "Needs you"
     assert all(
         w in src for w in ("DashHelpers.statusWord", "DashHelpers.STATUS_CHOICES", "DashHelpers.MOVE_CHOICES")
     )
@@ -722,7 +722,7 @@ def test_ui2_small_bugs_in_markup_and_css():
         and "@media(max-width:480px){.mm-bar.live{flex-wrap:wrap}" in css
     )
     # 6: a skeleton is in the page before the first data arrives
-    assert 'class="loading-home"' in html and 'aria-busy="true"' in html
+    assert "loading-home" in html and 'aria-busy="true"' in html
 
 
 @node
@@ -766,11 +766,11 @@ def test_footer_shows_the_relay_connection():
 @pytest.mark.parametrize(
     "status,word",
     [
-        ("open", "Not started"),
-        ("ready", "Not started"),
+        ("open", "To do"),
+        ("ready", "To do"),
         ("active", "Working"),
         ("waiting", "Needs you"),
-        ("review", "Ready for review"),
+        ("review", "Check"),
         ("done", "Done"),
         ("dropped", "Dropped"),
     ],

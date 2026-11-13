@@ -58,7 +58,7 @@ test('"Ask for changes" reads "You asked for changes" with the note', () => {
 test('other person lines are plain sentences', () => {
   const v = (text, me = 'human:lume') => H.historyView([entry('human:lume', text)], [], me)[0].sentence;
   assert.equal(v('Status review -> done'), 'You marked it Done');
-  assert.equal(v('Patched status (status active -> ready)'), 'You moved it to Not started');
+  assert.equal(v('Patched status (status active -> ready)'), 'You moved it to To do');
   assert.equal(v('Patched title, owner'), 'You changed the title and the owner');
   assert.equal(H.historyView([entry('agent:claude', 'Status active -> review')], [], 'human:lume')[0].sentence, null);
 });

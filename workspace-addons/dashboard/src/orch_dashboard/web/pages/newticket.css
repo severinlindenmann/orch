@@ -35,3 +35,22 @@
 .new-ticket-preview { max-height: 65vh; overflow: auto; }
 .new-ticket-preview pre { white-space: pre; font-size: 12px; }
 .new-ticket-preview img { max-width: 100%; height: auto; }
+.new-ticket { position: relative; }
+.new-ticket-drop { display: grid; gap: 4px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--surface); }
+.new-ticket-drop:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
+.new-ticket-file-hint { margin: 0; }
+ul.new-ticket-files { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow: auto; gap: 0; }
+.new-ticket .new-ticket-file { align-items: center; border-bottom: 1px solid var(--border); border-radius: 0; }
+.new-ticket-reading:empty { display: none; }
+.new-ticket-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.new-ticket-helper, .new-ticket-due { display: grid; gap: 6px; align-content: start; }
+.new-ticket-helper p { margin: 0; }
+.new-ticket-helper-fixed { min-height: 44px; display: flex; align-items: center; }
+/* Second pass (accepted New ticket draft): title + one line, X at the top right, footer with the quiet save at the left */
+.new-ticket{max-width:560px;width:calc(100vw - 32px)}
+.new-ticket h2{margin:0 40px 4px 0}
+.new-ticket .new-ticket-sub{margin:0 0 16px}
+.new-ticket .new-ticket-text{min-height:12em}
+dialog.new-ticket .actions{justify-content:flex-end;align-items:center}
+dialog.new-ticket .actions .new-ticket-link{margin-right:auto;min-height:32px;color:var(--text-muted);text-decoration:none}
+dialog.new-ticket .actions .new-ticket-link:hover{color:var(--text)}

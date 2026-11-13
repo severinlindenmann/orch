@@ -444,3 +444,94 @@ def test_updating_marker_covers_reinstall_and_followup(tmp_path, failure):
     assert _run_finisher(tmp_path, job).returncode == (0 if failure == "ok" else 1)
     assert not mark.exists()
     assert f"RESULT {'ok' if failure == 'ok' else 'fail'}:" in winfinish.log_path(tmp_path).read_text()
+
+
+# ---- services: the finisher stops them first and starts them again (also after a failure)
+
+
+def _with_services(tmp_path, **kw):
+    """A job whose `orch` is a fake python (a shell script) that records `stop`/`start` and its folder."""
+    calls = tmp_path / "calls.txt"
+    fake = tmp_path / "fakepy"
+    fake.write_text(f'#!/bin/sh\necho "$5 $(basename "$PWD")" >> {calls}\n', encoding="utf-8")
+    fake.chmod(0o755)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    job = _job(tmp_path, **kw)
+    job.update({"py": str(fake), "services": [str(ws)], "stop_delay": 0})
+    return job, calls
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake orch is a shell script")
+def test_finisher_stops_the_services_then_starts_them_again(tmp_path):
+    job, calls = _with_services(tmp_path)
+    assert _run_finisher(tmp_path, job).returncode == 0
+    assert calls.read_text().split() == ["stop", "ws", "start", "ws"]
+    log = (tmp_path / "finish.log").read_text().splitlines()
+    assert "RESULT ok:" in log[-1]  # the result comes after the services are back
+    assert any("started the services" in x for x in log)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake orch is a shell script")
+def test_failed_reinstall_still_gets_the_services_back(tmp_path):
+    job, calls = _with_services(tmp_path, uv_code="import sys; sys.exit(3)")
+    assert _run_finisher(tmp_path, job).returncode == 1
+    assert calls.read_text().split() == ["stop", "ws", "start", "ws"]
+    assert (tmp_path / "finish.log").read_text().splitlines()[-1].count("RESULT fail:") == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake orch is a shell script")
+def test_no_services_means_no_orch_calls(tmp_path):
+    job, calls = _with_services(tmp_path)
+    job["services"] = []
+    assert _run_finisher(tmp_path, job).returncode == 0
+    assert not calls.exists()
+
+
+def test_start_hands_the_services_to_the_finisher(tmp_path, monkeypatch):
+    monkeypatch.setattr(winfinish, "_popen", lambda argv, **kw: 4242)
+    base = tmp_path / "base" / "python.exe"
+    monkeypatch.setattr(winfinish.sys, "_base_executable", str(base), raising=False)
+    winfinish.start(tmp_path, ["uv"], [], tmp_path, "done", extra={"services": [str(tmp_path / "w")]})
+    job = json.loads((tmp_path / "finish" / "job.json").read_text())
+    assert job["services"] == [str(tmp_path / "w")]
+    assert job["py"].endswith("python.exe")
+
+
+def test_reinstall_collects_the_running_services(proj, monkeypatch):
+    from orch import services
+
+    started = _windows_with_one_finisher(monkeypatch)
+    extras = []
+    monkeypatch.setattr(
+        winfinish,
+        "start",
+        lambda home, uv, then, cwd, done, reg=None, extra=None: extras.append(extra) or home,
+    )
+    monkeypatch.setattr(
+        services, "running", lambda: [{"workspace": str(proj), "addon": "dashboard", "pid": 5}]
+    )
+    monkeypatch.setattr(services, "pid_alive", lambda pid: True)
+    addons._reinstall(
+        [{"name": "dashboard", "source": "built-in", "version": "0.0.0"}],
+        save=False,
+        then=[],
+        root=proj,
+        done="x",
+    )
+    assert extras == [{"services": [str(proj.resolve())]}] and not started
+
+
+@pytest.mark.parametrize(
+    "line, expect",
+    [
+        ("RESULT fail: still in use after 120s: C:\\x\\orch-workspace. Nothing", "still running"),
+        ("RESULT fail: the reinstall failed. Run it again: orch update", "reinstall failed"),
+        ("RESULT fail: Traceback (most recent call last)", "failed"),
+    ],
+)
+def test_update_status_reports_the_failure_in_plain_words(tmp_path, line, expect):
+    winfinish.log_path(tmp_path).write_text("old\n" + line + "\n", encoding="utf-8")
+    assert expect in winfinish.fail_reason_since(tmp_path, 4)
+    assert "C:" not in winfinish.fail_reason_since(tmp_path, 4)
+    assert "Run" in winfinish.fail_reason_since(tmp_path, -1)

@@ -1,4 +1,5 @@
 'use strict';
+const EMPTY_TICKET = 'Describe what needs doing before you continue.';
 const ticketFileTypes = {text:/\.(txt|md|csv|tsv|json|log|yml|yaml|toml|ini)$/i, image:/\.(png|jpg|jpeg|gif|webp)$/i};
 function ticketFileType(name) {
   return ticketFileTypes.text.test(name) ? 'text' : ticketFileTypes.image.test(name) ? 'image' : '';
@@ -6,7 +7,6 @@ function ticketFileType(name) {
 function ticketFileError(file, files) {
   if (!ticketFileType(file.name)) return file.name + ': only text files and pictures';
   if (file.size > 2 * 1024 * 1024) return file.name + ' is over 2 MB';
-  if (files.length >= 4) return 'At most 4 files';
   if (files.reduce((sum, item) => sum + item.size, file.size) > 3.5 * 1024 * 1024) return 'Files are over 3.5 MB';
   return '';
 }
@@ -21,18 +21,36 @@ function pastedLabel(text) {
 function ticketBase64(dataURL) {
   return dataURL.slice(dataURL.indexOf(',') + 1);
 }
+// Helpers the workspace really has: one entry per helper, the default first, never two with the same label.
+function ticketHelpers(settings) {
+  const out = [], labels = new Set();
+  const agents = (Array.isArray(settings?.agents) ? settings.agents : []).filter(a => a && typeof a.name === 'string' && a.found !== false);
+  agents.sort((a, b) => (b.chosen === true) - (a.chosen === true));
+  for (const a of agents) {
+    if (out.some(h => h.name === a.name)) continue;
+    const plain = String(a.label || a.name).replace(/^(agent|human):/, '');
+    let label = plain.charAt(0).toUpperCase() + plain.slice(1);
+    if (labels.has(label.toLowerCase())) label += ' (' + a.name + ')';
+    labels.add(label.toLowerCase());
+    out.push({name:a.name, label, description:typeof a.description === 'string' ? a.description.slice(0, 120) : '', chosen:a.chosen === true});
+  }
+  return out;
+}
+// The due date uses the shared date picker (kit/date.js: UI.date); a hidden input keeps the chosen day for the form.
 // New ticket / edit ticket dialog.
 function ticketForm(t) {
   const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
-  let optionalFields = fields;
+  if (!t) { d.className = (d.className ? d.className + ' ' : '') + 'new-ticket'; d.querySelector?.('h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
+  // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
+  let helpers = [], helperSelect = null, doneWrap = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
   let updateAttachments = () => {}, grow = () => {};
   const updateValidity = () => {
     if (t) return;
     const empty = !inputs.text.value.trim() && !pastedText && !files.length;
     inputs.text.required = empty;
-    inputs.text.setCustomValidity(empty ? 'What needs doing?' : '');
+    inputs.text.setCustomValidity(empty ? EMPTY_TICKET : '');
   };
   d.addEventListener('close', () => {
     closed = true;
@@ -42,17 +60,20 @@ function ticketForm(t) {
     const label = el('label', '', 'What needs doing?');
     const input = el('textarea', 'input new-ticket-text');
     input.name = 'text'; input.id = 'field-' + serial + '-text';
-    input.rows = 4; input.maxLength = 500000; input.required = true;
-    input.placeholder = 'Paste or write it here. A short title or a long text with many points: the agent splits it into tasks.';
+    input.rows = 8; input.maxLength = 500000; input.required = true;
+    input.placeholder = 'What should the helper do? A sentence or a long text; it is split into tasks.';
     // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
     grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
     input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
-    const zone = button('Attach file', 'new-ticket-attach', () => picker.click());
+    const zone = el('div', 'new-ticket-drop');
+    const attach = button('＋ Add files or drop them here', 'new-ticket-attach', () => picker.click());
+    zone.append(attach, el('p', 'meta new-ticket-file-hint', 'Add as many files as you need · text files and pictures, up to 2 MB each'));
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
     picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
     const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
-    const chips = el('div', 'new-ticket-files');
+    const chips = el('ul', 'new-ticket-files'); chips.setAttribute('aria-label', 'Added files');
+    const status = el('p', 'meta new-ticket-reading'); status.setAttribute('role', 'status');
     const help = el('p', 'meta new-ticket-help', 'Long text is kept as a file. The agent writes the title and a short description.');
     const preview = file => {
       const {d:previewDialog, actions:previewActions} = dialog(file.name, 'sheet');
@@ -68,10 +89,11 @@ function ticketForm(t) {
     updateAttachments = () => {
       chips.replaceChildren();
       const addChip = (file, remove, pasted = false) => {
-        const row = el('div', 'chip new-ticket-file');
+        const row = el('li', 'new-ticket-file');
         const body = button('', 'new-ticket-file-main', () => preview(file));
         body.append(el('span', '', pasted ? pastedLabel(file.text) : file.name));
-        const x = button('×', 'new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + (pasted ? 'pasted text' : file.name));
+        if (!pasted && typeof sizeText === 'function') body.append(el('span', 'meta', sizeText(file.size)));
+        const x = button('Remove', 'btn ghost xs new-ticket-file-remove', remove); x.setAttribute('aria-label', 'Remove ' + (pasted ? 'pasted text' : file.name));
         row.append(body, x); chips.append(row);
       };
       if (pastedText) addChip({name:'note.md', text:pastedText, size:new Blob([pastedText]).size, type:'text'}, () => { pastedText = ''; updateAttachments(); }, true);
@@ -86,6 +108,7 @@ function ticketForm(t) {
       reading = reading.then(async () => {
         fileError.textContent = '';
         const errors = [];
+        if (incoming.length) status.textContent = 'Reading ' + (incoming.length === 1 ? 'the file' : incoming.length + ' files') + '…';
         for (const file of incoming) {
           if (closed) break;
           const problem = ticketFileError(file, files);
@@ -107,6 +130,7 @@ function ticketForm(t) {
             files.push(item); updateAttachments();
           } catch (_) { errors.push(file.name + ': could not read'); }
         }
+        status.textContent = '';
         fileError.textContent = errors.join('\n');
       });
     };
@@ -126,12 +150,39 @@ function ticketForm(t) {
       if (combined.length > 500000) { fileError.textContent = 'Text is over 500000 characters'; return; }
       pastedText = combined; updateAttachments();
     });
-    fields.append(zone, picker, fileError, chips, help); updateAttachments();
-    const options = el('details', 'new-ticket-options');
-    optionalFields = el('div', 'form-fields');
-    options.append(el('summary', '', 'More options'), optionalFields); fields.append(options);
+    fields.append(zone, picker, status, fileError, chips, help); updateAttachments();
+    // Helper: only the helpers this workspace has. One helper is fixed text; none is a plain empty state.
+    // FOLLOW-UP: move to kit (shared custom select from the foundation PR); a native select until then.
+    helpers = ticketHelpers(typeof state !== 'undefined' && state ? state.settings : null);
+    const helperBox = el('div', 'new-ticket-helper');
+    if (helpers.length > 1) {
+      const helperLabel = el('label', '', 'Helper');
+      helperSelect = el('select', 'input'); helperSelect.name = 'helper'; helperSelect.id = 'field-' + serial + '-helper';
+      for (const h of helpers) { const option = el('option', '', h.label + (h.chosen ? ' (default)' : '')); option.value = h.name; helperSelect.append(option); }
+      helperSelect.value = helpers[0].name;
+      const about = el('p', 'meta new-ticket-helper-about');
+      const describe = () => { about.textContent = helpers.find(h => h.name === helperSelect.value)?.description || ''; about.hidden = !about.textContent; };
+      helperSelect.addEventListener('change', describe); describe();
+      helperLabel.htmlFor = helperSelect.id; helperLabel.append(helperSelect); helperBox.append(helperLabel, about);
+    } else {
+      helperBox.append(el('span', 'new-ticket-label', 'Helper'));
+      if (helpers.length) {
+        helperBox.append(el('p', 'new-ticket-helper-fixed', helpers[0].label));
+        if (helpers[0].description) helperBox.append(el('p', 'meta new-ticket-helper-about', helpers[0].description));
+      } else helperBox.append(el('p', 'meta new-ticket-empty', 'No helper is set up yet. The ticket is kept and waits until one is ready.'));
+    }
+    const dueInput = el('input'); dueInput.type = 'hidden'; dueInput.name = 'due'; dueInput.id = 'field-' + serial + '-due-value'; inputs.due = dueInput;
+    const dueToggle = el('button', 'btn outline new-ticket-date-toggle', '▦ No date'); dueToggle.type = 'button'; dueToggle.id = 'field-' + serial + '-due';
+    const dueLabel = el('label', '', 'Due date (optional)'); dueLabel.htmlFor = dueToggle.id;
+    const dueBox = el('div', 'new-ticket-due'); dueBox.append(dueLabel, dueToggle, dueInput);
+    if (window.UI?.date) window.UI.date(dueInput, dueToggle);
+    const options = el('div', 'new-ticket-options'); options.append(helperBox, dueBox); fields.append(options);
+    const doneLabel = el('label', '', 'Done when (optional)');
+    const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
+    done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done? Say it in your own words.';
+    doneLabel.htmlFor = done.id; doneLabel.append(done); fields.append(doneLabel); inputs.done_when = done; doneWrap = doneLabel;
   }
-  for (const field of (t ? ['owner', 'due', 'note', 'done_when'] : ['owner', 'due', 'done_when'])) {
+  for (const field of (t ? ['owner', 'due', 'note', 'done_when'] : [])) {
     const label = el('label', '', field === 'done_when' ? 'What should be true when it is done?' : field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
     const input = el(['note', 'done_when'].includes(field) ? 'textarea' : 'input', 'input');
     input.name = field; input.id = 'field-' + serial + '-' + field;
@@ -147,25 +198,25 @@ function ticketForm(t) {
     }
     if (field === 'title') { input.required = true; input.maxLength = 200; }
     input.value = t?.[field] || '';
-    label.htmlFor = input.id; label.append(input); optionalFields.append(label); inputs[field] = input;
+    label.htmlFor = input.id; label.append(input); fields.append(label); inputs[field] = input;
   }
   const error = el('p', 'bad'); error.setAttribute('role', 'alert');
   const reload = button('Reload ticket', 'outline sm', async () => { await refresh(); await window.orch.close(d); const latest = ticketOf(t?.id); if (latest) ticketForm(latest); });
   reload.hidden = true;
   const submit = el('button', 'btn primary', t ? 'Save changes' : 'Start'); submit.type = 'submit';
   let startAfter = !t;
-  // One main button (Start) and Cancel; the plan choice is a box in More options, "Create without starting" a text link.
+  // One main button (Start) and Cancel; the plan choice is a plain box, "Create without starting" a text link.
   let planBox = null;
   if (!t) {
     const planLabel = el('label', 'new-ticket-check');
     planBox = el('input'); planBox.type = 'checkbox'; planBox.name = 'plan_first';
     planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', 'The helper waits for your OK before work starts.'));
-    optionalFields.append(planLabel);
+    if (doneWrap && typeof fields.insertBefore === 'function' && doneWrap.parentNode === fields) fields.insertBefore(planLabel, doneWrap); else fields.append(planLabel);
   }
-  const plain = t ? null : button('Create without starting', 'new-ticket-link', () => { startAfter = false; form.requestSubmit(); });
+  const plain = t ? null : button('Save without starting', 'new-ticket-link', () => { startAfter = false; form.requestSubmit(); });
   if (plain) submit.addEventListener('click', () => { startAfter = true; });
   actions.append(submit);
-  if (plain) fields.append(plain);
+  if (plain) actions.prepend(plain);
   const startNow = async () => {
     if (t || !startAfter || !created) return;
     const run = await act('run.start', {ticket:created.id});
@@ -178,9 +229,12 @@ function ticketForm(t) {
     await reading;
     if (closed) return;
     updateValidity();
+    if (!t && inputs.text.required) error.textContent = EMPTY_TICKET;
     if (!form.reportValidity() || submit.disabled || creationUnresolved) return;
     submit.disabled = true; error.textContent = ''; reload.hidden = true;
     const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, key === 'done_when' ? input.value : input.value.trim()]));
+    // A helper other than the default is kept as the ticket's owner. FOLLOW-UP: run.start takes no helper yet.
+    if (!t) values.owner = helperSelect && helperSelect.value !== helpers[0].name ? 'agent:' + helperSelect.value : '';
     let result;
     if (t) result = await act('ticket.edit', {ticket:t.id, owner:values.owner, due:values.due, note:values.note, done_when:values.done_when, if_revision:t.revision});
     else {

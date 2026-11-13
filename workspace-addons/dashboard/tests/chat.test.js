@@ -50,7 +50,7 @@ test('moved conversation renders its banner and header ticket link', () => {
   assert.match(thread, /Open ticket/);
   assert.match(JSON.stringify(c.chatHeader(null, false)), /FS-1/);
 });
-test('the workspace name is the thread title and the Chat row title; "Your helper" in the bubble, the composer and the thinking line', () => {
+test('"Your helper" is the thread title, the Chat row title, the bubble, the composer and the thinking line; the workspace name sits under the title', () => {
   const c = context();
   c.state.workspace = 'pilatus'; c.state.chat.helper = 'pilatus helper';
   c.state.chat.messages = [{id:'m1', by:'ws_x', via:'helper', text:'Hi', at:'2026-11-09T10:00:00Z'}, {id:'m2', by:'you', via:'phone', text:'Yo', at:'2026-11-09T10:01:00Z'}];
@@ -61,17 +61,17 @@ test('the workspace name is the thread title and the Chat row title; "Your helpe
   const times = nodes(c.chatThread(null, null), n => /chat-message-time/.test(n.attrs?.className || '')).map(n => n.textContent);
   assert.ok(times.every(t => !/helper/.test(t)), 'the time line never says "helper"');
   assert.ok(times.some(t => /from your phone/.test(t)));
-  assert.match(thread, /Starts fresh each day at 04:00/);
+  assert.match(thread, /A new conversation starts each day at 04:00/);
   assert.doesNotMatch(thread, /Context cleared/);
   const head = JSON.stringify(c.chatHeader(null, false));
   const title = nodes(c.chatHeader(null, false), n => n.attrs?.['data-key'] === 'chat-title')[0].textContent;
-  assert.equal(title, 'Pilatus'); assert.doesNotMatch(head, /[Hh]elper|Chat · /);
+  assert.equal(title, 'Your helper'); assert.match(head, /Pilatus workspace/); assert.doesNotMatch(head, /[Pp]ilatus helper|Chat · /);
   const row = nodes(c.chatListRow(null), n => n.tag === 'strong')[0].textContent;
-  assert.equal(row, 'Pilatus');
+  assert.equal(row, 'Your helper');
   assert.match(JSON.stringify(c.chatThinking('Your helper', true)), /Your helper is thinking/);
 });
 
-test('the chip row is gone: one Show filter, and "Working on N tickets" only when N > 0', () => {
+test('the chip row is gone: one From my phone checkbox, and "Working on N tickets" only when N > 0', () => {
   const c = context();
   c.state.chat = {day:'2026-11-11', activity:{phone_today:2, from_workspaces:{Home:3}, running:0}, messages:[
     {id:'p1', by:'you', via:'phone', text:'From the phone'}, {id:'r1', by:'ws_x', via:'helper', text:'Reply to phone', reply_to:'p1'},
@@ -79,7 +79,8 @@ test('the chip row is gone: one Show filter, and "Working on N tickets" only whe
   const page = JSON.stringify(c.chatPage());
   assert.doesNotMatch(page, /From phone · |From Home · |Running · /);
   assert.doesNotMatch(page, /Working on/);
-  assert.match(page, /Show:/); assert.match(page, /From my phone/);
+  assert.match(page, /From my phone/); assert.match(page, /Phone & workspaces/);
+  assert.doesNotMatch(page, /chat-list"/, 'relay off: no conversation list');
   c.state.chat.activity.running = 2;
   assert.match(JSON.stringify(c.chatHeader(null, false)), /Working on 2 tickets/);
   vm.runInContext("chatUi.filter = 'phone'", c);
@@ -168,15 +169,15 @@ test('a finished group is only under Earlier, a live one only under Groups', () 
   }
 });
 
-test('thread header: Earlier on the title row, "Working on N tickets" on the Show row (no extra row)', () => {
+test('thread header: helper title with workspace and "Working on N tickets", then the phone filter and workspace link (no extra row)', () => {
   const c = context();
   c.state.chat = {day:'2026-11-11', activity:{running:2}, messages:[]};
   const head = c.chatHeader(null, false);
   const top = nodes(head, n => n.attrs?.className === 'chat-head-top')[0];
-  assert.deepEqual(top.children.map(n => n.textContent), ['‹ Chats', 'Fish', 'Earlier']);
+  assert.deepEqual(top.children.map(n => n.textContent), ['✧', 'Your helperFish workspace · Working on 2 tickets', 'Earlier']);
   const row = nodes(head, n => n.attrs?.className === 'chat-head-row')[0];
-  assert.match(row.textContent, /^Show:AllFrom my phoneWorking on 2 tickets$/);
-  assert.equal(head.children.length, 2, 'the title row and the Show row');
+  assert.equal(row.textContent, 'From my phonePhone & workspaces');
+  assert.equal(head.children.length, 2, 'the title row and the filter row');
 });
 
 test('Earlier: one entry point, past days first without today, then finished groups with their day', async () => {
@@ -247,3 +248,20 @@ for (const mode of ['Today', 'agent conversation', 'History day']) {
     assert.deepEqual(ids, expected.map(m => m.id));
   });
 }
+
+test('with groups or workspace chats: grouped list (This workspace, Other workspaces, Groups); otherwise the simple helper chat', () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', messages:[]};
+  c.ticketOf = () => ({id:'t_live', status:'active'});
+  c.state.groups = {hosted:[{id:'g_live', ticket:'t_live', title:'Live group', members:[{ws:'ws_a', name:'Home office'}], tasks:[]}], joined:[]};
+  assert.match(JSON.stringify(c.chatThread(null, null)), /Talk it through with your helper/);
+  const page = c.chatPage().children[0];
+  assert.doesNotMatch(page.attrs.className, /chat-simple/);
+  const list = page.children[0].textContent;
+  assert.ok(list.indexOf('This workspace') < list.indexOf('Your helper') && list.indexOf('Groups') < list.indexOf('Live group'));
+  assert.equal(nodes(page.children[0], n => n.attrs?.className === 'chat-avatar' && n.textContent === 'HO').length, 1, 'workspace initials');
+  vm.runInContext("chatUi.search = 'live'", c);
+  assert.equal(nodes(c.chatList(), n => n.attrs?.['data-id'] === 'chat')[0].hidden, true);
+  c.state.groups = {hosted:[], joined:[]};
+  assert.match(c.chatPage().children[0].attrs.className, /chat-simple/, 'only the helper chat');
+});

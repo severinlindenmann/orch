@@ -1,0 +1,17 @@
+{
+  "shop": "Demo Coffee",
+  "open": {
+    "mon-fri": "07:00-17:00",
+    "sun": "09:00-13:00"
+  },
+  "items": [
+    {
+      "name": "Flat white",
+      "price": 4.5
+    },
+    {
+      "name": "Cold brew",
+      "price": 5.0
+    }
+  ]
+}
