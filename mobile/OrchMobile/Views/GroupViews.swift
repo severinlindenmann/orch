@@ -122,12 +122,27 @@ enum GroupRoomRules {
         }.map { "m-" + $0.id }
     }
 
+    /// Answers still in their undo window whose group card can no longer be answered (group closed, or the card came
+    /// late): they are dropped, not sent. One already sending is left alone.
+    static func answersToCancel(_ groups: [PhoneGroup], pending: Set<String>, sending: Set<String>) -> Set<String> {
+        guard !pending.isEmpty else { return [] }
+        var out: Set<String> = []
+        for group in groups {
+            for message in group.messages {
+                guard let event = message.event, event.kind == "approval_needed", let id = event.questionMessage,
+                      pending.contains(id), !sending.contains(id), group.closed || message.late else { continue }
+                out.insert(id)
+            }
+        }
+        return out
+    }
+
     /// An approval this phone cannot answer: link to the member's topic (or chat) when it is paired here, else say who answers.
     static func answerElsewhere(_ event: GroupEvent, group: PhoneGroup, paired: [String]) -> (route: ChatRoute?, text: String) {
         let ws = event.ws ?? ""
         let name = group.name(of: ws)
         guard paired.contains(ws), !group.isExternal(ws) else {
-            return (nil, "Only the owner of \(name) can answer this, on their phone.")
+            return (nil, "Only someone with \(name) on their phone can answer this.")
         }
         if let delegate = event.delegate, let ticket = group.tasks[delegate]?.ticket {
             return (.ticket(workspace: ws, ticket: ticket), "Answer in \(name)")

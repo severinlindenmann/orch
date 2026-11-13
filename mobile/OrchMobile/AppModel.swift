@@ -356,6 +356,10 @@ final class AppModel {
         }
         #endif
         if groups != snapshot { groups = snapshot }
+        // A group that closed while an answer waited out its undo window: that answer is not sent any more.
+        for id in GroupRoomRules.answersToCancel(snapshot.groups, pending: Set(pendingAnswers.keys), sending: sendingAnswers) {
+            undoTimers[id]?.cancel(); undoTimers[id] = nil; pendingAnswers[id] = nil
+        }
     }
 
     private func merge(_ items: [PhoneMessage]) {

@@ -13,6 +13,12 @@ struct GroupRoomView: View {
     @State private var atBottom = true
     /// Message rows on screen now: read goes only up to the last of these while scrolled up.
     @State private var visible: Set<String> = []
+    /// False until the room has scrolled to where it opens (an open approval card): the list starts at the bottom, and
+    /// rows seen only in that first moment must not be marked read (P28 / P55).
+    @State private var positioned = false
+    /// "Open the … topic" in the info sheet: pushed once the sheet has closed, in whichever stack shows this room.
+    @State private var openTopicAfterSheet = false
+    @State private var topic: String?
     private var group: PhoneGroup? { model.groups.groups.first { $0.key == key } }
 
     var body: some View {
@@ -66,17 +72,38 @@ struct GroupRoomView: View {
                         // The newest open approval card wins over the newest message: the card lands just above the composer.
                         .task(id: key) {
                             let answered = Set(model.answers.keys).union(model.pendingAnswers.keys).union(model.queuedAnswers.keys)
-                            let target = GroupRoomRules.openRowID(group, questions: model.questions, answered: answered) ?? "group-bottom"
+                            let card = GroupRoomRules.openRowID(group, questions: model.questions, answered: answered)
+                            if card == nil { positioned = true; markRead(group) }
+                            let target = card ?? "group-bottom"
                             proxy.scrollTo(target, anchor: .bottom)
                             try? await Task.sleep(for: .milliseconds(300))
                             proxy.scrollTo(target, anchor: .bottom)
+                            if !positioned {
+                                await Task.yield()
+                                // Opened at a card above the newest messages: the bottom marker has not reported leaving yet,
+                                // so do not let a stale "at the bottom" mark the unseen messages read (P55). It reports itself
+                                // again if it is really on screen.
+                                if let card, card.hasPrefix("m-"),
+                                   let at = group.messages.firstIndex(where: { "m-" + $0.id == card }) {
+                                    atBottom = false
+                                    // Rows seen while the list passed over its bottom are not on screen any more: only
+                                    // messages up to the card count as seen.
+                                    visible = visible.filter { id in (group.messages.firstIndex { $0.id == id } ?? 0) <= at }
+                                }
+                                positioned = true; markRead(group)
+                            }
                         }
                         footer(group, onSent: { scrollToBottom(proxy) })
                     }
                 }
                 .onAppear { markRead(group) }
                 .onChange(of: group.messages) { _, _ in markRead(group) }
-                .sheet(isPresented: $members) { GroupMembersView(key: key) }
+                .sheet(isPresented: $members, onDismiss: {
+                    if openTopicAfterSheet { openTopicAfterSheet = false; topic = group.ticket }
+                }) { GroupMembersView(key: key, onOpenTopic: { openTopicAfterSheet = true }) }
+                .navigationDestination(item: $topic) { ticket in
+                    TicketChatView(workspaceId: key.host, ticketId: ticket).toolbar(.visible, for: .navigationBar)
+                }
                 .sheet(isPresented: $details) {
                     NavigationStack {
                         Text(privacy(group)).themeFont(17).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -239,10 +266,11 @@ struct GroupRoomView: View {
                     (Text("Everyone in this group sees what you write here · ").foregroundColor(Theme.muted) + Text("Details").foregroundColor(Theme.brand))
                         .themeFont(12).padding(.horizontal, 16).frame(minHeight: 44)
                 }.accessibilityIdentifier("group-privacy")
-            }
+            }.accessibilityElement(children: .contain).accessibilityIdentifier("group-composer")
         }
     }
     private func markRead(_ group: PhoneGroup) {
+        guard positioned else { return }
         let lastVisible = group.messages.last { visible.contains($0.id) }?.id
         model.markRead(GroupRoomRules.readKey(group), items: GroupRoomRules.readItems(group), atBottom: atBottom, lastVisibleId: lastVisible)
     }
@@ -284,6 +312,7 @@ struct GroupApprovalView: View {
     let event: GroupEvent
     let group: PhoneGroup
     var late: Bool = false
+    @AccessibilityFocusState private var undoFocused: Bool
     private struct ApprovalOption: Identifiable { let id: String; let option: String; let label: String }
     /// The button word for a raw approval option; nil = unknown (no button).
     nonisolated static func approvalLabel(_ o: String) -> String? {
@@ -299,6 +328,10 @@ struct GroupApprovalView: View {
         let label = approvalLabel(answer) ?? answer
         return sending ? "\(label) · sending…" : "\(label) · sent in a moment"
     }
+    /// An answer kept on this phone while offline: not done yet.
+    nonisolated static func queuedText(_ answer: String) -> String { "\(approvalLabel(answer) ?? answer) · waiting to send" }
+    /// VoiceOver: the buttons vanish on a tap, so say what happened and that it can still be undone.
+    nonisolated static func chosenAnnouncement(_ answer: String) -> String { "\(approvalLabel(answer) ?? answer). Sent in a moment. Undo available." }
     private var result: GroupEvent? {
         guard let delegate = event.delegate else { return nil }
         return group.messages.compactMap(\.event).last { $0.delegate == delegate && ["approved", "denied"].contains($0.kind) }
@@ -308,7 +341,7 @@ struct GroupApprovalView: View {
             if let result {
                 let text = GroupRoomRules.eventText(result, group: group, ownAnswer: model.ownGroupAnswer(for: result, in: group))
                 (group.isExternal(result.ws ?? "") ? Text(text).italic().foregroundColor(Theme.muted) : Text(text)).themeFont(15)
-            } else if let id = event.questionMessage, let answer = model.pendingAnswers[id],
+            } else if !group.closed, !late, let id = event.questionMessage, let answer = model.pendingAnswers[id],
                       let question = model.questions.first(where: { $0.id == id }) {
                 let sending = model.sendingAnswers.contains(id)
                 Text(question.message.body.text).themeFont(17, .semibold)
@@ -320,9 +353,13 @@ struct GroupApprovalView: View {
                         Button { model.undoAnswer(question) } label: {
                             Text("Undo").themeFont(15, .medium).foregroundStyle(Theme.brand)
                                 .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                        }.accessibilityIdentifier("group-undo")
+                        }.accessibilityLabel("Undo \(Self.approvalLabel(answer) ?? answer)").accessibilityIdentifier("group-undo")
+                            .accessibilityFocused($undoFocused)
                     }
                 }
+            } else if let id = event.questionMessage, let queued = model.queuedAnswers[id], model.answers[id] == nil {
+                if let question = model.questions.first(where: { $0.id == id }) { Text(question.message.body.text).themeFont(17, .semibold) }
+                Text(Self.queuedText(queued)).themeFont(13).foregroundStyle(Theme.muted).accessibilityIdentifier("group-approval-queued")
             } else if let answer = model.ownGroupAnswer(for: event, in: group) {
                 switch Self.approvalLabel(answer) {
                 case "No"?: group.memberText(event.ws ?? "", prefix: "You said no to ", suffix: "").themeFont(15)
@@ -343,7 +380,7 @@ struct GroupApprovalView: View {
                         }
                         HStack {
                             ForEach(options) { entry in
-                                Button(entry.label) { model.chooseAnswer(question, entry.option) }.themeFont(15, .medium).frame(maxWidth: .infinity, minHeight: 44)
+                                Button(entry.label) { choose(question, entry.option) }.themeFont(15, .medium).frame(maxWidth: .infinity, minHeight: 44)
                                     .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.s))
                             }
                         }
@@ -369,10 +406,20 @@ struct GroupApprovalView: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("group-approval")
     }
+
+    private func choose(_ question: Question, _ option: String) {
+        model.chooseAnswer(question, option)
+        AccessibilityNotification.Announcement(Self.chosenAnnouncement(option)).post()
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            undoFocused = true
+        }
+    }
 }
 
 struct GroupMembersView: View {
     let key: GroupKey
+    var onOpenTopic: () -> Void = {}
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var note = false
@@ -395,10 +442,10 @@ struct GroupMembersView: View {
                                 } name: { group.memberText(member.ws) }
                             }
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-                        if let ticket = group.ticket {
+                        if group.ticket != nil {
                             Button {
+                                onOpenTopic()
                                 dismiss()
-                                model.path.append(ChatRoute.ticket(workspace: key.host, ticket: ticket))
                             } label: {
                                 HStack {
                                     Text("Open the \(group.hostName) topic").themeFont(17)
@@ -408,16 +455,17 @@ struct GroupMembersView: View {
                                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
                             }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("group-open-topic")
                         }
-                        VStack(alignment: .leading, spacing: 8) {
-                            Button { note.toggle() } label: {
-                                Label("What members see", systemImage: "info.circle").themeFont(13).foregroundStyle(Theme.muted)
-                                    .frame(minHeight: 44)
-                            }.accessibilityIdentifier("group-members-note").accessibilityValue(note ? "Shown" : "Hidden")
-                            if note { Text(GroupRoomRules.membersNote(group)).themeFont(13).foregroundStyle(Theme.muted) }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        // A disclosure: VoiceOver reads it as collapsed / expanded.
+                        DisclosureGroup(isExpanded: $note) {
+                            Text(GroupRoomRules.membersNote(group)).themeFont(13).foregroundStyle(Theme.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
+                        } label: {
+                            Label("What members see", systemImage: "info.circle").themeFont(13).foregroundStyle(Theme.muted)
+                                .frame(minHeight: 44)
+                        }.tint(Theme.muted).accessibilityIdentifier("group-members-note")
                     }.padding(16)
                 }
-            }.background(Theme.bg).foregroundStyle(Theme.text).navigationTitle("Members").navigationBarTitleDisplayMode(.inline)
+            }.background(Theme.bg).foregroundStyle(Theme.text).navigationTitle("Group info").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }

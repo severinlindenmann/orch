@@ -48,6 +48,7 @@ final class GroupApprovalUITests: XCTestCase {
         card.buttons["Always"].tap()
         XCTAssertTrue(any("group-approval-pending").waitForExistence(timeout: 5))
         XCTAssertEqual(any("group-approval-pending").label, "Always · sent in a moment")
+        XCTAssertEqual(any("group-undo").label, "Undo Always")
         any("group-undo").tap()
         XCTAssertTrue(card.buttons["Always"].waitForExistence(timeout: 5), "undo brings the buttons back")
         XCTAssertFalse(any("group-approval-pending").exists)

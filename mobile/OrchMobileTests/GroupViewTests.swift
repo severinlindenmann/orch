@@ -220,7 +220,24 @@ final class GroupViewTests: XCTestCase {
         XCTAssertEqual(paired.route, .ticket(workspace: GroupMock.bank, ticket: "t_banktax001"))
         let other = GroupRoomRules.answerElsewhere(event, group: group, paired: [GroupMock.finance])
         XCTAssertNil(other.route)
-        XCTAssertEqual(other.text, "Only the owner of Bank can answer this, on their phone.")
+        XCTAssertEqual(other.text, "Only someone with Bank on their phone can answer this.")
+    }
+
+    func testPendingGroupAnswerIsCancelledWhenTheGroupClosesOrTheCardIsLate() throws {
+        let g = try XCTUnwrap(GroupRoomRules.rows(snapshot(GroupMock.messages(now: now))).first)
+        let id = try XCTUnwrap(g.messages.compactMap(\.event).first { $0.kind == "approval_needed" }?.questionMessage)
+        XCTAssertEqual(GroupRoomRules.answersToCancel([g], pending: [id], sending: []), [], "open group: keep it")
+        let closed = PhoneGroup(key: g.key, title: g.title, members: g.members, hostName: g.hostName, names: g.names,
+            externals: g.externals, ticketKey: g.ticketKey, ticket: g.ticket, messages: g.messages, closed: true,
+            startedHere: g.startedHere, gaps: g.gaps, tasks: g.tasks)
+        XCTAssertEqual(GroupRoomRules.answersToCancel([closed], pending: [id], sending: []), [id])
+        XCTAssertEqual(GroupRoomRules.answersToCancel([closed], pending: [id], sending: [id]), [], "already sending")
+        XCTAssertEqual(GroupRoomRules.answersToCancel([closed], pending: [], sending: []), [])
+    }
+
+    func testGroupApprovalQueuedAndVoiceOverTexts() {
+        XCTAssertEqual(GroupApprovalView.queuedText("always"), "Always · waiting to send")
+        XCTAssertEqual(GroupApprovalView.chosenAnnouncement("always"), "Always. Sent in a moment. Undo available.")
     }
 
     func testGroupApprovalPendingTextNamesTheChoice() {

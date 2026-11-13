@@ -1,8 +1,8 @@
 /* 11 Nov: shipped group, result and review states. Local fixtures, no services. */
 (() => {
-  const entries = [['groups','Chats · Groups'],['group-open','Group · open'],['group-sent','Group · after send'],['group-done','Group · done'],['done-groups','Earlier'],['info-collapsed','Ticket info · collapsed'],['info-expanded','Ticket info · expanded'],['info-job','Ticket info · job result'],['ticket-review','Ticket · ready for review'],['ticket-no-question','Ticket · no review question']];
+  const entries = [['groups','Chats · Groups'],['group-open','Group · open'],['group-sent','Group · after send'],['group-elsewhere','Group · answer in Bank'],['group-other-phone','Group · answer on another phone'],['group-done','Group · done'],['done-groups','Earlier'],['info-collapsed','Ticket info · collapsed'],['info-expanded','Ticket info · expanded'],['info-job','Ticket info · job result'],['ticket-review','Ticket · ready for review'],['ticket-no-question','Ticket · no review question']];
   reviewGroups.unshift(['11 Nov · Visual challenge', entries]);
-  const custom = new Set(['group-open','group-sent','group-done','done-groups','earlier-day','ticket-review','ticket-no-question']);
+  const custom = new Set(['group-open','group-sent','group-elsewhere','group-other-phone','group-done','done-groups','earlier-day','ticket-review','ticket-no-question']);
   let earlierWorkspace = 'pilatus', earlierDay = '';
   let sent = [], muted = false, verdict = '', infoTab = 'Photos', agentOpen = false, jobOpen = false;
   const go = (id, text, cls = '') => actionButton('navigate', text, id, cls);
@@ -21,10 +21,12 @@
   function bubbleText(text, sender='', mine=false){return `<div class="vc-message ${mine?'vc-own':''}">${sender?`<div class="vc-sender"><i class="vc-member ${sender.toLowerCase()}">${sender[0]}</i>${sender}</div>`:''}<div class="vc-bubble">${esc(text)}<small>14:${mine?'33':'30'} ${mine?'<span aria-label="Delivered">✓✓</span>':''}</small></div></div>`;}
   function composer(group){return `<footer class="vc-compose">${group?'<p class="vc-thinking">Home is thinking…</p><p class="vc-recipients">To: Finance, Home, Bank</p>':''}<form class="vc-compose-row"><input name="message" aria-label="${group?'Message the group':'Message'}" placeholder="${group?'Message the group':'Message…'}" autocomplete="off"><button type="submit" class="icon-button" aria-label="Send message">${icon('arrow')}</button></form>${group?`<p class="vc-hint">Everyone in this group sees what you write here · ${actionButton('vc-details','Details','','vc-inline')}</p>`:''}</footer>`;}
   /* Group approval: same undo window as topic answers (P54); answered elsewhere links to that chat (P56). */
-  let approval = '', approvalTimer = 0;
+  let approval = '', approvalTimer = 0, openedAt = '';
   function approvalCard(){const q='<strong>Bank: let Finance give tasks?</strong>';let body;
-    if(approval==='sent')body='<p>You allowed Bank always</p>';
-    else if(approval)body=`${q}<div class="vc-approval-pending"><span role="status">${approval} · sent in a moment</span>${actionButton('vc-approval-undo','Undo','','vc-inline')}</div>`;
+    if(screen==='group-elsewhere')body=actionButton('vc-bank','Answer in Bank ›','','vc-inline');
+    else if(screen==='group-other-phone')body='<p class="vc-muted">Only someone with Bank on their phone can answer this.</p>';
+    else if(approval==='sent')body='<p>You allowed Bank always</p>';
+    else if(approval)body=`${q}<div class="vc-approval-pending"><span role="status">${approval} · sent in a moment</span><button class="vc-inline" data-action="vc-approval-undo" aria-label="Undo ${approval}">Undo</button></div>`;
     else body=`${q}<div class="vc-approval-buttons">${['Allow once','Always','No'].map(o=>actionButton('vc-approval',o,o)).join('')}</div>`;
     return `<section class="vc-approval" data-testid="group-approval">${body}</section>`;}
   function draw(){
@@ -41,6 +43,9 @@
     }
     contentRoot().innerHTML=header(done,ticket)+(ticket?`<div class="vc-progress"><span>${verdict==='Accept'?'Done':'Ready for review'}</span><small>3 of 3 tasks done</small>${actionButton('vc-tasks',icon('down'),'','icon-button')}</div>`:'')+`<div class="scroll vc-feed">${ticket?`<div class="day">Today</div><div class="vc-bubble vc-result"><b>Result</b><p>${screen==='ticket-no-question'?'The helper finished the work.':'Your fish test page is ready.'}</p>${screen==='ticket-review'?`<button class="vc-artifact" data-action="vc-artifact"><div class="vc-fish" role="img" aria-label="Fish test page preview"><span>THE UNDERWATER WORLD</span><strong>Meet the fish</strong><svg viewBox="0 0 240 80" aria-hidden="true"><path d="M45 40Q100-15 175 40Q100 95 45 40M175 40l35-28v56z" fill="#2fc6a3"/><circle cx="75" cy="34" r="4" fill="#06231c"/></svg></div><span>Fish test page <b>Open ↗</b></span></button>`:''}<small>14:33</small></div>${verdict?pill(verdict==='Accept'?'Accepted':'Changes requested'):''}`:pill('Finance started this group')+bubbleText(done?'The car tax is paid.':'I’ve brought Home and Bank into this group.','Finance')+(done?pill('This group is done'):bubbleText('We’ll check the payment details here.')+bubbleText('I found last year’s payment.','Bank')+approvalCard()+`<button class="vc-task" data-action="vc-source"><small>Task</small><strong>Check last year’s payment</strong><span>Done ${icon('chevron')}</span></button>`+sent.map(t=>bubbleText(t,'',true)).join(''))}</div>`+(done?'<footer class="vc-readonly">Read only</footer>':`${ticket&&screen==='ticket-review'&&!verdict?`<div class="vc-review-bar">${actionButton('vc-verdict','Accept','Accept','vc-verdict primary')}${actionButton('vc-verdict','Ask for changes','Ask for changes','vc-verdict')}</div>`:''}${composer(!ticket)}`);
     if(screen==='group-sent'){const feed=contentRoot().querySelector('.vc-feed');feed.scrollTop=feed.scrollHeight;}
+    /* The room opens at an open approval card, just above the composer (P28); once per opening. */
+    else if(screen!==openedAt&&!approval&&!done&&!ticket)contentRoot().querySelector('[data-testid=group-approval] .vc-approval-buttons')?.closest('section').scrollIntoView({block:'end'});
+    openedAt=screen;
     const form=contentRoot().querySelector('form');if(form)form.onsubmit=e=>{e.preventDefault();const input=form.elements.message;if(!input.value.trim())return;if(ticket){contentRoot().querySelector('.vc-feed').insertAdjacentHTML('beforeend',bubbleText(input.value,'',true));input.value='';}else{sent.push(input.value.trim());screen='group-sent';draw();}const feed=contentRoot().querySelector('.vc-feed');feed.scrollTop=feed.scrollHeight;};
   }
   const oldRender=render, oldNavigate=navigate, oldReview=review, oldInfo=renderInfo;
@@ -49,7 +54,7 @@
   review=function(key){
     if(key==='question-approval')key='ticket-review';
     if(!entries.some(([id])=>id===key))return oldReview(key);
-    resetReviewState();approval='';clearTimeout(approvalTimer);sent=key==='group-sent'?['I can bring dessert']:[];verdict='';muted=false;
+    resetReviewState();approval='';openedAt='';clearTimeout(approvalTimer);sent=key==='group-sent'?['I can bring dessert']:[];verdict='';muted=false;
     if(key==='groups'){navigate('chats');contentRoot().querySelector('.vc-groups')?.scrollIntoView({block:'end'});}
     else if(key.startsWith('info-')){agentOpen=key!=='info-collapsed';jobOpen=key==='info-job';infoTab='Photos';navigate('ticket');navigate('info');if(jobOpen)contentRoot().querySelector('#vc-job').scrollIntoView({block:'start'});}
     else navigate(key);
@@ -69,9 +74,10 @@
     if(a==='vc-mute'){muted=!muted;el.setAttribute('aria-pressed',String(muted));el.setAttribute('aria-label',muted?'Unmute notifications':'Mute notifications');toast(muted?'Notifications muted':'Notifications on');}
     if(a==='vc-approval'){approval=v;draw();clearTimeout(approvalTimer);approvalTimer=setTimeout(()=>{approval=approval?'sent':'';draw();},5000);}
     if(a==='vc-approval-undo'){clearTimeout(approvalTimer);approval='';draw();}
-    if(a==='vc-members')sheet('Members',`${badges()}<h3>Pay car tax ${screen==='group-done'?'2026':'2027'}</h3><div class="vc-member-list"><div><i class="vc-member">You</i><span>You<small>Owner</small></span></div><div><i class="vc-member">F</i><span>Finance<small>Started the group</small></span></div><div><i class="vc-member">H</i><span>Home</span></div><div><i class="vc-member bank">B</i><span>Bank</span></div></div><button class="wide-btn" data-action="vc-source">Open the Finance topic</button><details class="vc-members-note"><summary>ⓘ What members see</summary><p>Members see the group's messages from when they joined. They do not see the rest of the Finance topic. People removed keep the files they already fetched.</p></details>`);
+    if(a==='vc-members')sheet('Group info',`${badges()}<h3>Pay car tax ${screen==='group-done'?'2026':'2027'}</h3><div class="vc-member-list"><div><i class="vc-member" aria-hidden="true">${icon('person')}</i><span>You<small>Owner</small></span></div><div><i class="vc-member">F</i><span>Finance<small>Started the group</small></span></div><div><i class="vc-member">H</i><span>Home</span></div><div><i class="vc-member bank">B</i><span>Bank</span></div></div><button class="wide-btn" data-action="vc-source">Open the Finance topic</button><details class="vc-members-note"><summary>ⓘ What members see</summary><p>Members see the group's messages from when they joined. They do not see the rest of the Finance topic. People removed keep the files they already fetched.</p></details>`);
     if(a==='vc-details')sheet('Group details',`${badges()}<h3>Pay car tax ${screen==='group-done'?'2026':'2027'}</h3><p class="sheet-note">Finance · Home · Bank</p><p>Everyone in this group sees what you write here.</p>`);
-    if(a==='vc-source')sheet('From ticket','<h3>Pay car tax</h3><p class="sheet-note">Finance · Home · Bank</p><div class="checklist-row">✓ Check last year’s payment</div><div class="checklist-row">○ Prepare this year’s payment</div>');
+    if(a==='vc-bank')sheet('Bank topic','<h3>Bank: let Finance give tasks?</h3><div class="vc-approval-buttons"><button>Allow once</button><button>Always</button><button>No</button></div>');
+    if(a==='vc-source')sheet('Finance topic','<h3>Pay car tax</h3><p class="sheet-note">Finance · Home · Bank</p><div class="checklist-row">✓ Check last year’s payment</div><div class="checklist-row">○ Prepare this year’s payment</div>');
     if(a==='vc-tasks')sheet('Tasks',['Prepare the page','Run checks','Deliver the result'].map(t=>`<div class="checklist-row">✓ ${t}</div>`).join(''));
     if(a==='vc-ticket-info'){chat='ticket';navigate('info');}
     if(a==='vc-verdict'){if(v==='Ask for changes')sheet('Ask for changes','<textarea id="vc-feedback" class="caption-input" aria-label="Requested changes" placeholder="What would you like changed?"></textarea>'+actionButton('vc-submit-changes','Send changes','','wide-btn primary'));else{verdict=v;draw();}}
