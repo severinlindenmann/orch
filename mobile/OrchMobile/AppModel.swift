@@ -38,6 +38,8 @@ final class AppModel {
     private(set) var announcement: String?
     /// Bumps on each successful answer / send (drives haptics).
     private(set) var answerTick = 0
+    /// Bumped for announcements that are not an answer, send or error (e.g. answered on the computer).
+    private(set) var noticeTick = 0
     private(set) var sendTick = 0
     private(set) var errorTick = 0
     var message: String?            // plain error / info line
@@ -66,6 +68,8 @@ final class AppModel {
     let speech: SpeechPlayer
     /// question id -> option waiting out the undo window before it is sent
     private(set) var pendingAnswers: [String: String] = [:]
+    /// When each pending answer was tapped: the visible countdown counts from this, not from when the card appeared.
+    private(set) var pendingAnswerAt: [String: Date] = [:]
     private(set) var sendingAnswers: Set<String> = []
     private var undoTimers: [String: Task<Void, Never>] = [:]
     /// 5 s undo window; UI tests widen it with `-undoSeconds N`.
@@ -197,18 +201,18 @@ final class AppModel {
     /// Tap = start the undo window; the answer is sent when it ends.
     func chooseAnswer(_ q: Question, _ option: String) {
         guard answers[q.id] == nil, pendingAnswers[q.id] == nil else { return }
-        pendingAnswers[q.id] = option
+        pendingAnswers[q.id] = option; pendingAnswerAt[q.id] = Date()
         undoTimers[q.id] = Task { [undoDelay] in
             try? await Task.sleep(for: undoDelay)
             guard !Task.isCancelled else { return }
             sendingAnswers.insert(q.id)
             await answer(q, with: option)
-            sendingAnswers.remove(q.id); pendingAnswers[q.id] = nil; undoTimers[q.id] = nil
+            sendingAnswers.remove(q.id); pendingAnswers[q.id] = nil; pendingAnswerAt[q.id] = nil; undoTimers[q.id] = nil
         }
     }
     func undoAnswer(_ q: Question) {
         guard !sendingAnswers.contains(q.id) else { return }
-        undoTimers[q.id]?.cancel(); undoTimers[q.id] = nil; pendingAnswers[q.id] = nil
+        undoTimers[q.id]?.cancel(); undoTimers[q.id] = nil; pendingAnswers[q.id] = nil; pendingAnswerAt[q.id] = nil
     }
     /// The "Got it" line the workspace sent for a text of this phone.
     func ack(for messageId: String) -> TicketUpdate? { updates.first { $0.replyTo == messageId && $0.kind == "ack" } }
@@ -427,9 +431,12 @@ final class AppModel {
             switch e {
             case .answered(_, let qid, let opt):
                 answerSentAt[qid] = Date()
-                answers[qid] = opt; answerTick += 1; announcement = "Answer sent: \(opt)"
+                let shown = questions.first { $0.id == qid }.map { QuestionCardRules.label($0, opt) } ?? opt
+                answers[qid] = opt; answerTick += 1; announcement = "Answer sent: \(shown)"
             case .answerTaken(_, let qid, let text):
-                answers[qid] = text; answeredElsewhere.insert(qid); message = nil
+                // Only the answer value is kept; "" = answered elsewhere, value unknown (the card then shows no chip).
+                answers[qid] = Outbox.takenAnswer(from: text) ?? ""; answeredElsewhere.insert(qid); message = nil
+                noticeTick += 1; announcement = "Answered on your computer"
             case .sent: sendTick += 1; announcement = "Message sent"
             case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
             case .unauthorized: handle(RelayError.unauthorized)
@@ -704,7 +711,7 @@ final class AppModel {
     private func reset() {
         defaults.removeObject(forKey: "pairedPhoneId")
         for t in undoTimers.values { t.cancel() }
-        undoTimers = [:]; pendingAnswers = [:]; sendingAnswers = []
+        undoTimers = [:]; pendingAnswers = [:]; pendingAnswerAt = [:]; sendingAnswers = []
         outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil; olderFailed = false
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
