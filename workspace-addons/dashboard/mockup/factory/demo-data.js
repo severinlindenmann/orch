@@ -11,5 +11,5 @@ window.FactoryData = {
     {title:'Started a small order to tidy test names',why:'Within the approved test cleanup goal and $3 order limit.',result:'1 of 2 orders active · 13:20'},
     {title:'Shortened the daily report',why:'Anna asked for decisions first and details below.',result:'Taste decision within the reporting house rule · 14:15'}
   ],
-  rules:[['House rules','Keep changes small and reversible. Use plain English.'],['Your time','Ask Anna or Ben together at 18:30; aim for 10 minutes a day.'],['Notifications','Send one daily digest. Interrupt only for a blocked stop.'],['Default line','Draft → Build → Check → Ship it? Always ask before shipping.'],['Crew per role','Helper manages with Claude API · Codex builds · Claude API reviews.']]
+  rules:[['House rules','Keep changes small and reversible. Use plain English.'],['Your time','Ask Anna or Ben together at 18:30; aim for 10 minutes a day.'],['Notifications','Send one daily digest. Interrupt only for a blocked stop.'],['Default line','Draft → Build → Check → Ship it? Always ask before shipping.'],['Crew per role','Helper manages with Review agent · Code agent builds · Review agent reviews.']]
 };
