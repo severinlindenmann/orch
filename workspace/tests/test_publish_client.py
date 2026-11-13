@@ -482,7 +482,7 @@ def test_view_json_lists_files_without_any_key(proj, run, pub):
     code, out, _ = run("publish", "view", "--json")
     v = json.loads(out)
     assert code == 0 and v["schema"] == "orch.addon-view/1" and key not in out and "#k=" not in out
-    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"] == "Files")
+    files = next(b for b in v["blocks"] if b["type"] == "list" and b["title"].startswith("Shared"))
     assert (
         files["items"][0]["title"] == "a.txt" and "link" not in files["items"][0]
     )  # http test server: no https link

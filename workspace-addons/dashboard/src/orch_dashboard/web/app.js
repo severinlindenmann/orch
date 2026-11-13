@@ -148,20 +148,23 @@ function skeletonFor(kind) {
     : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
     : kind === 'section' ? [stack(3, 'sk-row')]
+    : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-stack sk-side'}, stack(4, 'sk-tab')), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
     : [bar('sk-title'), stack(3)];
   return h('div', {className:'skeleton-page sk-' + kind, 'data-key':'loading', 'aria-busy':'true'}, h('p', {className:'sr-only', role:'status'}, 'Loading…'), shape);
 }
 // The skeleton for an address before the state is there (no state needed).
 function hashKind(hash) {
   const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
-  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : ['addon', 'open', 'notes', 'chat', 'general', 'settings'].includes(k) ? 'page' : 'home';
+  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : k === 'settings' ? 'settings' : ['addon', 'open', 'notes', 'chat', 'general', 'settings'].includes(k) ? 'page' : 'home';
 }
 function notFoundPage() {
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
     h('div', {className:'state-frame', 'data-key':'not-found'}, h('section', {className:'card error-hero'},
-      h('h2', {}, 'We couldn’t find that page'), h('p', {className:'muted'}, 'The link may be out of date, or the page may have moved.'),
+      h('span', {className:'error-number', 'aria-hidden':'true'}, '404'),
+      h('h2', {}, 'We couldn’t find that page'),
+      h('p', {className:'muted'}, 'The link may be out of date, or the page may have moved.', h('br'), 'Your workspace is still here.'),
       h('div', {className:'actions row'}, h('a', {className:'btn primary sm', href:'#home'}, 'Go to Home'),
-        addons().filter(a => a.dashboard || a.page).map(a => h('a', {className:'btn outline sm', href:'#addon/' + encodeURIComponent(a.name)}, addonLabel(a)))))));
+        h('a', {className:'btn ghost sm', href:'#settings/addons'}, 'Check installed add-ons')))));
 }
 // Sidebar icons (trusted constants, same drawings as the design).
 const NAV_ICON = {
@@ -247,8 +250,8 @@ function route() {
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|phone|addons))?$/.exec(hash);
-  if (settingsHash && !snapshot && state?.settings) return {kind:'settings', hash:'#settings', tab:settingsHash[1] || 'general'};
+  const settingsHash = /^#settings(?:\/(general|agent|phone|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) { const [tab, addon] = (settingsHash[1] || 'general').split('/'); return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
@@ -270,7 +273,7 @@ function route() {
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
-  if (r.kind === 'settings') settingsTab = r.tab;
+  if (r.kind === 'settings') { settingsTab = r.tab; settingsAddon = r.addon; }
   if (r.kind === 'page' && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
@@ -585,6 +588,11 @@ main.addEventListener('click', async event => {
     settingsConfirm('Move to private?', 'Removes them from the team repo and keeps your files.', '', 'Move to private', send);
     return;
   }
+  if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
+  if (action === 'phone-pair') { phonePairDialog(); return; }
+  if (action === 'relay-setup') { relaySetupDialog(); return; }
+  if (action === 'relay-reconnect') { await relayReconnect(control); return; }
+  if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
     const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
     if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;

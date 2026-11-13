@@ -290,8 +290,9 @@ function home() {
       h('p', {className:'quiet-note', 'data-key':'finished-note'}, 'Finished work stays in Tickets. ', h('a', {href:'#tickets'}, 'See finished tickets →')))));
 }
 function connectionNotice(connectionEl, hadState) {
-  connectionEl.replaceChildren(h('p', {className:'grow'}, hadState ? "Can't reach orch. Showing the last update, trying again every few seconds." : "Can't reach orch yet. Trying again shortly."),
-    button('Try now', 'outline sm', () => refresh()), h('p', {className:'meta'}, 'Is the computer asleep? orch runs on the computer that owns this workspace. Wake it up and check that it is connected.'));
+  connectionEl.replaceChildren(h('div', {className:'grow'}, h('h3', {}, "Can’t reach the workspace"),
+    h('p', {}, hadState ? 'Showing the last saved view. Changes are unavailable until you reconnect.' : 'Reconnect to load your workspace. Your data has not been changed.')),
+    button('Try again', 'outline sm', () => refresh()));
   connectionEl.hidden = false;
 }
 // Chat (former General) lives in pages/chat.js.
