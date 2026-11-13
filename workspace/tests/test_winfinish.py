@@ -47,7 +47,7 @@ def test_finisher_reinstalls_saves_the_list_and_runs_the_next_step(tmp_path):
     log = (tmp_path / "finish.log").read_text()
     assert "then ok" in log and log.rstrip().endswith("RESULT ok: dashboard installed and turned on")
     assert json.loads((tmp_path / "addons.json").read_text()) == [{"name": "dashboard"}]
-    assert (tmp_path / "tool-env").is_dir()  # the free-check renamed it back
+    assert (tmp_path / "tool-env").is_dir()
 
 
 def test_a_failed_reinstall_changes_nothing(tmp_path):
@@ -58,22 +58,15 @@ def test_a_failed_reinstall_changes_nothing(tmp_path):
     assert not (tmp_path / "addons.json").exists()  # the add-on list stays as it was
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the lock is simulated with POSIX folder permissions")
 def test_orch_still_running_changes_nothing(tmp_path):
-    """The tool folder can not be renamed (orch still runs from it): give up, change nothing."""
+    """Something still runs from the tool folder: give up, change nothing (POSIX simulates the held file)."""
     job = _job(tmp_path)
     job["wait"] = 1
-    locked = tmp_path / "locked"
-    locked.mkdir()
-    job["free"] = [str(locked / "tool-env")]
-    (locked / "tool-env").mkdir()
-    locked.chmod(0o500)  # no rename inside: like Windows while orch runs
-    try:
-        assert _run_finisher(tmp_path, job).returncode == 1
-    finally:
-        locked.chmod(0o700)
+    job["test_held"] = job["free"]
+    assert _run_finisher(tmp_path, job).returncode == 1
     assert "still in use after 1s" in (tmp_path / "finish.log").read_text()
     assert not (tmp_path / "addons.json").exists()
+    assert (tmp_path / "tool-env").is_dir()  # nothing was renamed
 
 
 def test_a_failing_next_step_is_reported(tmp_path):

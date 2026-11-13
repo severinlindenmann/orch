@@ -301,14 +301,14 @@ def test_an_addon_page_shown_inside_the_app_opens_there_not_in_a_new_tab(tmp_pat
     )  # not running: still offers Start
 
 
-def test_settings_general_panel_holds_mobile_mode_name_folder_and_share_together():
+def test_settings_general_panel_holds_look_name_folder_and_share_together():
     """panel(id, body) takes ONE body: the General panel must pass an array, or all but the first part is dropped."""
     src = webjs.all_js()
     start = src.index("panel('general', ")
     end = src.index("panel('agent', ", start)
     part = src[start:end]
     assert part.startswith("panel('general', [") and part.rstrip().endswith("]),")
-    for want in ("OrchMobileMode?.settingsSection(h)", "'Name'", "'Folder'", "shareCard(settings)"):
+    for want in ("OrchLook?.settingsSection()", "'Name'", "'Folder'", "shareCard(settings)"):
         assert want in part, want
     assert (
         "const panel = (id, body) =>" in src[: src.index("function settingsPage")]

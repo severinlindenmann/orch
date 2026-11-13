@@ -184,7 +184,61 @@ def _record_hook(argv: list[str]) -> int:
         dog.cancel()
 
 
+STAND_IN_MAIN = """
+
 def main():
+    argv = sys.argv[1:]
+    if is_record_hook(argv):  # a tool's hook: never block the tool, the same exits as orch_entry
+        if "--strict" in argv:
+            sys.stderr.write("Refused: nothing was recorded.\\n")
+            return 2
+        sys.stderr.write("orch: nothing was recorded.\\n")
+        return 0
+    sys.stderr.write("orch is still updating, try again in a moment.\\n")
+    return 3
+"""
+
+
+def stand_in_source() -> str:
+    """orch's stand-in while a reinstall replaces orch: is_record_hook copied from here, and a main that says
+    "still updating". Built when written (rarely), so the hook rule has one source."""
+    import inspect
+
+    head = f'"""orch\'s stand-in while a reinstall replaces orch ({STAND_IN_TAG})."""\nimport sys\n\n\n'
+    return head + inspect.getsource(is_record_hook) + STAND_IN_MAIN
+
+
+STAND_IN_TAG = "orch_entry stand-in v2; no package owns it"
+STAND_IN_PTH = "zz-orch-stand-in.pth"
+
+
+def ensure_stand_in() -> None:
+    """While uv replaces orch's packages, orch_entry is briefly missing and the console script failed with a
+    traceback (No module named 'orch_entry'). A .pth (which no package owns, so a reinstall leaves it) puts a
+    folder outside site-packages at the END of sys.path; its orch_entry is found only while the real one is
+    gone and says "still updating". Written once per tool environment; best effort."""
+    try:
+        import sysconfig
+
+        site = Path(sysconfig.get_paths()["purelib"])
+        folder = Path(sys.prefix) / "orch-stand-in"
+        pth = site / STAND_IN_PTH
+        line = str(folder) + "\n"
+        entry = folder / "orch_entry.py"
+        if pth.is_file() and pth.read_text(encoding="utf-8") == line and entry.is_file():
+            if STAND_IN_TAG in entry.read_text(encoding="utf-8")[:200]:
+                return
+        if not (Path(sys.prefix) / "uv-receipt.toml").is_file() or not site.is_dir():
+            return  # only in orch's uv tool environment
+        folder.mkdir(exist_ok=True)
+        (folder / "orch_entry.py").write_text(stand_in_source(), encoding="utf-8")
+        pth.write_text(line, encoding="utf-8")
+    except (OSError, KeyError, ValueError):
+        pass
+
+
+def main():
+    ensure_stand_in()
     argv = sys.argv[1:]
     if is_record_hook(argv):
         return _record_hook(argv)

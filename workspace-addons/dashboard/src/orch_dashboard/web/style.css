@@ -425,5 +425,10 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .sk-story{height:200px}
 .sk-row{height:40px}
 @media(max-width:899px){.sk-columns{grid-template-columns:minmax(0,1fr)}}
+
+/* Page not found (errors/not-found.html). */
+.error-hero{min-height:320px;display:grid;align-content:center;justify-items:start;gap:16px;padding:40px}
+.error-number{font-size:48px;line-height:1;color:var(--text-faint);font-weight:600}
+@media(max-width:600px){.error-hero{padding:24px;min-height:240px}}
 /* Page heading with an actions slot: actions sit at the end of the title row */
 .page-heading:has(>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}

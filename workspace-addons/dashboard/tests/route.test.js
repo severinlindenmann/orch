@@ -76,8 +76,10 @@ test('shared words: status, steps and the updated time', () => {
   assert.equal(H.updatedText(now - 3 * 60000, now), 'Updated 3 min ago');
 });
 test('#settings is General; #settings/<tab> opens that tab on the same Settings page', () => {
-  assert.deepEqual({...route('#settings', [])}, {kind:'settings', hash:'#settings', tab:'general'});
-  for (const tab of ['general', 'agent', 'phone', 'addons']) assert.deepEqual({...route('#settings/' + tab, [])}, {kind:'settings', hash:'#settings', tab});
+  assert.deepEqual({...route('#settings', [])}, {kind:'settings', hash:'#settings', tab:'general', addon:null});
+  for (const tab of ['general', 'agent', 'phone', 'addons']) assert.deepEqual({...route('#settings/' + tab, [])}, {kind:'settings', hash:'#settings', tab, addon:null});
+  assert.deepEqual({...route('#settings/addons/publish', [])}, {kind:'settings', hash:'#settings', tab:'addons', addon:'publish'});  // one add-on's own settings page
+  assert.equal(route('#settings/phone/publish', []).kind, 'notfound');
   assert.equal(route('#settings/nope', []).kind, 'notfound');  // an unknown tab is an unknown address: Page not found
 });
 test('the phone tab is role=tab and choosing it keeps Settings open at #settings/phone', () => {

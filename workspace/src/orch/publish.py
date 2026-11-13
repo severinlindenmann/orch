@@ -339,13 +339,14 @@ def view(root: Path) -> dict:
         for a in r["apps"]
     ]
     blocks: list = [
-        {"type": "stat", "label": "Files", "value": len(files)},
-        {"type": "stat", "label": "Apps", "value": len(apps)},
+        {
+            "type": "list",
+            "title": f"Shared · {len(files)} link{'s' if len(files) != 1 else ''}" if files else "Shared",
+            "items": files[:cap]
+            or [{"title": "No shared links", "subtitle": "Share a file to create a private link."}],
+            "more": max(0, len(files) - cap),
+        }
     ]
-    if files:
-        blocks.append(
-            {"type": "list", "title": "Files", "items": files[:cap], "more": max(0, len(files) - cap)}
-        )
     if apps:
         blocks.append({"type": "list", "title": "Apps", "items": apps[:cap], "more": max(0, len(apps) - cap)})
     return {

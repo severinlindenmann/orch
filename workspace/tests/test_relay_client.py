@@ -1966,7 +1966,7 @@ def test_view_lists_peers_allows_and_recent_messages(proj, run, rel):
 
     schema = json.loads((CONTRACTS / "addon-view.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(v)
-    people, recent = v["blocks"]
+    recent, people = v["blocks"]  # messages first, then who you can talk to
     assert v["notice"] == "Connected. Send messages and files to other workspaces."
     assert people["title"] == "Workspaces you can talk to · 1"
     first = people["items"][0]
@@ -2026,7 +2026,7 @@ def test_view_without_messages_names_a_workspace_to_try(proj, run, rel):
     rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports", "description": "Numbers"}]
     connect(run, rel)
     v = json.loads(run("relay", "view", "--json")[1])
-    assert v["blocks"][1]["items"][0]["subtitle"] == "Send one from the phone or from another workspace."
+    assert v["blocks"][0]["items"][0]["subtitle"] == "Send one from the phone or from another workspace."
 
 
 @pytest.mark.parametrize(
