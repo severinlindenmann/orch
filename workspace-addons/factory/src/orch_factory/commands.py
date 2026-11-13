@@ -55,9 +55,9 @@ def propose(root, order, data):
             raise Refused("This is an autopilot order. Use orch factory autopilot.", "invalid")
         # Read-only commands never log. A mutating proposal records ignored agent answers in core history.
         for q in authority.questions(store, ticket):
-            if q.get("answer") is not None and str(q.get("answered_by") or "").startswith("agent:"):
+            if q.get("answer") is not None and authority.who(q).startswith("agent:"):
                 text = f"Factory ignored the agent answer to {q['id']}; a person must press Start."
-                if not any(h.get("text") == text for h in ticket.get("history", [])):
+                if not any(h.get("text") == text for h in authority.history(ticket)):
                     orchcli.call(root, "log", order, text, write=True)
                     ticket = order_ticket(root, order)
         if authority.from_ticket(store, ticket):
@@ -103,11 +103,7 @@ def propose(root, order, data):
         if authority.from_ticket(store, ticket):
             raise Refused("This order has started. Make a change proposal.")
         for q in authority.questions(store, ticket):
-            if (
-                q.get("kind") == "factory:start"
-                and q.get("action") != action
-                and (q.get("answer") is None or not str(q.get("answered_by") or "").startswith("human:"))
-            ):
+            if q.get("kind") == "factory:start" and q.get("action") != action and not authority.human(q):
                 store.journal_append(
                     {"type": "superseded", "order": order, "q": q["id"], "kind": "factory:start"}
                 )

@@ -115,8 +115,8 @@ def expected(order, kind, rel, h, data):
 def answered_at(ticket, q):
     """When a person answered: the core's own history line for that answer (never a Factory file)."""
     want = f"Answered {q['id']}: {q['answer']}"
-    for h in ticket.get("history", []):
-        if h.get("text") == want and h.get("by") == q.get("answered_by"):
+    for h in history(ticket):
+        if h.get("text") == want and h.get("by") == who(q):
             try:
                 return datetime.fromisoformat(h["at"])
             except (KeyError, ValueError, TypeError):
@@ -134,8 +134,19 @@ def _when(text):
         return None
 
 
+def history(ticket):
+    """The order's history lines as the CLI shows them (`orch ticket show --json` is already the shown ticket)."""
+    lines = ticket.get("history")
+    return lines if isinstance(lines, list) else []
+
+
+def who(q):
+    """Who answered (core-recorded `answered_by` of the CLI JSON), "" when nobody did."""
+    return str(q.get("answered_by") or "")
+
+
 def human(q):
-    return q.get("answer") is not None and str(q.get("answered_by") or "").startswith("human:")
+    return q.get("answer") is not None and who(q).startswith("human:")
 
 
 def entries(store, ticket, journal=None):
@@ -224,9 +235,7 @@ def questions(store, ticket):
 
 def from_ticket(store, ticket):
     return any(
-        q.get("kind") == "factory:start"
-        and q.get("answer") == "Start"
-        and str(q.get("answered_by") or "").startswith("human:")
+        q.get("kind") == "factory:start" and q.get("answer") == "Start" and human(q)
         for q in questions(store, ticket)
     )
 

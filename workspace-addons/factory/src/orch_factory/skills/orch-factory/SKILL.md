@@ -1,6 +1,6 @@
 ---
 name: orch-factory
-description: "{{description}}"
+description: "Use when the owner describes an idea or a change bigger than one ticket (a feature, a page, a campaign, a report), says plan it or run it, or asks you to keep improving how the team works by yourself. You draft, propose the whole run and the owner presses Start. Not for a quick one-step task: do that on a normal ticket."
 ---
 # orch factory
 
@@ -14,21 +14,23 @@ the crew works → stops → Ship it**. Propose, don't configure: never hand the
 - The owner asks you to keep improving how the team works by yourself → an Autopilot proposal (below).
 - Not for a quick one-step task: just do it on a normal ticket.
 
-## 1. Idea → first small draft
+## Recipes
+
+### 1. Idea → first small draft
 
     orch factory idea "Online booking page" --file draft.md      # creates the order, stores draft v1
 
 The draft is one short page in plain words: what it is, for whom, 3 rough parts or screens, open questions. Answer in the
 chat with 3–5 lines and say where the draft is. Keep it small: the goal is that you and the owner mean the same thing.
 
-## 2. Polish together
+### 2. Polish together
 Every owner reply that changes the idea → a new version with "what changed" at the top:
 
     orch factory draft <order> --file draft.md
 
 Ask only what you cannot decide yourself. When the owner says "good, now plan it" (or similar), go to 3.
 
-## 3. Run proposal
+### 3. Run proposal
 Write the proposal (contract: `orch factory schema proposal`, schema `orch.factory.proposal/1`; `orch factory schema
 autopilot|change|stop` shows the others; `--help` of each command lists the fields) and send it:
 
@@ -49,7 +51,7 @@ what to change." **Never start the run yourself.** If the owner says "go" in the
 (dashboard, phone or Focus); only their answer counts.
 **Edit** = the owner says what to change → you send a new proposal (`propose` again; the old question stops counting).
 
-## 4. The run
+### 4. The run
 Each time you are woken, ask Factory what to do next and follow it:
 
     orch factory next <order>          # {"step": "start-crew" | "work" | "stop" | "ship" | "wait" | "edit" | "parked" | "resume" | "done", …}
@@ -66,18 +68,18 @@ Each time you are woken, ask Factory what to do next and follow it:
 - `done`: nothing is left to do for this order (shipped, or the autopilot grant has ended). Say so in one line and end
   your turn; do not start anything new on it.
 
-## 5. The owner talks during the run
+### 5. The owner talks during the run
 - **Tiny change** (within the approved scope: no new stage, no new done-means point, no new tool, no cost): just do it and
   record it — `orch factory tiny <order> --minutes 4 --what "Warmer button text"`. After 3 tiny changes or 30 minutes in
   total, Factory refuses: make a change proposal instead.
 - **Anything bigger**: `orch factory change <order> --file change.json` (what, +minutes, +cost, new ETA, which stage it lands
   in) and tell the owner in one line. Never widen the scope silently.
 
-## 6. Ship and learn
+### 6. Ship and learn
 After the owner answers **Ship it**, do exactly what the proposal's `ship.does` says, then write a 5-line summary on the
 order. If the owner repeated the same comment at stops, propose it as a house rule in the summary (the owner approves it).
 
-## Autopilot (only when the owner asks for it)
+### Autopilot (only when the owner asks for it)
 
     orch factory idea "Keep improving how we work"
     orch factory autopilot <order> --file autopilot.json     # may_decide: routine / taste · limits · 1, 3 or 7 days

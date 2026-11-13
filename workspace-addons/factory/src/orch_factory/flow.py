@@ -128,7 +128,7 @@ def derive(root, store, ticket, tickets=None):
         except Refused:
             return False
         line = f"Decided by agent:factory · {r.get('why', '')}"
-        for h in ticket.get("history", []):
+        for h in authority.history(ticket):
             if h.get("text") != line:
                 continue
             try:
@@ -142,7 +142,7 @@ def derive(root, store, ticket, tickets=None):
     def compute(e):
         q = e["q"]
         if authority.human(q):
-            return q["answer"], q["answered_by"]
+            return q["answer"], authority.who(q)
         r = decided.get(q["id"])
         if r and q.get("answer") is None and decided_ok(e, r):
             return r["answer"], "agent:factory"
@@ -318,7 +318,7 @@ def _log_ignored(root, store, order, d):
         text = f"Factory ignored the agent answer to {e['q']['id']}; a person must answer."
         if e["row"]["kind"] == "factory:start":
             text = f"Factory ignored the agent answer to {e['q']['id']}; a person must press Start."
-        if not any(h.get("text") == text for h in ticket.get("history", [])):
+        if not any(h.get("text") == text for h in authority.history(ticket)):
             orchcli.call(root, "log", order, text, write=True)
             ticket = commands.order_ticket(root, order)
 

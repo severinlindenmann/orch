@@ -26,7 +26,7 @@ def grants_of(store, ticket, journal=None):
                 {
                     "order": ticket["id"],
                     "q": q["id"],
-                    "by": q["answered_by"],
+                    "by": authority.who(q),
                     "from": at,
                     "until": at + timedelta(days=limits["days"]),
                     "may": e["data"]["may_decide"],
