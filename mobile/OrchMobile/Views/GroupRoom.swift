@@ -63,10 +63,13 @@ struct GroupRoomView: View {
                         }
                         // The bottom anchor alone lands short in a lazy list of rows with different heights: jump to the
                         // end marker once the rows are laid out (twice, as lazy rows settle their real heights).
+                        // The newest open approval card wins over the newest message: the card lands just above the composer.
                         .task(id: key) {
-                            proxy.scrollTo("group-bottom", anchor: .bottom)
+                            let answered = Set(model.answers.keys).union(model.pendingAnswers.keys).union(model.queuedAnswers.keys)
+                            let target = GroupRoomRules.openRowID(group, questions: model.questions, answered: answered) ?? "group-bottom"
+                            proxy.scrollTo(target, anchor: .bottom)
                             try? await Task.sleep(for: .milliseconds(300))
-                            proxy.scrollTo("group-bottom", anchor: .bottom)
+                            proxy.scrollTo(target, anchor: .bottom)
                         }
                         footer(group, onSent: { scrollToBottom(proxy) })
                     }
@@ -128,11 +131,11 @@ struct GroupRoomView: View {
                 Button { members = true } label: {
                     Text(group.title).themeFont(17, .semibold).lineLimit(1).truncationMode(.tail)
                 }.accessibilityIdentifier("group-members")
-                if let ticket = group.ticket {
-                    NavigationLink(value: ChatRoute.ticket(workspace: key.host, ticket: ticket)) {
-                        Text("From ticket ›").themeFont(13).foregroundStyle(Theme.brand)
-                    }
-                }
+                // Member names, like a messenger group; the topic link lives in the info screen.
+                group.members.enumerated().reduce(Text("")) { text, entry in
+                    text + Text(entry.offset == 0 ? "" : ", ") + group.memberText(entry.element.ws)
+                }.themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                    .accessibilityLabel(GroupRoomRules.subtitle(group)).accessibilityIdentifier("group-subtitle")
             }.frame(maxWidth: .infinity, alignment: .leading)
             if !group.closed {
                 TimelineView(.everyMinute) { context in
@@ -144,7 +147,7 @@ struct GroupRoomView: View {
             Button { members = true } label: {
                 Image(systemName: "info.circle").frame(width: 44, height: 44)
                     .background(Theme.surface2, in: Circle())
-            }.accessibilityLabel("Members")
+            }.accessibilityLabel("Group info")
         }.buttonStyle(PressStyle()).padding(.horizontal, 12).padding(.vertical, 12)
             .overlay(alignment: .bottom) { Theme.border.frame(height: 1) }
     }
@@ -243,9 +246,7 @@ struct GroupRoomView: View {
         let lastVisible = group.messages.last { visible.contains($0.id) }?.id
         model.markRead(GroupRoomRules.readKey(group), items: GroupRoomRules.readItems(group), atBottom: atBottom, lastVisibleId: lastVisible)
     }
-    private func privacy(_ group: PhoneGroup) -> String {
-        "Members see the group's messages from when they joined. They do not see the rest of the \(group.hostName) ticket."
-    }
+    private func privacy(_ group: PhoneGroup) -> String { GroupRoomRules.membersNote(group) }
 }
 
 struct GroupTaskView: View {
@@ -283,7 +284,6 @@ struct GroupApprovalView: View {
     let event: GroupEvent
     let group: PhoneGroup
     var late: Bool = false
-    @State private var sending = false
     private struct ApprovalOption: Identifiable { let id: String; let option: String; let label: String }
     /// The button word for a raw approval option; nil = unknown (no button).
     nonisolated static func approvalLabel(_ o: String) -> String? {
@@ -294,6 +294,11 @@ struct GroupApprovalView: View {
         default: nil
         }
     }
+    /// The line under a chosen answer during the undo window (same window as topic answers), then while it is sent.
+    nonisolated static func pendingText(_ answer: String, sending: Bool) -> String {
+        let label = approvalLabel(answer) ?? answer
+        return sending ? "\(label) · sending…" : "\(label) · sent in a moment"
+    }
     private var result: GroupEvent? {
         guard let delegate = event.delegate else { return nil }
         return group.messages.compactMap(\.event).last { $0.delegate == delegate && ["approved", "denied"].contains($0.kind) }
@@ -303,6 +308,21 @@ struct GroupApprovalView: View {
             if let result {
                 let text = GroupRoomRules.eventText(result, group: group, ownAnswer: model.ownGroupAnswer(for: result, in: group))
                 (group.isExternal(result.ws ?? "") ? Text(text).italic().foregroundColor(Theme.muted) : Text(text)).themeFont(15)
+            } else if let id = event.questionMessage, let answer = model.pendingAnswers[id],
+                      let question = model.questions.first(where: { $0.id == id }) {
+                let sending = model.sendingAnswers.contains(id)
+                Text(question.message.body.text).themeFont(17, .semibold)
+                HStack(spacing: 8) {
+                    Text(Self.pendingText(answer, sending: sending)).themeFont(13).foregroundStyle(Theme.muted)
+                        .accessibilityIdentifier("group-approval-pending")
+                    Spacer(minLength: 0)
+                    if !sending {
+                        Button { model.undoAnswer(question) } label: {
+                            Text("Undo").themeFont(15, .medium).foregroundStyle(Theme.brand)
+                                .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        }.accessibilityIdentifier("group-undo")
+                    }
+                }
             } else if let answer = model.ownGroupAnswer(for: event, in: group) {
                 switch Self.approvalLabel(answer) {
                 case "No"?: group.memberText(event.ws ?? "", prefix: "You said no to ", suffix: "").themeFont(15)
@@ -315,7 +335,7 @@ struct GroupApprovalView: View {
                 case .buttons(let question):
                     Text(question.message.body.text).themeFont(17, .semibold)
                     if let answer = model.answers[question.id] { Text(answer).themeFont(13).foregroundStyle(Theme.muted) }
-                    else if sending || model.queuedAnswers[question.id] != nil { Text("Waiting for approval").themeFont(13).foregroundStyle(Theme.muted) }
+                    else if model.queuedAnswers[question.id] != nil { Text("Waiting for approval").themeFont(13).foregroundStyle(Theme.muted) }
                     else if !group.closed {
                         // Only options with a known meaning get a button (an unknown one must not read "No" and send itself).
                         let options = question.message.body.options.enumerated().compactMap { index, option in
@@ -323,15 +343,21 @@ struct GroupApprovalView: View {
                         }
                         HStack {
                             ForEach(options) { entry in
-                                Button(entry.label) {
-                                    sending = true
-                                    Task { await model.answer(question, with: entry.option); sending = false }
-                                }.themeFont(15, .medium).frame(maxWidth: .infinity, minHeight: 44)
+                                Button(entry.label) { model.chooseAnswer(question, entry.option) }.themeFont(15, .medium).frame(maxWidth: .infinity, minHeight: 44)
                                     .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.s))
                             }
                         }
                     }
-                case .answerInWorkspace: group.memberText(event.ws ?? "", prefix: "Answer in ").themeFont(15)
+                case .answerInWorkspace:
+                    let elsewhere = GroupRoomRules.answerElsewhere(event, group: group, paired: model.workspaces.map(\.id))
+                    if let route = elsewhere.route {
+                        NavigationLink(value: route) {
+                            (Text(elsewhere.text) + Text(" ›")).themeFont(15, .medium).foregroundStyle(Theme.brand)
+                                .frame(minHeight: 44, alignment: .leading)
+                        }.accessibilityIdentifier("group-approval-elsewhere")
+                    } else {
+                        Text(elsewhere.text).themeFont(15).foregroundStyle(Theme.muted)
+                    }
                 case .closed: Text("Answered").themeFont(15)
                 }
             }
@@ -349,6 +375,7 @@ struct GroupMembersView: View {
     let key: GroupKey
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var note = false
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -357,21 +384,51 @@ struct GroupMembersView: View {
                         GroupBadges(group: group)
                         Text(group.title).themeFont(24, .bold)
                         VStack(alignment: .leading, spacing: 16) {
-                            Text("You · owner").themeFont(17)
+                            row(subtitle: "Owner") {
+                                Image(systemName: "person.fill").themeFont(15).foregroundStyle(Theme.brand)
+                                    .frame(width: 34, height: 34).background(Theme.surface3, in: Circle()).accessibilityHidden(true)
+                            } name: { Text("You") }
                             ForEach(group.members, id: \.ws) { member in
                                 Divider()
-                                HStack(spacing: 12) {
+                                row(subtitle: member.ws == key.host ? "Started the group" : nil) {
                                     GroupMemberBadge(group: group, ws: member.ws, size: 34)
-                                    group.memberText(member.ws, suffix: member.ws == key.host ? " · started the group" : "").themeFont(15)
-                                }
+                                } name: { group.memberText(member.ws) }
                             }
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-                        Text("Members see the group's messages from when they joined. They do not see the rest of the \(group.hostName) ticket.").themeFont(15).foregroundStyle(Theme.muted)
-                        Text("People removed keep the files they already fetched").themeFont(13).foregroundStyle(Theme.muted)
+                        if let ticket = group.ticket {
+                            Button {
+                                dismiss()
+                                model.path.append(ChatRoute.ticket(workspace: key.host, ticket: ticket))
+                            } label: {
+                                HStack {
+                                    Text("Open the \(group.hostName) topic").themeFont(17)
+                                    Spacer()
+                                    ShellChevron()
+                                }.frame(minHeight: 44).padding(.horizontal, 16).contentShape(Rectangle())
+                                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
+                            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("group-open-topic")
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button { note.toggle() } label: {
+                                Label("What members see", systemImage: "info.circle").themeFont(13).foregroundStyle(Theme.muted)
+                                    .frame(minHeight: 44)
+                            }.accessibilityIdentifier("group-members-note").accessibilityValue(note ? "Shown" : "Hidden")
+                            if note { Text(GroupRoomRules.membersNote(group)).themeFont(13).foregroundStyle(Theme.muted) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
                     }.padding(16)
                 }
             }.background(Theme.bg).foregroundStyle(Theme.text).navigationTitle("Members").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+
+    private func row<Avatar: View>(subtitle: String?, @ViewBuilder avatar: () -> Avatar, name: () -> Text) -> some View {
+        HStack(spacing: 12) {
+            avatar()
+            VStack(alignment: .leading, spacing: 2) {
+                name().themeFont(15)
+                if let subtitle { Text(subtitle).themeFont(13).foregroundStyle(Theme.muted) }
+            }
         }
     }
 }

@@ -33,7 +33,14 @@ final class GroupRoomScrollUITests: XCTestCase {
         let app = launch()
         revealInList(app, "group-13-ws_finance001-grp_t_cartax2027").tap()
         XCTAssertTrue(element(app, "group-members").waitForExistence(timeout: 10))
-        // No transcript swipe: a long room must open at its newest message.
+        // No transcript swipe: a long room opens at its open approval card (P28), whole and above the composer;
+        // "Jump to latest" then reaches the newest message.
+        let card = element(app, "group-approval")
+        waitUntilHittable(card.buttons["Allow once"])
+        XCTAssertLessThanOrEqual(card.frame.maxY, element(app, "composer-field").frame.minY, "card not behind the composer")
+        let jump = element(app, "jump-latest")
+        waitUntilHittable(jump)
+        jump.tap()
         waitUntilHittable(app.staticTexts["Group scroll message 25"])
         let field = element(app, "composer-field")
         waitUntilHittable(field)
