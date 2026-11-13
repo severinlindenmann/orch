@@ -563,12 +563,32 @@ def _same_python() -> list[str]:
     return ["--python", base] if sys.platform == "win32" and base else []
 
 
+def _reinstall_flags() -> list[str]:
+    """Reinstall orch's own packages (named in this tool env's receipt) in place. A whole-env `--reinstall`
+    removes the env's Scripts/bin folder: on Windows that fails while any orch runs ("Access is denied",
+    "Executable already exists: orch.exe") and leaves the env without its packages. Per-package reinstall
+    swaps the packages only (uv drops add-ons that are no longer asked for either way). No receipt: the whole
+    env, as before."""
+    names: list[str] = []
+    try:
+        data = tomllib.loads((Path(sys.prefix) / "uv-receipt.toml").read_text(encoding="utf-8"))
+        for r in data["tool"]["requirements"]:
+            n = r.get("name") if isinstance(r, dict) else None
+            if isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", n) and n not in names:
+                names.append(n)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    if "orch-workspace" not in names:
+        return ["--reinstall"]
+    return [a for n in names for a in ("--reinstall-package", n)]
+
+
 def _tool_args(entries: list[dict]) -> list[str]:
     """uv arguments that install orch with these add-ons in one uv tool env. An entry that can not be
     installed any more is left out with a note (it stays in the registry), so one stale entry never blocks
     the rest."""
     # --refresh: a branch zip has the same URL after every push, so never take it from uv's cache
-    args = ["tool", "install", "--reinstall", "--refresh", *_same_python(), spec("workspace")]
+    args = ["tool", "install", *_reinstall_flags(), "--refresh", *_same_python(), spec("workspace")]
     for e in entries:
         why = _missing_source(e)
         if why:
