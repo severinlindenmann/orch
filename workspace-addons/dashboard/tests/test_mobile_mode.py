@@ -191,9 +191,9 @@ def test_mobile_mode_palette_has_aa_contrast():
 def test_settings_files_change_the_event_revision(ws, tmp_path, monkeypatch):
     """A changed helper command (config.toml) or a person's Allow (approvals file) must move the revision, or
     the open Settings page and the cached /api/state keep showing the old pending request (G3)."""
-    from orch_dashboard.events import Revisions
-
     from orch import addons
+
+    from orch_dashboard.events import Revisions
 
     monkeypatch.setattr(addons, "home", lambda root=None: tmp_path / "orchhome")
     r = Revisions(ws)

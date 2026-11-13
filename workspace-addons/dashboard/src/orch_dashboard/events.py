@@ -1,5 +1,6 @@
 """One bounded revision watcher per server, running only while streams are open."""
 
+import contextlib
 import hashlib
 import os
 import threading
@@ -41,14 +42,16 @@ class Revisions:
         return hashlib.sha256(repr(sorted(rows)).encode()).hexdigest()
 
     def settings_files(self):
-        files = [self.root / ".orch" / "config.toml", self.root / ".orch" / "workspace.toml",
-                 self.root / "workspace.toml"]
-        try:
+        files = [
+            self.root / ".orch" / "config.toml",
+            self.root / ".orch" / "workspace.toml",
+            self.root / "workspace.toml",
+        ]
+        # no orch installed or no home: the workspace files still count
+        with contextlib.suppress(Exception):
             from orch import addons
 
             files.append(addons.home() / "agent-approvals.json")
-        except Exception:  # noqa: BLE001 - no orch installed or no home: the workspace files still count
-            pass
         return files
 
     def join(self):
