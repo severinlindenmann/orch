@@ -231,7 +231,12 @@ def test_stand_in_answers_while_orch_entry_is_gone(tmp_path, monkeypatch):
     r = subprocess.run([*py, "status"], capture_output=True, text=True)
     assert r.returncode == 3 and "still updating" in r.stderr and "Traceback" not in r.stderr
     r = subprocess.run([*py, "record", "hook"], capture_output=True, text=True)
-    assert r.returncode == 0
+    assert r.returncode == 0 and r.stdout == ""
+    r = subprocess.run([*py, "record", "--by", "x", "hook", "--strict"], capture_output=True, text=True)
+    assert r.returncode == 2 and r.stderr == "Refused: nothing was recorded.\n"
+    for other in (["record", "auth"], ["record"], ["--json", "record", "hook"]):  # not a hook call: no pass
+        r = subprocess.run([*py, *other], capture_output=True, text=True)
+        assert r.returncode == 3 and "still updating" in r.stderr, other
     monkeypatch.setattr(orch_entry.sys, "prefix", str(tmp_path / "dev-venv"))  # not a uv tool env: nothing
     (tmp_path / "dev-venv").mkdir()
     (site / orch_entry.STAND_IN_PTH).unlink()
