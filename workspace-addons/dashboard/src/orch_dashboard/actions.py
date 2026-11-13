@@ -373,7 +373,7 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
 
 
 def _ticket_attach(a):
-    """Files added to a ticket that already exists (Focus composer): one line in the history, the files go through
+    """Files added to a ticket that already exists (a ticket page composer): one line in the history, the files go through
     `orch ticket attach` after it (see attachments / run_op)."""
     _only(a, ("ticket", "files"))
     if not isinstance(a.get("files"), list) or not a["files"]:
