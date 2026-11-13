@@ -392,7 +392,7 @@ def test_frontend_text_only_and_refresh():
     assert "textContent" in js and "createElement" in js
     assert "setInterval(refresh, 30000)" in js and "document.hidden" in js
     assert "row.uses === null" in js
-    assert "Nothing recorded yet. Counts appear after the first agent run." in js
+    assert "Nothing recorded yet. Counts appear after the first helper run." in js
     assert "dataset.prefix" in js
     for word in ("MCP", "NetBird", "VPN"):
         assert word not in js

@@ -347,7 +347,7 @@ function sharedFolderLine(t) {
 function copyLine(t) {
   const f = Array.isArray(t.work?.folders) ? t.work.folders.filter(x => x && typeof x.branch === 'string' && x.branch) : [];
   if (!f.length) return null;
-  return h('div', {className:'shared-folder muted', 'data-key':'work-copy'}, h('span', {}, 'Works in a separate copy of your project, so other agents do not change the same files.'),
+  return h('div', {className:'shared-folder muted', 'data-key':'work-copy'}, h('span', {}, 'Works in a separate copy of your project, so other helpers do not change the same files.'),
     h('details', {className:'det'}, h('summary', {}, 'Details'), h('div', {}, f.map(x => h('p', {className:'mono'}, clean(String(x.branch || '')) + (typeof x.path === 'string' && x.path ? ' · ' + clean(x.path) : ''))))));
 }
 const surface = via => clean(via === 'cli' ? 'terminal' : via);

@@ -49,7 +49,7 @@
       if (p.status) { var w = STATUS[p.status] || STATUS.back; return [w[0], q(p.title), w[1] + (p.also && p.also.length ? " (it also changes: " + p.also.map(cap).join(", ") + ")" : "")]; }
       return ["Send ", q(p.title), " back with a note?"];
     },
-    "run.human_input": function (p) { return ["Send a message to the agent on ", q(p.title), "?"]; },
+    "run.human_input": function (p) { return ["Send a message to the helper on ", q(p.title), "?"]; },
     "chat.send": function (p) { return p.thread ? ["Send a message to ", plain(p.thread), "?"] : ["Send a message in Chat?"]; },
     "check.wont_do": function (p) { return ["Mark ", stepName(p), " on ", q(p.title), " as won't do?"]; },
     "check.wont_do_undo": function (p) {
@@ -57,9 +57,9 @@
       return [verb, stepName(p), " on ", q(p.title), p.action === "edit" || p.action === "remove" ? "?" : " again?"];
     },
     "config.agents_may_finish": function () { return ["Let agents mark tickets Done?"]; },
-    "config.permissions": function (p) { return ["Let agents do more without asking (mode ", plain(p.mode), ")?"]; },
+    "config.permissions": function (p) { return ["Let helpers do more without asking (mode ", plain(p.mode), ")?"]; },
     "config.copy_setup": function () { return ["Run a command whenever a separate copy is made?"]; },
-    "config.agent_add": function (p) { return ["Add the agent ", plain(p.name), "? orch will run this command for every task."]; },
+    "config.agent_add": function (p) { return ["Add the helper ", plain(p.name), "? orch will run this command for every task."]; },
     "config.share": function () { return ["Share the orch entry with your team (AGENTS.md)?"]; },
     "look.shared_pages": function (p) { return [p.on ? "Show the workspace name and icon on shared file pages?" : "Stop showing the workspace name and icon on shared file pages?"]; },
     "look.icon": function (p) { return ["Change the workspace icon to ", plain(p.icon), " and colour to ", plain(p.color), "?"]; },
@@ -75,7 +75,7 @@
     "relay.allow": function (p) { return ["Allow ", plain(p.peer), " to start ", q(p.task), " (" + cap(p.mode) + ")?"]; },
     "private.allow": function (p) { return ["Allow ", q(p.name), " to run ", full(p.command), p.interactive ? " (and, live: " : "", p.interactive ? full(p.interactive) : "", p.interactive ? ")" : "", " on this computer?"]; },
     "private.move": function () { return ["Move your orch files that are not shared with the team out of the team repo?"]; },
-    "config.agent_add": function (p) { return ["Add the agent ", q(p.name), " that runs ", full(p.command)].concat(p.interactive ? [" (live: ", full(p.interactive), ")"] : [], ["?"]); },
+    "config.agent_add": function (p) { return ["Add the helper ", q(p.name), " that runs ", full(p.command)].concat(p.interactive ? [" (live: ", full(p.interactive), ")"] : [], ["?"]); },
     "insights.settings": function (p) { return ["Change ", plain(INSIGHTS_SETTING[p.setting] || "an Insights setting"), " to ", plain(insightsValue(p.setting, p.value)), "?"]; },
     "record.delete_detail": function (p) { return ["Delete the full detail of ", q(p.title), "? The counts stay."]; },
     "addon.add_local": function (p) { return ["Add the add-on from ", full(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }

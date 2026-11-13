@@ -16,7 +16,7 @@ one tab for every add-on that is turned on and has a page. It follows changes by
   (`orch <add-on> act <verb> -- <ticket>`).
 - The ticket page has one agent line (Start, Continue, Start fresh, Stop, Start anyway, Try again). A ticket keeps its
   agent session.
-- Proof is marked "You" (the person checked it) or "Agent says"; a missing file reads "on another computer".
+- Proof is marked "You" (the person checked it) or "Helper says"; a missing file reads "on another computer".
 
 ## When to use
 - The user wants to see the tickets, progress or proof in a browser, or asks for "the dashboard" or "the link".

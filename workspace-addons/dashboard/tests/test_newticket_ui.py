@@ -56,7 +56,7 @@ def test_edit_and_create_start_semantics_are_preserved():
     assert "t.title === values.title && !previous.has(t.id)" in js
     assert "creationUnresolved = true" in js
     assert "submit.disabled = creationUnresolved" in js
-    assert "The ticket was created, but the agent did not start: " in js
+    assert "The ticket was created, but the helper did not start: " in js
     assert "The ticket was created, but could not be found in the reply." in js
 
 
