@@ -419,7 +419,7 @@ def replacing(home: Path):
         result = "ok: package reinstall"
     except BaseException as e:  # the reason goes into finish.log (a detached update has no terminal)
         cause = e.__cause__ or e
-        detail = " ".join(str(cause).split())[-1500:]
+        detail = " ".join(str(cause).split()).removeprefix("uv failed: ")[-1500:]
         result = "fail: package reinstall: " + " ".join(str(e).split())[:300]
         raise
     finally:
