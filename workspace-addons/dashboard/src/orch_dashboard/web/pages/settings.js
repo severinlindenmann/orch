@@ -614,9 +614,9 @@ function addonCatalog() {
     const row = array(state.settings?.available).find(r => r.name === name);
     if (!row || busy.has(name)) return;
     busy.add(name); fill();
-    const result = await act('addon.set', {name, on:true});
+    const result = await addonSet(name, true);
     busy.delete(name);
-    if (result.ok) added.set(name, row); else window.orch.toast(result.text, 'error');
+    if (result.ok) { added.set(name, row); window.orch.toast('Turned on.', 'ok'); } else window.orch.toast(result.text, 'error');
     fill();
     if (result.ok) render();
   });
@@ -644,12 +644,13 @@ function settingsConfirm(title, text, cls, label, send) {
   } else d.append(settingsText('pre', {className:cls}, text), actions);
   window.orch.open(d);
 }
-async function settingsSend(op, args, key) {
+async function settingsSend(op, args, key, run) {
   settingsBusy.add(key);
   render();
-  const result = await act(op, args);
+  const result = await (run ? run(op, args) : act(op, args));
   settingsBusy.delete(key);
   if (!result.ok) window.orch.toast(result.text, 'error');
+  else if (op === 'addon.set') window.orch.toast(args.on ? 'Turned on.' : 'Turned off.', 'ok');
   render();
   return result;
 }

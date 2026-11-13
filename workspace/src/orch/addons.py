@@ -721,6 +721,39 @@ def _running_workspaces(root: Path) -> list[str]:
     return sorted(found)
 
 
+def _called_by_a_service() -> bool:
+    """This command was started by one of the running services (the dashboard answering a click): restarting
+    it now would kill the request before its answer is sent."""
+    from orch import services
+
+    try:
+        parent = os.getppid()
+        return any(e.get("pid") == parent and services.pid_alive(parent) for e in services.running())
+    except Exception:
+        return False
+
+
+def _restart_later(root: Path) -> None:
+    """Restart the running services from a detached helper once this command has ended (+1 s), so the service
+    that started it answers first. Best effort: when it can not start, restart now."""
+    argv = [sys.executable, "-I", "-P", "-m", "orch.restartlater", str(root), str(os.getpid())]
+    kw: dict = {"start_new_session": True}
+    if sys.platform == "win32":
+        kw = {"creationflags": 0x00000008 | 0x00000200}  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen(  # noqa: S603
+            argv,
+            cwd=str(root),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            **kw,
+        )
+    except OSError:
+        _restart_updated(root)
+
+
 def _reinstall(
     entries: list[dict],
     *,
@@ -762,9 +795,13 @@ def _reinstall(
                         print(f"Note: could not put orch's add-ons back as they were: {e}", file=sys.stderr)
             raise
         if restart:  # what runs still uses the old files (an add-on add/remove replaced them): restart it
-            lines = _restart_updated(root)
-            if lines:
-                _say("\n".join(lines))
+            if _called_by_a_service():
+                _restart_later(root)
+                _say("The running services restart in a moment.")
+            else:
+                lines = _restart_updated(root)
+                if lines:
+                    _say("\n".join(lines))
         return True
     if winfinish.pending(home()):
         raise Refused(
