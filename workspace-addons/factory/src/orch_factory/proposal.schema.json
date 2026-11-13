@@ -1,0 +1,671 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/factory/proposal.schema.json",
+  "title": "orch factory: proposals, change proposals, stop rounds, journal lines",
+  "description": "What the manager agent hands to `orch factory propose|change|stop --file -` and what the add-on freezes under .orch/addons/factory/. The add-on renders the owner-facing question text from these files; free text from the agent never becomes the question.",
+  "$defs": {
+    "line": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+    },
+    "stage": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
+    "agent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "title",
+        "goal",
+        "line",
+        "crew",
+        "time",
+        "budget",
+        "done_means",
+        "wont_do",
+        "ship",
+        "tasks"
+      ],
+      "properties": {
+        "schema": {
+          "const": "orch.factory.proposal/1"
+        },
+        "kind": {
+          "const": "run"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "goal": {
+          "$ref": "#/$defs/line"
+        },
+        "based_on_draft": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "due": {
+          "type": "string",
+          "format": "date"
+        },
+        "line": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "description": "Stages in order. The last item must be the ship stop (stage \"ship\", stop true); the add-on refuses otherwise.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "stop",
+              "why"
+            ],
+            "properties": {
+              "stage": {
+                "$ref": "#/$defs/stage"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "stop": {
+                "type": "boolean",
+                "description": "true = the owner decides at the end of this stage."
+              },
+              "why": {
+                "$ref": "#/$defs/line"
+              }
+            }
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "why"
+            ],
+            "properties": {
+              "stage": {
+                "$ref": "#/$defs/stage"
+              },
+              "why": {
+                "$ref": "#/$defs/line"
+              }
+            }
+          }
+        },
+        "crew": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "agent",
+              "why"
+            ],
+            "properties": {
+              "role": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,23}$"
+              },
+              "agent": {
+                "$ref": "#/$defs/agent"
+              },
+              "why": {
+                "$ref": "#/$defs/line"
+              }
+            }
+          }
+        },
+        "needs": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "what",
+              "ready"
+            ],
+            "properties": {
+              "what": {
+                "$ref": "#/$defs/line"
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "fix": {
+                "$ref": "#/$defs/line",
+                "description": "Plain words for the one-click fix when not ready, e.g. Connect GitHub."
+              }
+            }
+          }
+        },
+        "handovers": {
+          "type": "array",
+          "maxItems": 2,
+          "description": "Rare: a task done by another workspace (about 90 % of the work stays here). Phase 1 shows it only; settlement comes later.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "task",
+              "workspace",
+              "why"
+            ],
+            "properties": {
+              "task": {
+                "$ref": "#/$defs/slug"
+              },
+              "workspace": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "why": {
+                "$ref": "#/$defs/line"
+              }
+            }
+          }
+        },
+        "time": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "active_min"
+          ],
+          "properties": {
+            "active_min": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10080
+            },
+            "eta_from": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "eta_to": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "owner_min": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 120,
+              "description": "Minutes of the owner's time the stops need."
+            }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "preset",
+            "active_min_cap"
+          ],
+          "properties": {
+            "preset": {
+              "enum": [
+                "small",
+                "standard",
+                "large"
+              ]
+            },
+            "active_min_cap": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10080
+            },
+            "api_usd_target": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10000
+            }
+          }
+        },
+        "done_means": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "wont_do": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "ship": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "does",
+            "undo"
+          ],
+          "properties": {
+            "does": {
+              "$ref": "#/$defs/line"
+            },
+            "undo": {
+              "$ref": "#/$defs/line"
+            }
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "$ref": "#/$defs/line"
+              },
+              "uncertain": {
+                "type": "boolean",
+                "description": "true = shown with Right / Wrong; Start alone does not confirm it."
+              }
+            }
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 40,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug",
+              "title",
+              "role",
+              "stage"
+            ],
+            "properties": {
+              "slug": {
+                "$ref": "#/$defs/slug"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "role": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,23}$"
+              },
+              "stage": {
+                "$ref": "#/$defs/stage"
+              },
+              "proves": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 5
+                },
+                "description": "Indexes into done_means."
+              }
+            }
+          }
+        }
+      }
+    },
+    "autopilot": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "An autopilot proposal. The always-ask list is fixed in the add-on (README, Autopilot) and is not part of this file: ship, scope changes, budget beyond the limits, crew outside an approved proposal, anything that cannot be undone, new connections or credentials, other workspaces, any grant change.",
+      "required": [
+        "schema",
+        "kind",
+        "title",
+        "goal",
+        "may_decide",
+        "limits",
+        "done_means"
+      ],
+      "properties": {
+        "schema": {
+          "const": "orch.factory.proposal/1"
+        },
+        "kind": {
+          "const": "autopilot"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "goal": {
+          "$ref": "#/$defs/line"
+        },
+        "may_decide": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "routine",
+              "taste"
+            ]
+          }
+        },
+        "examples": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "days",
+            "max_orders",
+            "active_min_per_day"
+          ],
+          "properties": {
+            "days": {
+              "enum": [
+                1,
+                3,
+                7
+              ]
+            },
+            "max_orders": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "active_min_per_day": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 480
+            },
+            "api_usd_per_day": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 50
+            }
+          }
+        },
+        "done_means": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "report_at": {
+          "type": "string",
+          "pattern": "^[0-2][0-9]:[0-5][0-9]$"
+        }
+      }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "title",
+        "what",
+        "adds_min",
+        "lands_in"
+      ],
+      "properties": {
+        "schema": {
+          "const": "orch.factory.proposal/1"
+        },
+        "kind": {
+          "const": "change"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "what": {
+          "$ref": "#/$defs/line"
+        },
+        "asked_by_owner": {
+          "$ref": "#/$defs/line",
+          "description": "The owner's words that led to it."
+        },
+        "adds_min": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440
+        },
+        "adds_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "new_eta": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lands_in": {
+          "$ref": "#/$defs/stage"
+        },
+        "adds_done_means": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "adds_tasks": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/proposal/properties/tasks/items"
+          }
+        }
+      }
+    },
+    "stop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "kind",
+        "stage",
+        "items"
+      ],
+      "properties": {
+        "schema": {
+          "const": "orch.factory.proposal/1"
+        },
+        "kind": {
+          "const": "stop"
+        },
+        "stage": {
+          "$ref": "#/$defs/stage"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "title",
+              "tag"
+            ],
+            "properties": {
+              "title": {
+                "$ref": "#/$defs/line"
+              },
+              "tag": {
+                "enum": [
+                  "routine",
+                  "taste",
+                  "cant-undo"
+                ]
+              },
+              "before": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Path inside .orch/addons/factory/reviews/<order>/<round>/ or a ticket ref."
+              },
+              "after": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "recommend": {
+                "type": "string",
+                "maxLength": 40,
+                "description": "Only for routine items; taste and cant-undo items never carry a preselected answer."
+              }
+            }
+          }
+        },
+        "checked": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "not_checked": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "changed_during_run": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        }
+      }
+    },
+    "journal_line": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One line of .orch/addons/factory/journal.jsonl (append only). Steps run in the fixed order journal → ext set → ask, and are replayed idempotently by `orch factory reconcile`.",
+      "required": [
+        "id",
+        "at",
+        "type",
+        "order"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^e_[a-z0-9]{8,24}$"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "type": {
+          "enum": [
+            "proposed",
+            "asked",
+            "superseded",
+            "consumed",
+            "started",
+            "crew-added",
+            "tiny-change",
+            "change-accepted",
+            "stop-answered",
+            "decided",
+            "shipped",
+            "cancelled",
+            "grant"
+          ]
+        },
+        "order": {
+          "type": "string",
+          "pattern": "^t_[a-z0-9]{6,16}$"
+        },
+        "q": {
+          "type": "string",
+          "pattern": "^q[0-9]{1,4}$"
+        },
+        "kind": {
+          "enum": [
+            "factory:start",
+            "factory:stop",
+            "factory:change",
+            "factory:autopilot"
+          ]
+        },
+        "file": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "answer": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "by": {
+          "type": "string",
+          "pattern": "^(human|agent):[A-Za-z0-9._-]{1,64}$"
+        },
+        "why": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "until": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/proposal"
+    },
+    {
+      "$ref": "#/$defs/autopilot"
+    },
+    {
+      "$ref": "#/$defs/change"
+    },
+    {
+      "$ref": "#/$defs/stop"
+    }
+  ]
+}

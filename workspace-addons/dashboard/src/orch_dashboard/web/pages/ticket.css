@@ -241,3 +241,15 @@
 /* Real thumbnails of web pages and PDFs (kit/fileviewer.js thumb()) sit over the type icon until they are drawn. */
 .ticket-page .file-type.has-thumb{position:relative;overflow:hidden;min-width:48px;width:48px;height:36px;border:1px solid var(--border);border-radius:6px}
 .ticket-page .ticket-preview.has-thumb{position:relative;height:160px}
+.ticket-page .completion-note{padding:24px;display:grid;gap:16px;border:1px solid var(--border);border-top:2px solid var(--done);border-radius:var(--radius-lg,8px);background:var(--surface)}
+.ticket-page .completion-note h2{font-size:20px;line-height:28px;margin:0}
+.ticket-page .completion-note .eyebrow{margin:0}
+.ticket-page .bring-back-card{padding:16px;display:grid;gap:12px}
+.ticket-page .bring-back-card h2{font-size:20px;line-height:28px;margin:0}
+.ticket-page .bring-back-card .actions{display:flex;flex-wrap:wrap;gap:8px}
+.ticket-page .kept-line,.kept-line{margin:0}
+.copy-files{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.copy-file{width:100%;display:flex;gap:12px;justify-content:space-between;text-align:left}
+.copy-diff{max-height:320px;overflow:auto;font-size:12px;line-height:18px;padding:12px;border:1px solid var(--border);border-radius:8px;margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.copy-diff .diff-add{color:var(--success)}
+.copy-diff .diff-del{color:var(--danger,var(--error,#e5484d))}

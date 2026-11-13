@@ -125,10 +125,9 @@
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(box, anchor); else document.body.insertBefore(box, document.body.firstChild);
     return box;
   }
-  function source() {  // where the request came from: behind a small click
-    var d = el("details"), s = el("summary", "Technical details", "meta"), p = el("p", "Requested from a terminal on this computer.", "meta");
-    s.style.cssText = "font-size:12px;cursor:pointer;min-height:44px;display:flex;align-items:center"; p.style.cssText = "margin:4px 0 0;font-size:12px";
-    d.appendChild(s); d.appendChild(p); return d;
+  function source() {  // where the request came from: one plain line, no disclosure
+    var p = el("p", "Requested from a terminal on this computer.", "meta"); p.style.cssText = "margin:0;font-size:12px";
+    return p;
   }
   function render(items) {
     var key = JSON.stringify(items) + open;
