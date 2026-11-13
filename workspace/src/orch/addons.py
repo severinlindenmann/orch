@@ -638,6 +638,22 @@ def _install_tool(entries: list[dict]) -> None:
         humanproof.write_install_record(plan["env"], plan["kind"])
 
 
+def _running_workspaces(root: Path) -> list[str]:
+    """Registered workspaces with a live background service: on Windows they hold orch's tool folder."""
+    from orch import services
+
+    try:
+        registered = _registered_workspaces(root)
+        found = {
+            e["workspace"]
+            for e in services.running()
+            if services.pid_alive(e.get("pid")) and Path(e["workspace"]).resolve() in registered
+        }
+    except Exception:
+        return []
+    return sorted(found)
+
+
 def _reinstall(
     entries: list[dict], *, save: bool, then: list[list[str]], root: Path, done: str, consents: list[str] = ()
 ) -> bool:
@@ -695,6 +711,11 @@ def _reinstall(
             if plan
             else {}
         )
+        running = _running_workspaces(root)
+        if (
+            running
+        ):  # the finisher stops these first (they run from the folder it replaces), starts them after
+            extra["services"] = running
         if consents:
             extra["consents"] = [str(consent_path()), workspace_id(root), sorted(consents)]
         argv = [uv, *_tool_args(entries)]
