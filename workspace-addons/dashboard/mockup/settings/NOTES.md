@@ -23,7 +23,7 @@
 ## settings-helper.html — Helper
 
 - Unavailable helpers offer setup guidance instead of a misleading Test action (SN-19).
-- Your own helper uses a human label; existing Claude and Codex unavailable states are preserved (SN-19; BP-78).
+- Your own helper uses a human label; the existing "helper unavailable" states are preserved (SN-19; BP-78).
 - Permission choices use a visible radio and strong teal selection; Full explains its consequence (SN-20; BP-13, BP-77).
 - Product data: Needs installation capability and authoritative permission value. Auto is a proposed preview default; not verified in the provided snapshot. Tests and installation cannot run in static HTML.
 
