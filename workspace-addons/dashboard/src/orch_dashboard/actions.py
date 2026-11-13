@@ -36,7 +36,6 @@ except ImportError:  # standalone use without orch: nothing runs
 MAX_TEXT = 2000
 LONG_TEXT = 1500  # a longer new-ticket text is kept as a file (note.md), the Note stays short
 MAX_LONG = 500_000  # characters of one long text (core refuses a file over 2 MB)
-MAX_FILES = 5  # incl. note.md (the page takes 4 dropped files)
 # Mirror of orch.tickets (ATTACH_TEXT/ATTACH_IMAGES/ATTACH_MAX): refuse early, before a ticket is made. orch decides.
 ATTACH_EXT = frozenset(
     {
@@ -344,8 +343,9 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
     files = args.get("files")
     if files is None:
         return out
-    if op not in ("ticket.new", "ticket.attach") or not isinstance(files, list) or len(files) + len(out) > MAX_FILES:
-        raise BadRequest(f"At most {MAX_FILES} files can be added.")
+    # No count limit: each file stays under ATTACH_MAX and the request under the server's body limit.
+    if op not in ("ticket.new", "ticket.attach") or not isinstance(files, list):
+        raise BadRequest("Those files could not be read.")
     for f in files:
         if not isinstance(f, dict) or set(f) - {"name", "text", "data"} or not isinstance(f.get("name"), str):
             raise BadRequest("That file could not be read.")
