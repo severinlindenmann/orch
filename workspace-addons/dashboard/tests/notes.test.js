@@ -8,7 +8,7 @@ const web = file => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/
 function context(items) {
   const h = (tag, attrs, ...children) => ({tag, attrs, addEventListener() {}, children:children.flat(Infinity).filter(c => c != null)});
   const c = vm.createContext({window:{DashHelpers:helpers}, h, array:v => Array.isArray(v) ? v : [], tickets:() => items,
-    fragment:(...children) => h('fragment', {}, children), heading:(t, sub) => h('h1', {}, t, sub), clean:v => String(v ?? ''), href:id => '#ticket/' + id,
+    fragment:(...children) => h('fragment', {}, children), name:v => String(v ?? ''), heading:(t, sub) => h('h1', {}, t, sub), clean:v => String(v ?? ''), href:id => '#ticket/' + id,
     render() {}});
   vm.runInContext(web('pages/ticket.js').slice(web('pages/ticket.js').indexOf('const NOTE_LABELS'), web('pages/ticket.js').indexOf('function ticketDoneLine')), c);
   vm.runInContext(web('pages/notes.js'), c);
@@ -29,50 +29,47 @@ test('card shows the three parts on a done ticket and nothing otherwise', () => 
 });
 test('notes: only done tickets with an outcome, newest first', () => {
   const items = [done('t_1'), done('t_3'), done('t_2'), done('t_4', {status:'active'}), done('t_5', {outcome:undefined}), done('t_6', {outcome:{changed:'  '}})];
-  const groups = context(items).notesGroups(items);
-  assert.deepEqual(Array.from(groups, g => g.id), ['t_3', 't_2', 't_1']);
-});
-test('notes: grouped by parent, the parent is the group head and never sits under itself', () => {
-  const items = [done('t_1', {title:'Parent'}), done('t_2', {parent:'t_1'}), done('t_4'), done('t_3', {parent:'t_1'}), done('t_9', {parent:'t_gone'}), done('t_8', {parent:'t_8'})];
-  const groups = context(items).notesGroups(items);
-  const shape = JSON.parse(JSON.stringify(groups.map(g => [g.id, g.head?.id || null, g.notes.map(n => n.id), g.parent?.id || null])));
-  assert.deepEqual(shape, [['t_9', 't_9', [], null], ['t_8', 't_8', [], null], ['t_4', 't_4', [], null], ['t_1', 't_1', ['t_3', 't_2'], null]]);
-});
-test('notes: a parent without its own note gives its children a "Step of" header', () => {
-  const items = [done('t_1', {title:'Parent', outcome:undefined}), done('t_2', {parent:'t_1'})];
-  const g = context(items).notesGroups(items);
-  assert.equal(g.length, 1); assert.equal(g[0].head, null); assert.equal(g[0].parent.id, 't_1'); assert.equal(g[0].notes[0].id, 't_2');
+  assert.deepEqual(Array.from(context(items).notesList(items), t => t.id), ['t_3', 't_2', 't_1']);
 });
 test('notes: order and time use when the ticket was marked done, not updated_at', () => {
   const hist = at => [{at, text:'Moved to Done', by:'human:Pat'}];
   const items = [done('t_1', {updated_at:'2026-11-09T10:00:00Z', history:hist('2026-11-01T10:00:00Z')}), done('t_2', {updated_at:'2026-11-02T10:00:00Z', history:hist('2026-11-05T10:00:00Z')}),
     done('t_3', {updated_at:'2026-11-03T10:00:00Z', done_at:'2026-11-07T10:00:00Z', history:hist('2026-11-01T10:00:00Z')})];
   const c = context(items);
-  assert.deepEqual(Array.from(c.notesGroups(items), g => g.id), ['t_3', 't_2', 't_1']);
+  assert.deepEqual(Array.from(c.notesList(items), t => t.id), ['t_3', 't_2', 't_1']);
   assert.equal(c.doneAt(items[0]), '2026-11-01T10:00:00Z');
   assert.equal(c.doneAt(done('t_5')), done('t_5').updated_at);
 });
 test('notes: search matches title, key and the outcome text', () => {
   const items = [done('t_1', {title:'Pay button', outcome:{changed:'Receipt email'}}), done('t_2', {key:'PIL-7', outcome:{why:'VAT was mixed in'}}), done('t_3')];
-  const c = context(items);
-  assert.deepEqual(Array.from(c.notesGroups(items, 'receipt'), g => g.id), ['t_1']);
-  assert.deepEqual(Array.from(c.notesGroups(items, ' vat '), g => g.id), ['t_2']);
-  assert.deepEqual(Array.from(c.notesGroups(items, 'pil-7'), g => g.id), ['t_2']);
-  assert.deepEqual(Array.from(c.notesGroups(items, 'pay'), g => g.id), ['t_1']);
-  assert.equal(c.notesGroups(items, 'zzz').length, 0);
+  const c = context(items), ids = q => Array.from(c.notesList(items, q), t => t.id);
+  assert.deepEqual(ids('receipt'), ['t_1']);
+  assert.deepEqual(ids(' vat '), ['t_2']);
+  assert.deepEqual(ids('pil-7'), ['t_2']);
+  assert.deepEqual(ids('pay'), ['t_1']);
+  assert.equal(ids('zzz').length, 0);
 });
-test('notes page: empty states and entries', () => {
+test('notes page: empty states and rows that open the note', () => {
   const empty = context([done('t_1', {outcome:undefined}), done('t_2', {status:'active'})]).notesPage();
-  assert.match(text(empty), /Finished tickets will show what changed and why here\./);
-  assert.equal(nodes(empty, n => n.attrs?.className === 'note-entry').length, 0);
-  const items = [done('t_1', {title:'Pay button', checklist:[{},{},{},{}]}), done('t_2', {parent:'t_1', title:'Receipt'}), done('t_3', {parent:'t_1', title:'Pay link'})];
+  assert.match(text(empty), /No notes from finished work yet/); assert.match(text(empty), /View finished tickets/);
+  assert.equal(nodes(empty, n => n.attrs?.className === 'note-row').length, 0);
+  const items = [done('t_1', {title:'Pay button'}), done('t_2', {parent:'t_1', title:'Receipt'})];
   const page = context(items).notesPage();
-  assert.equal(nodes(page, n => n.attrs?.className === 'note-entry').length, 3);
-  assert.match(text(page), /2 steps/); assert.doesNotMatch(text(page), /4 steps/); assert.doesNotMatch(text(page), /Step of /); assert.match(text(page), /Changed t_2/);
-  assert.doesNotMatch(text(page), /Finished tickets will show/);
+  const rows = nodes(page, n => n.attrs?.className === 'note-row');
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map(r => r.attrs.href).sort(), ['#note/t_1', '#note/t_2']);
+  assert.match(text(page), /Changed t_2/); assert.match(text(page), /Step of Pay button/); assert.match(text(page), /2 notes from finished work/);
+  assert.doesNotMatch(text(page), /No notes from finished work yet/);
+});
+test('note page: one note, and an honest page when it is gone', () => {
+  const t = done('t_1', {title:'Pay button', owner:'Anna', outcome:{changed:'Pay button added', why:'No transfer', not_included:'Refunds'}});
+  const c = context([t]), page = text(c.notePage(t));
+  assert.match(page, /Pay button added/); assert.match(page, /No transfer/); assert.match(page, /Refunds/); assert.match(page, /Source ticket/);
+  assert.match(text(c.notePage(undefined)), /This note is no longer available/);
+  assert.match(text(c.notePage(done('t_2', {status:'active'}))), /This note is no longer available/);
 });
 test('notes page is registered: route, nav, server and html', () => {
-  assert.match(web('app.js'), /'#notes'/); assert.match(web('app.js'), /notesPage\(\)/);
+  assert.match(web('app.js'), /'#notes'/); assert.match(web('app.js'), /notesPage\(\)/); assert.match(web('app.js'), /notePage\(ticketOf\(r\.id\)\)/);
   assert.match(web('index.html'), /pages\/notes\.js/); assert.match(web('index.html'), /pages\/notes\.css/);
   assert.match(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/server.py'), 'utf8'), /chat\|notes/);
 });
