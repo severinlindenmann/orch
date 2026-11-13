@@ -117,7 +117,7 @@ def test_open_agent_proposal_and_moved_conversation():
     index = (webjs.WEB / "index.html").read_text()
     assert 'data-action="open-agent"' in index
     assert "getElementById('open-agent').hidden = snapshot" in app
-    assert ">Open helper</button>" in index and ">Open agent<" not in index
+    assert ">Ask the helper</button>" in index and ">Open agent<" not in index
     for text in (
         "New conversation with your helper",
         "Talk it through first. When you are ready, the helper can make the ticket.",
@@ -133,7 +133,7 @@ def test_open_agent_proposal_and_moved_conversation():
 def test_open_helper_is_a_menu_item_on_a_narrow_screen():
     app = (webjs.WEB / "app.js").read_text(encoding="utf-8")
     css = (webjs.WEB / "style.css").read_text(encoding="utf-8")
-    assert "'data-nav':'open-agent'}, iconEl('spark'), 'Open helper')" in app
+    assert "'data-nav':'open-agent'}, iconEl('spark'), 'Ask the helper')" in app
     assert "if (helper) chatOpenAgent();" in app  # the Menu closes, then the helper opens
     # hidden in the wide sidebar (the header has the button), shown in the Menu where the header has none
     base = css.index(".nav-item.nav-helper{display:none;")

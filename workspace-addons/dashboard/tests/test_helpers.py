@@ -599,7 +599,8 @@ def test_agent_line_waiting_text_has_no_command():
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
     src = webjs.all_js()
-    assert "No tickets are being worked on." in src and "No agent is working right now" not in src
+    assert "working.length ? homeSection('working-now', 'Working now'" in src  # empty section is hidden
+    assert "No tickets are being worked on." not in src and "No agent is working right now" not in src
     assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
     assert (
@@ -753,10 +754,10 @@ def test_plain_names_and_history_dedupe():
 @node
 def test_footer_shows_the_relay_connection():
     on = {"settings": {"addons": [{"name": "relay", "active": True, "detail": {"connected": True}}]}}
-    assert call("footerState", on, False) == "Connected"
+    assert call("footerState", on, False) == ""
     off = {"settings": {"addons": [{"name": "relay", "active": True, "detail": {"connected": False}}]}}
-    assert call("footerState", off, False) == "Not connected yet"
-    assert call("footerState", {"settings": {"addons": []}}, False) == "Local workspace"
+    assert call("footerState", off, False) == "Not connected"
+    assert call("footerState", {"settings": {"addons": []}}, False) == ""
     assert call("footerState", on, True) == "Shared copy"
     assert "NetBird" not in (WEB / "helpers.js").read_text()
 

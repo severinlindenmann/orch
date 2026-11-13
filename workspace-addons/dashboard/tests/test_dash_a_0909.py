@@ -6,8 +6,8 @@ from tests import webjs
 def test_home_has_no_next_step_line_and_folds_needs():
     home = (webjs.WEB / "pages/home.js").read_text()
     assert "Next step" not in home  # fb6
-    assert "'Send back'" in home and "'Mark done'" in home  # fb1
-    assert ">= 3 && !needsOpen" in home and "'Show all'" in home  # fb2
+    assert "'Send back'" not in home and "'Mark done'" not in home  # Dash 04: sign-off is in the result view
+    assert ">= 3 && !needsOpen" in home and "' more questions'" in home  # fb2, Dash 12
 
 
 def test_new_ticket_button_stays_right_with_hidden_switch():
