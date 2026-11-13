@@ -588,3 +588,17 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
  .fx-top .btn,.fx-mobile-tasks,.fx-tech summary,.fx-action-menu button{min-height:44px;align-items:center}
  .fx-action-menu button{height:auto}
 }
+
+/* ---- UX phase 5: Focus start page in the dashboard's look (draft focus/focus.html) ---- */
+.fx-pick{max-width:1200px;padding:32px 24px 80px}
+.fx-pick h1{font-size:28px;line-height:36px;font-weight:600;margin:0 0 4px}
+.fx-pick>.meta.fx-sub{font-size:14px;color:var(--text);margin:0 0 24px}
+.fx-pick-group h2{display:flex;align-items:baseline;gap:8px;font-size:16px;font-weight:600;color:var(--text);margin:0 0 12px}
+.fx-pick-group h2 .meta{font-weight:400}
+.fx-pick-group .card{border-radius:var(--radius-lg,12px);overflow:hidden}
+.fx-pick a.fx-pick-row{min-height:56px;transition:background 150ms var(--ease-move,ease)}
+.fx-pick a.fx-pick-row:hover{background:var(--surface-2)}
+.fx-group-waiting .card{border-color:var(--warning,#e0b050)}
+.fx-skel{display:grid;gap:12px;margin-top:8px}
+.fx-skel-row{height:56px;border-radius:var(--radius-lg,12px)}
+@media(prefers-reduced-motion:reduce){.fx-pick a.fx-pick-row{transition:none}}

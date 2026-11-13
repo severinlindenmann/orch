@@ -8,13 +8,14 @@
     document.title = 'Focus · orch';
     root.classList.add('fx-picker');
     root.append(h('header', {class: 'fx-top'}, INAPP ? homeLink() : null, h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'})),
-      h('main', {class: 'fx-pick'}, h('h1', {text: 'Where shall we focus?'}), h('p', {class: 'meta', text: 'Choose a ticket to take its next step.'})));
+      h('main', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta fx-sub', text: 'Loading your tickets…'}), skeleton()));
     fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); }).then(payload => {
       const list = payload.tickets;
       root.querySelector('.fx-workspace').textContent = payload.workspace + ' / Focus';
       S.state.pickAttention = window.FocusHelpers.attentionText(list);
       pickerSub();
       const box = root.querySelector('.fx-pick');
+      box.querySelector('.fx-skel')?.remove();
       if (!list.some(t => t.status !== 'done')) box.append(emptyState());
       const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Check result', 'Check'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
       /* one line: key, title, the actual next step only when it says more, and a real action chip */
@@ -22,7 +23,7 @@
         const next = window.FocusHelpers.nextStepText(t, action);
         const finished = status === 'done' && t.closed_at ? stamp(t.closed_at) : '';
         return h('a', {class: 'fx-pick-row', href: P + '/t/' + t.id + (status === 'review' ? '#results' : '')},
-          h('span', {class: 'mono key', text: t.key || t.id}), h('strong', {class: 'grow', text: t.title}),
+          /^t_/.test(t.key || t.id) ? null : h('span', {class: 'mono key', text: t.key}), h('strong', {class: 'grow', text: t.title}),
           next ? h('small', {text: next}) : null, finished ? h('small', {text: 'Finished ' + finished}) : null,
           h('span', {class: 'chip fx-row-chip', text: action}));
       };
@@ -63,6 +64,11 @@
       if (!help.hidden && ['Escape', 'x', 'X'].includes(e.key)) toggle(false);
       if (!help.hidden && e.key === 'Tab') { e.preventDefault(); help.querySelector('button').focus(); }
     });
+  }
+
+  /* the page's shape before the tickets arrive, so nothing jumps */
+  function skeleton() {
+    return h('div', {class: 'fx-skel', 'aria-hidden': 'true'}, [0, 1, 2].map(() => h('div', {class: 'skeleton fx-skel-row'})));
   }
 
   const HOME = INAPP ? '/#home' : '/';
