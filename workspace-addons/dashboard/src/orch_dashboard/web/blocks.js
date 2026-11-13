@@ -219,9 +219,12 @@ const OrchBlocks = (() => {
     },
     table(b) {
       const s = el('section', 'blk'); if (b.title) s.append(el('h2', 'blk-title', b.title));
-      const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table'), cols = arr(b.columns);
+      const wrap = el('div', 'table-wrap'), t = el('table', 'blk-table data-table'), cols = arr(b.columns);
       const hr = el('tr');
+      const rowsList = arr(b.rows), hasActions = rowsList.some(r => arr(r.actions).length), hasToggle = rowsList.some(r => r.toggle);
       for (const c of cols) { const th = el('th', c.type === 'number' || c.type === 'duration' ? 'num' : '', c.label); th.scope = 'col'; hr.append(th); }
+      if (hasActions) { const th = el('th', '', 'Actions'); th.scope = 'col'; hr.append(th); }
+      if (hasToggle) { const th = el('th', '', 'On'); th.scope = 'col'; hr.append(th); }
       const head = el('thead'); head.append(hr); t.append(head);
       const tb = el('tbody');
       for (const r of arr(b.rows)) {
@@ -231,8 +234,19 @@ const OrchBlocks = (() => {
           if (i === 0 && typeof r.link === 'string' && (TICKET.test(r.link) || HTTPS.test(r.link))) {
             const a = linked('cell-link', r.link, [...td.childNodes]); td.replaceChildren(a);
           }
+          if (i === 0 && r.subtitle) td.append(el('span', 'subline', r.subtitle));
           tr.append(td);
         });
+        if (hasActions) {
+          const td = el('td'), box = el('div', 'row');
+          for (const a of arr(r.actions)) {
+            const btn = el('button', 'btn outline sm' + (a.tone === 'bad' ? ' danger' : ''), a.label); btn.type = 'button';
+            if (a.confirm) btn.dataset.confirm = String(a.confirm);
+            if (actionAttrs(btn, a.action, a.label)) box.append(btn);
+          }
+          td.append(box); tr.append(td);
+        }
+        if (hasToggle) { const td = el('td'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }
         tb.append(tr);
       }
       t.append(tb); wrap.append(t); s.append(wrap);

@@ -425,6 +425,38 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .sk-story{height:200px}
 .sk-row{height:40px}
 @media(max-width:899px){.sk-columns{grid-template-columns:minmax(0,1fr)}}
+/* Schedules page (add-on view): table with switch and buttons, week strip, status line, "How often" window. */
+.status-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0}
+.blk-table.data-table td{padding-top:12px;padding-bottom:12px}
+.blk .table-wrap{border:0;border-radius:0}
+.blk-table .subline{display:block;font-size:12px;line-height:16px;color:var(--text-faint);margin-top:4px}
+.blk-table td .row{flex-wrap:nowrap}
+.blk-table .cell-link{color:var(--text);font-weight:500;text-decoration:none}.blk-table .cell-link:hover{text-decoration:underline}
+.repeat-dialog{width:min(640px,calc(100% - 32px))}
+.repeat-dialog .form-fields{display:grid;gap:24px}
+.repeat-block{border:0;padding:0;margin:0;min-width:0}.repeat-block legend{margin-bottom:8px;padding:0}
+.repeat-block .frequency-control{display:flex;flex-wrap:nowrap;width:100%;box-sizing:border-box}
+.frequency-control label{flex:1;justify-content:center;position:relative;white-space:nowrap;font-weight:500}
+.frequency-control input,.day-chip input{position:absolute;opacity:0;width:1px;height:1px}
+.schedule-fields{display:grid;gap:16px;margin-top:24px}
+.schedule-row{display:grid;grid-template-columns:112px minmax(0,1fr);gap:16px;align-items:start}
+.schedule-row>span{padding-top:9px}
+.schedule-value{display:grid;gap:8px}
+.schedule-value select,.schedule-value input{width:160px;max-width:100%}
+.day-chips{display:flex;gap:6px;flex-wrap:wrap}
+.day-chip{position:relative;display:flex;align-items:center;justify-content:center;min-height:36px;min-width:38px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--sidebar);cursor:pointer;transition:background-color var(--dur-fast) var(--ease-move)}
+.day-chip:has(input:checked){background:var(--brand-soft);border-color:var(--brand);color:var(--brand)}
+.day-chip:focus-within{outline:2px solid var(--brand);outline-offset:2px}
+.custom-interval{display:flex;align-items:center;gap:12px}.custom-interval input{width:100px}
+.repeat-summary{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);color:var(--text-muted)}
+@media(max-width:599px){.frequency-control label{padding:4px 6px;font-size:12px}.schedule-row{grid-template-columns:92px minmax(0,1fr);gap:12px}}
+.strip-panel{overflow:hidden}
+.strip{grid-template-columns:repeat(7,minmax(0,1fr))}
+.strip .day{display:flex;flex-direction:column;align-items:stretch;gap:12px;min-height:116px;border-width:0 1px 0 0}
+.strip .day:last-child{border-right:0}
+.strip .day-head{gap:8px;color:var(--text-muted)}
+.strip .day.today{background:var(--surface-2)}.strip .day.today .day-head b{color:var(--brand)}
+@media(max-width:950px){.strip{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.strip .day{border-width:0 0 1px 0}}
 
 /* Page not found (errors/not-found.html). */
 .error-hero{min-height:320px;display:grid;align-content:center;justify-items:start;gap:16px;padding:40px}

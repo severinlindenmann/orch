@@ -7,41 +7,62 @@
 <title>Insights · orch</title>
 <link rel="stylesheet" href="__P__/kit/tokens.css">
 <link rel="stylesheet" href="__P__/kit/components.css">
+<link rel="stylesheet" href="__P__/kit/motion.css">
+<link rel="stylesheet" href="__P__/kit/interaction.css">
 <link rel="stylesheet" href="__P__/web/insights.css">
+<script src="__P__/kit/overlay.js" defer></script>
+<script src="__P__/kit/select.js" defer></script>
+<script src="__P__/kit/components.js" defer></script>
 <script src="__P__/web/insights.js" defer></script>
 <script src="__P__/web/settings.js" defer></script>
 </head>
 <body>
-<main>
-<header><h1>Insights <span class="preview">Preview</span></h1>
-<p>What your helpers used in the last 30 days</p>
-<p id="sharing" class="sharing" hidden></p>
-<p id="session-note" class="note" role="alert" hidden></p>
-<button id="settings-link" class="settings-link" type="button" aria-pressed="false" aria-controls="settings">Settings</button></header>
-<section id="settings" class="settings" aria-label="Insights settings" hidden>
-<h2>Insights settings</h2>
+<main id="content" class="page wide area-page page-enter" tabindex="-1" aria-label="Insights">
+<header class="page-header insights-header">
+<div><h1 id="page-title">Insights</h1><p id="page-sub">What your helpers used, at a glance.</p>
+<span id="health" class="badge done insights-health" hidden>All good · nothing needs a look</span>
+<p id="session-note" class="note" role="alert" hidden></p></div>
+<div class="actions">
+<div class="segmented" aria-label="Time range" id="range">
+<button class="btn sm" type="button" data-range="7" disabled title="Not enough history yet" aria-pressed="false">7 days</button>
+<button class="btn sm" type="button" data-range="30" aria-pressed="true">30 days</button>
+<button class="btn sm" type="button" data-range="90" disabled title="Not enough history yet" aria-pressed="false">90 days</button></div>
+<button id="settings-link" class="btn outline insights-settings" type="button" aria-pressed="false" aria-controls="settings" aria-label="Insights settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/></svg><span id="settings-label">Settings</span></button></div>
+</header>
+<div id="view-region" aria-busy="true">
+<div id="main-view" class="area-body">
+<div id="loading" class="area-body loading-mask" inert aria-hidden="true">
+<div class="metric-grid"><article class="card metric"><p class="meta">Runs</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Skills used</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Connected services</p><strong>00</strong><small>Loading data</small></article></div>
+<div class="analysis-grid"><section class="card chart-card"><div class="section-head"><h2>Runs over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head"><h2>Skill use</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>
+<section><div class="table-wrap"><table class="data-table"><tbody><tr><td>Loading the list of skills</td><td>Loading</td><td>Loading</td><td>0</td><td>Loading</td></tr><tr><td>Loading the list of skills</td><td>Loading</td><td>Loading</td><td>0</td><td>Loading</td></tr></tbody></table></div></section>
+</div>
+<p id="message" role="status" hidden></p>
+<div id="overview" class="area-body" hidden>
+<section id="needs" class="needs" aria-label="Needs a look" hidden></section>
+<div class="metric-grid" id="metrics"></div>
+<div class="analysis-grid"><section class="card chart-card"><div class="section-head"><h2>Runs over time</h2><span class="meta" id="period">Last 30 days</span></div>
+<div class="chart-stage" role="img" id="trend" aria-label="Daily run trend unavailable."><div class="chart-message"><h3>Daily history isn’t available yet</h3><p class="muted" id="trend-text"></p><button id="trend-settings" class="btn ghost sm" type="button">Review recording settings →</button></div></div>
+<div class="axis"><span id="axis-start">30 days ago</span><span>Today</span></div></section>
+<section class="card chart-card" id="skill-chart"><div class="section-head"><h2>Skill use</h2><span class="meta">Last 30 days</span></div><p class="muted" id="skill-text"></p><div id="bars"></div></section></div>
+<section id="breakdown"><div class="section-head"><div id="tabs" role="tablist" aria-label="Usage breakdown"></div></div>
+<p class="meta" id="tab-help"></p>
+<div id="panel" class="table-wrap" role="tabpanel" tabindex="0"><table class="data-table"><caption class="sr-only" id="table-caption"></caption><thead id="thead"></thead><tbody id="rows"></tbody></table></div>
+<section class="space-top"><p class="meta" id="services-title"></p><div id="services" class="detail-content pad muted"></div></section></section>
+<div class="footnote"><span>Usage counts describe use, not successful completion.</span><span id="foot-note"></span></div>
+</div>
+<section id="empty" class="card empty state-empty" hidden><span class="file-type" aria-hidden="true">—</span><h2>No activity in this range</h2><p>Your helpers’ activity will appear here after they start work.</p></section>
+</div>
+<section id="settings" class="area-body" aria-label="Insights settings" hidden>
 <p id="settings-status" class="note" role="status"></p>
 <div id="settings-body"><p>Reading the settings…</p></div>
-<dialog id="confirm" aria-labelledby="confirm-text">
+</section>
+</div>
+<dialog id="confirm" class="dialog" aria-labelledby="confirm-text">
 <p id="confirm-title" class="name"></p>
 <p id="confirm-text">Delete the full detail of this ticket's runs? The counts stay. This cannot be undone.</p>
-<div class="confirm-buttons"><button id="confirm-cancel" type="button">Cancel</button>
-<button id="confirm-delete" type="button" class="primary">Delete</button></div>
+<div class="confirm-buttons"><button id="confirm-cancel" class="btn ghost" type="button">Cancel</button>
+<button id="confirm-delete" type="button" class="btn primary">Delete</button></div>
 </dialog>
-</section>
-<div id="main-view">
-<p id="message" role="status">Reading the workspace record…</p>
-<section id="overview" hidden aria-label="Overview">
-<div id="needs" class="needs" aria-label="Needs a look"></div>
-<div id="tabs" class="tabs" role="tablist" aria-label="Items used"></div>
-<div class="lay">
-<section id="panel" role="tabpanel" tabindex="0">
-<div id="filters" class="filters" aria-label="Show"></div>
-<ul id="rows" class="rows"></ul></section>
-<aside id="detail" class="detail" role="dialog" aria-label="Details of the selected item" hidden></aside>
-</div>
-</section>
-</div>
 </main>
 </body>
 </html>

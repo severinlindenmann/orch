@@ -28,7 +28,10 @@ ALLOW = {
         "tickets_list",
     ): "CLI JSON (shown); closing time only",
     ("workspace-addons/automation/src/orch_automation/loop.py", "others"): "CLI JSON (shown); counts lines",
-    ("workspace-addons/factory/src/orch_factory/authority.py", "history"): "CLI JSON (shown); Factory's one reader of history",
+    (
+        "workspace-addons/factory/src/orch_factory/authority.py",
+        "history",
+    ): "CLI JSON (shown); Factory's one reader of history",
     ("workspace-addons/automation/src/orch_automation/needs.py", "rows"): "CLI JSON (shown); orchcli.person",
     # the dashboard: data.shown is the one entry (core rule, fail closed without the core)
     (
@@ -61,7 +64,7 @@ PERSON_OK = {
     (
         "workspace-addons/factory/src/orch_factory/authority.py",
         "who",
-    ): "CLI JSON (shown); the one reader of answered_by in Factory (authority: only a person's answer counts)",
+    ): "CLI JSON (shown); Factory's one reader of answered_by",
     (
         "workspace/src/orch/relay.py",
         "_applied_ticket",

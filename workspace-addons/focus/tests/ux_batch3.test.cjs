@@ -94,6 +94,7 @@ function fakeEl(name, act) {
     classList: {toggle(c, f) { f = f === undefined ? !cls.has(c) : f; if (f) cls.add(c); else cls.delete(c); return f; }, contains: c => cls.has(c), add: c => cls.add(c), remove: c => cls.delete(c)},
     addEventListener(t, f) { (on[t] = on[t] || []).push(f); }, fire(t, ev) { (on[t] || []).forEach(f => f(ev)); },
     setAttribute(k, v) { attrs[k] = String(v); }, getAttribute: k => (k in attrs ? attrs[k] : null),
+    insertBefore() {}, replaceChildren() {}, remove() {}, before() {}, scrollTo() {}, checked: false, scrollHeight: 0, scrollTop: 0, clientHeight: 0,
     focus() {}, click() { e.fire('click', {target: e}); }, contains: x => x === e || e.kids.includes(x),
     closest: sel => (sel === '[data-act]' ? (e.dataset.act ? e : null) : sel === 'button' ? e : null),
     querySelector: () => fakeEl(), querySelectorAll: () => [], getBoundingClientRect: () => ({left: 0, right: 100}),

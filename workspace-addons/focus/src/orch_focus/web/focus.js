@@ -57,6 +57,9 @@
     S.views.ticket.renderHelpers(v);
     S.views.live.renderFeed(v, !S.state.firstRender);
     S.views.live.renderQuestions(v);
+    S.views.live.renderNext(v);
+    S.views.live.renderWith(v);
+    S.views.live.followUpdate(S.views.live.renderTrace(v), S.state.firstRender);
     S.views.ticket.renderProof(v);
     S.views.used.renderUsed(v);
     S.views.used.renderFiles(v);
@@ -70,10 +73,22 @@
   }
 
   /* Compact is the default; Terminal mode adds the task rail and the tabs. The choice is remembered. */
+  /* In Terminal mode the person's side (next move, sent back, With Helper, composer) is its own column beside the
+     output; in compact it sits in the one column, as before. The same nodes move, so nothing is drawn twice. */
+  function placeHuman(terminal) {
+    if (terminal) els.human.replaceChildren(els.next, els.sent, els.withH, els.review, els.complete, els.compose);
+    else {
+      els.paneLive.insertBefore(els.next, els.line); els.paneLive.insertBefore(els.sent, els.line);
+      els.paneLive.insertBefore(els.withH, els.line);
+      els.help.before(els.compose, els.review, els.complete);  /* back in the stage: composer, then the review bar */
+    }
+  }
   function setMode(terminal) {
+    placeHuman(terminal);
     root.classList.toggle('fx-terminal', terminal);
     els.modeBtn.setAttribute('aria-pressed', String(terminal));
     els.modeBtn.textContent = terminal ? 'Compact view' : 'Terminal mode';
+    els.showTerm.hidden = terminal;
     try { localStorage.setItem('focus-mode', terminal ? 'terminal' : 'compact'); } catch (e) { /* not kept */ }
   }
   async function copyLink() {
@@ -117,6 +132,11 @@
       setPopover(els.menu, els.moreBtn, false);
       setPopover(els.session, els.live, false);
     };
+    /* Following starts off; reading pauses it (scroll away) and it never scrolls the view while it is off. */
+    try { S.state.follow = localStorage.getItem('focus-follow') === '1'; } catch (e) { S.state.follow = false; }
+    els.follow.checked = S.state.follow;
+    els.follow.addEventListener('change', () => { S.state.follow = els.follow.checked; try { localStorage.setItem('focus-follow', S.state.follow ? '1' : '0'); } catch (e) { /* not kept */ } if (S.state.follow) S.views.live.jumpToNew(); });
+    els.paneLive.addEventListener('scroll', () => { if (!els.newPill.hidden && S.views.live.atBottom()) S.views.live.jumpToNew(); }, {passive: true});
     els.moreBtn.addEventListener('click', () => {
       const open = els.menu.hidden; closePopovers(); setPopover(els.menu, els.moreBtn, open);
       if (open) [...els.menu.querySelectorAll('button:not(:disabled)')].find(b => b.offsetParent !== null)?.focus();
@@ -143,6 +163,8 @@
       if (a === 'fresh' && !els.fresh.disabled && !els.fresh.classList.contains('fx-confirm')) { armFresh(true); return; }
       if (els.menu.contains(e.target) && e.target.closest('button')) { closePopovers(); els.moreBtn.focus(); }
       if (a === 'mode') setMode(!root.classList.contains('fx-terminal'));
+      else if (a === 'jump') S.views.live.jumpToNew();
+      else if (a === 'phone') { els.phoneNote.hidden = !els.phoneNote.hidden; els.phoneBtn.setAttribute('aria-expanded', String(!els.phoneNote.hidden)); }
       else if (a === 'copy') copyLink();
       else if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
       else if (a === 'answer') S.views.live.focusQuestion(); else if (a === 'stop') S.views.live.stopToggle(); else if (a === 'fresh') { armFresh(false); S.views.live.startFresh(); } else if (a === 'attach') S.views.session.showAttach();
