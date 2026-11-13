@@ -1039,12 +1039,12 @@ def test_attachments_shape_and_limits():
         {"files": [{"name": "a.md", "text": "x", "data": "eA=="}]},
         {"files": [{"name": "a.png", "data": "not base64!"}]},
         {"files": [{"name": "a\x00.md", "text": "x"}]},
-        {"files": [{"name": "a.md", "text": "x"}] * 6},
-        {"long_text": "t", "files": [{"name": "a.md", "text": "x"}] * 5},
     )
     for args in bad:
         with pytest.raises(actions.BadRequest):
             actions.attachments("ticket.new", {"title": "T", **args})
+    many = actions.attachments("ticket.new", {"title": "T", "long_text": "t", "files": [{"name": "a.md", "text": "x"}] * 12})
+    assert len(many) == 13  # no file-count limit, only the per-file size limit
     assert actions.attachments("log", {"files": [1]}) == []  # only a new ticket takes files
     with pytest.raises(actions.BadRequest):
         actions.build_argv("ticket.paste", {"text": "x", "files": []})

@@ -23,7 +23,8 @@ class Node {
   remove() { this.isConnected = false; this.parent.children.splice(this.parent.children.indexOf(this), 1); }
 }
 const walk = n => [n, ...n.children.flatMap(walk)];
-function setup() {
+function setup() { return setupWith(null); }
+function setupWith(settings) {
   const body = new Node('body'), calls = [], revoked = [], toasts = [], items = [];
   const c = {Blob, TextDecoder, Uint8Array, btoa, serial:0, locks:new Set(), mounts:new Map(), nodeKey:() => '', clean:x => x,
     el:(...args) => new Node(...args), document:{body, activeElement:null}, render:() => { c.renders++; }, renders:0,
@@ -33,6 +34,7 @@ function setup() {
     act:async (op, args) => { calls.push({op, args}); if (op === 'ticket.new') items.push({id:'new', title:args.title}); return {ok:true, state:{attached:{failed:['bad.txt']}}}; },
     window:{DashHelpers:{scrubText:x => x}, orch:{open:d => { d.open = true; }, close:async d => { d.open = false; await d.fire('close'); }, toast:(...x) => toasts.push(x)}}};
   c.button = (text, cls, fn) => { const b = c.el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
+  if (settings) c.state = {settings};
   vm.createContext(c);
   const app = read('app.js');
   vm.runInContext(app.slice(app.indexOf('function dialog('), app.indexOf("document.getElementById('new-ticket')")), c);
@@ -50,7 +52,7 @@ test('file validation, first nonempty title, and base64 stripping', () => {
   assert.equal(c.ticketFileError({name:'x.html',size:1}, []), 'x.html: only text files and pictures');
   assert.equal(c.ticketFileError({name:'x.md',size:2097153}, []), 'x.md is over 2 MB');
   assert.equal(c.ticketFileError({name:'x.md',size:2097152}, []), '');
-  assert.equal(c.ticketFileError({name:'x.md',size:1}, Array(4).fill({size:1})), 'At most 4 files');
+  assert.equal(c.ticketFileError({name:'x.md',size:1}, Array(12).fill({size:1})), '');  // no file-count limit
   assert.equal(c.ticketFileError({name:'x.md',size:2*1024*1024}, [{size:2*1024*1024}]), 'Files are over 3.5 MB');
   assert.equal(c.ticketTextTitle('\n  hello\r\nworld', 3), 'hel');
   assert.equal(c.ticketTextTitle('  \n ', 80), '');
@@ -163,12 +165,11 @@ test('a typed title stays: with a 20 KB paste or files title_auto is false and t
   assert.equal(u.calls[0].args.title_auto, true);
 });
 
-test('Show me the plan first is a box in More options; Start creates a plan-first ticket and starts it', async () => {
+test('Show me the plan first is a plain box; Start creates a plan-first ticket and starts it', async () => {
   const s = setup();
   s.form.requestSubmit = () => s.form.fire('submit');
   s.input.value = 'Make a plan'; await s.input.fire('input');
-  const options = walk(s.d).find(n => n.className === 'new-ticket-options');
-  const box = walk(options).find(n => n.name === 'plan_first');
+  const box = walk(s.d).find(n => n.name === 'plan_first');
   assert.equal(box.type, 'checkbox');
   box.checked = true;
   await s.form.fire('submit');
@@ -207,12 +208,63 @@ test('one Start button; Create without starting is a text link; neither sends pl
 
 test('attach is a link, drops land anywhere on the form, pasted text reads in pages', async () => {
   const s = setup();
-  assert.ok(walk(s.d).some(n => n.textContent === 'Attach file' && n.className === 'new-ticket-attach'));
+  assert.ok(walk(s.d).some(n => n.textContent === '＋ Add files or drop them here' && n.className === 'new-ticket-attach'));
   assert.equal(s.input.rows, 4);
   assert.equal((await s.form.fire('drop', {dataTransfer:{files:[{name:'plan.md', size:3, arrayBuffer:async () => new TextEncoder().encode('abc').buffer}]}})).prevented, true);
   await s.paste('x'.repeat(9000));
   walk(s.d).find(n => n.type === 'submit').disabled = true; await s.form.fire('submit');
   const labels = s.chips().map(n => n.children.map(c => c.textContent).join('|'));
-  assert.deepEqual(labels, ['Pasted text (about 3 pages)', 'plan.md']);
+  assert.deepEqual(labels, ['Pasted text (about 3 pages)', 'plan.md|3 B']);
   assert.equal(s.c.pastedLabel('x'.repeat(100)), 'Pasted text (about 1 page)');
+});
+
+test('helper choice: only real helpers, distinct labels, default first', () => {
+  const c = setup().c;
+  const hs = c.ticketHelpers({agents:[{name:'claude', label:'Helper', found:true}, {name:'codex', label:'Helper', chosen:true, found:true, description:'Builds code'}, {name:'gone', found:false}, {name:'claude', label:'Helper'}]});
+  assert.deepEqual([...hs.map(h => h.name)], ['codex', 'claude']);
+  assert.equal(new Set(hs.map(h => h.label.toLowerCase())).size, 2);
+  assert.equal(hs[0].description, 'Builds code');
+  assert.equal(c.ticketHelpers(null).length, 0);
+});
+test('several helpers: a select, each once; a non-default choice is the owner. One helper: fixed text. None: empty state', async () => {
+  const s = setupWith({agents:[{name:'claude', label:'Claude', chosen:true}, {name:'codex', label:'Codex', description:'Websites and code'}]});
+  const select = walk(s.d).find(n => n.name === 'helper');
+  assert.deepEqual([...select.children.map(o => o.textContent)], ['Claude (default)', 'Codex']);
+  select.value = 'codex'; await select.fire('change');
+  assert.equal(walk(s.d).find(n => n.className.includes('new-ticket-helper-about')).textContent, 'Websites and code');
+  s.input.value = 'Work'; await s.input.fire('input'); await s.form.fire('submit');
+  assert.equal(s.calls[0].args.owner, 'agent:codex');
+  const one = setupWith({agents:[{name:'claude', label:'Claude'}]});
+  assert.equal(walk(one.d).some(n => n.name === 'helper'), false);
+  assert.equal(walk(one.d).find(n => n.className === 'new-ticket-helper-fixed').textContent, 'Claude');
+  const none = setupWith({agents:[]});
+  assert.match(walk(none.d).find(n => n.className.includes('new-ticket-empty')).textContent, /No helper is set up yet/);
+});
+test('due date picker: quick choices, arrow keys between days, Esc closes only the calendar', async () => {
+  const s = setup(), toggle = walk(s.d).find(n => n.className.includes('new-ticket-date-toggle'));
+  assert.equal(toggle.textContent, '▦ No date');
+  await toggle.click();
+  const pop = walk(s.d).find(n => n.className === 'new-ticket-cal');
+  assert.equal(pop.hidden, false); assert.equal(toggle['aria-expanded'], 'true');
+  const tabbable = () => walk(pop).find(n => n.className === 'new-ticket-cal-day' && n.tabIndex === 0);
+  const start = Number(tabbable().textContent);
+  await pop.fire('keydown', {key:'ArrowRight', target:tabbable()});
+  const after = Number(tabbable().textContent);
+  assert.ok(after === start + 1 || after === 1);
+  await pop.fire('keydown', {key:'Escape', target:tabbable()});
+  assert.equal(pop.hidden, true); assert.equal(s.d.open, true);
+  await toggle.click();
+  await walk(s.d).find(n => n.textContent === 'Tomorrow').click();
+  const d = new Date(); d.setDate(d.getDate() + 1);
+  s.input.value = 'Work'; await s.input.fire('input'); await s.form.fire('submit');
+  assert.equal(s.calls[0].args.due, s.c.ticketIso(d));
+  assert.notEqual(toggle.textContent, '▦ No date');
+});
+test('window closes with X and backdrop; an empty submit shows the plain message', async () => {
+  const s = setup();
+  await s.form.fire('submit');
+  assert.equal(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, 'Describe what needs doing before you continue.');
+  assert.equal(s.calls.length, 0);
+  await s.d.fire('click', {target:s.d}); assert.equal(s.d.open, false);
+  const x = setup(); await walk(x.d).find(n => n['aria-label'] === 'Close new ticket').click(); assert.equal(x.d.open, false);
 });

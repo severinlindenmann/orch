@@ -144,7 +144,7 @@ const heading = (title, sub = '', {eyebrow = '', actions = null} = {}) => h('hea
 function skeletonFor(kind) {
   const bar = cls => h('div', {className:'skeleton ' + cls, 'aria-hidden':'true'});
   const stack = (n, cls = 'sk-card') => h('div', {className:'sk-stack', 'aria-hidden':'true'}, Array.from({length:n}, () => bar(cls)));
-  const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(2), stack(1))]
+  const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(3), stack(1))]
     : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
     : kind === 'section' ? [stack(3, 'sk-row')]

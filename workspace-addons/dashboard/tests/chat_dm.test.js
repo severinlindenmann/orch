@@ -28,7 +28,7 @@ test('DM renders safe text, delivery states, read-only permissions and workspace
   let view = JSON.stringify(c.chatDmThread());
   assert.match(view, /Sending…/); assert.match(view, /Delivered to Home/); assert.match(view, /Not sent · /);
   assert.match(view, /<script>hello<\/script>/); assert.match(view, /Try again/);
-  assert.match(JSON.stringify(c.chatList()), /Workspaces/);
+  assert.match(JSON.stringify(c.chatList()), /Other workspaces/);
   vm.runInContext('chatDm.contacts[0].can.chat = false', c);
   assert.doesNotMatch(JSON.stringify(c.chatDmThread()), /textarea/);
 });
@@ -129,7 +129,7 @@ test('refused action retains text after clearing draft', async () => {
 test('contacts with stored count appear before opening a thread', () => {
   const c = context();
   vm.runInContext("chatUi.open = 'chat'; chatDm.contacts[0].count = 3", c);
-  assert.match(JSON.stringify(c.chatList()), /Workspaces/);
+  assert.match(JSON.stringify(c.chatList()), /Other workspaces/);
 });
 
 test('Chat list route imports unopened conversations and sorts newest first', async () => {

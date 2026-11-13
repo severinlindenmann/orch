@@ -11,9 +11,12 @@ def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
         "Paste or write it here. A short title or a long text with many points: the agent splits it into tasks."
         in js
     )
-    assert "el('details', 'new-ticket-options')" in js
-    assert "el('summary', '', 'More options')" in js
-    assert "t ? ['owner', 'due', 'note', 'done_when'] : ['owner', 'due', 'done_when']" in js
+    # Simpler window: helper, due date and "done when" are shown plainly, not behind "More options".
+    assert "More options" not in js
+    assert "el('div', 'new-ticket-options')" in js
+    assert "t ? ['owner', 'due', 'note', 'done_when'] : []" in js
+    assert "'Done when (optional)'" in js
+    assert "'Describe what needs doing before you continue.'" in js
     for removed in ("One point per line", "Something new", "Something broken", "Small job"):
         assert removed not in js
 
@@ -23,7 +26,7 @@ def test_paste_title_and_description_use_existing_create_action():
     assert "const fullText = inputs.text.value;" in js
     assert "values.title = ticketTextTitle(" in js
     assert "shortText.length <= 1500" in js
-    assert "inputs.text.setCustomValidity(empty ? 'What needs doing?' : '')" in js
+    assert "inputs.text.setCustomValidity(empty ? EMPTY_TICKET : '')" in js
     assert "const args = {title:values.title" in js and "act('ticket.new', args)" in js
     assert "long_text:longText" in js
     assert "files:files.map(({name, text, data})" in js
@@ -32,7 +35,9 @@ def test_paste_title_and_description_use_existing_create_action():
 def test_attachments_and_safe_preview():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "maxLength = 20000" not in js
-    assert "button('Attach file', 'new-ticket-attach'" in js
+    assert "button('＋ Add files or drop them here', 'new-ticket-attach'" in js
+    assert "At most" not in js  # no file-count limit
+    assert "up to 2 MB each" in js and "100 MB" not in js  # the real per-file limit
     assert "for (const target of [form])" in js  # drops land on the whole form
     assert "pre.textContent = file.text.slice(0, 200000)" in js
     assert "innerHTML" not in js
@@ -71,3 +76,12 @@ def test_paste_styles_are_scoped_to_new_ticket():
         "min-height: 44px",
     ):
         assert rule in css
+
+
+def test_window_closes_with_x_esc_backdrop_and_has_date_picker():
+    js = (WEB / "pages" / "newticket.js").read_text()
+    assert "'Close new ticket'" in js
+    assert "if (event.target === d) window.orch.close(d)" in js
+    assert "['Today', 0], ['Tomorrow', 1], ['Next week', 7], ['No date', null]" in js
+    assert "ArrowLeft:-1, ArrowRight:1, ArrowUp:-7, ArrowDown:7" in js
+    assert "FOLLOW-UP: move to kit" in js

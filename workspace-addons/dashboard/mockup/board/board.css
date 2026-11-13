@@ -2,3 +2,5 @@
 
 .new-fields{position:relative}
 .board-toolbar{flex-wrap:nowrap;gap:12px}.board-toolbar #helper{margin-left:auto;width:120px}.board-toolbar .grow{display:none}.board-toolbar label[for=density]{display:none}.board-toolbar #search{width:220px}.board-toolbar .search{margin-left:0}.board-toolbar .view-toggle a:first-child{order:2}
+
+.list-page td:first-child>a.meta{display:block;margin-top:4px}.list-page td:first-child:has(>a.meta) .ticket-info{display:none}

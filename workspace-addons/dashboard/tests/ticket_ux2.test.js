@@ -15,7 +15,7 @@ const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMa
 function listCtx(extra = {}) {
   const c = {h, window:{DashHelpers:helpers}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
     shown:t => t, chip:(t, cls) => h('span', {className:'chip ' + cls}, t), statusChip:t => h('span', {className:'chip'}, t.status), state:{runs:{}}, starting:new Set(),
-    needsList:() => [], snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
+    needsList:() => [], tickets:() => [], name:v => String(v || ''), location:{hash:'#tickets'}, snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
     button:(label, cls, fn) => { const b = h('button', {className:'btn ' + cls}, label); b.onclick = fn; return b; }, ...extra};
   vm.createContext(c); vm.runInContext(listSrc, c); return c;
 }
