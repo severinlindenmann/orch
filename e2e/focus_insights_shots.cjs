@@ -75,6 +75,7 @@ const SCREENS = [
   } },
   { name: 'ticket-steps', url: '/t/t_pil2bbbb', wait: '.fx-history', async setup(p) { await settle(p); await p.waitForSelector('.fx-history .fx-step'); } },
   { name: 'ticket-used', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-used'); } },
+  { name: 'ticket-results', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await settle(p); await p.evaluate(() => { document.querySelector('button[data-act=mode]').click(); }); await p.waitForSelector('#fx-t-proof', { state: 'attached' }); await p.evaluate(() => document.getElementById('fx-t-proof').click()); await p.waitForSelector('.fx-results .fx-ptile'); } }, // Results tab: the Command tile
   { name: 'ticket-files', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-files'); } },
   // the helper tree shows from 1500 px wide only (narrower it is folded away), so the smoke loads this screen at 1600
   { name: 'ticket-helpers', smokeWidth: 1600, url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) {

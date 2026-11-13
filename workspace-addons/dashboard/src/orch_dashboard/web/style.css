@@ -314,7 +314,7 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 /* One header row on a narrow screen: workspace icon, page name, New ticket, "Menu · N"; the menu opens under it */
 .topbar-ws{display:none;align-items:center;flex:none;text-decoration:none}
 .topbar-ws img{width:24px;height:24px}
-.topbar>#crumb{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar>#crumb,.breadcrumb>#crumb,.breadcrumb>#updated{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:720px){
   .shell{display:flex;flex-direction:column}
   .shell>div{display:contents}
@@ -324,7 +324,9 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
   .sidebar[data-open=true] .sidebar-top{display:none}
   .topbar{flex-wrap:nowrap;gap:10px;padding:6px 12px}
   .topbar-ws{display:inline-flex}
-  .topbar>#crumb{flex:1 1 auto;font-weight:600}
+  .topbar>.breadcrumb{flex:1 1 auto;min-width:0}
+  .breadcrumb>#crumb{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+  .breadcrumb>#updated{display:none}  /* "Updated just now" is secondary: hidden here instead of wrapping mid-word */
   .topbar-actions>#open-agent{display:none}
 }
 /* "Open helper" as a Menu item: only on a narrow screen, where the header has no room for its button */

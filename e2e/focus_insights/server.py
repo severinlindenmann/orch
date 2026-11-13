@@ -35,7 +35,7 @@ TICKETS = [
     ], [{"id": "q1", "text": "Should the boat trip be on day 1 or day 2?", "answer": None,
          "options": ["Day 2", "Day 1"], "recommended": "Day 2"}]),
     ticket("t_pil2bbbb", "PIL-2", "Write the newsletter", [
-        {"id": "c1", "text": "Outline", "done": True, "evidence": [{"type": "note", "ref": "outline", "text": "Outline written"}]},
+        {"id": "c1", "text": "Outline", "done": True, "evidence": [{"type": "note", "ref": "outline", "text": "Outline written"}, {"type": "command", "ref": "uv run pytest -q", "text": "12 passed", "at": "2026-11-13T10:00:00Z"}]},
         {"id": "c2", "text": "Write the intro", "done": False, "state": "doing", "evidence": []},
     ]),
 ]  # fmt: skip
