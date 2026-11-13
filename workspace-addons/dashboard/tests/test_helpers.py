@@ -364,7 +364,7 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     src = webjs.all_js()
     tree = src[src.index("function treeBranch") : src.index("let ticketView")]
-    assert tree.count("ticketAttentionChip(t, section)") == 1  # one chip, told which section the row sits in
+    assert tree.count("statusBadge(t)") == 1  # one status badge per table row
     assert "ticketAttentionChip(t)" not in tree
     chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
     assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
@@ -606,7 +606,7 @@ def test_ticket_screens_use_plain_wording_and_one_chip():
     assert (
         "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]
     )  # one label source
-    assert "Ideas to plan" in src and "Finished work" in src
+    assert "Finished tickets land here" in src  # the board columns show no hint lines, only an empty text
     assert (
         "hideStatus" not in src and "'Needs you'" in src
     )  # 10A: short board chip; 7A: no chip beside the banner
@@ -700,7 +700,8 @@ def test_review_ticket_without_run_offers_no_start():
     assert call("agentLine", {"id": "t_a", "status": "active"}, None, 0, None)["primary"]["label"] == "Start"
     src = webjs.all_js()
     assert "line.primary && !['answer', 'open'].includes(line.primary.op)" in src
-    assert "!['done', 'review'].includes(t.status) ? agentBar(t) : null" in src
+    # the helper bar only shows while the ticket is being worked on (never on review/done)
+    assert "!['done', 'review'].includes(t.status)" in src and "working ? agentBar(t) : null" in src
 
 
 def test_ui2_small_bugs_in_markup_and_css():

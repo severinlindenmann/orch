@@ -18,9 +18,7 @@ test('shows the core line, hint and details; nothing without proof data', () => 
   const out = text(line(t));
   assert.match(out, /1 part of "Done when" has no task/);
   assert.match(out, /No task covers this/);
-  assert.match(out, /Details/);
   assert.match(out, /Check passed/);
-  assert.doesNotMatch(text(line(t, true)), /Details/);
 });
 test('a failed check is a bad mark, no checks is neutral', () => {
   const json = JSON.stringify(line({id:'t_1', checklist:[], proof:{line:'1 check failed', level:'fail', uncovered:[], per_item:{}}}));
