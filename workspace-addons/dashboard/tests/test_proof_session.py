@@ -47,11 +47,14 @@ def live(tmp_path, monkeypatch):
     monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **k: no_child(argv))
     srv = make_server(root, 0, orch_bin=pageproof.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    SERVERS[srv.server_address[1]] = srv
     yield root, srv.server_address[1]
+    SERVERS.pop(srv.server_address[1], None)
     srv.shutdown()
     srv.server_close()
 
 
+SERVERS = {}  # port -> the fixture's running server (a test may swap it for a restarted one)
 SECRETS = {}  # cookie -> page secret of the sessions this module signed in
 
 
@@ -929,3 +932,112 @@ def test_every_dashboard_answer_forbids_framing_by_other_sites(live):
     for path in ("/", "/api/notices", "/nope"):
         _st, hdr, _ = _raw(port, "GET", path)
         assert "frame-ancestors 'self'" in hdr.get("content-security-policy", ""), path
+
+
+ANS = {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}
+
+
+def _answer(port, ck):
+    return post(
+        port,
+        "/api/act",
+        {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}},
+        {"Cookie": ck},
+    )
+
+
+def _restart(live_port, root):
+    """What an update does to the server: the old one goes away, a new one binds the same port."""
+    srv = make_server(root, live_port, orch_bin=pageproof.SELF)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_open_tab_keeps_its_session_after_the_update_restart(live, monkeypatch):
+    """The whole path: click Update, the old server ends, the restarted one (same port) takes the same tab's
+    next action. Nothing but the one-use resume file carries the session over."""
+    from orch_dashboard import handoff
+
+    root, port = live
+    hp.request_handoff(root, "update", "orch", "Update orch", "", argv=["update"])
+    hid = hp.handoffs(root)[0]["id"]
+    ck = session(root, port)
+    monkeypatch.setattr(handoff, "start_detached", lambda argv, proof, **kw: 4242)
+    assert post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": hid}}, {"Cookie": ck})[0] == 202
+    old = SERVERS[port]  # swap servers on the same port: stop the fixture's, start a new one
+    old.shutdown()
+    old.server_close()
+    new = _restart(port, root)
+    try:
+        st, _, body = _answer(port, ck)
+        assert st != 403 and b"Reload" not in body and b"from this computer" not in body
+    finally:
+        new.shutdown()
+        new.server_close()
+
+
+def test_a_busy_port_does_not_spend_the_resume_file(live):
+    root, port = live
+    assert hp.write_resume_cookie(root, "dashboard", "c" * 40, "s" * 40)
+    with pytest.raises(OSError):
+        make_server(root, port, orch_bin=pageproof.SELF)  # the fixture's server still holds the port
+    srv = make_server(root, 0, orch_bin=pageproof.SELF)  # the retry (auto-port) still adopts the session
+    try:
+        assert srv.RequestHandlerClass is not None
+        assert list(hp.key_dir(root).glob("resume-dashboard.cookie")) == []  # spent by the server that bound
+    finally:
+        srv.server_close()
+
+
+def test_a_tab_the_restarted_server_does_not_know_is_told_to_reload(live):
+    root, port = live
+    ck = session(root, port)
+    stale = {"Cookie": ck, "X-Orch-Page": "z" * 43}  # a session this server never issued
+    st, _, body = post(port, "/api/act", {"op": "answer", "args": ANS}, stale)
+    assert st == 403 and body.decode() == pageproof.RESTARTED_MSG
+    st, _, body = post(port, "/api/act", {"op": "handoff.confirm", "args": {"id": "x"}}, stale)
+    assert st == 403 and body.decode() == pageproof.RESTARTED_MSG
+    st, _, body = post(port, "/api/act", {"op": "answer", "args": ANS}, {"X-Orch-Page": None})
+    assert st == 403 and body.decode() != pageproof.RESTARTED_MSG  # a page that never signed in
+
+
+def test_a_transient_read_failure_keeps_the_resume_file(live, monkeypatch):
+    from orch import winacl
+
+    root, _ = live
+    assert hp.write_resume_cookie(root, "dashboard", "c" * 40, "s" * 40)
+    real = hp._read_guarded
+
+    def flaky(path):
+        raise winacl.Unknown("try again")
+
+    monkeypatch.setattr(hp, "_read_guarded", flaky)
+    assert hp.take_resume_session(root, "dashboard") is None
+    monkeypatch.setattr(hp, "_read_guarded", real)
+    assert hp.take_resume_session(root, "dashboard") == ("c" * 40, "s" * 40)
+
+
+def test_a_resume_file_that_cannot_be_removed_is_not_adopted(live, monkeypatch):
+    """No replay: when the one use cannot be proven (the unlink fails), nothing is adopted."""
+    root, _ = live
+    assert hp.write_resume_cookie(root, "dashboard", "c" * 40, "s" * 40)
+    f = hp.key_dir(root) / "resume-dashboard.cookie"
+    real = type(f).unlink
+
+    def deny(self, *a, **k):
+        if self.name == f.name:
+            raise PermissionError("in use")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(type(f), "unlink", deny)
+    why = []
+    assert hp.take_resume_session(root, "dashboard", why) is None and why
+    monkeypatch.setattr(type(f), "unlink", real)
+
+
+def test_an_update_the_core_refused_for_its_proof_says_the_request_expired():
+    assert (
+        pageproof._short_reason("Refused: " + hp.HANDOFF + "\n")
+        == "This request expired. Run the update again."
+    )
+    assert pageproof._short_reason("Refused: disk full\n") == "disk full"

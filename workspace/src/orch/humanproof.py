@@ -3335,7 +3335,7 @@ def write_resume_cookie(root: Path, server: str, cookie: str, secret: str) -> bo
         return False
 
 
-def take_resume_session(root: Path, server: str) -> tuple[str, str] | None:
+def take_resume_session(root: Path, server: str, why: list | None = None) -> tuple[str, str] | None:
     """The (cookie, page secret) a restarted server may adopt, once; the file is removed whatever it holds."""
     if server not in ("focus", "dashboard"):
         return None
@@ -3345,9 +3345,26 @@ def take_resume_session(root: Path, server: str) -> tuple[str, str] | None:
         with _key_lock(d):
             try:
                 lines = _read_guarded(f).decode("utf-8").split()
-            finally:
+            except winacl.Unknown:
+                if why is not None:
+                    why.append("Windows could not read the resume file; it is kept for the next start")
+                return None  # Windows could not read it just now: keep the file for the next start (15 min)
+            except FileNotFoundError:
+                return None  # nothing to adopt (a normal start)
+            except Exception as e:  # noqa: BLE001 - any other refusal: the file is spent, nothing is adopted
+                if why is not None:
+                    why.append(f"the resume file was refused ({type(e).__name__})")
                 with contextlib.suppress(OSError):
                     f.unlink()
+                return None
+            try:
+                f.unlink()  # one use, whatever it holds
+            except FileNotFoundError:
+                pass
+            except OSError:  # cannot prove it is spent (a Windows scanner holds it): adopt nothing
+                if why is not None:
+                    why.append("the resume file could not be removed")
+                return None
     except (Refused, OSError, ValueError):
         return None
     if (
@@ -3358,6 +3375,8 @@ def take_resume_session(root: Path, server: str) -> tuple[str, str] | None:
         and 20 <= len(lines[1]) <= 80
     ):
         return lines[0], lines[1]
+    if why is not None:
+        why.append("the resume file had expired or was damaged")
     return None
 
 
