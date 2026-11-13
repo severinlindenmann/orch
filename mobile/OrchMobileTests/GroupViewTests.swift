@@ -118,7 +118,7 @@ final class GroupViewTests: XCTestCase {
         XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [update])?.label, "HOME-8")
         var noKey = update
         noKey.key = nil
-        XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [noKey])?.label, "ticket")
+        XCTAssertEqual(GroupRoomRules.openTarget(task: task, workspaces: paired, tickets: [], updates: [noKey])?.label, "topic")
         let wrongWorkspace = GroupTask(delegate: "d", ws: GroupMock.finance, ticket: "t_local", status: "working")
         let finance = Workspace(id: GroupMock.finance, name: "Finance", description: nil, tags: [], online: true, lastSeen: nil, openQuestions: 0)
         XCTAssertNil(GroupRoomRules.openTarget(task: wrongWorkspace, workspaces: [finance], tickets: [ticket], updates: [update]))
@@ -191,6 +191,58 @@ final class GroupViewTests: XCTestCase {
             let item = try XCTUnwrap(GroupRoomRules.readItems(group).first { $0.id == message.id })
             if case .theirs = item.kind {} else { XCTFail("External member must remain incoming") }
         }
+    }
+
+    func testHeaderSubtitleAndFirstPillUseMemberNames() throws {
+        let group = try XCTUnwrap(GroupRoomRules.rows(snapshot(GroupMock.messages(now: now))).first)
+        XCTAssertEqual(GroupRoomRules.subtitle(group), "Finance, Home, Bank")
+        XCTAssertEqual(GroupRoomRules.eventText(GroupEvent(kind: "created", ws: GroupMock.finance), group: group, ownAnswer: nil),
+                       "Finance started this group")
+        let note = GroupRoomRules.membersNote(group)
+        XCTAssertTrue(note.hasSuffix("."))
+        XCTAssertFalse(note.contains("ticket"))
+    }
+
+    func testRoomOpensAtNewestOpenApprovalCard() throws {
+        let group = try XCTUnwrap(GroupRoomRules.rows(snapshot(GroupMock.messages(now: now))).first)
+        let question = GroupMock.question(at: ISO8601DateFormatter().string(from: now))
+        let card = try XCTUnwrap(group.messages.first { $0.event?.kind == "approval_needed" })
+        XCTAssertEqual(GroupRoomRules.openRowID(group, questions: [question], answered: []), "m-" + card.id)
+        XCTAssertNil(GroupRoomRules.openRowID(group, questions: [question], answered: [question.id]), "answered: open at the newest")
+        XCTAssertNil(GroupRoomRules.openRowID(group, questions: [], answered: []), "not answerable here")
+    }
+
+    func testApprovalElsewhereLinksOnlyToAPairedMember() throws {
+        let group = try XCTUnwrap(GroupRoomRules.rows(snapshot(GroupMock.messages(now: now))).first)
+        let event = try XCTUnwrap(group.messages.compactMap(\.event).first { $0.kind == "approval_needed" })
+        let paired = GroupRoomRules.answerElsewhere(event, group: group, paired: [GroupMock.bank])
+        XCTAssertEqual(paired.text, "Answer in Bank")
+        XCTAssertEqual(paired.route, .ticket(workspace: GroupMock.bank, ticket: "t_banktax001"))
+        let other = GroupRoomRules.answerElsewhere(event, group: group, paired: [GroupMock.finance])
+        XCTAssertNil(other.route)
+        XCTAssertEqual(other.text, "Only someone with Bank on their phone can answer this.")
+    }
+
+    func testPendingGroupAnswerIsCancelledWhenTheGroupClosesOrTheCardIsLate() throws {
+        let g = try XCTUnwrap(GroupRoomRules.rows(snapshot(GroupMock.messages(now: now))).first)
+        let id = try XCTUnwrap(g.messages.compactMap(\.event).first { $0.kind == "approval_needed" }?.questionMessage)
+        XCTAssertEqual(GroupRoomRules.answersToCancel([g], pending: [id], sending: []), [], "open group: keep it")
+        let closed = PhoneGroup(key: g.key, title: g.title, members: g.members, hostName: g.hostName, names: g.names,
+            externals: g.externals, ticketKey: g.ticketKey, ticket: g.ticket, messages: g.messages, closed: true,
+            startedHere: g.startedHere, gaps: g.gaps, tasks: g.tasks)
+        XCTAssertEqual(GroupRoomRules.answersToCancel([closed], pending: [id], sending: []), [id])
+        XCTAssertEqual(GroupRoomRules.answersToCancel([closed], pending: [id], sending: [id]), [], "already sending")
+        XCTAssertEqual(GroupRoomRules.answersToCancel([closed], pending: [], sending: []), [])
+    }
+
+    func testGroupApprovalQueuedAndVoiceOverTexts() {
+        XCTAssertEqual(GroupApprovalView.queuedText("always"), "Always · waiting to send")
+        XCTAssertEqual(GroupApprovalView.chosenAnnouncement("always"), "Always. Sent in a moment. Undo available.")
+    }
+
+    func testGroupApprovalPendingTextNamesTheChoice() {
+        XCTAssertEqual(GroupApprovalView.pendingText("always", sending: false), "Always · sent in a moment")
+        XCTAssertEqual(GroupApprovalView.pendingText("once", sending: true), "Allow once · sending…")
     }
 
     func testApprovalEventTextUsesOnlyOwnAnswer() throws {

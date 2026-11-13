@@ -66,6 +66,32 @@
   function holdText(v) {
     return v && v.run && v.run.running === true && typeof v.hold === 'string' ? v.hold.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
   }
-  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, pickerLine, fileIcon, ago, agentColor, holdText};
+  /* The one source for the session's words: pill, feed headline, and whether work is shown as happening now
+     ("Now:" marks and the "Waiting for the first step…" row). pill null: not started, the ticket's own status word. */
+  function sessionState(v) {
+    const t = v.ticket || {}, run = v.run || {};
+    if (v.state === 'done') return {key: 'finished', pill: 'Done', headline: 'Work completed', active: false};
+    if ((t.questions || []).some(q => q.answer == null)) return {key: 'waiting-for-you', pill: 'Needs you', headline: 'Before the question', active: false};
+    if (v.state === 'needs') return {key: 'waiting-for-you', pill: 'Needs you', headline: run.running === true ? 'The work is taking shape' : 'Work so far', active: run.running === true};
+    if (v.state === 'working') return {key: 'running', pill: 'Working', headline: 'The work is taking shape', active: true};
+    if (v.state === 'waiting') return {key: 'paused', pill: 'Paused', headline: 'Paused', active: false};
+    if (t.status === 'review') return {key: 'stopped', pill: 'Ready for review', headline: 'Work so far', active: false};
+    if (t.started || run.run) return {key: 'paused', pill: 'Paused', headline: 'Paused', active: false};
+    return {key: 'stopped', pill: null, headline: 'Work so far', active: false};
+  }
+  /* The ticket list row's small line: the actual next step only when it says more than the action chip. */
+  function nextStepText(t, action) {
+    const next = String((t && t.next_step) || '').trim();
+    return next && next.toLowerCase() !== String(action || '').toLowerCase() ? next : '';
+  }
+  /* A list group shows the first n rows; the rest wait behind "Show all". */
+  function limitGroup(rows, n = 5) {
+    return {shown: rows.slice(0, n), more: Math.max(0, rows.length - n)};
+  }
+  /* Results counts tasks, the same unit as "1 of 1 tasks": the finished tasks that have a result. */
+  function resultCount(checklist) {
+    return (checklist || []).filter(c => c.done && !c.wont_do && (c.evidence || []).length).length;
+  }
+  root.FocusHelpers = {plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);

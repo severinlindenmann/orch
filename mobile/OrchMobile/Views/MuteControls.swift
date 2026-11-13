@@ -53,8 +53,9 @@ struct MuteAllSettings: View {
                 Toggle("Mute all", isOn: Binding(get: { model.isMutedAll(now: context.date) }, set: { on in
                     if on { choosing = true } else { Task { await model.muteAll(.off) } }
                 })).themeFont(17).tint(Theme.brand).accessibilityIdentifier("mute-all")
+                Text("Silences notifications inside the app").themeFont(13).foregroundStyle(Theme.muted)
                 if model.isMutedAll(now: context.date) {
-                    Text(MuteRules.endLabel(model.settings.muteAllUntil)).themeFont(13).foregroundStyle(Theme.muted)
+                    Text(MuteRules.endLabel(model.settings.muteAllUntil, now: context.date)).themeFont(13).foregroundStyle(Theme.muted)
                 }
             }.padding(16)
         }.confirmationDialog("Mute all", isPresented: $choosing, titleVisibility: .visible) {
@@ -71,7 +72,7 @@ struct MuteAllBanner: View {
             if model.isMutedAll(now: context.date) {
                 HStack(spacing: 8) {
                     Image(systemName: "bell.slash").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Text("Notifications off · " + MuteRules.endLabel(model.settings.muteAllUntil, banner: true))
+                    Text("Notifications off · " + MuteRules.endLabel(model.settings.muteAllUntil, banner: true, now: context.date))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     Spacer(minLength: 0)
                     Button("Turn on") { Task { await model.muteAll(.off) } }

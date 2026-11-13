@@ -39,12 +39,12 @@
     return list.filter(e => !drop.has(e));
   }
 
-  /* The sidebar footer: the relay add-on's saved connection (the same fact Settings shows as "Connected"). */
+  /* The sidebar footer: empty unless something is wrong, i.e. the relay add-on's saved connection is lost
+     (the same fact Settings shows as "Connected"). A shared copy says so. */
   function footerState(state, snapshot) {
     if (snapshot) return 'Shared copy';
     const relay = ((state && state.settings && state.settings.addons) || []).find(a => a && a.name === 'relay' && a.active && a.detail);
-    if (!relay) return 'Local workspace';
-    return relay.detail.connected ? 'Connected' : 'Not connected yet';
+    return relay && !relay.detail.connected ? 'Not connected' : '';
   }
 
   function historyLine(entry, checklist) {
@@ -313,7 +313,7 @@
   /* The line under an agent's "waiting" chip, in plain words: no command text, a login named as signing in. */
   function plainWhy(why, label) {
     const w = String(why || '');
-    if (/wants a login|log in to|login method/i.test(w)) return (label || 'The agent') + ' needs you to sign in';
+    if (/wants a login|log in to|login method/i.test(w)) return (label || 'The helper') + ' needs you to sign in';
     return plainNames(w).replace(/\s*(Open the live session[^:]*:\s*)?orch run attach\s+\S+/gi, '').replace(/\s+/g, ' ').trim().replace(/[.:]$/, '');
   }
 
@@ -392,7 +392,7 @@
   }
   /* FO-14: who stands behind a proof. */
   function proofMark(ev) {
-    return String((ev && ev.by) || '').startsWith('human:') ? {mark: '●', label: 'You'} : {mark: '○', label: 'Agent says'};
+    return String((ev && ev.by) || '').startsWith('human:') ? {mark: '●', label: 'You'} : {mark: '○', label: 'Helper says'};
   }
   /* Leaving the page: every answer still in its Undo window is sent now. entries: [{state, send}]. Returns how many. */
   function flushPending(entries) {

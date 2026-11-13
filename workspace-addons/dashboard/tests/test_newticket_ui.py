@@ -6,7 +6,7 @@ from .webjs import WEB, all_js
 def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "'What needs doing?'" in js
-    assert "input.rows = 10; input.maxLength = 500000; input.required = true" in js
+    assert "input.rows = 4; input.maxLength = 500000; input.required = true" in js
     assert (
         "Paste or write it here. A short title or a long text with many points: the agent splits it into tasks."
         in js
@@ -32,7 +32,8 @@ def test_paste_title_and_description_use_existing_create_action():
 def test_attachments_and_safe_preview():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "maxLength = 20000" not in js
-    assert "Drop files here (e.g. .md, .txt) or paste any amount of text" in js
+    assert "button('Attach file', 'new-ticket-attach'" in js
+    assert "for (const target of [form])" in js  # drops land on the whole form
     assert "pre.textContent = file.text.slice(0, 200000)" in js
     assert "innerHTML" not in js
     assert "URL.revokeObjectURL" in js
@@ -48,14 +49,14 @@ def test_edit_and_create_start_semantics_are_preserved():
         in js
     )
     assert "let startAfter = !t" in js
-    assert "startAfter = false; planFirst = false; form.requestSubmit()" in js
-    assert "startAfter = true; planFirst = true; form.requestSubmit()" in js  # Show plan first
+    assert "startAfter = false; form.requestSubmit()" in js  # Create without starting
+    assert "const planFirst = startAfter && !!planBox?.checked" in js  # Show me the plan first
     assert "startAfter = true;" in js
     assert "act('run.start', {ticket:created.id})" in js
     assert "t.title === values.title && !previous.has(t.id)" in js
     assert "creationUnresolved = true" in js
     assert "submit.disabled = creationUnresolved" in js
-    assert "The ticket was created, but the agent did not start: " in js
+    assert "The ticket was created, but the helper did not start: " in js
     assert "The ticket was created, but could not be found in the reply." in js
 
 
@@ -64,7 +65,7 @@ def test_paste_styles_are_scoped_to_new_ticket():
     assert ".new-ticket .new-ticket-text" in css
     for rule in (
         "width: 100%",
-        "min-height: 200px",
+        "min-height: 6.5em",
         "resize: vertical",
         "font-size: 16px",
         "min-height: 44px",

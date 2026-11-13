@@ -15,6 +15,7 @@ struct ChatsListView: View {
     @State private var pendingContact: String?
     @State private var contactQuery = ""
     @State private var showSettings = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     // Concatenated Text can't take themeFont: these follow Dynamic Type live (ScaledMetric reads the environment).
     @ScaledMetric private var questionKeySize: CGFloat = 13
     @ScaledMetric private var questionTitleSize: CGFloat = 17
@@ -135,12 +136,11 @@ struct ChatsListView: View {
             }.frame(maxWidth: .infinity).padding(.vertical, 50).accessibilityIdentifier("chats-empty")
         } else {
             attentionCards
-            let now = NowLine.counts(model.workspaceSummaries)
-            NowLine(running: now.running, newCount: now.newCount, newFrom: now.newFrom)
-            let shown = model.workspaceSummaries.filter { filter == "All" || (filter == "Unread" ? $0.unread > 0 : $0.openQuestions > 0) }
-            if shown.isEmpty {
+            let shown = model.workspaceSummaries.filter { ChatsRowRules.matches(filter, unread: $0.unread, needsYou: $0.openQuestions > 0) }
+            let groupsShown = GroupsSection.shown(model, filter: filter)
+            if shown.isEmpty && groupsShown.isEmpty {
                 Text("Nothing here yet.").themeFont(15).foregroundStyle(Theme.muted).padding(.vertical, 24)
-            } else {
+            } else if !shown.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(shown) { summary in
                         workspaceRow(summary)
@@ -148,8 +148,8 @@ struct ChatsListView: View {
                     }
                 }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             }
-            GroupsSection()
-            if model.archivedCount > 0 { archivedRow }
+            GroupsSection(filter: filter, groups: groupsShown)
+            if model.archivedCount > 0 && filter == "All" { archivedRow }
         }
     }
 
@@ -171,29 +171,45 @@ struct ChatsListView: View {
     }
 
     @ViewBuilder private var attentionCards: some View {
-        let questions = model.questions.filter { !$0.isReview && !$0.isMakeTicket && model.answers[$0.id] == nil }
+        let questions = ChatsRowRules.needsYou(model.questions, answers: model.answers)
         if !questions.isEmpty && (filter == "All" || filter == "Needs your OK") {
+            // Pinned: at most three, the rest behind "See all (n)" (the Needs your OK filter lists them all).
+            let pinned = filter == "All" ? ChatsRowRules.pinned(questions) : questions
             VStack(alignment: .leading, spacing: 10) {
                 Text("Needs your OK · \(questions.count)").themeFont(13, .semibold).foregroundStyle(Theme.warn)
                     .accessibilityAddTraits(.isHeader)
                 VStack(spacing: 0) {
-                    ForEach(questions) { question in
+                    ForEach(pinned) { question in
                         let ws = question.message.from
                         let summary = model.workspaceSummaries.first { $0.id == ws }
+                        let wsName = summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? question.workspaceName
                         let topic = summary?.topics.first { $0.id.ticket == question.message.ticket && question.message.ticket != nil }
-                        let title = topic?.title ?? question.message.body.title ?? summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? question.workspaceName
+                        let title = topic?.title ?? question.message.body.title ?? (question.message.ticket == nil ? "Your helper" : wsName)
                         NavigationLink(value: question.message.ticket.map { ChatRoute.ticket(workspace: ws, ticket: $0) } ?? .workspace(ws)) {
-                            HStack(spacing: 14) {
-                                Image(systemName: "bubble.left").themeFont(20).foregroundStyle(Theme.warn).accessibilityHidden(true)
+                            HStack(spacing: 12) {
+                                WorkspaceBadge(name: wsName, icon: summary?.workspace.icon, color: summary?.workspace.color, size: 32)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(title).font(.system(size: questionTitleSize, weight: .semibold)).foregroundColor(Theme.text)
-                                    Text(ShellTime.day(question.message.createdAt)).themeFont(13).foregroundStyle(Theme.muted)
+                                        .lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
+                                    Text([wsName, ShellTime.day(question.message.createdAt)].filter { !$0.isEmpty }.joined(separator: " · "))
+                                        .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
                                     Text(question.message.body.text).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
                                 }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
                                 ShellChevron()
                             }.padding(.horizontal, 16).padding(.vertical, 14).contentShape(Rectangle())
                         }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
-                        if question.id != questions.last?.id { ShellDivider() }
+                            .accessibilityIdentifier("needs-you-\(question.id)")
+                        if question.id != pinned.last?.id { ShellDivider() }
+                    }
+                    if pinned.count < questions.count {
+                        ShellDivider()
+                        Button { filter = "Needs your OK" } label: {
+                            HStack {
+                                Text("See all (\(questions.count))").themeFont(15, .semibold)
+                                Spacer()
+                                ShellChevron()
+                            }.frame(minHeight: 44).padding(.horizontal, 16).padding(.vertical, 4).contentShape(Rectangle())
+                        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("needs-you-see-all")
                     }
                 }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             }
@@ -204,10 +220,8 @@ struct ChatsListView: View {
         let name = WorkspaceAlias.name(for: summary.workspace)
         let newest = summary.topics.max { ($0.lastAt ?? "") < ($1.lastAt ?? "") }
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
-        let shownQuestions = (filter == "All" || filter == "Needs your OK") ? model.questions.filter {
-            !$0.isReview && !$0.isMakeTicket && model.answers[$0.id] == nil && $0.message.from == summary.id
-        } : []
-        let preview = ChatsRowRules.preview(summary.lastLine, starting: starting, shownQuestionCount: shownQuestions.count)
+        let working = ChatsRowRules.isWorking(summary.topics)
+        let preview = ChatsRowRules.preview(summary.lastLine, starting: starting, working: working, unread: summary.unread)
         return TimelineView(.everyMinute) { context in
             let muted = model.notificationsMuted(workspace: summary.id, now: context.date)
             NavigationLink(value: ChatRoute.workspace(summary.id)) {
@@ -215,11 +229,16 @@ struct ChatsListView: View {
                     WorkspaceBadge(name: name, icon: summary.workspace.icon, color: summary.workspace.color, size: 46, lastSeen: .some(summary.workspace.lastSeen), id: summary.id)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            Text(name).themeFont(17, .semibold).lineLimit(2)
+                            Text(name).themeFont(17, .semibold).lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
                             if muted { MutedIcon() }
                         }
-                        Text(preview).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
-                        if shownQuestions.isEmpty && summary.openQuestions > 0 { Text(summary.openQuestions == 1 ? "1 needs your OK" : "\(summary.openQuestions) need your OK").themeFont(13).foregroundStyle(Theme.warn) }
+                        HStack(spacing: 6) {
+                            if working && !starting { ProgressView().controlSize(.mini).tint(Theme.muted).accessibilityHidden(true) }
+                            Text(preview).themeFont(15).foregroundStyle(Theme.muted).lineLimit(1)
+                        }
+                        if let label = ChatsRowRules.questionLabel(summary.openQuestions) {
+                            Text(label).themeFont(13).foregroundStyle(Theme.warn).accessibilityLabel(ChatsRowRules.needsYouSpoken(summary.openQuestions) ?? label)
+                        }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .trailing, spacing: 10) {
                         Text(ShellTime.short(summary.lastAt)).themeFont(12).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
@@ -356,10 +375,45 @@ struct ChatsListView: View {
 }
 
 
+/// Chat list numbers, one meaning each: the row badge is unread messages (`WorkspaceSummary.unread`), the row's
+/// "1 question" line is open questions (`openQuestions`), "Needs your OK · N" is conversations with an open question.
 enum ChatsRowRules {
-    static func preview(_ text: String, starting: Bool = false, shownQuestionCount: Int = 0) -> String {
-        if shownQuestionCount > 0 { return shownQuestionCount == 1 ? "1 needs your OK" : "\(shownQuestionCount) need your OK" }
+    /// Questions still waiting for an answer (not reviews, not "make a ticket" offers).
+    static func openQuestions(_ questions: [Question], answers: [String: String], workspace: String? = nil) -> [Question] {
+        questions.filter { !$0.isReview && !$0.isMakeTicket && answers[$0.id] == nil && (workspace == nil || $0.message.from == workspace) }
+    }
+    /// One entry per conversation (General or topic) with an open question: the oldest open question there.
+    static func needsYou(_ questions: [Question], answers: [String: String]) -> [Question] {
+        var seen = Set<String>()
+        return openQuestions(questions, answers: answers)
+            .sorted { $0.message.createdAt < $1.message.createdAt }
+            .filter { seen.insert($0.message.from + "|" + ($0.message.ticket ?? "")).inserted }
+    }
+    static let pinnedLimit = 3
+    /// The pinned "Needs your OK" section shows at most three; the rest sit behind "See all (n)".
+    static func pinned(_ questions: [Question]) -> [Question] { Array(questions.prefix(pinnedLimit)) }
+    /// Row titles: one line (tail cut) at default sizes, two at accessibility Dynamic Type sizes. Full title: Info.
+    static func titleLines(_ accessibilitySize: Bool) -> Int { accessibilitySize ? 2 : 1 }
+    /// Chat headers drop their subtitle (status, last seen) at accessibility sizes so the title stays readable; Info has it.
+    static func showsHeaderSubtitle(_ accessibilitySize: Bool) -> Bool { !accessibilitySize }
+    /// VoiceOver words for the amber needs-you count, kept apart from the unread badge ("3 unread").
+    static func needsYouSpoken(_ count: Int) -> String? { count > 0 ? (count == 1 ? "1 question needs your OK" : "\(count) questions need your OK") : nil }
+    /// One filter rule for every conversation kind on the list (workspaces and groups).
+    static func matches(_ filter: String, unread: Int, needsYou: Bool) -> Bool {
+        switch filter { case "Unread": unread > 0; case "Needs your OK": needsYou; default: true }
+    }
+    /// The helper is busy on a topic (a "Working…" subtitle, like "typing…").
+    static func isWorking(_ topics: [TopicSummary]) -> Bool {
+        topics.contains { $0.status == .working && !$0.isStarting }
+    }
+    /// "1 question", "3 questions"; nil when none.
+    static func questionLabel(_ count: Int) -> String? {
+        count > 0 ? (count == 1 ? "1 question" : "\(count) questions") : nil
+    }
+    /// An unread reply wins over "Working…" (the spinner still shows the helper is busy).
+    static func preview(_ text: String, starting: Bool = false, working: Bool = false, unread: Int = 0) -> String {
         if starting { return "Getting started…" }
+        if working && unread == 0 { return "Working…" }
         return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No messages yet" : text
     }
 }

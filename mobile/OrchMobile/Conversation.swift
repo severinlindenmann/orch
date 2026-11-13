@@ -419,7 +419,7 @@ enum ConversationBuilder {
         d.workspaces.map { w in
             WorkspaceSummary(workspace: w, presence: w.presence(now: d.now), general: general(workspace: w.id, d, read: read),
                              topics: topics(workspace: w.id, d, read: read),
-                             openQuestions: d.questions.filter { !$0.isReview && !$0.isMakeTicket && $0.message.from == w.id && d.answers[$0.id] == nil }.count)
+                             openQuestions: ChatsRowRules.openQuestions(d.questions, answers: d.answers, workspace: w.id).count)
         }.sorted { ($0.openQuestions > 0 ? 1 : 0, $0.lastAt ?? "") > ($1.openQuestions > 0 ? 1 : 0, $1.lastAt ?? "") }
     }
 }

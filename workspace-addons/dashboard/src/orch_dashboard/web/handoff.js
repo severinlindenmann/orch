@@ -1,5 +1,5 @@
-// "Requested by a command": a terminal asked for something only you may do. Shows the request in plain words; ONE click
-// (Continue) lets the dashboard do it. Never focuses a button, no typed words. No token is shown here.
+// A terminal asked for something only you may do. Shows the request in plain words; ONE click
+// (Send answer / Continue) lets the dashboard do it. Never focuses a button, no typed words. No token is shown here.
 (function () {
   var box = null, seen = "";
   function el(tag, text, cls) { var e = document.createElement(tag); if (text) e.textContent = text; if (cls) e.className = cls; return e; }
@@ -24,6 +24,7 @@
     parts.forEach(function (p) { s.appendChild(typeof p === "string" ? document.createTextNode(p) : p); });
     return s;
   }
+  function shortValue(v) { return v.length <= 120 && !/[\r\n]/.test(v); }  // shown in the sentence, no separate block
   function stepName(p) {  // "step 3, “text”": the number is orch's, the text is the agent's
     var n = Number(p.n) > 0 ? "step " + Number(p.n) + ", " : "";
     var s = el("span"); s.appendChild(document.createTextNode(n)); s.appendChild(q(p.step)); return s;
@@ -40,12 +41,15 @@
   var TEMPLATES = {
     "copy.remove_orphaned": function (p) { return ["Remove copies of the missing project ", plain(p.ws8), p.discard ? ", discarding changes that cannot be saved?" : ", saving changes first?"]; },
     "copy.retry": function (p) { return ["Try cleaning up the copy for ", q(p.title), " again?"]; },
-    "ticket.answer": function (p) { return ["Answer to ", q(p.question), " on ", q(p.title), "?"]; },
+    "ticket.answer": function (p, i) {  // "Send this answer to Weekly report? Which colour → Blue"
+      var v = i && i.value != null ? String(i.value) : "";
+      return ["Send this answer to ", plain(p.title), "? "].concat(p.question ? [el("span", cap(p.question))] : [], v && shortValue(v) ? [" \u2192 ", full(v)] : []);
+    },
     "ticket.verdict": function (p) {
       if (p.status) { var w = STATUS[p.status] || STATUS.back; return [w[0], q(p.title), w[1] + (p.also && p.also.length ? " (it also changes: " + p.also.map(cap).join(", ") + ")" : "")]; }
       return ["Send ", q(p.title), " back with a note?"];
     },
-    "run.human_input": function (p) { return ["Send a message to the agent on ", q(p.title), "?"]; },
+    "run.human_input": function (p) { return ["Send a message to the helper on ", q(p.title), "?"]; },
     "chat.send": function (p) { return p.thread ? ["Send a message to ", plain(p.thread), "?"] : ["Send a message in Chat?"]; },
     "check.wont_do": function (p) { return ["Mark ", stepName(p), " on ", q(p.title), " as won't do?"]; },
     "check.wont_do_undo": function (p) {
@@ -53,9 +57,9 @@
       return [verb, stepName(p), " on ", q(p.title), p.action === "edit" || p.action === "remove" ? "?" : " again?"];
     },
     "config.agents_may_finish": function () { return ["Let agents mark tickets Done?"]; },
-    "config.permissions": function (p) { return ["Let agents do more without asking (mode ", plain(p.mode), ")?"]; },
+    "config.permissions": function (p) { return ["Let helpers do more without asking (mode ", plain(p.mode), ")?"]; },
     "config.copy_setup": function () { return ["Run a command whenever a separate copy is made?"]; },
-    "config.agent_add": function (p) { return ["Add the agent ", plain(p.name), "? orch will run this command for every task."]; },
+    "config.agent_add": function (p) { return ["Add the helper ", plain(p.name), "? orch will run this command for every task."]; },
     "config.share": function () { return ["Share the orch entry with your team (AGENTS.md)?"]; },
     "look.shared_pages": function (p) { return [p.on ? "Show the workspace name and icon on shared file pages?" : "Stop showing the workspace name and icon on shared file pages?"]; },
     "look.icon": function (p) { return ["Change the workspace icon to ", plain(p.icon), " and colour to ", plain(p.color), "?"]; },
@@ -71,7 +75,7 @@
     "relay.allow": function (p) { return ["Allow ", plain(p.peer), " to start ", q(p.task), " (" + cap(p.mode) + ")?"]; },
     "private.allow": function (p) { return ["Allow ", q(p.name), " to run ", full(p.command), p.interactive ? " (and, live: " : "", p.interactive ? full(p.interactive) : "", p.interactive ? ")" : "", " on this computer?"]; },
     "private.move": function () { return ["Move your orch files that are not shared with the team out of the team repo?"]; },
-    "config.agent_add": function (p) { return ["Add the agent ", q(p.name), " that runs ", full(p.command)].concat(p.interactive ? [" (live: ", full(p.interactive), ")"] : [], ["?"]); },
+    "config.agent_add": function (p) { return ["Add the helper ", q(p.name), " that runs ", full(p.command)].concat(p.interactive ? [" (live: ", full(p.interactive), ")"] : [], ["?"]); },
     "insights.settings": function (p) { return ["Change ", plain(INSIGHTS_SETTING[p.setting] || "an Insights setting"), " to ", plain(insightsValue(p.setting, p.value)), "?"]; },
     "record.delete_detail": function (p) { return ["Delete the full detail of ", q(p.title), "? The counts stay."]; },
     "addon.add_local": function (p) { return ["Add the add-on from ", full(p.path), " (version ", plain(p.short), ")? It runs inside orch."]; }
@@ -79,7 +83,7 @@
   function sentence(i) {
     var p = i.parts && typeof i.parts === "object" ? i.parts : {};
     var f = TEMPLATES[i.op];
-    return say(f ? f(p) : ["Do something on this computer?"]);
+    return say(f ? f(p, i) : ["Do something on this computer?"]);
   }
   var EXACT_LABEL = {"config.agent_add": "Exact values:", "private.allow": "Exact values:", "relay.connect": "Exact address:", "update": "Exact source:", "addon.add_local": "Exact folder:", "group.share_file": "Exact file:", "config.copy_setup": "Exact command:"};
   function block(label, text) {
@@ -92,12 +96,13 @@
   function exact(i) {  // the exact text / target that will be used, never merged into the sentence, never cut
     var w = el("div"); w.style.cssText = "flex-basis:100%";
     if (i.exact) w.appendChild(block(EXACT_LABEL[i.op] || "Exact value:", i.exact));
-    if (i.value) w.appendChild(block("Exact text:", i.value));
+    if (i.value && !(i.op === "ticket.answer" && shortValue(String(i.value)))) w.appendChild(block("Exact text:", i.value));
     return w.childNodes.length ? w : null;
   }
+  var OK_LABEL = {"ticket.answer": "Send answer", "run.human_input": "Send message", "chat.send": "Send message"};
   function buttons(i) {
-    var row = el("span", "", "ho-btns");
-    var ok = el("button", "Continue", "btn primary"), no = el("button", "Not now", "btn");
+    var row = el("span", "", "ho-btns"); row.style.cssText = "display:inline-flex;gap:8px;flex-wrap:wrap";
+    var ok = el("button", OK_LABEL[i.op] || "Continue", "btn primary"), no = el("button", "Not now", "btn");
     ok.type = no.type = "button";
     ok.onclick = function () {
       ok.disabled = true;
@@ -120,6 +125,11 @@
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(box, anchor); else document.body.insertBefore(box, document.body.firstChild);
     return box;
   }
+  function source() {  // where the request came from: behind a small click
+    var d = el("details"), s = el("summary", "Technical details", "meta"), p = el("p", "Requested from a terminal on this computer.", "meta");
+    s.style.cssText = "font-size:12px;cursor:pointer;min-height:44px;display:flex;align-items:center"; p.style.cssText = "margin:4px 0 0;font-size:12px";
+    d.appendChild(s); d.appendChild(p); return d;
+  }
   function render(items) {
     var key = JSON.stringify(items) + open;
     if (key === seen) return;
@@ -129,11 +139,10 @@
     b.hidden = !items.length;
     if (!items.length) { open = false; return; }
     var head = el("div"); head.style.cssText = "display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center";
-    var small = el("span", "Requested by a command", "meta"); small.style.cssText = "flex-basis:100%;font-size:12px;opacity:.75";
-    head.appendChild(small);
     if (items.length === 1) {
       head.appendChild(sentence(items[0])); head.appendChild(buttons(items[0])); b.appendChild(head);
       var x1 = exact(items[0]); if (x1) b.appendChild(x1);
+      b.appendChild(source());
       return;
     }
     var sum = el("span", items.length + " requests waiting"); sum.style.cssText = "flex:1;font-weight:600";
@@ -146,6 +155,7 @@
       var x = exact(i); if (x) r.appendChild(x);
       b.appendChild(r);
     });
+    b.appendChild(source());
   }
   function poll() {
     fetch("/api/handoffs", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : []; }).then(render).catch(function () {});

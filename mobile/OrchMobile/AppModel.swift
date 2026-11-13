@@ -38,9 +38,13 @@ final class AppModel {
     private(set) var announcement: String?
     /// Bumps on each successful answer / send (drives haptics).
     private(set) var answerTick = 0
+    /// Bumped for announcements that are not an answer, send or error (e.g. answered on the computer).
+    private(set) var noticeTick = 0
     private(set) var sendTick = 0
     private(set) var errorTick = 0
     var message: String?            // plain error / info line
+    /// Transport health, separate from `message`: only a network failure marks the link down; a failed action does not.
+    private(set) var transportDown = false
 
     // Navigation
     var tab: Tab = .chats
@@ -64,6 +68,8 @@ final class AppModel {
     let speech: SpeechPlayer
     /// question id -> option waiting out the undo window before it is sent
     private(set) var pendingAnswers: [String: String] = [:]
+    /// When each pending answer was tapped: the visible countdown counts from this, not from when the card appeared.
+    private(set) var pendingAnswerAt: [String: Date] = [:]
     private(set) var sendingAnswers: Set<String> = []
     private var undoTimers: [String: Task<Void, Never>] = [:]
     /// 5 s undo window; UI tests widen it with `-undoSeconds N`.
@@ -148,7 +154,15 @@ final class AppModel {
     }
 
     enum Connection { case checking, ok, unreachable }
-    var connection: Connection { message != nil ? .unreachable : (hasLoaded ? .ok : .checking) }
+    var connection: Connection { Self.connection(transportDown: transportDown, hasLoaded: hasLoaded) }
+    /// A failed action (bad answer, server refusal) is not "offline": only a transport failure is.
+    static func connection(transportDown: Bool, hasLoaded: Bool) -> Connection {
+        transportDown ? .unreachable : (hasLoaded ? .ok : .checking)
+    }
+    /// Network failures (no route, timeout, relay unreachable) count as transport errors; API refusals do not.
+    static func isTransportError(_ error: Error) -> Bool { isOffline(error) }
+    /// P49: pairing failed because the invitation itself is no good (expired, used, unknown); a new one is needed.
+    private(set) var inviteNeedsReplacement = false
     var lastUpdatedText: String? {
         guard let lastUpdated else { return nil }
         let now = Date()
@@ -174,8 +188,8 @@ final class AppModel {
     func workspace(_ id: String) -> Workspace? { workspaces.first { $0.id == id } }
     func ticket(_ ws: String, _ t: String) -> Ticket? { tickets.first { $0.workspace == ws && $0.ticket == t } }
 
-    func markRead(_ chat: String, items: [ChatItem]) {
-        guard let last = items.filter(\.incoming).map(\.at).max() else { return }
+    func markRead(_ chat: String, items: [ChatItem], atBottom: Bool = true, lastVisibleId: String? = nil) {
+        guard let last = ReadRules.readUpTo(items.map { ($0.id, $0.at, $0.incoming) }, atBottom: atBottom, lastVisibleId: lastVisibleId) else { return }
         var r = readState; r.markRead(chat, upTo: last)
         guard r != readState else { return }
         readState = r
@@ -187,18 +201,18 @@ final class AppModel {
     /// Tap = start the undo window; the answer is sent when it ends.
     func chooseAnswer(_ q: Question, _ option: String) {
         guard answers[q.id] == nil, pendingAnswers[q.id] == nil else { return }
-        pendingAnswers[q.id] = option
+        pendingAnswers[q.id] = option; pendingAnswerAt[q.id] = Date()
         undoTimers[q.id] = Task { [undoDelay] in
             try? await Task.sleep(for: undoDelay)
             guard !Task.isCancelled else { return }
             sendingAnswers.insert(q.id)
             await answer(q, with: option)
-            sendingAnswers.remove(q.id); pendingAnswers[q.id] = nil; undoTimers[q.id] = nil
+            sendingAnswers.remove(q.id); pendingAnswers[q.id] = nil; pendingAnswerAt[q.id] = nil; undoTimers[q.id] = nil
         }
     }
     func undoAnswer(_ q: Question) {
         guard !sendingAnswers.contains(q.id) else { return }
-        undoTimers[q.id]?.cancel(); undoTimers[q.id] = nil; pendingAnswers[q.id] = nil
+        undoTimers[q.id]?.cancel(); undoTimers[q.id] = nil; pendingAnswers[q.id] = nil; pendingAnswerAt[q.id] = nil
     }
     /// The "Got it" line the workspace sent for a text of this phone.
     func ack(for messageId: String) -> TicketUpdate? { updates.first { $0.replyTo == messageId && $0.kind == "ack" } }
@@ -210,11 +224,14 @@ final class AppModel {
     func openInvite(_ text: String) {
         do {
             let link = try PairingLink(text)
-            invite = link; inviteState = .found(host: link.host); message = nil
+            invite = link; inviteState = .found(host: link.host); message = nil; inviteNeedsReplacement = false
         } catch { message = error.localizedDescription }
     }
 
     func openSampleInvite() { openInvite(PairingLink.sample.link) }
+
+    /// Drops the current invitation and goes back to scan / paste.
+    func clearInvite() { invite = nil; inviteState = .none; inviteNeedsReplacement = false; message = nil }
 
     func connect(phoneName: String) async {
         guard let invite else { return }
@@ -231,7 +248,8 @@ final class AppModel {
         } catch {
             inviteState = .found(host: invite.host)
             if case RelayError.api(let status, _, _) = error, status == 401 || status == 404 || status == 410 {
-                message = "This invitation has expired or was already used. Ask the person who invited you for a new one."
+                inviteNeedsReplacement = true
+                message = "This invitation has expired or was already used. Create a new one in orch on your computer."
             } else if error is URLError {
                 message = "Can't reach the server. Check your connection, then tap Connect this phone again."
             } else { message = error.localizedDescription }
@@ -283,6 +301,7 @@ final class AppModel {
     private static func isOffline(_ error: Error) -> Bool {
         if error is URLError { return true }
         if case RelayError.network = error { return true }
+        if case RelayError.api(let status, _, _) = error, [502, 503, 504].contains(status) { return true }  // relay or gateway down
         return false
     }
 
@@ -302,6 +321,7 @@ final class AppModel {
             await reloadMessages()
             for item in questions where questionLog[item.id] != item { questionLog[item.id] = item }
             if message != nil { message = nil }
+            if transportDown { transportDown = false }
             if !hasLoaded { hasLoaded = true }
             if lastUpdated == nil || Date().timeIntervalSince(lastUpdated ?? .distantPast) > 30 { lastUpdated = Date() }
             await flushOutbox()
@@ -340,6 +360,10 @@ final class AppModel {
         }
         #endif
         if groups != snapshot { groups = snapshot }
+        // A group that closed while an answer waited out its undo window: that answer is not sent any more.
+        for id in GroupRoomRules.answersToCancel(snapshot.groups, pending: Set(pendingAnswers.keys), sending: sendingAnswers) {
+            undoTimers[id]?.cancel(); undoTimers[id] = nil; pendingAnswers[id] = nil
+        }
     }
 
     private func merge(_ items: [PhoneMessage]) {
@@ -364,13 +388,18 @@ final class AppModel {
     /// Messages per page (tests make it small).
     var pageSize = 100
 
-    /// Scrolling up: the next older page. No-op when everything is loaded.
+    /// An older page is being fetched / the last try failed (the list then offers "Try again").
+    private(set) var loadingOlder = false
+    private(set) var olderFailed = false
+    /// Scrolling up: the next older page. No-op when everything is loaded or a page is already on its way.
     func loadOlderMessages() async {
-        guard let cursor = messagesNext else { return }
+        guard let cursor = messagesNext, !loadingOlder else { return }
+        loadingOlder = true; olderFailed = false
+        defer { loadingOlder = false }
         do {
             let page = try await client.messages(after: cursor, limit: pageSize)
             merge(page.items); messagesNext = page.next
-        } catch RelayError.unauthorized { handle(RelayError.unauthorized) } catch {}
+        } catch RelayError.unauthorized { handle(RelayError.unauthorized) } catch { olderFailed = true }
     }
     var hasOlderMessages: Bool { messagesNext != nil }
 
@@ -380,7 +409,7 @@ final class AppModel {
         outbox.enqueueAnswer(question: q, answer: option)
         let events = await outbox.flush(using: client)
         guard credentials?.phoneId == me, me != nil || useMock else { return }   // signed out meanwhile: drop the late result
-        if events.contains(.offline) { announcement = "No connection. Your answer waits on this phone." }
+        if events.contains(.offline) { transportDown = true; announcement = "No connection. Your answer waits on this phone." }
         await handle(events)
         if events.contains(where: { if case .answered = $0 { true } else { false } }) { await refresh() }
     }
@@ -402,9 +431,12 @@ final class AppModel {
             switch e {
             case .answered(_, let qid, let opt):
                 answerSentAt[qid] = Date()
-                answers[qid] = opt; answerTick += 1; announcement = "Answer sent: \(opt)"
+                let shown = questions.first { $0.id == qid }.map { QuestionCardRules.label($0, opt) } ?? opt
+                answers[qid] = opt; answerTick += 1; announcement = "Answer sent: \(shown)"
             case .answerTaken(_, let qid, let text):
-                answers[qid] = text; answeredElsewhere.insert(qid); message = nil
+                // Only the answer value is kept; "" = answered elsewhere, value unknown (the card then shows no chip).
+                answers[qid] = Outbox.takenAnswer(from: text) ?? ""; answeredElsewhere.insert(qid); message = nil
+                noticeTick += 1; announcement = "Answered on your computer"
             case .sent: sendTick += 1; announcement = "Message sent"
             case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
             case .unauthorized: handle(RelayError.unauthorized)
@@ -466,7 +498,7 @@ final class AppModel {
         guard !outbox.items.isEmpty, credentials != nil || useMock else { return }
         let events = await outbox.flush(using: client)
         guard credentials?.phoneId == me else { return }
-        if events.contains(.offline) { announcement = "No connection. The message waits on this phone." }
+        if events.contains(.offline) { transportDown = true; announcement = "No connection. The message waits on this phone." }
         await handle(events)
         if events.contains(where: { if case .sent = $0 { true } else { false } }) { await reloadMessages(); await refreshUpdates() }
     }
@@ -483,6 +515,8 @@ final class AppModel {
     /// A "starting" conversation becomes its topic once the workspace acked it; others are returned unchanged.
     func resolve(_ id: ConversationID) -> ConversationID { ConversationBuilder.resolve(id, conversationInputs) }
     func presence(of workspaceId: String, now: Date = Date()) -> Presence { workspace(workspaceId)?.presence(now: now) ?? .unknown }
+    func status(of workspaceId: String, now: Date = Date()) -> WorkspaceStatus { WorkspaceStatus.of(connection: connection, presence: presence(of: workspaceId, now: now)) }
+    func status(lastSeen: String?, now: Date = Date()) -> WorkspaceStatus { WorkspaceStatus.of(connection: connection, presence: Presence.of(lastSeen: lastSeen, now: now)) }
 
     func unread(_ id: ConversationID) -> Int { readState.unread(ReadState.key(id), in: conversationItems(id)) }
     // Archive, delete, auto-archive (phone-local)
@@ -505,10 +539,11 @@ final class AppModel {
     func split(_ summary: WorkspaceSummary) -> (topics: [TopicSummary], general: Bool, archived: [ArchivedChat]) { archive.split(summary) }
     var archivedCount: Int { workspaceSummaries.reduce(0) { $0 + archive.split($1).archived.count } }
 
-    /// Opening a conversation (or a new message arriving in the open one) marks it read. Phone-local.
-    func markRead(_ id: ConversationID) {
+    /// Opening a conversation (or a new message arriving in the open one) marks it read, but only what was seen:
+    /// while scrolled up, new messages stay unread. Phone-local.
+    func markRead(_ id: ConversationID, atBottom: Bool = true) {
         let items = conversationItems(id)
-        guard let last = items.filter(\.incoming).map(\.at).max() else { return }
+        guard let last = ReadRules.readUpTo(items.map { ($0.id, $0.at, $0.incoming) }, atBottom: atBottom) else { return }
         var r = readState; r.markRead(ReadState.key(id), upTo: last)
         guard r != readState else { return }
         readState = r
@@ -572,8 +607,8 @@ final class AppModel {
             await refresh()
             return r.workspaces
         } catch {
-            if case RelayError.api(let status, _, _) = error, status == 410 { message = "This invitation was already used or has expired. Ask the person who invited you for a new one." }
-            else if case RelayError.api(let status, _, _) = error, status == 404 { message = "This invitation is not valid. Ask the person who invited you for a new one." }
+            if case RelayError.api(let status, _, _) = error, status == 410 { message = "This invitation was already used or has expired. Create a new one in orch on your computer." }
+            else if case RelayError.api(let status, _, _) = error, status == 404 { message = "This invitation is not valid. Create a new one in orch on your computer." }
             else { handle(error) }
             return []
         }
@@ -676,16 +711,17 @@ final class AppModel {
     private func reset() {
         defaults.removeObject(forKey: "pairedPhoneId")
         for t in undoTimers.values { t.cancel() }
-        undoTimers = [:]; pendingAnswers = [:]; sendingAnswers = []
-        outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil
+        undoTimers = [:]; pendingAnswers = [:]; pendingAnswerAt = [:]; sendingAnswers = []
+        outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil; olderFailed = false
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
-        credentials = nil; invite = nil; inviteState = .none; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false
-        pairedWorkspaces = []; lastUpdated = nil; message = nil; tab = .chats; phase = .onboarding
+        credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false
+        pairedWorkspaces = []; lastUpdated = nil; message = nil; transportDown = false; tab = .chats; phase = .onboarding
     }
 
     private func handle(_ error: Error) {
+        if Self.isOffline(error) { transportDown = true }
         if case RelayError.unauthorized = error { Keychain.delete(); reset(); message = error.localizedDescription }
         else if error is URLError { message = "Can't reach the server. Check your connection, then try again." }
         else if error is RelayError { message = error.localizedDescription }

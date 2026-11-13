@@ -38,3 +38,9 @@
 @media(max-width:600px){.home-need.need-acts .acts{justify-content:flex-start}}
 .status-leaving{opacity:0;transition:opacity 160ms ease-out}
 @media(prefers-reduced-motion:reduce){.status-leaving{transition:none}}
+/* A result row is one link with a chevron; signing off happens in the result view. */
+.home-result .result-link{display:flex;align-items:center;gap:12px;min-height:44px;color:var(--text);text-decoration:none;font-weight:600}
+.home-result .result-link:hover .grow{text-decoration:underline}
+.home-result .result-link .meta{font-weight:400}
+.home-result .chevron{font-size:20px;line-height:1;color:var(--text-muted)}
+.home-columns .see-all{display:inline-flex;align-items:center;min-height:44px;color:var(--text)}

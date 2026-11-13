@@ -74,9 +74,9 @@ final class WontDoTests: XCTestCase {
     }
 
     func testSummary() {
-        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 3, status: "Done", wontDo: 2), "1 of 3 done, 2 won't do")
-        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 3, status: "Working", wontDo: 0), "2 of 3 tasks done")
-        XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 3, status: "Working", wontDo: 2), "0 of 3 done, 2 won't do")
+        XCTAssertEqual(ConversationRules.summaryText(done: 1, total: 3, status: "Done", wontDo: 2), "1 of 3 steps done, 2 won't do")
+        XCTAssertEqual(ConversationRules.summaryText(done: 2, total: 3, status: "Working", wontDo: 0), "2 of 3 steps done")
+        XCTAssertEqual(ConversationRules.summaryText(done: 0, total: 3, status: "Working", wontDo: 2), "0 of 3 steps done, 2 won't do")
     }
 
     func testContractVector() throws {

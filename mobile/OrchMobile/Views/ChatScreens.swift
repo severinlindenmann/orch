@@ -57,12 +57,39 @@ enum ConversationRules {
         return items.dropFirst(index + 1).contains { $0.side == .them && $0.kind == .message && $0.label != nil }
     }
 
-    /// Checklist progress only; the status has its own pill.
+    /// Checklist progress in plain words: "1 step", "2 of 5 steps done". The status has its own line.
     static func summaryText(done: Int, total: Int, status: String, separator: String = " · ", wontDo: Int = 0) -> String {
         guard total > 0 else { return "" }
-        if wontDo > 0 { return "\(done) of \(total) done, \(wontDo) won't do" }
-        return "\(done) of \(total) tasks done"
+        if wontDo > 0 { return "\(done) of \(total) steps done, \(wontDo) won't do" }
+        if total == 1 { return done >= 1 ? "1 step\(separator)done" : "1 step" }
+        return "\(done) of \(total) steps done"
     }
+
+    /// The steps row whenever the topic has steps (a single step shows as "1 step", it still opens the sheet).
+    static func showsStepsRow(total: Int, wontDo: Int) -> Bool { total >= 1 || wontDo > 0 }  // one step still opens the steps sheet (second opinion on P23)
+
+    /// Open questions still waiting for an answer (not stale, not a make-topic card).
+    static func openQuestionIds(in items: [ConvItem]) -> [String] {
+        items.indices.filter {
+            items[$0].kind == .question && items[$0].question?.isMakeTicket != true && items[$0].answer == nil && !isStale(index: $0, in: items)
+        }.map { items[$0].id }
+    }
+
+    /// "3 questions" banner above the messages: only with two or more open questions (one card says it by itself).
+    static func questionsBanner(in items: [ConvItem]) -> String? {
+        let n = openQuestionIds(in: items).count
+        return n >= 2 ? "\(n) questions" : nil
+    }
+
+    /// The header shows the topic status unless a card below already says it (an open question, the review bar).
+    static func headerStatus(_ status: TopicStatus, openQuestions: Int, reviewBar: Bool) -> TopicStatus? {
+        if status == .waitingOnYou && openQuestions > 0 { return nil }
+        if status == .review && reviewBar { return nil }
+        return status
+    }
+
+    /// The day separator of General once earlier days exist: "Today · fresh start".
+    static func freshStartLabel(_ day: String) -> String { "\(day) · fresh start" }
 
     static func summaryRepeatsResult(_ summary: String, in items: [ConvItem]) -> Bool {
         func normalized(_ text: String) -> String {
@@ -113,6 +140,7 @@ struct TicketChatView: View {
 struct ConversationView: View {
     let id: ConversationID
     @State var historyDay: String? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
     var goToToday: (() -> Void)? = nil
     @AppStorage("workspaceAliasRevision") private var aliasRevision = 0
     @State private var historyShown = false
@@ -175,10 +203,12 @@ struct ConversationView: View {
             if model.speech.isActive { MiniPlayer() }
             OfflineBanner()
             if let ticket {
-                summary(ticket)
-                if let answered = ConversationRules.answeredText(in: items) {
-                    Text(answered).themeFont(13).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal, 16).padding(.vertical, 8)
+                if ConversationRules.showsStepsRow(total: ticket.view?.totalCount ?? 0, wontDo: ticket.view?.wontDoCount ?? 0) {
+                    summary(ticket)
+                }
+                if let banner = ConversationRules.questionsBanner(in: items),
+                   let first = ConversationRules.openQuestionIds(in: items).first {
+                    questionsBanner(banner, first: first)
                 }
             }
             messages(items)
@@ -195,10 +225,12 @@ struct ConversationView: View {
                 }.chatCircleBackground()
                 ToolbarItem(placement: .principal) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(title).themeFont(16, .semibold).lineLimit(1).truncationMode(.tail).accessibilityIdentifier("chat-title")
-                        presence
+                        Text(title).themeFont(16, .semibold).lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize)).truncationMode(.tail).accessibilityIdentifier("chat-title")
+                        if ChatsRowRules.showsHeaderSubtitle(typeSize.isAccessibilitySize) { presence }
                     }
                     .padding(.vertical, 8)
+                    // The toolbar slot has a fixed height: two title lines fit up to AX2, larger sizes would clip.
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 }
                 if isGeneral && historyDay == nil {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -209,14 +241,14 @@ struct ConversationView: View {
                 }
                 if historyDay == nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    ChatMuteButton(name: workspaceName, muted: model.workspace(resolved.workspace)?.isMuted(now: now) ?? false) { mute in
+                    HeaderMuteButton(name: workspaceName, muted: model.workspace(resolved.workspace)?.isMuted(now: now) ?? false) { mute in
                         Task { await model.setMute(resolved.workspace, mute) }
                     }
                 }.chatCircleBackground()
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
                         headerIcon("info.circle")
-                    }.buttonStyle(.plain).accessibilityLabel("Chat info").accessibilityIdentifier("chat-info")
+                    }.buttonStyle(.plain).accessibilityLabel(isGeneral ? "Chat info" : "Topic info").accessibilityIdentifier("chat-info")
                 }.chatCircleBackground()
                 }
             }
@@ -246,7 +278,7 @@ struct ConversationView: View {
             }
             .sheet(isPresented: $historyShown) { ChatHistoryView(workspaceId: resolved.workspace) }
             .sheet(isPresented: $dayDetails) {
-                Text("\(workspaceName) starts fresh at 04:00. Find past chats in Earlier.")
+                Text("Every day at 04:00 \(workspaceName) starts fresh: it no longer remembers what you said on earlier days, so mention again what it needs to know. Past chats stay in Earlier.")
                     .themeFont(17).foregroundStyle(Theme.text).padding(24)
                     .presentationDetents([.medium]).presentationBackground(Theme.surface).presentationDragIndicator(.visible)
             }
@@ -260,40 +292,70 @@ struct ConversationView: View {
                 }
             }
     }
+    /// Header actions: plain icons of one size, no circle or capsule, so the title and subtitle keep their room.
     private func headerIcon(_ symbol: String) -> some View {
         Image(systemName: symbol).themeFont(20).foregroundStyle(Theme.text)
-            .frame(width: 44, height: 44).background(Theme.surface3, in: Circle())
+            .frame(width: 44, height: 44).contentShape(Rectangle())
     }
+    /// The topic status for the header, unless a card below already says it.
+    private var headerStatus: TopicStatus? {
+        guard let ticket, historyDay == nil else { return nil }
+        let review = resolved.ticket.flatMap { ticketId in
+            ReviewRules.reviewQuestion(ticket: ticket, workspaceId: resolved.workspace, ticketId: ticketId, questions: model.questions, answers: model.answers)
+        }
+        return ConversationRules.headerStatus(TopicStatus(ticket), openQuestions: ConversationRules.openQuestionIds(in: items).count, reviewBar: review != nil)
+    }
+    /// The subtitle says how the helper is (status or last seen), never the phone's connection: the banner says that.
     @ViewBuilder private var presence: some View {
         if case .starting = resolved { Text("Getting started…").themeFont(13).foregroundStyle(Theme.muted) }
-        else {
+        else if let status = headerStatus {
+            HStack(spacing: 4) {
+                Circle().fill(status.tone).frame(width: 7, height: 7)
+                Text(status.label).foregroundStyle(status.tone).lineLimit(1).layoutPriority(1)
+                Text("· \(workspaceName)").lineLimit(1).truncationMode(.tail)
+            }.themeFont(13).foregroundStyle(Theme.muted)
+                .accessibilityElement(children: .combine).accessibilityLabel("Status: \(status.label), \(workspaceName)")
+                .accessibilityIdentifier("chat-status")
+        } else {
             TimelineView(.everyMinute) { context in
                 let presence = model.presence(of: resolved.workspace, now: context.date)
                 HStack(spacing: 4) {
-                    if presence.isOnline { PresenceDot() }
-                    Text((resolved.ticket != nil ? "\(workspaceName) · " : "") + presence.line(now: context.date))
+                    if presence == .online { PresenceDot() }
+                    Text((resolved.ticket != nil ? "\(workspaceName) · " : "") + presence.text(now: context.date))
                         .lineLimit(1).truncationMode(.tail)
                 }
             }.themeFont(13).foregroundStyle(Theme.muted)
         }
     }
     private func summary(_ ticket: Ticket) -> some View {
-        Button { tasksShown = true } label: {
+        let text = ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label, wontDo: ticket.view?.wontDoCount ?? 0)
+        return Button { tasksShown = true } label: {
             HStack {
-                if [.waitingOnYou, .review].contains(TopicStatus(ticket)) {
-                    TicketStatusChip(status: TopicStatus(ticket))
-                }
-                if (ticket.view?.totalCount ?? 0) > 0 {
-                    Text(ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label, wontDo: ticket.view?.wontDoCount ?? 0))
-                }
+                Text(text)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.down")
             }.themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 44)
-                .padding(.vertical, 4)
                 .background(Theme.bg, ignoresSafeAreaEdges: .top)
                 .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
-        }.buttonStyle(PressStyle()).accessibilityLabel("Tasks, " + ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label, separator: ", ", wontDo: ticket.view?.wontDoCount ?? 0))
+        }.buttonStyle(PressStyle()).accessibilityLabel("Steps, " + text)
             .accessibilityIdentifier("tasks-toggle")
+    }
+    /// Two or more open questions: one calm line; a tap scrolls to the first.
+    private func questionsBanner(_ text: String, first: String) -> some View {
+        Button {
+            model.focusedQuestion = nil
+            DispatchQueue.main.async { model.focusedQuestion = first }
+        } label: {
+            HStack(spacing: 8) {
+                Circle().fill(TopicStatus.waitingOnYou.tone).frame(width: 8, height: 8)
+                Text(text).foregroundStyle(Theme.text)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down").foregroundStyle(Theme.muted)
+            }.themeFont(13).padding(.horizontal, 18).frame(minHeight: 44)
+                .background(Theme.bg)
+                .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        }.buttonStyle(PressStyle()).accessibilityLabel("\(text) waiting for you. Show the first")
+            .accessibilityIdentifier("questions-banner")
     }
     private var tasksSheet: some View {
         ScrollView {
@@ -358,6 +420,7 @@ struct ConversationView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
+                    if historyDay == nil && model.hasOlderMessages { olderRow }
                     if let topicSummary, !ConversationRules.summaryRepeatsResult(topicSummary, in: items) {
                         NavigationLink(value: ChatRoute.info(workspace: resolved.workspace, ticket: resolved.ticket)) {
                             Text(topicSummary).themeFont(15).foregroundStyle(Theme.muted).lineLimit(3)
@@ -365,18 +428,10 @@ struct ConversationView: View {
                                 .padding(14).background(Theme.surface2, in: RoundedRectangle(cornerRadius: 12))
                         }.buttonStyle(PressStyle()).accessibilityIdentifier("topic-summary")
                     }
-                    if isGeneral && historyDay == nil && !items.isEmpty && !ChatDay.split(allItems, today: today).past.isEmpty {
-                        VStack(spacing: 6) {
-                            Text("New day").themeFont(13, .medium)
-                            Text("Starts fresh each day at 04:00").themeFont(13)
-                            Button("Details") { dayDetails = true }.themeFont(12)
-                        }.foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, 16)
-                            .accessibilityIdentifier("chat-newday")
-                    }
                     if items.isEmpty { emptyState }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { n, row in
                         if n == 0 || rowDay(row) != rowDay(rows[n - 1]) {
-                            DayDivider(isGeneral ? ChatDay.label(forDay: rowDay(row), today: today) : dayLabel(row.at))
+                            dayDivider(row)
                         }
                         Group {
                             switch row {
@@ -402,7 +457,7 @@ struct ConversationView: View {
                 }
                 .onChange(of: items.last?.rowID) { _, _ in
                     if atBottom || items.last?.side == .me { scroll(proxy, to: "conversation-bottom", anchor: .bottom) }
-                    rememberRead(bottomSeen: atBottom)   // the open conversation is read, also while scrolled up
+                    rememberRead(bottomSeen: atBottom)   // while scrolled up, new messages stay unread
                 }
                 .onChange(of: model.focusedQuestion) { _, focus in focusQuestion(focus, proxy: proxy) }
                 .task(id: items.count) {
@@ -429,6 +484,20 @@ struct ConversationView: View {
         guard let item = found else { return }
         if item.kind == ArtifactItem.Kind.link { if let url = item.safeLinkURL { openURL(url) } } else { viewing = item }
     }
+    /// General today, once earlier days exist: "Today · fresh start"; a tap says what the helper forgets.
+    @ViewBuilder private func dayDivider(_ row: Row) -> some View {
+        if isGeneral && historyDay == nil && rowDay(row) == today && !ChatDay.split(allItems, today: today).past.isEmpty {
+            Button { dayDetails = true } label: {
+                HStack(spacing: 4) {
+                    Text(ConversationRules.freshStartLabel(ChatDay.label(forDay: today, today: today)))
+                    Image(systemName: "info.circle").themeFont(12)
+                }.themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(PressStyle()).accessibilityHint("What the helper forgets each day")
+                .accessibilityIdentifier("chat-newday")
+        } else {
+            DayDivider(isGeneral ? ChatDay.label(forDay: rowDay(row), today: today) : dayLabel(row.at))
+        }
+    }
     private func chipView(_ chip: StartedChip) -> some View {
         Button {
             if historyDay != nil { goToToday?() }
@@ -444,11 +513,8 @@ struct ConversationView: View {
         let retry: () -> Void = { Task { await model.retrySend(item.clientId ?? "") } }
         let discard: () -> Void = { model.discardSend(item.clientId ?? "") }
         let replyHere: () -> Void = { reply = ReplyPreview(messageId: item.id, title: "Answering \(workspaceName)", quote: item.preview) }
-        let wait = isGeneral && item.receipt == .queued ? ChatDay.queuedNote : item.clientId.flatMap { waiting[$0] }
-        if isGeneral && item.by != nil && item.side == .them &&
-            (index == 0 || items[index - 1].by != item.by || items[index - 1].side != .them) {
-            ChatHelperLabel(workspace: model.workspace(resolved.workspace))  // never a name from `by`: a workspace speaks only for itself in its Chat
-        }
+        // The banner says "offline" and the clock marks the message: only a throttle note is worth a caption.
+        let wait = item.clientId.flatMap { waiting[$0] }.flatMap { $0 == QueuedNote.waiting ? nil : $0 }
         if let question = item.question, question.isMakeTicket {
             MakeTicketCard(question: question, answer: item.answer).disabled(historyDay != nil)
         } else if item.kind == .question && historyDay == nil {
@@ -465,12 +531,13 @@ struct ConversationView: View {
         } else {
             MessageBubble(item: item, conversationId: resolved, conversationLanguage: language, workspaceName: workspaceName,
                           quotedText: item.replyTo.flatMap { key in items.first { $0.id == key }?.preview },
-                          onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, attachments: ticket?.view?.attachments ?? [], onReply: historyDay == nil ? replyHere : nil, waitNote: wait)
+                          onRetry: historyDay == nil ? retry : nil, onDiscard: historyDay == nil ? discard : nil, onOpenArtifact: openArtifact, attachments: ticket?.view?.attachments ?? [], onReply: historyDay == nil ? replyHere : nil, waitNote: wait,
+                          hugsContent: MessageBubble.hugs(item))
         }
     }
     @ViewBuilder private var emptyState: some View {
         if topicSummary != nil {
-            Text("Updates and results show up in this chat.").themeFont(13).foregroundStyle(Theme.muted)
+            Text("Updates and results show up in this topic.").themeFont(13).foregroundStyle(Theme.muted)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8)
         } else {
             VStack(spacing: 12) {
@@ -481,17 +548,31 @@ struct ConversationView: View {
             }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.vertical, 48)
         }
     }
-    /// The open conversation is read: new incoming messages are marked read while it is on screen, even when scrolled up
-    /// (only the jump button's own count waits until the bottom was seen).
+    /// Only what was seen is read: new messages that arrive while scrolled up stay unread (the jump button counts them)
+    /// until the bottom is reached.
     private func rememberRead(bottomSeen: Bool = true) {
-        guard historyDay == nil else { return }
-        if bottomSeen { seenIncoming = Set(items.filter(\.incoming).map(\.id)) }
-        model.markRead(resolved)
+        guard historyDay == nil, bottomSeen else { return }
+        seenIncoming = Set(items.filter(\.incoming).map(\.id))
+        model.markRead(resolved, atBottom: true)
+    }
+    /// At the top of the loaded messages: fetch the next older page, or offer to try again.
+    @ViewBuilder private var olderRow: some View {
+        Group {
+            if model.olderFailed {
+                Button("Couldn't load earlier messages. Try again") { Task { await model.loadOlderMessages() } }.themeFont(13)
+            } else {
+                HStack(spacing: 6) { ProgressView(); Text("Loading earlier messages…").themeFont(13) }
+                    .foregroundStyle(Theme.muted)
+                    .task(id: model.messagesNext) { await model.loadOlderMessages() }
+            }
+        }.frame(maxWidth: .infinity).padding(.vertical, 8).accessibilityIdentifier("older-messages")
     }
     private func focusQuestion(_ focus: String?, proxy: ScrollViewProxy) {
         guard let focus, items.contains(where: { $0.id == focus }) else { return }
         scrolledQuestion = focus
         scroll(proxy, to: items.first { $0.id == focus }?.rowID ?? focus, anchor: .center)
+        // Done: a later return to this chat must not jump back to the question.
+        DispatchQueue.main.async { if model.focusedQuestion == focus { model.focusedQuestion = nil; scrolledQuestion = nil } }
     }
     private func scroll(_ proxy: ScrollViewProxy, to id: String, anchor: UnitPoint) {
         if reduceMotion { proxy.scrollTo(id, anchor: anchor) }
@@ -516,11 +597,31 @@ struct ConversationView: View {
 
 struct TicketStatusChip: View {
     let status: TopicStatus
-    private var color: Color { status == .waitingOnYou ? Theme.warn : status == .review ? Theme.brand : Theme.muted }
     var body: some View {
-        Text(status.label).themeFont(13, .medium).foregroundStyle(color)
+        Text(status.label).themeFont(13, .medium).foregroundStyle(status.tone)
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(color.opacity(0.16), in: Capsule())
+            .background(status.tone.opacity(0.16), in: Capsule())
+            .accessibilityLabel("Status: \(status.label)")
+    }
+}
+
+/// The chat header's mute action: the same plain icon as the other header actions (no circle).
+struct HeaderMuteButton: View {
+    let name: String
+    let muted: Bool
+    let select: (Mute) -> Void
+    @State private var choosing = false
+    var body: some View {
+        Button {
+            if muted { select(.off) } else { choosing = true }
+        } label: {
+            Image(systemName: muted ? "bell.slash" : "bell").themeFont(20).foregroundStyle(Theme.text)
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).accessibilityLabel(muted ? "Unmute" : "Mute").accessibilityIdentifier("chat-mute")
+            .confirmationDialog("Mute \(name)", isPresented: $choosing, titleVisibility: .visible) {
+                MuteChoices(select: select)
+                Button("Cancel", role: .cancel) {}
+            }
     }
 }
 

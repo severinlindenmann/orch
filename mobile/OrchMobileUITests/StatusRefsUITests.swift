@@ -33,7 +33,7 @@ final class StatusRefsUITests: XCTestCase {
         let q3 = app.buttons["ticket-ws_pilatus001|t_q3sum1"]
         XCTAssertTrue(q3.waitForExistence(timeout: 5))
         app.reveal(q3)
-        XCTAssertFalse(app.staticTexts["Done"].exists, "Done is shown once: the toggle, no second header above the rows")
+        XCTAssertLessThanOrEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Done")).count, 1, "Done is shown once: the toggle, no second header above the rows")
         XCTAssertLessThan(done.frame.minY, q3.frame.minY, "the finished chat sits under the toggle")
         shot(app, "2-workspace-done-open")
     }
@@ -59,7 +59,7 @@ final class StatusRefsUITests: XCTestCase {
         XCTAssertTrue(info.waitForExistence(timeout: 10)); info.tap()
         let tab = app.buttons["info-tab-links"]
         XCTAssertTrue(tab.waitForExistence(timeout: 10))
-        XCTAssertTrue(tab.label.hasPrefix("References"), tab.label)
+        XCTAssertTrue(tab.label.hasPrefix("Links"), tab.label)
         tab.tap()
         // The Results section (draft 02, 2.6) sits above the references and the list is lazy: scroll down to them.
         for _ in 0..<4 where !el(app, "info-ref-ref0").exists { app.swipeUp() }
@@ -77,7 +77,10 @@ final class StatusRefsUITests: XCTestCase {
         for _ in 0..<3 where !el(app, "info-ref-ref1").isHittable { app.swipeDown() }
         el(app, "info-ref-ref1").tap()   // opens that topic
         // The referenced topic opened: its ticket chat status line (tasks toggle); "tasks-card" no longer exists.
-        XCTAssertTrue(app.descendants(matching: .any)["tasks-toggle"].waitForExistence(timeout: 10))
+        // The referenced topic opened: a ticket chat (conversation view) with that topic's title in its header.
+        XCTAssertTrue(app.descendants(matching: .any)["conversation-view"].firstMatch.waitForExistence(timeout: 10))
+        let openedTitle = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Rename field X in ingestion job")).firstMatch
+        XCTAssertTrue(openedTitle.waitForExistence(timeout: 10), "the referenced topic's chat is open")
         shot(app, "5-reference-opened")
     }
 

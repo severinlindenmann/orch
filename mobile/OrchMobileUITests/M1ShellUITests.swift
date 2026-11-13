@@ -68,10 +68,13 @@ final class M1ShellUITests: XCTestCase {
         let ws = app.buttons["settings-ws-ws_pilatus001"]
         XCTAssertTrue(ws.waitForExistence(timeout: 10))
         ws.tap()
-        let always = app.buttons["mute-Always"]
-        XCTAssertTrue(always.waitForExistence(timeout: 5))
-        always.tap()
-        XCTAssertTrue(app.buttons["mute-Always"].waitForExistence(timeout: 5))
+        let notifications = app.buttons["workspace-notifications"]
+        XCTAssertTrue(notifications.waitForExistence(timeout: 5))
+        notifications.tap()
+        XCTAssertTrue(app.buttons["Until I turn it on"].waitForExistence(timeout: 5))
+        app.buttons["Until I turn it on"].tap()
+        let muted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Muted'"), object: notifications)
+        XCTAssertEqual(XCTWaiter.wait(for: [muted], timeout: 5), .completed)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         let voice = app.buttons["voice-settings"]
         var tries = 0
@@ -91,9 +94,8 @@ final class M1ShellUITests: XCTestCase {
         app.buttons["new-chat"].tap()
         XCTAssertTrue(app.buttons["compose-add-workspace"].waitForExistence(timeout: 5))
         app.buttons["compose-add-workspace"].tap()
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5))
-        app.buttons["Paste invitation link"].tap()
+        XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 5))
+        app.buttons["invite-paste"].tap()
         let field = app.textFields["invite-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap(); field.typeText("https://example.com/nope")
@@ -110,9 +112,8 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(app.buttons["add-workspace"].waitForExistence(timeout: 10))
         app.buttons["add-workspace"].tap()
         func enter(_ link: String) {
-            if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-            XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5))
-            app.buttons["Paste invitation link"].tap()
+            XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 5))
+            app.buttons["invite-paste"].tap()
             let field = app.textFields["invite-field"]
             XCTAssertTrue(field.waitForExistence(timeout: 5))
             field.tap(); field.typeText(link)
@@ -121,7 +122,7 @@ final class M1ShellUITests: XCTestCase {
         enter("orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_expiredAAAAAAAAAAAAAA")
         XCTAssertTrue(app.buttons["invite-add"].waitForExistence(timeout: 5)); app.buttons["invite-add"].tap()
         XCTAssertTrue(app.staticTexts["invite-error"].waitForExistence(timeout: 10), "the used invitation is explained")
-        app.buttons["Try another link"].tap()
+        app.buttons["invite-new"].tap()
         enter("orch://pair?relay=https%3A%2F%2Frelay.severin.io&code=pc_Tg5Yh7Uj9Ik2Ol4Pz6Xc8V")
         XCTAssertTrue(app.buttons["invite-add"].waitForExistence(timeout: 5)); app.buttons["invite-add"].tap()
         let open = app.buttons["Open Home"]
@@ -156,8 +157,7 @@ final class M1ShellUITests: XCTestCase {
             app.terminate(); extra = extra + []
             app = paired(extra)
             app.buttons["new-chat"].tap(); app.buttons["compose-add-workspace"].tap()
-            if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-            XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 5)); try snap(app, "8-add-workspace")
+            XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 5)); try snap(app, "8-add-workspace")
             app.terminate()
         }
     }

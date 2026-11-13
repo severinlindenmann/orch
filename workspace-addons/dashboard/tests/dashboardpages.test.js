@@ -14,7 +14,7 @@ function context(items, extra = {}) {
     needsList:() => [], state:{}, starting:new Set(), sorted:v => v, STATUS_CHOICES:helpers.STATUS_CHOICES,
     heading:(...text) => h('h1', {}, text), now:() => new Date(), parse:() => null, capitalise:v => v,
     emptyRow:text => h('p', {}, text), card:(key,title,count,body) => h('section', {}, title,count,body),
-    activeTicket:() => true, ticketAttentionChip:() => null, ...extra});
+    activeTicket:() => true, ticketAttentionChip:() => null, titleTag:() => null, ...extra});
   for (const file of ['home', 'tickets']) vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/' + file + '.js'), 'utf8'), c);
   return c;
 }
@@ -56,38 +56,38 @@ test('home renders one need card per ticket with question count and yellow chip'
   const c = context([t], {needsList:() => needs});
   const home = c.home(), text = JSON.stringify(home);
   assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
-  assert.match(text, /2 questions/); assert.match(text, /Needs you \(1\)/); assert.match(text, /· 1 question for you ·/);
+  assert.match(text, /2 questions/); assert.match(text, /Needs you \(1\)/); assert.doesNotMatch(text, /questions? for you/);
   assert.match(text, /First\?/); assert.doesNotMatch(text, /Second\?/);
-  assert.equal(nodes(home, n => n.attrs?.className === 'chip attn').length, 1);
+  assert.equal(nodes(home, n => /chip/.test(n.attrs?.className || '')).length, 0); // the section heading already says it
   needs.shift();
   assert.match(JSON.stringify(c.home()), /Second\?/);
 });
-test('home: the greeting and the Needs you heading show the same count (one per ticket plus failed starts)', () => {
+test('home: the Needs you heading shows the count (one per ticket plus failed starts)', () => {
   const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'active', questions:[{id:id + '1', text:'One?'}, {id:id + '2', text:'Two?'}]}));
   const needs = items.flatMap(t => t.questions.map(q => ({id:q.id, ticket:t.id, title:q.text, answer:{question:q.id}})));
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
-  assert.match(text, /Needs you \(3\)/); assert.match(text, /· 3 questions for you ·/);
+  assert.match(text, /Needs you \(3\)/);
   assert.equal(helpers.needsYouCount(needs, []), 3);
   assert.equal(helpers.needsYouCount([{id:'x'}, {id:'y', ticket:'a'}, {id:'z', ticket:'a'}], [['b']]), 3);
   assert.equal(helpers.needsYouCount([], []), 0);
 });
-test('home: the badge and Menu count (needsToday) equal the heading and skip rows put off until later today', () => {
+test('home: the badge and Menu count (needsToday) equal the Needs you heading and skip rows put off until later today', () => {
   const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'waiting'}));
   const needs = items.flatMap(t => [1, 2].map(n => ({id:t.id + n, ticket:t.id, title:'Q?', answer:{question:t.id + n}, actions:[{later:true}]})));
   const later = {a1:'2026-11-12', a2:'2026-11-12'};
   const c = context(items, {needsList:() => needs, today:() => '2026-11-12', localStorage:{getItem:() => JSON.stringify(later)}, button:label => ({tag:'button', children:[label]})});
   const text = JSON.stringify(c.home());
   assert.equal(c.needsToday().count, 2);
-  assert.match(text, /Needs you \(2\)/); assert.match(text, /· 2 questions for you ·/);
+  assert.match(text, /Needs you \(2\)/);
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
   assert.match(app, /const needCount = needsToday\(\)\.count/); assert.doesNotMatch(app, /needsList\(\)\.length/);
 });
-test('home: the greeting counts a failed start on the page', () => {
+test('home: Needs you counts a failed start on the page', () => {
   const items = [{id:'a', title:'T a', status:'active'}, {id:'f', title:'T f', status:'waiting', waiting_on:{start:true, ref:'x'}}];
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
   assert.match(text, /could not start/);
-  assert.match(text, /Needs you \(2\)/); assert.match(text, /· 2 questions for you ·/);
+  assert.match(text, /Needs you \(2\)/);
 });
 
 // Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.
@@ -140,6 +140,11 @@ test('private settings card: move button, allow button, hidden when clear, no sn
   assert.equal(nodes(c.privateCard(settings), n => n.tag === 'button').length, 0);
   settings.git_private.count = 0;
   assert.equal(nodes(c.privateCard(settings), n => n.tag === 'h3').length, 1);
+  const unsafe = n => ({name:'u' + n, showable:false});
+  const text = s => nodes(c.privateCard({git_private:{count:0, lines:[], pending:s}}), n => n.textContent != null).map(n => n.textContent).join('|');
+  assert.match(text([unsafe(1)]), /1 request orch can't show safely\. Not allowed\./);
+  assert.match(text([unsafe(1), unsafe(2), unsafe(3)]), /3 requests orch can't show safely\. Not allowed\./);
+  assert.equal(nodes(c.privateCard({git_private:{count:0, lines:[], pending:[unsafe(1), unsafe(2), unsafe(3)]}}), n => n.attrs?.className === 'card').length, 1);
 });
 
 test('Separate copies card: one plain row with a switch; when, cap, setup and the footnote behind Details', () => {
@@ -316,4 +321,125 @@ test('settings: the workspace folder is visible on the row without opening Detai
     assert.match(JSON.stringify(details), /Stored on this computer/);
     assert.ok(nodes(details, n => n.textContent === folder).length);
   }
+});
+
+// Dash 02/21/43/44: no ticket keys or status chips on Home rows, no empty Working now, See all tickets right after.
+test('home rows: no key or chip, no empty Working now, See all tickets (N), finish time instead of Done', () => {
+  const today = new Date(); today.setHours(9, 5);
+  const items = [{id:'a', key:'PIL-54', title:'Pay invoice', status:'review'}, {id:'d', key:'PIL-55', title:'Book room', status:'done', done_at:today.toISOString()}];
+  const home = context(items, {parse:v => v ? new Date(v) : null, time:d => d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0')}).home(), text = JSON.stringify(home);
+  assert.doesNotMatch(text, /PIL-5/); assert.doesNotMatch(text, /"(review|done)"\]/);
+  assert.doesNotMatch(text, /Working now|No tickets are being worked on/);
+  assert.match(text, /Finished 9:05/);
+  const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
+  assert.deepEqual(left.children.at(-1).children, ['See all tickets (2)']);
+  assert.equal(left.children.at(-1).attrs.className, 'see-all');
+});
+// Dash 03/04/14: results fold to 3 one-link rows; same-name results stack with "Mark older as done".
+test('home results: one link per row, same-name stacked, newest first, 3 shown and Show all (N)', async () => {
+  const r = (id, title, at) => ({id, title, status:'review', updated_at:'2026-11-0' + at + 'T10:00:00Z'});
+  const items = [r('v1', 'Report', 1), r('v2', 'Report', 2), r('v3', 'report', 9), r('x', 'Logo', 4), r('y', 'Menu', 5), r('z', 'Flyer', 6)];
+  const moved = [];
+  const c = context(items, {snapshot:false, locks:new Set(), button:(label, cls, click) => ({tag:'button', attrs:{}, children:[label], click})});
+  let running = 0;
+  c.moveTicket = async (id, s) => { assert.equal(running++, 0); moved.push([id, s]); await null; running--; };
+  const home = c.home(), section = nodes(home, n => n.attrs?.['data-key'] === 'check-result')[0], text = JSON.stringify(section);
+  const rows = nodes(section, n => n.attrs?.className === 'card-row home-result');
+  assert.equal(rows.length, 3);
+  assert.doesNotMatch(text, /Open result|"Mark done"|Send back/);
+  assert.equal(nodes(rows[0], n => n.tag === 'a').length, 1);
+  assert.equal(nodes(rows[0], n => n.tag === 'a')[0].attrs.href, '#ticket/v3');
+  assert.match(text, /3 versions/); assert.match(text, /Show all \(6\)/);
+  // newest group first; Logo (the stalest) is folded away
+  assert.deepEqual(rows.map(r => nodes(r, n => n.tag === 'a')[0].attrs.href), ['#ticket/v3', '#ticket/z', '#ticket/y']);
+  const control = {disabled:false}, older = nodes(rows[0], n => n.tag === 'button')[0];
+  const done = older.click({currentTarget:control});
+  assert.equal(control.disabled, true);
+  older.click({currentTarget:control}); // a second click while running does nothing
+  await done;
+  assert.equal(control.disabled, false);
+  assert.deepEqual(moved, [['v1', 'done'], ['v2', 'done']]);
+});
+test('home results: untitled results do not stack', () => {
+  const items = [{id:'u1', title:'', status:'review'}, {id:'u2', title:'[E2E]', status:'review'}, {id:'u3', status:'review'}];
+  const c = context(items, {snapshot:false, locks:new Set()});
+  c.clean = v => String(v || '').replace(/^\[E2E\]$/, '');
+  const section = nodes(c.home(), n => n.attrs?.['data-key'] === 'check-result')[0];
+  assert.equal(nodes(section, n => n.attrs?.className === 'card-row home-result').length, 3);
+  assert.doesNotMatch(JSON.stringify(section), /versions/);
+});
+// Dash 12/14: the fold shows the oldest question with its answers, then "N more questions"; identical questions stack.
+test('home needs: fold shows the oldest card with answers; identical questions are answered once', async () => {
+  const items = ['a', 'b', 'c', 'd', 'e'].map(id => ({id, title:'T ' + id, status:'waiting', questions:[{id:id + '1', text:id === 'd' ? 'Other?' : id === 'e' ? 'Else?' : 'Tuesday or Friday?'}]}));
+  const needs = items.map((t, i) => ({id:t.id + '1', ticket:t.id, since:'2026-11-0' + (i + 1) + 'T00:00:00Z', answer:{question:t.id + '1', digest:'x', options:['Tuesday', 'Friday']}}));
+  const sent = [], toasts = [];
+  const button = (label, cls, click) => ({tag:'button', attrs:{}, children:[label], click, dataset:{}});
+  const c = context(items, {snapshot:false, document:{getElementById:() => null}, needsList:() => needs, button, locks:new Set(), render(){}, act:async (op, args) => { sent.push(args.ticket); return {ok:true}; }});
+  c.window.orch = {toast:t => toasts.push(t)};
+  const home = c.home(), text = JSON.stringify(home);
+  assert.match(text, /Asked on 3 tickets – answer once/);
+  assert.match(text, /2 more questions"/); // 3 rows: the stacked one, d and e
+  const cards = nodes(home, n => n.attrs?.className === 'card-row home-need');
+  assert.equal(cards.length, 1);
+  const host = {querySelectorAll:() => []};
+  await nodes(cards[0], n => n.tag === 'button')[0].click({currentTarget:{closest:() => host}});
+  assert.deepEqual(sent, ['a', 'b', 'c']); assert.deepEqual(toasts, ['Answered on 3 tickets']);
+});
+const sameNeeds = (n, act) => {
+  const items = Array.from({length:n}, (_, i) => ({id:'t' + i, title:'T' + i, status:'waiting', questions:[{id:'q' + i, text:'Tuesday or Friday?'}]}));
+  const needs = items.map((t, i) => ({id:'q' + i, ticket:t.id, since:'2026-11-0' + (i + 1) + 'T00:00:00Z', answer:{question:'q' + i, digest:'x', options:['Tuesday', 'Friday']}}));
+  const toasts = [], button = (label, cls, click) => ({tag:'button', attrs:{}, children:[label], click, dataset:{}});
+  const c = context(items, {snapshot:false, document:{getElementById:() => null}, needsList:() => needs, button, locks:new Set(), render(){}, act});
+  c.window.orch = {toast:(t, kind) => toasts.push([t, kind])};
+  return {c, toasts};
+};
+test('home needs: three identical questions are one row, not folded', () => {
+  const {c} = sameNeeds(3, async () => ({ok:true}));
+  const home = c.home(), text = JSON.stringify(home);
+  assert.match(text, /Asked on 3 tickets – answer once/);
+  assert.doesNotMatch(text, /more question/); assert.doesNotMatch(text, /needs-hide/);
+  assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
+});
+test('home needs: a failed answer on stacked questions says how many were answered', async () => {
+  let n = 0;
+  const {c, toasts} = sameNeeds(3, async () => ++n === 2 ? {ok:false, status:409, text:'Nope'} : {ok:true});
+  c.window.DashHelpers.scrubText = t => t;
+  const card = nodes(c.home(), n => n.attrs?.className === 'card-row home-need')[0];
+  await nodes(card, n => n.tag === 'button')[0].click({currentTarget:{closest:() => ({querySelectorAll:() => []})}});
+  assert.deepEqual(toasts, [['Answered on 2 of 3 tickets. Nope', 'error']]);
+});
+
+// Dash 01: clean() drops leading test tags and trailing machine stamps, keeps a title that is only a tag.
+test('clean strips leading [X] tags and trailing number/time stamps', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
+  const c = vm.createContext({});
+  vm.runInContext(app.slice(app.indexOf('let wsNames'), app.indexOf('const name =')) + ';this.clean = clean;', c);
+  assert.equal(c.clean('[E2E] [smoke] Pay the invoice [1731400000]'), 'Pay the invoice');
+  assert.equal(c.clean('Water plants [2026-11-12T10:00:00Z]'), 'Water plants');
+  assert.equal(c.clean('Order [3] chairs'), 'Order [3] chairs');
+  assert.equal(c.clean('[Draft]'), '[Draft]');
+});
+test('titleTag: the hidden tags show muted only when two visible tickets share a base title', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children});
+  const c = vm.createContext({h, tickets:() => [], array:v => v || []});
+  vm.runInContext(app.slice(app.indexOf('let wsNames'), app.indexOf('const name =')) + ';this.titleTag = titleTag; this.hiddenTags = hiddenTags;', c);
+  assert.equal(c.hiddenTags('[R] Pay the invoice [0722]'), '[R] [0722]');
+  const a = {id:'a', title:'[R] Pay the invoice [0722]'}, b = {id:'b', title:'[R] Pay the invoice [0811]'}, d = {id:'d', title:'Water plants [0722]'};
+  assert.equal(c.titleTag(d, [a, b, d]), null);
+  assert.equal(c.titleTag(a, [a]), null);
+  assert.equal(c.titleTag(a, [a, b]).children[0], ' [R] [0722]');
+  assert.equal(c.titleTag(b, [a, b]).children[0], ' [R] [0811]');
+});
+// Dash 51/28/31: footer line only when the connection is lost; the phone switch hides while on; Ask the helper.
+test('shell: quiet footer, one phone control while on, Ask the helper', () => {
+  const on = {settings:{addons:[{name:'relay', active:true, detail:{connected:true}}]}};
+  assert.equal(helpers.footerState(on, false), '');
+  assert.equal(helpers.footerState({settings:{addons:[{name:'relay', active:true, detail:{connected:false}}]}}, false), 'Not connected');
+  assert.equal(helpers.footerState({}, false), '');
+  const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
+  assert.match(web('style.css'), /\.side-foot:has\(#workspace-mode:empty\)\{display:none\}/);
+  assert.match(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/);
+  assert.match(web('index.html'), />Ask the helper<\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
+  assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
 });

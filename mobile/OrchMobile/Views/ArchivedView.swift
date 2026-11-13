@@ -63,7 +63,7 @@ extension View {
             Button("Cancel", role: .cancel) { id.wrappedValue = nil }
         } message: {
             Text(isGeneral ? "This erases Chat on this phone. It cannot be undone."
-                           : "The messages leave this phone. The ticket and its history stay in your workspace and on the dashboard.")
+                           : "The messages leave this phone. The topic and its history stay in your workspace and on the dashboard.")
         }
     }
 }

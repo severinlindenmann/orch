@@ -48,6 +48,42 @@ def test_bad_views_fail_both_checks(mutate):
     assert check_view(v) is None
 
 
+BUTTON = {"label": "Start", "action": {"op": "addon.start"}}
+
+
+def test_notice_button_is_passed_through():
+    v = {
+        **example(),
+        "notice": "Automation is stopped: nothing starts by itself.",
+        "notice_tone": "warn",
+        "button": BUTTON,
+    }
+    assert not list(VALIDATOR.iter_errors(v))
+    assert check_view(v)["button"] == BUTTON
+
+
+@pytest.mark.parametrize(
+    "button",
+    [
+        {**BUTTON, "command": "orch automation start"},
+        {**BUTTON, "label": "<b>Start</b>"},
+        {**BUTTON, "label": "x" * 31},
+        {"label": "Start", "action": {"op": "addon.start", "command": "rm -rf /"}},
+        {"label": "Start", "action": {"op": "addon.start", "args": {"x": 1}}},
+    ],
+)
+def test_bad_button_breaks_the_view(button):
+    v = {**example(), "notice": "Stopped.", "button": button}
+    assert list(VALIDATOR.iter_errors(v)), "the schema should refuse it"
+    assert check_view(v) is None
+
+
+def test_button_needs_a_notice():
+    v = {k: x for k, x in example().items() if k != "notice"}
+    v["button"] = BUTTON
+    assert list(VALIDATOR.iter_errors(v)) and check_view(v) is None
+
+
 def test_unknown_block_type_is_skipped_not_fatal():
     v = example()
     v["blocks"].insert(1, {"type": "hologram", "x": 1})
@@ -491,8 +527,9 @@ def test_v1_home_and_ticket_controls():
     home = js[js.index("function changeUnavailable") : js.index("// Chat (former General)")]
     tickets = js[js.index("function filterTickets") : js.index("function ticketNotFound")]
     assert "row.answer.recommended" in home and "' · Suggested'" in home
+    assert "className:'row answer-options'" in home  # the question card carries answer buttons
     assert (
-        "act('answer', {ticket:row.ticket, question:row.answer.question, digest:row.answer.digest, answer:option})"
+        "act('answer', {ticket:r.ticket, question:r.answer.question, digest:r.answer.digest, answer:option})"
         in home
     )
     assert "host.querySelectorAll('button')" in home and "locks.delete(key)" in home

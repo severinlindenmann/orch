@@ -52,7 +52,7 @@
     try {
       const result = await act('settings.set', {key: row.key, value: option.value});
       await load();
-      say(result.widened !== false ? 'Saved.' : `Saved. ${view && view.narrow_note ? view.narrow_note : ''}`.trim());
+      say('Saved.');  // the card keeps the one 'Takes effect at the next cleanup' note
     } catch (error) {
       await load();  // after any refusal or timeout, show what the record says now
       say(error.message);

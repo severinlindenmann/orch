@@ -265,7 +265,7 @@
       }
     }
     if (doc.title) root.append(el('h3', 'b-title', doc.title));
-    root.append(el('p', 'b-from', {job: 'Reported by the job', agent: 'Proof by the agent', orch: 'Worked out by orch'}[doc.from]));
+    root.append(el('p', 'b-from', {job: 'Reported by the job', agent: 'Proof by the helper', orch: 'Worked out by orch'}[doc.from]));
     for (const b of doc.blocks) root.append(renderBlock(b));
     return {el: root, valid: true, errors: [], fallbacks};
   }

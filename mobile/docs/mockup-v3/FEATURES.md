@@ -1,14 +1,14 @@
 # orch iPhone app: feature inventory (develop @812c1b7, 6 Nov 2026)
 
 ## 1. Screens today (exact visible labels)
-**Onboarding**: orch logo. "Let's get connected." / "Use your invitation to bring your workspaces along."
-- Buttons "Scan invitation QR code" (primary, camera sheet), "Paste invitation link" (uses clipboard if it holds orch://, else sheet).
-  Hint "Ask the person who invited you for a link or QR code."
-- Paste sheet: "Paste invitation link", field "Invitation link" placeholder "orch://pair?…", "Continue", "Close". Errors:
-  "Paste the link you were sent first. It starts with orch://." / "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
-- QR sheet: viewfinder "Scan invitation QR code", fallback "No camera here. Use the invitation link.", "Close".
-- Found: card "Your invitation is ready" / "You were invited to connect this phone." / disclosure "Connection details" (relay host). Button "Connect this phone" → "Connecting this phone…".
-- Errors: "This invitation has expired or was already used. Ask the person who invited you for a new one." / "Can't reach the server. Check your connection, then tap Connect this phone again."
+**Onboarding**: orch logo. "Let's get connected." / "Bring your workspaces along with an invitation."
+- Buttons "Scan QR code" (primary, camera sheet), "Paste link" (uses clipboard if it holds orch://, else sheet).
+  Hint "You get an invitation from orch on your computer." + disclosure "Get an invitation" (3 steps). DEBUG builds only: "Try a demo".
+- Paste sheet: "Paste link", field "Invitation link" placeholder "orch://pair?…", "Continue", "Close". Errors:
+  "Paste the link you were sent first. It starts with orch://." / "That link does not look right. Check you copied the whole link, or create a new one in orch on your computer."
+- QR sheet: camera viewfinder; problems: "orch can't use the camera. Allow it in Settings, or paste the link instead." (+ "Open Settings") / "The camera is blocked on this phone. Paste the link instead." / "This device has no camera. Paste the link instead." / "The camera didn't start. Close and try again, or paste the link instead."; "Paste link", "Close".
+- Found: card "Your invitation is ready" / "You were invited to connect this phone." / disclosure "Connection details". Buttons "Connect this phone" → "Connecting this phone…", "Use a different link".
+- Errors: "This invitation has expired or was already used. Create a new one in orch on your computer." (button "Use a new invitation") / "Can't reach the server. Check your connection, then tap Connect this phone again."
 
 **Notify step**: "You're connected." / "N workspaces are ready." Card "Know when you're needed." / "Get notified when your work needs an answer." + workspace names. "Allow notifications" / "Not now".
 
@@ -18,9 +18,9 @@
 Workspace row: avatar, name, amber dot if open questions, time, last line, unread. Indented ticket rows: status dot (amber needs you / green working / grey done), KEY (PIL-12), title, unread, state line ("Waiting for your answer" / "Working on it" / "Done — …" / "Did not work — …" / "Stopped").
 No workspaces: "No chats yet" / "Pair a workspace to bring your work here." / "Pair a workspace". Loading skeleton rows. Floating "New chat" (pencil).
 
-**Workspace chat**: offline banner "You're offline. Messages wait until you're online." Mine (queued: clock "Waiting to send"), theirs, system line "Ticket created: KEY · title", ticket card ("TICKET" key + pill, title, "x of y tasks", progress, "Open chat >"), questions. Empty "Say hello to <name>" / "Your first message starts a ticket." Composer "Message <name>…", note "A new message starts a new ticket", send. Info icon.
+**Workspace chat**: offline banner "You're offline. Messages wait until you're online." Mine (queued: clock "Waiting to send"), theirs, system line "Topic started: KEY · title", ticket card ("TICKET" key + pill, title, "x of y tasks", progress, "Open chat >"), questions. Empty "Say hello to <name>" / "Your first message starts a ticket." Composer "Message <name>…", note "A new message starts a new ticket", send. Info icon.
 
-**Ticket chat**: title KEY + title, pill ("Needs you" / "Working" / "Done" / "Stopped" / "Did not work"), agent name · workspace. Collapsible "Tasks done/total" card (collapsed = next open task; open = checklist). Agent messages from "Claude · agent" with labels RESULT / DID NOT WORK / STOPPED, attachments, questions. Empty "Nothing here yet" / "Updates and results show up in this chat." Composer "Message <agent>…", note "Goes in after this step" (running) or "Saved for the next run".
+**Topic chat**: title KEY + title, pill ("Needs you" / "Working" / "Done" / "Stopped" / "Did not work"), agent name · workspace. Collapsible "Tasks done/total" card (collapsed = next open task; open = checklist). Agent messages from "Claude · agent" with labels RESULT / DID NOT WORK / STOPPED, attachments, questions. Empty "Nothing here yet" / "Updates and results show up in this topic." Composer "Message <agent>…", note "Goes in after this step" (running) or "Saved for the next run".
 
 **Question bubble**: "Needs you" (allow: lock + "Permission"; after: "Answered"), text, KEY + title, option buttons, "Suggested" tag on recommended. Allow buttons "Allow once" / "Always" / "Ignore". After tap: "Sending <x> in a moment…" + "Undo" (5 s) → "Sending <x>…" → "✓ <x> · answered from this phone". 409: "Already answered: <x>".
 
@@ -28,9 +28,9 @@ No workspaces: "No chats yet" / "Pair a workspace to bring your work here." / "P
 
 **New chat**: "Where should it go?" / "Pick the workspace for this topic." → "Continue" → text box, "Start" ("Starting…"), note "This starts a new ticket. You get a message when there is a result, a question or a problem."
 
-**Chat info**: ticket: title, KEY + pill, Agent / Workspace / Updated, "WHERE IT STANDS" summary. Workspace: avatar, name, online text, description, "N TICKETS" list. Segments "Media n" / "Links n" / "Files n".
+**Topic info / Chat info**: topic ("Topic info"): title, KEY + pill, Agent / Workspace / Updated, "WHERE IT STANDS" summary. Workspace: avatar, name, online text, description, "N TOPICS" list. Segments "Media n" / "Links n" / "Files n".
 
-**Settings**: "Settings." / "Your connection, in one place." CONNECTION card "Your workspace server" ("● Connected · last updated just now" / "● Can't reach the server" / "● Checking…"), "Details" (Server, This phone, "Access is managed by whoever invited you."). YOUR WORKSPACES n: name + "Online" / "Asleep, last seen …" / "Asleep. Questions arrive when it wakes up." Hint "Need another workspace? Ask the person who invited you." Toggle "Notify me when I'm needed". "Sign out" → "Disconnect this phone? You will need a new invitation to connect again." / "Sign out of this phone" / "Cancel". Footer "orch for iOS · version (build)".
+**Settings**: "Settings." / "Your connection, in one place." CONNECTION card "Your workspace server" ("● Online" / "● Offline, no connection" / "● Checking…"), "Details" (Server, This phone, "Access is managed by whoever invited you."). YOUR WORKSPACES n: name + "Online" / "Computer not reachable, last seen …" / "Offline, no connection" Hint "Need another workspace? Ask the person who invited you." Toggle "Notify me when I'm needed". "Sign out" → "Disconnect this phone? You will need a new invitation to connect again." (plus "N messages are still waiting to be sent and will be lost." when messages or answers are queued) / "Sign out of this phone" / "Cancel". Footer "orch for iOS · version (build)".
 Shared error line "⚠︎ message" + "Try again". Signed out on 401: "This phone was signed out. Open the invitation you were sent to connect again."
 
 ## 2. Flows

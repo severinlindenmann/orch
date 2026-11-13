@@ -57,7 +57,7 @@ def test_optional_done_when_in_new_and_edit_dialog():
     assert "t ? ['owner', 'due', 'note', 'done_when'] : ['owner', 'due', 'done_when']" in js
     assert "input.name = field" in js
     assert "input.rows = 4; input.maxLength = 2000" in js
-    assert "Optional. Say it in your own words, the agent turns it into tasks." in js
+    assert "Optional. Say it in your own words, the helper turns it into tasks." in js
     assert js.index("'More options'") < js.index("field === 'done_when'")
     assert "optionalFields.append(label)" in js
     assert "key === 'done_when' ? input.value : input.value.trim()" in js
@@ -65,7 +65,10 @@ def test_optional_done_when_in_new_and_edit_dialog():
 
 def test_ticket_details_and_readonly_multiline():
     js = (WEB / "pages" / "ticket.js").read_text()
-    assert "field('Note', inlineField(t, 'note')), field('Done when', inlineField(t, 'done_when'))" in js
+    # Note sits in the Overview; empty Owner/Due/Done when hide behind "+ Add detail".
+    assert "h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'))" in js
+    assert "[['owner', 'Owner'], ['due', 'Due'], ['done_when', 'Done when']]" in js
+    assert "'+ Add detail'" in js
     assert "done_when:'Say what should be true when it is done'" in js
     assert "const MULTILINE = ['note', 'done_when']" in js
     assert "if (snapshot) return el('span', MULTILINE.includes(field) ? 'ed-ro preserve-lines'" in js

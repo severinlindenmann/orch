@@ -17,18 +17,24 @@ jobs:
           NAME=$(xcrun simctl list devices available | grep -oE 'iPhone [0-9A-Za-z ]+ \(' | head -1 | sed 's/ ($//')
           echo "SIM_NAME=$NAME" >> "$GITHUB_ENV"
       # Ad hoc signing (not CODE_SIGNING_ALLOWED=NO): an unsigned app has no Keychain in the Simulator.
-      # Pull requests into develop: build + unit tests (the UI suite took most of ~18 min per mobile PR). develop/main pushes,
-      # PRs into main (releases) and manual runs keep the full suite with the UI tests, so nothing is dropped, only moved to after the merge.
+      # Pull requests into develop: build + unit tests + a UI smoke subset (the classes below: onboarding/chats, conversation,
+      # shell + settings, accessibility ids; a few minutes instead of the full ~18 min), so a UI break shows on the PR, not after the merge.
+      # develop/main pushes, the nightly run, PRs into main (releases) and manual runs keep the full suite with all UI tests.
       - name: Build and test
         env:
-          SKIP_UI: ${{ github.event_name == 'pull_request' && github.base_ref != 'main' && '-skip-testing:OrchMobileUITests' || '' }}
+          SMOKE: ${{ github.event_name == 'pull_request' && github.base_ref != 'main' && 'yes' || '' }}
         run: |
           set -o pipefail
-          echo "UI tests: ${SKIP_UI:-included}"
+          ONLY=""
+          if [ -n "$SMOKE" ]; then
+            ONLY="-only-testing:OrchMobileTests"
+            for c in OnboardingFlowUITests ConversationUITests M1ShellUITests AccessibilityIdUITests; do ONLY="$ONLY -only-testing:OrchMobileUITests/$c"; done
+          fi
+          echo "UI tests: ${ONLY:-all (full suite)}"
           # CI only: a failed UI test gets one more try (-retry-tests-on-failure); the summary step below lists every retry so a flake
           # stays visible. Local runs have no retry, and the long loop test is skipped unless ORCH_UITEST_LONG=1 (not set here).
           rm -rf xcb.xcresult
-          xcodebuild test -scheme OrchMobile -destination "platform=iOS Simulator,name=$SIM_NAME" $SKIP_UI \
+          xcodebuild test -scheme OrchMobile -destination "platform=iOS Simulator,name=$SIM_NAME" $ONLY \
             -retry-tests-on-failure -test-iterations 2 -resultBundlePath xcb.xcresult \
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual > xcb.log 2>&1 \
             || { grep -E ":[0-9]+:[0-9]+: error:|error: " xcb.log | sort -u | head -60; tail -60 xcb.log; exit 1; }

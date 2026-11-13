@@ -993,6 +993,8 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
     if not publish_connected(root, orch_bin):
         return {"links": []}
     raw = run_orch(orch_bin, ["publish", "list", "--json"], root)
+    if not isinstance(raw, dict):  # the sharing server did not answer: say so, never "no links"
+        return {"links": [], "unreachable": True}
     files = raw.get("files", []) if isinstance(raw, dict) else []
     # The server's file list carries no link: rebuild it here from the saved publish address, the file id and
     # the key saved on this computer (publish list merges it in). The key is never sent to the server.

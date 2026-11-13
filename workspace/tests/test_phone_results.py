@@ -244,6 +244,42 @@ def test_older_relay_gets_the_same_update_without_results(proj, run, new_ticket,
     assert len({b["id"] for b in seen}) == 1, "the same message id"
 
 
+def test_a_result_text_without_update_is_sent_plain_and_the_sender_is_told(proj, run, new_ticket, conn):  # noqa: F811
+    """A result sent with only --ticket has no ticket page (the view belongs to --update)."""
+    tid = _evidence_ticket(proj, new_ticket, [("a.json", doc(), "2026-11-11T08:00:00Z")])
+    code, out, err = run("relay", "send", "phones", "All done", "--ticket", tid)
+    assert code == 0, err
+    assert "ticket_view" not in conn.sent[-1]["body"]
+    assert "--update result" in err and "ticket page" in err
+    code, out, err = run("relay", "send", "phones", "All done", "--ticket", tid, "--update", "result")
+    assert code == 0, err
+    assert "ticket_view" in _result_message(conn)["body"] and "ticket page" not in err
+
+
+def test_a_view_the_relay_refuses_is_dropped_and_the_sender_is_told(proj, run, new_ticket, conn):  # noqa: F811
+    tid = _evidence_ticket(proj, new_ticket, [("a.json", doc(), "2026-11-11T08:00:00Z")])
+    post = next(fn for m, rx, fn in conn.routes if rx == "/v1/messages")
+
+    def picky(m, q, body):
+        if "ticket_view" in json.loads(body)["body"]:
+            return 422, {"error": "invalid", "message": "bad view"}
+        return post(m, q, body)
+
+    conn.routes.insert(0, ("POST", "/v1/messages", picky))
+    code, _, err = run("relay", "send", "phones", "Done", "--ticket", tid, "--update", "result")
+    assert code == 0, err
+    assert "ticket_view" not in _result_message(conn)["body"]
+    assert "without the ticket page" in err and "refused" in err
+
+
+def test_hider_off_tells_the_sender_the_page_was_left_out(proj, run, new_ticket, conn, monkeypatch):  # noqa: F811
+    tid = _evidence_ticket(proj, new_ticket, [("a.json", doc(), "2026-11-11T08:00:00Z")])
+    monkeypatch.setattr(phone_results, "value_hider", lambda root: None)
+    code, _, err = run("relay", "send", "phones", "Done", "--ticket", tid, "--update", "result")
+    assert code == 0, err
+    assert "without the ticket page" in err and "stored keys" in err
+
+
 def test_pattern_secrets_in_cell_title_and_key_never_reach_the_output(proj, new_ticket, conn):  # noqa: F811
     tok = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
     forms = [tok, tok.encode().hex(), base64.b64encode(tok.encode()).decode()]

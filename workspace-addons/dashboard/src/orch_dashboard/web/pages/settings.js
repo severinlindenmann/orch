@@ -64,15 +64,20 @@ const pendingText = p => [['Helper', p.name], ['Adapter', p.adapter], ['Command'
 function privateCard(settings) {
   const info = settings.git_private;
   const pending = array(info?.pending);
+  const hidden = pending.filter(p => !p.showable).length;
   if (!info || !(info.count > 0 || pending.length)) return null;
   const lines = array(info.lines);
   return h('div', {className:'stack', 'data-key':'settings-private'},
     info.count > 0 ? h('div', {className:'card'}, h('div', {className:'card-row'}, h('div', {className:'grow'},
       settingsText('h3', {}, 'Private files are in your team repo'), settingsText('p', {className:'meta'}, lines[0])),
       snapshot ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-move', 'data-key':'settings-private-move', disabled:settingsBusy.has('private')}, 'Move to private'))) : null,
-    ...pending.map(p => h('div', {className:'card', 'data-key':'settings-private-pending-' + p.name}, h('div', {className:'card-row'}, h('div', {className:'grow'},
-      settingsText('h3', {}, 'This workspace asks to run a command'), p.showable ? settingsText('pre', {className:'meta mono preserve-lines'}, pendingText(p)) : settingsText('p', {className:'meta'}, "This workspace asks to run a command orch can't show safely. Not allowed.")),
-      snapshot || !p.showable ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-allow', 'data-name':p.name, 'data-key':'settings-private-allow-' + p.name, disabled:settingsBusy.has('private')}, 'Allow on this computer')))));
+    ...pending.filter(p => p.showable).map(p => h('div', {className:'card', 'data-key':'settings-private-pending-' + p.name}, h('div', {className:'card-row'}, h('div', {className:'grow'},
+      settingsText('h3', {}, 'This workspace asks to run a command'), settingsText('pre', {className:'meta mono preserve-lines'}, pendingText(p))),
+      snapshot ? null : settingsText('button', {type:'button', className:'btn', 'data-action':'private-allow', 'data-name':p.name, 'data-key':'settings-private-allow-' + p.name, disabled:settingsBusy.has('private')}, 'Allow on this computer')))),
+    /* Requests orch cannot show safely cannot be allowed: one card for all of them, not N identical ones. */
+    hidden ? h('div', {className:'card', 'data-key':'settings-private-pending-hidden'}, h('div', {className:'card-row'}, h('div', {className:'grow'},
+      settingsText('h3', {}, 'This workspace asks to run a command'),
+      settingsText('p', {className:'meta'}, hidden + (hidden === 1 ? " request" : " requests") + " orch can't show safely. Not allowed.")))) : null);
 }
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'}, h('h2', {className:'set-sub'}, 'Finished work'),
@@ -535,7 +540,14 @@ function addonBody(a, res) {
   if (res.state === 'error' || !res.view) return fragment(h('section', {className:'card pad stack'}, h('h2', {}, 'Can’t show ', addonLabel(a), ' right now.'), h('p', {}, res.message || 'No answer.', ' Nothing here was changed.'), retry));
   return fragment(h('p', {className:'meta'}, 'As of ', time(res.as_of)),
     res.state === 'stale' ? h('div', {className:'banner attn', role:'status'}, h('p', {className:'grow'}, 'Not up to date. Showing the last answer from ', time(res.as_of), '.', res.message ? ' ' + clean(res.message) + ' Newer items may be missing.' : ''), retry) : null,
-    res.view.notice ? h('p', {className:'banner ' + (res.view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(res.view.notice_tone) ? 'attn' : '')}, clean(res.view.notice)) : null, h('div', {id:'addon-blocks'}));
+    addonNotice(res.view), h('div', {id:'addon-blocks'}));
+}
+function addonNotice(view) {
+  if (!view.notice) return null;
+  const tone = 'banner ' + (view.notice_tone === 'bad' ? 'error' : ['warn', 'needs-you'].includes(view.notice_tone) ? 'attn' : '');
+  const b = view.button;
+  if (snapshot || b?.action?.op !== 'addon.start') return h('p', {className:tone}, clean(view.notice));
+  return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, clean(b.label)));
 }
 function paintAddon(id) {
   const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);
@@ -653,18 +665,19 @@ function repeatsDialog(only = null, addonName = null) {
   save.disabled = !ticket.options.length;
   actions.append(save); d.append(fields, actions); window.orch.open(d);
 }
-let sharedLinks = null;
+let sharedLinks = null, sharedLinksDown = false;
 async function loadSharedLinks() {
   try {
     const res = await fetch('/api/links', {cache:'no-store'});
-    if (res.status !== 200) { sharedLinks = null; return; }
+    if (res.status !== 200) { sharedLinks = null; sharedLinksDown = false; return; }
     const data = await res.json();
     sharedLinks = Array.isArray(data.links) ? data.links : null;
-  } catch (_) { sharedLinks = null; }
+    sharedLinksDown = data.unreachable === true;
+  } catch (_) { sharedLinks = null; sharedLinksDown = false; }
 }
 function sharedLinksCard() {
   return h('section', {className:'card pad stack addon-native', 'data-key':'shared-links'}, h('h2', {}, 'Links'),
-    sharedLinks.length ? sharedLinks.map(link => {
+    sharedLinksDown ? h('p', {className:'meta'}, "Couldn't reach the sharing server; try again in a moment.") : sharedLinks.length ? sharedLinks.map(link => {
       const expiry = link.expires_at;
       const date = expiry ? new Date(typeof expiry === 'number' ? expiry * 1000 : expiry) : null;
       const expired = link.expired === true || (date && date.getTime() <= Date.now());

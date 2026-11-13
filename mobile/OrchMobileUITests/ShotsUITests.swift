@@ -50,9 +50,9 @@ final class ShotsUITests: XCTestCase {
         dir = out
         let app = launch(["-openChat", "ws_reports001", "-openTicket", "t_9k2m4q", "-openInfo", "YES"])
         defer { app.terminate() }
+        XCTAssertTrue(app.descendants(matching: .any)["info-shared"].firstMatch.waitForExistence(timeout: 20))
         let links = app.buttons["info-tab-links"]
-        XCTAssertTrue(links.waitForExistence(timeout: 20))
-        links.tap()
+        if links.exists { links.tap() }   // with links as the only filter there is no tab row
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'info-item-'")).firstMatch.waitForExistence(timeout: 15))
         try shot(app, "10-phone-info-links")
     }

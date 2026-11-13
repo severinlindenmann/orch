@@ -109,10 +109,9 @@ final class RealRelayE2ETests: XCTestCase {
     // MARK: 0 pair
     func test00PairWithTheInvitationLink() {
         let app = launch(reset: true)
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        must(app, app.buttons["Paste invitation link"], "paste button", timeout: 20)
+        must(app, app.buttons["invite-paste"], "paste button", timeout: 20)
         shot("00-onboarding")
-        app.buttons["Paste invitation link"].tap()
+        app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         must(app, f, "invite field"); f.tap(); f.typeText(info["link"] as? String ?? "")
         app.buttons["invite-continue"].tap()
@@ -309,7 +308,8 @@ final class RealRelayE2ETests: XCTestCase {
         XCTAssertTrue(r.hasPrefix("20"), "second phone answered: \(r)")
         el(app, "answer-Red").tap()
         sleep(3); shot("63-answered-elsewhere")
-        XCTAssertTrue(text(app, "Already answered on your computer").waitForExistence(timeout: 40), "stale answer shows who answered")
+        XCTAssertTrue(text(app, "Answered on your computer").waitForExistence(timeout: 40), "stale answer shows who answered")
+        XCTAssertFalse(text(app, "already answered:").exists, "the server error text is never shown as the answer")
         shot("64-stale-answer-note")
     }
 
@@ -392,12 +392,12 @@ final class RealRelayE2ETests: XCTestCase {
         el(app, "settings-button").tap()
         must(app, el(app, "settings-ws-\(ws)"), "workspace row in Settings"); shot("100-settings")
         el(app, "settings-ws-\(ws)").tap()
-        must(app, el(app, "mute-Always"), "mute options"); el(app, "mute-Always").tap(); sleep(2); shot("101-muted")
-        el(app, "mute-Off").tap(); sleep(2)
+        must(app, el(app, "workspace-notifications"), "notifications row"); el(app, "workspace-notifications").tap()
+        must(app, app.buttons["Until I turn it on"], "mute options"); app.buttons["Until I turn it on"].tap(); sleep(2); shot("101-muted")
+        el(app, "workspace-notifications").tap(); must(app, app.buttons["Turn on"], "turn on"); app.buttons["Turn on"].tap(); sleep(2)
         back(app)
         el(app, "add-workspace").tap()
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        must(app, app.buttons["Paste invitation link"], "Paste invitation link"); app.buttons["Paste invitation link"].tap()
+        must(app, app.buttons["invite-paste"], "invite-paste"); app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         must(app, f, "invite field"); f.tap(); f.typeText(link)
         app.buttons["invite-continue"].tap()
@@ -480,9 +480,9 @@ final class RealRelayE2ETests: XCTestCase {
         chats(app)
         // The banner moved off the Chats list (round-8): it sits on the workspace screen.
         openWorkspace(app)
-        let banner = mobileBanner(app, containing: "Send questions to my phone · on")
+        let banner = mobileBanner(app, containing: "You're away from")
         must(app, banner, "Mobile mode banner in workspace", timeout: 90)
-        XCTAssertTrue(banner.label.contains("Send questions to my phone"))
+        XCTAssertTrue(banner.label.contains("questions come to your phone"))
         must(app, el(app, "mobile-mode-off-\(ws)"), "workspace Turn off button", timeout: 10)
         shot("121-mobile-mode-workspace")
         let ticket = host("out = ask_question('Mobile mode question?')")
@@ -539,7 +539,7 @@ final class RealRelayE2ETests: XCTestCase {
         }
         let app = launch()
         chats(app); openWorkspace(app)
-        must(app, mobileBanner(app, containing: "Send questions to my phone · on"), "reachable banner", timeout: 90)
+        must(app, mobileBanner(app, containing: "· questions come to your phone"), "reachable banner", timeout: 90)
         host("""
         import os, signal
         pid = keeper_pid()
@@ -550,7 +550,7 @@ final class RealRelayE2ETests: XCTestCase {
         must(app, mobileBanner(app, containing: "Can't reach"), "unreachable banner after silence", timeout: 480)
         shot("124-mobile-mode-unreachable")
         host("import os, signal; os.kill(int(S['mobile_mode_stopped_pid']), signal.SIGCONT)")
-        must(app, mobileBanner(app, containing: "Send questions to my phone · on"), "reachable banner after resume", timeout: 90)
+        must(app, mobileBanner(app, containing: "· questions come to your phone"), "reachable banner after resume", timeout: 90)
         host("out = mm_off()")
         XCTAssertTrue(el(app, "mobile-mode-banner-\(ws)").waitForNonExistence(timeout: 60))
         shot("125-mobile-mode-recovered-and-off")
@@ -562,18 +562,18 @@ final class RealRelayE2ETests: XCTestCase {
         host("out = mm_on(4)")
         let app = launch()
         chats(app); openWorkspace(app)
-        must(app, mobileBanner(app, containing: "Send questions to my phone · on"), "Mobile mode banner", timeout: 90)
+        must(app, mobileBanner(app, containing: "· questions come to your phone"), "Mobile mode banner", timeout: 90)
         setMute(app, "Always"); openWorkspace(app)
         // Muting preserves Mobile mode and hides its Turn off action.
-        must(app, mobileBanner(app, containing: "Send questions to my phone · muted"), "muted Mobile mode banner", timeout: 40)
+        must(app, mobileBanner(app, containing: "· questions muted"), "muted Mobile mode banner", timeout: 40)
         XCTAssertFalse(el(app, "mobile-mode-off-\(ws)").exists, "muted banner has no Turn off button")
         host("out = ask_question('Muted mobile mode question?')")
         // Simulator cannot observe push absence; relay tests cover suppression of pushes while muted.
-        must(app, mobileBanner(app, containing: "Send questions to my phone · muted"), "muted banner after question delivery", timeout: 30)
+        must(app, mobileBanner(app, containing: "· questions muted"), "muted banner after question delivery", timeout: 30)
         XCTAssertFalse(el(app, "mobile-mode-off-\(ws)").exists)
         shot("126-mobile-mode-muted-question")
         setMute(app, "Off"); openWorkspace(app)
-        must(app, mobileBanner(app, containing: "Send questions to my phone · on"), "unmuted banner", timeout: 30)
+        must(app, mobileBanner(app, containing: "· questions come to your phone"), "unmuted banner", timeout: 30)
         host("out = mm_off()")
         XCTAssertTrue(el(app, "mobile-mode-banner-\(ws)").waitForNonExistence(timeout: 60))
         shot("127-mobile-mode-unmuted-and-off")

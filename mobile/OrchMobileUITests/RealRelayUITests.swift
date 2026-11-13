@@ -29,9 +29,8 @@ final class RealRelayUITests: XCTestCase {
     /// Pair with the invitation link, see the workspace chat, start a new chat with a text.
     func test1PairAndNewChat() {
         let app = launch(reset: true)
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 15))
-        app.buttons["Paste invitation link"].tap()
+        XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 15))
+        app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         XCTAssertTrue(f.waitForExistence(timeout: 5))
         f.tap(); f.typeText(env["ORCH_PAIR_LINK"] ?? "")
@@ -77,7 +76,8 @@ final class RealRelayUITests: XCTestCase {
         }
         row.tap()
         XCTAssertTrue(app.staticTexts["composer-note"].waitForExistence(timeout: 10))
-        XCTAssertTrue(any(app, "tasks-toggle").waitForExistence(timeout: 10), "ticket status line")
+        // The ticket says its status in the header (chat-status) or, when it has steps, in the steps row (tasks-toggle).
+        XCTAssertTrue(any(app, "chat-status").waitForExistence(timeout: 10) || any(app, "tasks-toggle").waitForExistence(timeout: 5), "ticket status line or steps row")
         XCTAssertTrue(any(app, "attachment-image").waitForExistence(timeout: 10), "image attachment")
         shot("08-ticket-chat")
         let yes = app.buttons["answer-yes"]
@@ -150,9 +150,8 @@ final class RealRelayUITests: XCTestCase {
     /// Tickets made on the host (never texted from the phone) show nested under the workspace; each opens its ticket chat.
     func test6ThreeTicketsNested() {
         let app = launch(reset: true)
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
-        XCTAssertTrue(app.buttons["Paste invitation link"].waitForExistence(timeout: 15))
-        app.buttons["Paste invitation link"].tap()
+        XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 15))
+        app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         XCTAssertTrue(f.waitForExistence(timeout: 5))
         f.tap(); f.typeText(env["ORCH_PAIR_LINK"] ?? "")

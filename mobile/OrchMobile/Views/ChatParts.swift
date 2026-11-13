@@ -10,6 +10,18 @@ struct KeyTag: View {
     }
 }
 
+/// One status colour set for every screen: Working = green, Needs you = amber, Done = grey (a failure stays red).
+extension TopicStatus {
+    var tone: Color {
+        switch self {
+        case .working: Theme.brand
+        case .waitingOnYou, .review: Theme.warn
+        case .didntWork, .stopped: Theme.danger
+        case .done, .dropped, .paused, .backlog: Theme.muted
+        }
+    }
+}
+
 struct StatusPill: View {
     let status: Ticket.Status
     let kind: String
@@ -17,7 +29,13 @@ struct StatusPill: View {
         // The snapshot status decides Done; only a failure or stop keeps its own sign (a done ticket may arrive as note/ack).
         switch status { case .needsYou: "Needs your OK"; case .review: "Ready for review"; case .paused: "Paused"; case .backlog: "Not started"; case .working: "Working"; case .done: kind == "failure" ? "Did not work" : (kind == "stopped" ? "Stopped" : "Done") }
     }
-    var color: Color { switch status { case .needsYou: Theme.warn; case .review: Theme.warn; case .paused, .backlog: Theme.muted; case .working: Theme.brand; case .done: kind == "failure" || kind == "stopped" ? Theme.danger : Theme.muted } }
+    var color: Color {
+        switch status {
+        case .needsYou: TopicStatus.waitingOnYou.tone; case .review: TopicStatus.review.tone; case .paused: TopicStatus.paused.tone; case .backlog: TopicStatus.backlog.tone
+        case .working: TopicStatus.working.tone
+        case .done: (kind == "failure" ? TopicStatus.didntWork : kind == "stopped" ? .stopped : .done).tone
+        }
+    }
     var body: some View {
         Text(text).themeFont(11, .semibold).foregroundStyle(color).padding(.horizontal, 8).padding(.vertical, 3)
             .overlay(Capsule(style: .continuous).stroke(color.opacity(0.6)))
@@ -46,10 +64,9 @@ struct AttachmentBubble: View {
     var at: String = ""
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Helper").themeFont(11, .semibold).foregroundStyle(Theme.brand)
+            HStack(alignment: .bottom, spacing: 8) {
                 AttachmentTile(attachment: attachment, large: true)
-                Text(ChatBuilder.timeText(at)).themeFont(11).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
+                Text(ChatBuilder.timeText(at)).themeFont(12).foregroundStyle(Theme.muted)
             }.padding(10).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(Theme.border))
             Spacer(minLength: 48)
@@ -61,12 +78,17 @@ struct AttachmentBubble: View {
 struct AttachmentTile: View {
     let attachment: TicketSnapshot.Attachment
     var large = false
+    /// Set for a relay picture: the picture is its own open button (a failed one tries again on a tap instead).
+    var onOpen: (() -> Void)? = nil
+    static func opensItself(_ attachment: TicketSnapshot.Attachment) -> Bool {
+        attachment.kind == "image" && attachment.blobId.map(BlobID.isValid) == true
+    }
     var body: some View {
         switch attachment.kind {
         case "image":
             if let id = attachment.blobId, BlobID.isValid(id) {
                 VStack(alignment: .leading, spacing: 6) {
-                    BlobImage(id: id).frame(maxWidth: .infinity).frame(height: large ? 140 : 84).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
+                    BlobImage(id: id, open: onOpen.map { BlobImage.Open(label: "Open \(attachment.label ?? "picture")", identifier: "image-\(attachment.id)", action: $0) }).frame(maxWidth: .infinity).frame(height: large ? 140 : 84).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
                     Text(attachment.label ?? "Image").themeFont(12).foregroundStyle(Theme.text).lineLimit(1)
                 }
             } else {
@@ -113,19 +135,83 @@ struct AttachmentTile: View {
     }
 }
 
-/// Loads an image through the relay (paired credentials); a failure or a non-image shows a plain placeholder.
+/// What a picture from the relay shows while it is not drawn.
+enum BlobImageState: Equatable {
+    case loading, loaded, unavailable, failed
+    /// No bytes: the relay could not be reached (try again); bytes that are no picture stay unavailable.
+    static func after(data: Data?, isImage: Bool) -> BlobImageState {
+        guard data != nil else { return .failed }
+        return isImage ? .loaded : .unavailable
+    }
+    var text: String? {
+        switch self {
+        case .loading, .loaded: nil
+        case .unavailable: "Picture not available"
+        case .failed: "Couldn't load · Tap to try again"
+        }
+    }
+    /// A tap on a picture that failed tries again; otherwise it opens the picture.
+    var tapRetries: Bool { self == .failed }
+}
+
+/// Loads an image through the relay (paired credentials): loading, not available, or a failure with a tap to try again
+/// (also tried again by itself once the phone is back online).
 struct BlobImage: View {
+    /// The picture opens on a tap (it is its own button, so a failed picture can take the tap to try again).
+    struct Open { let label: String; let identifier: String; let action: () -> Void }
     @Environment(AppModel.self) private var model
     let id: String
+    var open: Open? = nil
     @State private var image: UIImage?
+    @State private var state: BlobImageState = .loading
+    @State private var attempt = 0
+    private static let retryLabel = "Picture couldn't load. Try again"
     var body: some View {
+        if let open {
+            Button { if state.tapRetries { attempt += 1 } else { open.action() } } label: { picture }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel(state.tapRetries ? Self.retryLabel : open.label)
+                .accessibilityIdentifier(state.tapRetries ? "image-retry-\(id)" : open.identifier)
+                .accessibilityValue(value)
+        } else {
+            picture
+                .overlay {
+                    if state.tapRetries {
+                        Button { attempt += 1 } label: { Color.clear.contentShape(Rectangle()) }
+                            .buttonStyle(.plain).accessibilityLabel(Self.retryLabel).accessibilityIdentifier("image-retry-\(id)")
+                    }
+                }
+                .accessibilityValue(value)
+        }
+    }
+    private var value: String { state == .loading ? "Loading" : state.text ?? "" }
+    @ViewBuilder private var symbol: some View {
+        if state == .loading { ProgressView().tint(Theme.muted) }
+        else { Image(systemName: state == .failed ? "arrow.clockwise" : "photo").font(.system(size: 24)) }
+    }
+    private var picture: some View {
         ZStack {
             Theme.surface3
             if let image { Image(uiImage: image).resizable().scaledToFill() }
-            else { Image(systemName: "photo").font(.system(size: 28)).foregroundStyle(Theme.muted) }
-        }.clipped().task(id: id) {
-            if let d = await model.blob(id) { image = Thumbnail.image(from: d) }
-        }
+            else {
+                // A small thumbnail keeps only the symbol (the words stay in the accessibility value).
+                ViewThatFits(in: .vertical) {
+                    VStack(spacing: 6) {
+                        symbol
+                        if let text = state.text { Text(text).themeFont(12).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    symbol
+                }.foregroundStyle(Theme.muted).padding(8)
+            }
+        }.clipped()
+            .task(id: "\(id)#\(attempt)#\(model.connection == .unreachable)") {
+                guard image == nil else { return }
+                state = .loading
+                let data = await model.blob(id)
+                let picture = data.flatMap { Thumbnail.image(from: $0) }
+                image = picture
+                state = BlobImageState.after(data: data, isImage: picture != nil)
+            }
     }
 }
 
@@ -292,29 +378,28 @@ struct MessageBubble: View {
                     if let quotedText {
                         HStack(spacing: 8) {
                             Rectangle().fill(Theme.brand).frame(width: 3)
-                            Text(quotedText).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
+                            Text(quotedText).themeFont(13).foregroundStyle(mine ? Theme.mineStamp : Theme.muted).lineLimit(2)
                         }.fixedSize(horizontal: false, vertical: true)
                     }
                     if let label = item.label {
                         Text(label).themeFont(12, .semibold).foregroundStyle(label == "DID NOT WORK" ? Theme.danger : Theme.brand)
                     }
                     if !item.text.isEmpty {
-                        messageText.themeFont(17).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        if inlineStamp { InlineStampLayout { textView; stamp(onMedia: false) } } else { textView }
                     }
                     ForEach(item.attachments) { attachment in
                         if attachment.kind == .image, BlobID.isValid(attachment.blobId) {
-                            Button { onOpenArtifact(attachment.blobId) } label: {
-                                BlobImage(id: attachment.blobId).frame(height: 190).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous))
-                            }.buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("image-\(attachment.id)")
+                            BlobImage(id: attachment.blobId, open: .init(label: "Open \(attachment.name)", identifier: "image-\(attachment.id)") { onOpenArtifact(attachment.blobId) })
+                                .frame(height: 190).clipShape(RoundedRectangle(cornerRadius: mediaOnly ? Theme.Radius.l : Theme.Radius.s, style: .continuous))
                         } else if BlobID.isValid(attachment.blobId), attachment.kind == .file {
-                            Button { onOpenArtifact(attachment.blobId) } label: { fileRow(attachment.name, size: attachment.size) }
+                            Button { onOpenArtifact(attachment.blobId) } label: { fileRowWithTime(attachment.name, size: attachment.size, isLast: isLastFile(attachment.id)) }
                                 .buttonStyle(PressStyle()).accessibilityLabel("Open \(attachment.name)").accessibilityIdentifier("file-\(attachment.id)")
-                        } else { fileRow(attachment.name, size: attachment.size) }
+                        } else { fileRowWithTime(attachment.name, size: attachment.size, isLast: isLastFile(attachment.id)) }
                     }
                     ForEach(item.queuedFiles, id: \.file) { file in
                         if file.kind == .image, let pending = model.outbox.item(clientId: item.clientId ?? "") {
                             QueuedConversationImage(url: model.outbox.fileURL(pending, file), name: file.name)
-                        } else { fileRow(file.name, size: file.size) }
+                        } else { fileRowWithTime(file.name, size: file.size, isLast: file.file == item.queuedFiles.last?.file) }
                     }
                     ForEach(item.artifacts) { artifact in
                         Button { onOpenArtifact(artifact.id) } label: {
@@ -336,18 +421,22 @@ struct MessageBubble: View {
                     if let feedback = item.feedback {
                         VStack(alignment: .leading, spacing: 4) {
                             Label(feedback.verdict == .approve ? "Looks good" : "Changes asked", systemImage: feedback.verdict == .approve ? "checkmark.circle" : "pencil")
-                            Text("\(feedback.pins.count) comments").foregroundStyle(Theme.muted)
+                            Text("\(feedback.pins.count) comments").foregroundStyle(mine ? Theme.mineStamp : Theme.muted)
                         }.themeFont(15)
                     }
-                    if mine {
-                        ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), note: waitNote, onRetry: onRetry, onDiscard: onDiscard)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    } else {
-                        Text(ChatBuilder.timeText(item.at)).themeFont(13).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
+                    if footerStamp {
+                        if mine {
+                            ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), note: waitNote, onRetry: onRetry, onDiscard: onDiscard,
+                                        tint: Theme.mineStamp, waitingWord: waitingWord)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        } else {
+                            Text(ChatBuilder.timeText(item.at)).themeFont(12).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
                     }
-                }.padding(12).foregroundStyle(Theme.text)
-                    .background(mine ? Theme.brand.opacity(0.14) : Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous).stroke(mine ? Theme.brand.opacity(0.5) : Theme.border))
+                }.padding(mediaOnly ? 0 : 12).foregroundStyle(Theme.text)
+                    // Photo and map run edge to edge: the time sits on the picture on a dark backing (readable on any picture).
+                    .overlay(alignment: .bottomTrailing) { if mediaOnly && !footerStamp { stamp(onMedia: true).padding(8) } }
+                    .background(mediaOnly ? Color.clear : (mine ? Theme.mineFill : Theme.surface2), in: RoundedRectangle(cornerRadius: Theme.Radius.l, style: .continuous))
                     .contextMenu {
                         Button { UIPasteboard.general.string = item.text } label: { Label("Copy", systemImage: "doc.on.doc") }.accessibilityIdentifier("copy-\(item.id)")
                         if !mine && item.canPlay {
@@ -360,17 +449,52 @@ struct MessageBubble: View {
             if !mine { Spacer(minLength: ChatBubbleLayout.agentTrailingSpace(for: typeSize)) }
         }
     }
-    @ViewBuilder private var messageText: some View {
-        if item.side == .them && conversationId.ticket != nil {
-            Text(ArtifactMentions.attributed(item.text, attachments: attachments))
-                .environment(\.openURL, OpenURLAction { url in
-                    guard let id = ArtifactMentions.attachmentId(from: url) else { return .systemAction }
-                    onOpenArtifact(id)
-                    return .handled
-                })
-        } else {
-            Text(item.text)
-        }
+    private var messageText: Text {
+        item.side == .them && conversationId.ticket != nil ? Text(ArtifactMentions.attributed(item.text, attachments: attachments)) : Text(item.text)
+    }
+    /// The message text alone (the time is placed beside it, never padded into it); a mentioned file opens in the viewer.
+    private var textView: some View {
+        messageText.themeFont(17).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            .environment(\.openURL, OpenURLAction { url in
+                guard let id = ArtifactMentions.attachmentId(from: url) else { return .systemAction }
+                onOpenArtifact(id)
+                return .handled
+            })
+    }
+    private var waitingWord: Bool { ReceiptView.showsWaitingWord(offline: model.connection == .unreachable, note: waitNote) }
+    private func isLastFile(_ attachmentId: String) -> Bool { item.queuedFiles.isEmpty && attachmentId == item.attachments.last?.id }
+    /// Only text and quote: the bubble is as wide as its text (no stretch to the screen edge).
+    static func hugs(_ item: ConvItem) -> Bool {
+        item.attachments.isEmpty && item.queuedFiles.isEmpty && item.artifacts.isEmpty && item.location == nil && item.feedback == nil
+    }
+    private var failed: Bool { if case .failed? = item.receipt { true } else { false } }
+    /// Retry/Discard or a "Try again later" note need their own line; else the time and ticks sit inline.
+    private var needsOwnLine: Bool { mine && (failed || (waitNote != nil && item.receipt == .queued)) }
+    /// A photo or a map alone: no frame around it (a failed or waiting one keeps its frame for the line below).
+    private var mediaOnly: Bool {
+        guard !needsOwnLine, item.text.isEmpty, quotedText == nil, item.label == nil, item.artifacts.isEmpty, item.feedback == nil, item.queuedFiles.isEmpty else { return false }
+        if item.location != nil { return item.attachments.isEmpty }
+        return item.attachments.count == 1 && item.attachments[0].kind == .image && BlobID.isValid(item.attachments[0].blobId)
+    }
+    /// Files alone: one compact row each, the time inline at the trailing edge of the last.
+    private var filesOnly: Bool {
+        item.text.isEmpty && item.location == nil && item.artifacts.isEmpty && item.feedback == nil
+            && !(item.attachments.isEmpty && item.queuedFiles.isEmpty)
+            && item.attachments.allSatisfy { !($0.kind == .image && BlobID.isValid($0.blobId)) } && item.queuedFiles.allSatisfy { $0.kind != .image }
+    }
+    private var inlineStamp: Bool { !needsOwnLine && Self.hugs(item) && !item.text.isEmpty }
+    private var footerStamp: Bool { needsOwnLine || !(inlineStamp || mediaOnly || filesOnly) }
+    @ViewBuilder private func stamp(onMedia: Bool) -> some View {
+        Group {
+            if mine { ReceiptView(receipt: item.receipt ?? .sent, time: ChatBuilder.timeText(item.at), inline: true, tint: onMedia ? .white : Theme.mineStamp, waitingWord: waitingWord) }
+            else { Text(ChatBuilder.timeText(item.at)).themeFont(12).foregroundStyle(onMedia ? .white : Theme.muted) }
+        }.padding(.horizontal, onMedia ? 8 : 0).padding(.vertical, onMedia ? 3 : 0)
+            .background(onMedia ? Color.black.opacity(0.6) : Color.clear, in: Capsule())
+    }
+    @ViewBuilder private func fileRowWithTime(_ name: String, size: Int, isLast: Bool) -> some View {
+        if filesOnly && !needsOwnLine && isLast {
+            HStack(alignment: .bottom, spacing: 8) { fileRow(name, size: size); Spacer(minLength: 0); stamp(onMedia: false) }
+        } else { fileRow(name, size: size) }
     }
 
     private static func symbol(_ kind: String) -> String {
@@ -450,5 +574,32 @@ private struct BubbleContentLayout: Layout {
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
+    }
+}
+
+/// A text and its time: the time sits at the bottom-trailing edge beside the text when the text keeps its lines
+/// while leaving room for it, else on its own line below. Nothing is padded into the text, so selecting, copying
+/// and VoiceOver get the text alone (links included).
+struct InlineStampLayout: Layout {
+    var spacing: CGFloat = 8
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        frames(proposal.width, subviews).size
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let f = frames(proposal.width ?? bounds.width, subviews)
+        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(f.text))
+        subviews[1].place(at: CGPoint(x: bounds.minX + f.stamp.x, y: bounds.minY + f.stamp.y), proposal: .unspecified)
+    }
+    private func frames(_ width: CGFloat?, _ subviews: Subviews) -> (size: CGSize, text: CGSize, stamp: CGPoint) {
+        guard subviews.count == 2 else { return (.zero, .zero, .zero) }
+        let stamp = subviews[1].sizeThatFits(.unspecified)
+        let full = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil))
+        let narrow = subviews[0].sizeThatFits(ProposedViewSize(width: width.map { max(0, $0 - stamp.width - spacing) }, height: nil))
+        if narrow.height <= full.height + 0.5 {
+            let size = CGSize(width: narrow.width + spacing + stamp.width, height: max(narrow.height, stamp.height))
+            return (size, narrow, CGPoint(x: size.width - stamp.width, y: size.height - stamp.height + 2))
+        }
+        let size = CGSize(width: max(full.width, stamp.width), height: full.height + stamp.height)
+        return (size, full, CGPoint(x: size.width - stamp.width, y: full.height))
     }
 }

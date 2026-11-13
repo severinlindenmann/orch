@@ -26,10 +26,10 @@ enum GroupRoomRules {
         -> (workspace: String, ticket: String, label: String, title: String?)? {
         guard workspaces.contains(where: { $0.id == task.ws }), let ticket = task.ticket else { return nil }
         if let local = tickets.first(where: { $0.workspace == task.ws && $0.ticket == ticket }) {
-            return (task.ws, ticket, local.key ?? "ticket", local.title)
+            return (task.ws, ticket, local.key ?? "topic", local.title)
         }
         if let local = updates.first(where: { $0.workspace == task.ws && $0.ticket == ticket }) {
-            return (task.ws, ticket, local.key ?? "ticket", local.title)
+            return (task.ws, ticket, local.key ?? "topic", local.title)
         }
         return nil
     }
@@ -90,6 +90,10 @@ enum GroupRoomRules {
         }
     }
 
+    /// A member's question in this group is still open (by question message id).
+    static func needsYou(_ group: PhoneGroup, open: Set<String>) -> Bool {
+        group.messages.contains { m in [m.task?.questionMessage, m.event?.questionMessage].contains { $0.map(open.contains) == true } }
+    }
     static func readKey(_ group: PhoneGroup) -> String { "group:\(group.key.host)|\(group.key.id)" }
     static func readItems(_ group: PhoneGroup) -> [ChatItem] {
         group.messages.map { message in
@@ -99,10 +103,57 @@ enum GroupRoomRules {
         }
     }
 
+    /// Header subtitle: the member names, as a messenger group shows them.
+    static func subtitle(_ group: PhoneGroup) -> String { group.members.map { group.name(of: $0.ws) }.joined(separator: ", ") }
+
+    static func membersNote(_ group: PhoneGroup) -> String {
+        "Members see the group's messages from when they joined. They do not see the rest of the \(group.hostName) topic. People removed keep the files they already fetched."
+    }
+
+    /// The row id ("m-" + message id) of the newest approval card this phone can still answer; the room opens there.
+    static func openRowID(_ group: PhoneGroup, questions: [Question], answered: Set<String>) -> String? {
+        guard !group.closed else { return nil }
+        let decided = Set(group.messages.compactMap(\.event).filter { ["approved", "denied"].contains($0.kind) }.compactMap(\.delegate))
+        return group.messages.last { message in
+            guard let event = message.event, event.kind == "approval_needed", let delegate = event.delegate, !decided.contains(delegate),
+                  case .buttons(let question) = GroupStore.approvalCard(for: event, in: group, questions: questions, late: message.late)
+            else { return false }
+            return !answered.contains(question.id)
+        }.map { "m-" + $0.id }
+    }
+
+    /// Answers still in their undo window whose group card can no longer be answered (group closed, or the card came
+    /// late): they are dropped, not sent. One already sending is left alone.
+    static func answersToCancel(_ groups: [PhoneGroup], pending: Set<String>, sending: Set<String>) -> Set<String> {
+        guard !pending.isEmpty else { return [] }
+        var out: Set<String> = []
+        for group in groups {
+            for message in group.messages {
+                guard let event = message.event, event.kind == "approval_needed", let id = event.questionMessage,
+                      pending.contains(id), !sending.contains(id), group.closed || message.late else { continue }
+                out.insert(id)
+            }
+        }
+        return out
+    }
+
+    /// An approval this phone cannot answer: link to the member's topic (or chat) when it is paired here, else say who answers.
+    static func answerElsewhere(_ event: GroupEvent, group: PhoneGroup, paired: [String]) -> (route: ChatRoute?, text: String) {
+        let ws = event.ws ?? ""
+        let name = group.name(of: ws)
+        guard paired.contains(ws), !group.isExternal(ws) else {
+            return (nil, "Only someone with \(name) on their phone can answer this.")
+        }
+        if let delegate = event.delegate, let ticket = group.tasks[delegate]?.ticket {
+            return (.ticket(workspace: ws, ticket: ticket), "Answer in \(name)")
+        }
+        return (.workspace(ws), "Answer in \(name)")
+    }
+
     static func eventText(_ event: GroupEvent, group: PhoneGroup, ownAnswer: String?) -> String {
         let name = group.name(of: event.ws ?? "")
         switch event.kind {
-        case "created": return "Group started"
+        case "created": return "\(group.hostName) started this group"
         case "member_added": return "\(group.hostName) added \(name) to this group"
         case "member_left": return "\(name) left this group"
         case "approved":
@@ -200,17 +251,39 @@ struct GroupListRow: View {
 
 struct GroupsSection: View {
     @Environment(AppModel.self) private var model
+    var filter = "All"
+
+    /// Open groups that pass the list filter (same rule as workspace rows).
+    static func shown(_ model: AppModel, filter: String) -> [PhoneGroup] {
+        let open = Set(ChatsRowRules.openQuestions(model.questions, answers: model.answers).map(\.id))
+        return GroupRoomRules.rows(model.groups).filter { group in
+            let unread = model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group))
+            return ChatsRowRules.matches(filter, unread: unread, needsYou: GroupRoomRules.needsYou(group, open: open))
+        }
+    }
+
+    /// Groups already filtered by the caller (the list computes them once per render).
+    var groups: [PhoneGroup]
+
     var body: some View {
-        let groups = GroupRoomRules.rows(model.groups)
         if !groups.isEmpty {
             Text("Groups").themeFont(13, .semibold).foregroundStyle(Theme.muted).padding(.top, 12)
             ForEach(groups, id: \.key) { GroupListRow(group: $0) }
         }
-        if !model.workspaceSummaries.isEmpty || !GroupRoomRules.rows(model.groups, closed: true).isEmpty {
+        let finished = GroupRoomRules.rows(model.groups, closed: true).count
+        // Helper-chat days stay reachable from each chat's "Earlier" button, so the row only appears with finished groups.
+        if filter == "All" && finished > 0 {
             NavigationLink(value: ChatRoute.groupHistory) {
-                HStack { Text("Earlier"); Spacer(); ShellChevron() }
-                    .themeFont(15).foregroundStyle(Theme.brand).frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-            }.accessibilityIdentifier("group-history")
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle").themeFont(20).foregroundStyle(Theme.muted).frame(width: 24).accessibilityHidden(true)
+                    Text("Finished groups").themeFont(17, .semibold)
+                    Spacer()
+                    Text("\(finished)").themeFont(15).foregroundStyle(Theme.muted)
+                    ShellChevron()
+                }.frame(minHeight: 44).padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).padding(.top, 6)
+                .accessibilityIdentifier("group-history").accessibilityLabel("Finished groups").accessibilityValue("\(finished)")
         }
     }
 }

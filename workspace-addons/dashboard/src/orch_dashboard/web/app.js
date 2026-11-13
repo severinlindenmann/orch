@@ -7,7 +7,19 @@ const array = value => Array.isArray(value) ? value : [];
 // Workspace ids are stored as they are (answered_by, history); people read the group member's name. Filled from state.groups.
 let wsNames = new Map();
 const showWs = value => String(value ?? '').replace(/\bws_[a-zA-Z0-9]{4,}\b/g, id => wsNames.get(id) || '');
-const clean = value => showWs(value).replace(/\b(?:ws|t|q|m|ph|wh|b|f)_[a-zA-Z0-9]{4,}\b/g, '').replace(/\s+·\s+·/g, ' · ').trim();
+// Test-run tags in front ("[E2E] ") and machine stamps at the end ("[1731400000]", "[2026-11-12T10:00Z]") are not part of the title.
+const TAG_HEAD = /^(?:\s*\[[^\]\n]{1,24}\]\s*)+/, TAG_TAIL = /(?:\s*\[(?:\d{4,}|\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{8}T?\d{0,6}Z?)\])+\s*$/;
+const cleanIds = value => showWs(value).replace(/\b(?:ws|t|q|m|ph|wh|b|f)_[a-zA-Z0-9]{4,}\b/g, '').replace(/\s+·\s+·/g, ' · ').trim();
+const clean = value => { const text = cleanIds(value); return text.replace(TAG_HEAD, '').replace(TAG_TAIL, '').trim() || text; };
+// The tags clean() hides, in order ("[R] ... [0722]" -> "[R] [0722]"); shown muted after the title only when two visible
+// tickets would otherwise look identical.
+const hiddenTags = value => { const text = cleanIds(value), head = text.match(TAG_HEAD), tail = text.replace(TAG_HEAD, '').match(TAG_TAIL); return [head && head[0], tail && tail[0]].filter(Boolean).map(x => x.trim().replace(/\]\s*\[/g, '] [')).join(' '); };
+function titleTag(t, all = null) {
+  const base = clean(t.title).toLowerCase(), tag = hiddenTags(t.title);
+  if (!tag || !base || clean(t.title) === cleanIds(t.title)) return null;
+  const same = (all || (typeof tickets === 'function' ? tickets() : [])).filter(o => o.id !== t.id && clean(o.title).toLowerCase() === base);
+  return same.length ? h('span', {className:'meta title-tag'}, ' ' + tag) : null;
+}
 const name = value => clean(String(value ?? '').replace(/^(human|agent):/, ''));
 const icon = value => {
   const svg = window.icon(String(value || 'page'));
@@ -176,6 +188,8 @@ function accept(next) {
 }
 function route() {
   const hash = location.hash || '#home';
+  // #new (linked from the one-ticket view) opens the new-ticket form on Home.
+  if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   if (hash === '#settings' && !snapshot && state?.settings) return {kind:'settings', hash};
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
@@ -206,10 +220,10 @@ function render(arrived = new Set()) {
   const crumb = document.getElementById('crumb');
   if (r.kind === 'ticket') {
     const tk = ticketOf(r.id);
-    crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' / ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || 'Ticket');
+    crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' / ', clean(tk?.title) || 'Ticket');
   } else if (r.kind === 'page') {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
-    crumb.replaceChildren(pageName, ' › ', typeof tk?.key === 'string' ? tk.key : clean(tk?.title) || last);
+    crumb.replaceChildren(pageName, ' › ', clean(tk?.title) || last);
   } else crumb.textContent = pageName;
   // On a narrow screen the header is one row: workspace icon, page name, New ticket, "Menu · N".
   const needCount = needsToday().count, menuToggle = document.getElementById('menu-toggle');
@@ -219,8 +233,8 @@ function render(arrived = new Set()) {
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-current':(r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash) === url ? 'page' : null}, iconEl(glyph), text, tail);
   reconcile(nav, fragment(navLink('#home', 'Home', 'page', needCount ? h('span', {className:'count', title:window.DashHelpers.needsYou(needCount), 'aria-label':window.DashHelpers.needsYou(needCount)}, window.DashHelpers.needsYou(needCount)) : null), navLink('#tickets', 'Tickets', 'table'), navLink('#notes', 'Notes', 'text'), state.chat || state.general ? navLink('#chat', 'Chat', 'text', chatBadge()) : null,
-    // On a narrow screen the header has no room for "Open helper": it is a Menu item there (CSS shows it only then).
-    snapshot ? null : h('button', {type:'button', className:'nav-item nav-helper', 'data-key':'nav-open-agent', 'data-nav':'open-agent'}, iconEl('spark'), 'Open helper'),
+    // On a narrow screen the header has no room for "Ask the helper": it is a Menu item there (CSS shows it only then).
+    snapshot ? null : h('button', {type:'button', className:'nav-item nav-helper', 'data-key':'nav-open-agent', 'data-nav':'open-agent'}, iconEl('spark'), 'Ask the helper'),
     addons().some(a => a.dashboard) ? h('p', {className:'eyebrow'}, 'Add-ons') : null, addons().filter(a => a.dashboard).map(a => navLink('#addon/' + encodeURIComponent(a.name), addonLabel(a), a.dashboard.icon || a.icon))));
   reconcile(document.getElementById('side-settings'), fragment(!snapshot && state.settings ? navLink('#settings', 'Settings', 'user') : null));
   if (changed) {
@@ -293,7 +307,7 @@ async function act(op, args) {
     if (!writing && refreshAgain) refresh();  // a change notice that came during the write
     if (before) {
       starting.delete(args.ticket);
-      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); window.orch.toast('Could not start the agent.', 'error'); }
+      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); window.orch.toast('Could not start the helper.', 'error'); }
       render();
     }
   }

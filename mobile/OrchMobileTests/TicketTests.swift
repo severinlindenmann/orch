@@ -305,5 +305,59 @@ final class TicketModelTests: XCTestCase {
         await model.answer(q, with: "TIMESTAMP")
         XCTAssertTrue(model.answeredElsewhere.contains(q.id))
         XCTAssertTrue(model.answers[q.id]?.contains("DATE") == true)
+        XCTAssertEqual(model.answers[q.id], "DATE", "only the answer value, never the 409 message")
+        XCTAssertEqual(model.announcement, "Answered on your computer", "VoiceOver hears who answered")
+    }
+
+    func testPendingAnswerKeepsItsTapTimeAndAnnouncesTheShownLabel() async {
+        let model = await ready()
+        model.undoDelay = .milliseconds(50)
+        let q = model.questions[0]
+        model.chooseAnswer(q, "TIMESTAMP")
+        let tapped = model.pendingAnswerAt[q.id]
+        XCTAssertNotNil(tapped)
+        model.undoAnswer(q)
+        XCTAssertNil(model.pendingAnswerAt[q.id])
+        model.chooseAnswer(q, "TIMESTAMP")
+        // The answer is stored first, the tap time is dropped when the send call returns: wait for both.
+        for _ in 0..<150 where model.answers[q.id] == nil || model.pendingAnswerAt[q.id] != nil { try? await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.answers[q.id], "TIMESTAMP")
+        XCTAssertNil(model.pendingAnswerAt[q.id])
+        XCTAssertEqual(model.announcement, "Answer sent: Timestamp")
+    }
+
+    func testTakenAnswerKeepsOnlyTheValue() {
+        XCTAssertEqual(Outbox.takenAnswer(from: "This question was already answered: Blue."), "Blue")
+        XCTAssertEqual(Outbox.takenAnswer(from: "This question was already answered: In the total"), "In the total")
+        XCTAssertNil(Outbox.takenAnswer(from: "Conflict"))
+        XCTAssertNil(Outbox.takenAnswer(from: "This question was already answered: ."))
+        XCTAssertEqual(Outbox.takenAnswer(from: "This question was already answered: v1.2.."), "v1.2.", "the value's own dot stays")
+        XCTAssertEqual(Outbox.takenAnswer(from: "This question was already answered: Option: B."), "Option: B")
+        XCTAssertNil(Outbox.takenAnswer(from: "q1 is already answered."))
+    }
+
+    func testQuestionCardRules() {
+        let shouted = ["DATE", "TIMESTAMP"]
+        XCTAssertEqual(QuestionCardRules.optionText("DATE", among: shouted), "Date")
+        XCTAssertEqual(QuestionCardRules.optionText("TIMESTAMP", among: shouted), "Timestamp")
+        XCTAssertEqual(QuestionCardRules.optionText("EXPORT JSON", among: ["EXPORT JSON", "EXPORT CSV"]), "Export JSON")
+        XCTAssertEqual(QuestionCardRules.optionText("JSON", among: ["JSON", "YAML"]), "JSON", "acronyms only: nothing is shouted")
+        XCTAssertEqual(QuestionCardRules.optionText("JSON", among: ["JSON", "Plain text"]), "JSON")
+        XCTAssertEqual(QuestionCardRules.optionText("NULL", among: ["NULL", "Empty string"]), "NULL", "a mixed card keeps technical capitals")
+        XCTAssertEqual(QuestionCardRules.optionText("CSV", among: ["CSV", "PDF"]), "CSV")
+        XCTAssertEqual(QuestionCardRules.optionText("Yes", among: ["Yes", "No"]), "Yes")
+        XCTAssertEqual(QuestionCardRules.optionText("Version A", among: ["Version A", "Version B"]), "Version A")
+        XCTAssertTrue(QuestionCardRules.announcesSelection(tappedAt: Date(), now: Date()))
+        XCTAssertFalse(QuestionCardRules.announcesSelection(tappedAt: Date(timeIntervalSinceNow: -3), now: Date()), "no repeat on reappear")
+        XCTAssertEqual(QuestionCardRules.sendingText(remaining: 5), "Sending in 5 s")
+        XCTAssertEqual(QuestionCardRules.sendingText(remaining: 0.2), "Sending in 1 s")
+        XCTAssertEqual(QuestionCardRules.sendingText(remaining: -3), "Sending in 1 s")
+        XCTAssertTrue(QuestionCardRules.selectedAnnouncement("Blue", seconds: 5).hasPrefix("Blue selected. Sending in 5 seconds"))
+    }
+
+    func testQuestionContextIsTheTitleOnly() async {
+        let model = await ready()
+        let q = model.questions[0]
+        XCTAssertEqual(QuestionCardRules.context(q), "Rename field X in ingestion job")
     }
 }

@@ -63,8 +63,19 @@ def _days_words(days: set[int]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def cron_human(expr: str, tz=None) -> str:
-    """Plain words for a 5-field cron read in `tz` (UTC when None, then said so): "Every 5 minutes", "Mondays at 08:00"."""
+def local_next(expr: str, tz=None, now: datetime | None = None, local=None) -> tuple[datetime, int] | None:
+    """The next run in the person's zone (`local`, default this computer's) and how many days it moves
+    against the cron's own zone (`tz`, UTC when None). The one conversion the words and "Next run" share."""
+    nxt = next_after(expr, now or datetime.now(UTC), tz)
+    if nxt is None:
+        return None
+    here = nxt.astimezone(local) if local else nxt.astimezone()
+    return here, (here.date() - nxt.astimezone(tz or UTC).date()).days
+
+
+def cron_human(expr: str, tz=None, now: datetime | None = None, local=None) -> str:
+    """Plain words for a 5-field cron read in `tz` (UTC when None), said in the person's local time:
+    "Every 5 minutes", "Mondays at 08:00"."""
     try:
         m, h, dom, mon, dow = expr.split()
     except ValueError:
@@ -78,17 +89,19 @@ def cron_human(expr: str, tz=None) -> str:
             return "Every hour" if int(m) == 0 else f"Every hour at {int(m)} past"
     if dom == mon == dow == "*" and m.isdigit() and h.startswith("*/") and h[2:].isdigit():
         return f"Every {int(h[2:])} hours"
-    if m.isdigit() and h.isdigit() and mon == "*":
-        at = f"{int(h) % 24:02d}:{int(m) % 60:02d}" + ("" if tz else " UTC")
+    if m.isdigit() and h.isdigit() and mon == "*" and (ln := local_next(expr, tz, now, local)):
+        here, shift = ln
+        at = here.strftime("%H:%M")
         if dom == "*" and dow == "*":
             return f"Every day at {at}"
         if dom == "*":
             days = _dows(dow)
             if days:
-                return f"{_days_words(days)} at {at}"
-        if dow == "*" and dom.isdigit():
-            return f"Every month on day {int(dom)} at {at}"
-    return f"On a custom plan ({expr}{'' if tz else ', UTC'})"
+                return f"{_days_words({(d + shift) % 7 for d in days})} at {at}"
+        # a day the local conversion moves is only safe while every month has it
+        if dow == "*" and dom.isdigit() and (shift == 0 or 1 <= int(dom) + shift <= 28):
+            return f"Every month on day {int(dom) + shift} at {at}"
+    return f"On a custom plan ({expr})"
 
 
 def _every(gap: int) -> str:
@@ -99,11 +112,8 @@ def _in(delta: timedelta) -> str:
     s = int(delta.total_seconds())
     if s < 60:
         return "now"
-    if s < 3600:
-        return f"in {s // 60} min"
-    if s < 86400:
-        return f"in {s // 3600} h"
-    return f"in {s // 86400} d"
+    n, unit = (s // 60, "minute") if s < 3600 else (s // 3600, "hour") if s < 86400 else (s // 86400, "day")
+    return f"in {n} {unit}{'' if n == 1 else 's'}"
 
 
 def _tz(t: dict):
@@ -150,7 +160,9 @@ def _events(tickets: list[dict], now: datetime, horizon: datetime) -> list[tuple
         cron = _repeats(t)
         nxt = next_after(cron, now, _tz(t)) if cron else None
         if nxt and nxt <= horizon:
-            out.append((nxt, t, f"{cron_human(cron, _tz(t))} · next {nxt.astimezone().strftime('%a %H:%M')}"))
+            out.append(
+                (nxt, t, f"{cron_human(cron, _tz(t), now)} · next {nxt.astimezone().strftime('%a %H:%M')}")
+            )
     return sorted(out, key=lambda e: e[0])
 
 
@@ -255,7 +267,8 @@ def _linked(t: dict, tickets: list[dict]) -> list[dict]:
     return out
 
 
-def _schedules(tickets: list[dict], now: datetime) -> list[dict]:
+def _schedules(tickets: list[dict], now: datetime, running: bool = True) -> list[dict]:
+    """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown."""
     rows = []
     for t in tickets:
         if not scheduled(t) or not (cron := _repeats(t, True)):
@@ -263,14 +276,24 @@ def _schedules(tickets: list[dict], now: datetime) -> list[dict]:
         sched = (t.get("ext") or {}).get("automation") or {}
         paused = sched.get("paused") is True
         tz = _tz(t)
-        words = cron_human(cron, tz)
+        words = cron_human(cron, tz, now)
         nxt = next_after(cron, now, tz)
-        nxt_s = nxt.astimezone().strftime("%a %d %b, %H:%M") if nxt else "none"
+        here = local_next(cron, tz, now)
+        nxt_s = here[0].strftime("%a %d %b, %H:%M") if here else "none"
         last = parse(sched.get("last_run"))
+        # the cron's own zone only when it is not the person's (then it explains the technical cron)
+        other = here and (tz or UTC).utcoffset(nxt) != here[0].utcoffset()
         detail = [
             {"label": "Repeats", "value": clean(words, 200)},
-            {"label": "Time zone", "value": clean(sched.get("tz") or "UTC", 60)},
-            {"label": "Next run", "value": f"Off · would run {nxt_s}" if paused else nxt_s},
+            *([{"label": "Time zone", "value": clean(sched.get("tz") or "UTC", 60)}] if other else []),
+            {
+                "label": "Next run",
+                "value": f"Off · would run {nxt_s}"
+                if paused
+                else nxt_s
+                if running
+                else f"Paused · would run {nxt_s}",
+            },
             {
                 "label": "Last run",
                 "value": last.astimezone().strftime("%a %d %b, %H:%M") if last else "Not yet",
@@ -296,7 +319,16 @@ def _schedules(tickets: list[dict], now: datetime) -> list[dict]:
                 {
                     "title": _name(t),
                     "subtitle": clean(
-                        f"{words} · " + ("off" if paused else f"next {_in(nxt - now)}" if nxt else "never"),
+                        f"{words} · "
+                        + (
+                            "off"
+                            if paused
+                            else "Paused"
+                            if not running
+                            else f"next {_in(nxt - now)}"
+                            if nxt
+                            else "never"
+                        ),
                         200,
                     ),
                     "toggle": {
@@ -391,13 +423,13 @@ def build(root: Path, now: datetime | None = None) -> dict:
     pid = service.running_pid(root, clean=False)
     blocks: list[dict] = []
 
-    sched_rows = _schedules(tickets, now)
+    sched_rows = _schedules(tickets, now, bool(pid))
     on = sum(1 for r in sched_rows if r["toggle"]["on"])
     if sched_rows:
         blocks.append(
             {
                 "type": "list",
-                "title": f"Schedules · {on} on",
+                "title": f"Schedules · {on} on" + ("" if pid or not on else ", paused"),
                 "items": sched_rows[:20],
                 "more": max(0, len(sched_rows) - 20),
             }
@@ -410,9 +442,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
                 "items": [
                     {
                         "title": "No repeats yet",
-                        "subtitle": 'Ask your agent, or run: orch automation repeat <ticket> "daily 07:30"'.replace(
-                            "<", ""
-                        ).replace(">", ""),
+                        "subtitle": "Ask your helper to repeat a ticket.",
                     }
                 ],
             }
@@ -480,5 +510,9 @@ def build(root: Path, now: datetime | None = None) -> dict:
             line += f" Ran {ran} times today."
         view.update(notice=line, notice_tone="good")
     else:
-        view.update(notice="Automation is stopped: nothing starts by itself.", notice_tone="warn")
+        view.update(
+            notice="Automation is stopped: nothing starts by itself.",
+            notice_tone="warn",
+            button={"label": "Start", "action": {"op": "addon.start"}},
+        )
     return view

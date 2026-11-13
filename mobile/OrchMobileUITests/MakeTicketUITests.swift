@@ -16,9 +16,9 @@ final class MakeTicketUITests: XCTestCase {
         let make = app.buttons["make-ticket"]
         XCTAssertTrue(make.waitForExistence(timeout: 10))
         make.tap()
-        let progressOrMade = card.staticTexts.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Making ticket…", "Ticket made")).firstMatch
+        let progressOrMade = card.staticTexts.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Making topic…", "Topic made")).firstMatch
         XCTAssertTrue(progressOrMade.waitForExistence(timeout: 10))
-        XCTAssertTrue(card.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Ticket made")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(card.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Topic made")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(make.exists)
         XCTAssertFalse(app.buttons["make-ticket-not-now"].exists)
     }
@@ -35,7 +35,7 @@ final class MakeTicketUITests: XCTestCase {
         XCTAssertTrue(make.waitForExistence(timeout: 10))
         make.tap()
         let card = app.descendants(matching: .any)["make-ticket-card"].firstMatch
-        XCTAssertTrue(card.staticTexts["Couldn't make the ticket"].waitForExistence(timeout: 10))
+        XCTAssertTrue(card.staticTexts["Couldn't make the topic"].waitForExistence(timeout: 10))
         XCTAssertFalse(make.exists)
         XCTAssertFalse(app.buttons["make-ticket-not-now"].exists)
     }

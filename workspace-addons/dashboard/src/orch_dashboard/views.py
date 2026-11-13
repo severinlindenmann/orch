@@ -76,6 +76,15 @@ def _action(a):
     )
 
 
+def _button(b):
+    return (
+        _keys_only(b, ("label", "action"))
+        and _text(b.get("label"), 30)
+        and _action(b.get("action"))
+        and not b["action"].get("args")
+    )
+
+
 def _detail_ok(d):
     # Copy copies `value`: a row that shows `lines` instead must not carry a hidden value to copy.
     if isinstance(d, dict) and d.get("copy") and ("lines" in d or "value" not in d):
@@ -267,6 +276,8 @@ def check_view(v) -> dict | None:
         and len(v["blocks"]) <= 20
         and _opt(v, "notice", _text)
         and _opt(v, "notice_tone", _tone)
+        and _opt(v, "button", _button)
+        and ("button" not in v or "notice" in v)
     ):
         return None
     blocks = []
@@ -278,7 +289,7 @@ def check_view(v) -> dict | None:
         elif not isinstance(b, dict) or not isinstance(b.get("type"), str):
             return None
     return {
-        **{k: v[k] for k in ("schema", "generated_at", "notice", "notice_tone") if k in v},
+        **{k: v[k] for k in ("schema", "generated_at", "notice", "notice_tone", "button") if k in v},
         "blocks": blocks,
     }
 

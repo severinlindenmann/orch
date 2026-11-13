@@ -934,11 +934,50 @@ def _gate(root: Path, tid: str, data: bytes, name: str, state: dict | None, phot
     return False
 
 
+def blob_scope(root: Path) -> str:
+    """Whose blobs these are: the relay URL plus this workspace id. Blob ids are valid on one relay only."""
+    try:
+        cfg = net.load_service(root, "relay")
+        return f"{cfg.get('url', '')}|{cfg.get('workspace', '')}|"
+    except (Refused, OSError, ValueError, KeyError):
+        return "|"
+
+
+def forget_blobs(root: Path, keep_scope: str | None = None, blob_ids=()) -> None:
+    """Drop cached blob ids: every entry outside `keep_scope` (a relay change), and/or the named blob ids (the
+    relay says it does not have them)."""
+    ids = set(blob_ids)
+
+    def fn(st):
+        st["blobs"] = {
+            k: v
+            for k, v in st["blobs"].items()
+            if (keep_scope is None or k.startswith(keep_scope)) and v.get("blob_id") not in ids
+        }
+
+    update_state(root, fn)
+
+
+def blob_ids_in(doc) -> set[str]:
+    """Every blob_id named anywhere in a snapshot."""
+    out: set[str] = set()
+    if isinstance(doc, dict):
+        for k, v in doc.items():
+            if k == "blob_id" and isinstance(v, str):
+                out.add(v)
+            else:
+                out |= blob_ids_in(v)
+    elif isinstance(doc, list):
+        for v in doc:
+            out |= blob_ids_in(v)
+    return out
+
+
 def _upload(root: Path, data: bytes, state: dict) -> dict | None:
-    """Upload a proof file once (cached by content); {blob_id, size} or None when the relay says no."""
+    """Upload a proof file once (cached by relay, workspace, content): {blob_id, size} or None."""
     from orch import relay
 
-    sha = hashlib.sha256(data).hexdigest()
+    sha = blob_scope(root) + hashlib.sha256(data).hexdigest()
     got = state["blobs"].get(sha)
     if got and time.time() - got.get("at", 0) < BLOB_DAYS * 86400:
         return got
@@ -946,7 +985,7 @@ def _upload(root: Path, data: bytes, state: dict) -> dict | None:
         blob = relay._api(root, "POST", "/v1/blobs", data, 300)[1]
     except Refused:
         return None
-    if not isinstance(blob, dict) or blob.get("sha256") != sha or blob.get("size") != len(data):
+    if not isinstance(blob, dict) or blob.get("sha256") != sha[-64:] or blob.get("size") != len(data):
         return None
     got = {"blob_id": blob["blob_id"], "size": len(data), "at": time.time()}
     state["blobs"][sha] = got

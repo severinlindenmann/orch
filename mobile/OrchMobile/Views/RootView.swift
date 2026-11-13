@@ -13,7 +13,7 @@ struct RootView: View {
             guard watching else { return }
             await model.watchWhileOpen()
         }
-        .onChange(of: model.answerTick + model.sendTick + model.errorTick) { _, _ in
+        .onChange(of: model.answerTick + model.sendTick + model.errorTick + model.noticeTick) { _, _ in
             if let text = model.announcement { AccessibilityNotification.Announcement(text).post() }
         }
         .overlay(alignment: .top) { StatusBarCover().frame(height: 0) }
