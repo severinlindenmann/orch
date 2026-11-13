@@ -66,7 +66,7 @@ test('dash27: a fixed menu: greyed when n/a, desktop rows hidden on phones, Star
   assert.match(f, /els\.fresh\.disabled = /);
   assert.match(f, /els\.attachBtn\.disabled = /);
   assert.doesNotMatch(f, /els\.(fresh|attachBtn)\.hidden/);
-  assert.match(t, /Technical details'\}\), els\.attachBtn/);
+  assert.doesNotMatch(t, /Technical details/);  // owner: no Details toggles, the row is plain
   assert.match(t, /fx-menu-divider/);
   assert.match(f, /Click again to start fresh/);
   assert.match(css, /\.fx-action-menu \.fx-desktop\{display:none\}/);
@@ -112,6 +112,7 @@ function focusPage() {
     proof: {isOpen: () => false}, keyOf: JSON.stringify, state: {firstRender: true, tab: 0}, views: {}, register: (n, m) => { S.views[n] = m; }};
   S.views.live = {startFresh: () => calls.push('fresh'), stopToggle() {}, focusQuestion() {}};
   S.views.session = {showAttach: () => calls.push('attach')};
+  S.views.compose = {mount() {}};
   const ctx = vm.createContext({
     window: {FocusStore: S, addEventListener() {}}, matchMedia: () => ({matches: false, addEventListener() {}}), innerWidth: 1000,
     document: {addEventListener(t, f) { (docOn[t] = docOn[t] || []).push(f); }, getElementById: () => Object.assign(fakeEl(), {hidden: true}), hidden: true}, location: {hash: ''},

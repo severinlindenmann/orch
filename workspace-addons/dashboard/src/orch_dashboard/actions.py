@@ -194,6 +194,7 @@ FREE_OPS = frozenset(
     {
         "ticket.new",
         "ticket.paste",
+        "ticket.attach",
         "ticket.edit",
         "ticket.field",
         "ticket.patch",
@@ -329,7 +330,7 @@ def _ticket_new(a):
 def attachments(op, args) -> list[tuple[str, bytes]]:
     """The files a new ticket brings along: (name hint, bytes), checked before anything is created. The name is
     only a hint, orch picks the real one; type, content and size are checked again by orch itself."""
-    if op not in ("ticket.new", "ticket.paste") or not isinstance(args, dict):
+    if op not in ("ticket.new", "ticket.paste", "ticket.attach") or not isinstance(args, dict):
         return []
     out: list[tuple[str, bytes]] = []
     long_text = args.get("long_text")
@@ -343,7 +344,7 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
     if files is None:
         return out
     # No count limit: each file stays under ATTACH_MAX and the request under the server's body limit.
-    if op != "ticket.new" or not isinstance(files, list):
+    if op not in ("ticket.new", "ticket.attach") or not isinstance(files, list):
         raise BadRequest("Those files could not be read.")
     for f in files:
         if not isinstance(f, dict) or set(f) - {"name", "text", "data"} or not isinstance(f.get("name"), str):
@@ -369,6 +370,15 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
             raise BadRequest(f"{f['name'][:60]} is over 2 MB.")
         out.append((f["name"], raw))
     return out
+
+
+def _ticket_attach(a):
+    """Files added to a ticket that already exists (a ticket page composer): one line in the history, the files go through
+    `orch ticket attach` after it (see attachments / run_op)."""
+    _only(a, ("ticket", "files"))
+    if not isinstance(a.get("files"), list) or not a["files"]:
+        raise BadRequest("Choose a file to add.")
+    return ["log", _tid(a.get("ticket"))], [], ["Added files to the ticket"]
 
 
 def _ticket_paste(a):
@@ -878,6 +888,7 @@ OPS = {
     "answer": _answer,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
+    "ticket.attach": _ticket_attach,
     "ticket.patch": _ticket_patch,
     "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
@@ -1142,6 +1153,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             from . import data as _data
 
             _data.copies_disk_forget(root)
+        if files and op == "ticket.attach":
+            out = {**(out if isinstance(out, dict) else {}), "id": args["ticket"]}
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             out["attached"] = _attach_all(root, orch_bin, out["id"], files)
         return 200, "", out if isinstance(out, dict) else None

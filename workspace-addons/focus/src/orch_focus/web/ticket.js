@@ -8,13 +8,14 @@
     document.title = 'Focus · orch';
     root.classList.add('fx-picker');
     root.append(h('header', {class: 'fx-top'}, INAPP ? homeLink() : null, h('span', {class: 'meta fx-workspace', text: 'Focus'}), h('button', {class: 'btn ghost sm', 'data-act': 'help', text: 'Help'})),
-      h('main', {class: 'fx-pick'}, h('h1', {text: 'Where shall we focus?'}), h('p', {class: 'meta', text: 'Choose a ticket to take its next step.'})));
+      h('main', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta fx-sub', text: 'Loading your tickets…'}), skeleton()));
     fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); }).then(payload => {
       const list = payload.tickets;
       root.querySelector('.fx-workspace').textContent = payload.workspace + ' / Focus';
       S.state.pickAttention = window.FocusHelpers.attentionText(list);
       pickerSub();
       const box = root.querySelector('.fx-pick');
+      box.querySelector('.fx-skel')?.remove();
       if (!list.some(t => t.status !== 'done')) box.append(emptyState());
       const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Check result', 'Check'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
       /* one line: key, title, the actual next step only when it says more, and a real action chip */
@@ -22,7 +23,7 @@
         const next = window.FocusHelpers.nextStepText(t, action);
         const finished = status === 'done' && t.closed_at ? stamp(t.closed_at) : '';
         return h('a', {class: 'fx-pick-row', href: P + '/t/' + t.id + (status === 'review' ? '#results' : '')},
-          h('span', {class: 'mono key', text: t.key || t.id}), h('strong', {class: 'grow', text: t.title}),
+          /^t_/.test(t.key || t.id) ? null : h('span', {class: 'mono key', text: t.key}), h('strong', {class: 'grow', text: t.title}),
           next ? h('small', {text: next}) : null, finished ? h('small', {text: 'Finished ' + finished}) : null,
           h('span', {class: 'chip fx-row-chip', text: action}));
       };
@@ -65,6 +66,11 @@
     });
   }
 
+  /* the page's shape before the tickets arrive, so nothing jumps */
+  function skeleton() {
+    return h('div', {class: 'fx-skel', 'aria-hidden': 'true'}, [0, 1, 2].map(() => h('div', {class: 'skeleton fx-skel-row'})));
+  }
+
   const HOME = INAPP ? '/#home' : '/';
   const homeLink = () => h('a', {class: 'btn ghost sm fx-home', href: HOME, target: INAPP ? '_top' : '_self'}, h('span', {'aria-hidden': 'true', text: '←'}), h('span', {text: 'Back to Home'}));
   function emptyState() {
@@ -102,9 +108,12 @@
     els.full = menuRow('full', 'expand', 'Full screen', 'fx-desktop');
     els.full.setAttribute('aria-pressed', 'false');
     els.helpBtn = menuRow('help', 'text', 'Keyboard shortcuts', 'fx-desktop');
+    els.modeBtn = h('button', {class: 'btn sm fx-desktop', type: 'button', 'data-act': 'mode', 'aria-pressed': 'false', text: 'Terminal mode'});
+    els.fullBtn = h('button', {class: 'btn sm fx-desktop', type: 'button', 'data-act': 'full', 'aria-pressed': 'false', text: 'Full screen'});
+    els.copyBtn = h('button', {class: 'btn ghost sm fx-desktop', type: 'button', 'data-act': 'copy', text: 'Copy link'});
     els.moreBtn = h('button', {class: 'btn ghost icon sm', type: 'button', icon: 'more', 'aria-label': 'More actions', 'aria-expanded': 'false', 'aria-controls': 'fx-action-menu'});
     els.menu = h('div', {class: 'fx-popover fx-action-menu', id: 'fx-action-menu', hidden: true}, els.full, els.helpBtn,
-      h('details', {class: 'fx-tech'}, h('summary', {text: 'Technical details'}), els.attachBtn), h('hr', {class: 'fx-menu-divider'}), els.fresh);
+      els.attachBtn, h('hr', {class: 'fx-menu-divider'}), els.fresh);
     els.more = h('div', {class: 'fx-more'}, els.moreBtn, els.menu);
     els.session = h('section', {class: 'fx-popover fx-session', id: 'fx-session', role: 'dialog', 'aria-labelledby': 'fx-session-title', tabindex: '-1', hidden: true});
     els.liveWrap = h('div', {class: 'fx-live-wrap'}, els.live, els.session);
@@ -113,9 +122,10 @@
     els.mobileTasks = h('button', {class: 'chip fx-mobile-tasks', type: 'button', 'data-act': 'rail', 'aria-controls': 'fx-tasks', 'aria-expanded': 'false'});
     const backToList = h('a', {class: 'btn ghost sm fx-exit', href: (P || '') + '/', target: '_self', title: 'Back to list'}, h('span', {'aria-hidden': 'true', text: '←'}), h('span', {class: 'opt', text: 'Back to list'}));
     const top = h('header', {class: 'fx-top'}, backToList, els.rail, h('div', {class: 'fx-title'}, h('h1', {}, els.title), els.areaChip, h('span', {class: 'fx-key-hidden', hidden: true}, els.key)),
-      els.back, h('div', {class: 'fx-prog'}, els.count, els.prog), els.mobileTasks, h('div', {class: 'fx-tools'}, els.stop, els.more));
+      els.back, h('div', {class: 'fx-prog'}, els.count, els.prog), els.mobileTasks, h('div', {class: 'fx-tools'}, els.modeBtn, els.fullBtn, els.copyBtn, els.stop, els.more));
     /* the status sits in the step bar: Plan · Work · Check · Done, the current step in the accent colour, then the live state */
-    const stepbar = h('div', {class: 'fx-stepbar'}, els.steps, els.liveWrap);
+    els.taskLine = h('span', {class: 'fx-taskline meta', text: ''});
+    const stepbar = h('div', {class: 'fx-stepbar'}, els.steps, els.liveWrap, els.taskLine);
     els.tasks = h('div', {id: 'fx-tasks'});
     els.helpers = h('div');
     els.railNote = h('p', {class: 'meta', style: false});
@@ -129,7 +139,8 @@
     els.line = h('div');
     els.qs = h('div', {class: 'fx-qwrap'});
     els.clash = h('div', {class: 'fx-clash-wrap'});  // "budget-2026.xlsx is also open in PIL-1" (used.js)
-    els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.clash, els.qs, els.line, els.feed, els.working);
+    els.sent = h('section', {class: 'fx-sent', 'aria-label': 'Sent back to you', hidden: true});
+    els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.clash, els.qs, els.sent, els.line, els.feed, els.working);
     els.paneProof = h('div', {class: 'fx-pane', id: 'fx-p-proof', role: 'tabpanel', 'aria-labelledby': 'fx-t-proof', hidden: true});
     els.paneFiles = h('div', {class: 'fx-pane', id: 'fx-p-files', role: 'tabpanel', 'aria-labelledby': 'fx-t-files', hidden: true});
     els.paneUsed = h('div', {class: 'fx-pane', id: 'fx-p-used', role: 'tabpanel', 'aria-labelledby': 'fx-t-used', hidden: true});
@@ -216,8 +227,24 @@
     if (v.state === 'done' && completed) content.append(h('p', {class: 'meta', text: 'Completed ' + stamp(completed).replace(/ (\d\d:)/, ' at $1')}));
     if (primary) content.append(proof.tile(primary, from => proof.open(list, list.indexOf(primary), from)));
     for (const c of done) content.append(h('p', {class: 'fx-result-note', text: '✓ ' + c.text + ' — ' + evText(c)}));
-    if (files.length) content.append(h('details', {}, h('summary', {text: 'Details'}), files.map(({c, ev}) => h('p', {class: 'meta', text: c.text + ' · ' + String(ev.ref || '').split('/').pop() + (ev.summary ? ' · ' + ev.summary : '')}))));
+    if (files.length) content.append(h('div', {class: 'fx-result-files'}, files.map(({c, ev}) => h('p', {class: 'meta', text: c.text + ' · ' + String(ev.ref || '').split('/').pop() + (ev.summary ? ' · ' + ev.summary : '')}))));
     els.paneProof.replaceChildren(content);
+    renderSent(v, list);
+  }
+
+  /* "Sent back to you": what the helper handed over, as small cards you can open in place (no PDFs or live pages mounted) */
+  function renderSent(v, list) {
+    const key = keyOf([v.ticket.status, list.map(x => [x.c.id, x.ev.ref, x.ev.type, x.ev.summary])]);
+    if (key === els.sent.dataset.k) return;
+    els.sent.dataset.k = key;
+    els.sent.hidden = !list.length;
+    if (!list.length) { els.sent.replaceChildren(); return; }
+    const files = list.filter(x => x.ev.type !== 'note');
+    const cards = [...files.map(x => proof.tile(x, from => proof.open(list, list.indexOf(x), from))),
+      ...list.filter(x => x.ev.type === 'note').map(({c, ev}) => h('article', {class: 'fx-sent-note card'}, h('p', {class: 'eyebrow', text: 'Result'}), h('strong', {text: c.text}), h('p', {class: 'meta', text: String(ev.text || ev.ref || '')})))];
+    const review = v.ticket.status === 'review';
+    els.sent.replaceChildren(h('div', {class: 'row'}, h('h2', {class: 'grow', text: 'Sent back to you'}), h('span', {class: 'meta', text: list.length + (list.length === 1 ? ' item' : ' items')})),
+      h('div', {class: 'fx-sent-grid'}, cards), ...(review ? [h('p', {class: 'meta', text: 'Checking a result records your feedback. It does not publish anything.'})] : []));
   }
 
   /* an empty tab is hidden; if it was the open one, Live opens instead */
