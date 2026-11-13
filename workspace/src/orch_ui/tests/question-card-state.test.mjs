@@ -154,3 +154,17 @@ test('immediate choices validate, respect pending answers, and report failures',
     assert.equal(storage.m.size, 0);
   }
 });
+
+test('an answer the server never returns is an error after 30 s, and the person can answer again', async () => {
+  const {card, clock, sent} = make(() => new Promise(() => {}));
+  card.choose('Yes');
+  await clock.advance(5000); await tick();
+  assert.equal(card.getState().phase, 'sending');
+  await clock.advance(29000); await tick();
+  assert.equal(card.getState().phase, 'sending');
+  await clock.advance(1500); await tick();
+  assert.equal(card.getState().phase, 'error');
+  assert.match(card.getState().message, /did not answer in time/);
+  assert.equal(sent.length, 1);
+  assert.ok(card.choose('Yes').ok); // buttons are usable again
+});

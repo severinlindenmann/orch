@@ -82,10 +82,18 @@ def _web(name: str) -> bytes:
     return resources.files("orch_focus").joinpath("web", name).read_bytes()
 
 
-def _kit(name: str) -> bytes:
-    import orch_ui
+def _kit(name: str) -> bytes | None:
+    """A kit file from orch_ui's static folder, else the dashboard's own copy; None when neither has it."""
+    try:
+        import orch_ui
 
-    return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
+        return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
+    except (ImportError, OSError, TypeError):
+        pass
+    try:
+        return resources.files("orch_dashboard").joinpath("web", "kit", name).read_bytes()
+    except (ImportError, OSError, TypeError):
+        return None
 
 
 class Tracker:
@@ -701,7 +709,10 @@ class Handler(BaseHTTPRequestHandler):
             pre = pre if PREFIX.fullmatch(pre) else ""
             return self._send(200, _web("index.html").replace(b"__P__", pre.encode()), TYPES[".html"])
         if path.startswith("/kit/") and path[5:] in KIT_FILES:
-            return self._send(200, _kit(path[5:]), TYPES["." + path.rsplit(".", 1)[1]])
+            body = _kit(path[5:])
+            if body is None:
+                return self._send(404, b"not found", "text/plain")
+            return self._send(200, body, TYPES["." + path.rsplit(".", 1)[1]])
         if path.startswith("/web/") and path[5:] in WEB_FILES:
             return self._send(200, _web(path[5:]), TYPES["." + path.rsplit(".", 1)[1]])
         self._send(404, b"not found", "text/plain")
@@ -926,15 +937,19 @@ class _Server(ThreadingHTTPServer):
 def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = None) -> ThreadingHTTPServer:
     # No ORCH_BIN from the environment (H1): the real server passes SELF (`sys.executable -I -m orch`); only a
     # test harness passes a fake path. None = no orch.
-    session = None
-    if orch_bin == actions.SELF:
+    tracker = Tracker(root, orch_bin)
+    handler = partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=None)
+    srv = _Server(("127.0.0.1", port), handler)
+    if (
+        orch_bin == actions.SELF
+    ):  # after the bind: a busy port must not spend the resume file (see the dashboard)
         from orch.pageproof import PageSession
 
-        session = PageSession(root, "focus")
-    tracker = Tracker(root, orch_bin)
-    srv = _Server(
-        ("127.0.0.1", port), partial(Handler, root=root, orch_bin=orch_bin, tracker=tracker, session=session)
-    )
+        try:
+            handler.keywords["session"] = PageSession(root, "focus")
+        except BaseException:
+            srv.server_close()
+            raise
     srv.revisions = Revisions(root)
     srv.tracker = tracker
     srv.ticker_stop = stop = threading.Event()

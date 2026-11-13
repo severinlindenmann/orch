@@ -877,3 +877,8 @@ def test_links_say_so_when_the_sharing_server_cannot_be_reached(monkeypatch, tmp
     assert data.load_links(tmp_path, "orch") == {"links": [], "unreachable": True}
     monkeypatch.setattr(data, "run_orch", lambda *a, **k: {"files": []})
     assert data.load_links(tmp_path, "orch") == {"links": []}
+
+
+def test_page_csp_allows_blob_pictures(server):
+    _code, _body, h = get(server + "/")
+    assert "img-src 'self' data: blob:" in h["Content-Security-Policy"]

@@ -244,7 +244,9 @@ function route() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
-  if (hash === '#settings' && !snapshot && state?.settings) return {kind:'settings', hash};
+  // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
+  const settingsHash = /^#settings(?:\/(general|agent|phone|addons))?$/.exec(hash);
+  if (settingsHash && !snapshot && state?.settings) return {kind:'settings', hash:'#settings', tab:settingsHash[1] || 'general'};
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
@@ -266,6 +268,7 @@ function route() {
 function render(arrived = new Set()) {
   if (!state) return;
   const r = route(), changed = !!renderedRoute && renderedRoute !== r.hash;
+  if (r.kind === 'settings') settingsTab = r.tab;
   if (r.kind === 'page' && location.hash !== r.hash) history.replaceState(null, '', r.hash);  // an old #open link shows the one address
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
@@ -314,9 +317,10 @@ function render(arrived = new Set()) {
       if (q) mountQuestion(host, {ticket:t.id, key:typeof t.key === 'string' ? t.key : undefined, id:q.id, digest:q.digest, title:q.text, text:'', oneTap:true, kind:q.kind, options:array(q.options).map(o => ({text:o, suggested:o === q.recommended}))});
     }
   });
-  if (r.kind === 'addon') {
-    if (activeAddon !== r.id) startAddon(r.id);
-    else if (!document.getElementById('addon-body').childNodes.length) paintAddon(r.id);
+  const shown = shownAddon();
+  if (shown) {
+    if (activeAddon !== shown) startAddon(shown);
+    else if (!document.getElementById('addon-body')?.childNodes.length) paintAddon(shown);
   } else {
     clearInterval(addonTimer); activeAddon = null;
   }
@@ -503,9 +507,7 @@ main.addEventListener('keydown', event => {
     const tabs = [...settingsTabControl.parentElement.querySelectorAll('[role="tab"]')];
     const index = tabs.indexOf(settingsTabControl);
     const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
-    settingsTab = next.dataset.tab;
-    settingsReview = null;
-    render();
+    settingsGo(next.dataset.tab);
     document.getElementById(next.id)?.focus();
     return;
   }
@@ -546,11 +548,7 @@ main.addEventListener('click', async event => {
     render(); return;
   }
   if (snapshot) return;
-  if (action === 'settings-tab') {
-    settingsTab = control.dataset.tab;
-    settingsReview = null;
-    render(); return;
-  }
+  if (action === 'settings-tab') { settingsGo(control.dataset.tab); return; }
   // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
@@ -643,7 +641,7 @@ main.addEventListener('click', async event => {
   }
   if (action === 'addon-more') { const n = control.dataset.name; if (addonOpen.has(n)) addonOpen.delete(n); else addonOpen.add(n); render(); }
   if (action === 'need') openNeed(array(state.needs).find(n => n.id === control.dataset.need), control);
-  if (action === 'retry-addon') loadAddon(route().id, true);
+  if (action === 'retry-addon') loadAddon(shownAddon(), true);
   if (action === 'start') {
     if (locks.has('background')) return;
     locks.add('background');

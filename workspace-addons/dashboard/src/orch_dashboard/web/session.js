@@ -20,8 +20,25 @@
         init.headers = h;
       }
     }
-    return realFetch.call(this, input, init);
+    return realFetch.call(this, input, init).then(function (r) {
+      if (r.status === 403) restartedNotice(r);
+      return r;
+    });
   };
+  // After an update the restarted server may not know this tab's session: say so in plain words, with a Reload button.
+  function restartedNotice(r) {
+    r.clone().text().then(function (t) {
+      if (t.indexOf("orch restarted after the update") !== 0 || document.getElementById("orch-restarted")) return;
+      var b = document.createElement("div");
+      b.id = "orch-restarted"; b.className = "banner info orch-notice"; b.setAttribute("role", "alert");
+      b.style.cssText = "margin:8px 16px 0";
+      var d = document.createElement("div"); d.textContent = t; b.appendChild(d);
+      var x = document.createElement("button"); x.type = "button"; x.textContent = "Reload"; x.style.marginTop = "8px";
+      x.onclick = function () { location.reload(); };
+      b.appendChild(x);
+      (document.body || document.documentElement).insertBefore(b, (document.body || document.documentElement).firstChild);
+    }).catch(function () {});
+  }
   var m = /[#&]launch=([A-Za-z0-9_-]{20,64})/.exec(location.hash || "");
   if (!m) return;
   // The app must NOT start (and fetch, and read a one-time notice) while the page is only a bootstrap: stop loading the
