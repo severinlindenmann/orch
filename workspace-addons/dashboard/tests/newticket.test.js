@@ -10,6 +10,7 @@ const source = read('pages/newticket.js');
 class Node {
   constructor(tag, cls = '', text = '') { this.tag = tag; this.className = cls; this.textContent = text; this.children = []; this.listeners = {}; this.dataset = {}; this.value = ''; this.isConnected = true; }
   append(...nodes) { for (const n of nodes) { n.parent?.children.splice(n.parent.children.indexOf(n), 1); n.parent = this; this.children.push(n); } }
+  prepend(...nodes) { const old = [...this.children]; for (const n of old) n.parent = null; this.children = []; this.append(...nodes, ...old); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   get firstChild() { return this.children[0]; }
   setAttribute(k, v) { this[k] = v; }
@@ -191,10 +192,10 @@ test('long typed text moved to a chip on submit shrinks the text box back', asyn
   assert.equal(s.input.style.height, 'auto');
 });
 
-test('one Start button; Create without starting is a text link; neither sends plan_first by default', async () => {
+test('one Start button; Save without starting is a text link; neither sends plan_first by default', async () => {
   const labels = walk(setup().d).filter(n => n.tag === 'button' && /btn/.test(n.className)).map(n => n.textContent);
   assert.ok(labels.includes('Start') && !labels.includes('Create & Start') && !labels.includes('Show plan first'));
-  for (const label of ['Create without starting', 'Start']) {
+  for (const label of ['Save without starting', 'Start']) {
     const s = setup();
     s.form.requestSubmit = () => s.form.fire('submit');
     s.input.value = 'Work'; await s.input.fire('input');
@@ -209,7 +210,7 @@ test('one Start button; Create without starting is a text link; neither sends pl
 test('attach is a link, drops land anywhere on the form, pasted text reads in pages', async () => {
   const s = setup();
   assert.ok(walk(s.d).some(n => n.textContent === '＋ Add files or drop them here' && n.className === 'new-ticket-attach'));
-  assert.equal(s.input.rows, 4);
+  assert.equal(s.input.rows, 8);
   assert.equal((await s.form.fire('drop', {dataTransfer:{files:[{name:'plan.md', size:3, arrayBuffer:async () => new TextEncoder().encode('abc').buffer}]}})).prevented, true);
   await s.paste('x'.repeat(9000));
   walk(s.d).find(n => n.type === 'submit').disabled = true; await s.form.fire('submit');

@@ -59,3 +59,12 @@ ul.new-ticket-files { list-style: none; margin: 0; padding: 0; max-height: 160px
 .new-ticket-cal-quickday:hover, .new-ticket-cal-day:hover { background: var(--brand-soft); color: var(--brand); }
 .new-ticket-cal-day[aria-pressed=true] { background: var(--brand); color: var(--bg); }
 .new-ticket-cal-day[aria-current=date] { box-shadow: inset 0 0 0 1px var(--brand); }
+/* Second pass (accepted New ticket draft): title + one line, X at the top right, footer with the quiet save at the left */
+.new-ticket{max-width:560px;width:calc(100vw - 32px)}
+.new-ticket h2{margin:0 40px 4px 0}
+.new-ticket .new-ticket-sub{margin:0 0 16px}
+.new-ticket .new-ticket-close{min-height:32px}
+.new-ticket .new-ticket-text{min-height:12em}
+dialog.new-ticket .actions{justify-content:flex-end;align-items:center}
+dialog.new-ticket .actions .new-ticket-link{margin-right:auto;min-height:32px;color:var(--text-muted);text-decoration:none}
+dialog.new-ticket .actions .new-ticket-link:hover{color:var(--text)}

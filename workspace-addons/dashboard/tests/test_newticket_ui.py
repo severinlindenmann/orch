@@ -6,11 +6,8 @@ from .webjs import WEB, all_js
 def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "'What needs doing?'" in js
-    assert "input.rows = 4; input.maxLength = 500000; input.required = true" in js
-    assert (
-        "Paste or write it here. A short title or a long text with many points: the agent splits it into tasks."
-        in js
-    )
+    assert "input.rows = 8; input.maxLength = 500000; input.required = true" in js
+    assert "What should the helper do? A sentence or a long text; it is split into tasks." in js
     # Simpler window: helper, due date and "done when" are shown plainly, not behind "More options".
     assert "More options" not in js
     assert "el('div', 'new-ticket-options')" in js
@@ -54,7 +51,7 @@ def test_edit_and_create_start_semantics_are_preserved():
         in js
     )
     assert "let startAfter = !t" in js
-    assert "startAfter = false; form.requestSubmit()" in js  # Create without starting
+    assert "startAfter = false; form.requestSubmit()" in js  # Save without starting
     assert "const planFirst = startAfter && !!planBox?.checked" in js  # Show me the plan first
     assert "startAfter = true;" in js
     assert "act('run.start', {ticket:created.id})" in js

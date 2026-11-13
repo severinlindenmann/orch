@@ -107,11 +107,12 @@ function ticketDatePicker(input) {
 function ticketForm(t) {
   const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
+  if (!t) { d.className = (d.className ? d.className + ' ' : '') + 'new-ticket'; d.querySelector?.('h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
   // The window closes with X, Esc (window.orch.open) and a click on the backdrop; dialog() puts the cursor back where it was.
   const closeX = button('✕', 'btn ghost sm new-ticket-close', () => window.orch.close(d));
   closeX.setAttribute('aria-label', t ? 'Close edit ticket' : 'Close new ticket'); d.append(closeX);
   d.addEventListener('click', event => { if (event.target === d) window.orch.close(d); });
-  let helpers = [], helperSelect = null;
+  let helpers = [], helperSelect = null, doneWrap = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
   let updateAttachments = () => {}, grow = () => {};
   const updateValidity = () => {
@@ -128,8 +129,8 @@ function ticketForm(t) {
     const label = el('label', '', 'What needs doing?');
     const input = el('textarea', 'input new-ticket-text');
     input.name = 'text'; input.id = 'field-' + serial + '-text';
-    input.rows = 4; input.maxLength = 500000; input.required = true;
-    input.placeholder = 'Paste or write it here. A short title or a long text with many points: the agent splits it into tasks.';
+    input.rows = 8; input.maxLength = 500000; input.required = true;
+    input.placeholder = 'What should the helper do? A sentence or a long text; it is split into tasks.';
     // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
     grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
     input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
@@ -248,7 +249,7 @@ function ticketForm(t) {
     const doneLabel = el('label', '', 'Done when (optional)');
     const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
     done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done? Say it in your own words.';
-    doneLabel.htmlFor = done.id; doneLabel.append(done); fields.append(doneLabel); inputs.done_when = done;
+    doneLabel.htmlFor = done.id; doneLabel.append(done); fields.append(doneLabel); inputs.done_when = done; doneWrap = doneLabel;
   }
   for (const field of (t ? ['owner', 'due', 'note', 'done_when'] : [])) {
     const label = el('label', '', field === 'done_when' ? 'What should be true when it is done?' : field.charAt(0).toUpperCase() + field.slice(1) + (field === 'title' ? '' : ' (optional)'));
@@ -279,12 +280,12 @@ function ticketForm(t) {
     const planLabel = el('label', 'new-ticket-check');
     planBox = el('input'); planBox.type = 'checkbox'; planBox.name = 'plan_first';
     planLabel.append(planBox, el('span', '', 'Show me the plan first'), el('span', 'meta', 'The helper waits for your OK before work starts.'));
-    fields.append(planLabel);
+    if (doneWrap && typeof fields.insertBefore === 'function' && doneWrap.parentNode === fields) fields.insertBefore(planLabel, doneWrap); else fields.append(planLabel);
   }
-  const plain = t ? null : button('Create without starting', 'new-ticket-link', () => { startAfter = false; form.requestSubmit(); });
+  const plain = t ? null : button('Save without starting', 'new-ticket-link', () => { startAfter = false; form.requestSubmit(); });
   if (plain) submit.addEventListener('click', () => { startAfter = true; });
   actions.append(submit);
-  if (plain) fields.append(plain);
+  if (plain) actions.prepend(plain);
   const startNow = async () => {
     if (t || !startAfter || !created) return;
     const run = await act('run.start', {ticket:created.id});

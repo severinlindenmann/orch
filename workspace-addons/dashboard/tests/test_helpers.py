@@ -606,7 +606,7 @@ def test_ticket_screens_use_plain_wording_and_one_chip():
     assert (
         "'Not chosen yet'" not in src.split("const agent = window.DashHelpers.agentLabel")[1].split("\n")[0]
     )  # one label source
-    assert "Ideas to plan" in src and "Finished work" in src
+    assert "Finished tickets land here" in src  # the board columns show no hint lines, only an empty text
     assert (
         "hideStatus" not in src and "'Needs you'" in src
     )  # 10A: short board chip; 7A: no chip beside the banner
