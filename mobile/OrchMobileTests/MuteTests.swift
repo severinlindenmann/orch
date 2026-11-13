@@ -42,7 +42,7 @@ final class MuteTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Zurich")!
         let cases = [
-            ("2026-11-09T06:59:00Z", "2026-11-09T07:00:00Z"),
+            ("2026-11-09T06:59:00Z", "2026-11-10T07:00:00Z"),
             ("2026-11-09T07:00:00Z", "2026-11-10T07:00:00Z"),
             ("2026-11-09T10:00:00Z", "2026-11-10T07:00:00Z"),
             ("2026-03-28T10:00:00Z", "2026-03-29T06:00:00Z"),

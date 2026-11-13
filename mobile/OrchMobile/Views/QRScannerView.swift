@@ -64,7 +64,7 @@ private final class ScannerController: UIViewController, AVCaptureMetadataOutput
         super.viewDidLoad()
         view.backgroundColor = UIColor(Theme.bg)
         #if targetEnvironment(simulator)
-        onUnavailable(.noCamera)
+        DispatchQueue.main.async { [onUnavailable] in onUnavailable(.noCamera) }   // not during view construction
         #else
         permissionTask = Task { [weak self] in
             guard let self else { return }
@@ -73,6 +73,7 @@ private final class ScannerController: UIViewController, AVCaptureMetadataOutput
             switch AVCaptureDevice.authorizationStatus(for: .video) {
             case .authorized: authorized = true
             case .notDetermined: authorized = await AVCaptureDevice.requestAccess(for: .video)
+            case .restricted: onUnavailable(.restricted); return  // Settings can't lift a restriction: no "Open Settings"
             default: authorized = false
             }
             guard !Task.isCancelled else { return }

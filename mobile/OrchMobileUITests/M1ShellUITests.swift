@@ -94,7 +94,6 @@ final class M1ShellUITests: XCTestCase {
         app.buttons["new-chat"].tap()
         XCTAssertTrue(app.buttons["compose-add-workspace"].waitForExistence(timeout: 5))
         app.buttons["compose-add-workspace"].tap()
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 5))
         app.buttons["invite-paste"].tap()
         let field = app.textFields["invite-field"]
@@ -113,7 +112,6 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(app.buttons["add-workspace"].waitForExistence(timeout: 10))
         app.buttons["add-workspace"].tap()
         func enter(_ link: String) {
-            if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
             XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 5))
             app.buttons["invite-paste"].tap()
             let field = app.textFields["invite-field"]
@@ -159,7 +157,6 @@ final class M1ShellUITests: XCTestCase {
             app.terminate(); extra = extra + []
             app = paired(extra)
             app.buttons["new-chat"].tap(); app.buttons["compose-add-workspace"].tap()
-            if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
             XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 5)); try snap(app, "8-add-workspace")
             app.terminate()
         }

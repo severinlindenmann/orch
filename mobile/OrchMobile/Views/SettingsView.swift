@@ -150,7 +150,7 @@ struct SettingsView: View {
                                 }.buttonStyle(PressStyle()).accessibilityIdentifier("auto-archive-days")
                                     .accessibilityLabel("Archive after").accessibilityValue("\(model.archive.autoDays) days")
                             }
-                            Text("Finished topics move to Archived after a while.")
+                            Text("Finished chats move to Archived after a while. A new message brings them back.")
                                 .themeFont(13).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 16)
                         }
@@ -322,7 +322,7 @@ struct VoiceSettingsView: View {
             Text(label).themeFont(17)
             Spacer(minLength: 8)
             control().pickerStyle(.menu).tint(Theme.muted).labelsHidden()
-        }.padding(.horizontal, 16).frame(minHeight: 52)
+        }.padding(.horizontal, 16).frame(minHeight: 52).accessibilityElement(children: .combine)
     }
     private func update(_ patch: SettingsPatch) {
         saving = true

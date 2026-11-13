@@ -31,7 +31,7 @@ struct AddWorkspaceView: View {
                             .themeFont(15).foregroundStyle(Theme.danger).accessibilityIdentifier("invite-error")
                         Button("Use a new invitation") { reset() }.buttonStyle(PrimaryButtonStyle()).accessibilityIdentifier("invite-new")
                     } else {
-                        Text("Join this workspace?").themeFont(22, .semibold).accessibilityAddTraits(.isHeader)
+                        Text("Add this workspace?").themeFont(22, .semibold).accessibilityAddTraits(.isHeader)
                         Text("You were invited to add it to this phone.").themeFont(15).foregroundStyle(Theme.muted)
                         DisclosureGroup {
                             Text(link.host).themeFont(13).textSelection(.enabled).padding(.vertical, 8)

@@ -245,7 +245,7 @@ final class AppModel {
             inviteState = .found(host: invite.host)
             if case RelayError.api(let status, _, _) = error, status == 401 || status == 404 || status == 410 {
                 inviteNeedsReplacement = true
-                message = "This invitation has expired or was already used. Ask the person who invited you for a new one."
+                message = "This invitation has expired or was already used. Create a new one in orch on your computer."
             } else if error is URLError {
                 message = "Can't reach the server. Check your connection, then tap Connect this phone again."
             } else { message = error.localizedDescription }
@@ -297,6 +297,7 @@ final class AppModel {
     private static func isOffline(_ error: Error) -> Bool {
         if error is URLError { return true }
         if case RelayError.network = error { return true }
+        if case RelayError.api(let status, _, _) = error, [502, 503, 504].contains(status) { return true }  // relay or gateway down
         return false
     }
 
@@ -595,8 +596,8 @@ final class AppModel {
             await refresh()
             return r.workspaces
         } catch {
-            if case RelayError.api(let status, _, _) = error, status == 410 { message = "This invitation was already used or has expired. Ask the person who invited you for a new one." }
-            else if case RelayError.api(let status, _, _) = error, status == 404 { message = "This invitation is not valid. Ask the person who invited you for a new one." }
+            if case RelayError.api(let status, _, _) = error, status == 410 { message = "This invitation was already used or has expired. Create a new one in orch on your computer." }
+            else if case RelayError.api(let status, _, _) = error, status == 404 { message = "This invitation is not valid. Create a new one in orch on your computer." }
             else { handle(error) }
             return []
         }

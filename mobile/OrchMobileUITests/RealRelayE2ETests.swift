@@ -109,7 +109,6 @@ final class RealRelayE2ETests: XCTestCase {
     // MARK: 0 pair
     func test00PairWithTheInvitationLink() {
         let app = launch(reset: true)
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         must(app, app.buttons["invite-paste"], "paste button", timeout: 20)
         shot("00-onboarding")
         app.buttons["invite-paste"].tap()
@@ -397,7 +396,6 @@ final class RealRelayE2ETests: XCTestCase {
         el(app, "workspace-notifications").tap(); must(app, app.buttons["Turn on"], "turn on"); app.buttons["Turn on"].tap(); sleep(2)
         back(app)
         el(app, "add-workspace").tap()
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         must(app, app.buttons["invite-paste"], "invite-paste"); app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
         must(app, f, "invite field"); f.tap(); f.typeText(link)

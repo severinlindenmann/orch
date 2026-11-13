@@ -5,6 +5,7 @@ struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @State private var showLink = false
     @State private var showScanner = false
+    @State private var pendingPaste = false
     @State private var link = ""
     @State private var linkError: String?
     @State private var finishing = false
@@ -47,8 +48,9 @@ struct OnboardingView: View {
                 Button { showLink = false } label: { Text("Close") }.buttonStyle(WideButtonStyle(color: Theme.muted))
             }.padding(23).presentationDetents([.medium, .large]).presentationBackground(Theme.bg)
         }
-        .sheet(isPresented: $showScanner) {
-            QRScannerView(onPaste: { showScanner = false; showLink = true }) { code in model.openInvite(code); showScanner = false }
+        // Open the paste sheet only after the scanner sheet is gone: two sheets in one update drop the second.
+        .sheet(isPresented: $showScanner, onDismiss: { if pendingPaste { pendingPaste = false; showLink = true } }) {
+            QRScannerView(onPaste: { pendingPaste = true }) { code in model.openInvite(code); showScanner = false }
         }
     }
 
@@ -56,7 +58,7 @@ struct OnboardingView: View {
                     let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
                     if clean.isEmpty { linkError = "Paste the link you were sent first. It starts with orch://."; return }
                     if (try? PairingLink(clean)) == nil {
-                        linkError = "That link does not look right. Check you copied the whole link, or ask the person who invited you for a new one."
+                        linkError = "That link does not look right. Check you copied the whole link, or create a new one in orch on your computer."
                         return
                     }
                     model.openInvite(clean); showLink = false

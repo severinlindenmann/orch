@@ -42,10 +42,11 @@ enum InviteWording {
 
 /// Why the QR scanner cannot scan.
 enum ScannerProblem: Equatable {
-    case denied, noCamera, failed
+    case denied, restricted, noCamera, failed
     var text: String {
         switch self {
         case .denied: "orch can't use the camera. Allow it in Settings, or paste the link instead."
+        case .restricted: "The camera is blocked on this phone. Paste the link instead."
         case .noCamera: "This device has no camera. Paste the link instead."
         case .failed: "The camera didn't start. Close and try again, or paste the link instead."
         }

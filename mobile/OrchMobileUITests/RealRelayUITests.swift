@@ -29,7 +29,6 @@ final class RealRelayUITests: XCTestCase {
     /// Pair with the invitation link, see the workspace chat, start a new chat with a text.
     func test1PairAndNewChat() {
         let app = launch(reset: true)
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 15))
         app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
@@ -150,7 +149,6 @@ final class RealRelayUITests: XCTestCase {
     /// Tickets made on the host (never texted from the phone) show nested under the workspace; each opens its ticket chat.
     func test6ThreeTicketsNested() {
         let app = launch(reset: true)
-        if app.buttons["Use invitation"].exists { app.buttons["Use invitation"].tap() }
         XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 15))
         app.buttons["invite-paste"].tap()
         let f = app.textFields["invite-field"]
