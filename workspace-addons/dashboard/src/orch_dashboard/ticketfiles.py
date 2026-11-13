@@ -223,7 +223,13 @@ def _xlsx(zf, sheet: int) -> dict:
         info = zf.getinfo(member)
         if info.file_size > MAX_SHEET:
             raise ValueError("too large")
-        return zf.read(member)
+        data = zf.read(member)
+        if len(data) > MAX_SHEET:
+            raise ValueError("too large")
+        # No document type or entity declarations: they are never needed in a workbook and allow expansion bombs.
+        if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
+            raise ValueError("declarations are not allowed")
+        return data
 
     wb = ET.fromstring(read("xl/workbook.xml"))
     sheets = [(s.get("name") or "Sheet", s.get(rel_ns + "id")) for s in wb.iter(ns + "sheet")]
