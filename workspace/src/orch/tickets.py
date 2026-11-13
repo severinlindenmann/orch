@@ -1123,7 +1123,8 @@ def ask_for_changes(
         ticket["checklist"].append(
             {
                 "id": _next_id(ticket["checklist"], "c"),
-                "text": "Change: " + note,
+                "text": note,
+                "origin": "change_request",  # structured: the dashboard shows "You asked: <note>"
                 "done": False,
                 "evidence": [],
             }

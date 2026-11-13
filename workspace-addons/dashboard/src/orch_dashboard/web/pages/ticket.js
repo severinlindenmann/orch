@@ -564,10 +564,11 @@ function taskProofChips(t, task) {
 }
 // Open task menus and their typed reason, keyed tid:check; kept across render() until submit, Escape or close.
 const taskMenus = new Map();
-// Change requests are stored as "Change: <what you typed>"; shown as a task title with what you asked below it.
-function changeTask(text) {
-  const m = /^Change:\s*([\s\S]+)$/.exec(String(text || '').trim());
-  if (!m) return null;
+// A change request (origin "change_request", text = the note; older ones are stored as "Change: <note>" without origin) is shown as a
+// task title with what you asked below it.
+function changeTask(text, origin) {
+  const m = origin === 'change_request' ? [null, String(text || '')] : /^Change:\s*([\s\S]+)$/.exec(String(text || '').trim());
+  if (!m || !m[1].trim()) return null;
   const asked = m[1].trim();
   const first = asked.split(/\r?\n/)[0].replace(/^(?:please|pls|can you|could you|would you)\s+(?:please\s+)?/i, '').replace(/[.!?\s]+$/, '').slice(0, 80);
   return {title:first ? first.charAt(0).toUpperCase() + first.slice(1) : asked, asked};
@@ -581,7 +582,7 @@ function taskRows(t) {
   }
   return array(t.checklist).map((task, i) => {
     const meta = [ticketActor(task.owner || task.by), clean(window.DashHelpers.cleanOutcome(task.summary))].filter(Boolean).join(' · ');
-    const doing = !task.wont_do && task.state === 'doing', change = changeTask(task.text);
+    const doing = !task.wont_do && task.state === 'doing', change = changeTask(task.text, task.origin);
     const mark = snapshot || !task.id ? (task.wont_do ? h('span', {className:'muted'}, '–') : task.done ? h('span', {className:'good'}, iconEl('check')) : h('span', {className:'dot ' + (doing && !window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings) ? 'working' : 'idle')}))
       : h('button', {type:'button', className:'task-check' + (task.wont_do ? ' muted' : task.done ? ' on' : ''), role:task.wont_do ? null : 'checkbox', 'aria-checked':task.wont_do ? null : String(!!task.done), 'aria-label':task.wont_do ? 'Open again' : clean(task.text), 'data-key':'task-check-' + task.id}, task.wont_do ? '–' : task.done ? iconEl('check') : null);
     if (!snapshot && task.id) mark.onclick = () => toggleTask(t.id, task.id);

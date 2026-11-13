@@ -57,7 +57,9 @@ test('Dash 50: a change request task reads as the change, with what you asked be
   const c = {}; vm.createContext(c);
   vm.runInContext(ticketSrc.slice(ticketSrc.indexOf('function changeTask'), ticketSrc.indexOf('function taskRows')), c);
   assert.deepEqual({...c.changeTask('Change: Please add a rain plan.')}, {title:'Add a rain plan', asked:'Please add a rain plan.'});
+  assert.deepEqual({...c.changeTask('Please add a rain plan.', 'change_request')}, {title:'Add a rain plan', asked:'Please add a rain plan.'});  // new: structured origin
   assert.equal(c.changeTask('Write the report'), null);
+  assert.equal(c.changeTask('Change: x', 'other')?.asked, 'x');
 });
 test('Dash 20/23/34/02: one Tasks list, Resume when paused, Details without empty fields, key under Technical details', () => {
   const t = {id:'t1', key:'PIL-54', title:'Report', status:'open', sessions:[{id:'s1', last_used:'2026-11-12T09:00:00Z'}], checklist:[{id:'c1', text:'Change: Please add a rain plan.', done:true}], note:'Remember', created_at:'2026-11-10T09:00:00Z', updated_at:'2026-11-12T09:00:00Z'};

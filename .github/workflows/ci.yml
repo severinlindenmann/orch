@@ -16,7 +16,7 @@ on:
     - cron: "0 1 * * *"
 # one run per PR: a new push cancels the PR's older run (the newest commit covers it; the merge gate is the PR's own
 # run). Pushes to develop/main are never cancelled: the path filter only sees the newest push, so a cancelled run of a
-# mobile merge would never run the mobile UI tests (they only run after the merge). Each push gets its own group.
+# mobile merge would never run the full mobile UI suite (PRs into develop run only a smoke subset). Each push gets its own group.
 concurrency:
   group: ci-${{ github.event.pull_request.number || format('{0}-{1}-{2}', github.event_name, github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
