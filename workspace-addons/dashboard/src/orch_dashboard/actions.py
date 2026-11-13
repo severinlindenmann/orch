@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -1063,6 +1064,17 @@ SHARE_MAX = (
 )  # raw bytes of a file picked in the browser (the request body is capped at 5 MB as base64)
 
 
+def _sweep_shares(parent: Path, older_than: float = 600.0) -> None:
+    """Remove copies a crashed share left behind (folders s-* older than 10 minutes, inside the share folder)."""
+    now = time.time()
+    for d in parent.glob("s-*"):
+        try:
+            if d.is_dir() and not d.is_symlink() and now - d.stat().st_mtime > older_than:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            continue
+
+
 def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, str, dict | None]:
     """Share a file picked in the browser: `orch publish file` on a private copy under .orch/run/share, removed
     right after. The link (which holds the key) never goes back to the page: the list shows the new row."""
@@ -1091,12 +1103,12 @@ def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, 
         raise NeedsPerson("Open the dashboard from this computer to do this.")
     if not publish_connected(root, orch_bin):
         raise BadRequest("Sharing is not set up here.")
-    parent = root / ".orch" / "run" / "share"
-    # a link planted at any level would send the private copy somewhere else: refuse, write nothing
-    if any(p.is_symlink() for p in (root / ".orch", root / ".orch" / "run", parent)):
-        raise BadRequest("This folder can't be used to share a file right now.")
-    parent.mkdir(parents=True, exist_ok=True)
-    folder = Path(tempfile.mkdtemp(prefix="s-", dir=parent))
+    try:  # no link at any level, 0700; anything else fails closed in plain words
+        parent = runfiles.run_dir(root, "share")
+        _sweep_shares(parent)
+        folder = Path(tempfile.mkdtemp(prefix="s-", dir=parent))
+    except (RuntimeError, OSError):
+        raise BadRequest("This folder can't be used to share a file right now.") from None
     try:
         os.chmod(folder, 0o700)
         path = folder / base

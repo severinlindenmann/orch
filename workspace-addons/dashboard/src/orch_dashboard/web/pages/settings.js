@@ -661,7 +661,7 @@ function addonHeaderNodes(id) {
   const to = header.link ? OrchBlocks.appHash(header.link.to) : null;
   if (to) out.push(h('a', {className:'btn ghost sm', href:to}, clean(header.link.label)));
   const op = header.button?.action?.op;
-  if (op === 'link.share') out.push(h('button', {type:'button', className:'btn primary sm', 'data-native':'link-share'}, clean(header.button.label)));
+  if (op === 'link.share' && panelOf(id) === 'links') out.push(h('button', {type:'button', className:'btn primary sm', 'data-native':'link-share'}, 'Share a file'));
   else if (op === 'addon.refresh') out.push(h('button', {type:'button', className:'btn outline sm', 'data-action':'retry-addon'}, clean(header.button.label)));
   return out;
 }
@@ -714,7 +714,7 @@ function paintAddon(id) {
   const template = addonBody(a, addonViews[id]);
   const blocks = template.querySelector('#addon-blocks');
   if (blocks) {
-    blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
+    blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:panelOf(id) === 'links', inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
     if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
     blocks.querySelectorAll('svg').forEach(n => {

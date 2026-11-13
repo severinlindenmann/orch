@@ -13,7 +13,7 @@ HARNESS = Path(__file__).parent / "blocks_harness.js"
 node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 
 
-def run(tmp_path, view, urls=None, own=None, inapp=False):
+def run(tmp_path, view, urls=None, own=None, inapp=False, links=False):
     f = tmp_path / "v.json"
     f.write_text(json.dumps(view))
     extra = [own or "", "inapp"] if inapp else ([own] if own else [])
@@ -22,6 +22,7 @@ def run(tmp_path, view, urls=None, own=None, inapp=False):
         capture_output=True,
         text=True,
         check=True,
+        env={**__import__("os").environ, "LINKS": "1" if links else "0"},
     )
     return json.loads(out.stdout)
 
@@ -360,7 +361,7 @@ def test_settings_card_holds_the_radio_choice(tmp_path):
 
 @node
 def test_compact_list_has_row_actions_for_shared_links(tmp_path):
-    tree = run(tmp_path, _page("valid-links-page.json"))
+    tree = run(tmp_path, _page("valid-links-page.json"), links=True)
     btns = [x for x in walk(tree) if x["data"].get("native")]
     assert [(x["data"]["native"], x["data"]["linkId"]) for x in btns] == [
         ("link-copy", "f_abc123"),
@@ -429,3 +430,16 @@ def test_new_examples_pass_both_checks_and_bad_ones_fail_both():
         if f.name in ("invalid-action-button.json",):  # unknown ops are dropped on screen, not by this check
             continue
         assert (check_view(v) is not None) == good, f.name
+
+
+@node
+def test_link_ops_only_exist_on_the_links_page_with_fixed_labels(tmp_path):
+    page = _page("valid-links-page.json")
+    assert not [x for x in walk(run(tmp_path, page)) if x["tag"] == "button"]  # any other add-on's view
+    page["blocks"][0]["items"][0]["actions"][0]["label"] = "Free money"
+    tree = run(tmp_path, page, links=True)
+    assert [x["text"] for x in walk(tree) if x["data"].get("native")] == [
+        "Copy link",
+        "Extend",
+        "Stop sharing",
+    ]

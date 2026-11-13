@@ -89,17 +89,20 @@ const OrchBlocks = (() => {
   function actionAttrs(node, a, label) {
     const args = a && a.args || {};
     if (a && a.op === 'addon.edit' && TICKET.test(String(args.target))) { node.dataset.addonEdit = String(args.target); return true; }
+    // shared-link ops only on the page of the add-on with the `links` panel (opts.links)
     const nat = a && /^link\.(copy|extend|stop)$/.exec(String(a.op));
-    if (nat && FILE.test(String(args.id))) { node.dataset.native = 'link-' + nat[1]; node.dataset.linkId = String(args.id); return true; }
+    if (nat && opts.links === true && FILE.test(String(args.id))) { node.dataset.native = 'link-' + nat[1]; node.dataset.linkId = String(args.id); return true; }
     const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
     if (!ok) return false;
     node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
     if (label) node.dataset.label = label;
     return true;
   }
+  const LINK_LABEL = {'link.copy': 'Copy link', 'link.extend': 'Extend', 'link.stop': 'Stop sharing'};
   const rowButton = (a, cls) => {
     const ghost = a.action && (a.action.op === 'addon.edit' || a.action.op === 'link.extend' || a.action.op === 'link.stop');
-    const b = el('button', 'btn ' + (ghost && a.tone !== 'bad' ? 'ghost' : 'outline') + ' sm' + (a.tone === 'bad' ? ' danger' : '') + (cls ? ' ' + cls : ''), a.label); b.type = 'button';
+    const fixed = a.action && LINK_LABEL[a.action.op];   // a link op always says what it does, in orch's own words
+    const b = el('button', 'btn ' + (ghost && a.tone !== 'bad' ? 'ghost' : 'outline') + ' sm' + (a.tone === 'bad' ? ' danger' : '') + (cls ? ' ' + cls : ''), fixed || a.label); b.type = 'button';
     if (a.confirm) b.dataset.confirm = String(a.confirm);
     return actionAttrs(b, a.action, a.label) ? b : null;
   };

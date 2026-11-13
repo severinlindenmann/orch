@@ -19,6 +19,7 @@ def b64(raw: bytes) -> str:
 def shared(tmp_path, monkeypatch):
     """A fake `orch publish file`: records the argv and what the copy held while it ran."""
     seen = {}
+    (tmp_path / ".orch").mkdir(exist_ok=True)  # a workspace always has one
 
     def fake_run(argv, **kw):
         path = argv[argv.index("file") + 1]
@@ -79,6 +80,7 @@ def test_sharing_must_be_set_up(tmp_path, shared, monkeypatch):
 
 
 def test_a_refusal_comes_back_as_plain_words_and_the_copy_is_still_removed(tmp_path, monkeypatch):
+    (tmp_path / ".orch").mkdir(exist_ok=True)
     monkeypatch.setattr(actions, "publish_connected", lambda root, orch_bin: True)
     monkeypatch.setattr(
         actions,
@@ -104,3 +106,26 @@ def test_a_link_planted_in_the_way_refuses_and_writes_nothing(tmp_path, shared):
     with pytest.raises(actions.BadRequest):
         actions.share_file(tmp_path, "orch", {"name": "a.txt", "data": b64(b"x")})
     assert not shared and list(elsewhere.iterdir()) == []
+
+
+def test_stale_copies_are_swept_but_fresh_ones_stay(tmp_path, shared):
+    share = tmp_path / ".orch" / "run" / "share"
+    share.mkdir(parents=True)
+    old, fresh = share / "s-old", share / "s-fresh"
+    for d in (old, fresh):
+        d.mkdir()
+        (d / "x").write_text("x")
+    past = __import__("time").time() - 3600
+    os.utime(old, (past, past))
+    actions.share_file(tmp_path, "orch", {"name": "a.txt", "data": b64(b"x")})
+    assert not old.exists() and fresh.exists()
+
+
+def test_an_unusable_run_folder_fails_closed_in_plain_words(tmp_path, shared, monkeypatch):
+    def boom(root, name):
+        raise OSError("disk says no")
+
+    monkeypatch.setattr(actions.runfiles, "run_dir", boom)
+    with pytest.raises(actions.BadRequest, match="can't be used"):
+        actions.share_file(tmp_path, "orch", {"name": "a.txt", "data": b64(b"x")})
+    assert not shared
