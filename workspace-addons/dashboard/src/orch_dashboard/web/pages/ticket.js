@@ -564,7 +564,7 @@ function taskProofChips(t, task) {
 }
 // Open task menus and their typed reason, keyed tid:check; kept across render() until submit, Escape or close.
 const taskMenus = new Map();
-// Change requests are stored as "Change: <what you typed>"; shown as a task title with what you asked below it.
+// Older change requests are stored as "Change: <what you typed>" (new ones are the plain note); shown as a task title with what you asked below it.
 function changeTask(text) {
   const m = /^Change:\s*([\s\S]+)$/.exec(String(text || '').trim());
   if (!m) return null;

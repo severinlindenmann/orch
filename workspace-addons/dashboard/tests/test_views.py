@@ -64,12 +64,19 @@ def test_notice_button_is_passed_through():
         {**BUTTON, "label": "<b>Start</b>"},
         {**BUTTON, "label": "x" * 31},
         {"label": "Start", "action": {"op": "addon.start", "command": "rm -rf /"}},
+        {"label": "Start", "action": {"op": "addon.start", "args": {"x": 1}}},
     ],
 )
 def test_bad_button_breaks_the_view(button):
-    v = {**example(), "button": button}
+    v = {**example(), "notice": "Stopped.", "button": button}
     assert list(VALIDATOR.iter_errors(v)), "the schema should refuse it"
     assert check_view(v) is None
+
+
+def test_button_needs_a_notice():
+    v = {k: x for k, x in example().items() if k != "notice"}
+    v["button"] = BUTTON
+    assert list(VALIDATOR.iter_errors(v)) and check_view(v) is None
 
 
 def test_unknown_block_type_is_skipped_not_fatal():

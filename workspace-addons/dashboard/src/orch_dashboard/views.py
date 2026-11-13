@@ -77,7 +77,12 @@ def _action(a):
 
 
 def _button(b):
-    return _keys_only(b, ("label", "action")) and _text(b.get("label"), 30) and _action(b.get("action"))
+    return (
+        _keys_only(b, ("label", "action"))
+        and _text(b.get("label"), 30)
+        and _action(b.get("action"))
+        and not b["action"].get("args")
+    )
 
 
 def _detail_ok(d):
@@ -272,6 +277,7 @@ def check_view(v) -> dict | None:
         and _opt(v, "notice", _text)
         and _opt(v, "notice_tone", _tone)
         and _opt(v, "button", _button)
+        and ("button" not in v or "notice" in v)
     ):
         return None
     blocks = []
