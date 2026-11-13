@@ -12,7 +12,12 @@ struct WorkspaceBadge: View {
     @Environment(AppModel.self) private var model: AppModel?
 
     private var shown: Look.Shown { Look.shown(icon: icon, color: color, name: name) }
-    private var tone: Color { Color(hex: Look.darkHex(shown.color)) }
+    private var tone: Color { Color(hex: Look.darkHex(Self.identityColor(shown.color))) }
+
+    /// Amber means "needs you" and teal/green mean unread, online and actions, so a badge never wears them (P06).
+    /// The stored pick stays untouched; only the drawn tone moves to a nearby non-status colour.
+    static let statusSwaps = ["amber": "orange", "teal": "cyan", "green": "blue", "lime": "indigo"]
+    static func identityColor(_ token: String) -> String { statusSwaps[token] ?? token }
 
     var body: some View {
         let s = shown

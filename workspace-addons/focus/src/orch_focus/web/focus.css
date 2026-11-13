@@ -217,12 +217,12 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 /* Accepted 8 November Focus layouts; colours and controls use the shared kit tokens. */
 .fx{--rail:240px}
 .fx [hidden]{display:none!important}
-.fx-top{min-height:100px;padding:16px 24px;gap:16px;flex-wrap:wrap}
+.fx-top{min-height:48px;height:48px;box-sizing:border-box;padding:0 16px;gap:12px;flex-wrap:nowrap}
 .fx-title{display:grid;gap:4px;min-width:180px}
 .fx-title h1{font-size:15px;white-space:normal}
 .fx-stepper{display:flex;gap:8px;color:var(--text-muted);font-size:12px}
 .fx-stepper span+span:before{content:'·';margin-right:8px}
-.fx-stepper [aria-current]{color:var(--text);font-weight:600}
+.fx-stepper [aria-current]{color:var(--brand);font-weight:600}
 .fx-prog{display:none}
 .fx-live{gap:6px}
 .fx-live b:after,.fx-live .t:not(:empty):before{content:' · ';color:var(--text-muted)}
@@ -344,15 +344,12 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 
 /* Focus QA: compact tasks and phone controls follow the draft on small screens. */
 .fx .eyebrow,.fx-pt-k,.fx-pv-cap{text-transform:none;letter-spacing:normal}
-.fx-mobile-tasks{display:none}
 .fx-picker .fx-top{justify-content:space-between}
 .fx-receipt{display:inline-flex;margin-top:12px;vertical-align:middle}
 @media(max-width:720px){
- .fx-mobile-tasks{display:block;text-align:left;padding:12px 20px;background:var(--surface);color:var(--text-muted);border:0;border-bottom:1px solid var(--border);font:inherit;cursor:pointer}
  .fx-top>.fx-tools{display:contents}
  .fx-phone{order:2;flex-basis:100%;min-height:40px}
- .fx-tools [data-act=stop],.fx-more,.fx-exit{order:3}
- .fx-exit .opt{display:none}
+ .fx-tools [data-act=stop],.fx-more{order:3}
 }
 /* Running now (every run Focus started) and the Done search on the ticket list */
 .fx-procs{margin-top:24px}
@@ -547,15 +544,47 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 /* ---- Phone width: room under the last row, "+" for a new task, labelled Stop and Exit ---- */
 .fx-add-wrap{margin-top:auto;flex-shrink:0;display:grid;gap:6px}
 .fx-add-wrap .fx-add-task{margin-top:0}
-.fx-add-toggle{display:none}
 @media(max-width:720px){
   .fx-pane{padding-bottom:calc(var(--fx-compose-h,120px) + env(safe-area-inset-bottom,0px));box-sizing:border-box}
-  .fx-add-toggle{display:inline-flex;gap:6px;justify-self:start;min-height:40px}
-  .fx:not(.fx-adding) .fx-add-task{display:none}
-  .fx-tools [data-act=stop] .opt,.fx-exit .opt{display:inline}
   .fx-clash-wrap{padding:16px 20px 0}
   .fx-agent-s{white-space:normal}
 }
 .fx-unchecked{display:inline-block;margin-left:6px;padding:0 5px;border:1px solid var(--border);border-radius:4px;font-size:10.5px;line-height:16px;color:var(--text-faint);white-space:nowrap;cursor:help;vertical-align:baseline}
 .fx-record-note{margin:4px 0 8px;font-size:12px;line-height:1.5;color:var(--warning)}
 .fx-ln-card .fx-record-note{margin:6px 14px 0}
+
+/* ---- One header row like the dashboard (48px): back, title, tasks chip, pause, "•••"; status lives in the step bar ---- */
+.fx-top{flex-wrap:nowrap!important;height:48px;min-height:48px;padding:0 16px}
+.fx-title{display:flex;align-items:center;gap:8px;flex:1;min-width:0;flex-basis:auto!important;order:0!important}
+.fx-title h1{font-size:15px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fx-stepbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:6px 16px;border-bottom:1px solid var(--border);background:var(--surface)}
+.fx-home{flex:none}
+.fx-action-menu button:disabled{opacity:.45;cursor:default}
+.fx-action-menu button:disabled:hover{background:transparent}
+.fx-menu-divider{border:0;border-top:1px solid var(--border);margin:5px 0}
+.fx-action-menu .fx-risky.fx-confirm{color:var(--danger)}
+.fx-tech summary{min-height:32px;padding:0 12px;font-size:12px;display:flex;align-items:center}
+.fx-add-task{padding:6px 0 0}
+.fx-add-task .input{width:100%;height:44px;min-height:44px;box-sizing:border-box}
+.fx .fx-add-task{display:flex}
+.fx-mobile-tasks{display:none}
+.fx-pick a.fx-pick-row{display:flex;align-items:center;gap:12px;min-height:44px;padding:8px 16px}
+.fx-pick a.fx-pick-row strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.fx-pick a.fx-pick-row .key{display:inline;flex:none}
+.fx-pick a.fx-pick-row small{display:inline;margin:0;flex:none;max-width:30%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fx-row-chip{flex:none;border:1px solid var(--border-strong);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--text)}
+.fx-pick-row:hover .fx-row-chip{border-color:var(--brand);color:var(--brand)}
+.fx-show-all{margin-top:8px}
+.fx-empty .row{gap:8px;margin-top:12px}
+@media(max-width:720px){
+ .fx-top{padding:0 8px;gap:4px}
+ .fx-top>.fx-tools{display:flex}
+ .fx-exit .opt,.fx-tools [data-act=stop] .opt{display:none}
+ .fx-mobile-tasks{display:inline-flex;flex:none;padding:2px 10px;border:1px solid var(--border-strong);border-radius:999px;font-size:12px}
+ .fx-action-menu .fx-desktop{display:none}
+ .fx-back{display:none}
+ .fx-stepbar{padding:6px 12px;gap:8px}
+ /* 44px touch targets on a phone */
+ .fx-top .btn,.fx-mobile-tasks,.fx-tech summary,.fx-action-menu button{min-height:44px;align-items:center}
+ .fx-action-menu button{height:auto}
+}

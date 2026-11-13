@@ -37,7 +37,7 @@ navigate=function(to,gestureFinish=false){
  incoming.animate([{transform:to==='back'?'translateX(-20%)':'translateX(100%)'},{transform:'translateX(0)'}],{duration:300,easing:'cubic-bezier(.2,.8,.2,1)'});
  }
 };
-function refreshChatsSummary(){const questions=waitingQuestions();const markup=questions.length?`<div class="waiting-strip">${questions.slice(0,3).map(({c,m})=>actionButton('search-result',`<small>${esc(names[workspace(c)])} · Needs your OK</small><strong>${esc(m.text)}</strong>`,m.id,'waiting-card')).join('')}${actionButton('all-questions','See all','','waiting-card')}</div>`:'';if($('.waiting-strip'))$('.waiting-strip').outerHTML=markup;else $('#chat-list').insertAdjacentHTML('beforebegin',markup);}
+function refreshChatsSummary(){const markup=needsYouStrip();if($('.waiting-strip'))$('.waiting-strip').outerHTML=markup||'<div class="waiting-strip" hidden></div>';else if(markup)$('#chat-list').insertAdjacentHTML('beforebegin',markup);}
 const originalComposer=renderComposer;
 renderComposer=function(){originalComposer();if(recording||!$('#composer'))return;if(parent[chat])$('#composer').insertAdjacentHTML('beforeend',`<p class="composer-hint">${['Done','Stopped',"Didn't work"].includes(statusFor(chat))?'Saved for the next run':'Goes in after this task'}</p>`);if(answering){const m=findMessage(answering)?.m;$('#composer').insertAdjacentHTML('afterbegin',`<div class="answering-banner"><span class="fill"><small>Answering ${esc(names[workspace(chat)])}</small><span>${esc(m?.text)}</span></span>${actionButton('cancel-answer','×','','cancel-answer')}</div>`);$('#message-input').placeholder='Your answer…';}};
 const originalSendText=sendText;

@@ -364,7 +364,13 @@ def test_an_agent_that_is_starting_is_a_starting_row_not_idle_or_lost():
 def test_ticket_rows_use_one_status_chip_and_inline_next_step():
     src = webjs.all_js()
     tree = src[src.index("function treeBranch") : src.index("let ticketView")]
-    assert tree.count("ticketAttentionChip(t)") == 1  # the one chip: Needs you (yellow) or the status word
+    assert tree.count("ticketAttentionChip(t, section)") == 1  # one chip, told which section the row sits in
+    assert "ticketAttentionChip(t)" not in tree
+    chip = src[src.index("function ticketAttentionChip") : src.index("const localDay")]
+    assert "section === 'waiting' ? null" in chip  # Needs you is left out in the waiting section
+    assert "columnOf(status) === section) return null" in chip  # the status word is left out where it matches
+    nxt = src[src.index("function ticketNext") : src.index("function ticketMenu")]
+    assert "'Next step: '" in nxt and "text = 'Paused'" in nxt  # text only when it adds something
     assert "ticketNext(t)" in tree and "ticketMenu(t, 'tree')" in tree
     assert "activity(t," not in tree
 
@@ -593,7 +599,8 @@ def test_agent_line_waiting_text_has_no_command():
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
     src = webjs.all_js()
-    assert "No tickets are being worked on." in src and "No agent is working right now" not in src
+    assert "working.length ? homeSection('working-now', 'Working now'" in src  # empty section is hidden
+    assert "No tickets are being worked on." not in src and "No agent is working right now" not in src
     assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format
     assert (
@@ -747,10 +754,10 @@ def test_plain_names_and_history_dedupe():
 @node
 def test_footer_shows_the_relay_connection():
     on = {"settings": {"addons": [{"name": "relay", "active": True, "detail": {"connected": True}}]}}
-    assert call("footerState", on, False) == "Connected"
+    assert call("footerState", on, False) == ""
     off = {"settings": {"addons": [{"name": "relay", "active": True, "detail": {"connected": False}}]}}
-    assert call("footerState", off, False) == "Not connected yet"
-    assert call("footerState", {"settings": {"addons": []}}, False) == "Local workspace"
+    assert call("footerState", off, False) == "Not connected"
+    assert call("footerState", {"settings": {"addons": []}}, False) == ""
     assert call("footerState", on, True) == "Shared copy"
     assert "NetBird" not in (WEB / "helpers.js").read_text()
 

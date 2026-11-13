@@ -12,7 +12,7 @@
   const EXTRA = {finance: ['wallet', 'savings', 'cash', 'bank', 'receipt', 'growth', 'calculator'], bills: ['receipt'], taxes: ['bank', 'legal'], budget: ['savings', 'calculator']};
 
   let look = null, name = 'Workspace';
-  let open = false, draft = {icon: null, color: null}, cat = null, light = false;
+  let open = false, more = false, short = [], draft = {icon: null, color: null}, cat = null, light = false;
   let editing = false, descDraft = '', busy = false, status = '', statusTone = 'ok';
 
   const clean = v => String(v == null ? '' : v).normalize('NFC').trim();
@@ -112,6 +112,12 @@
       id ? svgIcon(id, 20) : n('b', {}, letter(name)), n('span', {}, label));
   }
 
+  // The first 12 icons: the current choice, recent ones, suggested ones, then the rest in order.
+  // Taken once when the picker opens so tiles never move under the pointer.
+  function firstIcons() {
+    return [...new Set([draft.icon, look.icon, ...recent(), ...suggested(), ...Object.keys(D.icons)].filter(i => i && D.icons[i]))].slice(0, 12);
+  }
+
   function picker() {
     const rec = recent();
     if (!cat || (cat === 'recent' && !rec.length)) cat = rec.length ? 'recent' : 'suggested';
@@ -121,18 +127,22 @@
     const swatches = [n('button', {type: 'button', className: 'lk-sw auto', 'data-lk': 'color', 'data-v': '', 'data-key': 'lk-color-auto', title: 'Automatic', 'aria-label': 'Automatic colour', 'aria-pressed': String(!draft.color)})]
       .concat(COLORS.map(c => n('button', {type: 'button', className: 'lk-sw', 'data-c': c.id, 'data-lk': 'color', 'data-v': c.id, 'data-key': 'lk-color-' + c.id, title: c.label, 'aria-label': c.label, 'aria-pressed': String(draft.color === c.id)})));
     const changed = (draft.icon || null) !== (look.icon || null) || (draft.color || null) !== (look.color || null);
-    const prev = (size, label, shape) => n('div', {className: 'lk-pv-row'}, badge(draft, name, size, {light}), n('div', {}, n('b', {}, clean(name)), n('div', {className: 'meta'}, label)));
+    const prev = (size, label) => n('div', {className: 'lk-pv-row'}, badge(draft, name, size, {light}), n('div', {}, n('b', {}, clean(name)), n('div', {className: 'meta'}, label)));
+    const icons = more
+      ? [n('div', {className: 'lk-chips', role: 'tablist', 'aria-label': 'Icon groups'}, cats.map(([k, l]) => tab(k, l))),
+        n('div', {className: 'lk-grid', 'data-key': 'lk-grid'}, cat === 'suggested' || cat === 'recent' ? tile(null) : null, ids.map(tile))]
+      : [n('div', {className: 'lk-grid', 'data-key': 'lk-grid'}, tile(null), short.map(tile))];
     return n('div', {className: 'lk-picker', 'data-key': 'lk-picker', 'data-c': tone},
       n('div', {},
         n('p', {className: 'meta'}, 'Icon'),
-        n('div', {className: 'lk-chips', role: 'tablist', 'aria-label': 'Icon groups'}, cats.map(([k, l]) => tab(k, l))),
-        n('div', {className: 'lk-grid', 'data-key': 'lk-grid'}, cat === 'suggested' || cat === 'recent' ? tile(null) : null, ids.map(tile)),
+        icons,
+        n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'more', 'data-key': 'lk-more', 'aria-expanded': String(more)}, more ? 'Fewer icons' : 'More icons'),
         n('p', {className: 'meta lk-colour-label'}, 'Colour · ', n('b', {}, draft.color ? BYID[draft.color].label : 'Automatic')),
         n('div', {className: 'lk-swatches', role: 'group', 'aria-label': 'Colour'}, swatches)),
       n('div', {className: 'lk-preview' + (light ? ' light' : ''), 'aria-live': 'polite'},
         n('div', {className: 'lk-pv-head'}, n('p', {className: 'eyebrow grow'}, 'How it looks'),
           n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'light', 'data-key': 'lk-light'}, light ? 'Dark' : 'Light')),
-        prev(32, 'Dashboard and shared pages'), prev(46, 'Phone'), prev(16, 'Browser tab, real size')),
+        prev(32, 'In the dashboard, on your phone and on shared pages')),
       n('div', {className: 'lk-foot'},
         n('span', {className: 'meta grow'}, 'Shown in the dashboard, on your phone and on shared pages.'),
         n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'cancel', 'data-key': 'lk-cancel'}, 'Cancel'),
@@ -163,7 +173,7 @@
       n('h2', {className: 'set-sub'}, 'Workspace look'),
       n('div', {className: 'card'},
         n('div', {className: 'card-row', 'data-key': 'lk-look-row'}, n('span', {className: 'set-label'}, 'Icon and colour'),
-          n('div', {className: 'grow lk-current'}, badge(look, name, 32), n('span', {className: 'meta'}, lookText(look))),
+          n('div', {className: 'grow lk-current'}, badge(open ? draft : look, name, 32), n('span', {className: 'meta', 'data-testid': 'look-summary'}, lookText(open ? draft : look))),
           open ? null : n('button', {type: 'button', className: 'btn sm', 'data-lk': 'open', 'data-key': 'lk-open', 'data-testid': 'look-change'}, 'Change')),
         open ? picker() : null,
         descriptionRow(),
@@ -173,7 +183,7 @@
             n('p', {className: 'meta'}, 'On files you share with a link. Turn off to show nothing.')),
           n('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': String(on), 'aria-label': 'Show workspace name and icon on shared pages', 'data-lk': 'shared', 'data-key': 'lk-shared', 'data-testid': 'look-shared-pages', disabled: busy}))),
       status ? n('p', {className: 'meta lk-status ' + statusTone, role: 'status', 'data-key': 'lk-status'}, status) : null,
-      set === null && look.set_by === null ? n('p', {className: 'meta'}, 'Nobody has picked an icon yet. A helper can pick one for you, or press Change.') : null);
+      !open && !set && look.set_by == null ? n('p', {className: 'meta'}, 'Nobody has picked an icon yet. A helper can pick one for you, or press Change.') : null);
   }
 
   function repaint() {
@@ -212,11 +222,12 @@
     if (!t || !look || t.disabled) return;
     const v = t.dataset.v;
     switch (t.dataset.lk) {
-      case 'open': open = true; draft = {icon: look.icon || null, color: look.color || null}; cat = null; status = ''; repaint(); break;
+      case 'open': open = true; more = false; draft = {icon: look.icon || null, color: look.color || null}; short = firstIcons(); cat = null; status = ''; repaint(); break;
       case 'cancel': open = false; repaint(); break;
-      case 'icon': draft.icon = v || null; repaint(); break;
+      case 'icon': draft.icon = v || null; if (draft.icon && !short.includes(draft.icon)) short = [draft.icon, ...short].slice(0, 12); repaint(); break;
       case 'color': draft.color = v || null; repaint(); break;
       case 'cat': cat = v; repaint(); break;
+      case 'more': more = !more; repaint(); break;
       case 'light': light = !light; repaint(); break;
       case 'save': {
         const r = await run('look.set', {icon: draft.icon, color: draft.color});
