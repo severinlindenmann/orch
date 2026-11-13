@@ -242,3 +242,28 @@ def test_stand_in_answers_while_orch_entry_is_gone(tmp_path, monkeypatch):
     (site / orch_entry.STAND_IN_PTH).unlink()
     orch_entry.ensure_stand_in()
     assert not (site / orch_entry.STAND_IN_PTH).exists()
+
+
+def test_reinstall_swaps_orch_packages_in_place(tmp_path, monkeypatch):
+    """With a receipt, uv reinstalls orch's own packages by name (no whole-env --reinstall that removes the
+    Scripts folder while an orch runs); without one, the whole env as before."""
+    env = tmp_path / "orch-workspace"
+    env.mkdir()
+    monkeypatch.setattr(addons.sys, "prefix", str(env))
+    assert addons._reinstall_flags() == ["--reinstall"]
+    (env / "uv-receipt.toml").write_text(
+        "[tool]\nrequirements = [\n"
+        '    { name = "orch-workspace", url = "https://x/a.zip", subdirectory = "workspace" },\n'
+        '    { name = "orch-dashboard", url = "https://github.com/x/orch/archive/abc.zip" },\n'
+        '    { name = "--evil" },\n'
+        "]\n"
+    )
+    assert addons._reinstall_flags() == [
+        "--reinstall-package",
+        "orch-workspace",
+        "--reinstall-package",
+        "orch-dashboard",
+    ]
+    args = addons._tool_args([])
+    assert "--reinstall" not in args
+    assert args[:4] == ["tool", "install", "--reinstall-package", "orch-workspace"]
