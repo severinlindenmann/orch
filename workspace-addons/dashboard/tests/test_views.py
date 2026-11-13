@@ -52,7 +52,12 @@ BUTTON = {"label": "Start", "action": {"op": "addon.start"}}
 
 
 def test_notice_button_is_passed_through():
-    v = {**example(), "notice": "Automation is stopped: nothing starts by itself.", "notice_tone": "warn", "button": BUTTON}
+    v = {
+        **example(),
+        "notice": "Automation is stopped: nothing starts by itself.",
+        "notice_tone": "warn",
+        "button": BUTTON,
+    }
     assert not list(VALIDATOR.iter_errors(v))
     assert check_view(v)["button"] == BUTTON
 
