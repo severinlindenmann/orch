@@ -24,4 +24,6 @@ def test_dark_only_and_values():
     t = json.loads((BRAND / "tokens.json").read_text())
     assert t["schema"] == "orch.tokens/1" and t["mode"] == "dark-only"
     css = (BRAND / "tokens.css").read_text()
-    assert "--brand: #2fc6a3;" in css and "--fs-5: 28px;" in css and "--h: 36px;" in css
+    assert "--brand: #61d5b8;" in css and "--fs-5: 28px;" in css and "--h: 36px;" in css
+    assert "--fs-body: 14px;" in css and "--row-height: 40px;" in css and "--s9: 64px;" in css
+    assert "--addon: var(--brand);" in css and "#f07a2e" not in css

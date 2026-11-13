@@ -692,11 +692,11 @@ function ticketButton(label, cls, click, attrs = {}) {
   node.onclick = click;
   return node;
 }
-// "Review and bring back": a dialog shows exactly what the click approves (the tip, the count, the first
+// "Changes to add": a dialog shows exactly what the click approves (the tip, the count, the first
 // control paths; all made plain on the server) and sends back that same tip, count and path hash.
 function ticketBringBackDialog(t) {
   const b = t.bring_back || {}, paths = array(b.paths).map(p => clean(p)), count = Number(b.control_paths) || 0;
-  const {d, actions} = dialog('Bring back this work?');
+  const {d, actions} = dialog('Add these changes to your files?');
   const more = Math.max(0, count - paths.length);
   const body = [
     h('p', {}, 'Tip ', h('code', {}, clean(String(b.tip || '').slice(0, 12)))),
@@ -707,7 +707,7 @@ function ticketBringBackDialog(t) {
     paths.length ? h('ul', {className:'bring-back-paths', 'data-key':'bring-back-paths'}, paths.map(p => h('li', {}, h('code', {}, p)))) : null,
     more ? h('p', {className:'meta'}, 'and ' + more + ' more') : null,
   ].filter(Boolean);
-  const go = ticketButton('Bring back', 'primary', async () => {
+  const go = ticketButton('Add to my files', 'primary', async () => {
     if (go.disabled) return;
     go.disabled = true;
     const r = await act('copies.approve', {ticket:t.id, tip:b.tip, control_paths:b.control_paths, paths_hash:b.paths_hash});
@@ -724,8 +724,8 @@ function ticketBringBackRow(t) {
     const r = await act('copies.ask-update', {ticket:t.id});
     window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
   }) : null;
-  return h('div', {className:'row', 'data-key':'bring-back'}, h('span', {}, 'Done · changes waiting'), h('span', {}, clean(b.reason)),
-    !snapshot && b.tip ? ticketButton('Review and bring back', 'outline sm', () => ticketBringBackDialog(t)) : null, ask);
+  return h('div', {className:'row', 'data-key':'bring-back'}, h('span', {}, 'Changes to add'), h('span', {}, clean(b.reason)),
+    !snapshot && b.tip ? ticketButton('Add to my files', 'outline sm', () => ticketBringBackDialog(t)) : null, ask);
 }
 let ticketHistoryTechnical = false;
 let ticketHistoryActor = 'All';

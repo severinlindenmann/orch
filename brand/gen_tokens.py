@@ -24,6 +24,7 @@ def render(t: dict) -> str:
     out += [f"  --{k}: {v};" for k, v in t["color"].items()]
     out += [f"  --{k}: {v};" for k, v in t.get("font", {}).items()]
     out += [f"  --{k}: {v}px;" for k, v in t.get("size", {}).items()]
+    out += [f"  --{k}: {v};" for k, v in t.get("layout", {}).items()]
     for i, (k, v) in enumerate(t["type"].items(), 1):
         out.append(f"  --fs-{i}: {v}px; /* {k} */")
     out += [f"  --s{i}: {v}px;" for i, v in enumerate(t["space"], 1)]

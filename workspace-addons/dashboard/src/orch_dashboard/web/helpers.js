@@ -6,11 +6,11 @@
   else root.DashHelpers = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   const arr = v => Array.isArray(v) ? v : [];
-  const STATUS_WORD = {open: 'Not started', ready: 'Not started', active: 'Working', waiting: 'Needs you', review: 'Ready for review', done: 'Done', dropped: 'Dropped'};
+  const STATUS_WORD = {open: 'To do', ready: 'To do', active: 'Working', waiting: 'Needs you', review: 'Check', done: 'Done', dropped: 'Dropped'};
   /* The ONE source of status words and order (board columns, Home, ticket page, Move to, history, lists).
      Lifecycle order. "ready" is the same place as "open" (no separate word); "waiting" shows as "Needs you". */
   const STATUS_ORDER = ['open', 'active', 'waiting', 'review', 'done'];
-  const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'Not started';
+  const statusWord = (status, started) => (status === 'open' || status === 'ready') && started === true ? 'Paused' : STATUS_WORD[status] || 'To do';
   const columnOf = status => status === 'ready' ? 'open' : status;
   const STATUS_CHOICES = STATUS_ORDER.map(s => [s, STATUS_WORD[s]]);
   // "Move to" offers four places; Waiting is decided by the agent.
@@ -465,6 +465,18 @@
   }
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
+  // "x of y steps": one pattern for every step counter (always "steps").
+  const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + ' steps';
+  // Topbar freshness: when /api/state last answered. Under a minute is "just now".
+  function updatedText(at, nowMs) {
+    const t = typeof at === 'number' ? at : Date.parse(at);
+    if (!Number.isFinite(t)) return '';
+    const min = Math.floor(Math.max(0, (Number(nowMs) || Date.now()) - t) / 60000);
+    if (min < 1) return 'Updated just now';
+    if (min < 60) return 'Updated ' + min + ' min ago';
+    const hours = Math.floor(min / 60);
+    return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
+  }
 
-  return {resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, needsYouCount, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, needsYou, needsYouCount, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

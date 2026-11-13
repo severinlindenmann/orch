@@ -21,7 +21,7 @@ function ticketParents(items) {
   });
 }
 function ticketGroups(items) {
-  const groups = [['waiting', 'Needs you'], ['active', 'Working'], ['open', 'Not started'], ['review', 'Ready for review'], ['done', 'Done']].map(([status, title]) => ({status, title, tickets:[]}));
+  const groups = ['waiting', 'active', 'open', 'review', 'done'].map(status => [status, window.DashHelpers.STATUS_WORD[status]]).map(([status, title]) => ({status, title, tickets:[]}));
   const byId = new Map(items.map(t => [t.id, t]));
   const own = t => { const column = window.DashHelpers.columnOf(shown(t).status); return questions(t).length || column === 'waiting' ? 'waiting' : column; };
   // A part sits under its parent in the parent's group, whatever its own status is (its status chip still says it).
@@ -106,7 +106,7 @@ function treeBranch(rows, index, section) {
   const node = h('div', {className:'card-row ticket-row' + (row.depth ? ' child' : ''), 'data-key':'tree-' + t.id},
     row.children ? h('button', {type:'button', className:'btn ghost icon sm', 'data-action':'tree', 'data-ticket':t.id, 'aria-expanded':open, 'aria-label':(open ? 'Collapse ' : 'Expand ') + clean(t.title)}, iconEl('down')) : null,
     h('div', {className:'grow'}, h('h3', {}, h('a', {href:href(t.id)}, clean(t.title)), titleTag(t)), ticketNext(t),
-      row.children ? h('p', {className:'meta'}, row.done + ' of ' + row.children + ' steps done') : null,
+      row.children ? h('p', {className:'meta'}, window.DashHelpers.stepsText(row.done, row.children)) : null,
       row.parentMissing ? parentLine(t) : null),
     h('div', {className:'row ticket-meta'}, ticketAttentionChip(t, section), tasks.length ? h('span', {className:'meta'}, tasks.filter(window.DashHelpers.resolved).length + '/' + tasks.length) : null,
       name(t.owner) ? h('span', {className:'avatar', title:name(t.owner), 'aria-label':name(t.owner)}, initials(t.owner)) : null,
@@ -186,7 +186,8 @@ function moveTicket(id, status, undoing = false, extra = {}) {
 }
 function list() {
   const visible = filteredTickets();
-  const top = [heading('Tickets'), viewToggle()];
+  const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
+  const top = [heading('Tickets', needN ? window.DashHelpers.needsYou(needN) : ''), viewToggle()];
   if (!visible.length && (ticketSearch || ticketMine)) return fragment(top, h('div', {className:'card card-row'}, h('p', {className:'grow'}, 'No tickets match.'), button('Clear', 'outline sm', clearTicketFilters)));
   if (ticketView === 'board' && tickets().length) return fragment(top, board());
   return fragment(top, !tickets().length ? card('empty', 'Tickets', '', firstTicket()) : ticketGroups(visible).map(({status, title, tickets:items}) => {

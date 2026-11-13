@@ -1,0 +1,4 @@
+- Merged the B board with five readable scrolling columns, inline search, owners, real times, and pending changes; aligned List and New metadata. Kept the alternative.
+- Shared snapshot: 3 need you; Anna and Ben own tickets; Helper is the helper. Newsletter 23 min; survey 12:26; sign 12:32; typo 12:27; question 27 min.
+- Motion: retain entry, progress and status transitions; honor reduced motion. Preview stays collapsed until requested.
+- Performance target: no new dependencies or external network requests; interactions below 100 ms and animation frames below 16.7 ms. Loading and empty states remain available through the Preview pill.

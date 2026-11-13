@@ -2,7 +2,7 @@
 .notes-empty{padding:16px}
 .note-entry{padding:12px 16px;border-bottom:1px solid var(--border)}.note-entry:last-child{border-bottom:0}
 .note-head{margin-bottom:6px}
-.why{display:grid;grid-template-columns:120px 1fr;gap:4px 12px;font-size:13px;margin:0}
+.why{display:grid;grid-template-columns:120px 1fr;gap:4px 12px;font-size:14px;margin:0}
 .why dt{color:var(--text-muted)}.why dd{margin:0}
 @media (max-width:720px){.why{grid-template-columns:1fr}}
 .ticket-outcome .why{padding:12px 16px}

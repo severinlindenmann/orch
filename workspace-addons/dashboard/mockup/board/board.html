@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Tickets · orch</title>
+<link rel="stylesheet" href="../system/system.css">
+<style>
+:root{--surface-raised:#1b1f26;--surface-hover:#20252d;--border-card:#3a414b;--border-card-hover:#56606c;--lane:#14171c}
+/* top bar carries the page title, count, what waits on you */
+.tb-title{display:flex;align-items:center;gap:12px;min-width:0}
+.tb-title h1{font-size:20px;line-height:28px;letter-spacing:-.015em}
+.count-n{display:inline-grid;place-items:center;min-width:24px;height:20px;padding:0 8px;border-radius:99px;background:var(--surface-3);color:var(--text-muted);font:500 12px/16px var(--font-mono);font-variant-numeric:tabular-nums}
+.wait-link{display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:99px;background:var(--warning-soft);color:var(--warning);font-size:12px;line-height:16px;font-weight:500;text-decoration:none}
+.wait-link:hover{text-decoration:underline}
+.updated{font-size:12px;color:var(--text-faint);margin-right:4px}
+.loadbar{position:absolute;left:0;right:0;bottom:-1px;height:2px;overflow:hidden;opacity:0}
+.loadbar:after{content:'';position:absolute;inset:0;width:30%;background:var(--brand);animation:lb 1100ms var(--ease-move) infinite}
+html[data-state=loading] .loadbar{animation:lb-show 1ms linear 80ms forwards}
+@keyframes lb{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@keyframes lb-show{to{opacity:1}}
+
+/* page */
+.board-page{max-width:none;padding:16px var(--page-gutter) 24px;gap:12px}
+.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:40px}
+.toolbar .segmented{padding:2px}
+.toolbar .segmented .btn{min-height:30px;gap:6px}
+.jump{display:flex;gap:4px;flex-wrap:wrap}
+.jchip{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:4px 10px;border:1px solid var(--border);border-radius:99px;background:transparent;color:var(--text-muted);font-size:12px;line-height:16px;font-weight:500;transition:background-color var(--dur-fast) var(--ease-move),color var(--dur-fast) var(--ease-move),border-color var(--dur-fast) var(--ease-move)}
+.jchip:hover{background:var(--surface-2);color:var(--text);border-color:var(--border-strong)}
+.jchip b{font:500 12px/16px var(--font-mono);color:var(--text)}
+.jchip.attn{border-color:#5a4a2c}
+.sdot{width:8px;height:8px;border-radius:50%;background:var(--c,var(--text-faint))}
+.filter{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)}
+.filter select{width:auto;min-height:32px;padding:4px 28px 4px 10px;background:var(--surface);border-color:var(--border);font-size:14px}
+.search{position:relative;display:flex;align-items:center;width:224px}
+.search svg{position:absolute;left:10px;color:var(--text-faint)}
+.search input{min-height:32px;padding:4px 36px 4px 32px;background:var(--surface);border-color:var(--border)}
+.search input:focus{border-color:var(--border-strong)}
+.search kbd{position:absolute;right:6px;min-width:20px;padding:0 4px;font-size:12px}
+#clear{min-height:32px}
+
+/* board: columns breathe instead of squeezing; Done is a rail on small screens */
+.board{display:grid;gap:12px;grid-template-columns:repeat(4,minmax(208px,1fr)) 56px;align-items:stretch}
+.board.done-open{grid-template-columns:repeat(5,minmax(224px,1fr));overflow-x:auto;padding-bottom:8px}
+.col{--c:var(--text-faint);display:flex;flex-direction:column;min-height:calc(100dvh - 160px);background:var(--lane);border:1px solid #1f242b;border-top:2px solid var(--c);border-radius:10px}
+.col[data-col=working]{--c:var(--working)}.col[data-col=needs],.col[data-col=check]{--c:var(--warning)}.col[data-col=done]{--c:var(--success)}
+.col-h{display:flex;align-items:center;gap:8px;min-height:44px;padding:8px 8px 8px 12px;border-radius:8px 8px 0 0}
+.col-h h2{display:flex;align-items:center;gap:8px;font-size:14px;line-height:20px;letter-spacing:0}
+.col-h h2 svg{width:16px;height:16px;color:var(--c)}
+.col-h .add{margin-left:auto;opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
+.col:hover .add,.col-h .add:focus-visible{opacity:1}
+.col-body{display:flex;flex-direction:column;gap:8px;padding:0 8px 8px}
+.col-empty{display:none;padding:16px 8px;text-align:center;font-size:12px;color:var(--text-faint);border:1px dashed var(--border);border-radius:8px}
+.col.is-empty .col-empty{display:block}
+.col-h.status-change{animation:head-pulse 200ms var(--ease-enter)}
+@keyframes head-pulse{50%{background:var(--surface-2)}}
+.rail{display:none}
+.board:not(.done-open) .col[data-col=done]>.col-h,.board:not(.done-open) .col[data-col=done]>.col-body{display:none}
+.board:not(.done-open) .rail{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;flex:1;padding:12px 0;border:0;background:transparent;color:var(--text-muted);border-radius:8px}
+.rail:hover{background:var(--surface);color:var(--text)}
+.rail .v{writing-mode:vertical-rl;font-size:14px;font-weight:600;color:var(--text)}
+.rail svg{width:16px;height:16px;color:var(--success)}
+.collapse-done{display:none}
+.board.done-open .collapse-done{display:inline-flex}
+@media(min-width:1600px){
+ .board,.board.done-open{grid-template-columns:repeat(5,minmax(0,1fr));overflow:visible}
+ .board .col[data-col=done]>.col-h,.board .col[data-col=done]>.col-body{display:flex!important}
+ .board .rail,.board .collapse-done{display:none!important}
+ .col{min-height:calc(100dvh - 176px)}
+}
+
+/* ticket card: information first, actions on hover */
+.tcard{--a:transparent;position:relative;display:grid;gap:8px;padding:10px 12px 10px 14px;background:var(--surface-raised);border:1px solid var(--border-card);border-radius:8px;transition:border-color var(--dur-fast) var(--ease-move),background-color var(--dur-fast) var(--ease-move)}
+.tcard:before{content:'';position:absolute;left:-1px;top:8px;bottom:8px;width:2px;border-radius:2px;background:var(--a)}
+.tcard[data-state=working]{--a:var(--working)}.tcard[data-state=needs],.tcard[data-state=check]{--a:var(--warning)}.tcard[data-state=done]{--a:#98cda399}
+.tcard:hover,.tcard:focus-within{border-color:var(--border-card-hover);background:var(--surface-hover)}
+.tc-title{font-size:14px;line-height:20px;font-weight:500;color:var(--text);text-decoration:none;padding-right:24px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tc-title:after{content:'';position:absolute;inset:0;border-radius:8px}
+.tc-title:focus-visible{outline:none}.tc-title:focus-visible:after{outline:2px solid var(--brand);outline-offset:2px}
+.tcard[data-state=done] .tc-title{color:var(--text-muted)}
+.tc-line{display:flex;align-items:center;gap:8px;font-size:12px;line-height:16px;color:var(--text-muted);min-width:0}
+.tc-line svg{width:14px;height:14px}
+.tc-line.working{color:var(--working)}
+.tc-line.needs{color:var(--warning);font-weight:500}
+.tc-line.done{color:var(--success)}
+.live{width:6px;height:6px;border-radius:50%;background:var(--working);animation:live 2s ease-in-out infinite}
+@keyframes live{50%{opacity:.35}}
+.bar{flex:1;height:3px;min-width:32px;background:var(--surface-3);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:var(--v);background:var(--working);border-radius:3px;transition:width var(--dur-base) var(--ease-move)}
+.tc-line .n{font-family:var(--font-mono);color:var(--text-muted)}
+.tc-meta{display:flex;align-items:center;gap:8px;min-height:24px;font-size:12px;line-height:16px;color:var(--text-muted)}
+.who{display:inline-flex;align-items:center;gap:6px;color:var(--text-muted)}
+.who .avatar{width:20px;height:20px;font-size:12px}
+.when{margin-left:auto;color:var(--text-faint);white-space:nowrap;transition:opacity var(--dur-fast) var(--ease-move)}
+.tc-act{position:relative;z-index:1;margin-left:auto}
+.tc-act.hover{position:absolute;right:8px;bottom:8px;opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
+.tcard:hover .tc-act.hover,.tcard:focus-within .tc-act.hover{opacity:1}
+.tcard:hover .when:has(+.tc-act.hover),.tcard:focus-within .when:has(+.tc-act.hover){opacity:0}
+.tc-act.attn{border-color:#6b5730;color:var(--warning);background:var(--warning-soft)}
+.tc-act.attn:hover{background:#4a3d27}
+.tcard:not([data-state=todo]) [data-act=start]{display:none}
+.tc-more{position:absolute;z-index:1;top:6px;right:6px;opacity:0;color:var(--text-muted);transition:opacity var(--dur-fast) var(--ease-move)}
+.tcard:hover .tc-more,.tcard:focus-within .tc-more,.tc-more[aria-expanded=true]{opacity:1}
+.tcard.landed{animation:land 200ms var(--ease-enter)}
+@keyframes land{from{opacity:0;transform:translateY(-4px);box-shadow:0 0 0 2px var(--brand)}to{opacity:1;transform:none;box-shadow:0 0 0 0 transparent}}
+
+/* shared card menu (one floating menu, never clipped) */
+#card-menu{position:fixed;z-index:60;width:216px}
+#card-menu[data-open]{animation:page-in var(--dur-base) var(--ease-enter)}
+#card-menu .sep{height:1px;margin:4px 0;background:var(--border)}
+#card-menu .eyebrow{padding:4px 12px}
+#card-menu [aria-checked=true]:after{content:'✓';margin-left:auto;color:var(--brand)}
+#card-menu details summary{padding:8px 12px;min-height:36px;font-size:14px;color:var(--text)}
+#card-menu details p{padding:0 12px 8px;font-size:12px;color:var(--text-faint)}
+
+/* entry animation */
+.enter .col{animation:page-in 160ms var(--ease-enter) both;animation-delay:calc(var(--ci,0)*30ms)}
+.enter .tcard{animation:card-in 160ms var(--ease-enter) both;animation-delay:calc(var(--ci,0)*30ms + 40ms + var(--i,0)*25ms)}
+.enter .toolbar,.enter #empty{animation:page-in 160ms var(--ease-enter) both}
+@keyframes card-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* states */
+#skel,#empty{display:none}
+html[data-state=loading] #board,html[data-state=empty] #board{display:none}
+html[data-state=loading] #skel{display:grid}
+html[data-state=empty] #empty{display:grid}
+html[data-state=loading] .tb-dyn,html[data-state=empty] #wait{display:none!important}
+html[data-state=loading] .toolbar .jump,html[data-state=empty] .toolbar .jump{opacity:.5;pointer-events:none}
+.sk-col{display:flex;flex-direction:column;gap:8px;padding:12px 8px;min-height:calc(100dvh - 160px);background:var(--lane);border:1px solid #1f242b;border-top:2px solid var(--surface-3);border-radius:10px}
+.sk-card{display:grid;gap:8px;padding:12px;height:84px;background:var(--surface-raised);border:1px solid var(--border-card);border-radius:8px}
+@media(max-width:1599px){.sk-col.sk-done .sk-card,.sk-col.sk-done .skeleton.line{display:none}.sk-col.sk-done{align-items:center}}
+@media(min-width:1600px){#skel{grid-template-columns:repeat(5,minmax(0,1fr))}}
+#empty{place-items:center;align-content:center;gap:16px;min-height:calc(100dvh - 160px);padding:48px 24px;background:var(--lane);border:1px dashed var(--border-strong);border-radius:12px;text-align:center}
+#empty h2{font-size:20px}
+#empty p{max-width:52ch;color:var(--text-muted)}
+#empty .ex{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+#empty .flow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;font-size:12px;color:var(--text-faint)}
+
+/* preview controls + toasts */
+.pc{position:fixed;right:12px;bottom:12px;z-index:90;display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;font-size:12px;line-height:16px;box-shadow:var(--lift-shadow)}
+.pc span{color:var(--text-faint);padding:0 4px}
+.pc a{padding:4px 8px;border-radius:4px;color:var(--text-muted);text-decoration:none}
+.pc a:hover{background:var(--surface-3);color:var(--text)}
+.pc a[aria-current]{background:var(--brand-soft);color:var(--brand)}
+.toasts{bottom:64px}
+
+.board-page .board{grid-template-columns:repeat(5,minmax(200px,1fr))!important;overflow-x:auto;padding-bottom:16px}.board-page .col[data-col=done] .col-h,.board-page .col[data-col=done] .col-body{display:flex!important;visibility:visible!important}.board-page .col[data-col=done] .col-body{display:block!important}.board-page .col[data-col=done]{width:auto!important;min-width:200px}.rail,.collapse-done{display:none!important}.toolbar{flex-wrap:nowrap!important}.toolbar .search{width:220px;min-width:140px}.tc-line{flex-wrap:wrap}.n{white-space:nowrap}
+.result-snippet{display:flex;gap:8px;align-items:center;font-size:12px;text-decoration:none}.result-snippet>span:last-child{line-height:18px}.board .tc-title{-webkit-line-clamp:3}.board .tc-meta{flex-wrap:wrap}</style>
+</head>
+<body class="has-shell">
+<a class="skip-link btn primary" href="#content">Skip to content</a>
+<div class="shell">
+<aside class="sidebar" aria-label="Workspace navigation">
+<a class="brand" href="../home/home.html" aria-label="orch home"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg><span class="brand-word">orch</span></a>
+<details class="workspace"><summary class="ws-switch" aria-label="Choose workspace, Demo selected"><span class="wsb">D</span><span class="ws-text"><strong>Demo</strong><span class="meta">Workspace</span></span><span class="ws-chev" aria-hidden="true">⌄</span></summary><div class="menu"><p class="eyebrow pad">Your workspace</p><a class="menu-item" href="../home/home.html"><span class="wsb">D</span> Demo <span class="grow"></span>✓</a><a class="menu-item" href="../relay/relay.html">Manage workspaces →</a></div></details>
+<div class="sidebar-scroll"><nav aria-label="Main"><a class="nav-item" href="../home/home.html" aria-label="Home"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/></svg><span class="nav-label">Home</span><span class="count" id="nav-count" aria-label="3 need you">3</span></a><a class="nav-item" href="../board/board.html" aria-label="Tickets" aria-current="page"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg><span class="nav-label">Tickets</span></a><a class="nav-item" href="../notes/notes.html" aria-label="Notes"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5zM8 8h8m-8 4h8m-8 4h5"/></svg><span class="nav-label">Notes</span></a><a class="nav-item" href="../chat/chat.html" aria-label="Chat"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z"/><path d="M8 8h8m-8 4h5"/></svg><span class="nav-label">Chat</span></a></nav>
+<details class="nav-group"><summary class="nav-item" aria-label="Ticket views"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg><span class="nav-label">Ticket views</span></summary><nav class="saved-views" aria-label="Saved ticket views"><a class="nav-item" href="../board/board.html?view=needs-you" aria-label="Needs me">Needs me</a><a class="nav-item" href="../board/board.html?view=working" aria-label="Working now">Working now</a><a class="nav-item" href="../board/board.html?view=done-week" aria-label="Done this week">Done this week</a></nav></details>
+<details class="nav-group" open><summary class="nav-item" aria-label="Add-ons"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="nav-label">Add-ons</span></summary><nav aria-label="Add-ons"><a class="nav-item" href="../automation/automation.html" aria-label="Automation"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-7z"/></svg><span class="nav-label">Automation</span></a><a class="nav-item" href="../focus/focus.html" aria-label="Focus"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5"/><circle cx="12" cy="12" r="3"/></svg><span class="nav-label">Focus</span></a><a class="nav-item" href="../insights/insights.html" aria-label="Insights"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v17h17M8 16v-4m5 4V7m5 9v-6"/></svg><span class="nav-label">Insights</span></a><a class="nav-item" href="../sync/sync.html" aria-label="Sync"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 9a8 8 0 0 0-14-3L3 9m0-5v5h5m-4 6a8 8 0 0 0 14 3l3-3m0 5v-5h-5"/></svg><span class="nav-label">Sync</span></a><a class="nav-item" href="../publish/publish.html" aria-label="Shared links"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><span class="nav-label">Shared links</span></a><a class="nav-item" href="../relay/relay.html" aria-label="Phone &amp; workspaces"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/></svg><span class="nav-label">Phone &amp; workspaces</span></a></nav></details></div>
+<div class="side-foot"><a class="nav-item" href="../settings/settings.html" aria-label="Settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 3 2 2-1 4 3 2 3-1 3 3 3-1 1-4 3-2-1-4-3-1-1-3z"/></svg><span class="nav-label">Settings</span></a></div></aside>
+
+<div class="shell-body">
+<header class="topbar">
+ <div class="tb-title"><h1>Tickets</h1><span class="count-n tb-dyn" id="total" aria-label="tickets in total">11</span>
+  <a class="wait-link tb-dyn" id="wait" href="#col-needs" data-jump="needs"><span class="sdot" style="--c:var(--warning)"></span><span><span id="waitn">2</span> need you</span></a></div>
+ <div class="topbar-actions"><span class="updated tb-dyn" id="updated" aria-live="polite">Updated just now</span><a class="btn ghost sm" href="../chat/chat.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Ask the helper</a><a class="btn primary sm" href="../board/new.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</a></div>
+ <span class="loadbar" aria-hidden="true"></span>
+</header>
+
+<main id="content" class="page wide board-page" tabindex="-1" aria-label="Tickets">
+<div id="anim" class="enter" style="display:contents">
+ <div class="toolbar" role="toolbar" aria-label="Show and filter tickets">
+  <div class="segmented" role="group" aria-label="How to show tickets">
+   <a class="btn" href="list.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>List</a>
+   <button class="btn" type="button" aria-pressed="true"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg>Board</button>
+  </div>
+  
+  <span class="grow"></span>
+  <button class="btn ghost sm" type="button" id="clear" hidden>Clear filters</button>
+  <label class="filter">Person <select id="person"><option value="">Everyone</option><option value="Anna">Anna</option><option value="Ben">Ben</option></select></label>
+  <div class="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input type="search" id="q" placeholder="Search tickets" aria-label="Search tickets"><kbd aria-hidden="true">/</kbd></div>
+ </div>
+
+ <!-- LOADED -->
+ <div class="board" id="board">
+  <section class="col" id="col-todo" data-col="todo" style="--ci:0" aria-labelledby="h-todo">
+   <header class="col-h"><h2 id="h-todo" title="To do yet"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/></svg>To do</h2><span class="count-n" data-count="todo">4</span><a class="btn ghost icon xs add" href="../board/new.html" aria-label="New ticket"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></a></header>
+   <div class="col-body">
+    <article class="tcard" data-state="todo" data-person="Anna" data-ref="t_ceu9qj">
+     <a class="tc-title" href="../ticket/ticket-copy.html">Set up the weekly sales report</a>
+     <div class="tc-line">2 steps planned</div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">Added yesterday</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Set up the weekly sales report"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_05uo1r">
+     <a class="tc-title" href="../ticket/ticket-copy.html">Redesign the logo</a>
+     <div class="tc-line"><span>Paused</span><span class="bar"><i style="--v:50%"></i></span><span class="n">1 of 2 steps</span></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">2 days ago</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Redesign the logo"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_3lhp1y">
+     <a class="tc-title" href="../ticket/ticket-copy.html">Thank-you notes for our top customers</a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Thank-you notes for our top customers"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <article class="tcard" data-state="todo" data-person="Ben" data-ref="t_8yfw3d">
+     <a class="tc-title" href="../ticket/ticket-copy.html">Answer customer emails from last week</a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">Added Mon</span><button class="btn xs outline tc-act hover" type="button" data-act="start">Start helper</button></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Answer customer emails from last week"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <p class="col-empty" data-empty="Nothing to start. Add a ticket with +">Nothing to start. Add a ticket with +</p>
+   </div>
+  </section>
+
+  <section class="col" id="col-working" data-col="working" style="--ci:1" aria-labelledby="h-working">
+   <header class="col-h"><h2 id="h-working" title="A helper is on it"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>Working</h2><span class="count-n" data-count="working">3</span></header>
+   <div class="col-body">
+    <article class="tcard" data-state="working" data-person="Anna" data-ref="t_9w3xrs">
+     <a class="tc-title" href="../ticket/ticket-working.html">Plan the autumn newsletter</a>
+     <div class="tc-line working"><span class="live" aria-hidden="true"></span><span>Helper working</span><span class="bar" role="img" aria-label="3 of 4 steps"><i style="--v:75%"></i></span><span class="n">3 of 4 steps</span></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when" data-demo="newsletter-time">23 min ago</span><a class="btn xs outline tc-act hover" href="../focus/focus.html">Watch live</a></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Plan the autumn newsletter"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <article class="tcard" data-state="working" data-person="Ben" data-ref="t_0qu0pr">
+     <a class="tc-title" href="../ticket/ticket-working.html">Book the spring workshop room</a>
+     <div class="tc-line working"><span class="live" aria-hidden="true"></span><span>Helper working</span><span class="bar" role="img" aria-label="1 of 3 steps"><i style="--v:33%"></i></span><span class="n">1 of 3 steps</span></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><span class="when">24 min ago</span><a class="btn xs outline tc-act hover" href="../focus/focus.html">Watch live</a></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Book the spring workshop room"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <article class="tcard" data-state="working" data-person="Anna" data-ref="t_fswaap">
+     <a class="tc-title" href="../ticket/ticket-change.html">Update the price list</a>
+     <div class="tc-line working"><span class="live" aria-hidden="true"></span><span>Helper working</span><span class="bar" role="img" aria-label="2 of 3 steps"><i style="--v:67%"></i></span><span class="n">2 of 3 steps</span></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><span class="when">24 min ago</span><a class="btn xs outline tc-act hover" href="../focus/focus.html">Watch live</a></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Update the price list"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <p class="col-empty" data-empty="No helper is working right now">No helper is working right now</p>
+   </div>
+  </section>
+
+  <section class="col" id="col-needs" data-col="needs" style="--ci:2" aria-labelledby="h-needs">
+   <header class="col-h"><h2 id="h-needs" title="A helper asked you something"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M10 10a2 2 0 1 1 3 1.7c-.6.4-1 .8-1 1.6M12 16.5h.01"/></svg>Needs you</h2><span class="count-n" data-count="needs">1</span></header>
+   <div class="col-body">
+    <article class="tcard" data-state="needs" data-person="Ben" data-ref="t_rpcqdr">
+     <a class="tc-title" href="../ticket/ticket-question.html">Which supplier for the gift boxes?</a>
+     <div class="tc-line needs"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z"/></svg>Question for you · asked 27 min ago</div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">B</span>Ben</span><a class="btn xs tc-act attn" href="../ticket/ticket-question.html#answer">Answer</a></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Which supplier for the gift boxes?"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <p class="col-empty" data-empty="No questions for you. All clear">No questions for you. All clear</p>
+   </div>
+  </section>
+
+  <section class="col" id="col-check" data-col="check" style="--ci:3" aria-labelledby="h-check">
+   <header class="col-h"><h2 id="h-check" title="Ready for your look"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Check</h2><span class="count-n" data-count="check">1</span></header>
+   <div class="col-body">
+    <article class="tcard" data-state="check" data-person="Anna" data-ref="t_bjv2j0">
+     <a class="tc-title" href="../ticket/ticket-review.html">Summarise the customer survey</a>
+     <div class="tc-line needs"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5"/></svg>Check · Finished <span data-demo="survey-time">12:26</span></div><a class="result-snippet" href="../ticket/ticket-review.html"><span class="preview-thumbnail" aria-label="Preview of survey summary"><span>Survey</span><i></i><i></i><i></i></span><span>112 answers read · Preview →</span></a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><a class="btn xs tc-act attn" href="../ticket/ticket-review.html#result">Check result</a></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Summarise the customer survey"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <p class="col-empty" data-empty="Nothing to check">Nothing to check</p>
+   </div>
+  </section>
+
+  <section class="col" id="col-done" data-col="done" style="--ci:4" aria-labelledby="h-done">
+   <button class="rail" type="button" id="rail" aria-expanded="false" aria-controls="col-done" aria-label="Show Done, 2 tickets"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg><span class="count-n" data-count="done">2</span><span class="v">Done</span></button>
+   <header class="col-h"><h2 id="h-done" title="Finished work"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>Done</h2><span class="count-n" data-count="done">2</span><button class="btn ghost icon xs collapse-done" type="button" id="collapse" aria-label="Hide Done" style="margin-left:auto"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></header>
+   <div class="col-body">
+    <article class="tcard" data-state="done" data-person="Anna" data-ref="t_4ksrp6">
+     <a class="tc-title" href="../ticket/ticket-done.html">Prepare the new opening hours sign</a>
+     <div class="tc-line done"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg>Finished today <span data-demo="sign-time">12:32</span></div><div class="tc-line needs">Changes to add</div><a class="btn primary xs" href="../ticket/ticket-done.html#changes">Add to my files</a>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><a class="btn xs outline tc-act hover" href="../ticket/ticket-done.html#result">Open result</a></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Prepare the new opening hours sign"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <article class="tcard" data-state="done" data-person="Anna" data-ref="t_9sxr4o">
+     <a class="tc-title" href="../ticket/ticket-done.html">Fix the typo on the opening hours page</a>
+     <div class="tc-line done"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg>Finished today <span data-demo="typo-time">12:27</span></div>
+     <div class="tc-meta"><span class="who"><span class="avatar sm">A</span>Anna</span><a class="btn xs outline tc-act hover" href="../ticket/ticket-done.html#result">Open result</a></div>
+     <button class="btn ghost icon xs tc-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for Fix the typo on the opening hours page"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </article>
+    <p class="col-empty" data-empty="Finished tickets land here">Finished tickets land here</p>
+   </div>
+  </section>
+ </div>
+
+ <!-- LOADING -->
+ <div class="board" id="skel" aria-busy="true" aria-label="Loading tickets"></div>
+
+ <!-- EMPTY -->
+ <section id="empty" aria-labelledby="empty-h">
+  <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" style="width:32px;height:32px;color:var(--brand)"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16"/></svg>
+  <h2 id="empty-h">No tickets yet</h2>
+  <p>Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.</p>
+  <div class="flow" aria-hidden="true"><span>To do</span>→<span>Working</span>→<span>Needs you</span>→<span>Check</span>→<span>Done</span></div>
+  <a class="btn primary" href="../board/new.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</a>
+  <div class="ex" aria-label="Examples"><a class="chip" href="../board/board.html?new=1&amp;idea=pdf">Summarise a PDF</a><a class="chip" href="../board/board.html?new=1&amp;idea=email">Draft an email</a><a class="chip" href="../board/board.html?new=1&amp;idea=offers">Compare two offers</a></div>
+ </section>
+</div>
+</main>
+</div>
+</div>
+
+<div class="menu" id="card-menu" role="menu" aria-label="Ticket actions" hidden>
+ <a class="menu-item" id="m-open" role="menuitem" href="#">Open ticket</a>
+ <div class="sep"></div>
+ <p class="eyebrow">Move to</p>
+ <button class="menu-item" type="button" role="menuitemradio" data-move="todo">To do</button>
+ <button class="menu-item" type="button" role="menuitemradio" data-move="working">Working</button>
+ <button class="menu-item" type="button" role="menuitemradio" data-move="check">Check</button>
+ <button class="menu-item" type="button" role="menuitemradio" data-move="done">Done</button>
+ <div class="sep"></div>
+ <details><summary>Details</summary><p>Reference <span class="mono" id="m-ref"></span></p></details>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<nav class="pc" aria-label="Preview controls"><span>Preview</span><a href="?state=loaded" data-s="loaded">Loaded</a><a href="?state=loading" data-s="loading">Loading</a><a href="?state=empty" data-s="empty">Empty</a><a href="#" id="replay">Replay</a></nav>
+
+<script>
+(()=>{const q=document.querySelector('#q'),person=document.querySelector('#person'),root=document.documentElement;
+root.dataset.state=new URLSearchParams(location.search).get('state')||'loaded';
+const params=new URLSearchParams(location.search);q.value=params.get('q')||'';person.value=params.get('person')||'';const view=params.get('view');const filter=()=>{document.querySelectorAll('.tcard').forEach(c=>c.hidden=!(c.textContent.toLowerCase().includes(q.value.toLowerCase())&&(!person.value||c.dataset.person===person.value)&&(!view||view==='working'&&c.dataset.state==='working'||view==='done-week'&&c.dataset.state==='done'||view==='needs-you'&&(c.dataset.state==='needs'||c.dataset.state==='check'||c.dataset.ref==='t_4ksrp6'))));document.querySelectorAll('.col').forEach(c=>{const n=c.querySelectorAll('.tcard:not([hidden])').length;c.querySelector('.count-n').textContent=n;c.classList.toggle('is-empty',!n)});document.querySelector('#clear').hidden=!q.value&&!person.value};q.oninput=person.onchange=filter;document.querySelector('#clear').onclick=()=>{q.value=person.value='';filter()};
+document.querySelector('#skel').innerHTML=Array.from({length:5},()=>'<div class="sk-col"><div class="sk-card skeleton"></div><div class="sk-card skeleton"></div></div>').join('');
+document.querySelectorAll('.tc-more').forEach(b=>b.remove());document.querySelectorAll('[data-act="start"]').forEach(b=>b.onclick=()=>location.href='../ticket/ticket-copy.html');
+filter();document.querySelector('#waitn').textContent='3';document.querySelector('#nav-count').textContent='3';
+})();</script><script src="../home/demo-data.js"></script><script src="../system/preview-controls.js"></script></body></html>

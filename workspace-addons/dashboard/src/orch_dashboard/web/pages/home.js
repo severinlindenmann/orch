@@ -198,8 +198,10 @@ function needsToday() {
   const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
   return {needs, failed, count:window.DashHelpers.needsYouCount(needs, failed)};
 }
+// The one needs-you number: sidebar badge, Menu, Home and Tickets headers all read it.
+function needsYouTotal() { return state ? needsToday().count : 0; }
 function home() {
-  const {needs, failed, count:needCount} = needsToday(), groupedNeeds = homeNeeds(needs), all = tickets();
+  const {needs, failed} = needsToday(), needCount = needsYouTotal(), groupedNeeds = homeNeeds(needs), all = tickets();
   const rowsShown = groupedNeeds.length + failed.length; // stacked identical questions are one row
   if (rowsShown < 3) needsOpen = false;
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
@@ -209,7 +211,7 @@ function home() {
   const hour = now().getHours();
   const stopped = array(state.services).some(s => s.running === false);
   const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
-  return fragment(heading('Good ' + (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'), now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'})), banner,
+  return fragment(heading('Good ' + (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'), [now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), needCount ? window.DashHelpers.needsYou(needCount) : ''].filter(Boolean).join(' · ')), banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
       homeSection('needs-you', 'Needs you (' + needCount + ')', rowsShown >= 3 && !needsOpen ? needsFold(groupedNeeds, failed, newest) : needCount ? [...groupedNeeds.map(({row, count, same}) => needRow(row, newest, count, same)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), rowsShown >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null] : emptyRow('Nothing needs you right now.')),
       working.length ? homeSection('working-now', 'Working now', working.map(workingRow)) : null,
@@ -218,11 +220,6 @@ function home() {
       h('a', {className:'see-all', href:'#tickets', 'data-key':'everything-else'}, 'See all tickets (' + all.length + ')')),
     h('aside', {className:'stack', 'data-key':'right'},
       card('finished-today', 'Finished today', '', finished.length ? finished.map(ticketRow) : emptyRow('Nothing finished today yet.')))));
-}
-function loadingView() {
-  const shape = kind => h('div', {className:'card skeleton-card ' + kind, 'aria-hidden':'true'}, h('div', {className:'skeleton-line'}), h('div', {className:'skeleton-line short'}), h('div', {className:'skeleton-line'}));
-  return h('div', {className:'loading-home', 'data-key':'loading', 'aria-busy':'true'}, h('p', {role:'status'}, 'Loading your workspace…'),
-    h('div', {className:'skeleton-heading', 'aria-hidden':'true'}), h('div', {className:'columns'}, h('div', {className:'stack'}, shape('question'), shape('work'), shape('result')), h('aside', {className:'stack'}, shape('message'), shape('finished'))));
 }
 function connectionNotice(connectionEl, hadState) {
   connectionEl.replaceChildren(h('p', {className:'grow'}, hadState ? "Can't reach orch. Showing the last update, trying again every few seconds." : "Can't reach orch yet. Trying again shortly."),

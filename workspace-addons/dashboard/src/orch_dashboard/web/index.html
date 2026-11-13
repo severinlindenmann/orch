@@ -22,22 +22,26 @@
 <link rel="stylesheet" href="look.css">
 </head>
 <body class="has-shell">
+<a class="skip-link btn primary" href="#content" data-skip>Skip to content</a>
 <div class="shell">
-<aside class="sidebar" id="side-menu">
-<div class="sidebar-top">
-<a class="brand" href="#home" aria-label="orch dashboard"><img src="logo.svg" alt="">orch</a>
-</div>
-<div class="workspace"><span id="workspace-name">Workspace</span><p class="meta">Workspace</p></div>
+<aside class="sidebar" id="side-menu" aria-label="Workspace navigation">
+<a class="brand" href="#home" aria-label="orch home"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 10a8 8 0 1 1-5-6" stroke="currentColor" stroke-width="2"/><circle cx="11" cy="12" r="3" fill="currentColor"/><circle cx="19" cy="5" r="2" fill="var(--brand)"/></svg><span class="brand-word">orch</span></a>
+<div class="workspace ws-switch"><span class="wsb ws-badge-slot" aria-hidden="true"></span><span class="ws-text"><strong id="workspace-name">Workspace</strong><span class="meta">Workspace</span></span><span class="ws-chev" aria-hidden="true">⌄</span></div>
+<div class="sidebar-scroll">
 <nav id="side-nav" aria-label="Main"></nav>
-<button type="button" class="mm-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" hidden><span class="mm-label">Send questions to my phone</span><i class="mm-sw"></i></button>
+<div id="side-addons"></div>
+<p class="meta side-mode" id="workspace-mode"></p>
+</div>
+<div class="side-foot">
+<button type="button" class="mm-toggle phone-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" hidden><span class="mm-label">Send questions to my phone</span><i class="mm-sw"></i></button>
 <nav id="side-settings" class="side-settings" aria-label="Settings"></nav>
-<div class="side-foot"><p class="meta" id="workspace-mode"></p></div>
+</div>
 </aside>
-<div>
+<div class="shell-body">
 <div id="mm-bar" class="mm-bar" hidden></div>
-<header class="topbar"><a class="topbar-ws" id="topbar-ws" href="#home" aria-label="Home"><img src="logo.svg" alt=""></a><span id="crumb">Home</span><span class="topbar-actions"><button type="button" class="btn outline sm" id="open-agent" data-action="open-agent" hidden>Ask the helper</button><button type="button" class="btn primary sm" id="new-ticket" hidden>New ticket</button><button type="button" class="btn ghost sm mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-menu">Menu</button></span></header>
+<header class="topbar"><a class="topbar-ws" id="topbar-ws" href="#home" aria-label="Home"><img src="logo.svg" alt=""></a><span class="meta breadcrumb"><span id="crumb">Home</span><span id="updated"></span></span><span class="topbar-actions"><button type="button" class="btn ghost sm" id="open-agent" data-action="open-agent" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Ask the helper</button><button type="button" class="btn primary sm" id="new-ticket" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</button><button type="button" class="btn ghost sm mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-menu">Menu</button></span></header>
 <div id="connection" class="banner attn" role="status" hidden></div>
-<main id="content" class="page" aria-label="Dashboard"><div class="loading-home" role="status" aria-busy="true" aria-label="Loading"><div class="skeleton lh-title"></div><div class="skeleton lh-card"></div><div class="skeleton lh-card"></div></div></main>
+<main id="content" class="page" tabindex="-1" aria-label="Dashboard"><div class="skeleton-page sk-home loading-home" aria-busy="true"><p class="sr-only" role="status">Loading…</p><div class="skeleton sk-title" aria-hidden="true"></div><div class="skeleton sk-card" aria-hidden="true"></div><div class="skeleton sk-card" aria-hidden="true"></div></div></main>
 </div>
 </div>
 <script src="session.js"></script><script src="handoff.js" defer></script>
