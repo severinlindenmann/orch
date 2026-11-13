@@ -1392,6 +1392,6 @@ def test_factory_is_shipped_and_its_manifest_is_valid():
     assert "factory" in addons.SHIPPED_ADDONS and addons._builtin_ok("factory")
     m = addons.folder_manifest(folder)
     assert m["name"] == "factory"
-    assert m["requires"] == ["automation"]
+    assert m["requires"] == []  # its own watcher wakes the agent
     assert m["dashboard"]["label"] == "Factory"
     assert m["needs"] is True
