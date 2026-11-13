@@ -1,7 +1,7 @@
 # TestFlight upload (orch mobile)
 
 Scripts: `testflight.sh` (archive + upload + wait + group + notes), `testflight_asc.py` (App Store Connect part),
-`tf-next-build.py` (next build number `YYMMDD.HHMMSS`, always above the latest in ASC).
+`tf-next-build.py` (next build number `YYMMDD.HHMMSS` as dotted integers (leading zeros dropped), always above the latest in ASC).
 
 ## Prerequisites
 - Xcode, `xcodegen`, `uv`.
@@ -14,6 +14,7 @@ Scripts: `testflight.sh` (archive + upload + wait + group + notes), `testflight_
 ## Steps
 1. Write the "What to test" text to a file, e.g. `notes.txt` (plain text, a few lines).
 2. Run `mobile/scripts/testflight.sh <git-sha> notes.txt`.
+   - The sha must exist in the repo at `ORCH_REPO` (default `~/orch-dev/orch`, not necessarily the clone you run from).
    - It checks out `<git-sha>` in a separate detached worktree (`TF_WORKTREE`, default `<repo>/../.worktrees/tf`), picks the
      next build number, archives the `OrchMobile` scheme and exports with `destination: upload` (this uploads to ASC).
    - Set `TF_HEAVY` to a wrapper (for example a job limiter) if the machine needs one.

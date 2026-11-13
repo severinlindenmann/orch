@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import jwt
@@ -38,7 +39,9 @@ def call(m, p, b=None):
 
 bid = st = None
 for _ in range(120):
-    d = call('GET', f'/v1/builds?filter[app]={APP}&filter[version]={bn}&fields[builds]=version,processingState')
+    d = call('GET', f'/v1/builds?filter[app]={APP}&filter[version]={urllib.parse.quote(bn)}&fields[builds]=version,processingState')
+    if d.get('err') in (401, 403):
+        sys.exit(f'ASC auth failed: {d}')
     if d.get('data'):
         bid, st = d['data'][0]['id'], d['data'][0]['attributes']['processingState']
         if st == 'VALID':
@@ -49,8 +52,14 @@ for _ in range(120):
 print('build', bn, bid, st)
 if st != 'VALID':
     sys.exit('not VALID in time')
-g = call('GET', f'/v1/betaGroups?filter[app]={APP}&filter[name]={GROUP}')['data'][0]['id']
-print(f'group {GROUP}:', call('POST', f'/v1/betaGroups/{g}/relationships/builds', {'data': [{'type': 'builds', 'id': bid}]}) or 'ok')
+gd = call('GET', f'/v1/betaGroups?filter[app]={APP}&filter[name]={urllib.parse.quote(GROUP)}')
+if not gd.get('data'):
+    sys.exit(f'beta group {GROUP!r} not found: {gd}')
+g = gd['data'][0]['id']
+added = call('POST', f'/v1/betaGroups/{g}/relationships/builds', {'data': [{'type': 'builds', 'id': bid}]})
+print(f'group {GROUP}:', added.get('err', 'ok'))
+if 'err' in added:
+    sys.exit(f'adding to group failed: {added}')
 loc = call('GET', f'/v1/builds/{bid}/betaBuildLocalizations').get('data', [])
 if loc:
     r = call('PATCH', '/v1/betaBuildLocalizations/' + loc[0]['id'],
@@ -59,3 +68,5 @@ else:
     r = call('POST', '/v1/betaBuildLocalizations', {'data': {'type': 'betaBuildLocalizations', 'attributes': {'locale': 'en-US', 'whatsNew': wtt},
                                                             'relationships': {'build': {'data': {'type': 'builds', 'id': bid}}}}})
 print('what to test:', r.get('err', 'ok'))
+if 'err' in r:
+    sys.exit(f'setting What to test failed: {r}')

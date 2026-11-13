@@ -29,7 +29,7 @@ def get(path):
 
 
 versions = [tuple(int(x) for x in d["attributes"]["version"].split("."))
-            for d in get(f"/v1/builds?filter[app]={APP}&limit=200&fields[builds]=version")["data"]]
+            for d in get(f"/v1/builds?filter[app]={APP}&limit=200&sort=-uploadedDate&fields[builds]=version")["data"]]
 latest = max(versions) if versions else (0,)
 n = datetime.datetime.now(datetime.timezone.utc)
 cand = (int(n.strftime("%y%m%d")), int(n.strftime("%H%M%S")))
