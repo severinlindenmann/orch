@@ -59,6 +59,12 @@ def connect(root: Path, url: str, workspace: str, token: str) -> tuple[dict, str
     finally:
         if connected or net.read_json(secrets / "relay.json", None) != before:
             (secrets / "policy.json").unlink(missing_ok=True)
+    from orch import phone_view
+
+    with contextlib.suppress(
+        Refused, OSError, ValueError
+    ):  # blobs of another relay or workspace are useless here
+        phone_view.forget_blobs(root, keep_scope=phone_view.blob_scope(root))
     return who, refresh(root)
 
 
@@ -746,42 +752,50 @@ def send_text(
             if isinstance(view, dict) or _unreachable(e) or getattr(e, "status", None) is None:
                 raise  # a light update without its view says nothing: refused means refused
             note = "the relay refused it"
-            try:
-                if tv.get(
-                    "results"
-                ):  # an older relay does not know results: the same update once without them
-                    try:
-                        msg = _message(
-                            root,
-                            to,
-                            "text",
-                            {**body, "ticket_view": {k: v for k, v in tv.items() if k != "results"}},
-                            ticket,
-                            reply_to,
-                            mid,
-                        )
-                    except Refused as e1:
-                        if _unreachable(e1) or getattr(e1, "status", None) is None:
-                            raise
-                        if getattr(e1, "status", None) == 409:
-                            raise
+            # the relay does not have a blob the view names (another relay, or it expired it): forget those
+            # cached ids, upload again and send the same message once WITH its view before any fallback
+            msg = None
+            if getattr(e, "status", None) == 404:
+                msg = _retry_with_fresh_blobs(root, to, body, tv, ticket, reply_to, mid)
+            if msg is not None:
+                note = ""
+            else:
+                try:
+                    if tv.get(
+                        "results"
+                    ):  # an older relay does not know results: the same update once without them
+                        try:
+                            msg = _message(
+                                root,
+                                to,
+                                "text",
+                                {**body, "ticket_view": {k: v for k, v in tv.items() if k != "results"}},
+                                ticket,
+                                reply_to,
+                                mid,
+                            )
+                        except Refused as e1:
+                            if _unreachable(e1) or getattr(e1, "status", None) is None:
+                                raise
+                            if getattr(e1, "status", None) == 409:
+                                raise
+                            msg = _message(root, to, "text", body, ticket, reply_to, mid)
+                    else:
                         msg = _message(root, to, "text", body, ticket, reply_to, mid)
-                else:
-                    msg = _message(root, to, "text", body, ticket, reply_to, mid)
-            except Refused as e2:
-                if getattr(e2, "status", None) != 409:
-                    raise
-                # 409: the relay has this id already (stored): that is a send, not a failure
-                msg = {
-                    "schema": "orch.msg/1",
-                    "id": mid,
-                    "to": to,
-                    "type": "text",
-                    "body": body,
-                    "created_at": tickets.now(),
-                    "ticket": ticket,
-                    "sent": True,
-                }
+                except Refused as e2:
+                    if getattr(e2, "status", None) != 409:
+                        raise
+                    # 409: the relay has this id already (stored): that is a send, not a failure
+                    msg = {
+                        "schema": "orch.msg/1",
+                        "id": mid,
+                        "to": to,
+                        "type": "text",
+                        "body": body,
+                        "created_at": tickets.now(),
+                        "ticket": ticket,
+                        "sent": True,
+                    }
     else:
         msg = _message(root, to, "text", body, ticket, reply_to, mid)
     if note:
@@ -795,6 +809,24 @@ def send_text(
         except (Refused, OSError):
             pass  # the text is sent; a missing history line never fails the send
     return msg
+
+
+def _retry_with_fresh_blobs(root, to, body, tv, ticket, reply_to, mid) -> dict | None:
+    """After a 404 for a missing blob: drop the cached ids of this view, build it again (uploads) and send
+    it once. None when there is nothing to retry or the retry is refused too (the caller falls back)."""
+    from orch import phone_view
+
+    ids = phone_view.blob_ids_in(tv)
+    if not ids:
+        return None
+    phone_view.forget_blobs(root, blob_ids=ids)
+    fresh = phone_view.view_for(root, ticket)
+    if not fresh:
+        return None
+    try:
+        return _message(root, to, "text", {**body, "ticket_view": fresh}, ticket, reply_to, mid)
+    except Refused:
+        return None
 
 
 def _record_general(root: Path, msg: dict, text: str, body: dict, reply_to, refs) -> None:
