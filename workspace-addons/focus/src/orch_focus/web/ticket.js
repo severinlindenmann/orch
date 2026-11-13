@@ -17,7 +17,7 @@
       const box = root.querySelector('.fx-pick');
       box.querySelector('.fx-skel')?.remove();
       if (!list.some(t => t.status !== 'done')) box.append(emptyState());
-      const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Check result', 'Check'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
+      const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Sent back to you', 'Check'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
       /* one line: key, title, the actual next step only when it says more, and a real action chip */
       const rowFor = (t, status, action) => {
         const next = window.FocusHelpers.nextStepText(t, action);
@@ -131,7 +131,7 @@
     els.railNote = h('p', {class: 'meta', style: false});
     els.addInput = h('input', {class: 'input', type: 'text', maxlength: '500', placeholder: 'Add a task', 'aria-label': 'Add a task', name: 'task'});
     els.addForm = h('form', {class: 'fx-add-task', id: 'fx-add-task'}, els.addInput);  // one full-width field; Enter adds the task
-    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Tasks'}), els.railCount = h('span')), els.tasks), els.helpers, els.railNote, h('div', {class: 'fx-add-wrap'}, els.addForm));
+    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Work log'}), els.railCount = h('span')), els.logMeta = h('p', {class: 'meta fx-log-meta', text: ''}), els.tasks), els.helpers, els.railNote, h('div', {class: 'fx-add-wrap'}, els.addForm));
     els.tabs = [['live', 'Live'], ['proof', 'Results'], ['files', 'Files'], ['used', 'What it read']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
     els.sub = h('span', {class: 'meta', text: ''});
     els.feed = h('div', {class: 'fx-feed', role: 'log', 'aria-label': 'What the agent is doing'});
@@ -140,7 +140,22 @@
     els.qs = h('div', {class: 'fx-qwrap'});
     els.clash = h('div', {class: 'fx-clash-wrap'});  // "budget-2026.xlsx is also open in PIL-1" (used.js)
     els.sent = h('section', {class: 'fx-sent', 'aria-label': 'Sent back to you', hidden: true});
-    els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.clash, els.qs, els.sent, els.line, els.feed, els.working);
+    /* "Your next move": the open question first, with how many wait and, when a phone is paired, the phone hand-off */
+    els.qCount = h('span', {class: 'meta', text: ''});
+    els.phoneBtn = h('button', {class: 'btn ghost sm', type: 'button', 'data-act': 'phone', hidden: true, text: 'Answer on phone'});
+    els.phoneNote = h('p', {class: 'meta fx-phone-note', hidden: true, text: 'Open this ticket on your paired phone. The same question waits there; the helper stays paused until you answer.'});
+    els.next = h('section', {class: 'fx-next', 'aria-label': 'Your next move', hidden: true}, h('div', {class: 'fx-next-h'}, h('span', {class: 'eyebrow', text: 'Your next move'}), els.qCount), els.qs, h('div', {class: 'fx-next-f'}, els.phoneBtn), els.phoneNote);
+    /* "With Helper": the ticket's own messages and updates, newest last */
+    els.withList = h('div', {class: 'fx-with-list'});
+    els.withH = h('section', {class: 'fx-with', 'aria-label': 'With Helper', hidden: true}, h('h2', {text: 'With Helper'}), els.withList);
+    /* the compact one-line trace: the latest step, a way into the terminal, and the follow switch */
+    els.traceText = h('span', {class: 'fx-trace-text meta', text: ''});
+    els.follow = h('input', {class: 'switch', type: 'checkbox', role: 'switch', id: 'fx-follow', 'aria-label': 'Follow the helper'});
+    els.newPill = h('button', {class: 'btn sm fx-new', type: 'button', 'data-act': 'jump', hidden: true, text: ''});
+    els.showTerm = h('button', {class: 'btn ghost sm fx-desktop fx-show-term', type: 'button', 'data-act': 'mode', text: 'Show terminal →'});
+    els.trace = h('div', {class: 'fx-trace'}, els.traceText, els.showTerm, els.newPill, h('label', {class: 'fx-follow-l'}, els.follow, h('span', {text: 'Follow the helper'})));
+    els.human = h('aside', {class: 'fx-human', 'aria-label': 'Your side'});
+    els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.clash, els.next, els.sent, els.line, els.feed, els.working);
     els.paneProof = h('div', {class: 'fx-pane', id: 'fx-p-proof', role: 'tabpanel', 'aria-labelledby': 'fx-t-proof', hidden: true});
     els.paneFiles = h('div', {class: 'fx-pane', id: 'fx-p-files', role: 'tabpanel', 'aria-labelledby': 'fx-t-files', hidden: true});
     els.paneUsed = h('div', {class: 'fx-pane', id: 'fx-p-used', role: 'tabpanel', 'aria-labelledby': 'fx-t-used', hidden: true});
@@ -153,7 +168,7 @@
       h('button', {class: 'btn', 'data-act': 'changes', text: 'Ask for changes'}), h('button', {class: 'btn primary', 'data-act': 'done', text: 'Accept'}));
     els.complete = h('div', {class: 'fx-review', hidden: true}, h('p', {text: 'You’re all set here.'}));
     const stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, els.paneFiles, els.paneUsed, compose, els.review, els.complete, els.help);
-    root.replaceChildren(top, stepbar, h('div', {class: 'fx-body'}, rail, stage));
+    root.replaceChildren(top, stepbar, els.trace, h('div', {class: 'fx-body'}, rail, stage, els.human));
     els.stopIc.innerHTML = ic('pause');
     root.querySelectorAll('[data-icon]').forEach(e => { e.innerHTML = ic(e.dataset.icon); });
   }
@@ -162,14 +177,19 @@
     const checks = v.ticket.checklist;
     const doing = checks.findIndex(c => !c.done && !c.wont_do && c.state === 'doing');
     if (S.state.sel >= checks.length) S.state.sel = Math.max(0, checks.length - 1);
-    const key = keyOf([checks.map(c => [c.id, c.text, c.done, c.wont_do, c.reason, c.state, evText(c)]), S.state.sel, v.run.running]);
+    const mins = c => S.views.live.taskMinutes(v, c.id);
+    const done = checks.filter(c => c.done && !c.wont_do).length, skipped = checks.filter(c => c.wont_do).length;
+    const total = checks.reduce((n, c) => n + (parseInt(mins(c), 10) || 0), 0);
+    els.logMeta.textContent = checks.length ? [done + ' done', skipped ? skipped + ' skipped' : '', total ? total + ' min' : ''].filter(Boolean).join(' · ') : '';
+    const key = keyOf([checks.map(c => [c.id, c.text, c.done, c.wont_do, c.reason, c.state, evText(c), mins(c)]), S.state.sel, v.run.running]);
     if (key === els.tasks.dataset.k) return;
     els.tasks.dataset.k = key;
     els.tasks.replaceChildren(...checks.flatMap((c, i) => {
       const cls = c.wont_do ? 'wont' : c.done ? 'done' : (c.state === 'doing' ? 'doing' : '');
       const row = h('button', {class: 'fx-task ' + cls, 'data-task': String(i), 'aria-current': String(i === (S.state.sel === 0 && doing >= 0 && !els.tasks.dataset.picked ? doing : S.state.sel))},
-        h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: c.text}), h('span', {class: 'sub', text: evText(c)})));
-      row.addEventListener('click', () => { S.state.sel = i; els.tasks.dataset.picked = '1'; els.tasks.dataset.k = ''; renderTasks(S.state.view); });
+        h('span', {class: 'st', icon: c.done && !c.wont_do ? 'check' : false, text: c.wont_do ? '–' : false}), h('span', {}, h('span', {class: 'tt', text: (c.done && !c.wont_do ? 'Done · ' : '') + c.text}),
+          h('span', {class: 'sub', text: c.wont_do ? 'Skipped' + (c.reason ? ' · ' + c.reason : '') : [mins(c), evText(c)].filter(Boolean).join(' · ')})));
+      row.addEventListener('click', () => { S.views.live.scrollToTask(c.id); S.state.sel = i; els.tasks.dataset.picked = '1'; els.tasks.dataset.k = ''; renderTasks(S.state.view); });
       const reason = c.wont_do && c.reason && h('details', {class: 'fx-task-reason meta'}, h('summary', {text: 'Reason'}), h('span', {text: c.reason}));
       const out = [reason ? h('div', {}, row, reason) : row];
       if (els.tasks.dataset.picked && i === S.state.sel) out.push(taskTools(c, i, checks));

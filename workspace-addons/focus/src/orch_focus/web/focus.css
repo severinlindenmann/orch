@@ -637,3 +637,91 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 .fx-compose .fx-compose-hint,.fx-compose .fx-file-error{max-width:820px;margin-left:auto;margin-right:auto}
 .fx-sent{max-width:848px;width:100%;box-sizing:border-box;margin-left:auto;margin-right:auto;padding-left:32px;padding-right:32px}
 .fx-compose .fx-compose-hint,.fx-compose .fx-file-error{width:100%;box-sizing:border-box;padding:0 12px}
+
+/* ---- UX phase 5, Focus pass 2 (drafts focus-ticket*.html): trace, next move, work log, 3-column Terminal mode ---- */
+.fx-trace{display:flex;align-items:center;gap:12px;min-height:44px;padding:6px 20px;border-bottom:1px solid var(--border);background:var(--bg)}
+.fx-trace[hidden]{display:none}
+.fx-trace-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.fx-trace-text:empty{display:none}
+.fx-trace .grow-s{flex:1}
+.fx-trace .btn[hidden],.fx-new[hidden]{display:none}
+input.switch[type=checkbox]{appearance:none;width:36px;height:24px;min-width:36px;min-height:24px;padding:0;box-sizing:border-box}
+.fx-follow-l{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:13px;color:var(--text-muted);white-space:nowrap;cursor:pointer}
+.fx-new{border-color:var(--brand);color:var(--brand)}
+.fx-next{border:1px solid var(--warning);border-radius:12px;background:var(--surface);padding:16px;margin:16px 0;display:grid;gap:8px}
+.fx-next[hidden]{display:none}
+.fx-next-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.fx-next-h .eyebrow{text-transform:none;letter-spacing:0;font-size:12px;color:var(--text-muted)}
+.fx .fx-next .fx-qwrap{max-width:none;width:auto;margin:0;padding:0}
+.fx-next .fx-qwrap .qcard{border:0;background:transparent;padding:0;border-radius:0}
+.fx-next .fx-qwrap h3{font-size:18px;margin:4px 0 8px}
+.fx-next .fx-qwrap .qoption{min-height:36px;min-width:0}
+.fx-next .fx-qwrap .qoptions{margin-top:12px;gap:8px}
+.fx-next-f{display:flex;gap:8px}
+.fx-next-f .btn[hidden]{display:none}
+.fx-phone-note{margin:0}
+.fx-phone-note[hidden]{display:none}
+.fx:not(.fx-terminal) .fx-next{max-width:848px;width:calc(100% - 64px);box-sizing:border-box;margin:24px auto 0}
+.fx-with{margin:20px 0 12px}
+.fx-with[hidden]{display:none}
+.fx-with h2{font-size:16px;font-weight:600;margin:0 0 8px}
+.fx-with-item{padding:10px 4px;border-top:1px solid var(--border);font-size:14px}
+.fx-with-item p{margin:0}
+.fx-with-item .meta{font-size:12px;margin-bottom:2px}
+.fx-story.hit{outline:2px solid var(--brand);outline-offset:6px;border-radius:4px;transition:outline-color 300ms var(--ease-out,ease-out)}
+.fx-story .fx-now-steps{margin-top:8px}
+.fx-human{display:none}
+.fx.fx-terminal .fx-human{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:auto;border-left:1px solid var(--border);padding:0 16px;scroll-behavior:smooth}
+.fx.fx-terminal .fx-human>.fx-sent{max-width:none;padding:0;margin:8px 0 4px}
+.fx.fx-terminal .fx-human .fx-sent-grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.fx.fx-terminal .fx-human>.fx-compose,.fx.fx-terminal .fx-human>.fx-review{position:sticky;bottom:0;margin:auto -16px 0;padding:12px 16px;z-index:2}
+.fx.fx-terminal .fx-human>.fx-compose{margin-top:auto}
+.fx.fx-terminal .fx-human>.fx-review{margin-top:12px;padding:12px 16px;flex-wrap:wrap}
+.fx.fx-terminal .fx-human>.fx-review:not([hidden])+.fx-compose{margin-top:0}
+.fx.fx-terminal .fx-feed{max-width:none;margin:0;padding:20px 20px 32px}
+.fx.fx-terminal .fx-feed .fx-now-step{font-family:var(--font-mono);font-size:12px}
+.fx.fx-terminal .fx-rail .eyebrow{margin-bottom:4px}
+.fx-log-meta{padding:0;margin:0 0 16px;font-size:12px}
+.fx-log-meta:empty{display:none}
+@media(min-width:1500px){
+  .fx.fx-terminal .fx-body{grid-template-rows:minmax(0,1fr);grid-template-columns:var(--rail) minmax(0,1fr) minmax(400px,460px)}
+  .fx.fx-terminal.rail-closed .fx-body{grid-template-columns:0 minmax(0,1fr) minmax(400px,460px)}
+}
+@media(min-width:1001px) and (max-width:1499px){
+  .fx.fx-terminal .fx-body,.fx.fx-terminal.rail-closed .fx-body{grid-template-columns:minmax(0,1fr) minmax(340px,420px);grid-template-rows:auto minmax(0,1fr);grid-template-areas:"rail human" "stage human"}
+  .fx.fx-terminal .fx-rail{grid-area:rail;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 16px;border-right:0;border-bottom:1px solid var(--border);overflow:visible}
+  .fx.fx-terminal.rail-closed .fx-rail{display:none;visibility:visible}
+  .fx.fx-terminal .fx-stage{grid-area:stage}
+  .fx.fx-terminal .fx-human{grid-area:human}
+  .fx.fx-terminal .fx-rail>div:first-child{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;min-width:0}
+  .fx.fx-terminal .fx-rail .eyebrow{margin:0}
+  .fx.fx-terminal .fx-log-meta{margin:0}
+  .fx.fx-terminal #fx-tasks{display:flex;flex-wrap:wrap;gap:6px}
+  .fx.fx-terminal #fx-tasks .fx-task{padding:4px 10px;margin:0;border:1px solid var(--border-strong);border-radius:8px;width:auto;height:auto;min-height:32px;align-items:center}
+  .fx.fx-terminal .fx-rail .eyebrow>span:last-child,.fx.fx-terminal .fx-task-reason{display:none}
+  .fx.fx-terminal .fx-task-tools{flex-basis:100%}
+  .fx.fx-terminal #fx-tasks .fx-task.doing{padding:4px 10px}
+  .fx.fx-terminal #fx-tasks .sub,.fx.fx-terminal .fx-rail>*:not(:first-child):not(.fx-add-wrap){display:none}
+  .fx.fx-terminal .fx-add-wrap{margin:0;flex:0 1 220px}
+  .fx.fx-terminal .fx-add-task{margin:0;padding:0}
+}
+@media(max-width:1000px){
+  .fx.fx-terminal .fx-human{order:-1;border-left:0;overflow:visible}
+}
+@media(max-width:720px){
+  .fx-trace{padding:6px 12px;flex-wrap:wrap}
+  .fx:not(.fx-terminal) .fx-next{width:calc(100% - 24px)}
+}
+@media(prefers-reduced-motion:reduce){.fx-human{scroll-behavior:auto}.fx-story.hit{transition:none}}
+/* the start page: needs you first, then what was sent back, then live work, then the rest */
+.fx-pick{display:flex;flex-direction:column}
+.fx-pick>*{order:5}
+.fx-pick>h1,.fx-pick>.meta{order:0}
+.fx-pick>.fx-livenow-ask{order:1;margin-top:24px}
+.fx-pick>.fx-group-waiting{order:2}
+.fx-pick>.fx-group-review{order:3}
+.fx-pick>.fx-livenow:not(.fx-livenow-ask){order:4}
+.fx-livenow-ask .fx-ln-card{border-color:var(--warning)}
+.fx-pick>.fx-livenow[hidden]{display:none}
+.fx:not(.fx-terminal) .fx-with{max-width:848px;width:100%;box-sizing:border-box;margin:0 auto 12px;padding:0 32px}
+@media(max-width:720px){.fx:not(.fx-terminal) .fx-with{padding:0 12px}}
