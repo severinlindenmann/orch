@@ -310,7 +310,9 @@ class Handler(BaseHTTPRequestHandler):
                 200, json.dumps(load_links(self.root, self.orch_bin)).encode(), "application/json"
             )
         if path == "/api/state":
-            fresh = "fresh=1" in query.split("&")  # the question card: the ticket as it is now, not a cached copy
+            fresh = "fresh=1" in query.split(
+                "&"
+            )  # the question card: the ticket as it is now, not a cached copy
             state, age = self.server.state_cache.fresh() if fresh else self.server.state_cache.get()
             return self._send(
                 200, json.dumps(state).encode(), "application/json", {"X-State-Age-Ms": str(int(age * 1000))}
