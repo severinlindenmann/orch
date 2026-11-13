@@ -21,7 +21,6 @@
   .live-strip .btn{min-height:32px}
   .settings button,.addon-native button,.settings-other button,.settings .sync-chip{min-height:32px}
   .settings-nav button,.settings-nav a,.settings details summary,.addon-native summary{min-height:36px}
-  .settings .switch{min-height:20px}
   .chat-page button,.chat-page a,.chat-page summary,.chat-page input{min-height:32px}
   .chat-page .chat-button,.chat-page .chat-delivery .chat-button,.chat-page .chat-bubble > .btn.outline{min-height:32px}
   .chat-page .chat-card,.chat-page .chat-day-row,.chat-page .chat-contact{min-height:40px}
@@ -40,4 +39,5 @@
   .board .col-body{gap:8px;padding-bottom:0}
   /* Ticket: Progress and What was asked read as plain sections, not boxed cards (accepted Ticket draft) */
   .ticket-page .progress-card,.ticket-page .card.asked{background:none;border:0;padding:0}
+  .settings .switch{border-color:transparent}
 }
