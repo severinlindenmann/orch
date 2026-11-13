@@ -57,7 +57,10 @@ def test_switch_rows_choices_and_closed_details_owner_pass():
 
 def test_repeat_window_offers_plain_choices_and_open_tickets():
     src = webjs.all_js()
-    assert "const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];" in src
+    assert (
+        "const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];"
+        in src
+    )
     assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
     assert "{addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase}" in src
     assert "verb:'copy', target:ticket.value" in src
