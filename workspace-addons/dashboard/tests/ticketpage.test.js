@@ -566,3 +566,14 @@ test('Results of a Done ticket shows the completion note, newest first, and noth
   assert.equal(c.completionNotes({...t, status:'review'}).length, 0);
   assert.equal(c.ticketResultsCard({id:'t_x', status:'done', checklist:[]}), null);
 });
+test('the Changes to add card offers Review changes and Keep as is; a kept copy collapses to one quiet line', () => {
+  const c = context({render:() => {}, clean:v => String(v ?? '')});
+  const t = {id:'t_k1', bring_back:{state:'waiting', reason:'Needs review', tip:'d'.repeat(40)}};
+  const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
+  const labels = r => nodes(r).filter(n => n.tag === 'button').map(n => n.children.join(''));
+  assert.deepEqual(labels(c.ticketBringBackRow(t)), ['Add to my files', 'Review changes', 'Keep as is']);
+  nodes(c.ticketBringBackRow(t)).find(n => n.tag === 'button' && n.children.includes('Keep as is')).onclick();
+  const kept = c.ticketBringBackRow(t);
+  assert.match(JSON.stringify(kept), /Changes kept in a copy/);
+  assert.deepEqual(labels(kept), ['Add to my files']);
+});

@@ -873,6 +873,50 @@ function ticketBringBackDialog(t) {
   actions.append(go); d.append(...body, actions); window.orch.open(d);
   return d;
 }
+// "Review changes": a read-only list of what the copy changed (files with + and - counts) and one file's diff.
+const keptCopies = new Set();
+function keptKey(t) { return 'orch.keptcopy.' + t.id + '.' + String(t.bring_back?.tip || ''); }
+function isKept(t) {
+  if (keptCopies.has(keptKey(t))) return true;
+  try { return sessionStorage.getItem(keptKey(t)) === '1'; } catch (_) { return false; }
+}
+function ticketChangesDialog(t) {
+  const {d, actions} = dialog('What the copy changed');
+  const body = el('div', 'stack'), diffBox = el('pre', 'preserve-lines copy-diff');
+  diffBox.hidden = true; diffBox.tabIndex = 0;
+  body.append(el('p', 'meta', 'Reading the copy…'));
+  const showDiff = async file => {
+    diffBox.hidden = false; diffBox.textContent = 'Loading…';
+    try {
+      const r = await fetch('/api/copy-changes?t=' + encodeURIComponent(t.id) + '&path=' + encodeURIComponent(file.path), {cache:'no-store'});
+      const data = r.ok ? await r.json() : null;
+      diffBox.replaceChildren();
+      if (!data) { diffBox.textContent = 'This file could not be shown.'; return; }
+      String(data.diff).split('\n').forEach(line => {
+        const row = el('span', /^\+(?!\+\+)/.test(line) ? 'diff-add' : /^-(?!--)/.test(line) ? 'diff-del' : '', line + '\n');
+        diffBox.append(row);
+      });
+      if (data.cut) diffBox.append(el('span', 'meta', '\n(The rest of this file is not shown.)'));
+    } catch (_) { diffBox.textContent = 'This file could not be shown.'; }
+  };
+  fetch('/api/copy-changes?t=' + encodeURIComponent(t.id), {cache:'no-store'}).then(r => r.ok ? r.json() : {files:[]}).catch(() => ({files:[]})).then(data => {
+    const files = array(data.files);
+    body.replaceChildren();
+    if (!files.length) { body.append(el('p', 'muted', 'No changed files could be listed.')); return; }
+    const list = el('ul', 'copy-files');
+    files.forEach(f => {
+      const li = el('li'), b = button('', 'ghost sm copy-file', () => showDiff(f));
+      b.append(el('span', 'grow', clean(f.path)), el('span', 'meta', f.added == null ? 'binary' : '+' + f.added + ' −' + f.removed));
+      li.append(b); list.append(li);
+    });
+    body.append(list);
+    if (data.more) body.append(el('p', 'meta', 'and ' + data.more + ' more files'));
+  });
+  d.append(body, diffBox, actions);
+  actions.firstChild.textContent = 'Close';
+  window.orch.open(d);
+  return d;
+}
 function ticketBringBackRow(t) {
   const b = t.bring_back;
   if (b?.state !== 'waiting') return null;
@@ -880,9 +924,17 @@ function ticketBringBackRow(t) {
     const r = await act('copies.ask-update', {ticket:t.id});
     window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
   }) : null;
+  const add = !snapshot && b.tip ? ticketButton('Add to my files', 'primary sm', () => ticketBringBackDialog(t)) : null;
+  // "Keep as is" is only this page's choice: nothing is changed or signed; the copy stays where it is.
+  if (!snapshot && b.tip && isKept(t)) return h('p', {className:'meta kept-line', 'data-key':'bring-back'}, 'Changes kept in a copy · ', ticketButton('Add to my files', 'ghost sm', () => ticketBringBackDialog(t)));
+  const review = !snapshot && b.tip ? ticketButton('Review changes', 'outline sm', () => ticketChangesDialog(t)) : null;
+  const keep = !snapshot && b.tip ? ticketButton('Keep as is', 'ghost sm', () => {
+    keptCopies.add(keptKey(t)); try { sessionStorage.setItem(keptKey(t), '1'); } catch (_) { /* optional */ }
+    render();
+  }) : null;
   return h('section', {className:'card attention decision bring-back-card', 'data-key':'bring-back'},
     h('p', {className:'meta'}, 'Approval needed'), h('h2', {}, 'Changes to add'), h('p', {className:'muted'}, clean(b.reason)),
-    h('div', {className:'actions'}, !snapshot && b.tip ? ticketButton('Add to my files', 'primary sm', () => ticketBringBackDialog(t)) : null, ask));
+    h('div', {className:'actions'}, add, review, keep, ask));
 }
 const ticketHistoryTechnical = false;
 let ticketHistoryActor = 'All';

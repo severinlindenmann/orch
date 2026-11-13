@@ -17,7 +17,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import actions, reffiles, selfupdate, ticketfiles
+from . import actions, copychanges, reffiles, selfupdate, ticketfiles
 from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
 from .state_cache import StateCache
@@ -341,6 +341,14 @@ class Handler(BaseHTTPRequestHandler):
                 json.dumps(ticketfiles.listing(self.root, self.orch_bin, m.group(1))).encode(),
                 "application/json",
             )
+        if path == "/api/copy-changes":  # read-only: what a ticket's copy would add to the project
+            q = parse_qs(query, keep_blank_values=True)
+            one = lambda k: (q.get(k) or [""])[0]
+            if one("path"):
+                code, data = copychanges.diff(self.root, one("t"), one("path"))
+            else:
+                code, data = 200, copychanges.listing(self.root, one("t"))
+            return self._send(code, json.dumps(data).encode(), "application/json")
         if path == "/api/file-info":
             q = parse_qs(query, keep_blank_values=True)
             one = lambda k: (q.get(k) or [""])[0]
