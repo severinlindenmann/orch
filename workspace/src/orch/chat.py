@@ -399,6 +399,33 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False, proven:
     return {"id": mid, "ticket": gid, "day": entry["day"], "sent": bool(sent)}
 
 
+def reply(
+    root: Path, text: str, ticket: str, reply_to: str | None = None, refs: list[dict] | None = None
+) -> dict:
+    """The helper answers in Chat (`orch chat reply`). It is kept in the Chat history first; when a relay is
+    connected the paired phones get it too. No relay (or the add-on off) is not an error: the dashboard shows it."""
+    from orch import addons
+
+    text = (text or "").strip()
+    if not text or len(text) > MAX_TEXT:
+        raise Refused("A Chat text has 1 to 20000 characters.")
+    gid = tickets.general_id(root)
+    if not gid or tickets.resolve(root, ticket) != gid:
+        raise Refused("A Chat answer belongs to the Chat ticket.")
+    if "relay" in addons.active(root):
+        try:
+            msg = relay.send_text(root, "phones", text, gid, None, reply_to, general=True, refs=refs)
+            return {"id": msg["id"], "sent": bool(msg.get("sent", True))}
+        except Refused as e:
+            if "not connected" not in str(e):
+                raise
+    who = tickets.current_actor()
+    mid = relay.new_id()
+    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, chat=True), by=who)
+    record(root, mid, "helper", "helper", text, reply_to=reply_to, refs=refs)
+    return {"id": mid, "sent": False}
+
+
 def proposal_state(root: Path, mid: str) -> str:
     """Where the proposal in Chat message `mid` stands: "open" (nobody made it), "making" (started, not finished:
     a retry finishes the same ticket), "made", or "gone" (no such proposal in the last days)."""
@@ -597,8 +624,8 @@ def helper_prompt(root: Path, ticket: dict, items: list[dict], news: str) -> str
         f"You are {helper_name(root)}: the one helper of this workspace. A person writes to you in Chat from "
         f"their phone or the dashboard; this hidden ticket ({tid}) is your conversation.",
         "Read .agents/skills/orch/SKILL.md first. Answer short and in plain words, in the person's language.",
-        f'Answer with: orch relay send <phone id of the message> "<answer>" --ticket {tid} '
-        "--reply-to <message id>. "
+        f'Answer with: orch chat reply "<answer>" --ticket {tid} --reply-to <message id>. '
+        "It works with or without a phone connected. "
         "Add --ref ticket:<KEY> for a ticket you opened, --ref reference:<url> or --ref file:<path> "
         "for something you point to: they show as cards.",
         "When you sum up what is open or done, write a few short lines in everyday words, one line per kind "
@@ -668,6 +695,7 @@ HELPER_COMMANDS = {
         {"workspace", "text", "reply_to", "ticket", "summary", "speak", "ref"},
         ("ticket",),
     ),
+    ("chat", "reply"): ("reply", {"text", "reply_to", "ticket", "ref"}, ("ticket",)),
     ("relay", "topic"): ("plain", {"message", "title"}, ()),  # makes a ticket from a phone text; no target
     ("chat", "status"): ("read", set(), ()),
     ("chat", "days"): ("read", set(), ()),
@@ -778,7 +806,7 @@ def guard(root: Path, args) -> None:
             raise no from None
         if not isinstance(rid, str) or not tickets._ID_RE.fullmatch(rid):
             raise no  # not a ticket we can name: refused, never skipped
-        if kind in ("run", "relay") and rid != gid or kind == "write" and rid == gid:
+        if kind in ("run", "relay", "reply") and rid != gid or kind == "write" and rid == gid:
             raise no
     if kind == "run" and getattr(args, "run", None) not in (None, os.environ.get("ORCH_RUN")):
         raise no  # only the helper's own run
@@ -796,6 +824,11 @@ def guard(root: Path, args) -> None:
         raise no
     if (cmd, sub) == ("ref", "add"):
         _check_ref_add(root, args, no)
+    if kind == "reply":
+        for r in getattr(args, "ref", None) or []:
+            k, _, v = str(r).partition(":")
+            if k not in REF_KINDS or (k == "file" and not helper_safe_file(root, v)):
+                raise Refused("That card is not allowed.")
     if kind == "relay":
         to = str(getattr(args, "workspace", ""))
         try:

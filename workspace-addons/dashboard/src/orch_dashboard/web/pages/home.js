@@ -29,6 +29,7 @@ function ticketRow(t) {
 function needRow(row, newest, questionCount = 1, same = []) {
   const key = 'need-' + row.id;
   if (needActs(row).length) return needActionsRow(row, key);
+  if (!row.ticket && array(row.answer?.options).length) return needNoticeRow(row, key);
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row);
   const options = array(row.answer?.options);
   let actions = null, other = null;
@@ -74,6 +75,18 @@ function needRow(row, newest, questionCount = 1, same = []) {
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
     actions, other, t ? parentLine(t) : null);
 }
+// A row that offers choices but belongs to no ticket cannot be answered as a ticket question (the answer needs a
+// ticket). It shows as a plain notice and can always be put off for the day.
+function needNoticeRow(row, key) {
+  const later = snapshot ? null : button('Not now', 'quiet sm', () => {
+    try { localStorage.setItem(NEED_LATER, JSON.stringify({...needsLater(), [row.id]:today()})); } catch (_) { /* fine without storage */ }
+    window.orch.toast('Asking again tomorrow.', 'ok'); render();
+  });
+  if (later) later.dataset.key = key + '-later';
+  return h('div', {className:'card-row home-need need-acts need-notice', 'data-key':key, 'data-need-row':row.id},
+    h('div', {className:'grow'}, h('p', {}, clean(row.text || row.title)), h('p', {className:'meta'}, typeof capitalise === 'function' ? capitalise(row.source || 'orch') : 'orch')),
+    h('div', {className:'acts'}, later));
+}
 // Who asked: the helper working on the ticket (the product's name for it), else "Helper".
 function whoAsked(t) {
   return window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state?.settings, state?.runs?.[t?.id]?.claim) : 'Helper';
@@ -92,7 +105,7 @@ const NEED_LATER = 'orch.needs.later';
 function needsLater() {
   try { const v = JSON.parse(localStorage.getItem(NEED_LATER) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (_) { return {}; }
 }
-const laterToday = row => array(row.actions).some(a => a && a.later) && needsLater()[row.id] === today();
+const laterToday = row => { const day = needsLater()[row.id]; return !!day && day === today(); }; // only a "Not now" button sets it
 // a core op: only {op, core wording}, always signed; an add-on verb, "Not now" or "View file" as the row names it
 const needAct = (row, a) => {
   if (!a || typeof a !== 'object') return null;
