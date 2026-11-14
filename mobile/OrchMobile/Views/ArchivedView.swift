@@ -5,6 +5,8 @@ struct ArchiveToast: Equatable {
     let id = UUID()
     let text: String
     let undo: (() -> Void)?
+    /// Names the accessibility identifiers: "<kind>-toast" and "<kind>-undo".
+    var kind = "archive"
     static func == (a: ArchiveToast, b: ArchiveToast) -> Bool { a.id == b.id }
 
     /// How long the undo toast stays: exactly 5 s. Only a UI-test build (DEBUG or `-uitest`) that also sets
@@ -31,14 +33,14 @@ struct ArchiveToastBar: View {
                 Button { undo(); dismiss() } label: {
                     Text("Undo").themeFont(15, .semibold).foregroundStyle(Theme.brand)
                         .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                }.buttonStyle(PressStyle()).accessibilityIdentifier("archive-undo")
+                }.buttonStyle(PressStyle()).accessibilityIdentifier("\(toast.kind)-undo")
                     .accessibilityHint("Reverses the last archive or move back action.")
             }
         }.foregroundStyle(Theme.text).padding(.horizontal, 16).padding(.vertical, 4)
             .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).strokeBorder(Theme.border, lineWidth: 1) }
             .shadow(color: Theme.bg.opacity(0.5), radius: 8, y: 4)
-            .padding(.horizontal, 16).accessibilityIdentifier("archive-toast")
+            .padding(.horizontal, 16).accessibilityIdentifier("\(toast.kind)-toast")
     }
 }
 
