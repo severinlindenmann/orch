@@ -254,6 +254,20 @@ function moveTicket(id, status, undoing = false, extra = {}) {
 const GROUP_ORDER = ['waiting', 'review', 'active', 'open', 'done'];
 const foldedGroups = new Set();
 let foldSeen = false;
+// The group's main action for all its tickets: "Answer 2 questions" opens the first question, "Check 3 results" the first result.
+function groupAction(status, group) {
+  if (snapshot || foldedGroups.has(status)) return null;
+  const withQuestions = group.filter(t => questions(t).length);
+  if (status === 'waiting' && withQuestions.length) {
+    const n = withQuestions.reduce((sum, t) => sum + questions(t).length, 0);
+    return button('Answer ' + n + (n === 1 ? ' question' : ' questions'), 'outline sm group-action', event => {
+      const need = needsList().find(x => withQuestions.some(t => t.id === x.ticket));
+      if (need) openNeed(need, event.currentTarget); else location.hash = href(withQuestions[0].id);
+    });
+  }
+  if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Check ' + group.length + (group.length === 1 ? ' result' : ' results'));
+  return null;
+}
 function ticketTable(visible) {
   const groups = ticketGroups(visible);
   if (!foldSeen) { foldSeen = true; if ((groups.find(g => g.status === 'done')?.tickets.length || 0) > 5) foldedGroups.add('done'); }
@@ -265,7 +279,7 @@ function ticketTable(visible) {
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = foldedGroups.has(status);
     const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(group.tickets.length)));
     toggle.addEventListener('click', () => { if (foldedGroups.has(status)) foldedGroups.delete(status); else foldedGroups.add(status); render(); });
-    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, toggle)));
+    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets)))));
     if (!folded) for (const {i} of roots) body.push(treeBranch(rows, i, status));
   }
   return h('div', {className:'table-wrap', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},

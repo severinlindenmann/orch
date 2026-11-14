@@ -45,3 +45,19 @@ test('dialogs have one close button: the master removes a repeated plain Close',
   assert.match(o, /one close button/);
   assert.match(o, /textContent\.trim\(\)==='Close'/);
 });
+test('Contacts is a top-level sidebar entry, not in the Add-ons fold-out', () => {
+  assert.match(app, /contactsAddon \? navLink\(/);
+  assert.match(app, /a\.dashboard && a !== contactsAddon/);
+});
+test('the master empty state is used for Chat earlier, add-on blocks and Insights', () => {
+  assert.match(web('pages/chat.js'), /stateNote\('No earlier days yet'/);
+  assert.match(web('blocks.js'), /window\.UI\.state/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../../insights/src/orch_insights/web/insights.js'), 'utf8'), /paintState\(byId\('empty'\)/);
+});
+test('the add-on frame shows a skeleton until it has loaded', () => {
+  assert.match(web('pages/settings.js'), /embed-skeleton/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../../focus/src/orch_focus/web/focus.js'), 'utf8'), /fx-loading/);
+});
+test('ticket list group headers carry the group action', () => {
+  assert.match(tickets, /group-action/);
+});
