@@ -14,6 +14,24 @@ ROOTS = (
     ("record", False, ".orch/record"),
     ("local-id", False, ".orch/.local-id"),
 )
+# A ticket agent works in <orch home>/worktrees/<ws8>/<ticket>: its instruction file, its skills and its code
+# live there. A deny rule has no "except", so for the tool the home is denied child by child and `worktrees`
+# is the one child left open (without_worktrees). The names in HOME_CHILDREN are denied even when absent.
+OPEN_CHILD = "worktrees"
+HOME_CHILDREN = (
+    "keys",
+    "secrets",
+    "addons.json",
+    "consent.json",
+    "copies.json",
+    "finish.log",
+    "human-settings.json",
+    "installed.json",
+    "ports.json",
+    "running.json",
+    "services.lock",
+    "shared-pages.json",
+)
 _BAD = re.compile(r"[,() \t\r\n\0]")
 _DRIVE = re.compile(r"^([A-Za-z]):[\\/]")
 
@@ -166,6 +184,30 @@ def rules(root: Path, homes: list[str] | None = None, account_home: str | None =
     return out
 
 
+def _home_children(home: str) -> list[str]:
+    names = list(HOME_CHILDREN)
+    try:
+        names += sorted(os.listdir(home))
+    except OSError:
+        pass
+    return [n for n in dict.fromkeys(names) if n.lower() != OPEN_CHILD]
+
+
+def without_worktrees(rule_list: list[dict], workspace: str, account_home: str | None) -> list[dict]:
+    """The deny set the tool is told: each home row keeps its text forms (shell) and its file forms are
+    replaced by one row per child of the home, except `worktrees` (the agent's own copy of the project)."""
+    out = []
+    for r in rule_list:
+        if r["root"] != "home":
+            out.append(r)
+            continue
+        out.append({**r, "file": []})
+        for child in _home_children(r["path"]):
+            cp = _norm(r["path"]) + "/" + child
+            out.append({**r, "path": cp, "file": path_forms(cp, workspace, account_home)["file"], "text": []})
+    return out
+
+
 def tool_patterns(rule_list: list[dict]) -> list[str]:
     """patterns/1: Read/Edit/Write patterns and Bash text patterns, de-duplicated, in a stable order."""
     pats: list[str] = []
@@ -213,5 +255,6 @@ def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[st
 
         raise Refused("orch cannot start this tool without its deny rules (no workspace given).")
     if fmt == "patterns/1":
-        return merge_flag(extra, tool_patterns(rules(root)))
+        acct = _account_home()
+        return merge_flag(extra, tool_patterns(without_worktrees(rules(root), str(root), acct)))
     raise RuntimeError(f"unknown deny format {fmt}")

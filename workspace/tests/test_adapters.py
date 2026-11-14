@@ -77,7 +77,12 @@ SETTINGS = ["--settings", json.dumps({"hooks": _REMINDER}, separators=(",", ":")
 
 def _claude_argvs(root):
     """The snapshots: the permission flags plus the deny rules for this workspace (slice 1.4)."""
-    deny = denyrules.merge_flag(DENY, denyrules.tool_patterns(denyrules.rules(root)))
+    deny = denyrules.merge_flag(
+        DENY,
+        denyrules.tool_patterns(
+            denyrules.without_worktrees(denyrules.rules(root), str(root), denyrules._account_home())
+        ),
+    )
     return (
         ["claude", "-p", "--session-id", NEW, *ORCH_OK, *SETTINGS, *deny, "--", "Do it"],
         ["claude", "-p", "--resume", OLD, *ORCH_OK, *SETTINGS, *deny, "--", "Do it"],

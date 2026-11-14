@@ -63,7 +63,7 @@ def test_patterns_formatted_adapters_get_the_deny_set_in_every_mode(proj_ws, per
     root = proj_ws
     argv = _argv("claude", kind, mode, perm, root)
     pats = _flag(argv)
-    want = _set(denyrules.rules(root))
+    want = _set(denyrules.without_worktrees(denyrules.rules(root), str(root), denyrules._account_home()))
     assert want and set(want) <= set(pats)
     assert "Bash(orch private:*)" in pats or perm == "full"  # the existing rules are extended, not replaced
     if mode == "oneshot":
@@ -529,3 +529,40 @@ def test_missing_claude_code_message_is_plain(monkeypatch, tmp_path):
         str(e.value)
         == "Claude Code is missing or too old on this computer. Install or update it, then press Continue."
     )
+
+
+# ---- a ticket agent reads its own instruction file and skills in <orch home>/worktrees/<ws8>/<ticket>
+
+
+def test_the_open_child_stays_open_while_the_rest_of_the_home_is_denied(tmp_path):
+    home = tmp_path / ".orch-tool"
+    (home / "worktrees" / "ab12cd34" / "t_1").mkdir(parents=True)
+    (home / "keys").mkdir()
+    (home / "newthing.json").write_text("{}")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    rl = denyrules.without_worktrees(
+        denyrules.rules(ws, homes=[str(home)], account_home=str(tmp_path)), str(ws), str(tmp_path)
+    )
+    pats = _set(rl)
+    h = str(home).lstrip("/")
+    for tool in ("Read", "Edit"):
+        assert f"{tool}(//{h}/keys/**)" in pats and f"{tool}(//{h}/consent.json)" in pats
+        assert f"{tool}(//{h}/newthing.json)" in pats  # whatever is there now
+        assert not any(p.startswith(f"{tool}(") and "/worktrees" in p for p in pats)
+        assert f"{tool}(//{h})" not in pats and f"{tool}(//{h}/**)" not in pats  # no blanket rule left
+    assert any(p.startswith("Bash(*") and ".orch-tool" in p for p in pats)  # the shell patterns stay
+    assert "Read(./.orch/secrets/**)" in pats  # the workspace's own secrets stay denied
+
+
+def test_the_agent_start_lets_a_worktree_read_its_instruction_file_and_skills(proj_ws):
+    argv = _argv("claude", "fresh", "oneshot", "ask", proj_ws)
+    pats = _flag(argv)
+    wt = denyrules._candidates(proj_ws)[0] + "/worktrees/ab12cd34/t_1"
+    for rel in ("CLAUDE.local.md", ".agents/skills/orch/SKILL.md", ".claude/skills/orch/SKILL.md"):
+        for p in pats:
+            if p.startswith(("Read(", "Edit(")) and not p.startswith(("Read(./", "Edit(./")):
+                pat = p[p.index("(") + 1 : -1]
+                path = "//" + (wt + "/" + rel).lstrip("/")
+                base = pat[:-3] if pat.endswith("/**") else pat
+                assert not (path == base or path.startswith(base + "/")), (p, rel)
