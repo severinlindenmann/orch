@@ -19,6 +19,11 @@ def add_parsers(sub, common) -> None:
     x = s.add_parser("say", parents=[common], help="a person writes in Chat from the dashboard")
     x.add_argument("text")
     x.add_argument("--new", action="store_true", help="start a new conversation")
+    x = s.add_parser("reply", parents=[common], help="the helper answers in Chat (with or without a phone)")
+    x.add_argument("text")
+    x.add_argument("--ticket", help="the Chat ticket")
+    x.add_argument("--reply-to")
+    x.add_argument("--ref", action="append", default=[], metavar="KIND:VALUE")
     x = s.add_parser("make-ticket", parents=[common], help="make a ticket from a Chat proposal")
     x.add_argument("message_id")
     x.add_argument("--title")
@@ -62,10 +67,19 @@ def dispatch(args, root: Path) -> bool:
         )
         r = chat.make_ticket(root, args.message_id, args.title, who)
         _out(args, r, r["key"])
+    elif args.sub == "reply":
+        if not tickets.agent_tool():
+            raise Refused("Only the helper answers with this. Write in Chat from the dashboard.")
+        refs = [
+            {"kind": k, {"ticket": "key", "reference": "url", "proposal": "title"}.get(k, "path"): v}
+            for k, _, v in (r.partition(":") for r in args.ref)
+        ]
+        r = chat.reply(root, args.text, args.ticket or tickets.general_id(root) or "", args.reply_to, refs)
+        _out(args, r, "Sent." if r["sent"] else "Saved in the chat.")
     elif args.sub == "say":
         if tickets.agent_tool():
             raise Refused(
-                "Only a person writes as themselves in Chat. Use: orch relay send ... --ticket <chat>."
+                "Only a person writes as themselves in Chat. Use: orch chat reply ... --ticket <chat>."
             )
         from orch import humanproof
 
