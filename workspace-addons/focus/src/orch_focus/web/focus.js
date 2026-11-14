@@ -200,7 +200,7 @@
     let cur = 0;
     document.addEventListener('keydown', e => {
       if (e.metaKey || e.ctrlKey || e.altKey || proof.isOpen()) return;
-      if (e.target.closest('input,textarea,select')) return;
+      if (e.target.closest('input,textarea,select,[data-term]')) return;
       const k = e.key;
       if (k === 'Escape' || (!els.help.hidden && k.toLowerCase() === 'x')) { if (!els.help.hidden) toggleHelp(false); else if (root.classList.contains('is-full')) setFull(false); return; }
       if (k === '?') { e.preventDefault(); toggleHelp(); return; }
@@ -255,5 +255,5 @@
     window.addEventListener('pagehide', () => { stream.close(); live = false; });
     window.addEventListener('pageshow', e => { if (e.persisted) connect(); });
   }
-  S.views.ticket.build(); S.views.compose.mount(); wire(); poll();
+  S.views.ticket.build(); S.views.compose.mount(); if (INAPP && S.views.term) S.views.term.mount(els.paneLive); wire(); poll();
 })();
