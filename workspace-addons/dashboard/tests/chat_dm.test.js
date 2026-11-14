@@ -26,7 +26,7 @@ test('DM renders safe text, delivery states, read-only permissions and workspace
   vm.runInContext(`chatDm.threads.set('${WS}', {messages:[{id:'1',by:'you',text:'<script>hello</script>',state:'sending'},
     {id:'2',by:'you',text:'ok',state:'delivered'}, {id:'3',by:'you',text:'failed',state:'failed'}, {id:'4',by:'${WS}',text:'reply'}]});`, c);
   let view = JSON.stringify(c.chatDmThread());
-  assert.match(view, /Sending…/); assert.match(view, /Delivered to Home/); assert.match(view, /Not sent · /);
+  assert.match(view, /Sending…/); assert.match(view, /Delivered — their helper answers when it runs/); assert.match(view, /Not sent · /);
   assert.match(view, /<script>hello<\/script>/); assert.match(view, /Try again/);
   assert.match(JSON.stringify(c.chatList()), /Other workspaces/);
   vm.runInContext('chatDm.contacts[0].can.chat = false', c);
@@ -155,4 +155,24 @@ test('a received text shows the sender time (shown_at) when there is one, else t
   assert.match(view, /\[2026-11-09T11:59:00Z\]/);
   assert.match(view, /\[2026-11-09T12:01:00Z\]/);
   assert.doesNotMatch(view, /\[2026-11-09T12:02:00Z\]/); // my own messages show their delivery state, not a time
+});
+
+test('workspace chat header: the name once, then one description line with tags; delivery line says who answers', () => {
+  const c = context();
+  vm.runInContext(`chatDm.contacts[0] = {ws:'${WS}',name:'Shop',can:{chat:true},description:'Online orders and opening hours.',tags:['orders','website']};
+    chatDm.threads.set('${WS}', {messages:[{id:'2',by:'you',text:'hi',state:'delivered'}]});`, c);
+  const view = JSON.stringify(c.chatDmThread());
+  const texts = n => typeof n === 'string' ? [n] : (n && n.children ? n.children.flatMap(texts) : []);
+  const head = texts(c.chatDmThread().children[0]).join('|');
+  assert.equal((head.match(/Shop/g) || []).length, 1, 'the name appears once in the header');
+  assert.doesNotMatch(view, /Workspace · Shop/);
+  assert.doesNotMatch(view, /You \(.*\) · Shop/);
+  assert.match(view, /Online orders and opening hours\./);
+  assert.match(view, /orders/); assert.match(view, /website/);
+  assert.match(view, /Delivered — their helper answers when it runs/);
+});
+test('workspace chat header without a description shows no empty line', () => {
+  const c = context();
+  vm.runInContext(`chatDm.contacts[0] = {ws:'${WS}',name:'Shop',can:{chat:true}}; chatDm.threads.set('${WS}', {messages:[]});`, c);
+  assert.doesNotMatch(JSON.stringify(c.chatDmThread()), /chat-desc/);
 });

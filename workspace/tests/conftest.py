@@ -481,3 +481,11 @@ def seal_append(root, run, event):
         seq, link = 1, None
     with path.open("ab") as f:
         f.write(seal_lines(root, run, [event], start=seq, link=link))
+
+
+@pytest.fixture(autouse=True)
+def _no_update_info_network(monkeypatch):
+    """Update text asks the install source for release numbers and changes: never the network in tests."""
+    from orch import updateinfo
+
+    monkeypatch.setattr(updateinfo, "_fetch_messages", lambda *a, **k: None)

@@ -527,7 +527,7 @@ function settingsPage() {
   const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
   if (detailAddon) return addonDetailPage(detailAddon);
   return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
-    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
+    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
       // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
@@ -543,8 +543,82 @@ function settingsPage() {
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
-    panel('addons', addonsPanel)))
+    panel('addons', addonsPanel),
+    panel('about', aboutPanel())))
   ));
+}
+// ---- About & updates (Settings): the installed release, the newest one, what changed, one Update button, the steps.
+// Data: GET /api/update-info (orch asks its install source; nothing is sent). The click runs the same detached update
+// as "Continue" on a request from the terminal. The phase comes from handoff.js ("orch-update-state" events).
+const updUi = {info:null, loading:false, phase:'idle', from:null, to:null, reason:''};
+const UPD_STEPS = ['Downloading', 'Installing', 'Restarting', 'Done'];
+function updLoad(force = false) {
+  if (updUi.loading || (updUi.info && !force)) return;
+  updUi.loading = true;
+  fetch('/api/update-info', {cache:'no-store'}).then(r => r.ok ? r.json() : {}).catch(() => ({})).then(info => {
+    updUi.info = info && typeof info === 'object' ? info : {}; updUi.loading = false;
+    if (updUi.phase === 'restarting' || updUi.phase === 'running') return;
+    if (updUi.phase === 'done' && updUi.info.installed) updUi.to = updUi.info.installed.release || updUi.info.installed.label;
+    if (route().kind === 'settings') render();
+  });
+}
+async function updStart() {
+  const was = updUi.info?.installed;
+  updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
+  try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
+  let res = null;
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:{}})}); } catch (e) { /* the server may already be restarting */ }
+  if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
+  try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
+}
+if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('orch-update-state', event => {
+  const d = event.detail || {};
+  if (d.state === 'running' && updUi.phase === 'idle') updUi.phase = 'running';
+  else if (d.state === 'unreachable' && updUi.phase === 'running') updUi.phase = 'restarting';
+  else if (d.state === 'finished') {
+    if (updUi.from == null) { try { updUi.from = JSON.parse(sessionStorage.getItem('orch-update-from')); } catch (e) {} }
+    updUi.phase = 'done'; updUi.info = null; updUi.loading = false;
+  } else if (d.state === 'failed') { updUi.phase = 'failed'; updUi.reason = String(d.reason || 'It did not finish.'); }
+  if (route().kind === 'settings') render();
+  if (d.state === 'finished') updLoad(true);
+});
+function updButton(text, key, fn) { const b = button(text, 'primary', fn); b.dataset.key = key; return b; }
+function updNum(v) { return typeof v === 'number' ? 'orch ' + v : String(v || ''); }
+function aboutPanel() {
+  if (settingsTab === 'about') updLoad();  // the check runs when the tab is open, not on every Settings page
+  const info = updUi.info, have = info?.installed, newest = info?.newest, phase = updUi.phase;
+  const line = (label, body) => h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, label), h('div', {className:'grow set-ctl'}, body));
+  const steps = h('ol', {className:'upd-steps', 'data-key':'update-steps', 'aria-label':'Update steps'}, UPD_STEPS.map((name, i) => {
+    const at = phase === 'done' ? 4 : phase === 'restarting' ? 2 : phase === 'running' ? 0 : -1;  // Downloading + Installing run as one step
+    const state = i < at ? 'done' : (i === at || (at === 0 && i === 1)) && phase !== 'failed' ? 'now' : 'next';
+    return h('li', {className:'upd-step ' + state, 'aria-current':state === 'now' ? 'step' : null}, (state === 'done' ? '✓ ' : '') + name);
+  }));
+  let body;
+  if (phase === 'running' || phase === 'restarting') {
+    body = [steps, settingsText('p', {className:'meta', role:'status', 'data-key':'update-note'}, 'Your helpers keep their work and carry on after the restart.')];
+  } else if (phase === 'done') {
+    const to = updUi.to ?? have?.release ?? have?.label;
+    const text = updUi.from != null && to != null && updUi.from !== to ? 'Updated ' + (typeof updUi.from === 'number' ? updUi.from : String(updUi.from).replace(/^orch /, '')) + ' → ' + (typeof to === 'number' ? to : String(to).replace(/^orch /, '')) : 'Updated';
+    body = [steps, settingsText('p', {className:'upd-done', role:'status', 'data-key':'update-done'}, text),
+      array(info?.changes).length ? h('ul', {className:'upd-changes', 'data-key':'update-changes'}, array(info.changes).map(c => settingsText('li', {}, c))) : null];
+  } else if (phase === 'failed') {
+    body = [settingsText('p', {className:'bad', role:'alert', 'data-key':'update-failed'}, 'The update did not finish: ' + clean(updUi.reason).replace(/[.\s]+$/, '') + '. orch is still the old version.'),
+      snapshot ? null : updButton('Try again', 'update-retry', () => { updUi.phase = 'idle'; render(); })];
+  } else if (!info) {
+    body = settingsText('p', {className:'meta', 'data-key':'update-loading'}, 'Checking for a newer version…');
+  } else {
+    const ready = info.update_available === true && newest;
+    body = [
+      !newest ? settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.')
+        : ready ? h('div', {className:'upd-ready'}, settingsText('strong', {}, updNum(newest.release) || newest.label), settingsText('span', {className:'meta'}, ' is ready to install'))
+        : settingsText('p', {className:'meta', 'data-key':'update-current'}, 'You have the newest version.'),
+      ready && array(info.changes).length ? h('div', {className:'stack', 'data-key':'update-changes'}, h('h3', {}, 'What changed'), h('ul', {className:'upd-changes'}, array(info.changes).map(c => settingsText('li', {}, c)))) : null,
+      ready && !snapshot ? h('div', {className:'row'}, updButton('Update to ' + String(newest.release || newest.label).replace(/^orch /, ''), 'update-start', updStart),
+        info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
+  }
+  return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
+    line('Installed', settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…'))),
+    line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))));
 }
 // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
 function openAgentForm(control) {

@@ -606,8 +606,10 @@ function chatDmThread() {
   const draft = chatUi.drafts[ws] || '';
   return h('div', {className:'chat-main', 'data-key':'dm-' + ws},
     h('header', {className:'chat-thread-head'}, h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}), chatAvatar(c || title),
-      h('div', {className:'chat-head-text'}, chatText('p', 'chat-eyebrow', 'Workspace · ' + title), h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
-        chatText('p', 'chat-muted chat-head-meta', 'You (' + chatWorkspace() + ') · ' + title)))),
+      // The name once; under it ONE line about the workspace (its description, then small tags). No repeated name.
+      h('div', {className:'chat-head-text'}, h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
+        c?.description ? chatText('p', 'chat-muted chat-head-meta chat-desc', clean(c.description)) : null,
+        array(c?.tags).length ? h('p', {className:'chat-member-chips chat-tags'}, array(c.tags).slice(0, 6).map(t => chatText('small', 'chat-member-chip', clean(t)))) : null))),
     chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
@@ -615,7 +617,7 @@ function chatDmThread() {
         m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,
         m.by === 'you' ? h('small', {className:'chat-delivery'},
           m.state === 'failed' ? fragment('Not sent · ', chatButton('Try again', 'retry-send', {'data-id':m.id})) :
-          m.state === 'delivered' ? 'Delivered to ' + clean(title) : 'Sending…') : null))),
+          m.state === 'delivered' ? 'Delivered — their helper answers when it runs' : 'Sending…') : null))),
     !snapshot && c?.can?.chat ? h('form', {className:'chat-compose', 'data-key':'form-' + ws},
       h('textarea', {rows:1, maxLength:2000, className:'chat-draft', 'data-key':'draft-' + ws, 'data-chat-input':'draft', 'data-thread':ws,
         'aria-label':'Message ' + title, placeholder:'Message ' + title}, draft),
