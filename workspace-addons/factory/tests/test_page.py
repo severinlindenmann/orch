@@ -378,8 +378,6 @@ def test_web_files_from_a_fixed_list(srv):
     assert get(srv, "/web/__init__.py")[0] == 404 and get(srv, "/web/")[0] == 404
 
 
-
-
 def test_kit_missing_everywhere_is_404(srv, monkeypatch):
     monkeypatch.setitem(sys.modules, "orch_ui", None)
     monkeypatch.setitem(sys.modules, "orch_dashboard", None)

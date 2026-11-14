@@ -30,4 +30,3 @@ def test_kit_missing_everywhere_is_404(server, no_static, monkeypatch):
     srv = server
     assert get(srv, "/kit/tokens.css")[:2] == (404, b"not found")
     assert get(srv, "/web/focus.css")[0] == 200  # the server still answers
-

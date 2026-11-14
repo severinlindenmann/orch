@@ -75,6 +75,8 @@ kbd{display:inline-grid;place-items:center;min-width:24px;padding:2px 4px;border
 .nav-item[aria-current=page]{background:var(--nav-selected);color:var(--text)}
 .nav-item .count,.nav-item .addon-tag{margin-left:auto}
 .ic{flex:none;display:block}
+/* An icon sizes itself (owner 14 Nov: an unsized SVG rendered as a giant circle). :where keeps every specific size rule winning. */
+:where(svg.ic,svg.ico,.ico>svg){width:20px;height:20px}
 svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .sidebar .eyebrow{padding:8px}
 .nav-group>summary{list-style:none;padding:8px}

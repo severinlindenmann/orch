@@ -229,7 +229,11 @@ def test_gallery_and_design_rules_are_served(server):
 
     r = urllib.request.urlopen(f"{server}/kit/gallery.html")
     page = r.read().decode()
-    assert r.status == 200 and "orch design system" in page and "style-src 'self' 'unsafe-inline'" in r.headers["Content-Security-Policy"]
+    assert (
+        r.status == 200
+        and "orch design system" in page
+        and "style-src 'self' 'unsafe-inline'" in r.headers["Content-Security-Policy"]
+    )
     for link in re.findall(r'(?:href|src)="([a-z0-9./-]+\.(?:css|js|svg|pdf|csv|md))"', page):
         assert urllib.request.urlopen(f"{server}/kit/{link}").status == 200, link
     assert b"the one master" in urllib.request.urlopen(f"{server}/kit/DESIGN.md").read()

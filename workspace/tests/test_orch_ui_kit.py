@@ -1,4 +1,4 @@
-"""The master design system (orch_ui/static): every file a page links exists, the gallery is complete, no copies."""
+"""The master design system (orch_ui/static): linked files exist, the gallery is complete, no copies."""
 
 import re
 from pathlib import Path
@@ -29,7 +29,8 @@ def test_every_kit_file_a_page_links_exists_in_the_master():
 def test_add_on_servers_serve_what_their_pages_link():
     for name, mod in (("focus", "orch_focus"), ("insights", "orch_insights"), ("factory", "orch_factory")):
         server = (ADDONS / name / "src" / mod / "server.py").read_text()
-        listed = set(re.findall(r'"([a-z0-9-]+\.(?:css|js))"', server.split("KIT_FILES", 1)[1].split(")", 1)[0]))
+        table = server.split("KIT_FILES", 1)[1].split(")", 1)[0]
+        listed = set(re.findall(r'"([a-z0-9-]+\.(?:css|js))"', table))
         linked = set(_links((ADDONS / name / "src" / mod / "web" / "index.html").read_text(), "__P__/kit/"))
         assert linked <= listed, f"{name}: page links kit files its server does not serve: {linked - listed}"
 
@@ -61,3 +62,8 @@ def test_design_doc_names_how_to_add_a_component():
 def test_one_chevron_no_text_glyph():
     for name in ("select.js", "components.css", "widgets.js"):
         assert "⌄" not in (STATIC / name).read_text() and "⌄" not in (STATIC / name).read_text(), name
+
+
+def test_an_unsized_icon_sizes_itself():
+    css = (STATIC / "components.css").read_text()
+    assert ":where(svg.ic,svg.ico,.ico>svg){width:20px;height:20px}" in css
