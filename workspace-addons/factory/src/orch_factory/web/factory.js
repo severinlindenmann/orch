@@ -175,10 +175,9 @@
       ...(b.warn ? [meta('Budget needs attention · review the order ticket.')] : []));
   }
   const tail = (...nodes) => group('actions', ...nodes);
-  // The page is read-only: an idea or a change of "Ask me at every stop" goes to your helper in Chat, prefilled, and you send it there.
+  // The page is read-only: an idea or a change of "Ask me at every stop" goes to your helper in Chat as typed text (postMessage to the dashboard); you press Send there.
   function toChat(message) {
-    const to = '/#chat?say=' + encodeURIComponent(message);
-    try { window.top.location.href = to; } catch (_) { window.location.href = to; }
+    window.parent.postMessage({type: 'orch.say', text: message}, location.origin);
   }
   function ideaBox() {
     const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));

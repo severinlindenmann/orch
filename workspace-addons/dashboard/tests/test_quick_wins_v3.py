@@ -21,3 +21,8 @@ def test_tab_counts_are_body_size_grey_not_mono():
     css = (KIT / "components.css").read_text()
     line = next(x for x in css.splitlines() if x.startswith(".tabs sup"))
     assert "13px" in line and "mono" not in line
+
+
+def test_chat_draft_is_never_filled_from_the_url():
+    chat = (WEB / "pages" / "chat.js").read_text()
+    assert "say=" not in chat and "'orch.say'" in chat and "e.origin !== location.origin" in chat

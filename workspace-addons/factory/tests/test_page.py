@@ -565,7 +565,8 @@ def test_page_decisions_only_post_the_open_question():
 
     js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
     posts = re.findall(r"postMessage\(([^;]*)\);", js)
-    assert len(posts) == 1 and "'orch.question'" in posts[0] and "location.origin" in posts[0]
+    assert len(posts) == 2 and all("location.origin" in x for x in posts)
+    assert sum("'orch.question'" in x for x in posts) == 1 and sum("'orch.say'" in x for x in posts) == 1  # the idea box types text into Chat, never sends it
     assert "window.top !== window" in js
     assert not re.search(r"fetch\([^)]*method|method:\s*['\"]POST", js)
 

@@ -312,11 +312,15 @@ test('header reads Your helper once a message exists, and Send works while the h
   assert.equal(send.attrs.disabled, false);
 });
 
-test('#chat?say=text opens the helper chat with the text typed in (Factory idea box)', () => {
-  const c = context();
-  c.location.hash = '#chat?say=' + encodeURIComponent('Factory: a page with opening hours');
-  c.history = {replaceState(_a, _b, to) { c.location.hash = to; }};
-  vm.runInContext('chatSayFromHash()', c);
-  assert.equal(vm.runInContext('chatUi.drafts.chat', c), 'Factory: a page with opening hours');
-  assert.equal(c.location.hash, '#chat');
+test('orch.say from the shown add-on frame fills the draft; a URL does not; a typed draft is kept', () => {
+  const c = context(), frameWin = {};
+  c.location = {hash:'#addon/factory', origin:'http://x'};
+  c.route = () => ({kind:'page', id:'factory'});
+  c.state.addons = [{name:'factory', shipped:true}];
+  c.document.querySelector = () => ({contentWindow:frameWin});
+  const msg = (text, extra = {}) => ({data:{type:'orch.say', text}, origin:'http://x', source:frameWin, ...extra});
+  assert.equal(c.chatSayRequest(msg('Factory: a page\nwith hours\u0007')).text, 'Factory: a page with hours');
+  assert.equal(c.chatSayRequest(msg('x'.repeat(900))).text.length, 500);
+  assert.equal(c.chatSayRequest(msg('hi', {origin:'http://evil'})), null);
+  assert.equal(c.chatSayRequest(msg('hi', {source:{}})), null);
 });

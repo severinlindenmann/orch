@@ -564,16 +564,26 @@ async function chatDmLoad(force = false) {
     }
   }
 }
-// "#chat?say=<text>" (from Factory's idea box) opens the helper chat with that text typed in; you press Send.
-function chatSayFromHash() {
-  const m = /^#chat\?(?:.*&)?say=([^&]*)/.exec(location.hash || '');
-  if (!m || snapshot) return;
-  let text = ''; try { text = decodeURIComponent(m[1]).slice(0, 2000); } catch { return; }
-  history.replaceState(null, '', '#chat');
-  chatUi.open = 'chat'; chatUi.listOpen = false; chatUi.filter = 'all'; chatUi.drafts.chat = text;
+// Factory's idea box hands text to the helper chat by postMessage (same origin, from the shown shipped add-on frame only,
+// never from a URL). The text lands in the draft; you press Send. A draft you already typed is kept.
+function chatSayRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.say' || typeof data.text !== 'string') return null;
+  if (e.origin !== location.origin || snapshot) return null;
+  const r = route();
+  if (r.kind !== 'page' || !state?.addons?.find?.(a => a.name === r.id)?.shipped) return null;
+  const frame = document.querySelector('iframe.embed[data-key="embed"]');
+  if (!frame || !frame.contentWindow || e.source !== frame.contentWindow) return null;
+  const text = data.text.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 500);
+  return text ? {text} : null;
 }
+window.addEventListener('message', e => {
+  const req = chatSayRequest(e); if (!req) return;
+  if (!(chatUi.drafts.chat || '').trim()) chatUi.drafts.chat = req.text;
+  chatUi.open = 'chat'; chatUi.listOpen = false; chatUi.filter = 'all';
+  location.hash = '#chat';
+});
 function chatDmRoute() {
-  chatSayFromHash();
   const ws = location.hash.slice(6);
   if (chatDmId(ws)) { chatUi.open = ws; chatUi.listOpen = false; chatUi.day = null; }
   if (route().kind === 'chat') { render(); chatDmLoad(); }
