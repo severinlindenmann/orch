@@ -156,7 +156,7 @@
   }
   function render(items) {
     lastItems = items;
-    if (items.some(function (i) { return i.op === "update"; })) loadUpdateInfo(); else if (updInfo && updInfo.__done !== false) updInfo = null;
+    if (items.some(function (i) { return i.op === "update"; })) loadUpdateInfo(); else updInfo = null;
     var key = JSON.stringify(items) + open + Math.floor(Date.now() / 60000);
     if (key === seen) return;
     seen = key;
