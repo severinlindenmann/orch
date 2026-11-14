@@ -822,7 +822,7 @@ function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
   const src = '/addon/' + r.id + '/' + r.path;
-  const frame = h('iframe', {className:'embed', 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
   if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
@@ -831,6 +831,14 @@ function pageFrame(r) {
   return fragment(skeleton, frame);
 }
 const framesLoaded = new Set();
+// A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
+const shellAddons = new Set();
+globalThis.addEventListener?.('message', event => {
+  const name = event.origin === location.origin && event.data?.orch === 'embed-shell' && /^\/addon\/([a-z][a-z0-9-]{1,31})\//.exec(String(event.data.path || ''))?.[1];
+  if (!name || shellAddons.has(name)) return;
+  shellAddons.add(name);
+  document.querySelectorAll('iframe.embed').forEach(f => { if ((f.getAttribute('src') || '').startsWith('/addon/' + name + '/')) f.classList.add('embed-shell'); });
+});
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
 // Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };

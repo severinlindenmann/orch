@@ -170,3 +170,6 @@ Validation: browser checks passed for all 15 loaded/loading/empty combinations a
 Validation: all 18 ticket-page checks passed at 1280×800 and 1920×1080 across loaded, loading and empty states, including card sizing, question buttons, result inspection, queued instructions, Take back and refused attachments.
 
 Final component validation: the requested `node base/scripts/qa-components.cjs 1280` sweep reports no problems for any Focus or system page; the same checks pass at 1920 pixels. The full sweep reports one unrelated problem in `board/new.html`, outside these folders.
+
+## fb17 (14 Nov): Focus inside the dashboard shell
+- The accepted target is `proposals/fb17-focus-shell.html`: tickets left, the live session in the centre (Pause while it writes), one result panel on the right (Looks good / Send back only when the helper is done). The product matches it; the older pages in this folder (focus-ticket*.html) show the stand-alone page, which still exists when Focus is opened outside the dashboard.
