@@ -587,3 +587,15 @@ def test_a_text_in_chat_starts_the_helper_even_when_sync_was_ever_on(ws):
     (ws / "pending-t_chat0001").write_text(json.dumps(["p_phone00001"]))
     (ws / "ended-t_chat0001").write_text("")
     assert Scheduler(ws).tick(T(8)) == ["t_chat0001"]
+
+
+def test_with_sync_on_an_unknown_ticket_is_refused_but_the_chat_ticket_is_not(ws):
+    """Fail closed: a ticket the lookup does not return (list failed, or not found) is not approved; only the Chat
+    ticket, by core's stored id, is exempt."""
+    from orch_automation import orchcli
+
+    (ws / ".orch" / "run" / "sync").mkdir(parents=True)
+    (ws / "chat-ticket").write_text("t_chat0001")
+    res = orchcli.run_start(ws, "t_other001", "hi")
+    assert res["result"] == "failed" and "local approval" in res["reason"]
+    assert orchcli.run_start(ws, "t_chat0001", "hi")["result"] == "started"
