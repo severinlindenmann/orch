@@ -117,7 +117,9 @@ def run_start(
 
     if sync_on(root):  # never the record's presence: removing it must not skip the check
         current = ticket(root, tid)
-        if current is None or not allowed(root, current):
+        # The Chat's hidden ticket is in no ticket list and never carries a synced automation block: nothing to approve.
+        # (Reading "not in the list" as "not approved" kept the Chat helper from ever starting once sync had been on.)
+        if current is not None and not allowed(root, current):
             return {"result": "failed", "reason": "This synced automation needs local approval."}
     cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", by or BY]
     if mode:

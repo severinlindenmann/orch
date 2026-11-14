@@ -577,3 +577,13 @@ def test_the_automation_actor_name_is_the_one_core_never_holds_for():
     from orch_automation import orchcli
 
     assert orchcli.BY == runs_live.AUTOMATION_BY
+
+
+def test_a_text_in_chat_starts_the_helper_even_when_sync_was_ever_on(ws):
+    """Owner feedback 14 Nov fb16: the Chat's hidden ticket is in no ticket list, and the "synced automation needs
+    local approval" gate read that as "not approved" once sync had ever been on here: the helper never started."""
+    (ws / ".orch" / "run" / "sync").mkdir(parents=True)  # a trace of sync: history.sync_enabled is True
+    (ws / "chat-ticket").write_text("t_chat0001")
+    (ws / "pending-t_chat0001").write_text(json.dumps(["p_phone00001"]))
+    (ws / "ended-t_chat0001").write_text("")
+    assert Scheduler(ws).tick(T(8)) == ["t_chat0001"]
