@@ -1559,21 +1559,27 @@ async function openNeed(row, trigger) {
     window.orch.toast(result.ok ? 'Started again' : result.text, result.ok ? 'ok' : 'error');
     return;
   }
+  if (action.kind === 'start') {  // a background add-on stopped: one press starts it (no dialog to read first)
+    if (trigger.disabled) return;
+    trigger.disabled = true;
+    const result = await act('addon.start', {});
+    trigger.disabled = false;
+    window.orch.toast(result.ok ? 'Started' : result.text, result.ok ? 'ok' : 'error');
+    return;
+  }
   if (action.kind === 'answer' || action.kind === 'review') {
     const {d, actions} = dialog(row.title, 'dialog', 'needs-you');
     const host = el('div');
     d.append(host, actions);
     mountQuestion(host, {ticket:row.ticket, id:row.answer.question, digest:row.answer.digest, title:row.title, text:row.text, options:array(row.answer.options).map(o => ({text:o, suggested:o === row.answer.recommended}))}, {dialog:d, row:trigger.closest('[data-need-row]'), lock:'needs-you'});
     window.orch.open(d);
+    // "Write your own…" opens the answer box with its Send button at once, not a second page of choices
+    if (trigger.dataset?.write === 'own') d.querySelector('.qoptions .quiet')?.click();
   } else if (row.ticket) location.hash = href(row.ticket);
   else {
     const a = addons().find(a => a.dashboard && (a.name === row.source || String(row.kind).startsWith(a.name + ':')));
     if (a) location.hash = '#addon/' + encodeURIComponent(a.name);
-    else {
-      const {d, actions} = dialog(row.title);
-      d.append(el('p', 'preserve-lines', clean(row.text || 'No further details.')), actions);
-      window.orch.open(d);
-    }
+    else window.orch.toast(clean(row.text || row.title || 'Nothing to do here.'));  // nothing to press: say it, no dead-end dialog
   }
 }
 

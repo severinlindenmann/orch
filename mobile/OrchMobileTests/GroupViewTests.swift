@@ -305,3 +305,24 @@ final class GroupViewTests: XCTestCase {
         XCTAssertEqual(queued.ticket, GroupMock.ticket)
     }
 }
+
+final class GroupBadgeLayoutTests: XCTestCase {
+    func testSpotsStayInsideTheBox() {
+        for members in [1, 2, 3, 5] {
+            let spots = GroupBadgeLayout.spots(members: members)
+            XCTAssertEqual(spots.count, min(members, 3))
+            for spot in spots {
+                XCTAssertGreaterThanOrEqual(spot.x, 0); XCTAssertGreaterThanOrEqual(spot.y, 0)
+                XCTAssertLessThanOrEqual(spot.x + spot.size, GroupBadgeLayout.box)
+                XCTAssertLessThanOrEqual(spot.y + spot.size, GroupBadgeLayout.box)
+            }
+        }
+    }
+    func testTriangleAndOverflow() {
+        XCTAssertEqual(GroupBadgeLayout.spots(members: 3).map { [$0.x, $0.y] }, [[0, 1], [24, 1], [12, 24]])
+        XCTAssertEqual(GroupBadgeLayout.spots(members: 5).last?.overflow, 3)
+        XCTAssertNil(GroupBadgeLayout.spots(members: 3).last?.overflow)
+        XCTAssertEqual(GroupBadgeLayout.spots(members: 1).first?.size, 46)
+        XCTAssertEqual(GroupBadgeLayout.spots(members: 2).map(\.y), [12, 12])
+    }
+}

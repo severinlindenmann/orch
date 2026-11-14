@@ -286,6 +286,8 @@ struct ConversationView: View {
             .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
             // the clock: the General receipt and line also end by the timeout without a new message
             .task {
+                // Only General reads the clock (receipt + working line); a topic must not redraw every 15 s.
+                guard case .general = id else { return }
                 while !Task.isCancelled {
                     now = Date()
                     try? await Task.sleep(for: .seconds(15))

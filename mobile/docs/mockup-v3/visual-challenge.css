@@ -4,3 +4,11 @@
 
 .vc-approval{background:var(--surface2);border:1px solid color-mix(in srgb,var(--warn,#f5a524) 35%,transparent);border-radius:var(--r-m);padding:16px;display:flex;flex-direction:column;gap:12px}.vc-approval p{margin:0}.vc-approval-buttons{display:flex;gap:8px}.vc-approval-buttons button{flex:1;min-height:44px;background:var(--surface3);border-radius:var(--r-s)}.vc-approval-pending{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:.8rem}.vc-approval-pending button{min-height:44px;min-width:44px;color:var(--brand)}.vc-member-list{background:var(--surface);border-radius:var(--r-m);padding:8px 16px}.vc-member-list>div{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}.vc-member-list>div:last-child{border:0}.vc-member-list .vc-member{width:34px;height:34px;font-size:.7rem}.vc-member-list small{display:block;color:var(--muted);font-size:.75rem}.vc-members-note summary{min-height:44px;display:flex;align-items:center;color:var(--muted);font-size:.8rem}.vc-members-note p{color:var(--muted);font-size:.8rem}
 .answer-options.stacked{display:flex;flex-direction:column;gap:12px;flex-wrap:nowrap}.answer-options.stacked .option-row{display:flex;flex-direction:column;gap:4px}.answer-options.stacked button{width:100%;text-transform:none;white-space:normal}.recommended-tag{font-size:.8125rem;font-weight:500;color:var(--brand)}.question-context{font-size:.8125rem;color:var(--muted);margin:.5rem 0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.undo-line .countdown-ring{flex:none}
+
+/* 14 Nov B: group logo is a 46 pt box, three 22 pt badges in a triangle (same size as the workspace badge) */
+.vc-badges{width:46px;height:46px}
+.vc-badges i{width:22px;height:22px;border-radius:7px;font-size:.75rem}
+.vc-badges i:nth-child(1){left:0;top:1px}
+.vc-badges i:nth-child(2){left:24px;top:1px}
+.vc-badges i:nth-child(3){left:12px;top:24px}
+.hide-hint{margin:0 0 8px;font-size:.75rem;color:var(--muted)}

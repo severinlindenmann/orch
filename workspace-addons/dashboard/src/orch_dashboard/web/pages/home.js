@@ -61,7 +61,7 @@ function needRow(row, newest, questionCount = 1, same = []) {
       return control;
     }));
     // a written answer goes through the full question card (checked answer, Undo)
-    other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id}, 'Write your own…');
+    other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id, 'data-write':'own'}, 'Write your own…');
   } else if (!snapshot) {
     actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
   }
@@ -266,6 +266,14 @@ function needsToday() {
 }
 // The one needs-you number: sidebar badge, Menu, Home and Tickets headers all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
+// Services that should run but do not (one that is off on purpose, like Sync before it is turned on, is not one).
+function stoppedServices() { return array(state.services).filter(s => s.running === false && !s.idle); }
+function backgroundBanner() {
+  const names = stoppedServices().map(s => { const a = addons().find(x => x.name === s.addon); const n = a?.dashboard?.label || s.addon; return n.charAt(0).toUpperCase() + n.slice(1); });
+  if (!names.length) return null;
+  const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names.at(-1) : names[0];
+  return h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, list + (names.length > 1 ? ' are' : ' is') + ' not running. Press Start so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start'));
+}
 // Home: what needs the person first, in order: questions, results to check, changes to add, then what is working.
 function home() {
   const {needs, failed} = needsToday(), needCount = needsYouTotal(), groupedNeeds = homeNeeds(needs), all = tickets();
@@ -276,8 +284,7 @@ function home() {
   const changes = all.filter(t => t.bring_back?.state === 'waiting');
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const stopped = array(state.services).some(s => s.running === false);
-  const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
+  const banner = backgroundBanner();
   const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : 'Nothing needs you';
   const head = heading(title, attentionSummary(groupedNeeds, failed, review.length, changes.length), {
     eyebrow:now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}),
