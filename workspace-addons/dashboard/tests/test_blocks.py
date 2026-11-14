@@ -474,9 +474,10 @@ def test_the_panel_of_a_manifest_does_not_earn_the_link_controls():
 def test_allow_on_this_computer_is_drawn_only_for_a_ticket_id(tmp_path):
     v = json.loads(json.dumps(ACCORDION))
     acts = v["blocks"][0]["items"][0]["actions"]
-    acts[0] = {"label": "Allow on this computer", "action": {"op": "addon.allow", "args": {"target": "t_mec009"}}}
+    acts[0] = {"label": "Run now", "action": {"op": "addon.allow", "args": {"target": "t_mec009"}}}
     acts[1] = {"label": "Bad", "action": {"op": "addon.allow", "args": {"target": "../x"}}}
     nodes = list(walk(run(tmp_path, v)))
     allow = [n for n in nodes if n["tag"] == "button" and n["data"].get("syncAllow")]
     assert [n["data"]["syncAllow"] for n in allow] == ["t_mec009"]
+    assert allow[0]["text"] == "Allow on this computer"  # a view cannot word it differently
     assert not any(n["text"] == "Bad" for n in nodes)
