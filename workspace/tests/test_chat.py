@@ -1025,6 +1025,19 @@ def test_make_ticket_person_note_and_sanitised_history(proj, monkeypatch):
     assert t["history"][-2]["via"] == "chat"
 
 
+def test_make_ticket_copies_only_the_relevant_exchange(proj):
+    chat.record(proj, "old1", "you", "dashboard", "Unrelated earlier question")
+    chat.record(proj, "oldh", "helper", "helper", "Unrelated earlier answer")
+    chat.record(proj, "p1", "you", "dashboard", "Build the fish page")
+    chat.record(proj, "p2", "you", "dashboard", "With a menu")
+    chat.record(proj, "h1", "helper", "helper", "Sounds good")
+    _proposal(proj)
+    t = tickets.load(proj, chat.make_ticket(proj, "proposal", by="human:me")["ticket"])
+    assert t["note"] == "You: Build the fish page\n\nYou: With a menu"
+    texts = " ".join(h["text"] for h in t["history"])
+    assert "Unrelated" not in texts and "Build the fish page" in texts and "Sounds good" in texts
+
+
 def test_make_ticket_requires_new_person_after_move(proj):
     chat.record(proj, "person", "you", "phone", "First")
     _proposal(proj)

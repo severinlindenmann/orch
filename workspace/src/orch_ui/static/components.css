@@ -96,6 +96,8 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .ws-chev{font-size:0;width:16px;height:16px;background:var(--text-muted);-webkit-mask:var(--chev) center/16px no-repeat;mask:var(--chev) center/16px no-repeat}
 .wsb,.avatar{display:inline-grid;place-items:center;flex:none;width:28px;height:28px;border-radius:50%;background:var(--surface-3);color:var(--text-muted);font-size:12px;line-height:16px;font-weight:500}
 .wsb{width:32px;height:32px;border-radius:8px;background:var(--brand-soft);color:var(--brand)}
+.avatar{position:relative}
+.avatar-spark{position:absolute;right:-4px;bottom:-4px;border-radius:50%;background:var(--surface);color:inherit;font-size:12px;line-height:14px;pointer-events:none}
 .avatar.helper{border-radius:8px;color:var(--info);background:var(--info-soft)}
 .avatar.sm{width:24px;height:24px}
 .agent-chip{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)}

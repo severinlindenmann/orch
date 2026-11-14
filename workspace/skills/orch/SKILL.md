@@ -51,7 +51,7 @@ After you ran a check command (tests, a build, a linter), record it: `orch check
 person then sees whether files changed since the check.
 
 Proof flags: `--command`, `--note`, `--pr`, `--commit`, `--file <path>`, `--url` (one or more). A file is copied
-into the ticket (workspace files, at most 25 MB). Record what really happened. Never invent proof.
+into the ticket (files of the workspace or of your own working copy of this ticket, at most 25 MB; never another ticket's copy). Record what really happened. Never invent proof.
 Every finished step also gets `--summary "<what came out, one plain line>"` (at most 200 characters; no file names or
 sizes) and, when the step produced a file, a picture or a PR, that as `--file` / `--pr` with `--title "<short name>"`.
 The person reads the summary on the task and opens the proof from it. "Completed" says nothing.
