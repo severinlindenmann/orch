@@ -55,6 +55,7 @@ into the ticket (workspace files, at most 25 MB). Record what really happened. N
 Every finished step also gets `--summary "<what came out, one plain line>"` (at most 200 characters; no file names or
 sizes) and, when the step produced a file, a picture or a PR, that as `--file` / `--pr` with `--title "<short name>"`.
 The person reads the summary on the task and opens the proof from it. "Completed" says nothing.
+Record checks with orch check record, so the next run and the person can see whether they still pass. If a step's proof is changed or failed when you send the ticket to Review, orch asks you once to run the checks again and record them; then send it to Review again.
 
     orch check done <id> c1 --summary "Connected as Dev Team; all 3 workspaces answered." --file out/check.md --title "Connection check"
 
