@@ -763,3 +763,49 @@ def test_prompt_names_declined_steps_and_cli_strips_control_chars(proj, run, new
     assert "Declined by a person" in text and "c1 (" in text and "c1: step 1" not in text
     _, out, _ = run("ticket", "show", tid)
     assert "\x1b" not in out and "\x07" not in out
+
+
+def test_review_asks_agent_to_recheck_once_on_changed_or_failed(repo, run, new_ticket, monkeypatch):
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    _done_with_record(repo, run, tid, 0)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    tickets.set_status(repo, tid, "active", "agent:claude")
+    (repo / "a.txt").write_text("edited\n", encoding="utf-8")  # proof is changed now
+    with pytest.raises(tickets.Refused, match="run the checks again and record them with orch check record"):
+        tickets.set_status(repo, tid, "review", "agent:claude")
+    assert tickets.load(repo, tid)["status"] == "active"
+    t = tickets.set_status(repo, tid, "review", "agent:claude")  # once: the second try goes through
+    assert t["status"] == "review" and "recheck_asked" not in t
+
+
+def test_review_recheck_also_on_failed_and_not_on_green(repo, run, new_ticket, monkeypatch):
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    _done_with_record(repo, run, tid, 1)  # failed
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    with pytest.raises(tickets.Refused, match="checks again"):
+        tickets.set_status(repo, tid, "review", "agent:claude")
+    assert tickets.set_status(repo, tid, "review", "agent:claude")["status"] == "review"
+    green = new_ticket("Green")
+    run("check", "add", green, "ok")
+    _done_with_record(repo, run, green, 0)
+    assert tickets.set_status(repo, green, "review", "agent:claude")["status"] == "review"  # no ask
+    person = new_ticket("Person")
+    run("check", "add", person, "ok")
+    _done_with_record(repo, run, person, 1)
+    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
+    assert tickets.set_status(repo, person, "review", "human:me")["status"] == "review"  # people never asked
+
+
+def test_fresh_prompt_summary_names_writer_and_proof(repo, run, new_ticket):
+    from orch import runs
+
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    _done_with_record(repo, run, tid, 0)
+    tickets.set_summary(repo, tid, "Half done", "agent:claude")
+    prompt = runs.fresh_prompt(tickets.load(repo, tid), [], repo)
+    assert "Where things stand, written by the last run (proof: 1 check passed;" in prompt
+    assert "Half done" in prompt and "how you know it works" in prompt and "orch check record" in prompt
+    assert len(prompt) <= 12000
