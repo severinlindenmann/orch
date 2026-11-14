@@ -413,19 +413,17 @@ def test_view_matches_the_addon_view_contract(root, capsys):
     off = json.loads(capsys.readouterr().out)
     assert not list(check.iter_errors(off))
     assert "notice" not in off  # off is the saved setting, not a problem
-    settings, radio = off["blocks"][:2]
-    assert settings["type"] == "settings" and settings["rows"][0] == {
-        "label": "Current setting",
-        "value": "Off",
-        "note": "Tickets and their files can be copied. Secrets and private files are never included.",
-    }
+    radio = off["blocks"][0]
+    assert radio["type"] == "radio" and not any(
+        b["type"] == "settings" for b in off["blocks"]
+    )  # no "Current setting" row
     assert [(o["label"], o["selected"]) for o in radio["options"]] == [
         ("Off", True),
         ("On this computer only", False),
         ("Another computer or your own storage", False),
     ]
     assert radio["options"][2]["link"] == "app:settings" and "action" not in radio["options"][2]
-    assert off["header"]["link"]["to"] == "app:settings"
+    assert "header" not in off
     assert run(root, "set", "--mode", "local") == 0
     (root / ".orch/run/sync/state.json").write_text(
         json.dumps(
@@ -463,7 +461,7 @@ def test_view_keeps_the_saved_setting_when_the_status_cannot_be_read(root, capsy
     assert not list(
         jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).iter_errors(view)
     )
-    assert view["blocks"][0]["rows"][0]["value"] == "On this computer"
+    assert [o["label"] for o in view["blocks"][0]["options"] if o["selected"]] == ["On this computer only"]
     assert (
         view["notice"].startswith("Can\u2019t read sync status")
         and "Nothing here was changed" in view["notice"]

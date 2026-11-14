@@ -158,6 +158,13 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .mo-cell{border:1px solid var(--border);border-radius:8px;padding:12px;min-height:120px;display:grid;gap:8px;align-content:start;overflow:hidden}
 .swatch-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
 
+/* Settings row (14 Nov, lane owner-fb-v3): one row style for every setting: label, value with one plain sentence, action. */
+.setting-row{display:grid;grid-template-columns:136px minmax(0,1fr) auto;gap:16px;align-items:center;padding:16px;min-height:64px}
+.setting-row+.setting-row,.card-h+.setting-row,.pad-card+.setting-row{border-top:1px solid var(--border)}
+.setting-row .row-label{color:var(--text-muted)}
+.setting-row .row-value p,.setting-row .row-value .meta{margin-top:4px}
+.setting-row .row-action{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.setting-row .row-action:empty{display:none}
 /* Mini table: a small CSV preview inside a file card thumbnail (header and 5 rows at most). */
 .mini-table{border-collapse:collapse;font-size:11px;line-height:16px;color:var(--text-muted);width:calc(100% - 24px);table-layout:fixed}
 .mini-table th{text-align:left;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);padding:2px 6px}
