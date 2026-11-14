@@ -181,6 +181,7 @@ final class RealRelayE2ETests: XCTestCase {
         must(app, app.buttons["new-chat"], "+ in Chats"); app.buttons["new-chat"].tap()
         shot("30-plus-menu")
         must(app, app.buttons["compose-new-topic"], "New topic"); app.buttons["compose-new-topic"].tap()
+        if app.buttons["nt-type"].waitForExistence(timeout: 10) { app.buttons["nt-type"].tap() }
         if app.buttons["workspace-picker"].waitForExistence(timeout: 3), app.buttons["workspace-picker"].isHittable {
             app.buttons["workspace-picker"].tap(); shot("31-workspace-picker")
             if app.buttons["pick-\(ws)"].waitForExistence(timeout: 3) { app.buttons["pick-\(ws)"].tap() }
@@ -393,8 +394,8 @@ final class RealRelayE2ETests: XCTestCase {
         must(app, el(app, "settings-ws-\(ws)"), "workspace row in Settings"); shot("100-settings")
         el(app, "settings-ws-\(ws)").tap()
         must(app, el(app, "workspace-notifications"), "notifications row"); el(app, "workspace-notifications").tap()
-        must(app, app.buttons["Until I turn it on"], "mute options"); app.buttons["Until I turn it on"].tap(); sleep(2); shot("101-muted")
-        el(app, "workspace-notifications").tap(); must(app, app.buttons["Turn on"], "turn on"); app.buttons["Turn on"].tap(); sleep(2)
+        must(app, app.buttons["Until I unmute"], "mute options"); app.buttons["Until I unmute"].tap(); sleep(2); shot("101-muted")
+        el(app, "workspace-notifications").tap(); must(app, app.buttons["Unmute"], "unmute"); app.buttons["Unmute"].tap(); sleep(2)
         back(app)
         el(app, "add-workspace").tap()
         must(app, app.buttons["invite-paste"], "invite-paste"); app.buttons["invite-paste"].tap()

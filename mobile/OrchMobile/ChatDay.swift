@@ -15,10 +15,7 @@ enum ChatDay {
 
     static func key(of item: ConvItem, calendar: Calendar = .current) -> String {
         if let day = item.day { return day }
-        let parser = ISO8601DateFormatter()
-        if let date = parser.date(from: item.at) { return key(for: date, calendar: calendar) }
-        parser.formatOptions.insert(.withFractionalSeconds)
-        if let date = parser.date(from: item.at) { return key(for: date, calendar: calendar) }
+        if let date = SharedISO.iso.date(from: item.at) ?? SharedISO.isoFraction.date(from: item.at) { return key(for: date, calendar: calendar) }
         return String(item.at.prefix(10))
     }
 
@@ -52,4 +49,28 @@ enum ChatDay {
         if fromPhone { return .me }
         return by == "you" && via == "dashboard" ? .me : .them
     }
+}
+
+/// Shared ISO-8601 parsers: creating one per call (per row) is slow.
+enum SharedISO {
+    nonisolated(unsafe) static let relative: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .full; return f
+    }()
+    nonisolated(unsafe) private static var patterns: [String: DateFormatter] = [:]
+    private static let patternLock = NSLock()
+    /// One shared DateFormatter per (pattern, locale id, time zone id); creating one per call is slow.
+    static func formatter(_ pattern: String, localeId: String? = nil, timeZone: TimeZone = .current) -> DateFormatter {
+        let key = "\(pattern)|\(localeId ?? "")|\(timeZone.identifier)"
+        patternLock.lock(); defer { patternLock.unlock() }
+        if let f = patterns[key] { return f }
+        let f = DateFormatter()
+        if let localeId { f.locale = Locale(identifier: localeId) }
+        f.dateFormat = pattern; f.timeZone = timeZone
+        patterns[key] = f
+        return f
+    }
+    nonisolated(unsafe) static let iso = ISO8601DateFormatter()
+    nonisolated(unsafe) static let isoFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f
+    }()
 }

@@ -67,6 +67,10 @@ def _home_path(p: str) -> str:
 def _service_line(r: dict) -> str:
     if r.get("error"):
         return f"  {r['addon']:<12}did not start: {r['error']}"
+    if r.get("running") is False and r.get("idle"):
+        return f"  {r['addon']:<12}off here (turned off in its settings)"
+    if r.get("running") is False and "last_seen" not in r and "url" not in r:
+        return f"  {r['addon']:<12}not running - start it: orch start"
     if r.get("running") is False and "last_seen" in r:
         seen = services.ago(r["last_seen"])
         return f"  {r['addon']:<12}not running (last seen {seen}) - start it: orch start"

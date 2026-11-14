@@ -38,7 +38,7 @@ test('an answer request reads as one sentence with the answer, Send answer butto
   assert.equal(c.T['ticket.answer']({title: 'Weekly report', question: 'Which colour'}, {value: 'Blue'}).map(text).join(''), 'Send this answer to Weekly report? Which colour \u2192 Blue');
   const exact = 'say  "yes"';
   assert.equal(c.T['ticket.answer']({title: 'R'}, {value: exact}).map(text).join(''), 'Send this answer to R?  \u2192 ' + exact, 'the short answer is shown exactly as sent');
-  assert.match(src, /"Requested from a terminal on this computer\.", "meta"/);
+  assert.match(src, /from a terminal on this computer\.", "meta"/);
   assert.match(src, /"ticket.answer": "Send answer"/);
   assert.match(src, /display:inline-flex;gap:8px/);
   assert.doesNotMatch(src, /Technical details|el\("details"\)/);

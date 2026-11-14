@@ -232,8 +232,17 @@ def view(root: Path) -> dict:
         out["header"] = {"status": {"label": "Connected", "tone": "good"}}
     rows: list[tuple[str, dict]] = []
 
-    def row(at: str, who: str, arrow: str, type_: str, line: str, extra: str) -> tuple[str, dict]:
-        title = f"{who} → you" if arrow == "in" else f"you → {who}"
+    def row(
+        at: str, who: str, arrow: str, type_: str, line: str, extra: str, to_phones: bool = False
+    ) -> tuple[str, dict]:
+        if arrow == "in":
+            title = f"{who} → you"
+        elif (
+            to_phones
+        ):  # the workspace's own updates ("Ready for your review"), not something the person typed
+            title = "Helper → your phone"
+        else:
+            title = f"you → {who}"
         item: dict = {"title": plain(title, 200)}
         if type_ == "file":
             item["subtitle"] = _stamp(at) or "-"
@@ -258,6 +267,7 @@ def view(root: Path) -> dict:
                 e["type"],
                 plain(e.get("preview") or "-"),
                 str(e.get("extra") or ""),
+                e["to"] == "phones",
             )
         )
     rows.sort(key=lambda r: r[0], reverse=True)

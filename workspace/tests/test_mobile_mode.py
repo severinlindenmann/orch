@@ -485,3 +485,17 @@ def test_question_to_phone_continued_ticket_and_broken_parent(on_state, monkeypa
         d["parent"] = parent
         p.write_text(json.dumps(d))
         assert not mm.from_phone(on_state, bad)
+
+
+def test_status_counts_the_paired_phones(on_state, monkeypatch):
+    """F: the page disables the switch when no phone is paired (phones == 0)."""
+    monkeypatch.setattr(relay, "_read_dir", lambda root: {"phones": []})
+    assert mm.status(on_state)["phones"] == 0
+    monkeypatch.setattr(relay, "_read_dir", lambda root: {"phones": [{"id": "ph_1"}, "junk"]})
+    assert mm.status(on_state)["phones"] == 1
+
+    def broken(root):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(relay, "_read_dir", broken)
+    assert mm.status(on_state)["phones"] is None  # unknown: never blocks the switch

@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from orch_sync import repo
+from orch_sync import repo, service
+
+REAL_ENSURE_RUNNING = service.ensure_running  # tests of the auto-start put it back
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +28,7 @@ def isolated_git(tmp_path, monkeypatch):
     ]:
         monkeypatch.setenv(key, str(value))
     monkeypatch.delenv("ORCH_SYNC_REMOTE_PREVIEW", raising=False)
+    monkeypatch.setattr(service, "ensure_running", lambda root: None)  # a set never starts a real loop here
 
 
 @pytest.fixture

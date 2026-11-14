@@ -165,10 +165,8 @@ struct GroupRoomView: View {
                     .accessibilityLabel(GroupRoomRules.subtitle(group)).accessibilityIdentifier("group-subtitle")
             }.frame(maxWidth: .infinity, alignment: .leading)
             if !group.closed {
-                TimelineView(.everyMinute) { context in
-                    ChatMuteButton(name: group.title, muted: model.isGroupMuted(key, now: context.date), groupStyle: true) { mute in
-                        Task { await model.setGroupMute(key, mute) }
-                    }
+                ChatMuteButton(name: group.title, muted: model.isGroupMuted(key, now: MinuteClock.shared.now), groupStyle: true) { mute in
+                    Task { await model.setGroupMute(key, mute) }
                 }
             }
             Button { members = true } label: {

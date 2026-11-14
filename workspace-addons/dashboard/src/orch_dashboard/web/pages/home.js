@@ -29,6 +29,7 @@ function ticketRow(t) {
 function needRow(row, newest, questionCount = 1, same = []) {
   const key = 'need-' + row.id;
   if (needActs(row).length) return needActionsRow(row, key);
+  if (!row.ticket && array(row.answer?.options).length) return needNoticeRow(row, key);
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row);
   const options = array(row.answer?.options);
   let actions = null, other = null;
@@ -60,23 +61,42 @@ function needRow(row, newest, questionCount = 1, same = []) {
       return control;
     }));
     // a written answer goes through the full question card (checked answer, Undo)
-    other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id}, 'Write your own…');
+    other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id, 'data-write':'own'}, 'Write your own…');
   } else if (!snapshot) {
     actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
   }
+  // An add-on's own row (no ticket) is named by the add-on's display name, never its id ("sync").
+  const source = !t && row.source ? addonName(row.source) : '', asked = source || whoAsked(t);
   const question = needQuestion(row), when = typeof age === 'function' ? age(row.since) : '';
   return h('div', {className:'card-row home-need', 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
-    h('h2', {className:'question-title'}, clean(window.DashHelpers.plainWhy(question, 'The helper'))),
-    h('p', {className:'meta question-context'}, whoAsked(t) + ' asked' + (when ? ' ' + when : ''),
+    h('h2', {className:'question-title'}, clean(source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper'))),
+    h('p', {className:'meta question-context'}, asked + ' asked' + (when ? ' ' + when : ''),
       t ? [' on ‘' + clean(t.title) + '’ · ', h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
     actions && options.length ? h('p', {className:'meta choose-line'}, 'Needs you · Choose an answer') : null,
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
     actions, other, t ? parentLine(t) : null);
 }
+// A row that offers choices but belongs to no ticket cannot be answered as a ticket question (the answer needs a
+// ticket). It shows as a plain notice and can always be put off for the day.
+function needNoticeRow(row, key) {
+  const later = snapshot ? null : button('Not now', 'quiet sm', () => {
+    try { localStorage.setItem(NEED_LATER, JSON.stringify({...needsLater(), [row.id]:today()})); } catch (_) { /* fine without storage */ }
+    window.orch.toast('Asking again tomorrow.', 'ok'); render();
+  });
+  if (later) later.dataset.key = key + '-later';
+  return h('div', {className:'card-row home-need need-acts need-notice', 'data-key':key, 'data-need-row':row.id},
+    h('div', {className:'grow'}, h('p', {}, clean(row.text || row.title)), h('p', {className:'meta'}, typeof capitalise === 'function' ? capitalise(row.source || 'orch') : 'orch')),
+    h('div', {className:'acts'}, later));
+}
 // Who asked: the helper working on the ticket (the product's name for it), else "Helper".
 function whoAsked(t) {
   return window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state?.settings, state?.runs?.[t?.id]?.claim) : 'Helper';
+}
+// The display name of an add-on from its id ("sync" -> "Sync"): its dashboard label, else the id with a capital.
+function addonName(id) {
+  const a = typeof addons === 'function' ? addons().find(x => x.name === id) : null;
+  return typeof addonLabel === 'function' && a ? addonLabel(a) : String(id).replace(/^./, c => c.toUpperCase());
 }
 function needQuestion(row) { return array(ticketOf(row.ticket)?.questions).find(q => q.id === row.answer?.question)?.text || row.title || row.text; }
 // An add-on row that names its own buttons (needs.schema.json `actions`, e.g. sync): each runs that add-on's verb on
@@ -92,7 +112,7 @@ const NEED_LATER = 'orch.needs.later';
 function needsLater() {
   try { const v = JSON.parse(localStorage.getItem(NEED_LATER) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (_) { return {}; }
 }
-const laterToday = row => array(row.actions).some(a => a && a.later) && needsLater()[row.id] === today();
+const laterToday = row => { const day = needsLater()[row.id]; return !!day && day === today(); }; // only a "Not now" button sets it
 // a core op: only {op, core wording}, always signed; an add-on verb, "Not now" or "View file" as the row names it
 const needAct = (row, a) => {
   if (!a || typeof a !== 'object') return null;
@@ -245,26 +265,36 @@ function needsFold(groups, failed, newest) {
   const more = groups.length + failed.length - 1; // stacked identical questions count once
   return [first, h('div', {className:'card-row needs-fold', 'data-key':'needs-fold'}, button(more + (more === 1 ? ' more question' : ' more questions'), 'outline sm', () => { needsOpen = true; render(); }))];
 }
-// What needs the person today (Home, the Home badge and the Menu count all use this).
+// What needs the person today (Home, the Home badge and the Menu count all use this): the parts of the Home subtitle, summed.
 function needsToday() {
   const needs = needsList().filter(r => !laterToday(r));
   const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
-  return {needs, failed, count:window.DashHelpers.needsYouCount(needs, failed)};
+  const groups = homeNeeds(needs), all = tickets();
+  const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id));
+  const changes = all.filter(t => t.bring_back?.state === 'waiting');
+  const asked = groups.length + failed.length;
+  return {needs, failed, groups, review, changes, asked, count:asked + review.length + changes.length};
 }
 // The one needs-you number: sidebar badge, Menu, Home and Tickets headers all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
+// Services that should run but do not (one that is off on purpose, like Sync before it is turned on, is not one).
+function stoppedServices() { return array(state.services).filter(s => s.running === false && !s.idle); }
+function backgroundBanner() {
+  const names = stoppedServices().map(s => { const a = addons().find(x => x.name === s.addon); const n = a?.dashboard?.label || s.addon; return n.charAt(0).toUpperCase() + n.slice(1); });
+  if (!names.length) return null;
+  const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names.at(-1) : names[0];
+  return h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, list + (names.length > 1 ? ' are' : ' is') + ' not running. Press Start so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start'));
+}
 // Home: what needs the person first, in order: questions, results to check, changes to add, then what is working.
 function home() {
-  const {needs, failed} = needsToday(), needCount = needsYouTotal(), groupedNeeds = homeNeeds(needs), all = tickets();
+  const {needs, failed, groups:groupedNeeds, review, changes, asked, count:needCount} = needsToday(), all = tickets();
   const rowsShown = groupedNeeds.length + failed.length; // stacked identical questions are one row
   if (rowsShown < 3) needsOpen = false;
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
-  const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)), results = resultGroups(review);
-  const changes = all.filter(t => t.bring_back?.state === 'waiting');
+  const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
-  const stopped = array(state.services).some(s => s.running === false);
-  const banner = stopped ? h('div', {className:'banner attn', 'data-key':'background'}, h('p', {className:'grow'}, 'Background work is not running. Start it so repeating work and checks can run.'), snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'start'}, 'Start')) : null;
+  const banner = backgroundBanner();
   const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : 'Nothing needs you';
   const head = heading(title, attentionSummary(groupedNeeds, failed, review.length, changes.length), {
     eyebrow:now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}),
@@ -278,7 +308,7 @@ function home() {
   const needsBody = rowsShown >= 3 && !needsOpen ? needsFold(groupedNeeds, failed, newest) : [...groupedNeeds.map(({row, count, same}) => needRow(row, newest, count, same)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), rowsShown >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null];
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      needCount ? attentionCard('needs-you', (allQuestions ? '! Question · ' : '! Needs you · ') + needCount, 'needs', needsBody, groupedNeeds.length ? whoAsked(ticketOf(groupedNeeds[0].row.ticket)) : '') : null,
+      asked ? attentionCard('needs-you', (allQuestions ? '! Question · ' : '! Needs you · ') + asked, 'needs', needsBody, groupedNeeds.length ? whoAsked(ticketOf(groupedNeeds[0].row.ticket)) : '') : null,
       results.length ? attentionCard('check-result', '◇ Check · ' + review.length, 'review', [...results.slice(0, 3).map(resultRow),
         results.length > 3 ? h('div', {className:'card-row', 'data-key':'results-all'}, h('a', {className:'btn ghost sm', href:'#tickets'}, 'Show all (' + review.length + ')')) : null], (() => {
         const newestResult = results[0][results[0].length - 1], at = finishedAt(newestResult) || parse(newestResult.updated_at);

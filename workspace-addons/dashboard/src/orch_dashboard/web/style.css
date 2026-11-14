@@ -40,17 +40,18 @@
 @media(max-width:720px){.ticket-row>.grow{flex-basis:100%}.addon-rows{grid-template-columns:minmax(0,1fr)}.tl{flex-wrap:wrap}}
 
 
-.acc-li{display:flex;align-items:flex-start;gap:12px}
-.acc-li>.grow{min-width:0}
+.acc-li{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 12px}
+.acc-li>.grow{min-width:0;flex:1 1 220px}
 .acc-li>.switch{margin:10px 12px 0 0}
 .acc>summary{list-style:none;cursor:pointer}
 .acc>summary::-webkit-details-marker{display:none}
 .chev{width:7px;height:7px;border-right:1.5px solid var(--text-muted);border-bottom:1.5px solid var(--text-muted);transform:rotate(-45deg);flex:none;margin:0 4px;transition:transform 150ms var(--ease-out)}
 .acc[open]>summary .chev{transform:rotate(45deg)}
-.acc-panel{padding:0 12px 12px 36px;display:grid;gap:12px}
+.acc-panel{padding:0 12px 12px 36px;display:grid;gap:12px;container-type:inline-size}
 .acc-detail{display:grid;gap:0;margin:0}
 .acc-detail>div{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,3fr);gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}
 .acc-detail dd{margin:0;overflow-wrap:anywhere}
+@container (max-width:300px){.acc-detail>div{grid-template-columns:minmax(0,1fr);gap:2px}}
 .acc-line{margin:0}
 .acc-tickets{display:grid;gap:0;border:1px solid var(--border);border-radius:var(--radius)}
 .acc-ticket{display:flex;align-items:center;gap:12px;padding:8px 12px;text-decoration:none;color:var(--text)}
@@ -364,7 +365,7 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .ticket-details .ed:hover,.ticket-details .ed:focus-visible{border-color:var(--brand)}
 .status-menu>.status-sum{gap:4px}
 .board .activity .chip{white-space:normal}
-.acc-li>.send-msg{margin:6px 12px 0 0;flex:none;white-space:nowrap}
+.acc-li>.send-msg{margin:6px 12px 10px 36px;flex:none;white-space:nowrap}
 /* round 8 Nov B1: the whole Home ticket row opens the ticket (stretched link; Move to and links stay above it) */
 .ticket-row{position:relative}
 .ticket-row h3 a::after{content:"";position:absolute;inset:0}
@@ -433,6 +434,9 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .blk .table-wrap{border:0;border-radius:0}
 .blk-table .subline{display:block;font-size:12px;line-height:16px;color:var(--text-faint);margin-top:4px}
 .blk-table td .row{flex-wrap:nowrap}
+/* Short cells and button labels never break ("Edi/t", "Run/now"); the first cell (the name) may wrap, a narrow window scrolls the table. */
+.blk-table td:not(:first-child),.blk-table td .btn{white-space:nowrap}
+.blk-table td:has(.row){width:1%}
 .blk-table .cell-link{color:var(--text);font-weight:500;text-decoration:none}.blk-table .cell-link:hover{text-decoration:underline}
 .repeat-dialog{width:min(640px,calc(100% - 32px))}
 .repeat-dialog .form-fields{display:grid;gap:24px}

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark">
+<title>Phone points 14 Nov</title><link rel="icon" href="logo.svg" type="image/svg+xml"><link rel="stylesheet" href="draft-1114.css"></head>
+<body><div class="page">
+<div class="top"><a href="index.html">&larr; Phone app v3 mockup</a><nav><a href="#A">A Swipe away</a><a href="#B">B Group logo</a><a href="#C">C Speed</a><a href="#D">D Mute all</a><a href="#E">E New topic</a></nav></div>
+<h1>Phone points · 14 Nov</h1>
+<p class="lede">Your five phone points from the TestFlight test (build 261113.120909). Each one shows today and the proposal. The phones are clickable: swipe a question, tap the mute switch, and run the new-topic flow.</p>
+
+<section class="item" id="A"><h2><span class="tag">A</span> Swipe away “Needs your OK” <span class="built">Built</span></h2>
+<p class="quote">“let me swipe away needs you messages”</p>
+<ul class="notes">
+<li>Swipe a question to the left to <b>hide</b> it from the top of Chats. A long swipe hides it at once. A short swipe shows the Hide button.</li>
+<li>Hiding only tidies the list. The question stays open in its chat, the workspace row still says “4 questions”, and the helper keeps waiting.</li>
+<li>Undo shows for 5 seconds. The question comes back on its own when the helper writes in it again. The “Needs your OK” tab lists hidden ones under “Hidden (n)”.</li>
+<li>Not proposed: “Answer later” with a time. That would add a second choice and a timer, and hiding already covers it.</li>
+</ul>
+<div class="row">
+<div class="col"><p class="cap now"><b>Now</b> · your screenshot</p><img class="ownershot" src="draft-1114/A-before-owner.png" alt="Needs your OK list today, rows cannot be swiped"></div>
+<div class="col"><p class="cap"><b>Proposal</b> · try it: drag a row left</p><div class="phone" id="phA"></div></div>
+<div class="col"><p class="cap"><b>Proposal</b> · “Needs your OK” tab after hiding one</p><div class="phone" id="phA2"></div></div>
+</div></section>
+
+<section class="item" id="B"><h2><span class="tag">B</span> Group logo centred <span class="built">Built</span></h2>
+<p class="quote">“the groups "logo" is not centered correctly”</p>
+<ul class="notes">
+<li>Cause: the three small logos are moved with an offset. Offsets do not change the space a view takes up, so the stack sits too far right and spills below the row (GroupViews.swift:196-201).</li>
+<li>Fix: the stack fits in the same 46 × 46 box as a workspace logo. It is centred in the row and lines up with the workspace rows above. The three small logos sit as a small triangle (two on top, one below) so none covers another and every letter stays readable. More than three members: the third spot shows “+2”.</li>
+</ul>
+<div class="row">
+<div class="col"><p class="cap now"><b>Now</b> · your screenshot</p><img class="ownershot" src="draft-1114/B-before-owner.png" alt="Group logos offset to the right and below the row"></div>
+<div class="col"><p class="cap"><b>Proposal</b> · <button class="reset" id="guideBtn">show alignment line</button></p><div class="phone short guide" id="phB"></div></div>
+</div></section>
+
+<section class="item" id="C"><h2><span class="tag">C</span> Taps feel laggy <span class="built building">Accepted, building</span></h2>
+<p class="quote">“clicking in the app is really laggy can we improve the performance and make it feel less laggy”</p>
+<ul class="notes">
+<li>Main cause found in the code: the chat list and each chat rebuild <b>all</b> conversations from all messages, several times on every redraw (AppModel.swift:515-521, ChatScreens.swift:159-173). This happens on every tap that opens a screen.</li>
+<li>Also: date formatters are created per row, each row and each logo runs its own minute clock, an open chat redraws completely every 15 s, photos decode on the main thread, and every send writes the whole outbox to disk.</li>
+<li>Plan: measure first (Instruments plus timing marks), cache the list data once per change, then fix the formatters, clocks, photo decoding and disk writes. Goal: no visible delay between a tap and the next screen.</li>
+<li>Full plan with file:line: PERF-PLAN in the draft folder (shown on the decision page).</li>
+</ul></section>
+
+<section class="item" id="D"><h2><span class="tag">D</span> Only “Mute all” <span class="built">Built</span></h2>
+<p class="quote">“i dont understnad why there is a button mute all + notifications can we not just keep mute all”</p>
+<ul class="notes">
+<li>Today Settings has two switches that sound alike. “Mute all” at the top silences orch for a while. “Notifications” under Preferences asks iPhone for permission.</li>
+<li>Proposal: keep only <b>Mute all</b>. Turning it on asks for how long (1 hour, until tomorrow 08:00, until I unmute). The line under it says what you get: questions and finished work.</li>
+<li>iPhone permission is asked once when you pair a workspace. If it is off in iPhone Settings, a yellow note appears with “Open iPhone Settings”, and nothing else.</li>
+<li>The Chats banner uses the same words: “Muted until tomorrow 08:00 · Unmute”.</li>
+</ul>
+<div class="row">
+<div class="col"><p class="cap now"><b>Now</b> · Settings (two switches)</p><div class="phone short" id="phD0"></div></div>
+<div class="col"><p class="cap"><b>Proposal</b> · try the switch</p><div class="phone short" id="phD" style="min-height:660px"></div></div>
+<div class="col"><p class="cap now"><b>Now</b> · your Chats banner</p><img class="ownershot" src="draft-1114/D-before-banner.png" alt="Notifications off banner today"><p class="cap" style="margin-top:14px"><b>Proposal</b> · banner and iPhone-off note</p><div class="phone short" id="phD2"></div></div>
+</div></section>
+
+<section class="item" id="E"><h2><span class="tag">E</span> New topic, hands busy <span class="built">Built</span></h2>
+<p class="quote">“adding a new topic must feel more smooth … i open new topic and get a big microphone option or add picture options as default … the user can e.g. drive a car and dont have to finger around a lot just big buttons select a new voice input, select the workspace and go”</p>
+<ul class="notes">
+<li><b>Variant 1 (recommended): Big buttons.</b> + opens one screen: workspace tiles at the top (last used already picked), a huge microphone in the middle, Photo and Camera at the bottom. Tap the mic, talk, tap <b>Send</b>. That is 3 taps, with no keyboard and nothing to read.</li>
+<li><b>Variant 2: Records at once.</b> + starts recording straight away to the last used workspace, with one big Send button. That is 2 taps, but every + starts a recording, including accidental ones. It already exists as a setting (“autoMic”), so Variant 1 becomes the default and Variant 2 stays the option.</li>
+<li>After Send: the phone says “Sent to Reports”, buzzes once, and shows Undo for 5 seconds, so you never need to look. Cancel sits well below Send, so a miss does not throw the message away.</li>
+<li>No live transcript while recording: only a timer and a level bar, nothing to read. The text appears in the chat after sending. Every button is at least 60 pt. The keyboard only opens with “Type instead”.</li>
+<li>iOS safety: Apple’s driving rules allow voice and short glances, not reading or typing. The fully hands-free route is Siri (“Hey Siri, new orch topic for Reports”) and later CarPlay. The same goes for an Action button shortcut and a Lock Screen button that opens straight into recording. These are follow-ups, not part of this draft.</li>
+</ul>
+<div class="row">
+<div class="col"><p class="cap"><b>Variant 1</b> · try it: pick, talk, send</p><div class="ctl"><button class="reset" id="eReset">start again</button></div><div class="phone" id="phE"></div></div>
+<div class="col"><p class="cap"><b>Variant 1</b> · More… opens big tiles</p><div class="ctl"><span class="cap">&nbsp;</span></div><div class="phone" id="phEpick"></div></div>
+<div class="col"><p class="cap"><b>Variant 2</b> · records at once</p><div class="ctl"><span class="cap">&nbsp;</span></div><div class="phone" id="phE2"></div></div>
+</div>
+<div class="row" style="margin-top:22px"><div class="col"><p class="cap now"><b>Now</b> · New topic today: small “To:” pill, keyboard opens, small mic</p><div class="phone" id="phE0"></div></div></div>
+</section>
+</div>
+<script src="draft-1114.js"></script>
+</body></html>

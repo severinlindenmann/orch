@@ -277,6 +277,20 @@ def _last_result(runs: list[dict], tid: str) -> str | None:
     return f"{'Done' if r['exit'] == 0 else 'Stopped'} · {when}"
 
 
+def _started(tickets: list[dict], runs: list[dict]) -> list[tuple[datetime, dict]]:
+    """Scheduled tickets whose newest run started after the newest finished run: nothing recorded it yet, but it
+    did start ("Last result" shows it, so "Recent runs" must too)."""
+    out = []
+    for t in tickets:
+        if not scheduled(t):
+            continue
+        last = parse(((t.get("ext") or {}).get("automation") or {}).get("last_run"))
+        done = [parse(r["at"]) for r in runs if r.get("ticket") == t["id"]]
+        if last and not any(d >= last for d in done):
+            out.append((last, t))
+    return out
+
+
 def _schedules(
     tickets: list[dict], now: datetime, running: bool = True, runs: list[dict] | None = None
 ) -> list[dict]:
@@ -303,7 +317,7 @@ def _schedules(
                         "repeats": clean(words, 200),
                         "next": "Off" if paused else "Paused" if not running else clean(nxt_s, 40),
                         "last": result
-                        or (last.astimezone().strftime("%a %d %b, %H:%M") if last else "Not yet"),
+                        or (f"Started \u00b7 {last.astimezone():%a %H:%M}" if last else "Not yet"),
                     },
                     "link": t["id"],
                     "subtitle": clean(sched.get("agent") or "The workspace agent", 60),
@@ -463,7 +477,20 @@ def build(root: Path, now: datetime | None = None) -> dict:
         )
 
     recent = []
-    for r in reversed(runs[-5:]):
+    events_ = [(parse(r["at"]), r, None) for r in runs[-5:]] + [
+        (at, None, t) for at, t in _started(tickets, runs)
+    ]
+    for _at, r, started in sorted(events_, key=lambda e: e[0], reverse=True)[:5]:
+        if started:
+            recent.append(
+                {
+                    "title": _name(started),
+                    "subtitle": f"{_at.astimezone():%a %H:%M}",
+                    "chips": [{"label": "Started", "tone": "neutral"}],
+                    "link": started["id"],
+                }
+            )
+            continue
         ok = r["exit"] == 0
         when = parse(r["at"]).astimezone().strftime("%a %H:%M")
         took = r.get("took")

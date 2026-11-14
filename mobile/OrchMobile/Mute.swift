@@ -22,11 +22,10 @@ enum MuteRules {
         isMuted(all, now: now) || isMuted(workspace, now: now) ||
         groups.contains { $0.key == group && isMuted($0.mutedUntil, now: now) }
     }
-    static func endLabel(_ value: String?, banner: Bool = false, now: Date = Date(), calendar: Calendar = .current) -> String {
-        guard let value, let end = date(value) else {
-            return banner ? "until I turn them on" : "Until I turn it on"
-        }
-        return (banner ? "until " : "Until ") + endText(end, now: now, calendar: calendar)
+    /// "Muted until 8:00", "Muted until tomorrow 8:00", "Muted until you unmute".
+    static func mutedText(_ value: String?, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard let value, let end = date(value) else { return "Muted until you unmute" }
+        return "Muted until " + endText(end, now: now, calendar: calendar)
     }
     /// "8:00" today, "tomorrow 8:00", "Sunday 8:00" within a week, else "1 Dec 8:00".
     static func endText(_ end: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
@@ -51,8 +50,8 @@ enum MuteRules {
 
 enum MuteChoice: String, CaseIterable, Identifiable {
     case hour = "1 hour"
-    case morning = "Until tomorrow"
-    case forever = "Until I turn it on"
+    case morning = "Until tomorrow 8:00"
+    case forever = "Until I unmute"
     var id: String { rawValue }
     func mute(now: Date = Date(), calendar: Calendar = .current) -> Mute {
         switch self {

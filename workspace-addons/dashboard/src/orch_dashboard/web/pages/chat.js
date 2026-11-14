@@ -124,7 +124,7 @@ function chatPhoneLink() {
 }
 function chatOpenAgent() {
   if (snapshot) return;
-  chatUi.agentConversation = true; chatUi.newConversation = true; chatUi.drafts.chat = '';
+  chatUi.agentConversation = false; chatUi.newConversation = false; // the existing helper conversation, with its history
   chatUi.open = 'chat'; chatUi.day = null; chatUi.listOpen = false; chatUi.sheet = null; chatUi.filter = 'all';
   location.hash = '#chat'; render();
 }
@@ -147,7 +147,7 @@ function chatFilter() {
 function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const running = !g && !history && !agent ? chatCount(state?.chat?.activity?.running) : 0;
-  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent ? 'New conversation with your helper' : CHAT_HELPER);
+  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent && !chatConversation().length ? 'New conversation with your helper' : CHAT_HELPER);
   const helper = !g && !history, others = g ? chatObjects(g.members).filter(m => m.ws !== 'you').length : 0;
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
@@ -277,6 +277,14 @@ function chatWelcome() {
     h('div', {className:'chat-prompts'}, CHAT_PROMPTS.map(([kind, text]) => h('button', {type:'button', className:'chat-prompt', 'data-chat-action':'prompt', 'data-prompt':text, 'data-key':'prompt-' + kind},
       chatText('span', '', kind), clean(text)))));
 }
+const CHAT_STALL_MS = 60000;
+// The helper did not start answering within a minute: say what is going on in plain words, one fix when we know it.
+function chatStalled() {
+  const stopped = array(state?.services).some(x => x && x.running === false);
+  return h('div', {className:'chat-message', 'data-key':'helper-stalled'}, h('div', {className:'chat-bubble chat-muted'},
+    h('p', {}, stopped ? 'Your helper is not running. Start background work so it can answer.' : 'Your helper has not answered yet. It may be busy or still starting.'),
+    stopped && !snapshot ? h('button', {type:'button', className:'btn outline sm', 'data-action':'start', 'data-key':'helper-start'}, 'Start helper') : null));
+}
 function chatThinking(who, plain = false) {
   const label = plain || / helper$/.test(who) ? who : who + ' helper';
   return h('div', {className:'chat-message', 'data-key':'thinking-' + who}, h('div', {className:'chat-bubble chat-muted'}, h('span', {className:'chat-dots', 'aria-hidden':'true'}, h('i'), h('i'), h('i')), clean(label) + ' is thinking…'));
@@ -294,14 +302,16 @@ function chatThread(g, archived) {
   const readOnly = snapshot || !!archived || !!(g?.done || g?.closed || g?.readOnly), last = messages[messages.length - 1];
   const lastMine = messages.reduce((found, m, i) => m.by === 'you' ? i : found, -1);
   const since = Date.now() - Date.parse(last?.at);
-  const thinking = readOnly ? [] : g ? array(g.thinking).filter(n => typeof n === 'string') : state?.chat?.running || (last?.by === 'you' && since >= 0 && since < 600000) ? [CHAT_HELPER] : [];
+  const waiting = !g && !state?.chat?.running && last?.by === 'you' && since >= 0 && since < 600000;
+  const stalled = !readOnly && waiting && since >= CHAT_STALL_MS; // no helper picked the message up: never "thinking" for ever
+  const thinking = readOnly || stalled ? [] : g ? array(g.thinking).filter(n => typeof n === 'string') : state?.chat?.running || waiting ? [CHAT_HELPER] : [];
   const logKey = 'log-' + (archived ? chatUi.day : g?.id || 'chat');
   return fragment(g ? chatSharedTicket(g) : null,
     g?.done || g?.closed ? chatText('div', 'chat-archive-banner', 'Finished · you can read, not reply') : g?.readOnly ? chatText('div', 'chat-archive-banner', 'You can read here. Write in ' + chatHost(g) + '.') : null,
     h('div', {className:'chat-log', 'data-key':logKey, role:'log', 'aria-live':'polite', 'aria-label':g ? 'Group messages' : 'Chat messages'},
       h('div', {className:'chat-divider'}, archived ? date(chatUi.day) : 'Today'),
       !g && !archived && state && !state.chat ? chatHistoryStatus('loading') :
-      messages.length ? messages.map((m, i) => fragment(m.moved_to && m.moved_to.id !== messages[i - 1]?.moved_to?.id ? chatMovedBanner(m.moved_to) : null, chatMessage(m, messages[i - 1], g, i, readOnly, lastMine))) : !g && !archived && !phoneOnly && !readOnly ? chatWelcome() : chatText('p', 'chat-empty', phoneOnly ? 'Nothing from your phone today.' : readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(w => chatThinking(w, !g))),
+      messages.length ? messages.map((m, i) => fragment(m.moved_to && m.moved_to.id !== messages[i - 1]?.moved_to?.id ? chatMovedBanner(m.moved_to) : null, chatMessage(m, messages[i - 1], g, i, readOnly, lastMine))) : !g && !archived && !phoneOnly && !readOnly ? chatWelcome() : chatText('p', 'chat-empty', phoneOnly ? 'Nothing from your phone today.' : readOnly ? 'No messages.' : 'No messages yet. Say hello below.'), thinking.map(w => chatThinking(w, !g)), stalled ? chatStalled() : null),
     readOnly ? snapshot ? chatText('p', 'chat-readonly', 'This is a shared copy.') : null : chatComposer(g));
 }
 function chatComposer(g) {

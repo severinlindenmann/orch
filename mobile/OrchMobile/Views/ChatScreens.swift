@@ -44,10 +44,7 @@ enum ConversationRules {
 
     static func date(_ iso: String) -> Date? {
         let s = String(iso.prefix(while: { $0 != "~" }))
-        let f = ISO8601DateFormatter()
-        if let d = f.date(from: s) { return d }
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.date(from: s)
+        return SharedISO.iso.date(from: s) ?? SharedISO.isoFraction.date(from: s)
     }
 
     /// An open question is stale once the workspace has moved on: a later result/failure/stopped line exists.
@@ -286,6 +283,8 @@ struct ConversationView: View {
             .fullScreenCover(item: $viewing) { ArtifactViewer(item: $0) }
             // the clock: the General receipt and line also end by the timeout without a new message
             .task {
+                // Only General reads the clock (receipt + working line); a topic must not redraw every 15 s.
+                guard case .general = id else { return }
                 while !Task.isCancelled {
                     now = Date()
                     try? await Task.sleep(for: .seconds(15))

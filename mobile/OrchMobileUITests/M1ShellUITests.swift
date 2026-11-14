@@ -47,6 +47,7 @@ final class M1ShellUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["new-chat-sheet"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["compose-add-workspace"].waitForExistence(timeout: 5))
         app.buttons["compose-new-topic"].tap()
+        XCTAssertTrue(app.buttons["nt-type"].waitForExistence(timeout: 10)); app.buttons["nt-type"].tap()   // "Type instead"
         let picker = app.buttons["workspace-picker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
         picker.tap()
@@ -71,8 +72,8 @@ final class M1ShellUITests: XCTestCase {
         let notifications = app.buttons["workspace-notifications"]
         XCTAssertTrue(notifications.waitForExistence(timeout: 5))
         notifications.tap()
-        XCTAssertTrue(app.buttons["Until I turn it on"].waitForExistence(timeout: 5))
-        app.buttons["Until I turn it on"].tap()
+        XCTAssertTrue(app.buttons["Until I unmute"].waitForExistence(timeout: 5))
+        app.buttons["Until I unmute"].tap()
         let muted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Muted'"), object: notifications)
         XCTAssertEqual(XCTWaiter.wait(for: [muted], timeout: 5), .completed)
         app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -153,7 +154,7 @@ final class M1ShellUITests: XCTestCase {
             app.terminate()
             app = paired(extra)
             app.buttons["new-chat"].tap(); XCTAssertTrue(app.buttons["compose-new-topic"].waitForExistence(timeout: 5)); try snap(app, "6-compose")
-            app.buttons["compose-new-topic"].tap(); XCTAssertTrue(app.buttons["workspace-picker"].waitForExistence(timeout: 5)); try snap(app, "7-new-topic")
+            app.buttons["compose-new-topic"].tap(); XCTAssertTrue(app.buttons["nt-type"].waitForExistence(timeout: 5)); try snap(app, "7-new-topic-home"); app.buttons["nt-type"].tap(); XCTAssertTrue(app.buttons["workspace-picker"].waitForExistence(timeout: 5)); try snap(app, "7-new-topic")
             app.terminate(); extra = extra + []
             app = paired(extra)
             app.buttons["new-chat"].tap(); app.buttons["compose-add-workspace"].tap()

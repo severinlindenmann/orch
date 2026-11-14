@@ -51,9 +51,6 @@ struct SettingsView: View {
     @State private var addWorkspace = false
     @State private var confirmSignOut = false
     @State private var signingOut = false
-    @State private var requestingPermission = false
-    @State private var access: NotificationAccess = .allowed
-    @Environment(\.scenePhase) private var scenePhase
     private var statusText: String {
         switch model.connection {
         case .ok: "Connected"
@@ -102,29 +99,6 @@ struct SettingsView: View {
                     }
                     section("PREFERENCES") {
                         VStack(spacing: 0) {
-                            if access == .denied {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Notifications").themeFont(17)
-                                    Text("Notifications are off for orch in iPhone Settings.").themeFont(13).foregroundStyle(Theme.muted)
-                                    Button("Open Settings") {
-                                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                                    }.themeFont(17).foregroundStyle(Theme.brand).frame(minHeight: 44).accessibilityIdentifier("open-ios-settings")
-                                }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                            } else {
-                            Toggle(isOn: Binding(get: { model.notificationsEnabled }, set: { enabled in
-                                model.notificationsEnabled = enabled
-                                if enabled {
-                                    requestingPermission = true
-                                    Task { model.notificationsEnabled = await PushPermission.request(); requestingPermission = false; await readAccess() }
-                                }
-                            })) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("Notifications").themeFont(17)
-                                    Text("Questions and finished work").themeFont(13).foregroundStyle(Theme.muted)
-                                }
-                            }.tint(Theme.brand).padding(16).disabled(requestingPermission)
-                            }
-                            ShellDivider()
                             NavigationLink { VoiceSettingsView() } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: "mic").themeFont(20)
@@ -185,11 +159,6 @@ struct SettingsView: View {
         }.background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
             .sheet(isPresented: $addWorkspace) { AddWorkspaceView().presentationDetents([.medium, .large]) }
-            .task { await readAccess() }
-            .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await readAccess() } } }
-    }
-    private func readAccess() async {
-        access = NotificationAccess.from(await UNUserNotificationCenter.current().notificationSettings().authorizationStatus)
     }
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -222,7 +191,7 @@ struct WorkspaceSettingsView: View {
                 TimelineView(.everyMinute) { context in
                     let value = MuteRules.notificationsValue(workspace?.mutedUntil, now: context.date)
                     Menu {
-                        if value != "On" { Button("Turn on", systemImage: "bell") { changeMute(.off) } }
+                        if value != "On" { Button("Unmute", systemImage: "bell") { changeMute(.off) } }
                         MuteChoices { changeMute($0) }
                     } label: {
                         HStack {
@@ -278,6 +247,7 @@ struct AutoArchiveDaysView: View {
 
 struct VoiceSettingsView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(NewTopicRules.autoMicKey) private var autoMic = false
     @State private var saving = false
     var body: some View {
         ScrollView {
@@ -296,6 +266,12 @@ struct VoiceSettingsView: View {
                         ShellDivider().padding(.leading, 16)
                         Toggle("I speak Swiss German", isOn: Binding(get: { model.settings.swissGerman }, set: { update(SettingsPatch(swissGerman: $0)) }))
                             .themeFont(17).tint(Theme.brand).padding(16).frame(minHeight: 52)
+                        ShellDivider().padding(.leading, 16)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Start recording right away", isOn: $autoMic).themeFont(17).tint(Theme.brand)
+                                .accessibilityIdentifier("auto-mic")
+                            Text("New topic opens with the microphone on").themeFont(13).foregroundStyle(Theme.muted)
+                        }.padding(16).frame(minHeight: 52)
                     }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
                     Text("Defaults for all chats").themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 16)
                 }

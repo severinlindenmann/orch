@@ -1,5 +1,26 @@
 import SwiftUI
 
+/// One shared minute clock for every avatar, presence line and list row (instead of a TimelineView each).
+/// A view that reads `now` in its body is redrawn at the next full minute.
+@MainActor @Observable
+final class MinuteClock {
+    static let shared = MinuteClock()
+    private(set) var now = Date()
+    private(set) var ticks = 0
+    private var task: Task<Void, Never>?
+    private init() { start() }
+    private func start() {
+        task = Task { [weak self] in
+            while !Task.isCancelled {
+                let t = Date().timeIntervalSinceReferenceDate
+                try? await Task.sleep(for: .seconds(max(1, 60 - t.truncatingRemainder(dividingBy: 60))))
+                guard let self else { return }
+                self.now = Date(); self.ticks += 1
+            }
+        }
+    }
+}
+
 struct ShellAvatar: View {
     let name: String
     var size: CGFloat = 46
@@ -16,10 +37,8 @@ struct ShellAvatar: View {
             .frame(width: size, height: size).background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: Theme.Radius.avatar(size), style: .continuous))
             .overlay(alignment: .bottomTrailing) {
                 if let lastSeen {
-                    TimelineView(.everyMinute) { context in
-                        Circle().fill(WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: context.date)).isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
-                            .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
-                    }
+                    Circle().fill(WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: MinuteClock.shared.now)).isOnline ? Theme.online : Theme.muted).frame(width: 8, height: 8)
+                        .overlay(Circle().stroke(Theme.surface, lineWidth: 2))
                 }
             }.accessibilityHidden(true)
     }
@@ -41,13 +60,12 @@ struct PresenceLine: View {
     let lastSeen: String?
     @Environment(AppModel.self) private var model: AppModel?
     var body: some View {
-        TimelineView(.everyMinute) { context in
-            let status = WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: context.date))
-            HStack(spacing: 5) {
-                Circle().fill(status.isOnline ? Theme.online : Theme.muted).frame(width: 7, height: 7).accessibilityHidden(true)
-                Text(status.text(now: context.date)).themeFont(13).foregroundStyle(Theme.muted)
-            }.accessibilityElement(children: .combine)
-        }
+        let now = MinuteClock.shared.now
+        let status = WorkspaceStatus.of(connection: model?.connection ?? .ok, presence: Presence.of(lastSeen: lastSeen, now: now))
+        HStack(spacing: 5) {
+            Circle().fill(status.isOnline ? Theme.online : Theme.muted).frame(width: 7, height: 7).accessibilityHidden(true)
+            Text(status.text(now: now)).themeFont(13).foregroundStyle(Theme.muted)
+        }.accessibilityElement(children: .combine)
     }
 }
 
@@ -55,10 +73,7 @@ enum ShellTime {
     static func date(_ iso: String?) -> Date? {
         guard let iso else { return nil }
         let clean = String(iso.prefix(while: { $0 != "~" }))
-        let f = ISO8601DateFormatter()
-        if let date = f.date(from: clean) { return date }
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.date(from: clean)
+        return SharedISO.iso.date(from: clean) ?? SharedISO.isoFraction.date(from: clean)
     }
     static func short(_ iso: String?, now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let date = date(iso) else { return "" }
@@ -72,8 +87,7 @@ enum ShellTime {
         return formatted(date, "EEE d MMM")
     }
     private static func formatted(_ date: Date, _ format: String, timeZone: TimeZone = .current) -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = format; f.timeZone = timeZone
-        return f.string(from: date)
+        SharedISO.formatter(format, localeId: "en_GB", timeZone: timeZone).string(from: date)
     }
 }
 

@@ -1370,3 +1370,13 @@ def test_old_key_mentions_do_not_redirect(proj, new_ticket):
     assert chat.refs_in_text(proj, f"See {old}") == []
     assert chat.clean_refs(proj, [{"kind": "ticket", "key": old}]) == []
     assert chat.refs_in_text(proj, f"See {ticket['key']}")[0]["id"] == tid
+
+
+def test_helper_reply_without_a_relay_is_kept_in_the_chat(proj, run, monkeypatch):
+    """fb16: on a workspace with no relay the helper's `orch relay send` was refused (relay add-on off), so a dashboard
+    message was never answered. The reply is kept locally (nothing to send to)."""
+    gid = _helper(proj, monkeypatch)
+    code, out, err = run("chat", "reply", "Four.", "--ticket", gid, "--reply-to", "m_abcdefghij")
+    assert code == 0, (out, err)
+    last = chat.read_day(proj, chat.day_key(proj))["messages"][-1]
+    assert last["text"] == "Four." and last["via"] == "helper" and last["by"] != "you"
