@@ -293,7 +293,7 @@ def test_status_says_when_an_addon_is_not_running(svc, proj, run):
 
 def test_an_addon_that_is_off_on_purpose_is_not_a_problem(svc, proj, run):
     # owner feedback 14 Nov (W6): sync is off by default; `orch start` left it "not running" and the
-    # dashboard asked the person to start it for ever. The add-on says "off is meant" with .orch/run/<name>/idle.
+    # dashboard asked the person to start it for ever. The add-on says "off is meant": run/<name>/idle.
     from orch import needs
 
     run("start")
