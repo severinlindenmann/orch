@@ -592,7 +592,7 @@ kbd{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 
 }
 
 /* ---- UX phase 5: Focus start page in the dashboard's look (draft focus/focus.html) ---- */
-.fx-pick{max-width:1200px;padding:32px 24px 80px}
+.fx-pick{max-width:calc(var(--content-width) + var(--page-gutter)*2);padding:32px 24px 80px}
 .fx-pick h1{font-size:28px;line-height:36px;font-weight:600;margin:0 0 4px}
 .fx-pick>.meta.fx-sub{font-size:14px;color:var(--text);margin:0 0 24px}
 .fx-pick-group h2{display:flex;align-items:baseline;gap:8px;font-size:16px;font-weight:600;color:var(--text);margin:0 0 12px}
@@ -728,3 +728,45 @@ input.switch[type=checkbox]{appearance:none;width:36px;height:24px;min-width:36p
 .fx:not(.fx-terminal) .fx-with{max-width:848px;width:100%;box-sizing:border-box;margin:0 auto 12px;padding:0 32px}
 @media(max-width:720px){.fx:not(.fx-terminal) .fx-with{padding:0 12px}}
 .fx-loading{display:grid;gap:12px;padding:24px;max-width:640px}
+
+/* fb17: Focus inside the dashboard is one shell (the master .focus3): tickets left, the live session in the centre,
+   one result panel right. No header, step bar or trace line of its own; only tokens and master classes. */
+.fx.fx-shell{border:0;border-radius:0;height:100dvh;min-height:0}
+.fx.fx-shell .fx-top,.fx.fx-shell .fx-stepbar,.fx.fx-shell .fx-trace,.fx.fx-shell .fx-mobile-tasks{display:none}
+.fx.fx-terminal.fx-shell .fx-body{display:grid;flex:1;min-height:0;border:0;border-radius:0;grid-template-rows:minmax(0,1fr);grid-template-areas:none;grid-template-columns:minmax(200px,240px) minmax(0,1fr) minmax(280px,340px)}
+.fx.fx-shell .fx-left{display:flex;flex-direction:column;min-height:0;overflow:auto;background:var(--sidebar)}
+.fx.fx-shell .fx-left .card-h{padding:16px 16px 8px}
+.fx.fx-shell .fx-left .card-h h3{font-size:12px;line-height:16px;font-weight:600;color:var(--text-muted);margin:0}
+.fx.fx-shell .fx-tickets .list-row{text-decoration:none;color:var(--text);cursor:pointer;min-height:40px;padding:8px 16px}
+.fx.fx-shell .fx-tickets .list-row strong{font-weight:500;font-size:14px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fx.fx-shell .fx-tickets .list-row:hover{background:var(--surface-2)}
+.fx.fx-terminal.fx-shell .fx-rail{grid-area:auto;display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;overflow:visible;margin-top:16px;padding:16px;gap:16px;border:0;border-top:1px solid var(--border);background:transparent;opacity:1;visibility:visible;pointer-events:auto}
+.fx.fx-terminal.fx-shell .fx-rail>*{display:revert}
+.fx.fx-terminal.fx-shell .fx-rail>div:first-child{display:block}
+.fx.fx-terminal.fx-shell #fx-tasks{display:block}
+.fx.fx-terminal.fx-shell #fx-tasks .fx-task{padding:8px 0;border:0;width:100%;min-height:0}
+.fx.fx-terminal.fx-shell #fx-tasks .sub{display:block}
+.fx.fx-terminal.fx-shell .fx-rail .eyebrow>span:last-child{display:revert}
+.fx.fx-terminal.fx-shell .fx-stage,.fx.fx-terminal.fx-shell .fx-human{grid-area:auto}
+.fx.fx-shell .fx-stage{display:flex;flex-direction:column;min-width:0;min-height:0}
+.fx.fx-shell .fx-chead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid var(--border)}
+.fx.fx-shell .fx-chead>.grow{flex:1 1 0;min-width:0}
+.fx.fx-shell .fx-chead>.fx-live-wrap{order:3;flex:1 0 100%}
+.fx.fx-shell .fx-human>.fx-sent>.row{display:none}
+.fx.fx-shell .fx-chead h1{font-size:20px;line-height:28px;font-weight:600;margin:4px 0 0;letter-spacing:0}
+.fx.fx-shell .fx-chead .eyebrow .key{font-family:inherit}
+.fx.fx-shell .fx-human{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;overflow:auto;padding:16px;border-left:1px solid var(--border);background:var(--surface)}
+.fx.fx-shell .fx-human>.fx-sent{max-width:none;margin:0;padding:0}
+.fx.fx-shell .fx-human .fx-sent-grid{grid-template-columns:1fr}
+.fx.fx-shell .fx-human>.fx-review{position:static;margin:0;padding:12px 0 0;border-top:1px solid var(--border);background:transparent;flex-wrap:wrap}
+.fx.fx-shell .fx-human>.fx-review>div{flex-basis:100%}
+.fx.fx-shell .fx-human>.fx-review[hidden],.fx.fx-shell .fx-result-empty[hidden]{display:none}
+.fx.fx-shell .fx-stage>.fx-compose{padding:12px 20px 16px;margin:0}
+@media(max-width:900px){
+  .fx.fx-terminal.fx-shell .fx-body{grid-template-columns:minmax(200px,230px) minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
+  .fx.fx-shell .fx-human{grid-column:1 / -1;border-left:0;border-top:1px solid var(--border);max-height:40dvh}
+}
+@media(max-width:720px){
+  .fx.fx-terminal.fx-shell .fx-body{display:flex;flex-direction:column;overflow:auto}
+  .fx.fx-shell .fx-left{max-height:30dvh;flex:none}
+}

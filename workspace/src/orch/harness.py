@@ -21,6 +21,7 @@ from pathlib import Path
 from orch.errors import Refused
 
 HARNESS = Path(".orch") / "harness"
+COPY_HARNESS = ".orch-harness"  # in a separate copy: its own AGENTS.orch.md, refreshed at each start
 COPY_MARK = ".orch-copy"  # inside a copy made where links are not allowed: "orch owns this folder"
 LOCAL_MARK = ("<!-- orch:begin local -->", "<!-- orch:end local -->")
 EXCLUDE_MARK = ("# orch:begin", "# orch:end")
@@ -866,8 +867,20 @@ def write_local_file(root: Path, fn: str, line: str | None, harness_root: Path |
     if line and (root / "AGENTS.md").is_file() and not team_file:
         lines.append(line)
     if combined(harness_root or root):
-        # a separate copy has no .orch/harness of its own: it imports the workspace's, by full path
-        imp = (harness_root / HARNESS / "AGENTS.orch.md") if harness_root else (HARNESS / "AGENTS.orch.md")
+        imp = HARNESS / "AGENTS.orch.md"
+        if harness_root:
+            # a separate copy has no .orch/harness of its own. It gets the workspace's AGENTS.orch.md as a
+            # file of its own, imported relatively: an import outside the folder the tool runs in makes the
+            # agent tool ask to allow external imports, and an unattended helper hangs there
+            own = root / COPY_HARNESS
+            if is_link(own) or (own.exists() and not own.is_dir()) or is_link(own / "AGENTS.orch.md"):
+                return False
+            own.mkdir(exist_ok=True)
+            src = harness_root / HARNESS / "AGENTS.orch.md"
+            body = _read(src) if src.is_file() and not is_link(src) else ""
+            if _read(own / "AGENTS.orch.md") != body:
+                write_text(own / "AGENTS.orch.md", body)
+            imp = Path(COPY_HARNESS) / "AGENTS.orch.md"
         lines.append(f"@{imp.as_posix()}")
     if not lines and LOCAL_MARK[0] not in text:
         return path.exists()  # nothing to say yet: do not make the file

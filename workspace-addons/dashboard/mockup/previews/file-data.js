@@ -5,5 +5,5 @@ window.previewFiles=[{"title": "Catalogue web page", "name": "catalogue-page.htm
  const evidence=['shop-photo.png','shop-photo.jpg','orders-5000.csv','sales-sheet.xlsx','sync.log'];
  f.role=results.includes(f.name)?'Result':evidence.includes(f.name)||f.name.startsWith('sample-')?'Evidence':['mystery-device-dump.bin','supplier-archive-25mb.dat'].includes(f.name)?'Other':'Reference';
  f.createdAt='2026-11-13T13:38:00+01:00';
- f.taskUrl='../ticket/ticket-working.html?task='+encodeURIComponent(f.step)+'#ticket-tasks';
+ f.taskUrl='../ticket/ticket-working.html?task='+encodeURIComponent(f.step)+'#ticket-steps';
 });

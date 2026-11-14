@@ -26,3 +26,12 @@ def test_tab_counts_are_body_size_grey_not_mono():
 def test_chat_draft_is_never_filled_from_the_url():
     chat = (WEB / "pages" / "chat.js").read_text()
     assert "say=" not in chat and "'orch.say'" in chat and "e.origin !== location.origin" in chat
+
+
+def test_person_switch_stays_inside_the_sidebar_and_truncates_long_names():
+    """The sidebar footer's person switch never overflows sideways (release-18 finding, owner-fb-fix-g)."""
+    css = (KIT / "widgets.css").read_text()
+    assert ".person-switch .menu{" in css and "width:min(216px,100%)" in css
+    assert ".person-switch>summary .nav-label{min-width:0;overflow:hidden;text-overflow:ellipsis" in css
+    assert ".person-switch .menu-pop{grid-template-columns:minmax(0,1fr)}" in css
+    assert "node('span', {className: 'truncate'}, n)" in (WEB / "people.js").read_text()

@@ -26,7 +26,7 @@
     root.hidden = false;
     const me = ppl.me, list = ppl.people || [];
     const items = list.map(n => node('button', {type: 'button', className: 'menu-item', 'data-person': n, 'data-testid': 'person-' + n, disabled: busy},
-      avatar(n), n, n === me ? node('span', {className: 'grow'}) : null, n === me ? node('span', {className: 'ck', 'aria-label': 'You'}, '✓') : null));
+      avatar(n), node('span', {className: 'truncate'}, n), n === me ? node('span', {className: 'grow'}) : null, n === me ? node('span', {className: 'ck', 'aria-label': 'You'}, '✓') : null));
     const add = adding
       ? node('form', {className: 'person-add', 'data-person-form': ''},
         node('input', {className: 'input', name: 'name', maxlength: '40', placeholder: 'Name', 'aria-label': 'Name of the new person', autocomplete: 'off', 'data-testid': 'person-name'}),

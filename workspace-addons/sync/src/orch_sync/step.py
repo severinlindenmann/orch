@@ -452,7 +452,7 @@ def merged_tree(root, head, remote, index, now, first=False):
         and remote_rows.get(p) != base_rows.get(p)
     ]
     if both_changed:
-        raise pause.Pause("Conflicting artifact needs a person", sorted(both_changed))
+        raise pause.Pause("Conflicting result needs a person", sorted(both_changed))
     bases = repo.git(root, "merge-base", "--all", head, checked_remote, allowed_codes=(0, 1)).stdout.split()
     chosen_all = bool(decisions) and set(entries(root, remote)) <= set(decisions)
     if len(bases) > 1 or (not bases and not first and not chosen_all):
@@ -493,7 +493,7 @@ def merged_tree(root, head, remote, index, now, first=False):
         if not paths.TICKET.fullmatch(p) and p != "ticket-counter.json" and p not in decisions
     ]
     if unresolved:
-        raise pause.Pause("Conflicting artifact needs a person", unresolved)
+        raise pause.Pause("Conflicting result needs a person", unresolved)
     repo.git(root, "read-tree", tree, index=index)
     base_result = repo.git(root, "merge-base", head, remote, allowed_codes=(0, 1))
     base = entries(root, base_result.stdout.decode().strip() or None)

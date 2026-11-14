@@ -56,9 +56,10 @@ function shareCard(settings) {
   const on = settings.share === true;
   return h('div', {className:'stack', 'data-key':'settings-share'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
-      h('div', {className:'grow'}, settingsText('h3', {}, 'Share with team'),
-        settingsText('p', {className:'meta'}, on ? 'AGENTS.md has a short orch entry. Turn off to remove it.' : 'Off: orch files stay on this computer and your team sees nothing.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Share with team', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Tell teammates about orch'),
+        settingsText('p', {}, 'Adds a short note to your project’s guide file so your teammates’ helpers know orch is used here.'),
+        settingsText('p', {className:'meta'}, 'Example: a colleague’s helper learns how to open your tickets.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Tell teammates about orch', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
       reviewPanel('share', settings)));
 }
 // The CLI hint stays out of the page: a missing sign-in is said in plain words.
@@ -86,9 +87,10 @@ function privateCard(settings) {
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
-      h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers may mark tickets Done'),
-        settingsText('p', {className:'meta'}, 'On: a helper marks its finished work Done. Off: helpers send finished work to Review and you decide when it is Done.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Helpers may mark tickets Done', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Let helpers finish tickets'),
+        settingsText('p', {}, 'A helper may mark its own ticket Done. When this is off it asks you to check first.'),
+        settingsText('p', {className:'meta'}, 'Example: the helper fixes a typo and closes the ticket; you find it under Done.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
 }
 // Separate copies (draft 1f, owner pass 11 Nov): one plain row with a switch; when, how many, what is on this
@@ -107,8 +109,8 @@ function settingsReviewText(id, settings) {
     ? {verb:'Stop sharing', what:'Your team will no longer see that this workspace uses orch.', affects:'The short orch entry is taken out of AGENTS.md. Nothing else in your files changes.'}
     : {verb:'Share', what:'Your team will see that this workspace uses orch.', affects:'A short orch entry is added to AGENTS.md in your team’s files. Everything else from orch stays on this computer.'};
   if (id === 'workflow') return settings.agents_may_finish
-    ? {verb:'Turn off', what:'Helpers will send finished work to Review, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
-    : {verb:'Turn on', what:'Helpers will mark their finished work Done themselves.', affects:'You will not be asked to look at it first. Tickets already waiting in Review stay there.'};
+    ? {verb:'Turn off', what:'Helpers will ask you to check finished work, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
+    : {verb:'Turn on', what:'Helpers will mark their finished work Done themselves.', affects:'You will not be asked to look at it first. Tickets already waiting for your check stay there.'};
   if (id === 'copies-switch') return copiesModeOf(settings) !== 'off'
     ? {verb:'Turn off', what:'Helpers will all work in your own folder, also when they work at the same time.', affects:'Copies that already exist stay until their ticket is done. Your own files are not touched.'}
     : {verb:'Turn on', what:'When helpers work at the same time, each one gets its own copy of your files.', affects:'At most ' + (settings.copies_max || 3) + ' copies at the same time. They take space on this computer and are removed when their ticket is done. Your own files are not touched.'};
@@ -153,10 +155,12 @@ function copiesCard(settings) {
   const row = (title, hint, ...rest) => h('div', {className:'copies-sub'}, settingsText('h3', {}, title), hint ? settingsText('p', {className:'meta'}, hint) : null, ...rest);
   return h('div', {className:'stack', 'data-key':'settings-copies'},
     h('div', {className:'card'},
-      h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers working at the same time: each gets its own copy of your files')),
-        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Each helper gets its own copy of your files', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
+      h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Several helpers at once'),
+        settingsText('p', {}, 'Each helper works in its own copy of your folder, so two helpers never change the same file.'),
+        settingsText('p', {className:'meta'}, 'Example: one helper writes the newsletter while another fixes the website.')),
+        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Several helpers at once', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
       reviewPanel('copies-switch', settings),
-      h('div', {className:'copies-details', 'data-key':'settings-copies-details'},
+      !on ? null : h('div', {className:'copies-details', 'data-key':'settings-copies-details'},
         h('div', {className:'stack copies-more'},
           row('When', '', h('div', {className:'row copies-choices', role:'radiogroup', 'aria-label':'When each helper gets its own copy'}, COPY_CHOICES.map(([id, label]) =>
             h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:off || !on}, label)))),
@@ -818,7 +822,7 @@ function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
   const src = '/addon/' + r.id + '/' + r.path;
-  const frame = h('iframe', {className:'embed', 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
   // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
   const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
   if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
@@ -827,6 +831,14 @@ function pageFrame(r) {
   return fragment(skeleton, frame);
 }
 const framesLoaded = new Set();
+// A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
+const shellAddons = new Set();
+globalThis.addEventListener?.('message', event => {
+  const name = event.origin === location.origin && event.data?.orch === 'embed-shell' && /^\/addon\/([a-z][a-z0-9-]{1,31})\//.exec(String(event.data.path || ''))?.[1];
+  if (!name || shellAddons.has(name)) return;
+  shellAddons.add(name);
+  document.querySelectorAll('iframe.embed').forEach(f => { if ((f.getAttribute('src') || '').startsWith('/addon/' + name + '/')) f.classList.add('embed-shell'); });
+});
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
 // Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };

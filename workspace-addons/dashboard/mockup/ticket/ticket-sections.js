@@ -36,22 +36,22 @@
     const activityCount=(activity?.children.length||0)+(extraActivity?.querySelectorAll('li, p').length||0);
     const tabs=el('nav','ticket-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Ticket sections');header.after(tabs);
     const panels={Overview:overview};
-    for(const name of ['Tasks','Files','Activity']) {
+    for(const name of ['Steps','Files','Activity']) {
       const panel=el('section','ticket-tab-panel');panel.id='ticket-'+name.toLowerCase();panel.hidden=true;overview.after(panel);panels[name]=panel;
     }
-    const counts={Tasks:empty?0:rows.length,Files:empty?0:files[kind]?1:0,Activity:empty?0:activityCount};
+    const counts={Steps:empty?0:rows.length,Files:empty?0:files[kind]?1:0,Activity:empty?0:activityCount};
     Object.entries(panels).forEach(([name,panel],i)=>{
       const b=el('button','btn ghost',name+(name==='Overview'?'':' '+counts[name]));b.type='button';b.id='tab-'+name.toLowerCase();b.dataset.ticketTab=panel.id;b.setAttribute('role','tab');b.setAttribute('aria-controls',panel.id);b.setAttribute('aria-selected',String(i===0));b.tabIndex=i===0?0:-1;tabs.append(b);
       panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',b.id);panel.tabIndex=0;
     });
-    panels.Tasks.append(el('h2','','Tasks'),el('p','muted','Open a task to see its notes, files and links.'));
+    panels.Steps.append(el('h2','','Steps'),el('p','muted','Open a step to see its notes, files and links.'));
     if(!empty)rows.forEach((row,i)=>{
       const detail=el('details','task-evidence');const summary=el('summary');const title=el('span','grow',taskNames[i]);const note=row.querySelector('.task-note');if(note)title.append(el('span','task-note meta',note.textContent));summary.append(title,el('span','meta',row.querySelector('.task-mark, .tick')?.textContent.trim()==='✓'?'Done':/Skipped|photos from the shop/.test(row.textContent)?'Skipped':'Working'));detail.append(summary);
       const body=el('div','evidence-body');body.append(el('h3','','Notes'),el('p','muted',notes[kind]?.[i]||'No notes attached yet.'),el('h3','','Files'));
       if(files[kind]?.tasks.includes(i))body.append(fileButton());else body.append(el('p','meta','No files attached to this task.'));
-      body.append(el('h3','','Links'),el('p','meta','No separate links attached to this task.'));detail.append(body);panels.Tasks.append(detail);
+      body.append(el('h3','','Links'),el('p','meta','No separate links attached to this step.'));detail.append(body);panels.Steps.append(detail);
     });
-    if(!counts.Tasks)panels.Tasks.append(el('p','muted','No tasks yet. Tasks and their evidence will appear here when the work is planned.'));
+    if(!counts.Steps)panels.Steps.append(el('p','muted','No steps yet. Steps and their evidence will appear here when the work is planned.'));
     panels.Files.append(el('h2','','Files'));
     if(counts.Files){const f=files[kind];const card=el('article','card ticket-file');card.append(el('h3','',f.name),el('p','meta',f.meta),el('p','muted','Evidence for: '+f.tasks.map(i=>taskNames[i]).join(' · ')),fileButton());panels.Files.append(card);}else panels.Files.append(el('p','muted','No files attached. Completion notes appear with their tasks.'));
     const grid=el('a','btn ghost sm','Browse the full file grid ↗');grid.href='../previews/files.html';panels.Files.append(grid);
