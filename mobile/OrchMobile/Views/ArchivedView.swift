@@ -40,7 +40,9 @@ struct ArchiveToastBar: View {
             .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).strokeBorder(Theme.border, lineWidth: 1) }
             .shadow(color: Theme.bg.opacity(0.5), radius: 8, y: 4)
-            .padding(.horizontal, 16).accessibilityIdentifier("\(toast.kind)-toast")
+            .padding(.horizontal, 16)
+            // A container with its own id (and the Undo button inside), so UI tests and VoiceOver find the bar itself.
+            .accessibilityElement(children: .contain).accessibilityIdentifier("\(toast.kind)-toast")
     }
 }
 

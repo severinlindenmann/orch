@@ -9,9 +9,12 @@ enum SwipeToHideRules {
     static let hideAtOnce: CGFloat = 0.55  // share of the row width
     enum Outcome: Equatable { case springBack, reveal, hide }
     /// `offset` is where the row ends up (negative = moved left).
-    static func outcome(offset: CGFloat, width: CGFloat) -> Outcome {
+    /// `predicted`: where the finger's speed would carry the row (DragGesture.predictedEndTranslation); a quick fling past the
+    /// whole row hides too, as in Mail and Messages, even when the finger itself travelled less than `hideAtOnce`.
+    static func outcome(offset: CGFloat, predicted: CGFloat? = nil, width: CGFloat) -> Outcome {
         let moved = -offset
         if width > 0, moved > width * hideAtOnce { return .hide }
+        if width > 0, let predicted, moved > reveal, -predicted > width { return .hide }
         return moved > reveal ? .reveal : .springBack
     }
     /// Horizontal drags only: more sideways than up/down.
@@ -25,9 +28,13 @@ private struct SwipeToHide: ViewModifier {
     @State private var open = false
     @State private var width: CGFloat = 0
     @State private var dragging = false
+    /// True from the first sideways move until shortly after the finger lifts: the row's own tap (NavigationLink) must not
+    /// fire at the end of a swipe, else a swipe that hides the question also opens its chat.
+    @State private var swiping = false
 
     func body(content: Content) -> some View {
         content
+            .disabled(swiping)
             .background(Theme.surface)
             .offset(x: offset)
             .overlay { if open { Color.clear.contentShape(Rectangle()).offset(x: offset).onTapGesture { close() } } }
@@ -52,15 +59,16 @@ private struct SwipeToHide: ViewModifier {
     private var drag: some Gesture {
         DragGesture(minimumDistance: 20)
             .onChanged { value in
-                if !dragging { guard SwipeToHideRules.isHorizontal(value.translation) else { return }; dragging = true }
+                if !dragging { guard SwipeToHideRules.isHorizontal(value.translation) else { return }; dragging = true; swiping = true }
                 let base: CGFloat = open ? -SwipeToHideRules.buttonWidth : 0
                 offset = min(0, max(-width, base + value.translation.width))
             }
             .onEnded { value in
                 guard dragging else { return }
                 dragging = false
+                Task { try? await Task.sleep(for: .milliseconds(350)); swiping = false }
                 let base: CGFloat = open ? -SwipeToHideRules.buttonWidth : 0
-                switch SwipeToHideRules.outcome(offset: base + value.translation.width, width: width) {
+                switch SwipeToHideRules.outcome(offset: base + value.translation.width, predicted: base + value.predictedEndTranslation.width, width: width) {
                 case .hide: commit()
                 case .reveal: withAnimation(.spring(duration: 0.25)) { offset = -SwipeToHideRules.buttonWidth; open = true }
                 case .springBack: close()

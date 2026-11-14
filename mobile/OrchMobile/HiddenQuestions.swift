@@ -17,6 +17,14 @@ final class HiddenQuestions {
         self.defaults = defaults
         self.key = key
         self.entries = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        // Sign-out and `-resetState`: nothing phone-local may stay for the next person (AppModel.reset posts this).
+        nonisolated(unsafe) weak var store = self   // only touched on the main queue (queue: .main)
+        NotificationCenter.default.addObserver(forName: .orchPhoneReset, object: nil, queue: .main) { _ in store?.clear() }
+    }
+
+    func clear() {
+        entries = [:]
+        defaults.removeObject(forKey: key)
     }
 
     /// `date`: the newest activity time of the question's conversation (server clock), see `mark(for:activity:)`.
@@ -60,4 +68,9 @@ final class HiddenQuestions {
     }
 
     private func save() { defaults.set(entries, forKey: key) }
+}
+
+extension Notification.Name {
+    /// Posted by AppModel.reset (sign-out, `-resetState`): phone-local stores clear themselves.
+    static let orchPhoneReset = Notification.Name("orchPhoneReset")
 }

@@ -795,6 +795,7 @@ final class AppModel {
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
         readState = ReadState(); blobCache = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
+        UserDefaults.standard.removeObject(forKey: HiddenQuestions.defaultsKey); NotificationCenter.default.post(name: .orchPhoneReset, object: nil)
         credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; transportDown = false; tab = .chats; phase = .onboarding
     }
