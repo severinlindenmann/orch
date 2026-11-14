@@ -61,7 +61,7 @@ function needRow(row, newest, questionCount = 1, same = []) {
       return control;
     }));
     // a written answer goes through the full question card (checked answer, Undo)
-    other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id}, 'Write your own…');
+    other = h('button', {type:'button', className:'btn ghost sm', 'data-action':'need', 'data-need':row.id, 'data-write':'own'}, 'Write your own…');
   } else if (!snapshot) {
     actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
   }

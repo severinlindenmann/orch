@@ -63,3 +63,8 @@ test('a need with no ticket, no page and no action says its text in a toast inst
   await c.openNeed({id: 'x', kind: 'sync-conflict', ticket: null, title: 'Conflict', text: 'Two copies changed.'}, {disabled: false});
   assert.equal(JSON.stringify(toasts), '["Two copies changed."]');
 });
+
+test('"Write your own…" opens the answer box with Send at once', () => {
+  assert.match(src, /'data-write':'own'/);
+  assert.match(openNeedSrc, /trigger\.dataset\?\.write === 'own'[\s\S]*?\.click\(\)/);
+});

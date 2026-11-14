@@ -1573,6 +1573,8 @@ async function openNeed(row, trigger) {
     d.append(host, actions);
     mountQuestion(host, {ticket:row.ticket, id:row.answer.question, digest:row.answer.digest, title:row.title, text:row.text, options:array(row.answer.options).map(o => ({text:o, suggested:o === row.answer.recommended}))}, {dialog:d, row:trigger.closest('[data-need-row]'), lock:'needs-you'});
     window.orch.open(d);
+    // "Write your own…" opens the answer box with its Send button at once, not a second page of choices
+    if (trigger.dataset?.write === 'own') d.querySelector('.qoptions .quiet')?.click();
   } else if (row.ticket) location.hash = href(row.ticket);
   else {
     const a = addons().find(a => a.dashboard && (a.name === row.source || String(row.kind).startsWith(a.name + ':')));
