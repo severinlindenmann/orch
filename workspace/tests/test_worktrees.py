@@ -186,7 +186,7 @@ def test_without_git_no_copy_is_made(proj, new_ticket):
     assert worktrees.count(proj) == 0
     folder, notes = _route(proj, t)
     assert folder == proj and notes == []
-    assert not (addons.home() / "worktrees").exists() or not any((addons.home() / "worktrees").rglob("t_*"))
+    assert not addons.copies_home().exists() or not any(addons.copies_home().rglob("t_*"))
 
 
 def test_a_repo_without_a_commit_makes_no_copy(proj, new_ticket):

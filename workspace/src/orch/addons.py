@@ -413,7 +413,7 @@ def copies_base(h: Path) -> Path:
     these copies, and every agent is denied the whole orch home (denyrules: keys, secrets, approvals); a copy
     inside the home would be denied too, and a carve-out cannot be made safe.
     `~/.orch-tool` -> `~/.orch-work`; any other home -> `<parent>/.orch-work-<8 hex of its path>` (one per
-    home, and the name never contains the home's own name, which the agent's shell deny rules match as text)."""
+    home; the name never holds the home's own name, which the agent's shell deny rules match as text)."""
     h = h.resolve()
     if h.name == ".orch-tool":
         return h.parent / ".orch-work"
