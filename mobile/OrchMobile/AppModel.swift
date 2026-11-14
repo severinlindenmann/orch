@@ -28,7 +28,9 @@ final class AppModel {
     private(set) var workspaces: [Workspace] = [] { didSet { revision &+= 1; rebuildGroups() } }
     private(set) var questions: [Question] = [] { didSet { revision &+= 1 } }
     /// Texts between this phone and its workspaces, newest first.
-    private(set) var messages: [PhoneMessage] = [] { didSet { revision &+= 1; rebuildGroups() } }
+    private(set) var messages: [PhoneMessage] = [] { didSet { revision &+= 1; if skipGroupRebuild { skipGroupRebuild = false } else { rebuildGroups() } } }
+    /// Set by `merge` when no new or changed message can affect the groups (no group message, none from this phone).
+    @ObservationIgnored private var skipGroupRebuild = false
     private(set) var groups = GroupSnapshot(groups: [], dropped: [])
     /// Newest work update per ticket (`GET /v1/phone/updates`).
     private(set) var updates: [TicketUpdate] = [] { didSet { revision &+= 1 } }
@@ -423,13 +425,30 @@ final class AppModel {
             arrivalCounter += 1
             firstSeen[m.id] = Date()
         }
-        var byId = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        for m in items { byId[m.id] = m }          // newer data (delivered_at) replaces the old copy
-        let merged = byId.values.sorted { ($0.message.createdAt, $0.id) > ($1.message.createdAt, $1.id) }
-        if merged != messages { messages = merged }
-        let retained = Set(messages.map(\.id))
-        arrival = arrival.filter { retained.contains($0.key) }
-        firstSeen = firstSeen.filter { retained.contains($0.key) }
+        // Incremental: only new or changed ids touch the list (newer data, e.g. delivered_at, replaces the old copy).
+        // `messages` is sorted newest first; a poll that brings nothing new costs one dictionary lookup per item.
+        var index = [String: Int](minimumCapacity: messages.count)
+        for (i, m) in messages.enumerated() { index[m.id] = i }
+        var next = messages, touched: [PhoneMessage] = [], needsFullSort = false
+        var pendingInserts: [String: PhoneMessage] = [:]
+        for m in items {
+            if let i = index[m.id] {
+                guard next[i] != m else { continue }
+                if next[i].message.createdAt != m.message.createdAt { needsFullSort = true }
+                next[i] = m; touched.append(m)
+            } else { pendingInserts[m.id] = m }          // the last copy of an id in `items` wins
+        }
+        if touched.isEmpty && pendingInserts.isEmpty { return }
+        func before(_ a: PhoneMessage, _ b: PhoneMessage) -> Bool { (a.message.createdAt, a.id) > (b.message.createdAt, b.id) }
+        for m in pendingInserts.values {
+            var lo = 0, hi = next.count
+            while lo < hi { let mid = (lo + hi) / 2; if before(next[mid], m) { lo = mid + 1 } else { hi = mid } }
+            next.insert(m, at: lo); touched.append(m)
+        }
+        if needsFullSort { next.sort(by: before) }
+        skipGroupRebuild = !touched.contains { $0.message.body.group != nil || $0.fromPhone }
+        messages = next
+        skipGroupRebuild = false
     }
     /// client_ids of messages the relay stored (first tick) that `/messages` has not listed yet.
     private func unlistedSentClientIds() -> Set<String> {

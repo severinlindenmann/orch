@@ -158,6 +158,48 @@ final class PerfTests: XCTestCase {
         print("PERF e_decode_3000px_to_600_x5 \(c)")
     }
 
+    /// Step 6: the merge is incremental. A poll with nothing new changes nothing; new ones land in order; a changed copy replaces the old one.
+    func testMergeIsIncrementalAndKeepsOrder() async throws {
+        let m = await loadedModel()
+        let box = currentBox!
+        let base = m.derivedRebuilds
+        let sorted0 = m.messages.map(\.id)
+        await m.reloadMessages()
+        XCTAssertEqual(m.messages.map(\.id), sorted0, "same page again: same list")
+        XCTAssertEqual(m.derivedRebuilds, base, "nothing new: nothing rebuilt")
+        // an old message arrives late (older than most) plus a new one on top
+        let old = PhoneMessage(message: TextMessage(id: "m_late", from: "ws_perf0", to: "ph_perf01", type: "text", createdAt: iso(300) ,
+                                                   ticket: "t_ws_perf0_0", body: TextBody(text: "Late")), workspaceName: "Perf workspace 0")
+        let new = PhoneMessage(message: TextMessage(id: "m_top", from: "ws_perf0", to: "ph_perf01", type: "text", createdAt: iso(30_000),
+                                                   ticket: "t_ws_perf0_0", body: TextBody(text: "Top")), workspaceName: "Perf workspace 0")
+        box.items.insert(contentsOf: [new, old], at: 0)
+        await m.reloadMessages()
+        XCTAssertEqual(m.messages.count, Self.messageCount + 2)
+        XCTAssertEqual(m.messages.first?.id, "m_top")
+        let keys = m.messages.map { ($0.message.createdAt, $0.id) }
+        XCTAssertTrue(zip(keys, keys.dropFirst()).allSatisfy { $0 > $1 }, "still newest first")
+        XCTAssertTrue(m.messages.contains { $0.id == "m_late" })
+        XCTAssertEqual(Set(m.messages.map(\.id)).count, m.messages.count, "no duplicates")
+    }
+
+    /// Step 6: the queue is in memory at once, the file follows on a background queue; the last state wins.
+    func testOutboxWritesAreCoalescedAndLandOnDisk() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("perf-outbox-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let ob = Outbox(directory: dir, phone: "ph_iphone0001")
+        var last: OutboxItem?
+        let ms = Double(ContinuousClock().measure {
+            for i in 0..<50 { last = try? ob.enqueue(MessageDraft(text: "msg \(i)"), to: .general(workspace: "ws_pilatus001")) }
+        }.components.attoseconds) / 1e15
+        print(String(format: "PERF f_outbox_50_enqueues %.2f", ms))
+        XCTAssertEqual(ob.items.count, 50, "in memory at once")
+        ob.flushWrites()
+        let again = Outbox(directory: dir, phone: "ph_iphone0001")
+        XCTAssertEqual(again.items.count, 50)
+        XCTAssertEqual(again.items.last?.clientId, last?.clientId)
+        XCTAssertNil(ob.lastSaveError)
+    }
+
     func testDerivedDataIsRebuiltOnlyWhenAnInputChanges() async throws {
         let m = await loadedModel()
         _ = m.workspaceSummaries
