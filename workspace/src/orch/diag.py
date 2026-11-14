@@ -53,7 +53,7 @@ _FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.([a-z][a-z0-9_-]{0,23})\.(\d+)\.jsonl
 _PROC_START = int(time.time() * 1000)
 _lock = threading.Lock()
 _busy = threading.local()
-_state = {"root": None, "src": "cli", "seq": 0, "last_prune": 0.0}
+_state = {"root": None, "src": "cli", "seq": 0, "last_prune": None}
 _dropped: dict[str, int] = {}
 _rate: dict[tuple[str, int], int] = {}
 _enabled_cache: dict[str, tuple[float, bool]] = {}
@@ -395,7 +395,7 @@ def _emit(
         if not _append(d, src, day, data):
             return _restore(pending if i == 0 else {}, "write")
     mono = time.monotonic()
-    if mono - _state["last_prune"] > PRUNE_EVERY:
+    if _state["last_prune"] is None or mono - _state["last_prune"] > PRUNE_EVERY:
         _state["last_prune"] = mono
         prune(root)
 

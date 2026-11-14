@@ -29,7 +29,7 @@ def proj(proj):
 
 @pytest.fixture(autouse=True)
 def _fresh(monkeypatch):
-    monkeypatch.setattr(diag, "_state", {"root": None, "src": "cli", "seq": 0, "last_prune": 0.0})
+    monkeypatch.setattr(diag, "_state", {"root": None, "src": "cli", "seq": 0, "last_prune": None})
     for d in (diag._dropped, diag._rate, diag._enabled_cache, diag._hider_cache, diag._ws_cache):
         d.clear()
     diag._trace.set(None)
