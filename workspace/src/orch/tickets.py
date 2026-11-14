@@ -1396,7 +1396,9 @@ TIDY_LINE = "Title tidied from: "
 
 def tidied(root: Path, ticket: dict) -> bool:
     lines = history.lines(root, ticket)
-    return any(str(h.get("text", "")).startswith((TIDY_LINE, "Ticket tidied")) for h in lines)
+    # An unverified (synced) line shows with a display prefix; the stored text is what marks "tidied".
+    texts = (str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED) for h in lines)
+    return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
 def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) -> dict:

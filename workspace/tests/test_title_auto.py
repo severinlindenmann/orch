@@ -150,3 +150,13 @@ def test_cli_ticket_tidy(proj, run):
         "agent:claude",
     )[:2]
     assert code == 0 and json.loads(out)["title"] == "Fix the login page"
+
+
+def test_tidied_still_counts_when_its_history_line_shows_as_unverified(proj):
+    from orch import history
+
+    t = tickets.create(proj, "fix login", "human:t")
+    t = tickets.tidy(proj, t["id"], "Fix the login page", "agent:claude")
+    shown = dict(t, history=[dict(h, text=history.SYNCED_UNVERIFIED + h["text"]) for h in t["history"]])
+    assert tickets.tidied(proj, shown)
+    assert not tickets.tidied(proj, tickets.create(proj, "other", "human:t"))
