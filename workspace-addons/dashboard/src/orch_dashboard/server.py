@@ -372,6 +372,12 @@ class Handler(BaseHTTPRequestHandler):
             ok = self.session is not None and self.session.authed(self.headers, self.server.server_address[1])
             items = handoff.notices(self.root) if ok else []
             return self._send(200, json.dumps(items).encode(), "application/json")
+        if (
+            path == "/api/update-info"
+        ):  # versions + what changed: same-origin only (checked above), no secrets
+            from . import handoff
+
+            return self._send(200, json.dumps(handoff.update_info()).encode(), "application/json")
         if path == "/api/update-status":  # only a page with a session (a finished result is read once)
             from . import handoff
 
@@ -502,7 +508,7 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|notes|desktop)\.(js|css)", name
+            r"pages/(home|tickets|ticket|newticket|settings|chat|desktop)\.(js|css)", name
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (
@@ -690,6 +696,19 @@ class Handler(BaseHTTPRequestHandler):
 
                 handoff.ack_notice(self.root, (body.get("args") or {}).get("id"))
                 return self._send(200, b"{}", "application/json")
+            if body.get("op") == "update.start":  # the Update button in Settings: one click of a person
+                from . import handoff
+
+                code, text = handoff.start_update(
+                    self.root,
+                    self.orch_bin,
+                    mint,
+                    actions.human_env(self.root, self.orch_bin),
+                    session=self.session,
+                )
+                if code == 403:
+                    text = self._refused_text(text)
+                return self._send(code, text.encode(), "text/plain; charset=utf-8")
             if body.get("op") in ("handoff.confirm", "handoff.dismiss"):
                 from . import handoff
 

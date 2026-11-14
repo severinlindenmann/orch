@@ -94,7 +94,7 @@ function page(first) {
     fetch:url => ['/api/state', '/api/act'].includes(url) ? Promise.resolve(replies.shift()).then(body => ({ok:true, status:200, json:async () => body})) : new Promise(() => {})};
   window.window = window;
   vm.createContext(ctx);
-  vm.runInContext([...['home', 'tickets', 'ticket', 'newticket', 'settings', 'chat', 'notes'].map(p => read('pages/' + p + '.js')), read('app.js')].join('\n'), ctx);
+  vm.runInContext([...['home', 'tickets', 'ticket', 'newticket', 'settings', 'chat'].map(p => read('pages/' + p + '.js')), read('app.js')].join('\n'), ctx);
   const main = doc.getElementById('content');
   return {
     main, replies,

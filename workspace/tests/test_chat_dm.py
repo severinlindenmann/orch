@@ -792,3 +792,17 @@ def test_the_failure_handler_itself_never_raises(tmp_path, monkeypatch):
     chat.dm_import_on_pull(tmp_path, None)  # a broken log state and a closed stderr: still no exception
     chat.dm_import_on_pull(tmp_path, [{"type": "text", "from": OTHER}])
     assert isinstance(chat._DM_IMPORT_LOGGED, dict)
+
+
+def test_contact_carries_description_and_tags_cleaned(dm):
+    root, directory = dm
+    row = directory["workspaces"][0]
+    row["description"] = "Online orders\x00 and opening hours." + "x" * 400
+    row["tags"] = ["orders", "web\x07site", "", 5, "t" * 80] + [f"t{i}" for i in range(20)]
+    c = chat.contacts(root)[0]
+    assert c["description"].startswith("Online orders and opening hours.")
+    assert len(c["description"]) <= 280 and "\x00" not in c["description"]
+    assert c["tags"][:2] == ["orders", "website"]
+    assert len(c["tags"]) <= 8 and all(isinstance(t, str) and 0 < len(t) <= 24 for t in c["tags"])
+    del row["description"], row["tags"]
+    assert "description" not in chat.contacts(root)[0] and "tags" not in chat.contacts(root)[0]

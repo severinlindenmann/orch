@@ -163,10 +163,13 @@ def _services_cmd(args, root: Path) -> None:
             from orch import cli_config
 
             lines += cli_config.private_lines(root)
+        from orch import updateinfo
+
         _out(
             args,
             ws,
-            "\n".join(lines) or "Nothing runs in the background. Start it in a workspace: orch start",
+            ("\n".join(lines) or "Nothing runs in the background. Start it in a workspace: orch start")
+            + f"\n{updateinfo.current_label()}",  # which release this is (e.g. "orch 16")
         )
     else:
         if args.all:

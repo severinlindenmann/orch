@@ -20,7 +20,6 @@
 <link rel="stylesheet" href="pages/newticket.css">
 <link rel="stylesheet" href="pages/settings.css">
 <link rel="stylesheet" href="pages/chat.css">
-<link rel="stylesheet" href="pages/notes.css">
 <link rel="stylesheet" href="look-colors.css">
 <link rel="stylesheet" href="look.css">
 <link rel="stylesheet" href="pages/desktop.css">
@@ -44,7 +43,7 @@
 </aside>
 <div class="shell-body">
 <div id="mm-bar" class="mm-bar" hidden></div>
-<header class="topbar"><a class="topbar-ws" id="topbar-ws" href="#home" aria-label="Home"><img src="logo.svg" alt=""></a><span class="meta breadcrumb"><span id="crumb">Home</span><span id="updated"></span></span><span class="topbar-actions"><button type="button" class="btn ghost sm" id="open-agent" data-action="open-agent" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Ask the helper</button><button type="button" class="btn primary sm" id="new-ticket" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</button><button type="button" class="btn ghost sm mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-menu">Menu</button></span></header>
+<header class="topbar"><a class="topbar-ws" id="topbar-ws" href="#home" aria-label="Home"><img src="logo.svg" alt=""></a><span class="meta breadcrumb"><span id="crumb">Home</span><span id="updated"></span></span><a class="topbar-wait meta" id="topbar-wait" href="#home" hidden></a><span class="topbar-actions"><button type="button" class="btn ghost sm" id="open-agent" data-action="open-agent" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Ask the helper</button><button type="button" class="btn primary sm" id="new-ticket" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</button><button type="button" class="btn ghost sm mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-menu">Menu</button></span></header>
 <div id="connection" class="banner attn" role="status" hidden></div>
 <main id="content" class="page" tabindex="-1" aria-label="Dashboard"><div class="skeleton-page sk-home loading-home" aria-busy="true"><p class="sr-only" role="status">Loading…</p><div class="skeleton sk-title" aria-hidden="true"></div><div class="skeleton sk-card" aria-hidden="true"></div><div class="skeleton sk-card" aria-hidden="true"></div></div></main>
 </div>
@@ -74,7 +73,6 @@
 <script src="pages/newticket.js"></script>
 <script src="pages/settings.js"></script>
 <script src="pages/chat.js"></script>
-<script src="pages/notes.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

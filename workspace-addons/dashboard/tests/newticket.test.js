@@ -31,7 +31,7 @@ function setupWith(settings, extra = {}) {
     el:(...args) => new Node(...args), document:{body, activeElement:null}, render:() => { c.renders++; }, renders:0,
     sizeText:n => n + ' B', URL:{createObjectURL:() => 'blob:test', revokeObjectURL:x => revoked.push(x)},
     FileReader:class { readAsDataURL() { this.result = 'data:image/png;base64,YQ=='; this.onload(); } },
-    tickets:() => items, ticketOf:() => null, refresh:async () => {},
+    tickets:() => items, ticketOf:() => null, refresh:async () => {}, location:{hash:''}, href:id => '#ticket/' + id,
     act:async (op, args) => { calls.push({op, args}); if (op === 'ticket.new') items.push({id:'new', title:args.title}); return {ok:true, state:{attached:{failed:['bad.txt']}}}; },
     window:{DashHelpers:{scrubText:x => x}, orch:{open:d => { d.open = true; }, close:async d => { d.open = false; await d.fire('close'); }, toast:(...x) => toasts.push(x)}, ...extra}};
   c.button = (text, cls, fn) => { const b = c.el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
@@ -194,7 +194,7 @@ test('one Start button; Save without starting is a text link; neither sends plan
 test('attach is a link, drops land anywhere on the form, pasted text reads in pages', async () => {
   const s = setup();
   assert.ok(walk(s.d).some(n => n.textContent === '＋ Add files or drop them here' && n.className === 'new-ticket-attach'));
-  assert.equal(s.input.rows, 8);
+  assert.equal(s.input.rows, 3);
   assert.equal((await s.form.fire('drop', {dataTransfer:{files:[{name:'plan.md', size:3, arrayBuffer:async () => new TextEncoder().encode('abc').buffer}]}})).prevented, true);
   await s.paste('x'.repeat(9000));
   walk(s.d).find(n => n.type === 'submit').disabled = true; await s.form.fire('submit');
@@ -242,4 +242,18 @@ test('window closes through the shared overlay; an empty submit shows the plain 
   assert.equal(s.calls.length, 0);
   assert.ok(!walk(s.d).some(n => /^Close/.test(n['aria-label'] || '')), 'the Close button comes from the shared overlay, not from the page');
   await s.c.window.orch.close(s.d); assert.equal(s.d.open, false);
+});
+
+// Owner feedback 14 Nov (sweep d-new-ticket): the box starts small and grows; Start opens the new ticket, Save stays on the list.
+test('the text box starts at 3 rows; Start opens the new ticket, Save without starting does not', async () => {
+  assert.equal(setup().input.rows, 3);
+  for (const label of ['Start', 'Save without starting']) {
+    const s = setup();
+    s.form.requestSubmit = () => s.form.fire('submit');
+    s.input.value = 'Work'; await s.input.fire('input');
+    const node = walk(s.d).find(n => n.textContent === label);
+    if (label === 'Start') { await node.click(); await s.form.fire('submit'); } else await node.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(s.c.location.hash, label === 'Start' ? '#ticket/new' : '', label);
+  }
 });

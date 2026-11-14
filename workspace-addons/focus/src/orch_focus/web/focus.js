@@ -13,6 +13,7 @@
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
     els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
+    document.getElementById('fx-loading')?.remove();  /* the skeleton goes when the first view is there */
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
     els.agent.textContent = 'Helper';  // never the vendor's name on screen

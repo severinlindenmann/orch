@@ -29,7 +29,7 @@
     var n = Number(p.n) > 0 ? "step " + Number(p.n) + ", " : "";
     var s = el("span"); s.appendChild(document.createTextNode(n)); s.appendChild(q(p.step)); return s;
   }
-  var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Review?"], back: ["Send ", " back to work?"]};
+  var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Check?"], back: ["Send ", " back to work?"]};
   var INSIGHTS_SETTING = {"insights.keep_days": "how long full detail is kept", "insights.max_mb": "the largest size of the record", "insights.share_counts": "sharing counts with your admin", "insights.share_names": "sharing this workspace's names"};
   function insightsValue(key, v) {  // plain words for the value; anything unexpected is shown capped, never as markup
     var n = Number(v);
@@ -217,16 +217,24 @@
       : "The update did not finish. orch is still the old version. Start the update again when you are ready.";
     if (t !== shown) { shown = t; startedGone(); banner(t); }
   }
+  function tell(state, reason) {
+    if (!state) return;
+    try { window.dispatchEvent(new CustomEvent("orch-update-state", {detail: {state: state, reason: reason || ""}})); } catch (e) {}
+  }
   function updateStatus() {
     var gone = false;
     fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { gone = !r.ok; return r.ok ? r.json() : {}; }).then(function (s) {
-      if (!s || !s.state || s.state === "running") { updateOverdue(gone); return; }
+      if (!s || !s.state || s.state === "running") {
+        tell(s && s.state === "running" ? "running" : gone ? "unreachable" : "");  // Settings > About & updates shows the steps
+        updateOverdue(gone); return;
+      }
+      tell(s.state, s.reason);
       updateDone();
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
       var t = s.state === "finished" ? "Update finished." : "Update failed: " + why + ".";
       if (t !== shown) { shown = t; startedGone(); banner(t); }
       poll();  // an update request that waited no longer applies: it is gone from the list now
-    }).catch(function () { updateOverdue(true); });
+    }).catch(function () { tell("unreachable"); updateOverdue(true); });
   }
   notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
 })();

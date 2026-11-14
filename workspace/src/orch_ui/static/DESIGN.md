@@ -80,6 +80,9 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
   · Send back; the person = chosen name (fb13); "agent", "artifact", "autopilot", "relay", "copy" (worktree), "Exact
   text", "Reference" are banned on level 1 (BP-78, F2, F3).
 - SX-19 Dates: "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32", 24 h, elapsed as "running 53 min" (F4, round-2 note).
+  Built: `UI.stamp(value, {time:false, now})` and `UI.clock(value)` in `date.js` are the only way to write a date or time on a page (the dashboard's `date()`, `time()` and `DashHelpers.stamp` call the same rules). Never `toLocaleString`.
+- Ticket header strip (14 Nov): `.strip` = one status pill (`UI.statusIcon`), the title, one sentence, one main action, then the tabs. No stepper. The helper is just "Helper"; the review state is always "Check" with "Looks good" / "Send back".
+- File cards (14 Nov): one `.file-tile` per file (thumbnail, name, kind · size · date). A CSV thumbnail is a `.mini-table`, Markdown is rendered (`FileViewer.renderMd`). A toolbar (search, sort, cards/list) only above 6 files.
 - SX-20 One source per count and status: sidebar badge = Home headline = Tickets group count; a newer system event
 
 ## Behaviour notes (owner feedback 14 Nov)
@@ -136,11 +139,11 @@ Computed sRGB contrast, before browser rendering: primary text on the lightest s
 
 One inverted L: sidebar plus topbar, at most one contextual detail panel (BP-02). Sidebar is 232 px at 1280 and 1920. Below 1280 it becomes a 64 px icon rail. Icons have accessible names and focus labels; nothing is mouse-only. The workspace switcher and ticket views use native disclosures, including a popout on the rail. The phone switch has an accessible full label. At short heights the nav can scroll; the page never needs a forced desktop minimum width.
 
-Four core links: Home, Tickets, Notes, Chat. Add-ons are a labelled native disclosure containing Automation, Focus, Insights, Sync, Shared links, Phone & workspaces. Settings is anchored at the bottom. This preserves the requested full route map without eleven undifferentiated top-level destinations (BP-50). Add-ons begin expanded for discovery. The additional Ticket views disclosure contains Needs me, Working now, Done this week (BP-21). In the application, persist the user's disclosure preference; these static pages deliberately do not store anything.
+Three core links: Home, Tickets, Chat (Notes live on Home). Add-ons are a labelled native disclosure containing Automation, Focus, Insights, Sync, Shared links, Contacts. Settings is anchored at the bottom. This preserves the requested full route map without eleven undifferentiated top-level destinations (BP-50). Add-ons begin expanded for discovery. Ticket views are chips on the Tickets page (All, Needs me, Working, Done this week, + Save view), not a sidebar group (owner 14 Nov). In the application, persist the user's disclosure preference; these static pages deliberately do not store anything.
 
 Only Home carries an attention count. Do not give every destination a badge. A ticket view query (`?view=needs-you`, `?view=working`, `?view=done-week`) is the proposed area contract. The board designer must implement those queries; the links are integration targets, not local filter implementations.
 
-**Phone & workspaces lives under Add-ons.** It manages devices and workspace access. The bottom sidebar switch “Send questions to my phone” is a quick control, not a navigation shortcut. Settings contains notification preferences and the timeout, saved in place. Never give Settings a tab that silently redirects. If a Settings section needs device management, show an explicit link “Manage devices in Phone & workspaces →” while leaving the Settings section open (BP-47–49).
+**Contacts lives under Add-ons.** It manages devices and workspace access. The bottom sidebar switch “Send questions to my phone” is a quick control, not a navigation shortcut. Settings contains notification preferences and the timeout, saved in place. Never give Settings a tab that silently redirects. If a Settings section needs device management, show an explicit link “Manage devices in Contacts →” while leaving the Settings section open (BP-47–49).
 
 Topbar: current location and Ask the helper / New ticket. These are navigation actions. Inside a decision view, make the decision its sole prominent action and style global New ticket as outline. Breadcrumbs only for nested pages: Tickets › Customer survey; current location is not a link (BP-24, BP-51). Demo new-ticket links use `../board/board.html?new=1`; area authors should wire that query to their composer. The shell intentionally has no active route until it is adopted by an area.
 
@@ -185,7 +188,7 @@ Two levels only. Level 1 answers “What is happening, why does it matter, what 
 | Insights | 3–5 meaningful KPIs with period deltas; 1–2 labelled charts; one shared time-range control. | Breakdown tables, individual helpers, raw values. No empty chart shell or fake zero. |
 | Automation | What will happen, next time, on/off state, last outcome, action for a failure. | Schedule rule, older runs and advanced conditions. |
 | Notes / chat | Note title or conversation, useful excerpt, author/helper, last change; the current message and reply action. | Earlier conversation, file collection, source details. Preview attached files in context. |
-| Sync / Shared links / Phone & workspaces | Connection or sharing state, destination/person, last success, next needed action. | Storage path, technical connection facts, detailed history and advanced sharing options. Never put secrets in a preview. |
+| Sync / Shared links / Contacts | Connection or sharing state, destination/person, last success, next needed action. | Storage path, technical connection facts, detailed history and advanced sharing options. Never put secrets in a preview. |
 | Settings | Workspace name, helpers, notifications, dark appearance, access. Save feedback in place. | Technical and advanced settings in one disclosure per section. No redirecting tabs. |
 | Results | Typed visual preview, name, type, size, age; Open / Download / Copy link. | Full viewer, source view, remaining files. |
 
@@ -262,7 +265,7 @@ Sentence case. Familiar nouns: helper, step, result, file, needs you, ready for 
 - Each work item shows who is responsible and one useful time fact.
 - Files show real content, with the same three actions in every preview.
 - Loading, empty and failed states look different and keep the same space.
-- Phone & workspaces has one clear home; Settings no longer disguises a page jump as a tab.
+- Contacts has one clear home; Settings no longer disguises a page jump as a tab.
 - Short, optional motion explains changes, while reduced-motion settings are respected throughout.
 - Wide screens get useful columns; reading lines stay a comfortable length.
 - Technical details move one click away, leaving plain-language summaries in view.
