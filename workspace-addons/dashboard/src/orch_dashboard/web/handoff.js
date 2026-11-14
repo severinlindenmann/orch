@@ -217,16 +217,24 @@
       : "The update did not finish. orch is still the old version. Start the update again when you are ready.";
     if (t !== shown) { shown = t; startedGone(); banner(t); }
   }
+  function tell(state, reason) {
+    if (!state) return;
+    try { window.dispatchEvent(new CustomEvent("orch-update-state", {detail: {state: state, reason: reason || ""}})); } catch (e) {}
+  }
   function updateStatus() {
     var gone = false;
     fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { gone = !r.ok; return r.ok ? r.json() : {}; }).then(function (s) {
-      if (!s || !s.state || s.state === "running") { updateOverdue(gone); return; }
+      if (!s || !s.state || s.state === "running") {
+        tell(s && s.state === "running" ? "running" : gone ? "unreachable" : "");  // Settings > About & updates shows the steps
+        updateOverdue(gone); return;
+      }
+      tell(s.state, s.reason);
       updateDone();
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
       var t = s.state === "finished" ? "Update finished." : "Update failed: " + why + ".";
       if (t !== shown) { shown = t; startedGone(); banner(t); }
       poll();  // an update request that waited no longer applies: it is gone from the list now
-    }).catch(function () { updateOverdue(true); });
+    }).catch(function () { tell("unreachable"); updateOverdue(true); });
   }
   notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
 })();
