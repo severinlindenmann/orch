@@ -208,13 +208,19 @@ def set_idle(root, idle):
 
 def ensure_running(root):
     """After the person turned sync on: the loop runs (a loop that is already running is only woken by the caller).
+    Started through core (only this add-on, never the dashboard) so core records it too: `orch status` and the
+    dashboard then see it.
     Best effort: a loop that cannot start is told by `orch sync status` and the log, never a failed setting."""
     pid = running_pid(root)
     if pid:
         return pid
     try:
+        services.start(root, only={"sync"})
+        pid = running_pid(root)
+        if pid:
+            return pid
         return start(root)
-    except (OSError, repo.Refused):
+    except (OSError, repo.Refused, services.Refused):
         return None
 
 

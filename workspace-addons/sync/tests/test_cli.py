@@ -166,12 +166,16 @@ def test_start_while_off_leaves_the_idle_mark_that_says_off_is_meant(root, capsy
 def test_turning_sync_on_starts_the_loop(root, monkeypatch):
     # owner feedback 14 Nov (W5): "Sync is on" while no loop ran, because only `orch start` ever started it
     from conftest import REAL_ENSURE_RUNNING
+    from orch import services
 
     from orch_sync import service
 
     started = []
     monkeypatch.setattr(service, "ensure_running", REAL_ENSURE_RUNNING)
     monkeypatch.setattr(service, "running_pid", lambda r: None)
+    monkeypatch.setattr(
+        services, "start", lambda r, only=None: []
+    )  # core started nothing: sync starts its own
     monkeypatch.setattr(service, "start", lambda r: started.append(r) or 4242)
     assert run(root, "set", "--mode", "local") == 0
     assert len(started) == 1
@@ -181,6 +185,7 @@ def test_turning_sync_on_starts_the_loop(root, monkeypatch):
 
 def test_a_loop_that_does_not_start_never_fails_the_set(root, monkeypatch, capsys):
     from conftest import REAL_ENSURE_RUNNING
+    from orch import services
 
     from orch_sync import service
 
@@ -189,8 +194,25 @@ def test_a_loop_that_does_not_start_never_fails_the_set(root, monkeypatch, capsy
 
     monkeypatch.setattr(service, "ensure_running", REAL_ENSURE_RUNNING)
     monkeypatch.setattr(service, "running_pid", lambda r: None)
+    monkeypatch.setattr(services, "start", lambda r, only=None: [])
     monkeypatch.setattr(service, "start", refused)
     assert run(root, "set", "--mode", "local") == 0
+
+
+def test_turning_sync_on_starts_it_through_core_so_core_records_it(root, monkeypatch):
+    from conftest import REAL_ENSURE_RUNNING
+    from orch import services
+
+    from orch_sync import service
+
+    calls = []
+    pids = iter([None, None, 4242])
+    monkeypatch.setattr(service, "ensure_running", REAL_ENSURE_RUNNING)
+    monkeypatch.setattr(service, "running_pid", lambda r: next(pids))
+    monkeypatch.setattr(services, "start", lambda r, only=None: calls.append(only) or [])
+    monkeypatch.setattr(service, "start", lambda r: pytest.fail("core started it"))
+    assert run(root, "set", "--mode", "local") == 0
+    assert calls == [{"sync"}]
 
 
 def test_start_needs_the_addon_on_here(root, monkeypatch, capsys):
