@@ -120,7 +120,7 @@ const chatRich = () => !!(chatGroup() || chatDmId(chatUi.open)) || chatGroups().
 function chatPhoneLink() {
   if (snapshot) return null;
   const phone = chatObjects(state?.addons).find(a => /phone/i.test(String(a.label || a.title || '')));
-  return h('a', {className:'chat-phone-link', href:phone?.name ? '#addon/' + phone.name : '#settings', 'data-key':'phone-link'}, 'Phone & workspaces');
+  return h('a', {className:'chat-phone-link', href:phone?.name ? '#addon/' + phone.name : '#settings', 'data-key':'phone-link'}, 'Contacts');
 }
 function chatOpenAgent() {
   if (snapshot) return;

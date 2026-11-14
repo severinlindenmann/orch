@@ -70,3 +70,18 @@
 .page:has(.board-toolbar)>.table-wrap{min-width:0;max-width:100%;overflow-x:auto}
 @media(max-width:899px){.ticket-table{min-width:680px}.ticket-table .ticket-cell{min-width:220px}.ticket-table .who{white-space:nowrap}}
 .table-wrap{position:relative}
+
+/* Owner feedback 14 Nov (lane v1): view chips, collapsed empty board columns, clickable rows, one action on hover */
+.view-chips{flex-wrap:wrap;gap:8px;align-items:center}
+.view-chip{text-decoration:none;min-height:32px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer}
+.view-chip.active{background:var(--accent-soft,var(--surface-3));color:var(--text);border-color:var(--border-strong)}
+.view-chip.add{border-style:dashed;background:none}
+.view-chip.add[disabled]{opacity:.5;cursor:default}
+.board-toolbar{flex-wrap:wrap;gap:12px;align-items:center}
+.board .kanban-col.col-collapsed{flex:0 0 56px;min-width:56px;min-height:0;max-height:none}
+.board .kanban-col.col-collapsed .col-head{flex-direction:column;align-items:flex-start;gap:4px}
+.board .kanban-col.col-collapsed .board-none{display:none}
+.ticket-table tr.row-click{cursor:pointer}
+.ticket-table tr.row-click:hover td{background:var(--surface-2)}
+@media(hover:hover){.ticket-table tr.row-click .ticket-menu,.ticket-table tr.row-click .ticket-actions-row>:not(:first-child){opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
+  .ticket-table tr.row-click:hover .ticket-actions-row>*,.ticket-table tr.row-click:focus-within .ticket-actions-row>*{opacity:1}}
