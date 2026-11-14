@@ -1,7 +1,8 @@
 """Deny rules for the agent's own tools (contracts/secrets.md, "Deny rules"; Level 1).
 
 One deny set for every adapter (`roots`); an adapter's `deny.format` only says how its tool is told.
-Pure string work on paths (no reads), so Windows forms can be tested anywhere."""
+Pure string work on paths (only copies_rules lists the copies folders), so Windows forms can be tested
+anywhere."""
 
 import os
 import re
@@ -166,6 +167,66 @@ def rules(root: Path, homes: list[str] | None = None, account_home: str | None =
     return out
 
 
+def _copies_bases() -> list[str]:
+    from orch import addons
+
+    out: list[str] = []
+    try:
+        for b in addons.copies_candidates(include_real=True):
+            for x in (str(b), os.path.realpath(b)):
+                if x not in out:
+                    out.append(x)
+    except (OSError, RuntimeError):
+        pass
+    return out
+
+
+def copies_rules(
+    workdir: str | None, workspace: str, account_home: str | None, bases: list[str] | None = None
+) -> list[dict]:
+    """Other tickets' copies. Copies live OUTSIDE the orch home (addons.copies_base), so the home deny
+    (keys, secrets, approvals) holds whole for every agent, its own copy is simply not under it. On top:
+    an agent that does not work in a copy is denied every copies folder; an agent in
+    <base>/<ws8>/<ticket> is denied every other entry there at its start (other workspaces' copies, the
+    other tickets, `.owner`, `.trash`). Copies hold project files, never orch's secrets: this row is
+    defense in depth, the secret boundary is the home deny."""
+    bases = _copies_bases() if bases is None else bases
+    own: tuple[str, str, str] | None = None
+    for w in dict.fromkeys(x for x in (workdir, workdir and os.path.realpath(workdir)) if x):
+        for b in bases:
+            parts = [x for x in (_under(w, b) or "").split("/") if x]
+            if len(parts) >= 2 and ".." not in parts:
+                own = (b, parts[0], parts[1])
+                break
+        if own:
+            break
+
+    def row(path: str) -> dict:
+        return {"root": "copies", "path": path, "read": True, **path_forms(path, workspace, account_home)}
+
+    if own is None:
+        return [row(_norm(b)) for b in dict.fromkeys(bases)]
+    out = []
+    for b in dict.fromkeys(bases):
+        base = _norm(b)
+        keep_ws = own[1] if _norm(own[0]).lower() == base.lower() else None
+        for n in _list(base):
+            if keep_ws is None or n.lower() != keep_ws.lower():
+                out.append(row(base + "/" + n))
+        if keep_ws is not None:
+            for n in _list(base + "/" + keep_ws):
+                if n.lower() != own[2].lower():
+                    out.append(row(base + "/" + keep_ws + "/" + n))
+    return out
+
+
+def _list(folder: str) -> list[str]:
+    try:
+        return sorted(os.listdir(folder))
+    except OSError:
+        return []
+
+
 def tool_patterns(rule_list: list[dict]) -> list[str]:
     """patterns/1: Read/Edit/Write patterns and Bash text patterns, de-duplicated, in a stable order."""
     pats: list[str] = []
@@ -203,7 +264,9 @@ def merge_flag(extra: list[str], patterns: list[str]) -> list[str]:
     return [*out, "--disallowedTools", ",".join([*old, ",".join(patterns)])]
 
 
-def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[str]:
+def deny_args(
+    deny: dict | None, extra: list[str], root: Path | None, workdir: str | Path | None = None
+) -> list[str]:
     """`extra` (the tool's permission flags) plus the deny rules for the adapter's `deny.format`."""
     fmt = (deny or {}).get("format", "none")
     if fmt == "none":
@@ -213,5 +276,7 @@ def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[st
 
         raise Refused("orch cannot start this tool without its deny rules (no workspace given).")
     if fmt == "patterns/1":
-        return merge_flag(extra, tool_patterns(rules(root)))
+        rl = rules(root)
+        rl += copies_rules(str(workdir) if workdir else None, str(root), _account_home())
+        return merge_flag(extra, tool_patterns(rl))
     raise RuntimeError(f"unknown deny format {fmt}")

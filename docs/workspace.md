@@ -93,7 +93,7 @@ Every change is written to the ticket's history with who did it and where (`via`
 
 ## Separate copies
 
-When two agents work in the same project at once, orch gives each ticket its own copy of the project (a git worktree under `~/.orch-tool/worktrees/<workspace>/<ticket>`), so they do not edit the same files. Settings: Off, When agents work together (default), Every time.
+When two agents work in the same project at once, orch gives each ticket its own copy of the project (a git worktree under `~/.orch-work/<workspace>/<ticket>`, next to orch's own folder `~/.orch-tool`, so an agent in a copy can read its instructions and skills but never orch's keys), so they do not edit the same files. Settings: Off, When agents work together (default), Every time.
 
 A copy is removed when its ticket is Done, closed or cancelled and no agent is working in it any more, and a start also checks for copies nobody needs. Before a copy goes, everything in it that git tracks or sees as new is saved on the branch `orch/<ticket>` of your project; the branch is deleted once it is merged, or after 14 days when it is not (counted from its last change). What is not kept: files git ignores (such as `.env` or build folders), and the inside of nested repositories and submodules (only the link is saved). Large new files are saved to the branch like any other. A removed copy waits a day in a trash folder first, and stays there for you to look at if something wrote into it after it was saved. If a copy cannot be saved (git is missing, the copy is on another branch, git was interrupted) it is kept and the dashboard says why; "Try again" or `orch copy retry <ticket>` clears an old lock left by an interrupted git.
 

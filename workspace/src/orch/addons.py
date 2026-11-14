@@ -408,6 +408,40 @@ def home(root: Path | None = None) -> Path:
     return real
 
 
+def copies_base(h: Path) -> Path:
+    """Where the ticket copies of orch home `h` live: a SIBLING of the home, never inside it. Agents work in
+    these copies, and every agent is denied the whole orch home (denyrules: keys, secrets, approvals); a copy
+    inside the home would be denied too, and a carve-out cannot be made safe.
+    `~/.orch-tool` -> `~/.orch-work`; any other home -> `<parent>/.orch-work-<8 hex of its path>` (one per
+    home, and the name never contains the home's own name, which the agent's shell deny rules match as text)."""
+    h = h.resolve()
+    if h.name == ".orch-tool":
+        return h.parent / ".orch-work"
+    return h.parent / (".orch-work-" + hashlib.sha256(str(h).casefold().encode("utf-8")).hexdigest()[:8])
+
+
+def copies_home(root: Path | None = None) -> Path:
+    """copies_base(home(root))."""
+    return copies_base(home(root))
+
+
+def copies_candidates(include_real: bool = False) -> list[Path]:
+    """copies_base of every home_candidates() entry: for "is this path inside an orch copy" questions."""
+    return list(dict.fromkeys(copies_base(h) for h in home_candidates(include_real)))
+
+
+def home_of_copies(base: Path) -> Path | None:
+    """The orch home whose copies_base is `base` (resolved), or None."""
+    try:
+        b = base.resolve()
+    except (OSError, RuntimeError):
+        return None
+    for h in home_candidates(include_real=True):
+        if copies_base(h) == b:
+            return h
+    return None
+
+
 def registry_path() -> Path:
     """The add-on list: home()/addons.json, always the same home as every other piece of state (running.json,
     run/, installed.json). Reading it from a trusted ORCH_HOME is safe because registry() drops what a crafted

@@ -1222,6 +1222,7 @@ def plan(
         "orch_hooks_file": hooks_file,
         "stream": mode == "oneshot",
         "person": person,
+        "workdir": str(workdir_for(root, read(root, tid), tid)),
     }
     argv = None
     resumed = False
