@@ -44,10 +44,7 @@ enum ConversationRules {
 
     static func date(_ iso: String) -> Date? {
         let s = String(iso.prefix(while: { $0 != "~" }))
-        let f = ISO8601DateFormatter()
-        if let d = f.date(from: s) { return d }
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.date(from: s)
+        return SharedISO.iso.date(from: s) ?? SharedISO.isoFraction.date(from: s)
     }
 
     /// An open question is stale once the workspace has moved on: a later result/failure/stopped line exists.

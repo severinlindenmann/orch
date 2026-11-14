@@ -53,6 +53,22 @@ enum ChatDay {
 
 /// Shared ISO-8601 parsers: creating one per call (per row) is slow.
 enum SharedISO {
+    nonisolated(unsafe) static let relative: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .full; return f
+    }()
+    nonisolated(unsafe) private static var patterns: [String: DateFormatter] = [:]
+    private static let patternLock = NSLock()
+    /// One shared DateFormatter per (pattern, locale id, time zone id); creating one per call is slow.
+    static func formatter(_ pattern: String, localeId: String? = nil, timeZone: TimeZone = .current) -> DateFormatter {
+        let key = "\(pattern)|\(localeId ?? "")|\(timeZone.identifier)"
+        patternLock.lock(); defer { patternLock.unlock() }
+        if let f = patterns[key] { return f }
+        let f = DateFormatter()
+        if let localeId { f.locale = Locale(identifier: localeId) }
+        f.dateFormat = pattern; f.timeZone = timeZone
+        patterns[key] = f
+        return f
+    }
     nonisolated(unsafe) static let iso = ISO8601DateFormatter()
     nonisolated(unsafe) static let isoFraction: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f
