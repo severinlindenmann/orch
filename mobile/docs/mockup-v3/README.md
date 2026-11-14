@@ -9,6 +9,7 @@ Open: `python3 -m http.server 8000 --bind 127.0.0.1 --directory mobile/docs/mock
 (the right panel jumps to every screen; `?phone=1` shows only the app). Works offline, no build.
 
 - `archive.html` — archive, delete and auto-archive of chats (swipe, Undo, Archived list, Settings > Chats; phone-local).
+- `draft-1114.html` — DRAFT 14 Nov (not built yet): owner phone points A–E (swipe to hide Needs your OK, centred group logo, one Mute all, hands-busy New topic).
 - `mobile-mode.html` — the Mobile mode banner on the chat list: on, computer not reachable, phone muted.
 - `notes.html` — what the backend needs (contracts: `contracts/relay-api.md` "Phone API v3").
 - `FEATURES.md` — inventory of the app before v3 (every feature must stay).
