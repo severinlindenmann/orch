@@ -23,6 +23,11 @@ from .events import Revisions
 from .state_cache import StateCache
 from .views import ViewPuller
 
+try:  # the core's debug log; a dashboard that cannot import it simply writes none
+    from orch import diag
+except ImportError:  # pragma: no cover
+    diag = None
+
 DEFAULT_PORT = 8420
 MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = 5 * 1024 * 1024  # a new ticket with a long text and up to 5 attached files
@@ -179,7 +184,16 @@ class Handler(BaseHTTPRequestHandler):
     def __init__(self, *a, root: Path, orch_bin: str | None, puller: ViewPuller, session=None, **kw):
         self.root, self.orch_bin, self.puller, self.session = root, orch_bin, puller, session
         self.nonce = os.environ.get("ORCH_DASHBOARD_NONCE", "")
+        if diag:
+            diag.bind(root, "dashboard")
         super().__init__(*a, **kw)
+
+    def _trace(self) -> None:
+        """One trace per request (an incoming valid traceparent is joined) and one debug-log event (no query string)."""
+        if not diag:
+            return
+        diag.new_trace(self.headers.get("traceparent"))
+        diag.log("dashboard.request", "debug", method=self.command, path=self.path.split("?", 1)[0][:200])
 
     def log_message(self, *a):  # quiet
         pass
@@ -323,6 +337,7 @@ class Handler(BaseHTTPRequestHandler):
         return origin.lower() in (f"http://{host}",)
 
     def do_GET(self):
+        self._trace()
         if not self._host_ok():  # DNS rebinding guard
             return self._send(421, b"misdirected request", "text/plain")
         path, _, query = self.path.partition("?")
@@ -683,6 +698,7 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
+        self._trace()
         path = self.path.split("?", 1)[0]
         if path == "/session":
             return self._session_post()

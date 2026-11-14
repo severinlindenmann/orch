@@ -20,7 +20,7 @@ import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, history, humanproof, net, procs, saferead, syncgate, term
+from orch import config, diag, history, humanproof, net, procs, saferead, syncgate, term
 from orch.errors import Refused
 from orch.session_ids import SESSION_ID_RE as SESSION_ID_RE
 from orch.session_ids import valid_session_id
@@ -521,6 +521,39 @@ def apply_op(
     if_revision: int | None = None,
     by: str,
 ):
+    """Every attempt leaves one decision event in the debug log (diag.md): ticket.op_applied or
+    ticket.op_refused (actor, op, status and revision before/after, the refusing guard; no ticket text)."""
+    info: dict = {}
+    try:
+        out = _apply_op(root, tid, fn, expect, if_revision, by, info)
+    except BaseException as e:
+        guard = (
+            "closed_ticket"
+            if isinstance(e, ClosedRefused)
+            else "conflict"
+            if isinstance(e, Conflict)
+            else type(e).__name__
+        )
+        diag.log(
+            "ticket.op_refused", "info", root=root, ticket=tid, actor=by, op=_op_name(fn), guard=guard,
+            status=info.get("status"), expected_revision=if_revision, actual_revision=info.get("revision"),
+        )  # fmt: skip
+        raise
+    diag.log(
+        "ticket.op_applied", "info", root=root, ticket=tid, actor=by, op=_op_name(fn),
+        status_from=info.get("status"), status_to=info.get("status_to"),
+        revision_from=info.get("revision"), revision_to=info.get("revision_to"),
+        written=info.get("written", False),
+    )  # fmt: skip
+    return out
+
+
+def _op_name(fn) -> str:
+    name = getattr(fn, "__name__", "") or "op"
+    return "op" if name == "<lambda>" else name.strip("_")[:60] or "op"
+
+
+def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict):
     """The one write path: load, change and write under ONE lock, so concurrent plain ops all land on the
     latest revision. `fn(ticket)` changes the dict (no subprocess, nothing slow) and returns a result.
     Only an edit of something a person saw passes `expect=(path, old value)` or `if_revision`;
@@ -533,6 +566,7 @@ def apply_op(
     with _locked(root, tid):
         ticket = _load_raw(root, tid)
         raw_status = ticket.get("status")
+        info.update(status=raw_status, revision=revision(ticket))
         eff_status = _effective(root, ticket)["status"] if raw_status == "done" else raw_status
         if raw_status == "done":
             ticket["status"] = eff_status  # ops see what readers see: an unsigned Done is Review
@@ -574,6 +608,7 @@ def apply_op(
         ticket["revision"] = revision(ticket) + 1
         ticket["updated_at"] = now()
         _write(root, ticket)
+        info.update(status_to=ticket.get("status"), revision_to=revision(ticket), written=True)
         after = ticket.get("status")
         closed_now = after in CLOSED and eff_status not in CLOSED and not restored
         # entering Review, leaving Review for more work, or leaving Done: a review round starts or ends

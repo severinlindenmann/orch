@@ -20,7 +20,11 @@ def _store(p):
 
 def _files(root):
     """{path: bytes} of every file: names alone would miss a rewritten file."""
-    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+    return {  # the debug log (.orch/diag) records every command, a refused one too
+        str(p.relative_to(root)): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file() and ".orch/diag/" not in p.as_posix()
+    }
 
 
 def test_orch_root_beats_a_nested_store(proj, run, monkeypatch):

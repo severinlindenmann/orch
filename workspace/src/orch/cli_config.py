@@ -15,7 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, history, humanproof, tickets
+from orch import adapters, config, diag, history, humanproof, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -27,6 +27,7 @@ KEYS = (
     "workflow.copies",
     "workflow.copies_max",
     "workflow.copy_setup",
+    "diag.enabled",
     *config.INSIGHTS_KEYS,
 )
 GET_ALIASES = {"record.keep_days": "insights.keep_days", "record.max_mb": "insights.max_mb"}
@@ -292,6 +293,7 @@ def _config(args, root: Path) -> None:
             "workflow.copies": lambda: config.copies_mode(root),
             "workflow.copies_max": lambda: config.copies_max(root),
             "workflow.copy_setup": lambda: config.copy_setup(root),
+            "diag.enabled": lambda: config.diag_enabled(root),
             "insights.share_counts": lambda: config.insights_share_counts(root),
             "insights.share_names": lambda: config.insights_share_names(root),
             "insights.keep_days": lambda: config.record_keep_days(root),
@@ -349,6 +351,17 @@ def _config(args, root: Path) -> None:
             v = config.set_copy_setup(root, args.value)
             text = f"Saved: a new copy is prepared with: {v}." if v else "Saved: nothing runs in a new copy."
         _out(args, {args.key: v}, text)
+    elif args.sub == "set" and args.key == "diag.enabled":
+        if args.value not in ("on", "off"):
+            raise Refused("Choose on or off.")
+        value = config.set_diag_enabled(root, args.value == "on")
+        diag.forget_settings()
+        _out(
+            args,
+            {"diag.enabled": value},
+            "Saved: the debug log is "
+            + ("on." if value else "off. New lines are not written; old files stay."),
+        )
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)
         _out(

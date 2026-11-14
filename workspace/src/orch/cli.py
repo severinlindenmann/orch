@@ -25,6 +25,7 @@ from orch import (
     cli_screen,
     cli_secret,
     cli_status,
+    diag,
     fields,
     history,
     humanproof,
@@ -1289,6 +1290,12 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
         )
 
 
+def _sub_word(argv: list[str]) -> str:
+    """The second word of a command if it is a plain word (`orch ticket list` -> list); never a value."""
+    w = argv[1] if len(argv) > 1 else ""
+    return w if re.fullmatch(r"[a-z][a-z-]{0,30}", w) else ""
+
+
 def main(argv: list[str] | None = None, watchdog=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if is_record_hook(argv):  # a tool's hook: exit 0 whatever happens (only --strict refuses), no parser
@@ -1317,6 +1324,8 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
 
     try:
         root = _find_root()  # an invalid ORCH_ROOT is refused here, before anything is read or written
+        diag.bind(root, "cli")  # the debug log: one trace per invocation (joins an inherited TRACEPARENT)
+        diag.new_trace(os.environ.get("TRACEPARENT"))
         lines = addons.help_lines(root) if ("-h" in argv or "--help" in argv or not argv) else None
         parser = build_parser(show_all, lines)
         if argv and argv[0] in addons.CORE_ADDONS and argv[0] not in addons.active(root):
@@ -1330,7 +1339,10 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
                 return addons.dispatch(root, argv[0], argv[1:])
         args = parser.parse_args(argv)
         _resolve_keys(args, root)
-        run(args)
+        with diag.span(
+            "cli.command", "info", root=root, command=argv[0] if argv else "", sub=_sub_word(argv)
+        ):
+            run(args)
         cli_run.after_command(args, root, want_json)
         for text in humanproof.cli_notices(root):  # e.g. "orch reset its protection ...": said once, in words
             print(text, file=sys.stderr)

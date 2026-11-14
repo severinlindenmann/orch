@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, history, procs, runhooks, services, tickets
+from orch import adapters, addons, diag, history, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -1418,7 +1418,7 @@ def start(
             proc = subprocess.Popen(
                 cmd,
                 cwd=root,
-                env={**os.environ, "ORCH_ROOT": str(root)},
+                env={**os.environ, "ORCH_ROOT": str(root), **diag.trace_env()},
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=errlog,
@@ -1613,7 +1613,13 @@ def wrap(
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {
+        **_agent_environ(root),
+        "ORCH_RUN": run,
+        "ORCH_TICKET": tid,
+        "ORCH_AGENT": name,
+        **diag.trace_env(),
+    }
     work = workdir_for(root, rec, tid)  # a separate copy of the folder, or the workspace itself
     log = root / (rec.get("log") or f".orch/run/logs/{tid}-{run}.log")
     mode = rec.get("mode") or "oneshot"
@@ -1714,7 +1720,13 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
     if not rec or rec["run"] != run:
         return 1
     set_process(root, tid, run, os.getpid())
-    env = {**_agent_environ(root), "ORCH_RUN": run, "ORCH_TICKET": tid, "ORCH_AGENT": name}
+    env = {
+        **_agent_environ(root),
+        "ORCH_RUN": run,
+        "ORCH_TICKET": tid,
+        "ORCH_AGENT": name,
+        **diag.trace_env(),
+    }
     # guard: in-process lock between the submit watcher thread and the SIGTERM handler (the run lock is per
     # process, so it does not keep them apart); stop: set by either, the watcher writes nothing after it
     current: dict = {"guard": threading.Lock(), "stop": threading.Event()}

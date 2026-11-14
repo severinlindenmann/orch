@@ -5,7 +5,7 @@ phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (ve
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
-With kinds (activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal) only those draft-02 checks run.
+With kinds (activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal, diag) only those draft-02 checks run.
 """
 import base64
 import hashlib
@@ -1798,6 +1798,19 @@ def kind_proposal():
         _expect(f"proposal from_draft {c['name']}", got, c["expect"])
 
 
+# --- diag (diag.md) --------------------------------------------------------------------------------------------------
+def kind_diag():
+    ve = _w("diag")
+    _core_clean("diag")
+    _examples("diag", lambda d: _msgs(ve, d))
+    vec = _vec("diag-v1.json")
+    for c in vec["events"]:
+        _expect(f"diag vector {c['name']}", not _msgs(ve, c["event"]), c["valid"])
+    name = re.compile(ve.schema["$defs"]["event"]["properties"]["ev"]["pattern"])
+    for c in vec["names"]:
+        _expect(f"diag event name {c['ev']!r}", bool(name.fullmatch(c["ev"])), c["valid"])
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
     "activity": kind_activity,
@@ -1811,6 +1824,7 @@ KINDS = {
     "counts": kind_counts,
     "human": kind_human,
     "proposal": kind_proposal,
+    "diag": kind_diag,
 }
 
 

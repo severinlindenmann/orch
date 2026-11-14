@@ -308,6 +308,17 @@ def _copies_set(root: Path, key: str, value) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def diag_enabled(root: Path | None) -> bool:
+    """The always-on debug log (contracts/diag.md): on unless a person switched it off on this computer."""
+    v = _copies_get(root, "diag_enabled")
+    return v if isinstance(v, bool) else True
+
+
+def set_diag_enabled(root: Path, on: bool) -> bool:
+    _copies_set(root, "diag_enabled", bool(on))
+    return bool(on)
+
+
 def copies_mode(root: Path | None) -> str:
     """off | together (default: a copy when another agent already works in the folder) | always."""
     v = _copies_get(root, "copies")

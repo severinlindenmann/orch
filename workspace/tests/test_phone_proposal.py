@@ -9,7 +9,7 @@ import pytest
 from fakes import WS
 from test_relay_client import msg
 
-from orch import chat, relay, tickets
+from orch import chat, diag, relay, tickets
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
@@ -23,6 +23,15 @@ def conn(proj, run, rel):
     ]
     assert run("relay", "connect", rel.url, "--workspace", WS, "--token", rel.token)[0] == 0
     return rel
+
+
+def failure_log(proj):
+    """The relay.send_failed events of the debug log, one text line each (what: why)."""
+    return [
+        f"{e['kv']['what']}: {e['kv']['why']}"
+        for e in diag.read_events(proj)
+        if e["ev"] == "relay.send_failed"
+    ]
 
 
 def proposals(rel):
@@ -277,9 +286,9 @@ def test_relay_refusal_keeps_the_dashboard_card(proj, run, conn):
     )
     assert not proposals(conn)
     assert any(m["type"] == "text" and m["id"] == sent["id"] for m in conn.sent), "the phone still hears it"
-    log = (proj / ".orch/run/relay-errors.log").read_text()
-    assert f"proposal question {sent['id']} to phones failed" in log and "nothing like this" in log
-    assert log.count("\n") == 1, "the text fallback went out: one line only"
+    log = failure_log(proj)
+    assert f"proposal question {sent['id']} to phones failed" in log[0] and "nothing like this" in log[0]
+    assert len(log) == 1, "the text fallback went out: one line only"
     check_local_first(proj, conn, sent)
 
 
@@ -290,7 +299,7 @@ def test_relay_refusal_through_the_helper_command_says_nothing_about_the_relay(p
     code, out, err = run("relay", "send", "phones", SENTENCE, "--ticket", gid, "--ref", "proposal:Rename X")
     assert code == 0, err
     text = (out + err).lower()
-    assert (proj / ".orch/run/relay-errors.log").is_file()
+    assert failure_log(proj)
     assert "refus" not in text and "not sent" not in text and "relay" not in text.replace("sent to", "")
     (entry,) = [m for m in chat.read_day(proj, chat.day_key(proj))["messages"] if m["by"] != "you"]
     assert chat.proposal_state(proj, entry["id"]) == "open"
@@ -305,7 +314,7 @@ def test_relay_refusing_everything_logs_both_and_shows_nothing(proj, run, conn, 
         proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
     )
     check_local_first(proj, conn, sent)
-    lines = (proj / ".orch/run/relay-errors.log").read_text().splitlines()
+    lines = failure_log(proj)
     assert [("question" in x, "text" in x) for x in lines] == [(True, False), (False, True)]
     assert "no" not in capsys.readouterr().out
     general = tickets.load(proj, tickets.general_id(proj))
@@ -315,18 +324,20 @@ def test_relay_refusing_everything_logs_both_and_shows_nothing(proj, run, conn, 
 def test_the_failure_log_is_ignored_by_git_and_private(proj, conn):
     import subprocess
 
+    from orch import harness
+
     subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
     refuse_questions(conn)
     chat.record(proj, "m_you0000000000001", "you", "phone", "please rename field X", phone=PHONE)
     relay.send_text(
         proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
     )
-    log = proj / ".orch/run/relay-errors.log"
-    assert log.is_file() and (log.stat().st_mode & 0o077) == 0
+    (log,) = (proj / ".orch" / "diag").iterdir()
+    assert (log.stat().st_mode & 0o077) == 0 and "diag/" in harness.CONTRACT_IGNORE
     out = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"], cwd=proj, capture_output=True, text=True
     ).stdout
-    assert "relay-errors" not in out
+    assert "diag" not in out
 
 
 def test_relay_offline_keeps_the_dashboard_card(proj, run, conn):
@@ -378,12 +389,13 @@ def test_an_outbox_write_failure_leaves_no_card_the_phone_never_had(proj, conn, 
     )
     assert sent["sent"] is True and not proposals(conn)
     assert relay._asked_edit(proj, lambda a: sent["id"] in a) is False
-    assert "failed" in (proj / ".orch/run/relay-errors.log").read_text()
+    assert "failed" in failure_log(proj)[0]
 
 
-def test_a_corrupt_failure_log_never_fails_the_caller(proj, conn):
-    log = proj / ".orch/run/relay-errors.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_bytes(b"\xff\xfe broken\n")
-    relay.log_send_failure(proj, "x", "y")
-    assert log.read_text(errors="replace").endswith("x: y\n")
+def test_an_unusable_debug_log_never_fails_the_caller(proj, conn):
+    import shutil
+
+    shutil.rmtree(proj / ".orch" / "diag", ignore_errors=True)
+    (proj / ".orch" / "diag").write_bytes(b"\xff\xfe not a folder\n")
+    relay.log_send_failure(proj, "x", "y")  # no exception
+    assert diag.dropped_count() >= 1

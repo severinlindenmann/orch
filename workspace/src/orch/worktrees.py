@@ -48,7 +48,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from orch import adapters, addons, config, harness, humanproof, runs, safegit, sharedfolder, tickets
+from orch import adapters, addons, config, diag, harness, humanproof, runs, safegit, sharedfolder, tickets
 from orch.errors import Refused
 
 REGISTRY = Path(".orch") / "run" / "worktrees.json"
@@ -2722,7 +2722,6 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
 # repositories and submodules (only the link is saved). Large untracked files ARE committed to orch/<ticket>.
 
 REGISTRY_PENDING = Path(".orch") / "run" / "worktrees-pending.json"
-CLEAN_LOG = Path(".orch") / "run" / "logs" / "copies-clean.log"
 BRANCH_DAYS = 14  # unmerged orch/<ticket> branch of a closed ticket: kept this long
 SWEEP_BUDGET = 90.0  # seconds of git time for one sweep (orch copy clean, Clean up now)
 START_SWEEP_BUDGET = 8.0  # the same when a start triggers it: a start never waits longer
@@ -2735,9 +2734,7 @@ _DONE = ("done", "dropped")
 
 
 def _log(root: Path, line: str) -> None:
-    with contextlib.suppress(OSError, Refused):
-        with runs.open_log(root / CLEAN_LOG) as out:
-            out.write(f"{tickets.now()} {line}\n".encode())
+    diag.log("copies.clean", "info", root=root, line=line)
 
 
 def _want(root: Path, ticket: str) -> Path | None:
