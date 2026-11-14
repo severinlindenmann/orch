@@ -411,6 +411,18 @@ function linkGroups(links) {
 const ticketPreviewText = new Map(), ticketPreviewDone = new Map(), ticketPreviewPending = new Set();
 // A web page or PDF shows its first screen, small, over the type icon (kit/fileviewer.js); other files have none.
 const shownThumb = (t, kind, file) => snapshot || !window.FileViewer?.thumb ? null : window.FileViewer.thumb({tid:t.id, kind, name:file.name, size:file.size, mtime:file.mtime || ''});
+// A short text preview that looks like the file: a CSV as a small table, Markdown rendered, anything else as plain lines.
+function previewText(t, kind, file, text) {
+  const FV = window.FileViewer;
+  if (/\.(csv|tsv)$/i.test(file.name) && FV?.parseDelimited) {
+    const rows = text.split('\n').slice(0, 7).join('\n'), data = FV.parseDelimited(rows, /\.tsv$/i.test(file.name) ? '\t' : ',');
+    const cols = array(data.columns).slice(0, 4), cut = row => cols.map((_, i) => String(array(row)[i] ?? '').slice(0, 24));
+    return h('table', {className:'mini-table', 'data-key':'preview-table'}, h('thead', {}, h('tr', {}, cols.map(c => h('th', {}, String(c).slice(0, 24))))),
+      h('tbody', {}, array(data.rows).slice(0, 5).map(r => h('tr', {}, cut(r).map(c => h('td', {}, c))))));
+  }
+  if (/\.(md|markdown)$/i.test(file.name) && FV?.renderMd) return FV.renderMd(text.split('\n').slice(0, 10).join('\n'), {tid:t.id, kind, name:file.name});
+  return h('pre', {}, text.split('\n').slice(0, 8).join('\n'));
+}
 function ticketPreviewTile(t, file, kind = 'artifacts') {
   const title = window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
@@ -431,14 +443,14 @@ function ticketPreviewTile(t, file, kind = 'artifacts') {
     let text = '';
     try { while (text.length < 2048) { const part = await reader.read(); if (part.done) break; text += decoder.decode(part.value, {stream:true}); } }
     finally { await reader.cancel(); }
-    return {text:text.slice(0, 2048).split('\n').slice(0, 8).join('\n')};
+    return {text:text.slice(0, 2048).split('\n').slice(0, 14).join('\n')};
   }).catch(() => null));
   // A finished preview is drawn at once: the page redraws often, and a tile filled later would be thrown away.
   const fill = data => {
     if (data?.blob) {
       const src = URL.createObjectURL(data.blob), img = h('img', {src, alt:title, loading:'lazy'});
       img.onload = img.onerror = () => URL.revokeObjectURL(src); tile.append(img);
-    } else if (data?.text) tile.append(h('pre', {}, data.text));
+    } else if (data?.text) tile.append(previewText(t, kind, file, data.text));
   };
   if (ticketPreviewDone.has(key)) fill(ticketPreviewDone.get(key));
   else if (!ticketPreviewPending.has(key)) {  // one redraw per file, however often the page redraws meanwhile
@@ -596,16 +608,14 @@ function ticketFileGroups(t) {
   return groups;
 }
 const ticketFileCount = t => ticketFileEntries(t).length;
-// ---- Files tab: toolbar (find, type, sort, group, grid/list), groups of picture tiles, one shared viewer.
-const filesUI = {q:'', type:'all', sort:'important', group:'task', view:'grid', all:false, open:new Map(), more:new Set()};
-const FILE_TYPES = [['all', 'All types'], ['image', 'Pictures'], ['docs', 'Documents'], ['table', 'Tables'], ['code', 'Code'], ['media', 'Sound and video'], ['other', 'Other']];
-const typeGroup = kind => ({image:'image', pdf:'docs', page:'docs', md:'docs', text:'docs', table:'table', xlsx:'table', code:'code', audio:'media', video:'media'}[kind] || 'other');
-const SORTS = [['important', 'Most important'], ['newest', 'Newest'], ['oldest', 'Oldest'], ['name', 'Name']];
-const GROUPS = [['task', 'By task'], ['role', 'By role'], ['none', 'None']];
+// ---- Files tab: one card per file (thumbnail, name, kind · size · date); a toolbar (find, sort, cards/list) only above 6 files.
+const filesUI = {q:'', sort:'newest', view:'cards'};
+const FILES_TOOLBAR_FROM = 7;
+const SORTS = [['newest', 'Newest'], ['oldest', 'Oldest'], ['name', 'Name']];
 function sortedEntries(list) {
   const time = f => Date.parse(f.mtime) || 0;
-  const by = {important:(a, b) => (a.role === b.role ? 0 : a.role === 'Result' ? -1 : 1) || time(b) - time(a), newest:(a, b) => time(b) - time(a), oldest:(a, b) => time(a) - time(b), name:(a, b) => a.title.localeCompare(b.title)};
-  return list.slice().sort(by[filesUI.sort] || by.important);
+  const by = {newest:(a, b) => time(b) - time(a), oldest:(a, b) => time(a) - time(b), name:(a, b) => a.title.localeCompare(b.title)};
+  return list.slice().sort(by[filesUI.sort] || by.newest);
 }
 function fileThumb(t, f) {
   const thumb = h('div', {className:'file-thumb', 'data-kind':f.fileKind});
@@ -622,68 +632,29 @@ function fileThumb(t, f) {
 function fileTile(t, f) {
   // Read the list when clicked: a redraw keeps this button, so a list captured now could be out of date.
   const open = () => previewFile(t.id, f.kind, f.name);
-  const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + f.meta.split(' · ').slice(0, 2).join(' · '), 'data-key':'file-open-' + f.kind + '-' + f.name},
-    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), h('span', {className:'meta'}, [viewerWord(f.fileKind), Number.isFinite(f.size) ? sizeText(f.size) : ''].filter(Boolean).join(' · '))));
+  const meta = [viewerWord(f.fileKind), Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', f.mtime ? localStamp(f.mtime) : ''].filter(Boolean).join(' · ');
+  const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + meta, 'data-key':'file-open-' + f.kind + '-' + f.name},
+    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), h('span', {className:'meta'}, meta)));
   link.onclick = open;
-  const task = f.task ? h('button', {type:'button', className:'task-link', 'data-key':'file-task-' + f.kind + '-' + f.name}, 'Task: ' + f.task) : null;
-  if (task) task.onclick = () => { ticketTabs.set(t.id, 'tasks'); render(); };
-  return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link,
-    h('div', {className:'file-context'}, h('span', {className:'role-chip', 'data-role':f.role}, f.role), task, f.created ? h('span', {className:'created-time meta'}, f.created) : null));
-}
-function fileGroups(entries) {
-  if (filesUI.group === 'none') return [{label:'', files:entries, key:'all'}];
-  const map = new Map();
-  for (const f of entries) {
-    const label = filesUI.group === 'role' ? (f.role === 'Result' ? 'Results' : 'Evidence') : (f.task || 'Results');
-    if (!map.has(label)) map.set(label, []);
-    map.get(label).push(f);
-  }
-  return [...map].map(([label, files]) => ({label, files, key:label}));
+  return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }
 function visibleFileEntries(t, all) {
   const q = filesUI.q.trim().toLowerCase();
-  return sortedEntries(all.filter(f => (filesUI.type === 'all' || typeGroup(f.fileKind) === filesUI.type) && (!q || (f.title + ' ' + f.name + ' ' + f.task).toLowerCase().includes(q))));
+  return sortedEntries(all.filter(f => !q || (f.title + ' ' + f.name).toLowerCase().includes(q)));
 }
 function filesPanelBody(t, all) {
   const entries = visibleFileEntries(t, all);
-  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? 'No files match. Clear the search or choose All types.' : 'No files attached yet. Files your helper attaches appear here, with the task they belong to.');
-  const groups = fileGroups(entries), tasks = new Set(entries.map(f => f.task).filter(Boolean)).size;
-  const summary = h('div', {className:'collection-summary'}, h('p', {className:'meta'}, entries.length + (entries.length === 1 ? ' file' : ' files') + (tasks ? ' · ' + tasks + (tasks === 1 ? ' finished step' : ' finished steps') : '')),
-    groups.length > 2 && filesUI.group !== 'none' ? ticketButton(filesUI.all ? 'Collapse groups' : 'Show all files', 'ghost sm', () => { filesUI.all = !filesUI.all; filesUI.open.clear(); render(); }, {'data-key':'files-show-all'}) : null);
-  const body = groups.map((g, gi) => {
-    const grid = open => {
-      const limit = 8, more = !filesUI.more.has(g.key) && !filesUI.all && g.files.length > limit && filesUI.view === 'grid';
-      const shown = more ? g.files.slice(0, 5) : g.files;
-      const tiles = open ? shown.map(f => fileTile(t, f)) : [];
-      if (more) {
-        const rest = h('button', {type:'button', className:'file-tile file-more', 'data-key':'file-more-' + g.key}, '+' + (g.files.length - 5) + ' more');
-        rest.onclick = () => { filesUI.more.add(g.key); render(); };
-        tiles.push(rest);
-      }
-      return h('div', {className:'file-grid'}, tiles);
-    };
-    if (filesUI.group === 'none') return h('div', {className:'file-group flat', 'data-key':'file-group-all'}, grid(true));
-    const isOpen = filesUI.open.has(g.key) ? filesUI.open.get(g.key) : filesUI.all || gi < 2;
-    const det = h('details', {className:'file-group', 'data-key':'file-group-' + g.key}, h('summary', {}, h('strong', {}, g.label), h('span', {className:'meta group-count'}, g.files.length + (g.files.length === 1 ? ' file' : ' files'))), grid(isOpen));
-    det.open = isOpen;
-    det.addEventListener('toggle', () => { if (filesUI.open.get(g.key) !== det.open) { filesUI.open.set(g.key, det.open); render(); } });
-    return det;
-  });
-  return h('div', {className:'files-collection', 'data-view-mode':filesUI.view, 'data-key':'files-collection'}, summary, body);
+  if (!entries.length) return h('p', {className:'muted', 'data-key':'files-none'}, all.length ? 'No files match. Clear the search.' : 'No files attached yet. Files your helper attaches appear here.');
+  return h('div', {className:'files-collection', 'data-view-mode':filesUI.view === 'list' ? 'list' : 'grid', 'data-key':'files-collection'}, h('div', {className:'file-grid'}, entries.map(f => fileTile(t, f))));
 }
 function filesToolbar(count) {
-  const select = (label, opts, key, extra) => {
-    const s = h('select', {'aria-label':label, 'data-key':'files-' + key, 'data-label':label, ...(extra || {})}, opts.map(([v, text]) => h('option', {value:v}, text)));
-    s.value = filesUI[key]; s.onchange = () => { filesUI[key] = s.value; render(); };
-    return s;
-  };
-  const search = h('input', {type:'search', className:'files-search', placeholder:'Find a file…', 'aria-label':'Find a file', 'data-key':'files-search', value:filesUI.q});
+  const sort = h('select', {'aria-label':'Sort', 'data-key':'files-sort', 'data-label':'Sort', 'data-prefix':'Sort'}, SORTS.map(([v, text]) => h('option', {value:v}, text)));
+  sort.value = filesUI.sort; sort.onchange = () => { filesUI.sort = sort.value; render(); };
+  const search = h('input', {type:'search', className:'files-search', placeholder:'Search files', 'aria-label':'Search files', 'data-key':'files-search', value:filesUI.q});
   search.value = filesUI.q;
   search.oninput = () => { filesUI.q = search.value; render(); };
   const view = (id, label) => { const b = h('button', {type:'button', className:'btn sm', 'aria-pressed':String(filesUI.view === id), 'data-key':'files-view-' + id}, label); b.onclick = () => { filesUI.view = id; render(); }; return b; };
-  return h('div', {className:'files-toolbar', 'data-key':'files-toolbar'}, h('h2', {}, 'Files', h('span', {className:'meta'}, count)), search,
-    select('File type', FILE_TYPES, 'type'), select('Sort', SORTS, 'sort', {'data-prefix':'Sort'}), select('Group', GROUPS, 'group', {'data-prefix':'Group'}),
-    h('div', {className:'view-switch', role:'group', 'aria-label':'File view'}, view('grid', '▦ Grid'), view('list', '☰ List')));
+  return h('div', {className:'files-toolbar', 'data-key':'files-toolbar'}, search, h('div', {className:'row'}, sort, h('div', {className:'segmented', role:'group', 'aria-label':'File view'}, view('cards', 'Cards'), view('list', 'List'))));
 }
 function artifactsPanel(t) {
   if (snapshot) {  // a saved copy cannot read files: names only, no controls
@@ -693,9 +664,9 @@ function artifactsPanel(t) {
         : h('p', {className:'muted'}, 'No files attached yet.')];
   }
   const all = ticketFileEntries(t);
-  if (!all.length && !artifactData.get(t.id)?.data) return [filesToolbar(0), h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
+  if (!all.length && !artifactData.get(t.id)?.data) return [h('div', {className:'file-grid file-skeleton', 'aria-busy':'true', 'aria-label':'Loading files', 'data-key':'files-skeleton'},
     [0, 1, 2].map(i => h('div', {className:'file-tile skeleton-tile', 'data-key':'skeleton-' + i})))];
-  return [filesToolbar(all.length), filesPanelBody(t, all)];
+  return [all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
 function ticketActor(by) {
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(by);

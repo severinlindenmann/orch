@@ -243,7 +243,7 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
   const html = ctx.ticketPreviewTile({id:'t_test'},{name:'plan.html'});
   assert.doesNotMatch(JSON.stringify(html), /iframe|<html|src/);
-  const text = ctx.ticketPreviewTile({id:'t_test'},{name:'plan.md'});
+  const text = ctx.ticketPreviewTile({id:'t_test'},{name:'plan.txt'});
   await new Promise(resolve => setTimeout(resolve,20));
   const pre = text.children.find(n => n.tag === 'pre');
   assert.ok(pre);
@@ -529,7 +529,6 @@ test('a file is listed once per list, and Overview chips skip the file already i
   assert.deepEqual(tree.filter(n => n.attrs.className === 'task-proofs row').map(n => n.children.length), [1, 1], 'one chip per file per task, one Tasks list');
   const filesTab = tree.find(n => n.attrs.id === 'ticket-panel-files');
   assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'file-tile').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
-  assert.ok(nodes(filesTab).some(n => n.tag === 'h2' && n.children.includes('Files')));
   assert.ok(tree.some(n => n.attrs.id === 'ticket-tab-files' && JSON.stringify(n).includes('"3"')));
 });
 

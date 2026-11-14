@@ -157,3 +157,8 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .mo-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
 .mo-cell{border:1px solid var(--border);border-radius:8px;padding:12px;min-height:120px;display:grid;gap:8px;align-content:start;overflow:hidden}
 .swatch-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+
+/* Mini table: a small CSV preview inside a file card thumbnail (header and 5 rows at most). */
+.mini-table{border-collapse:collapse;font-size:11px;line-height:16px;color:var(--text-muted);width:calc(100% - 24px);table-layout:fixed}
+.mini-table th{text-align:left;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);padding:2px 6px}
+.mini-table td{padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

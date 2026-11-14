@@ -459,5 +459,5 @@
     (d.querySelector('.ui-overlay-close') || d).focus();
     return d;
   }
-  window.FileViewer = {open: show, thumb, kindOf, word: k => WORD[k], urlOf, extOf, parseDelimited};
+  window.FileViewer = {open: show, thumb, kindOf, word: k => WORD[k], urlOf, extOf, parseDelimited, renderMd};
 })();
