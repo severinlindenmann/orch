@@ -235,6 +235,7 @@ function syncStatusLine(card) {
 }
 // "Not synced: tickets/t_x.json: secret" in the words a person reads; other texts stay as the add-on wrote them.
 const SYNC_WHY = {secret:'it may contain a password or access key', path:'its name or folder is never synced', 'cannot-check':'it could not be checked'};
+const SYNC_STOP = {secret:'a ticket or file may contain a password or access key', path:'a file name or folder is never synced', 'cannot-check':'a file could not be checked'};
 function syncPlainError(text) {
   const m = /^Not synced: (.+): (secret|path|cannot-check)$/.exec(String(text));
   if (!m) return String(text);
@@ -249,7 +250,7 @@ function syncLastError(card) {
 // Paused: what is wrong in one plain line, and the one button that goes to the place where the person decides.
 function syncPausedHelp(card) {
   const m = /^Not synced: .+: (secret|path|cannot-check)$/.exec(String(card.last_error || ''));
-  const what = m ? 'Sync stopped because a ticket or file ' + SYNC_WHY[m[1]] + '.' : 'Sync stopped because something needs your decision.';
+  const what = m ? 'Sync stopped: ' + SYNC_STOP[m[1]] + '.' : 'Sync stopped: something needs your decision.';
   const go = h('a', {className:'btn primary sm', href:'#home', 'data-key':'sync-paused-button'}, 'Review it now');
   go.addEventListener('click', event => { event.preventDefault(); location.hash = '#home'; requestAnimationFrame(() => { const n = document.getElementById('needs-you'); if (n) { n.scrollIntoView({block:'start'}); n.focus({preventScroll:true}); } }); });
   return h('div', {className:'sync-warn sync-paused', 'data-key':'sync-paused-help'}, h('p', {}, what), h('div', {className:'row'}, go));

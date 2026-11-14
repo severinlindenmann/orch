@@ -178,6 +178,7 @@
     const answerable = !!r.answer && r.kind !== 'overdue-wait';
     if (answerable && /^[a-z][a-z0-9-]*:/.test(String(r.kind || ''))) return {label: 'Review', kind: 'review'};
     if (answerable) return {label: 'Answer', kind: 'answer'};
+    if (r.kind === 'addon:not-running' && !r.ticket) return {label: 'Start', kind: 'start'};  // a background add-on that stopped
     if (r.tone === 'bad' && r.ticket) return {label: 'Run again', kind: 'run'};
     return {label: 'Open', kind: 'open'};
   }
