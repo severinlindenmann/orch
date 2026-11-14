@@ -573,6 +573,8 @@ main.addEventListener('click', async event => {
   if (sendControl) { messageSend(sendControl); return; }
   const row = event.target.closest('[data-addon-act]');
   if (row) { if (!snapshot) addonAct(row); return; }
+  const allow = event.target.closest('[data-sync-allow]');
+  if (allow) { if (!snapshot) syncAllow(allow.dataset.syncAllow); return; }
   const edit = event.target.closest('[data-addon-edit]');
   if (edit) { if (!snapshot) repeatsDialog(edit.dataset.addonEdit, shownAddon()); return; }
   const copy = event.target.closest('[data-copy]');

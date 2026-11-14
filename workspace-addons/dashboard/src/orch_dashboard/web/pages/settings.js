@@ -874,6 +874,13 @@ async function addonAct(control) {
   d.append(actions);
   window.orch.open(d);
 }
+// "Allow on this computer" on a schedule that came by sync: the person signs sync's own Allow for that ticket's
+// block (the sign step shows exactly the block); afterwards the page reads the add-on again.
+async function syncAllow(tid) {
+  const id = shownAddon();
+  if (!id || !/^t_[a-z0-9]{6,16}$/.test(String(tid)) || locks.has('addon-act')) return;
+  await signedAct({addon:SYNC, verb:'allow', target:tid + ':' + id}, 'Allowed on this computer.', () => loadAddon(id));
+}
 async function addonRadio(input) {
   const id = shownAddon();
   if (snapshot || !id) return;

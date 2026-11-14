@@ -76,23 +76,28 @@ def allowed(root, ticket):
         if core is None:
             return False
         history, humanproof = core
+        tid = ticket.get("id")
+        # This machine's own approval record: a block this machine wrote (a schedule made here, or one a person
+        # allowed) is approved by that record alone. It is signed by this core and pinned, so it only ever names
+        # exact blocks written here; the sync folder merely existing says nothing against it.
+        created = _signed(
+            root, root / ".orch/addons/automation/local-blocks.json", BLOCKS_KIND, BLOCKS_SCHEMA, humanproof
+        )
+        if created and isinstance(tid, str) and created.get(tid) == _digest(block):
+            return True
         local = _signed(
             root, root / ".orch/run/sync/local-ext.json", LOCAL_EXT_KIND, LOCAL_EXT_SCHEMA, humanproof
         )
         if local is None:
             return False  # missing, rolled back or not this core's record: no synced value counts as approved
-        tid = ticket.get("id")
         if tid not in local:
             # Locally created ticket (sync records every ticket it receives first, and the record is the pinned
             # current one), unless the ticket shows sync's own traces: then it came through sync.
             return not history.doc_shows_sync(ticket)
         # approved.json is not read: its entries are the sync add-on's signed records, which only the core can
         # check. A person's approval makes the value this machine's own: sync records it in local-ext.json.
-        created = _signed(
-            root, root / ".orch/addons/automation/local-blocks.json", BLOCKS_KIND, BLOCKS_SCHEMA, humanproof
-        )
         entry = local[tid] if isinstance(local[tid], dict) else {}
-        return _digest(block) in (entry.get("automation"), (created or {}).get(tid))
+        return _digest(block) == entry.get("automation")
     except (OSError, ValueError, TypeError, AttributeError):
         return False
 
