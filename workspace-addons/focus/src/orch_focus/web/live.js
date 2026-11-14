@@ -10,7 +10,7 @@
     const addon = k => k.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
     let m;
     if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
-    if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a task' + task(m[1]);
+    if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a step' + task(m[1]);
     if ((m = /^Marked (c\d+) as won't do$/.exec(text))) return "Marked as won't do" + task(m[1]);
     if (/^Asked q\d+, waiting$/.test(text)) return 'Asked a question';
     if ((m = /^Answered q\d+: ([\s\S]*)$/.exec(text))) return 'Answered a question: ' + m[1];

@@ -564,12 +564,11 @@ def build(root: Path, now: datetime | None = None) -> dict:
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
     if pid:
         nxt = events[0][0] if events else None
-        line = "On." + (
-            f" Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}" if nxt else " Nothing planned"
-        )
-        if ran >= 5:
-            line += f". Ran {ran} times today"
-        view.update(notice=line, notice_tone="good")
+        if nxt:  # nothing planned: no row at all (owner sweep 14 Nov)
+            line = f"On. Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}"
+            if ran >= 5:
+                line += f". Ran {ran} times today"
+            view.update(notice=line, notice_tone="good")
     else:
         view.update(
             notice="Automation is stopped: nothing starts by itself.",
