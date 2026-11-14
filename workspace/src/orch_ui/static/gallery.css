@@ -1,0 +1,29 @@
+/* Style guide page only (gallery.html): reference nav, swatches, motion cards, state controls. */
+.table-title{width:45%}
+.reference-nav{display:flex;gap:8px;flex-wrap:wrap}
+.reference-nav a{padding:4px 8px;min-height:28px;text-decoration:none;color:var(--text-muted);font-size:12px}
+.reference-nav [aria-current]{color:var(--text);background:var(--surface-3);border-radius:4px}
+.spec-section{display:grid;gap:16px;padding-top:24px;border-top:1px solid var(--border);scroll-margin-top:80px}
+.section-heading{display:flex;align-items:baseline;gap:12px}
+.section-heading .eyebrow{min-width:24px;color:var(--brand)}
+.sample-label{margin-bottom:12px;color:var(--text-faint);font-size:12px;line-height:16px}
+.swatches{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.swatch{height:48px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--swatch)}
+.demo-stage{min-height:144px;padding:24px;background:var(--sidebar);border:1px solid var(--border);border-radius:8px;display:grid;align-content:center;gap:12px}
+.motion-card{display:grid;gap:16px;padding:16px}
+.motion-card header{display:flex;gap:12px;justify-content:space-between;align-items:start}
+.motion-card header p{margin-top:4px}
+.preview-states{min-height:192px}
+.preview-states .empty, .preview-states .error-state{height:192px;min-height:192px;padding:16px}
+.preview-states .preview-body{height:192px}
+.demo-footer{padding-top:24px;border-top:1px solid var(--border);color:var(--text-faint);font-size:12px;line-height:16px}
+.press-demo{animation:press-demo 100ms var(--ease-move) 2 alternate}
+@media(max-width:899px){.swatches{grid-template-columns:repeat(3,minmax(0,1fr))}}
+body .shared-preview.preview-controls{position:fixed!important;inset:auto 12px 8px auto!important;width:auto!important;max-width:calc(100vw - 32px)!important;display:block!important;padding:0!important;margin:0!important;z-index:200;border:1px solid var(--border-strong);border-radius:18px;background:var(--surface);box-shadow:var(--lift-shadow);font-size:12px}
+.shared-preview>summary{min-height:28px;padding:4px 12px;cursor:pointer;list-style:none}
+.shared-preview>summary::-webkit-details-marker{display:none}
+.shared-preview .preview-options{display:flex;gap:4px;padding:4px 8px 8px}
+.shared-preview:not([open]) .preview-options{display:none}
+.preview-options button{border:0;border-radius:4px;padding:6px;background:var(--surface-2);color:var(--text)}
+body:has(.shared-preview) main{padding-bottom:72px}
+@media(prefers-reduced-motion:reduce){.shared-preview *{animation:none!important;transition:none!important}}
