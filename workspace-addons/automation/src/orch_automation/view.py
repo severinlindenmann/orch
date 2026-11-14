@@ -13,6 +13,7 @@ from . import listen, needs, orchcli, service
 from .cron import fmt, next_after, parse
 from .loop import scheduled
 from .plain import zone
+from .syncapproval import allowed
 
 DAYS = (
     "Sundays",
@@ -292,9 +293,15 @@ def _started(tickets: list[dict], runs: list[dict]) -> list[tuple[datetime, dict
 
 
 def _schedules(
-    tickets: list[dict], now: datetime, running: bool = True, runs: list[dict] | None = None
+    tickets: list[dict],
+    now: datetime,
+    running: bool = True,
+    runs: list[dict] | None = None,
+    waiting: frozenset = frozenset(),
 ) -> list[dict]:
-    """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown."""
+    """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown.
+    `waiting`: ids of schedules that arrived by sync and are not allowed on this computer yet: they offer
+    "Allow on this computer" (the person signs it) instead of Run now."""
     rows = []
     for t in tickets:
         if not scheduled(t) or not (cron := _repeats(t, True)):
@@ -327,7 +334,12 @@ def _schedules(
                         "action": _act("toggle", t["id"]),
                     },
                     "actions": [
-                        {"label": "Run now", "action": _act("run", t["id"])},
+                        {
+                            "label": "Allow on this computer",
+                            "action": {"op": "addon.allow", "args": {"target": t["id"]}},
+                        }
+                        if t["id"] in waiting
+                        else {"label": "Run now", "action": _act("run", t["id"])},
                         {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
                     ],
                 },
@@ -406,7 +418,8 @@ def build(root: Path, now: datetime | None = None) -> dict:
     pid = service.running_pid(root, clean=False)
     blocks: list[dict] = []
 
-    sched_rows = _schedules(tickets, now, bool(pid), runs)
+    waiting = frozenset(t["id"] for t in tickets if scheduled(t) and not allowed(root, t))
+    sched_rows = _schedules(tickets, now, bool(pid), runs, waiting)
     if sched_rows:
         blocks.append(
             {

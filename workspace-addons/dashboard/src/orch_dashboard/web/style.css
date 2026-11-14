@@ -524,3 +524,9 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .person-switch .person-add{display:flex;gap:8px;padding:4px}
 .person-switch .person-add .input{flex:1;min-width:0}
 .person-switch .ck{color:var(--brand)}
+
+/* Waiting requests: one quiet line in the top bar (owner 14 Nov), not a banner */
+.topbar-wait{margin-left:auto;text-decoration:none;white-space:nowrap;color:var(--warning)}
+.topbar-wait:hover{text-decoration:underline}
+.topbar-wait:not([hidden])+.topbar-actions{margin-left:12px}
+@media(max-width:720px){.topbar-wait{display:none}}

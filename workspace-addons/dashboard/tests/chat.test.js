@@ -96,7 +96,7 @@ test('the chip row is gone: one From my phone checkbox, and "Working on N ticket
   const page = JSON.stringify(c.chatPage());
   assert.doesNotMatch(page, /From phone · |From Home · |Running · /);
   assert.doesNotMatch(page, /Working on/);
-  assert.match(page, /From my phone/); assert.match(page, /Phone & workspaces/);
+  assert.match(page, /From my phone/); assert.match(page, /Contacts/);
   assert.doesNotMatch(page, /chat-list"/, 'relay off: no conversation list');
   c.state.chat.activity.running = 2;
   assert.match(JSON.stringify(c.chatHeader(null, false)), /Working on 2 tickets/);
@@ -193,7 +193,7 @@ test('thread header: helper title with workspace and "Working on N tickets", the
   const top = nodes(head, n => n.attrs?.className === 'chat-head-top')[0];
   assert.deepEqual(top.children.map(n => n.textContent), ['✧', 'Your helperFish workspace · Working on 2 tickets', 'Earlier']);
   const row = nodes(head, n => n.attrs?.className === 'chat-head-row')[0];
-  assert.equal(row.textContent, 'From my phonePhone & workspaces');
+  assert.equal(row.textContent, 'From my phoneContacts');
   assert.equal(head.children.length, 2, 'the title row and the filter row');
 });
 
