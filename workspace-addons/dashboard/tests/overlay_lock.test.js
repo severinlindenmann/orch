@@ -17,16 +17,17 @@ function setup() {
   }
   const observers = [];
   const html = {style:{overflow:''}};
+  const body = {style:{overflow:''}};
   const win = {addEventListener() {}};
   const ready = [];
   const ctx = vm.createContext({
     window:win, HTMLDialogElement:FakeDialog, matchMedia:() => ({matches:true}), setTimeout:fn => { fn(); return 1; },
     MutationObserver:class { constructor(fn) { observers.push(fn); } observe() {} },
-    document:{documentElement:html, addEventListener:(type, fn) => { if (type === 'DOMContentLoaded') ready.push(fn); }, querySelectorAll:() => [], createElement:() => new FakeDialog(), querySelector:() => null, activeElement:null, body:{}},
+    document:{documentElement:html, addEventListener:(type, fn) => { if (type === 'DOMContentLoaded') ready.push(fn); }, querySelectorAll:() => [], createElement:() => new FakeDialog(), querySelector:() => null, activeElement:null, body},
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/kit/overlay.js'), 'utf8'), ctx);
   ready.forEach(fn => fn());  // the page is loaded: the watcher on the document is started
-  return {FakeDialog, html, observers};
+  return {FakeDialog, html, body, observers};
 }
 
 test('a dialog closed the normal way gives the page its scrolling back', () => {
@@ -52,4 +53,16 @@ test('a dead dialog left in the list never blocks the next one from restoring th
   const b = new FakeDialog(); b.showModal();
   b.close();
   assert.equal(html.style.overflow, '');
+});
+
+test('a body lock left behind by an old close path heals when no dialog is open', () => {
+  const {body, observers} = setup();
+  body.style.overflow = 'hidden';  // what the old motion.js open() left when the dialog was closed another way
+  observers.forEach(fn => fn([]));
+  assert.equal(body.style.overflow, '');
+});
+
+test('motion.js no longer locks the body itself (one lock in overlay.js)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/kit/motion.js'), 'utf8');
+  assert.ok(!/body\.style\.overflow/.test(src));
 });

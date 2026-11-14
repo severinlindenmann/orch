@@ -355,3 +355,10 @@ test('fb9: a paused sync says in plain words what is wrong and has one button to
   const err = text(byKey(card, 'sync-last-error'));
   assert.doesNotMatch(err, /: secret$/);
 });
+
+// Owner feedback 14 Nov (W13): the sweep pressed "Sync now" while sync was off here: a refused request (422) in the console.
+test('Sync now is not offered while the saved sync mode is off', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const i = src.indexOf("'data-key':'sync-now'");
+  assert.ok(/saved\.where === 'off'/.test(src.slice(i, i + 120)));
+});

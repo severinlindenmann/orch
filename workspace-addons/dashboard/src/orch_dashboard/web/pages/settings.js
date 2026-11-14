@@ -293,7 +293,7 @@ function syncCard(settings) {
     chip.addEventListener('click', () => { syncUi.draft = {...syncNow(), every:value}; render(); });
     return chip;
   });
-  const now = h('button', {type:'button', className:'btn ' + (blocked ? 'ghost' : 'primary'), 'data-key':'sync-now', disabled:off || syncUi.nowBusy}, iconEl('refresh'), 'Sync now');
+  const now = h('button', {type:'button', className:'btn ' + (blocked ? 'ghost' : 'primary'), 'data-key':'sync-now', disabled:off || syncUi.nowBusy || saved.where === 'off'}, iconEl('refresh'), 'Sync now');
   now.addEventListener('click', syncNowClick);
   const remoteBox = cur.where === 'remote' ? h('div', {className:'sync-sub', 'data-key':'sync-remote'},
     h('div', {className:'sync-field'}, h('label', {className:'meta', for:'sync-addr'}, 'Sync address'), h('div', {className:'sync-field-line'}, addr, check), res),

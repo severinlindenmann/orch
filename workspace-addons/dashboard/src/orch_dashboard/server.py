@@ -63,9 +63,7 @@ PROXY = re.compile(r"/addon/([a-z][a-z0-9-]{1,31})(/(?:[A-Za-z0-9_./-]|%20)*)?")
 # replaced; any other answer to such a request is a 403.
 PAGE_PATH = re.compile(r"/page/t_[a-z0-9]{6,16}/[0-9a-f]{16}/.+")  # ticket, key (unguessable), file
 LOCAL = re.compile(r"http://(?:127\.0\.0\.1|localhost):(\d{1,5})/?")
-PROXY_CSP = (
-    "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
-)
+PROXY_CSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"
 PROXY_BODY = 16384
 
 
