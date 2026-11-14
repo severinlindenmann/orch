@@ -69,3 +69,4 @@
 .attn-card{border-left:2px solid var(--warning)}
 .row-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
 .home-note{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:start;padding:12px 16px}.home-note+.home-note{border-top:1px solid var(--border)}
+.dot-err{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger)}
