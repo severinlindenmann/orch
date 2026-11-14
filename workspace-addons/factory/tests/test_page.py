@@ -378,18 +378,6 @@ def test_web_files_from_a_fixed_list(srv):
     assert get(srv, "/web/__init__.py")[0] == 404 and get(srv, "/web/")[0] == 404
 
 
-def test_kit_fallback_to_the_dashboard_copy(srv, monkeypatch, tmp_path):
-    kit = tmp_path / "pkgs" / "orch_dashboard" / "web" / "kit"
-    kit.mkdir(parents=True)
-    (kit.parents[1] / "__init__.py").write_text("")
-    (kit / "tokens.css").write_bytes(b":root{}")
-    monkeypatch.setitem(sys.modules, "orch_ui", None)  # orch_ui gone
-    monkeypatch.delitem(sys.modules, "orch_dashboard", raising=False)
-    monkeypatch.syspath_prepend(str(tmp_path / "pkgs"))
-    code, body, r = get(srv, "/kit/tokens.css")
-    assert (code, body) == (200, b":root{}") and r.getheader("Content-Type").startswith("text/css")
-    assert get(srv, "/kit/icons.js")[0] == 404  # not in the copy
-    assert get(srv, "/kit/server.py")[0] == 404
 
 
 def test_kit_missing_everywhere_is_404(srv, monkeypatch):

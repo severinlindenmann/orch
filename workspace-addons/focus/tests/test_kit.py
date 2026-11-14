@@ -31,13 +31,3 @@ def test_kit_missing_everywhere_is_404(server, no_static, monkeypatch):
     assert get(srv, "/kit/tokens.css")[:2] == (404, b"not found")
     assert get(srv, "/web/focus.css")[0] == 200  # the server still answers
 
-
-def test_kit_falls_back_to_the_dashboard_copy(server, no_static, monkeypatch, tmp_path):
-    kit = tmp_path / "pkgs" / "orch_dashboard" / "web" / "kit"
-    kit.mkdir(parents=True)
-    (kit.parents[1] / "__init__.py").write_text("")
-    (kit / "tokens.css").write_bytes(b":root{}")
-    monkeypatch.delitem(sys.modules, "orch_dashboard", raising=False)
-    monkeypatch.syspath_prepend(str(tmp_path / "pkgs"))
-    code, body, ctype = get(server, "/kit/tokens.css")
-    assert (code, body) == (200, b":root{}") and ctype.startswith("text/css")

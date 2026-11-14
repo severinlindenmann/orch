@@ -1,6 +1,10 @@
 """Source contracts for the local workspace menu and optional backend fields."""
 
+from pathlib import Path
+
 from .webjs import WEB
+
+KIT = Path(__file__).resolve().parents[3] / "workspace" / "src" / "orch_ui" / "static"
 
 
 def test_switcher_only_lists_local_workspaces_current_first():
@@ -34,7 +38,7 @@ def test_switcher_keyboard_and_touch_targets():
 def test_switcher_stays_one_row_in_the_open_menu():
     # The kit shows the workspace box as a block in the open Menu (0,3,0); the switcher
     # (icon, name + sub-label, chevron) must win with a more specific flex rule.
-    kit = (WEB / "kit" / "components.css").read_text()
+    kit = (KIT / "components.css").read_text()
     look = (WEB / "look.css").read_text()
     assert ".sidebar[data-open=true] .workspace," in kit
     assert ".sidebar[data-open=true] .workspace.ws-switch{display:flex}" in look

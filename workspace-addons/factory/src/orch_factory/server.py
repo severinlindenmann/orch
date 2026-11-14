@@ -27,6 +27,8 @@ KIT_FILES = (
     "icons.js",
     "overlay.js",
     "select.js",
+    "widgets.css",
+    "widgets.js",
 )
 WEB_FILES = ("index.html", "factory.css", "factory.js")
 PLAIN = "text/plain; charset=utf-8"
@@ -45,17 +47,14 @@ def _web(name):
 
 
 def _kit(name):
-    """A kit file from orch_ui's static folder, else the dashboard's own copy; None when neither has it."""
+    """A kit file from orch_ui's static folder (the one master kit); None when it is not installed."""
     try:
         import orch_ui
 
         return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
     except (ImportError, OSError, TypeError):
         pass
-    try:
-        return resources.files("orch_dashboard").joinpath("web", "kit", name).read_bytes()
-    except (ImportError, OSError, TypeError):
-        return None
+    return None
 
 
 def _local_check(  # keep in sync with orch_ui.origin (test_fallback_fence_matches_shared_rules)

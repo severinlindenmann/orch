@@ -25,7 +25,7 @@ function setup() {
     MutationObserver:class { constructor(fn) { observers.push(fn); } observe() {} },
     document:{documentElement:html, addEventListener:(type, fn) => { if (type === 'DOMContentLoaded') ready.push(fn); }, querySelectorAll:() => [], createElement:() => new FakeDialog(), querySelector:() => null, activeElement:null, body},
   });
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/kit/overlay.js'), 'utf8'), ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/overlay.js'), 'utf8'), ctx);
   ready.forEach(fn => fn());  // the page is loaded: the watcher on the document is started
   return {FakeDialog, html, body, observers};
 }
@@ -63,6 +63,6 @@ test('a body lock left behind by an old close path heals when no dialog is open'
 });
 
 test('motion.js no longer locks the body itself (one lock in overlay.js)', () => {
-  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/kit/motion.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/motion.js'), 'utf8');
   assert.ok(!/body\.style\.overflow/.test(src));
 });

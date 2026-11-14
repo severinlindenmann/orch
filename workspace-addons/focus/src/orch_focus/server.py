@@ -53,7 +53,7 @@ TYPES = {
     ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
 }  # fmt: skip
 KIT_FILES = ("tokens.css", "components.css", "motion.css", "icons.js", "motion.js", "question-card-state.js",
-             "question-card.js", "evidence.js")  # fmt: skip
+             "question-card.js", "evidence.js", "widgets.css", "widgets.js")  # fmt: skip
 WEB_FILES = (
     "index.html",
     "compose.js",
@@ -84,17 +84,14 @@ def _web(name: str) -> bytes:
 
 
 def _kit(name: str) -> bytes | None:
-    """A kit file from orch_ui's static folder, else the dashboard's own copy; None when neither has it."""
+    """A kit file from orch_ui's static folder (the one master kit); None when it is not installed."""
     try:
         import orch_ui
 
         return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
     except (ImportError, OSError, TypeError):
         pass
-    try:
-        return resources.files("orch_dashboard").joinpath("web", "kit", name).read_bytes()
-    except (ImportError, OSError, TypeError):
-        return None
+    return None
 
 
 class Tracker:
