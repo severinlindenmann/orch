@@ -422,7 +422,7 @@ def test_view_matches_the_addon_view_contract(root, capsys):
     assert [(o["label"], o["selected"]) for o in radio["options"]] == [
         ("Off", True),
         ("On this computer only", False),
-        ("Also on another computer or server", False),
+        ("Another computer or your own storage", False),
     ]
     assert radio["options"][2]["link"] == "app:settings" and "action" not in radio["options"][2]
     assert off["header"]["link"]["to"] == "app:settings"

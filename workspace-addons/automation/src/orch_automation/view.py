@@ -105,7 +105,9 @@ def cron_human(expr: str, tz=None, now: datetime | None = None, local=None) -> s
 
 
 def _every(gap: int) -> str:
-    return "Every minute" if gap <= 60 else f"Every {gap // 60} min"
+    if gap <= 60:
+        return "Every minute"
+    return f"Every {gap // 3600} h" if gap >= HOUR and gap % HOUR == 0 else f"Every {gap // 60} min"
 
 
 def _in(delta: timedelta) -> str:
@@ -191,7 +193,9 @@ def _day_items(
         if not left:
             continue
         gaps = [(b - a).total_seconds() for a, b in pairwise(whole)]
-        if gaps and min(gaps) < HOUR:
+        if (
+            len(whole) >= 3
+        ):  # three or more a day: one item with the rhythm, never the same ticket again and again
             first = left[0].astimezone().strftime("%H:%M")
             lead = f"next {first}" if today else (f"from {first}" if first != "00:00" else "")
             note = " · ".join(x for x in (lead, f"{len(whole)} runs/day") if x)
@@ -408,19 +412,17 @@ def build(root: Path, now: datetime | None = None) -> dict:
 
     sched_rows = _schedules(tickets, now, bool(pid), runs)
     if sched_rows:
-        blocks.append(
-            {
-                "type": "table",
-                "columns": [
-                    {"key": "schedule", "label": "Schedule", "type": "text"},
-                    {"key": "repeats", "label": "Repeats", "type": "text"},
-                    {"key": "next", "label": "Next run", "type": "text"},
-                    {"key": "last", "label": "Last result", "type": "text"},
-                ],
-                "rows": sched_rows[:20],
-                "more": max(0, len(sched_rows) - 20),
-            }
-        )
+        table = {
+            "type": "table",
+            "columns": [
+                {"key": "schedule", "label": "Schedule", "type": "text"},
+                {"key": "repeats", "label": "Repeats", "type": "text"},
+                {"key": "next", "label": "Next run", "type": "text"},
+                {"key": "last", "label": "Last result", "type": "text"},
+            ],
+            "rows": sched_rows[:20],
+            "more": max(0, len(sched_rows) - 20),
+        }
         days = []
         local_now = now.astimezone()
         for n in range(7):
@@ -437,9 +439,14 @@ def build(root: Path, now: datetime | None = None) -> dict:
             if first.month == last.month
             else f"{first.day} {first:%B} \u2013 {last.day} {last:%B}"
         )
-        blocks.append(
-            {"type": "calendar", "title": "Coming up", "meta": f"{span} \u00b7 Workspace time", "days": days}
-        )
+        week = {
+            "type": "calendar",
+            "title": "Coming up",
+            "meta": f"{span} \u00b7 Workspace time",
+            "days": days,
+        }
+        # the week strip sits above the stable table, and only with two or more schedules (one needs no calendar)
+        blocks += [week, table] if len(sched_rows) >= 2 else [table]
     else:
         blocks.append(
             {
