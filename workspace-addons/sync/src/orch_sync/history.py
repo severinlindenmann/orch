@@ -47,7 +47,7 @@ def record(root, now, before, after, error):
         entries = read(root, all_=True)
         entries.append({"at": str(now), "ok": not error, "text": text})
         write(root, FILE, encoded({"entries": entries[-KEEP:]}))
-    except Exception:  # noqa: BLE001, S110 - the history is a convenience: never breaks a sync
+    except Exception:  # noqa: BLE001 - the history is a convenience: never breaks a sync
         return
 
 

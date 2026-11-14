@@ -67,6 +67,7 @@
 /* Sync (draft sync-card.html, Variant A): below Workspace; head with the one status line, where to keep a copy,
    the sync address with its check, Sync every, Sync now, the review line, then Details. */
 .settings [data-key=settings-sync]{order:-1}
+.settings[data-key=sync-page] [data-key=settings-sync]{order:0}  /* on its own page the facts come first, then the settings */
 .settings .sync-head{padding:14px 16px 0;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-head h3{font-weight:600;flex:1;min-width:120px;margin:0}
 .settings .sync-status-line{display:flex;gap:4px 12px;align-items:center;flex-wrap:wrap}

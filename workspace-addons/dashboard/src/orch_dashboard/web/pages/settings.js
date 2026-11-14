@@ -266,7 +266,7 @@ function syncWhen(value) {
 function syncInfo(card) {
   if (!card || card.mode === 'off') return null;
   const c = card.counts || {tickets:0, files:0, bytes:0}, remote = card.mode === 'remote' && card.remote;
-  const box = (key, title, ...body) => h('section', {className:'card', 'data-key':key}, h('header', {className:'card-h'}, h('h3', {}, title)), h('div', {className:'pad-card'}, ...body));
+  const box = (key, title, ...body) => h('section', {className:'card', 'data-key':key}, h('header', {className:'card-h'}, h('h3', {}, title)), h('div', {className:'card-row sync-info-body'}, h('div', {className:'stack'}, ...body)));
   const failed = card.shown === 'offline' || (card.last_error && card.shown !== 'paused' && card.shown !== 'syncing');
   const banner = failed ? h('div', {className:'banner error', role:'alert', 'data-key':'sync-error'},
     h('div', {className:'grow'}, h('strong', {}, 'The last sync did not finish.'),
@@ -276,7 +276,7 @@ function syncInfo(card) {
   return h('div', {className:'stack', 'data-key':'sync-info'}, banner,
     h('div', {className:'grid-3'},
       box('sync-where-info', 'Where', h('strong', {}, 'This computer'), h('p', {className:'meta'}, 'The ' + (card.folder || 'workspace') + ' folder'),
-        remote ? [h('hr', {}), h('strong', {}, 'Your own storage'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, ''))] : null),
+        remote ? [h('strong', {}, 'Your own storage'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, ''))] : null),
       box('sync-what-info', 'What', h('strong', {}, c.tickets + ' tickets · ' + c.files + ' files · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
       box('sync-when-info', 'When', h('strong', {}, 'Last: ' + (syncWhen(card.last_ok) || 'not yet')),
         h('p', {className:'meta'}, 'Next: ' + (card.running && card.next_run ? syncWhen(card.next_run) + ' · ' : card.running ? '' : 'not while sync is stopped · ') + 'every ' + (card.interval || 15) + ' minutes'),
@@ -770,7 +770,7 @@ function addonTab(id) {
   // Sync is changed on its own page: the same card as in Settings, no trip to another page.
   if (id === SYNC && syncNative()) {
     const a = addons().find(a => a.name === id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, syncInfo(syncUi.card), syncCard(state.settings)));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
   }
   // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
