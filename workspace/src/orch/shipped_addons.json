@@ -65,7 +65,15 @@
   "version": "0.2.0"
  },
  "factory": {
-  "acts": {},
+  "acts": {
+   "idea": {
+    "summary": "File the idea box's text as a new order and start your agent on its first draft",
+    "who": "people",
+    "writes": [
+     "ext.factory"
+    ]
+   }
+  },
   "agents_block": "skills/orch-factory/AGENTS-block.md",
   "background": true,
   "dashboard": {

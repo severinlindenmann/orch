@@ -11,7 +11,7 @@
   const SVGNS = 'http://www.w3.org/2000/svg';
   const EXTRA = {finance: ['wallet', 'savings', 'cash', 'bank', 'receipt', 'growth', 'calculator'], bills: ['receipt'], taxes: ['bank', 'legal'], budget: ['savings', 'calculator']};
 
-  let look = null, name = 'Workspace';
+  let look = null, name = 'Workspace', owner = null;
   let open = false, more = false, short = [], draft = {icon: null, color: null}, cat = null, light = false;
   let editing = false, descDraft = '', busy = false, status = '', statusTone = 'ok';
 
@@ -165,6 +165,14 @@
       !editing && svc ? n('button', {type: 'button', className: 'btn sm', 'data-lk': 'desc-edit', 'data-key': 'lk-desc-edit'}, 'Edit') : null);
   }
 
+  // Who owns this workspace: the person chosen in "You: ..." (switch person). Shown here only; it is not sent to other workspaces.
+  function ownerRow() {
+    return n('div', {className: 'card-row', 'data-key': 'lk-owner-row'}, n('span', {className: 'set-label'}, 'Owner'),
+      n('div', {className: 'grow'},
+        n('p', {className: 'set-ctl', 'data-testid': 'look-owner'}, owner || 'Not set'),
+        n('p', {className: 'meta'}, owner ? 'Taken from “You” in the sidebar. Only you see it here; it is not sent to other workspaces.' : 'Choose your name under “You” in the sidebar. Only you see it here; it is not sent to other workspaces.')));
+  }
+
   function section() {
     if (!look) return null;
     const on = look.shared_pages !== false;
@@ -177,6 +185,7 @@
           open ? null : n('button', {type: 'button', className: 'btn sm', 'data-lk': 'open', 'data-key': 'lk-open', 'data-testid': 'look-change'}, 'Change')),
         open ? picker() : null,
         descriptionRow(),
+        ownerRow(),
         // Like every other switch row: the words left, the switch right, one row at any width.
         n('div', {className: 'card-row lk-shared-row', 'data-key': 'lk-shared-row'},
           n('div', {className: 'grow'}, n('h3', {}, 'Shared pages: show workspace name and icon'),
@@ -253,6 +262,7 @@
   window.addEventListener('orch:state', e => {
     look = e.detail && e.detail.look ? e.detail.look : null;
     name = clean(e.detail && e.detail.workspace) || 'Workspace';
+    owner = clean(e.detail && e.detail.people && e.detail.people.me) || null;
     if (look) {
       if (!open) draft = {icon: look.icon || null, color: look.color || null};
       paintFavicon();

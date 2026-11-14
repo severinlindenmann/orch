@@ -83,6 +83,11 @@ def main(argv=None):
         p.add_argument("title", nargs="?")
         p.add_argument("--file")
         p.add_argument("--ticket", help="turn this existing ticket (e.g. one made from Chat) into the order")
+        # what the Factory page's idea box does through the dashboard (the add-on act contract)
+        p = sub.add_parser("act", parents=[common])
+        p.add_argument("verb", choices=("idea",))
+        p.add_argument("target")
+        p.add_argument("--by")
         kinds = {"propose": "proposal", "autopilot": "autopilot", "change": "change", "stop": "stop"}
 
         def epilog(command):
@@ -170,6 +175,8 @@ def main(argv=None):
                 result = commands.idea(root, args.title, data, args.ticket)
             else:
                 result = fn(root, target, data)
+        elif args.cmd == "act":
+            result = commands.idea_act(root, args.target, args.by)
         elif args.cmd in ("next", "ship"):
             result = {"next": flow.next_step, "ship": flow.ship}[args.cmd](root, args.order)
         elif args.cmd == "crew":
