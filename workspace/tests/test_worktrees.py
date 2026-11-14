@@ -867,3 +867,33 @@ def test_the_copies_folder_never_carries_the_homes_name(tmp_path):
         h.mkdir(parents=True)
         b = addons.copies_base(h)
         assert not addons.names_clash(h, b) and b.parent == h.resolve().parent, (name, b)
+
+
+def test_the_copy_imports_its_own_harness_file_never_one_outside_it(repo):
+    """An import outside the folder the tool runs in makes Claude Code ask "Allow external CLAUDE.md file
+    imports?": an unattended helper in a copy hung there. The copy gets the workspace's AGENTS.orch.md as
+    a file of its own (refreshed at each start), imported relatively, kept out of git."""
+    import re
+
+    from orch import harness
+
+    blocks = repo / ".orch" / "harness" / "blocks"
+    blocks.mkdir(parents=True, exist_ok=True)
+    (blocks / "orch.md").write_text("# orch rules\n")
+    (repo / ".orch" / "harness" / "AGENTS.orch.md").write_text("# orch rules v1\n")
+    a, _ = repo.tids
+    config.set_copies_mode(repo, "always")
+    f, _ = _route(repo, a)
+    assert harness.write_local_file(f, "CLAUDE.local.md", "@AGENTS.md", harness_root=repo)
+    text = (f / "CLAUDE.local.md").read_text()
+    imports = re.findall(r"^@(\S+)", text, re.M)
+    assert imports and all(not Path(i).is_absolute() and ".." not in Path(i).parts for i in imports), text
+    for i in imports:
+        assert (f / i).resolve().is_relative_to(f.resolve()), i
+    assert (f / ".orch-harness" / "AGENTS.orch.md").read_text() == "# orch rules v1\n"
+    assert git(f, "status", "--porcelain") == ""  # kept out of commits by the shared exclude
+    (repo / ".orch" / "harness" / "AGENTS.orch.md").write_text("# orch rules v2\n")
+    f2, _ = _route(repo, a)  # the next start refreshes it
+    assert f2 == f
+    harness.write_local_file(f, "CLAUDE.local.md", "@AGENTS.md", harness_root=repo)
+    assert (f / ".orch-harness" / "AGENTS.orch.md").read_text() == "# orch rules v2\n"
