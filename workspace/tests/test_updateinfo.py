@@ -100,3 +100,29 @@ def test_installed_record_hostile_values(proj, monkeypatch, bad):
     (addons.home() / "installed.json").write_text(json.dumps(bad))
     got = updateinfo.installed()
     assert got["sha"] is None and got["release"] is None
+
+
+def test_announce_lines_name_both_versions_and_what_changed(proj, monkeypatch):
+    monkeypatch.setattr(
+        updateinfo,
+        "info",
+        lambda use_cache=True: {
+            "installed": {"label": "orch 15"},
+            "newest": {"label": "orch 16"},
+            "update_available": True,
+            "changes": ["Helpers tidy up new tickets"],
+        },
+    )
+    assert updateinfo.announce_lines() == [
+        "Updating orch 15 → orch 16",
+        "What changed:",
+        "  - Helpers tidy up new tickets",
+    ]
+
+
+def test_announce_lines_empty_when_up_to_date_or_unknown(proj, monkeypatch):
+    for value in ({"update_available": False}, {"update_available": None}, {}):
+        monkeypatch.setattr(updateinfo, "info", lambda use_cache=True, v=value: v)
+        assert updateinfo.announce_lines() == []
+    monkeypatch.setattr(updateinfo, "info", lambda use_cache=True: 1 / 0)
+    assert updateinfo.announce_lines() == []
