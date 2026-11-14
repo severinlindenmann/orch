@@ -249,9 +249,12 @@ enum Thumbnail {
     /// Decodes off the main actor and remembers the result per (id, size).
     static func decoded(id: String, data: Data, maxPixel: Int = inlineMaxPixel) async -> UIImage? {
         if let hit = cached(id: id, maxPixel: maxPixel) { return hit }
-        let image = await Task.detached(priority: .userInitiated) { image(from: data, maxPixel: maxPixel) }.value
-        if let image { cache.setObject(image, forKey: key(id, maxPixel), cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4)) }
-        return image
+        let task: Task<UIImage?, Never> = Task.detached(priority: .userInitiated) { Thumbnail.image(from: data, maxPixel: maxPixel) }
+        guard let decoded = await task.value else { return nil }
+        let size = decoded.size, scale = decoded.scale
+        let pixels: CGFloat = size.width * size.height * scale * scale
+        cache.setObject(decoded, forKey: key(id, maxPixel), cost: Int(pixels) * 4)
+        return decoded
     }
     static func evictAll() { cache.removeAllObjects() }
 }
