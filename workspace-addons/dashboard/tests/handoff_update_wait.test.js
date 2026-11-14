@@ -13,7 +13,7 @@ function page(now, store, reply) {
     ? {then() { return {then() { return {catch(f) { f(); }}; }}; }}
     : {then(f) { const s = f({ok: true, json: () => reply}); return {then(g) { g(s); return {catch() {}}; }}; }};
   const c = vm.createContext({sessionStorage, fetch, Date: {now: () => now}, Number, String, shown: ''});
-  vm.runInContext('var shown = ""; function banner(t) { out.push(t); }\n' + src.slice(start, end) + '\nthis.S = updateStatus; this.go = updateStarted;', Object.assign(c, {out: banners}));
+  vm.runInContext('var shown = ""; function banner(t) { out.push(t); }\n' + src.slice(start, end) + '\nthis.S = updateStatus; this.go = updateStarted; this.hold = function (b) { startedBanner = b; };', Object.assign(c, {out: banners}));
   return {c, banners};
 }
 
@@ -43,4 +43,22 @@ test('a server that cannot be reached after the wait says "orch restarted", not 
   late.c.S();
   assert.deepEqual(late.banners, ['orch restarted. Reload the dashboard.']);
   assert.ok(!('orch-update-started' in store));
+});
+
+// fb1: "Update started" and "Update finished" stayed stacked
+test('the "Update started" banner goes away when the update finishes, fails or is overdue', () => {
+  for (const [now, reply] of [[2000, {state: 'finished'}], [2000, {state: 'failed', reason: 'No internet'}], [1000 + 181000, {state: 'running'}]]) {
+    const store = {'orch-update-started': '1000'};
+    const p = page(now, store, reply);
+    let removed = 0;
+    p.c.hold({remove() { removed++; }});
+    p.c.S();
+    assert.equal(p.banners.length, 1);
+    assert.equal(removed, 1, JSON.stringify(reply));
+  }
+  const store = {'orch-update-started': '1000'}, p = page(2000, store, {state: 'running'});
+  let removed = 0;
+  p.c.hold({remove() { removed++; }});
+  p.c.S();
+  assert.equal(removed, 0, 'still running: the started banner stays');
 });
