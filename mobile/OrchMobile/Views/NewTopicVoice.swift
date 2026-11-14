@@ -24,7 +24,6 @@ struct NewTopicVoiceView: View {
     /// Transcribed segments of earlier takes, and the segments of the take being written down.
     @State private var ready: [DraftVoice] = []
     @State private var pending: [VoiceSegment] = []
-    @State private var textSent = false
     @State private var finished = false
     @FocusState private var editFocus: Bool
 
@@ -205,23 +204,44 @@ struct NewTopicVoiceView: View {
         // Failed writing-down: the older takes keep their words, the take that failed goes without.
         var drafts = ready + (voiceOnly ? pending.map { DraftVoice(url: $0.url, duration: $0.duration, transcript: "", lang: "", langSource: .detected) } : [])
         if !voiceOnly {
-            let texts = textSent ? [String](repeating: "", count: drafts.count) : NewTopicVoiceFlow.transcripts(text: flow.transcript, segmentCount: drafts.count, voiceOnly: false)
+            let texts = NewTopicVoiceFlow.transcripts(text: flow.transcript, segmentCount: drafts.count, voiceOnly: false)
             for i in drafts.indices { drafts[i].transcript = texts[i] }
         }
-        for d in drafts {
-            do {
-                try await model.send(MessageDraft(voice: d, replyTo: nil), to: target)
-                try? FileManager.default.removeItem(at: d.url)
-                if !d.transcript.isEmpty { textSent = true }
-                ready.removeAll { $0.url == d.url }
-                pending.removeAll { $0.url == d.url }
-            } catch {
-                self.error = error.localizedDescription; flow.sendFailed(); return
-            }
+        // One New topic is exactly one topic: only the first memo starts it; the others join once the workspace has acked it.
+        guard let first = drafts.first else { return }
+        let item: OutboxItem
+        do { item = try await model.send(MessageDraft(voice: first, replyTo: nil), to: target) }
+        catch { self.error = error.localizedDescription; flow.sendFailed(); return }
+        try? FileManager.default.removeItem(at: first.url)
+        let extras = NewTopicVoiceFlow.restDrafts(drafts)
+        ready = []; pending = []
+        if !extras.isEmpty {
+            let model = self.model, workspaceId = workspace.id, clientId = item.clientId, sentId = item.sentMessageId
+            Task { @MainActor in await Self.sendRest(extras, model: model, workspace: workspaceId, clientId: clientId, firstId: sentId) }
         }
         finished = true; success += 1
         UIAccessibility.post(notification: .announcement, argument: "Sent to \(name)")
         onSent()
+    }
+
+    /// The other memos of a long or extended recording: wait for the workspace's ack of the first one, then add them to that topic.
+    /// No ack in time: the files stay on the phone (never sent as new topics).
+    @MainActor private static func sendRest(_ drafts: [DraftVoice], model: AppModel, workspace: String, clientId: String, firstId: String?) async {
+        var ticket: String?
+        for _ in 0..<15 {
+            let mine = model.messages.first { ($0.clientId ?? $0.message.body.clientId) == clientId || $0.id == firstId }
+            if let mine { ticket = mine.message.ticket ?? model.ack(for: mine.id)?.ticket }
+            if ticket != nil { break }
+            try? await Task.sleep(for: .milliseconds(700))
+            await model.reloadMessages(); await model.refreshUpdates()
+        }
+        guard let ticket else { return }
+        for d in drafts {
+            do {
+                try await model.send(MessageDraft(voice: d, replyTo: nil), to: NewTopicVoiceFlow.target(workspace: workspace, ticket: ticket, isFirst: false) ?? .topic(workspace: workspace, ticket: ticket))
+                try? FileManager.default.removeItem(at: d.url)
+            } catch { return }
+        }
     }
 
     /// Drops the recording and every file of it (Cancel, or the screen closed).

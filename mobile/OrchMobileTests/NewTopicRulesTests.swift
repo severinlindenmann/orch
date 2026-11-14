@@ -77,3 +77,19 @@ final class NewTopicVoiceFlowTests: XCTestCase {
         XCTAssertEqual(NewTopicVoiceFlow.transcripts(text: "x", segmentCount: 0, voiceOnly: false), [])
     }
 }
+
+final class NewTopicOneTopicTests: XCTestCase {
+    func testFirstMemoStartsTheTopicTheRestWaitForTheTicket() {
+        XCTAssertEqual(NewTopicVoiceFlow.target(workspace: "w", ticket: nil, isFirst: true), .newTopic(workspace: "w"))
+        XCTAssertEqual(NewTopicVoiceFlow.target(workspace: "w", ticket: "T-1", isFirst: true), .newTopic(workspace: "w"))
+        XCTAssertNil(NewTopicVoiceFlow.target(workspace: "w", ticket: nil, isFirst: false))
+        XCTAssertEqual(NewTopicVoiceFlow.target(workspace: "w", ticket: "T-1", isFirst: false), .topic(workspace: "w", ticket: "T-1"))
+    }
+    func testRestDraftsSkipTheFirstAndCarryNoText() {
+        func d(_ n: String) -> DraftVoice { DraftVoice(url: URL(fileURLWithPath: "/\(n)"), duration: 2, transcript: "text \(n)", lang: "en", langSource: .detected) }
+        let rest = NewTopicVoiceFlow.restDrafts([d("a"), d("b"), d("c")])
+        XCTAssertEqual(rest.map(\.url.lastPathComponent), ["b", "c"])
+        XCTAssertTrue(rest.allSatisfy { $0.transcript.isEmpty })
+        XCTAssertTrue(NewTopicVoiceFlow.restDrafts([d("a")]).isEmpty)
+    }
+}

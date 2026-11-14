@@ -51,4 +51,14 @@ struct NewTopicVoiceFlow: Equatable {
         if !voiceOnly { out[0] = text }
         return out
     }
+
+    /// One New topic = one topic: the first memo starts it (no ticket yet), the others wait for the ticket (nil = keep waiting).
+    static func target(workspace: String, ticket: String?, isFirst: Bool) -> SendTarget? {
+        if isFirst { return .newTopic(workspace: workspace) }
+        return ticket.map { .topic(workspace: workspace, ticket: $0) }
+    }
+    /// The memos that join the topic after the first one, with no transcript (the text went with the first memo).
+    static func restDrafts(_ drafts: [DraftVoice]) -> [DraftVoice] {
+        drafts.dropFirst().map { var d = $0; d.transcript = ""; return d }
+    }
 }
