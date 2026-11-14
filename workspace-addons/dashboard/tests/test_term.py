@@ -1,0 +1,192 @@
+"""fb17: the live helper session in the browser. A real tmux on a private socket stands in for the helper."""
+
+import functools
+import json
+import secrets
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+
+import pytest
+
+from orch_dashboard import termsession
+from orch_dashboard.server import make_server
+
+pytestmark = pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux")
+
+SOCK, TID = (
+    "orch-0badf00d",
+    "t_term0001",
+)  # SOCK is made new for each test (parallel workers must not share a tmux server)
+
+
+def tm(*args):
+    return subprocess.run(["tmux", "-L", SOCK, *args], capture_output=True, text=True, check=False)
+
+
+@pytest.fixture
+def helper(tmp_path):
+    """A 'helper': a shell loop in a tmux session on a private socket, plus a fake `orch` that names it."""
+    global SOCK
+    SOCK = "orch-" + secrets.token_hex(4)
+    tm(
+        "new-session",
+        "-d",
+        "-x",
+        "80",
+        "-y",
+        "24",
+        "-s",
+        TID,
+        "--",
+        "sh",
+        "-c",
+        "echo hello-from-helper; cat",
+    )
+    state = tmp_path / "status.json"
+    state.write_text(
+        json.dumps({"running": True, "claim": {"run": "r_1", "tmux": {"socket": SOCK, "session": TID}}})
+    )
+    orch = tmp_path / "orch"
+    orch.write_text(
+        f"#!{sys.executable}\nimport sys\nprint(open({str(state)!r}).read()) if sys.argv[1:3] == ['run', 'status'] else sys.exit(2)\n"
+    )
+    orch.chmod(0o755)
+    time.sleep(0.4)
+    yield str(orch), state
+    tm("kill-server")
+
+
+def screen(root, orch, tid=TID):
+    return termsession.snapshot(root, orch, tid)
+
+
+def test_snapshot_shows_the_live_screen(helper, tmp_path):
+    orch, _ = helper
+    snap = screen(tmp_path, orch)
+    assert snap["state"] == "live" and "hello-from-helper" in snap["screen"]
+    assert (snap["cols"], snap["rows"]) == (80, 24) and snap["scrolled"] is False
+
+
+def test_no_session_says_why(helper, tmp_path):
+    orch, state = helper
+    state.write_text(json.dumps({"running": True, "claim": {"run": "r_1"}}))
+    assert screen(tmp_path, orch)["state"] == "oneshot"
+    state.write_text(json.dumps({"running": False}))
+    assert screen(tmp_path, orch)["state"] == "none"
+    assert screen(tmp_path, orch, "../etc")["state"] == "none"
+
+
+def test_names_come_from_the_core_claim_and_must_have_core_shape(helper, tmp_path):
+    orch, state = helper
+    state.write_text(
+        json.dumps({"running": True, "claim": {"tmux": {"socket": "../../tmp/evil", "session": TID}}})
+    )
+    assert screen(tmp_path, orch)["state"] == "none"
+    state.write_text(
+        json.dumps({"running": True, "claim": {"tmux": {"socket": SOCK, "session": "t_other0002"}}})
+    )
+    assert screen(tmp_path, orch)["state"] == "none"
+
+
+def test_typing_reaches_the_session(helper, tmp_path):
+    orch, _ = helper
+    assert termsession.keys(tmp_path, orch, TID, [{"t": "-typed words"}, {"k": "Enter"}]) == (200, "{}")
+    time.sleep(0.4)
+    assert "-typed words" in screen(tmp_path, orch)["screen"]
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [],
+        "x",
+        [{"k": "F12"}],
+        [{"t": ""}],
+        [{"t": "a" * 2001}],
+        [{"t": "a", "k": "Enter"}],
+        [{"k": "Enter"}] * 41,
+        [{"k": "C-b"}],
+        [{"t": "a\x00"}],
+    ],
+)
+def test_typing_refuses_what_is_not_on_the_list(helper, tmp_path, items):
+    orch, _ = helper
+    assert termsession.keys(tmp_path, orch, TID, items)[0] == 400
+
+
+def test_typing_without_a_live_session_is_refused(helper, tmp_path):
+    orch, state = helper
+    state.write_text(json.dumps({"running": False}))
+    assert termsession.keys(tmp_path, orch, TID, [{"k": "Enter"}])[0] == 409
+
+
+class Person:
+    """The person's dashboard session (cookie + page secret): the real check is PageSession.can_mint."""
+
+    def __init__(self, ok):
+        self.ok = ok
+
+    def can_mint(self, headers, port):
+        return self.ok and headers.get("X-Orch-Page") == "secret"
+
+    def authed(self, headers, port):
+        return self.can_mint(headers, port)
+
+
+def serve(tmp_path, orch, session):
+    srv = make_server(tmp_path, 0, orch_bin=orch)
+    srv.RequestHandlerClass = functools.partial(srv.RequestHandlerClass, session=session)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def call(url, body=None, headers=None):
+    req = urllib.request.Request(
+        url, data=body, headers=headers or {}, method="POST" if body is not None else "GET"
+    )
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def post(base, items, secret="secret"):
+    h = {"Content-Type": "application/json", "Origin": base, "X-Orch-Page": secret}
+    return call(base + "/api/term/keys", json.dumps({"ticket": TID, "items": items}).encode(), h)
+
+
+def test_the_screen_is_served_read_only_and_typing_needs_the_persons_session(helper, tmp_path):
+    orch, _ = helper
+    (tmp_path / ".orch" / "tickets").mkdir(parents=True)
+    srv, base = serve(tmp_path, orch, Person(True))
+    try:
+        code, body = call(base + "/api/term?ticket=" + TID)
+        assert code == 200 and "hello-from-helper" in json.loads(body)["screen"]
+        assert post(base, [{"t": "ok"}, {"k": "Enter"}])[0] == 200
+        assert post(base, [{"t": "no"}], secret="wrong")[0] == 403  # a script without the page secret
+        code, _ = call(
+            base + "/api/term/keys",
+            json.dumps({"ticket": TID, "items": [{"k": "Enter"}]}).encode(),
+            {"Content-Type": "application/json"},
+        )
+        assert code == 403  # no Origin: not a page
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_watch_only_server_never_types(helper, tmp_path):
+    orch, _ = helper
+    (tmp_path / ".orch" / "tickets").mkdir(parents=True)
+    srv, base = serve(tmp_path, orch, None)
+    try:
+        assert post(base, [{"k": "Enter"}])[0] == 403
+    finally:
+        srv.shutdown()
+        srv.server_close()

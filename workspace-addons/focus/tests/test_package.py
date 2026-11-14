@@ -46,6 +46,7 @@ def test_web_scripts_are_served_and_loaded_in_order():
         "areas",
         "used",
         "session",
+        "term",
         "settings",
         "live",
         "ticket",

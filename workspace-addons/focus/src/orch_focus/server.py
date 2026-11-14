@@ -61,6 +61,7 @@ WEB_FILES = (
     "store.js",
     "jobs.js",
     "session.js",
+    "term.js",
     "settings.js",
     "live.js",
     "ticket.js",

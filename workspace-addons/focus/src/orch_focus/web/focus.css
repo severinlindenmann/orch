@@ -770,3 +770,23 @@ input.switch[type=checkbox]{appearance:none;width:36px;height:24px;min-width:36p
   .fx.fx-terminal.fx-shell .fx-body{display:flex;flex-direction:column;overflow:auto}
   .fx.fx-shell .fx-left{max-height:30dvh;flex:none}
 }
+
+/* the live session (term.js): the master .term frame, the screen colours from tokens */
+.fx-term{margin:16px 20px 0}
+.fx-term-view{outline:0;cursor:text}
+.fx-term-view:focus-visible{box-shadow:inset 0 0 0 2px var(--brand)}
+.fx-term-b{overflow:auto;max-height:46dvh;padding:12px;white-space:pre;font-family:var(--font-mono);font-size:12.5px;line-height:20px;color:var(--text)}
+.fx-term-view[data-readonly="1"]{cursor:default}
+.fx-term .term-h{display:flex;align-items:center;gap:8px}
+.fx-term-hint{font-size:12px}
+.fx-term-note{margin:12px 20px 0}
+.t-row{min-height:20px}
+.t-b{font-weight:600}.t-d{opacity:.65}.t-r{background:var(--text);color:var(--bg)}
+.t-cur{background:var(--text);color:var(--bg);animation:fx-caret 1.1s steps(1) infinite}
+@keyframes fx-caret{50%{background:transparent;color:inherit}}
+@media(prefers-reduced-motion:reduce){.t-cur{animation:none}}
+.t-c0{color:var(--text-faint)}.t-c1,.t-c9{color:var(--danger)}.t-c2,.t-c10{color:var(--success)}.t-c3,.t-c11{color:var(--warning)}
+.t-c4,.t-c12{color:var(--info)}.t-c5,.t-c13{color:var(--brand)}.t-c6,.t-c14{color:var(--working)}.t-c7,.t-c15{color:var(--text)}
+.fx-term-foot{padding:8px 12px;border-top:1px solid var(--border)}
+.fx-term-b{min-height:120px}
+.fx-term-foot{font-family:var(--font-ui)}
