@@ -304,17 +304,18 @@ function render(arrived = new Set()) {
   const needCount = needsYouTotal(), menuToggle = document.getElementById('menu-toggle');
   menuToggle.textContent = needCount ? 'Menu · ' + needCount : 'Menu';
   menuToggle.setAttribute('aria-label', needCount ? 'Menu, ' + window.DashHelpers.needsYou(needCount) : 'Menu');
+  const wait = document.getElementById('topbar-wait');
+  if (wait) { // waiting requests: one quiet line with the age of the oldest, never a banner stack
+    const ages = array(state.tickets).filter(t => t.status !== 'done' && questions(t).length).map(t => Date.parse(t.updated_at)).filter(Number.isFinite);
+    const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
+    wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
+  }
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'note' ? '#notes' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount);
-  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), navLink('#notes', 'Notes', 'notes'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
-    // Saved ticket views: the same list with a filter on the address (#tickets?view=...)
-    array(state.tickets).length ? h('details', {className:'nav-group', 'data-key':'nav-views', open:viewsOpen() || /[?&]view=/.test(r.hash || '') ? '' : null},
-      h('summary', {className:'nav-item', 'aria-label':'Ticket views'}, navIcon('tickets'), h('span', {className:'nav-label'}, 'Ticket views')),
-      h('nav', {'aria-label':'Saved ticket views'}, [['needs-you', 'Needs me'], ['working', 'Working now'], ['done-week', 'Done this week']].map(([id, label]) =>
-        h('a', {className:'nav-item', href:'#tickets?view=' + id, 'aria-label':label, 'aria-current':String(r.hash || '').includes('view=' + id) ? 'page' : null}, h('span', {className:'nav-label'}, label))))) : null));
+  reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null));
   const pages = addons().filter(a => a.dashboard);
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
