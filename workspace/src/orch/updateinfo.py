@@ -214,3 +214,18 @@ def after_update(
     if changes:
         lines += ["What changed:", *[f"  - {c}" for c in changes]]
     return new_release, lines
+
+
+def announce_lines() -> list[str]:
+    """What `orch update` says before it waits for the click: 'Updating orch 15 → orch 16' and what changed.
+    Nothing when it is up to date or unknown (best effort, never an error)."""
+    try:
+        data = info()
+        if data.get("update_available") is not True:
+            return []
+        lines = [f"Updating {data['installed']['label']} → {data['newest']['label']}"]
+        if data.get("changes"):
+            lines += ["What changed:", *[f"  - {c}" for c in data["changes"]]]
+        return lines
+    except Exception:  # noqa: BLE001
+        return []
