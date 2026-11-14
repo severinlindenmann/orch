@@ -141,7 +141,7 @@ def test_shipped_local_addons_are_recommended_and_server_ones_are_not():
 
 
 def test_dashboard_title_and_subtitle_are_optional_plain_text(tmp_path):
-    """A page heading that differs from the nav label (Phone & workspaces / Messages), and one sentence."""
+    """A page heading that differs from the nav label (Contacts), and one sentence."""
 
     def with_(extra):
         return lambda t: t.replace("order = 20\n", "order = 20\n" + extra)
