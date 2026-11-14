@@ -742,12 +742,12 @@ function addonTab(id) {
     const a = addons().find(a => a.name === id);
     return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, syncCard(state.settings)));
   }
-  // The add-on that repeats tickets is the Schedules page: its main button sits in the heading.
+  // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
   if (panelOf(id) === 'repeats') {
     const add = snapshot ? null : h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ New schedule');
     if (add) add.onclick = () => repeatsDialog(null, id);
-    return fragment(heading('Schedules', 'Repeat work on a plan you choose.', {actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || 'Repeat work on a plan you choose.', {actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
   }
   return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {actions:slot}), addonHost(id));
 }

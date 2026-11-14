@@ -188,8 +188,12 @@ def load_mobile(root: Path, orch_bin: str | None) -> dict | None:
     )
     choices = [h for h in (d.get("hours_choices") or []) if h in (4, 8, 12, 24)] or [4, 8, 12, 24]
     dh = d.get("default_hours")
+    phones = d.get("phones")
     return {
         "on": d["on"],
+        "phones": phones
+        if isinstance(phones, int) and not isinstance(phones, bool) and phones >= 0
+        else None,
         "default_hours": dh if dh in choices else 12,
         "hours_choices": choices,
         "awake": d.get("awake") if d.get("awake") in ("ok", "could_not_keep_awake") else None,
