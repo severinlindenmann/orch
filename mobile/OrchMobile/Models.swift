@@ -567,9 +567,8 @@ enum JSONCoding {
 /// Human wording for "last seen".
 func lastSeenText(_ iso: String?, online: Bool, now: Date = Date()) -> String {
     if online { return "Online" }
-    guard let iso, let date = ISO8601DateFormatter().date(from: iso) else { return "Asleep. Questions arrive when it wakes up." }
-    let f = RelativeDateTimeFormatter(); f.unitsStyle = .full
-    return "Asleep, last seen " + f.localizedString(for: date, relativeTo: now)
+    guard let iso, let date = SharedISO.iso.date(from: iso) else { return "Asleep. Questions arrive when it wakes up." }
+    return "Asleep, last seen " + SharedISO.relative.localizedString(for: date, relativeTo: now)
 }
 
 /// `POST /v1/phone/transcribe` answer.

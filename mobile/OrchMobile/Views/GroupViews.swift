@@ -53,7 +53,6 @@ enum GroupRoomRules {
     static func thinking(group: PhoneGroup, now: Date) -> [String] {
         guard !group.closed else { return [] }
         var working: [String: Date] = [:]
-        let formatter = ISO8601DateFormatter()
         for message in group.messages {
             let ws: String
             switch message.sender {
@@ -63,10 +62,7 @@ enum GroupRoomRules {
             guard group.members.contains(where: { $0.ws == ws }) else { continue }
             let kind = message.message.message.body.update?.kind
             if kind == "working" {
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                let fractional = formatter.date(from: message.at)
-                formatter.formatOptions = [.withInternetDateTime]
-                working[ws] = fractional ?? formatter.date(from: message.at)
+                working[ws] = SharedISO.isoFraction.date(from: message.at) ?? SharedISO.iso.date(from: message.at)
             } else if kind != "ack", !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 working[ws] = nil
             }

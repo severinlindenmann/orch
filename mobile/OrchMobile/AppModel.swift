@@ -175,8 +175,7 @@ final class AppModel {
         guard let lastUpdated else { return nil }
         let now = Date()
         if now.timeIntervalSince(lastUpdated) < 60 { return "Last updated just now" }
-        let f = RelativeDateTimeFormatter(); f.unitsStyle = .full
-        return "Last updated \(f.localizedString(for: min(lastUpdated, now), relativeTo: now))"
+        return "Last updated \(SharedISO.relative.localizedString(for: min(lastUpdated, now), relativeTo: now))"
     }
 
     var relayHost: String { credentials?.relay.host ?? invite?.host ?? "your server" }
@@ -474,7 +473,7 @@ final class AppModel {
     func answerTime(for questionId: String) -> Date? {
         if let sent = answerSentAt[questionId] { return sent }
         return outbox.items.first { $0.kind == .answer && $0.questionMessageId == questionId }
-            .flatMap { ISO8601DateFormatter().date(from: $0.createdAt) }
+            .flatMap { SharedISO.iso.date(from: $0.createdAt) }
     }
 
     /// Acts on what the outbox did: answers recorded, refusals announced, sign-out handled.

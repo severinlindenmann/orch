@@ -124,6 +124,16 @@ final class PerfTests: XCTestCase {
         print(String(format: "PERF c_message_arrives_merge_plus_reads %.2f", best))
     }
 
+    /// Step 3: what the Chats list formats per row (time text, last seen, relative text) for 600 rows.
+    func testFormatterCost() {
+        let isos = (0..<600).map { iso($0) }
+        let now = Date(timeIntervalSince1970: 1_790_000_000 + 600 * 60)
+        timed("d_format_600_rows") {
+            for s in isos { _ = ChatBuilder.timeText(s, now: now); _ = ShellTime.short(s, now: now); _ = lastSeenText(s, online: false, now: now) }
+        }
+        XCTAssertFalse(ShellTime.short("2026-11-11T14:02:30.250Z", now: now).isEmpty, "fractional seconds still parse")
+    }
+
     func testDerivedDataIsRebuiltOnlyWhenAnInputChanges() async throws {
         let m = await loadedModel()
         _ = m.workspaceSummaries

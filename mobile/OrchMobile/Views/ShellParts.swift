@@ -55,10 +55,7 @@ enum ShellTime {
     static func date(_ iso: String?) -> Date? {
         guard let iso else { return nil }
         let clean = String(iso.prefix(while: { $0 != "~" }))
-        let f = ISO8601DateFormatter()
-        if let date = f.date(from: clean) { return date }
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.date(from: clean)
+        return SharedISO.iso.date(from: clean) ?? SharedISO.isoFraction.date(from: clean)
     }
     static func short(_ iso: String?, now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let date = date(iso) else { return "" }
@@ -72,8 +69,7 @@ enum ShellTime {
         return formatted(date, "EEE d MMM")
     }
     private static func formatted(_ date: Date, _ format: String, timeZone: TimeZone = .current) -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = format; f.timeZone = timeZone
-        return f.string(from: date)
+        SharedISO.formatter(format, localeId: "en_GB", timeZone: timeZone).string(from: date)
     }
 }
 
