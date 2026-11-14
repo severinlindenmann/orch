@@ -1122,7 +1122,7 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             '--description "<what this is about>". Do this before you add tasks. It only works while the '
             "title is a placeholder: a title a person wrote is never changed.",
         )
-    elif not tickets.tidied(ticket) and not ticket.get("checklist"):  # first pickup of a new ticket
+    elif not tickets.tidied(root, ticket) and not ticket.get("checklist"):  # first pickup of a new ticket
         out.insert(
             1,
             "FIRST tidy this new ticket, directly, do not ask anyone: fix typos and write a short clear "

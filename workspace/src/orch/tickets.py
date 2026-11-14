@@ -1394,10 +1394,9 @@ def set_auto_title(root: Path, tid: str, title: str, by: str, description: str |
 TIDY_LINE = "Title tidied from: "
 
 
-def tidied(ticket: dict) -> bool:
-    return any(
-        str(h.get("text", "")).startswith((TIDY_LINE, "Ticket tidied")) for h in ticket.get("history") or []
-    )
+def tidied(root: Path, ticket: dict) -> bool:
+    lines = history.lines(root, ticket)
+    return any(str(h.get("text", "")).startswith((TIDY_LINE, "Ticket tidied")) for h in lines)
 
 
 def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) -> dict:
@@ -1412,7 +1411,7 @@ def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) 
         clean_field(k, v)
 
     def op(ticket):
-        if tidied(ticket):
+        if tidied(root, ticket):
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
         if title != old:
