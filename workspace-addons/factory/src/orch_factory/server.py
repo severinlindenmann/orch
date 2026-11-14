@@ -38,7 +38,7 @@ TYPES = {
     "js": "text/javascript",
 }
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
-CSP = "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"
 ORDER_PATH = re.compile(r"/api/order/(t_[a-z0-9]{6,16})(?:/(draft|file)/(.+))?")
 
 

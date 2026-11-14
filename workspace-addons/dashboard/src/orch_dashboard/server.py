@@ -119,6 +119,16 @@ def web_file(name: str) -> bytes:
     return resources.files("orch_dashboard").joinpath("web", name).read_bytes()
 
 
+def page_asset(name: str) -> bytes:
+    """A file the page links: kit/<file> comes from the master kit (orch_ui), anything else from web/."""
+    if name.startswith("kit/"):
+        got = kit_file(name[4:])
+        if got is None:
+            raise FileNotFoundError(name)
+        return got[0]
+    return web_file(name)
+
+
 _PORTS: dict[tuple[str, str], tuple[float, int | None, object]] = {}
 PORT_KEEP = 60.0  # seconds a running add-on's port is remembered: `orch status` costs about 0.2 s
 # Files a browser may keep for a minute: an add-on page's own styles, scripts and pictures (never its pages or data)

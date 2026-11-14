@@ -42,7 +42,7 @@ TYPES = {
     "js": "text/javascript",
 }
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
-CSP = "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"
 
 
 def read_counts(root, orch_bin=None):
