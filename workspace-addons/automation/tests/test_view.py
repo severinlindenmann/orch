@@ -394,3 +394,19 @@ def test_recent_runs_and_last_result_read_the_same_runs(ws):
     (lst,) = blocks(v, "list", "Recent runs")
     assert [i["title"] for i in lst["items"]] == ["Weekly report"]
     assert lst["items"][0]["chips"] == [{"label": "Started", "tone": "neutral"}]
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["daily 08:00", "every monday 08:00", "0 8 * * 1,3", "monthly 5 08:00", "0 8 */3 * *"],
+)
+def test_every_phrase_the_dashboard_sends_is_saved_and_listed(ws, monkeypatch, phrase):
+    """The dashboard's Save schedule sends one of these phrases: after the save the list must show that row."""
+    from orch_automation import service
+    from orch_automation.actions import act
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    add_ticket(ws, "t_save0001", title="TEST: save then list")
+    assert act(ws, "repeat", "t_save0001", by="human:tester", value=phrase)["recurring"] is True
+    (rep,) = blocks(build(ws, T(15, 2)), "table")
+    assert [r for r in rep["rows"] if "save then list" in json.dumps(r)], "the saved schedule is not listed"
