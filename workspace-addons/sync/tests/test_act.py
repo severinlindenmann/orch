@@ -618,3 +618,17 @@ def test_a_two_sided_review_too_large_as_a_whole_is_refused(root, monkeypatch):
 
 def test_review_size_counts_utf16_units():
     assert act._units("a") == 1 and act._units("\U0001f600") == 2  # an astral character is 2 in the dashboard
+
+
+def test_secret_row_without_a_file_to_leave_out_offers_no_answer_buttons(root, monkeypatch):
+    """fb14: a "Keep mine / Keep theirs" question with no buttons of its own could only fail in the dashboard."""
+    paused = {
+        "files": ["ticket-counter.json"],
+        "since": "2026-11-11T10:12:00Z",
+        "reason": "a secret was found",
+    }
+    monkeypatch.setattr(cli, "read", lambda *a: {})
+    monkeypatch.setattr(pause, "verified_pause", lambda *a: paused)
+    rows = needs.rows(root)
+    assert [r["kind"] for r in rows] == ["sync:secret"]
+    assert "answer" not in rows[0] and not rows[0].get("actions")

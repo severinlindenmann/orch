@@ -31,16 +31,33 @@ test('proposal offers a person Make ticket, then the same ticket card as every o
   c.snapshot = true;
   assert.equal(c.chatRefs([{kind:'proposal',title:'Fish'}], 'x')[0].attrs.disabled, true);
 });
-test('Open helper starts empty and shows only the latest conversation after sending', () => {
+// Owner feedback 14 Nov, fb25: "Ask the helper" opened an empty chat; the history only showed after a reload.
+test('Open helper shows the existing helper conversation with its history right away', () => {
   const c = context();
   c.state.chat.messages = [{id:'old', text:'Old'}, {id:'new', text:'Fish', convo_start:true}];
   c.chatOpenAgent();
   assert.equal(c.location.hash, '#chat');
-  assert.equal(c.chatConversation().length, 0);
-  assert.match(JSON.stringify(c.chatHeader(null, false)), /New conversation with your helper/);
-  assert.doesNotMatch(JSON.stringify(c.chatHeader(null, false)), /agent/);
-  vm.runInContext('chatUi.newConversation = false', c);
-  assert.deepEqual(Array.from(c.chatConversation(), m => m.id), ['new']);
+  assert.deepEqual(Array.from(c.chatConversation(), m => m.id), ['old', 'new']);
+  assert.doesNotMatch(JSON.stringify(c.chatHeader(null, false)), /New conversation/);
+});
+// fb16: "Your helper is thinking…" for ever when no helper started
+test('thinking turns into a plain line after a minute without a helper, with Start when background work is off', () => {
+  const c = context();
+  const at = new Date(Date.now() - 5 * 60000).toISOString();
+  c.state.chat.messages = [{id:'m1', by:'you', text:'hi', at}];
+  c.state.services = [{addon:'automation', running:false}];
+  let thread = JSON.stringify(c.chatThread(null, null));
+  assert.doesNotMatch(thread, /is thinking/);
+  assert.match(thread, /Your helper is not running/);
+  assert.match(thread, /"data-action":"start"/);
+  c.state.services = [];
+  thread = JSON.stringify(c.chatThread(null, null));
+  assert.doesNotMatch(thread, /is thinking|"data-action":"start"/);
+  assert.match(thread, /has not answered yet/);
+  c.state.chat.messages = [{id:'m1', by:'you', text:'hi', at:new Date(Date.now() - 10000).toISOString()}];
+  assert.match(JSON.stringify(c.chatThread(null, null)), /is thinking/);
+  c.state.chat.messages = [{id:'m1', by:'you', text:'hi', at}]; c.state.chat.running = true;
+  assert.match(JSON.stringify(c.chatThread(null, null)), /is thinking/);
 });
 test('moved conversation renders its banner and header ticket link', () => {
   const c = context();
