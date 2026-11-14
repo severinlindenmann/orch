@@ -434,6 +434,9 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .blk .table-wrap{border:0;border-radius:0}
 .blk-table .subline{display:block;font-size:12px;line-height:16px;color:var(--text-faint);margin-top:4px}
 .blk-table td .row{flex-wrap:nowrap}
+/* Short cells and button labels never break ("Edi/t", "Run/now"); the first cell (the name) may wrap, a narrow window scrolls the table. */
+.blk-table td:not(:first-child),.blk-table td .btn{white-space:nowrap}
+.blk-table td:has(.row){width:1%}
 .blk-table .cell-link{color:var(--text);font-weight:500;text-decoration:none}.blk-table .cell-link:hover{text-decoration:underline}
 .repeat-dialog{width:min(640px,calc(100% - 32px))}
 .repeat-dialog .form-fields{display:grid;gap:24px}
