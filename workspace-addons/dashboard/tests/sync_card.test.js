@@ -317,3 +317,40 @@ test('a row with options but no ticket and no buttons is a notice in plain words
   assert.equal(calls.length, 0);
   assert.equal(all(c.home(), n => String(n.attrs?.className || '').includes('home-need')).length, 0, 'gone for today');
 });
+
+// Owner feedback 14 Nov fb9: the Sync page itself changes the settings (no redirect to Settings), and says in
+// plain words what is wrong with one button to press.
+test('fb9: #addon/sync shows the real Sync controls on the page itself, no link away to Settings', async () => {
+  const {c, ui} = context({settings:{...ON}});
+  c.route = () => ({kind:'addon', id:'sync'});
+  vm.runInContext("route = () => ({kind:'addon', id:'sync'}); addons = () => [{name:'sync', active:true, dashboard:{label:'Sync', subtitle:'Keep another copy.'}}];", c);
+  ui.card = {...BASE};
+  const page = c.addonTab('sync');
+  assert.ok(byKey(page, 'settings-sync'), 'the sync card is on the page');
+  assert.ok(byKey(page, 'sync-where-remote'), 'the three places are on the page');
+  assert.equal(all(page, n => n.tag === 'a' && /settings/.test(n.attrs?.href || '')).length, 0, 'no link to Settings');
+  assert.equal(text(byKey(page, 'sync-addr') || ''), '');
+  assert.equal(byKey(page, 'sync-addr').attrs.value, 'https://files.example.org/mia/month-end');
+});
+
+test('fb9: the sync status loads while the Sync page is open', async () => {
+  const {c, calls} = context({settings:{...ON}, answers:{status:{...BASE}}});
+  vm.runInContext("route = () => ({kind:'addon', id:'sync'});", c);
+  await c.syncLoad();
+  assert.deepEqual(calls.map(([, a]) => a.verb), ['status']);
+});
+
+test('fb9: a paused sync says in plain words what is wrong and has one button to press', () => {
+  const {c, ui} = context({settings:{...ON}});
+  ui.card = {...BASE, shown:'paused', paused_needs:1, last_error:'Not synced: tickets/t_awwgkw.json: secret'};
+  const card = c.syncCard(ON);
+  const line = text(byKey(card, 'sync-paused-help'));
+  assert.match(line, /password or access key/);
+  assert.doesNotMatch(line, /t_awwgkw|: secret/);
+  const button = byKey(card, 'sync-paused-button');
+  assert.equal(button.tag, 'a');
+  assert.equal(button.attrs.href, '#home');
+  assert.equal(text(button), 'Review it now');
+  const err = text(byKey(card, 'sync-last-error'));
+  assert.doesNotMatch(err, /: secret$/);
+});
