@@ -389,11 +389,15 @@ class Handler(BaseHTTPRequestHandler):
 
             return self._send(200, json.dumps(handoff.listing(self.root)).encode(), "application/json")
         if path == "/api/term":  # the live helper session's screen (read only; typing is POST /api/term/keys)
+            if not self._same_origin():
+                return self._send(403, b"forbidden", "text/plain")
             from . import termsession
 
             tid = parse_qs(self.path.partition("?")[2]).get("ticket", [""])[0]
             snap = termsession.snapshot(self.root, self.orch_bin, tid)
-            return self._send(200, json.dumps(snap).encode(), "application/json")
+            return self._send(
+                200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/events":
             return self._events()
         if path == "/api/ref-file":

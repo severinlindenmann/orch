@@ -55,3 +55,12 @@ test('typed letters are merged into one text item, other keys stay apart', () =>
   const out = T.merge([{t: 'h'}, {t: 'i'}, {k: 'Enter'}, {t: '!'}]);
   assert.deepEqual(JSON.parse(JSON.stringify(out)), [{t: 'hi'}, {k: 'Enter'}, {t: '!'}]);
 });
+
+test('typing state, ordered sends, batch limits and the waiting line are in term.js', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_focus/web/term.js'), 'utf8');
+  assert.match(src, /Typing into the helper’s session/);
+  assert.match(src, /chain = chain\.then\(flush, flush\)/);
+  assert.match(src, /items\.length < 40 && size \+ \(all\[0\]\.t \|\| ''\)\.length <= 12000/);
+  assert.match(src, /Your helper is waiting for an answer in its session/);
+  assert.match(src, /status === 409/);
+});

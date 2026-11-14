@@ -190,3 +190,49 @@ def test_a_watch_only_server_never_types(helper, tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+@pytest.mark.parametrize("text", ["a;", ";", "a\\;", "x;y"])
+def test_a_semicolon_stays_literal(helper, tmp_path, text):
+    orch, _ = helper
+    assert termsession.keys(tmp_path, orch, TID, [{"t": text}])[0] == 200
+    time.sleep(0.4)
+    assert text in screen(tmp_path, orch)["screen"]
+
+
+@pytest.mark.parametrize("text", ["a\x1b[31m", "x\x07", "y\x9b", "z\x7f"])
+def test_control_characters_are_refused_but_tab_and_newline_are_not(helper, tmp_path, text):
+    orch, _ = helper
+    assert termsession.keys(tmp_path, orch, TID, [{"t": text}])[0] == 400
+    assert termsession.keys(tmp_path, orch, TID, [{"t": "a\tb\n"}])[0] == 200
+
+
+def test_waiting_input_needs_a_quiet_screen_and_a_question():
+    k = ("orch-0badf00d", "t_wait0001")
+    ask = "working\nDo you want to proceed? (y/n)"
+    assert termsession.waiting_input(k, ask, 100.0) is False  # first sight
+    assert termsession.waiting_input(k, ask, 110.0) is False  # not quiet long enough
+    assert termsession.waiting_input(k, ask, 125.0) is True
+    assert termsession.waiting_input(k, ask + "!", 130.0) is False  # the screen changed
+    k2 = ("orch-0badf00d", "t_wait0002")
+    termsession.waiting_input(k2, "building...", 1.0)
+    assert termsession.waiting_input(k2, "building...", 60.0) is False  # quiet but not a question
+
+
+def test_the_screen_route_is_same_origin_and_not_cached(helper, tmp_path):
+    orch, _ = helper
+    (tmp_path / ".orch" / "tickets").mkdir(parents=True)
+    srv, base = serve(tmp_path, orch, Person(True))
+    try:
+        req = urllib.request.Request(base + "/api/term?ticket=" + TID)
+        with urllib.request.urlopen(req) as r:
+            assert r.headers["Cache-Control"] == "no-store"
+        req = urllib.request.Request(
+            base + "/api/term?ticket=" + TID, headers={"Sec-Fetch-Site": "cross-site"}
+        )
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req)
+        assert e.value.code == 403
+    finally:
+        srv.shutdown()
+        srv.server_close()

@@ -37,7 +37,29 @@ KEYS = frozenset(
     }
 )
 MAX_ITEMS, MAX_TEXT, TIMEOUT = 40, 2000, 3.0
+CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # no raw control/escape bytes in text; \t and \n allowed
 _MARK = "@@orch "
+QUIET = 20.0  # seconds the screen must stay the same before it counts as "waiting"
+_ASK = re.compile(r"(do you want|\(y/n\)|\[y/n\]|allow|press enter|\bconfirm\b|proceed\?)", re.IGNORECASE)
+_SEEN: dict[tuple[str, str], tuple[str, float]] = {}
+
+
+def _literal(t: str) -> str:
+    """tmux ends a command at an argument that ends in an unescaped ';' (and drops it): keep it literal."""
+    return t[:-1] + "\\;" if t.endswith(";") else t
+
+
+def waiting_input(key: tuple[str, str], screen: str, now: float | None = None) -> bool:
+    """The screen has not changed for QUIET seconds and its last lines look like a question or a confirm prompt."""
+    import time
+
+    now = time.monotonic() if now is None else now
+    old = _SEEN.get(key)
+    if old is None or old[0] != screen:
+        _SEEN[key] = (screen, now)
+        return False
+    tail = "\n".join([ln for ln in screen.split("\n") if ln.strip()][-4:])
+    return now - old[1] >= QUIET and bool(_ASK.search(tail))
 
 
 def _tmux(socket: str, *args: str, timeout: float = TIMEOUT) -> subprocess.CompletedProcess:
@@ -99,6 +121,7 @@ def snapshot(root: Path, orch_bin: str | None, tid: str) -> dict:
         "rows": rows,
         "scrolled": mode != 0,
         "cursor": cur == 1,
+        "waiting_input": waiting_input((sock, sess), screen),
     }
 
 
@@ -110,8 +133,8 @@ def keys(root: Path, orch_bin: str | None, tid: str, items) -> tuple[int, str]:
     for it in items:
         if not isinstance(it, dict) or len(it) != 1:
             return 400, "That request could not be read."
-        if isinstance(it.get("t"), str) and 0 < len(it["t"]) <= MAX_TEXT and "\x00" not in it["t"]:
-            plan.append(["-l", "--", it["t"]])
+        if isinstance(it.get("t"), str) and 0 < len(it["t"]) <= MAX_TEXT and not CTRL.search(it["t"]):
+            plan.append(["-l", "--", _literal(it["t"])])
         elif isinstance(it.get("k"), str) and it["k"] in KEYS:
             plan.append([it["k"]])
         else:

@@ -72,17 +72,26 @@
     const body = h('div', {class: 'term-b fx-term-b', 'aria-hidden': 'true'});
     const hint = h('span', {class: 'meta fx-term-hint', text: 'Click the screen to type into the session · Shift+Tab to leave'});
     const view = h('div', {class: 'fx-term-view', tabindex: '0', role: 'group', 'data-term': '', 'aria-label': 'Live session of the helper. Press a key to type.'}, body);
-    const card = h('div', {class: 'term fx-term', hidden: true}, h('div', {class: 'term-h'}, dot, h('span', {text: 'Live session of Helper (the real session)'}), h('span', {class: 'grow'})), view, h('div', {class: 'fx-term-foot'}, hint));
+    const badge = h('span', {class: 'badge fx-term-typing', hidden: true, text: 'Typing into the helper’s session'});
+    const IDLE = 'Click the screen to type into the session · Shift+Tab to leave';
+    const card = h('div', {class: 'term fx-term', hidden: true}, h('div', {class: 'term-h'}, dot, h('span', {text: 'Live session of Helper (the real session)'}), h('span', {class: 'grow'}), badge), view, h('div', {class: 'fx-term-foot'}, hint));
+    const setTyping = () => {
+      const on = canType && document.activeElement === view;
+      card.dataset.typing = on ? '1' : '';
+      badge.hidden = !on;
+      hint.textContent = !canType ? 'You can watch here. Open the dashboard from this computer to type.' : on ? 'Your keys go to the helper’s session · Shift+Tab to stop' : IDLE;
+    };
+    const ask = h('div', {class: 'fx-term-ask row', hidden: true}, h('span', {class: 'grow', text: 'Your helper is waiting for an answer in its session.'}), h('button', {class: 'btn sm primary', type: 'button', text: 'Answer in the session', onclick: () => view.focus()}));
     const note = h('p', {class: 'meta fx-term-note', hidden: true});
-    host.prepend(card, note);
+    card.insertBefore(ask, card.firstChild); host.prepend(card, note);
     let queue = [], timer = null, canType = true, busy = false, last = '';
     const render = snap => {
       if (snap.state === 'live') {
         card.hidden = false; note.hidden = true;
         const key = JSON.stringify([snap.screen, snap.cx, snap.cy, snap.cursor, document.activeElement === view]);
         if (key !== last) { last = key; body.replaceChildren(...paint(snap.screen, snap.cx, snap.cy, snap.cursor && !snap.scrolled && document.activeElement === view)); }
-        view.dataset.readonly = canType ? '' : '1';
-        hint.textContent = canType ? 'Click the screen to type into the session · Shift+Tab to leave' : 'You can watch here. Open the dashboard from this computer to type.';
+        view.dataset.readonly = canType ? '' : '1'; setTyping();
+        ask.hidden = !snap.waiting_input;
         return;
       }
       card.hidden = true; last = '';
@@ -95,16 +104,22 @@
       try { const r = await fetch('/api/term?ticket=' + TID); if (r.ok) render(await r.json()); } catch (e) { /* next poll */ }
       busy = false;
     }
+    let chain = Promise.resolve();
+    const schedule = () => { if (!timer) timer = setTimeout(() => { timer = null; chain = chain.then(flush, flush); }, 25); };
     async function flush() {
-      timer = null;
-      const items = merge(queue.splice(0, queue.length));
-      if (!items.length) return;
+      const all = merge(queue.splice(0, queue.length));
       let secret = ''; try { secret = sessionStorage.getItem('orch_page_secret') || ''; } catch (e) { /* none */ }
-      try {
-        const r = await fetch('/api/term/keys', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Orch-Page': secret}, body: JSON.stringify({ticket: TID, items})});
-        if (r.status === 403) { canType = false; S.toast('Open the dashboard from this computer to type here.', 'error'); }
-        else if (!r.ok && r.status !== 409) S.toast((await r.text()).slice(0, 120) || 'The session did not take that.', 'error');
-      } catch (e) { /* the screen shows what arrived */ }
+      while (all.length) {
+        const items = []; let size = 0;
+        while (all.length && items.length < 40 && size + (all[0].t || '').length <= 12000) { size += (all[0].t || '').length; items.push(all.shift()); }
+        if (!items.length) items.push(all.shift());
+        try {
+          const r = await fetch('/api/term/keys', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Orch-Page': secret}, body: JSON.stringify({ticket: TID, items})});
+          if (r.status === 403) { canType = false; setTyping(); S.toast('Open the dashboard from this computer to type here.', 'error'); return; }
+          if (r.status === 409) { S.toast('The live session has ended; those keys were not sent.', 'error'); return; }
+          if (!r.ok) { S.toast((await r.text()).slice(0, 120) || 'The session did not take that.', 'error'); return; }
+        } catch (e) { return; }
+      }
       setTimeout(poll, 120);
     }
     view.addEventListener('keydown', e => {
@@ -112,17 +127,17 @@
       if (!it) return;
       e.preventDefault(); e.stopPropagation();
       queue.push(it);
-      if (!timer) timer = setTimeout(flush, 25);
+      schedule();
     });
     view.addEventListener('paste', e => {
       const t = (e.clipboardData && e.clipboardData.getData('text')) || '';
       e.preventDefault();
       if (!canType || !t) return;
-      for (let i = 0; i < t.length; i += 2000) queue.push({t: t.slice(i, i + 2000).replace(/\r\n?/g, '\n').replace(/\x00/g, '')});
-      if (!timer) timer = setTimeout(flush, 25);
+      for (let i = 0; i < t.length; i += 2000) queue.push({t: t.slice(i, i + 2000).replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '')});
+      schedule();
     });
-    view.addEventListener('focus', () => { last = ''; poll(); });
-    view.addEventListener('blur', () => { last = ''; poll(); });
+    view.addEventListener('focus', () => { last = ''; setTyping(); poll(); });
+    view.addEventListener('blur', () => { last = ''; setTyping(); poll(); });
     body.addEventListener('click', () => view.focus());
     setInterval(() => { if (S.state.view && S.state.view.run.running) poll(); }, 1000);
     poll();

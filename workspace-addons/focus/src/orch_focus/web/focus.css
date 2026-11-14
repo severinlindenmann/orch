@@ -790,3 +790,7 @@ input.switch[type=checkbox]{appearance:none;width:36px;height:24px;min-width:36p
 .fx-term-foot{padding:8px 12px;border-top:1px solid var(--border)}
 .fx-term-b{min-height:120px}
 .fx-term-foot{font-family:var(--font-ui)}
+.fx-term[data-typing="1"] .fx-term-view{box-shadow:inset 0 0 0 2px var(--brand)}
+.fx-term[data-typing="1"] .fx-term-foot{color:var(--brand)}
+.fx-term-ask{align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--warning-soft,var(--surface-2))}
+.fx-term-ask[hidden]{display:none}
