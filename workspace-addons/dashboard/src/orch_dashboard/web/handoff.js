@@ -125,12 +125,20 @@
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(box, anchor); else document.body.insertBefore(box, document.body.firstChild);
     return box;
   }
-  function source() {  // where the request came from: one plain line, no disclosure
-    var p = el("p", "Requested from a terminal on this computer.", "meta"); p.style.cssText = "margin:0;font-size:12px";
+  function ago(at, now) {  // "5 min ago": how old a request is, in plain words
+    var s = Math.max(0, Math.floor(((now == null ? Date.now() : now) / 1000) - Number(at)));
+    if (!Number(at) || s < 60) return "just now";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + " min ago";
+    var h = Math.floor(m / 60);
+    return h + (h === 1 ? " hour ago" : " hours ago");
+  }
+  function source(i) {  // where the request came from and how old it is: one plain line, no disclosure
+    var p = el("p", "Asked " + ago(i && i.at) + ", from a terminal on this computer.", "meta"); p.style.cssText = "margin:0;font-size:12px";
     return p;
   }
   function render(items) {
-    var key = JSON.stringify(items) + open;
+    var key = JSON.stringify(items) + open + Math.floor(Date.now() / 60000);
     if (key === seen) return;
     seen = key;
     var b = slot();
@@ -141,7 +149,7 @@
     if (items.length === 1) {
       head.appendChild(sentence(items[0])); head.appendChild(buttons(items[0])); b.appendChild(head);
       var x1 = exact(items[0]); if (x1) b.appendChild(x1);
-      b.appendChild(source());
+      b.appendChild(source(items[0]));
       return;
     }
     var sum = el("span", items.length + " requests waiting"); sum.style.cssText = "flex:1;font-weight:600";
@@ -152,9 +160,9 @@
       var r = el("div"); r.style.cssText = "display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;border-top:1px solid var(--border);padding-top:8px";
       r.appendChild(sentence(i)); r.appendChild(buttons(i));
       var x = exact(i); if (x) r.appendChild(x);
+      r.appendChild(source(i));
       b.appendChild(r);
     });
-    b.appendChild(source());
   }
   function poll() {
     fetch("/api/handoffs", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : []; }).then(render).catch(function () {});
@@ -181,9 +189,12 @@
     }).catch(function () {});
   }
   var shown = "";
+  // the update banners ("started", then the outcome): ONE at a time, a new one replaces the old; "Got it" clears it
   function banner(text) {
+    var old = document.querySelectorAll ? document.querySelectorAll(".orch-update-banner") : [];
+    for (var k = 0; k < old.length; k++) old[k].remove();
     var b = el("div", text, "orch-notice"); b.setAttribute("role", "status");
-    b.className = "banner info orch-notice"; b.style.cssText = "margin:8px 16px 0";
+    b.className = "banner info orch-notice orch-update-banner"; b.style.cssText = "margin:8px 16px 0";
     var x = el("button", "Got it"); x.type = "button"; x.style.cssText = "margin-left:12px"; x.onclick = function () { b.remove(); };
     b.appendChild(x); place(b);
     return b;
@@ -214,6 +225,7 @@
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
       var t = s.state === "finished" ? "Update finished." : "Update failed: " + why + ".";
       if (t !== shown) { shown = t; startedGone(); banner(t); }
+      poll();  // an update request that waited no longer applies: it is gone from the list now
     }).catch(function () { updateOverdue(true); });
   }
   notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
