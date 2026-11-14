@@ -1,0 +1,159 @@
+/* Widgets added to the master 14 Nov (owner: one big master). Ported from the Oct orch-core React kit and the 14 Nov sweep
+   (SX-1..20), plain CSS on the tokens. Each has an entry in gallery.html. Add new widgets HERE, never in a page. */
+
+/* Type scale (SX-2): 28/36 title, 20/28 section + dialog title, 16/24 row + card title, 14/20 body, 13/18 meta, 12/16 label */
+.t-title{font-size:28px;line-height:36px;font-weight:600}.t-sect{font-size:20px;line-height:28px;font-weight:600}.t-row{font-size:16px;line-height:24px;font-weight:500}.t-body{font-size:14px;line-height:20px}.t-meta{font-size:13px;line-height:18px;color:var(--text-muted)}.t-eyebrow{font-size:12px;line-height:16px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-faint)}
+.sec-title{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-faint)}
+.stack-lg{display:grid;gap:20px}.stack-sm{display:grid;gap:8px}.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}.row-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.pad-card{padding:16px}.pad-card>*+*{margin-top:12px}
+.quiet-note{color:var(--text-muted);font-size:13px;padding-top:12px;border-top:1px solid var(--border)}
+
+/* Status icon set (SX-9): one SVG per state, used in pills, group headers, rows. UI.statusIcon(name) builds them. */
+.st{display:inline-block;width:16px;height:16px;flex:none;vertical-align:-3px}
+.st.todo{color:var(--text-faint)}.st.working{color:var(--working)}.st.needs{color:var(--warning)}.st.check{color:var(--text-muted)}.st.done{color:var(--success)}
+.st.working .arc{transform-origin:12px 12px;animation:orch-spin 1.2s linear infinite}
+@keyframes orch-spin{to{transform:rotate(360deg)}}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px 2px 6px;border:1px solid var(--border);border-radius:99px;font-size:13px;line-height:18px;background:var(--surface-2);color:var(--text)}
+.pill.needs{color:var(--warning)}.pill.working{color:var(--working)}.pill.done{color:var(--success)}
+.dot-ok,.dot-warn,.dot-work,.dot-err{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot-ok{background:var(--success)}.dot-warn{background:var(--warning)}.dot-work{background:var(--working)}.dot-err{background:var(--danger)}
+
+/* Select trigger look for static mockups and non-native pickers (the real <select> is enhanced by select.js) */
+.select-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px;min-width:140px;padding:6px 10px 6px 12px;border:1px solid var(--input);border-radius:8px;background:var(--surface-2);color:var(--text);font:inherit}
+.select-btn .chev{color:var(--text-muted)}.select-btn.open .chev{transform:rotate(180deg)}.select-btn.sm{min-height:32px;min-width:0}
+.text-input{min-height:36px;padding:6px 12px;border:1px solid var(--input);border-radius:8px;background:var(--bg);color:var(--text);font:inherit}
+.text-input.num{width:72px;text-align:center}
+.chip-btn{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:4px 12px;border:1px solid var(--border);border-radius:99px;background:var(--surface-2);color:var(--text-muted);font:inherit;font-size:13px;text-decoration:none;transition:background var(--dur-fast) ease,color var(--dur-fast) ease}
+.chip-btn:hover{background:var(--surface-3);color:var(--text)}.chip-btn .n{font-size:12px;color:var(--text-faint)}.chip-btn.dash{border-style:dashed}
+.chip.sel,.chip-btn.sel{background:var(--brand-soft);color:var(--brand-strong);border-color:transparent}
+
+/* Empty / error component (SX-10, SX-11): <= 240 px, icon, one sentence, one action. UI.state() builds it. */
+.empty-state{display:grid;justify-items:center;gap:8px;text-align:center;padding:24px;max-height:240px}
+.empty-state .ico{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--surface-3);color:var(--text-muted)}
+.empty-state.err .ico{background:var(--danger-soft);color:var(--danger)}
+.empty-state p{margin:0;color:var(--text-muted);max-width:48ch}
+
+/* Stat tile (KPI): label, big value, optional change. Max five per page. */
+.stat-tile{display:grid;gap:4px;padding:16px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);min-width:0}
+.stat-tile .stat-label{font-size:12px;line-height:16px;color:var(--text-muted)}
+.stat-tile .stat-value{font-size:28px;line-height:36px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat-tile .stat-delta{font-size:13px;line-height:18px;color:var(--text-muted)}.stat-delta.up{color:var(--success)}.stat-delta.down{color:var(--danger)}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+
+/* Progress with label */
+.progress-labeled{display:grid;gap:4px}.progress-labeled .progress-text{display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted)}
+
+/* Sortable table header */
+.table-wrap th[aria-sort]{cursor:pointer;user-select:none;white-space:nowrap}
+.table-wrap th[aria-sort] .chev{margin-left:4px;opacity:.35;vertical-align:-3px}
+.table-wrap th[aria-sort=ascending] .chev,.table-wrap th[aria-sort=descending] .chev{opacity:1}
+.table-wrap th[aria-sort=ascending] .chev{transform:rotate(180deg)}
+
+/* Tooltip on any [data-tip] (keyboard focus too). Only reinforces shortcuts; a primary label never needs one. */
+[data-tip]{position:relative}
+[data-tip]:hover:after,[data-tip]:focus-visible:after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);padding:6px 10px;background:var(--surface-3);border:1px solid var(--border-strong);border-radius:6px;font-size:12px;line-height:16px;font-weight:400;white-space:nowrap;color:var(--text);z-index:50;pointer-events:none}
+
+/* Dialog sizes S / M / L with the footer rule [tertiary] ... [Cancel] [Primary] (SX-13) */
+.dlg{background:var(--surface);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow)}
+.dlg>*{padding:16px 20px}.dlg>*+*{border-top:1px solid var(--border)}
+.dlg.s{width:360px;max-width:100%}.dlg.m{width:480px;max-width:100%}.dlg.l{width:640px;max-width:100%}
+.dlg-h{display:flex;justify-content:space-between;align-items:center}.dlg-h h2{font-size:20px;line-height:28px;margin:0}
+.dlg-f{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.sheet-h h2{margin:0;font-size:20px;line-height:28px}
+
+/* Strip (ticket header), list-row link, history list, key/value helper */
+.strip{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}
+.strip-h{display:flex;align-items:center;gap:16px;padding:16px 20px;flex-wrap:wrap}.strip .tabs{padding:0 20px;gap:20px}
+.rowlink{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:16px;align-items:center;padding:16px;border-top:1px solid var(--border);color:inherit;text-decoration:none;transition:background var(--dur-fast) ease}.rowlink:hover{background:var(--surface-2)}
+.hist{list-style:none;margin:0;padding:0}.hist li{display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:center;padding:12px 16px}.hist li+li{border-top:1px solid var(--border)}
+.tag{font-size:12px;color:var(--text-muted);border:1px solid var(--border);border-radius:99px;padding:0 8px}
+
+/* Board (columns of cards, empty columns collapse) */
+.bd{display:grid;gap:12px;align-items:start}
+.bcol{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);min-width:0}
+.bcol-h{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 12px}
+.bcol.empty{writing-mode:vertical-rl;min-height:160px;display:flex;align-items:center;justify-content:flex-start;padding:12px 0;gap:8px;color:var(--text-muted)}
+.bcard{margin:0 12px 12px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);position:relative;transition:border-color var(--dur-fast) ease}
+.bcard:hover,.bcard.hov{border-color:var(--border-strong)}
+.bcard .act{position:absolute;right:8px;bottom:8px;opacity:0;transition:opacity var(--dur-fast) ease}.bcard:hover .act,.bcard.hov .act,.bcard:focus-within .act{opacity:1}
+
+/* File card (thumbnail + name + size + age) */
+.fcard{border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;background:var(--surface)}
+.fcard .th{height:96px;background:var(--bg);padding:10px;font-size:11px;line-height:14px;color:var(--text-muted);overflow:hidden;font-family:var(--font-mono)}.fcard .nm{padding:10px 12px}
+
+/* Motion helpers (SX-17): leave / enter for list changes */
+.leave{animation:orch-leave var(--dur-base) ease-in forwards}.enter{animation:orch-enter var(--dur-slow) var(--ease-enter) both}
+@keyframes orch-leave{to{opacity:0;transform:translateY(-6px)}}@keyframes orch-enter{from{opacity:0;transform:translateY(12px)}}
+@media (prefers-reduced-motion:reduce){.st.working .arc,.skeleton:after,.leave,.enter{animation:none}}
+
+/* ---- Patterns from the 14 Nov proposals (proposals/fb.css) and sweep drafts (sweep/sweep.css), moved here so no mockup has its own sheet.
+   Used by: person switch, terminal, Focus 3-pane, chat grid, stepper numbers, modal frames, comparison table, board/home notes. ---- */
+.person-switch{position:relative}
+.person-switch>summary{list-style:none;display:flex;align-items:center;gap:8px;min-height:40px;padding:8px;border-radius:8px;cursor:pointer;color:var(--text-muted)}
+.person-switch>summary::-webkit-details-marker{display:none}
+.person-switch>summary strong{color:var(--text);font-weight:500}
+.person-switch>summary:hover{background:var(--surface-2)}
+.person-switch .menu{top:auto;bottom:calc(100% + 8px);left:0;width:216px}
+.person-switch .menu-item .ck{margin-left:auto;color:var(--brand)}
+.qr{width:168px;height:168px;border-radius:8px;background:#fff;padding:8px;flex:none}
+.stepper .done-s{color:var(--success)}
+.stepper .now{color:var(--text)}
+.step-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--border-strong);font-size:12px}
+.done-s .step-n{background:var(--success-soft);border-color:transparent;color:var(--success)}
+.now .step-n{background:var(--brand);color:var(--on-brand);border-color:transparent}
+.lines{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--text)}
+.diff-from{color:var(--text-faint);text-decoration:line-through}
+.focus3{display:grid;grid-template-columns:280px minmax(0,1fr) 320px;gap:0;min-height:640px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:hidden}
+.focus3>*{min-width:0}
+.focus3>*+*{border-left:1px solid var(--border)}
+.focus-list .list-row{cursor:pointer}
+.focus-list .list-row.cur{background:var(--surface-2);box-shadow:inset 2px 0 var(--brand)}
+.term{background:var(--sidebar);border:1px solid var(--border);border-radius:8px;font-family:var(--font-mono);font-size:12.5px;line-height:20px;color:var(--text-muted);overflow:hidden}
+.term-h{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);font-family:var(--font-ui);font-size:12px}
+.term-b{padding:12px;display:grid;gap:2px}
+.term-b .c{color:var(--text)}
+.term-b .ok{color:var(--success)}
+.term-b .tool{color:var(--info)}
+.term-in{display:flex;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid var(--border);color:var(--text-faint)}
+.term-in b{color:var(--brand)}
+.caret{display:inline-block;width:7px;height:15px;background:var(--brand);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.caret{animation:none}}
+.msgs{display:grid;gap:12px;align-content:start}
+.msg{max-width:60ch;padding:12px 16px;border-radius:12px;background:var(--surface-2)}
+.msg.me{justify-self:end;background:var(--brand-soft)}
+.chat-grid{display:grid;grid-template-columns:272px minmax(0,1fr);gap:0;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);min-height:600px;overflow:hidden}
+.chat-grid>*+*{border-left:1px solid var(--border)}
+.composer-fb{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);align-items:center}
+.composer-fb .text-input{flex:1}
+.pop-anchor{position:relative}
+.pop-anchor .menu{top:calc(100% + 8px);left:0;width:272px}
+.menu .eyebrow{padding:8px 12px 4px}
+.modal-back{position:relative;min-height:620px;border-radius:var(--radius-card);background:#0008;display:grid;place-items:start center;padding-top:32px}
+.modal-box{width:520px;background:var(--surface);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow)}
+.modal-box>*{padding:16px 20px}
+.modal-box>*+*{border-top:1px solid var(--border)}
+.cmp{display:grid;grid-template-columns:140px 1fr 1fr;gap:0;border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden}
+.cmp>div{padding:16px;border-top:1px solid var(--border);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.cmp>div:nth-child(-n+3){border-top:0;background:var(--surface-2);font-weight:500}
+.cmp>div:nth-child(3n+2), .cmp>div:nth-child(3n+3){border-left:1px solid var(--border)}
+.old-sel{display:inline-flex;gap:8px;min-height:36px;align-items:center;padding:6px 12px;border:1px solid var(--input);border-radius:8px;background:var(--surface-2)}
+.demo-motion{width:48px;height:48px;border-radius:12px;background:var(--brand-soft);border:1px solid var(--brand);transition:transform var(--dur-slow) var(--ease-enter),opacity var(--dur-slow) var(--ease-enter)}
+.demo-motion.go{transform:translateX(96px)}
+.attn-card{border-left:2px solid var(--warning)}
+.home-note{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:start;padding:12px 16px}
+.home-note+.home-note{border-top:1px solid var(--border)}
+@media (prefers-reduced-motion:reduce){.st.working .arc,.skeleton:after{animation:none}}
+.bcol.empty .st{transform:rotate(0)}
+.gal{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.tbl{width:100%;table-layout:fixed;border-collapse:collapse}
+.tbl th{text-align:left;font-weight:500;color:var(--text-faint);font-size:12px;padding:8px 16px}
+.tbl td{padding:12px 16px;border-top:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rowlink .chev{transform:rotate(-90deg);color:var(--text-faint)}
+.radio-row{display:flex;gap:12px;align-items:flex-start;padding:12px 0}
+.frames{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.frame{border:1px dashed var(--border-strong);border-radius:var(--radius-card);padding:16px;display:grid;gap:12px;align-content:start;min-height:300px;position:relative}
+.qcard2{border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);padding:20px;display:grid;gap:12px}
+.mo-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.mo-cell{border:1px solid var(--border);border-radius:8px;padding:12px;min-height:120px;display:grid;gap:8px;align-content:start;overflow:hidden}
+.swatch-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
