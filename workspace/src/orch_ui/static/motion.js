@@ -64,7 +64,7 @@
     open(dialog) {
       if(typeof dialog==='string') dialog=document.querySelector(dialog);
       if(!dialog || dialog.open) return;
-      overlayState.set(dialog,{trigger:document.activeElement,overflow:document.body.style.overflow});document.body.style.overflow='hidden';
+      overlayState.set(dialog,{trigger:document.activeElement});
       dialog.dataset.state='opening';dialog.showModal();
       dialog.oncancel=e=>{e.preventDefault();api.close(dialog);};
     },
@@ -72,7 +72,7 @@
       if(typeof dialog==='string') dialog=document.querySelector(dialog);
       if(!dialog?.open || dialog.dataset.state==='closing') return;
       dialog.dataset.state='closing';await wait(reduce()?0:200);dialog.close();delete dialog.dataset.state;
-      const state=overlayState.get(dialog);document.body.style.overflow=state?.overflow||'';state?.trigger?.focus();
+      const state=overlayState.get(dialog);state?.trigger?.focus();
     },
     async resolve(row, focusTarget) {
       row.style.setProperty('--row-height',`${row.getBoundingClientRect().height}px`);row.classList.add('row-out');focusTarget?.focus();await wait(reduce()?0:160);row.remove();
