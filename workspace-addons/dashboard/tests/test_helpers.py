@@ -211,11 +211,12 @@ def test_a_file_proof_shows_when_it_was_added():
         == "hello.txt · 1 KB · yesterday 09:12"
     )
     assert (
-        call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now) == "hello.txt · 1 KB · 30 Oct 2026, 09:12"
+        call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now)
+        == "hello.txt · 1 KB · 30 Oct 2026, 09:12"
     )
     assert (
         call("fileProofLabel", {**ev, "at": "2025-12-24T07:00:00Z"}, now)
-        == "hello.txt · 1 KB · 24 Dec 2025 07:00"
+        == "hello.txt · 1 KB · 24 Dec 2025, 07:00"
     )
     assert call("fileProofLabel", {**ev, "at": "nonsense"}, now) == "hello.txt · 1 KB"
     assert call("fileProofLabel", {k: v for k, v in ev.items() if k != "at"}, now) == "hello.txt · 1 KB"
