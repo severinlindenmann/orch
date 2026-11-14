@@ -29,7 +29,7 @@
     var n = Number(p.n) > 0 ? "step " + Number(p.n) + ", " : "";
     var s = el("span"); s.appendChild(document.createTextNode(n)); s.appendChild(q(p.step)); return s;
   }
-  var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Review?"], back: ["Send ", " back to work?"]};
+  var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Check?"], back: ["Send ", " back to work?"]};
   var INSIGHTS_SETTING = {"insights.keep_days": "how long full detail is kept", "insights.max_mb": "the largest size of the record", "insights.share_counts": "sharing counts with your admin", "insights.share_names": "sharing this workspace's names"};
   function insightsValue(key, v) {  // plain words for the value; anything unexpected is shown capped, never as markup
     var n = Number(v);

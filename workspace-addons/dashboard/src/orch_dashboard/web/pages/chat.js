@@ -213,7 +213,7 @@ function chatTicketCard(ref, key, readOnly) {
   const word = open.length ? 'Needs your OK' : ticket?.status ? window.DashHelpers.statusWord(ticket.status) : '';
   const pending = q ? chatUi.pending.has('answer-' + ticket.id + '-' + q.id) : false;
   // Only actions the ticket already offers: a plain question's options (one tap, like Home), else Answer on
-  // the ticket; a ticket ready for review gets Mark done / Send back. Nothing in a day you can only read.
+  // the ticket; a ticket to check gets Looks good / Send back. Nothing in a day you can only read.
   const actions = readOnly || snapshot || !ticket ? null : q ? q.kind == null && array(q.options).length
     ? array(q.options).slice(0, 4).map((option, i) => chatButton(option, 'answer', {'data-key':key + '-answer-' + i, 'data-ticket':ticket.id, 'data-q':q.id, 'data-digest':q.digest, 'data-answer':option, disabled:pending}))
     : h('a', {className:'chat-button', href:chatLink(ticket.id)}, 'Answer')

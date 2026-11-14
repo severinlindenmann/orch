@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
 const routeSource = source.slice(source.indexOf('function route() {'), source.indexOf('function render('));
 function route(hash, addons) {
-  const ctx = {location:{hash}, snapshot:false, state:{settings:true}, addons:() => addons, decodeURIComponent};
+  const ctx = {history:{replaceState(){}}, location:{hash}, snapshot:false, state:{settings:true}, addons:() => addons, decodeURIComponent};
   vm.createContext(ctx); vm.runInContext(routeSource, ctx);
   return ctx.route();
 }
@@ -15,7 +15,7 @@ const FOCUS = {name:'focus', page:{path:'/'}, dashboard:{label:'Focus'}};
 const OTHER = {name:'automation', dashboard:{label:'Automation'}};
 test('#addon/focus is the Focus page; #open/focus/ and #open/focus/t/<id> forward to it', () => {
   assert.deepEqual({...route('#addon/focus', [FOCUS, OTHER])}, {kind:'page', id:'focus', path:'', hash:'#addon/focus'});
-  assert.deepEqual({...route('#note/t_1', [])}, {kind:'note', id:'t_1', hash:'#note/t_1'});
+  assert.deepEqual({...route('#note/t_1', [])}, {kind:'home', hash:'#home'}, 'the Notes page is gone: an old note link lands on Home');
   assert.deepEqual({...route('#open/focus/', [FOCUS])}, {kind:'page', id:'focus', path:'', hash:'#addon/focus'});
   assert.deepEqual({...route('#open/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
   assert.deepEqual({...route('#addon/focus/t/t_abc12345', [FOCUS])}, {kind:'page', id:'focus', path:'t/t_abc12345', hash:'#addon/focus/t/t_abc12345'});
@@ -31,7 +31,7 @@ test('unknown addresses are Page not found; empty and #home stay Home; a query k
   assert.equal(route('', []).kind, 'home');
   assert.equal(route('#home', []).kind, 'home');
   assert.deepEqual({...route('#tickets?view=working', [])}, {kind:'tickets', hash:'#tickets?view=working'});
-  assert.equal(route('#notes?x=1', []).kind, 'notes');
+  assert.equal(route('#notes?x=1', []).kind, 'home');
 });
 const skSource = source.slice(source.indexOf('function skeletonFor('), source.indexOf('function notFoundPage('));
 test('skeletonFor draws the page shape, busy, with one status text and hidden shapes', () => {
@@ -51,8 +51,8 @@ test('skeletonFor draws the page shape, busy, with one status text and hidden sh
   assert.equal(count(ctx.skeletonFor('ticket'), 'sk-side'), 1);
   assert.equal(ctx.hashKind('#ticket/t_1'), 'ticket');
   assert.equal(ctx.hashKind('#tickets?view=x'), 'tickets');
-  assert.equal(ctx.hashKind('#notes'), 'notes');
-  assert.equal(ctx.hashKind('#note/t_1'), 'notes');
+  assert.equal(ctx.hashKind('#notes'), 'home');
+  assert.equal(ctx.hashKind('#note/t_1'), 'home');
 });
 test('the sidebar: Home has the needs badge, Settings is last in the foot', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/index.html'), 'utf8');

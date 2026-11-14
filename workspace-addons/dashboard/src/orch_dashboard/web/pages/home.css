@@ -96,3 +96,12 @@
 .home-section>h2{margin:0 0 12px}
 .home-result .result-link{min-height:0;margin:0;font-size:14px;font-weight:500}.home-result .result-link:hover .grow{text-decoration:none}
 .home-section-head h2{font-size:14px;line-height:20px}
+/* Owner feedback 14 Nov: the question is body text, not a heading. */
+.home-need .question-title{font-size:14px;line-height:20px;font-weight:600}
+/* What changed: one row per finished ticket, the helper's note under its title. */
+.what-changed{margin-top:24px}
+.what-changed .home-note{display:flex;align-items:flex-start;gap:16px;padding:12px 16px;color:var(--text);text-decoration:none}
+.what-changed .home-note+.home-note{border-top:1px solid var(--border)}
+.what-changed .home-note:hover{background:var(--surface-2)}
+.what-changed .home-note p{margin:2px 0 0}
+.what-changed .home-note .meta{flex:none;white-space:nowrap}
