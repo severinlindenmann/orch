@@ -30,3 +30,6 @@ Round 2 — working shared components.
 - Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+## Owner feedback 14 Nov (lane owner-fb-v2)
+The Notes page is removed. `notes.html` and `note.html` now only forward to Home, where "What changed" shows the same completion notes. Old links in the product land on Home.

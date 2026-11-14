@@ -27,3 +27,6 @@ Round 2 — working shared components.
 - Questions now share recommended choices, a checked written answer, an answered state and Undo; phone and desktop show the same reply.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+## Owner feedback 14 Nov (lane owner-fb-v2)
+Home: the question is body text; answering moves the card out, the next one in, the badge counts down and a toast says "Answered · Undo" (`../sweep/d-home-answer.html`). "What changed" (from completion notes) sits under the columns and replaces the Notes page (`../proposals/fb23-home-what-changed.html`).
