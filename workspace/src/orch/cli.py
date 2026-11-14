@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 from orch import (
-    __version__,
     addons,
     cli_addons,
     cli_chat,
@@ -354,6 +353,12 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
             hide(a, names)
 
 
+def _version_text() -> str:
+    from orch import updateinfo
+
+    return updateinfo.current_label()
+
+
 def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
@@ -363,7 +368,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )  # human proof (H1): first line of stdin
 
     p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
-    p.add_argument("--version", action="version", version=f"orch {__version__}")
+    p.add_argument("--version", action="version", version=_version_text())
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")

@@ -251,7 +251,7 @@ function route() {
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
-  const settingsHash = /^#settings(?:\/(general|agent|phone|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
+  const settingsHash = /^#settings(?:\/(general|agent|phone|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
   if (settingsHash && !snapshot && state?.settings) { const [tab, addon] = (settingsHash[1] || 'general').split('/'); return {kind:'settings', hash:'#settings', tab, addon:addon || null}; }
   if (/^#chat\/ws_[a-z0-9]{10}$/.test(hash) && !snapshot) return {kind:'chat', hash};
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};

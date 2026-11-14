@@ -69,6 +69,42 @@ def confirm(
     return 422, msg[:300]
 
 
+def start_update(root: Path, orch_bin, mint, env, session=None, start=None) -> tuple[int, str]:
+    """The person clicked Update in Settings (About & updates): the same detached update as Continue on a request
+    from the terminal, for the source this install updates from. mint(op, target) exists only for a page with
+    a session (a curl or an agent gets 403)."""
+    if humanproof is None or mint is None:
+        return 403, "Open the dashboard from this computer to do this."
+    try:
+        from orch import addons
+
+        target = humanproof.update_target(addons.repo(), addons.ref())
+    except Exception:  # noqa: BLE001 - e.g. a source name orch refuses
+        return 422, "orch cannot find where to update from."
+    if session is not None:
+        humanproof.write_resume_cookie(root, session.server, session.cookie, session.secret)
+    try:
+        pid = (start or start_detached)(
+            ["update"], mint("update", target), orch_bin=orch_bin, cwd=root, env=env
+        )
+    except OSError:
+        return 503, "The update could not be started. Please try again."
+    _record_update(root, pid)
+    return 202, "Update started. This page reconnects when it is done."
+
+
+def update_info() -> dict:
+    """Installed and newest version with what changed (plain words, cached by orch for 10 minutes)."""
+    try:
+        from orch import addons, updateinfo
+
+        data = dict(updateinfo.info())
+        data["source"] = f"{addons.repo()} ({addons.ref()})"[:200]
+        return data
+    except Exception:  # noqa: BLE001 - never an error page for a version line
+        return {}
+
+
 def _record_update(root: Path, pid: int) -> None:
     """The detached update's pid, kept in the add-on's run folder (display and cleanup only)."""
     try:

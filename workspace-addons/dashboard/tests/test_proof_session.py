@@ -1097,3 +1097,48 @@ def test_an_update_the_core_refused_for_its_proof_says_the_request_expired():
         == "This request expired. Run the update again."
     )
     assert pageproof._short_reason("Refused: disk full\n") == "disk full"
+
+
+def test_settings_update_button_needs_a_session_and_starts_the_detached_update(live, monkeypatch):
+    root, port = live
+    from orch_dashboard import handoff
+
+    started = {}
+
+    def fake_start(argv, proof, **kw):
+        started.update(argv=argv, proof=proof)
+        return 4343
+
+    monkeypatch.setattr(handoff, "start_detached", fake_start)
+    st, _, _ = post(port, "/api/act", {"op": "update.start", "args": {}})
+    assert st == 403 and not started  # no session: a curl or an agent cannot update
+    ck = session(root, port)
+    st, _, body = post(port, "/api/act", {"op": "update.start", "args": {}}, {"Cookie": ck})
+    assert st == 202 and b"Update started" in body
+    assert started["argv"] == ["update"] and started["proof"].startswith("hp1.")
+
+
+def test_update_info_endpoint_gives_versions_and_changes(live, monkeypatch):
+    _, port = live
+    from orch import updateinfo
+
+    monkeypatch.setattr(
+        updateinfo,
+        "info",
+        lambda use_cache=True: {
+            "installed": {"label": "orch 15", "release": 15, "sha": None},
+            "newest": {"label": "orch 16", "release": 16, "sha": "b" * 40},
+            "update_available": True,
+            "changes": ["Helpers tidy up new tickets"],
+        },
+    )
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/api/update-info", headers={"Host": f"127.0.0.1:{port}"})
+    r = c.getresponse()
+    data = json.loads(r.read())
+    assert (
+        r.status == 200
+        and data["newest"]["label"] == "orch 16"
+        and data["changes"] == ["Helpers tidy up new tickets"]
+    )
+    assert "source" in data

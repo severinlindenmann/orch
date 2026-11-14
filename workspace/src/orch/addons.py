@@ -2252,8 +2252,18 @@ def _stored_sha() -> str | None:
     return _sha_or_none(d.get("sha")) if isinstance(d, dict) else None
 
 
-def _save_installed(sha: str | None) -> None:
-    _write_atomic(home() / "installed.json", json.dumps({"sha": _sha_or_none(sha)}))
+def _save_installed(sha: str | None, release: int | None = None) -> None:
+    """The commit this install came from and, when known, its release number (what a person reads)."""
+    data: dict = {"sha": _sha_or_none(sha)}
+    if isinstance(release, int) and not isinstance(release, bool) and release > 0:
+        data["release"] = release
+    _write_atomic(home() / "installed.json", json.dumps(data))
+
+
+def _stored_release() -> int | None:
+    from orch import updateinfo
+
+    return updateinfo.installed()["release"]
 
 
 def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
@@ -2290,6 +2300,8 @@ def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
         return None
     path.unlink(missing_ok=True)
     d["sha"] = _sha_or_none(d.get("sha"))
+    rel = d.get("release")
+    d["release"] = rel if isinstance(rel, int) and not isinstance(rel, bool) and rel > 0 else None
     return d
 
 
@@ -2579,7 +2591,10 @@ def update(
     """Reinstall orch + every installed add-on together, then refresh this project's skills and blocks.
     after_install: the install script just put a bare orch in place; put the registered add-ons back."""
     if after_install:
-        _save_installed(_source_sha())
+        from orch import updateinfo
+
+        sha_now = _source_sha()
+        _save_installed(sha_now, updateinfo.release_now(sha_now))
         reg = _current_registry()
         if reg:
             names = ", ".join(e["name"] for e in reg)
@@ -2597,6 +2612,7 @@ def update(
             "orch": _orch_version(),
             "addons": {e["name"]: e["version"] for e in registry()},
             "sha": _stored_sha(),
+            "release": _stored_release(),
         }
         before_path = home() / "update-before.json"
         _write_atomic(before_path, json.dumps(snapshot))
@@ -2650,6 +2666,10 @@ def update(
     sha = _source_sha()
     if before is not None:
         lines, _changed = _update_lines(before, found, sha)
+        from orch import updateinfo
+
+        new_release, more = updateinfo.after_update(before.get("sha"), before.get("release"), sha)
+        lines += more  # "Updated orch 15 → 16", then what changed
         if not json_output:
             _say("\n".join(lines))
         restart_lines = _restart_updated(root)  # whatever changed: what runs is the old install
@@ -2665,5 +2685,5 @@ def update(
                 entry["version"] = found[entry["name"]]["version"]
         _save_registry(reg)
         if sha:
-            _save_installed(sha)
+            _save_installed(sha, new_release)
     return done
