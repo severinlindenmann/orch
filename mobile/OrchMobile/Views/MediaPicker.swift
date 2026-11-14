@@ -25,8 +25,12 @@ enum MediaSelection: Equatable {
 
 @MainActor
 struct MediaPicker: View {
+    /// Where the picker opens straight away (the New topic screen's big Photo / Camera buttons); nil = the choices.
+    enum Start { case library, camera }
     var onPick: (MediaSelection) -> Void
+    var start: Start? = nil
     @Environment(\.dismiss) private var dismiss
+    @State private var libraryOpen = false
     @State private var detent: PresentationDetent = .height(170)
     @State private var step: Step = .choices
     @State private var cameraOptions = false
@@ -47,7 +51,7 @@ struct MediaPicker: View {
     private enum Step { case choices, preview, location }
     private enum Capture: String, Identifiable { case photo, scan; var id: String { rawValue } }
 
-    init(onPick: @escaping (MediaSelection) -> Void) { self.onPick = onPick }
+    init(start: Start? = nil, onPick: @escaping (MediaSelection) -> Void) { self.start = start; self.onPick = onPick }
 
     var body: some View {
         ScrollView {
@@ -108,7 +112,19 @@ struct MediaPicker: View {
             importFiles(result)
         }
         .onDisappear { if !finished { removePrepared(drafts) } }   // swiped away: nothing prepared stays in the temp folder
+        .photosPicker(isPresented: $libraryOpen, selection: $photos, maxSelectionCount: 10, matching: .images)
         .task(id: photos) { await loadPhotos() }
+        .task {
+            switch start {
+            case .camera: if UIImagePickerController.isSourceTypeAvailable(.camera) { source = .photo; capture = .photo }
+            case .library:
+                #if DEBUG
+                if UserDefaults.standard.bool(forKey: "fakePhoto") { receiveCapture(.success([Self.fakeJPEG()]), mode: .photo); source = nil; return }
+                #endif
+                libraryOpen = true
+            case nil: break
+            }
+        }
         .task(id: locationRequest) {
             if step == .location { await findLocation() }
         }
