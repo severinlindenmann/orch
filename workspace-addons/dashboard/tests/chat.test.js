@@ -282,3 +282,20 @@ test('with groups or workspace chats: grouped list (This workspace, Other worksp
   c.state.groups = {hosted:[], joined:[]};
   assert.match(c.chatPage().children[0].attrs.className, /chat-simple/, 'only the helper chat');
 });
+// Owner feedback 14 Nov, F21: header says "Your helper" once today's thread has a message; Send stays usable while the helper is thinking.
+test('header reads Your helper once a message exists, and Send works while the helper is thinking', () => {
+  const c = context();
+  vm.runInContext('chatUi.agentConversation = true', c);
+  c.state.chat.messages = [{id:'m1', by:'you', text:'hi', at:new Date(Date.now() - 10000).toISOString()}];
+  assert.doesNotMatch(JSON.stringify(c.chatHeader(null, false)), /New conversation/);
+  assert.match(JSON.stringify(c.chatHeader(null, false)), /Your helper/);
+  c.state.chat.messages = [];
+  assert.match(JSON.stringify(c.chatHeader(null, false)), /New conversation with your helper/);
+  c.state.chat.messages = [{id:'m1', by:'you', text:'hi', at:new Date(Date.now() - 10000).toISOString()}];
+  c.state.chat.running = true;
+  vm.runInContext("chatUi.agentConversation = false; chatUi.drafts.chat = 'one more thing'", c);
+  const thread = c.chatThread(null, null);
+  assert.match(JSON.stringify(thread), /is thinking/);
+  const send = nodes(thread, n => n.attrs?.['data-key'] === 'send')[0];
+  assert.equal(send.attrs.disabled, false);
+});
