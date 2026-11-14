@@ -1122,6 +1122,16 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             '--description "<what this is about>". Do this before you add tasks. It only works while the '
             "title is a placeholder: a title a person wrote is never changed.",
         )
+    elif not tickets.tidied(ticket) and not ticket.get("checklist"):  # first pickup of a new ticket
+        out.insert(
+            1,
+            "FIRST tidy this new ticket, directly, do not ask anyone: fix typos and write a short clear "
+            "title, "
+            "and fill the owner, due date and done-when line only where the person's text says them: "
+            f'orch ticket tidy {tid} "<short clear title>" [--owner <name>] [--due YYYY-MM-DD] '
+            '[--done-when "<one plain line>"]. Their original title stays in the history. '
+            "Do this before you add tasks.",
+        )
     out[1:1] = _plan_first_plan(ticket) + _done_when_plan(ticket)  # the plan instruction comes first
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")

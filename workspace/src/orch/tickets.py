@@ -1391,6 +1391,45 @@ def set_auto_title(root: Path, tid: str, title: str, by: str, description: str |
     return apply_op(root, tid, op, by=by)[0]
 
 
+TIDY_LINE = "Title tidied from: "
+
+
+def tidied(ticket: dict) -> bool:
+    return any(
+        str(h.get("text", "")).startswith((TIDY_LINE, "Ticket tidied")) for h in ticket.get("history") or []
+    )
+
+
+def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) -> dict:
+    """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
+    the history: "Title tidied from: ...") and owner / due / done_when,
+    filled only where still empty. Once."""
+    title = title.strip()
+    if not title or len(title) > 200:
+        raise Refused("A title needs 1 to 200 characters.")
+    fields = {k: v for k, v in (fields or {}).items() if k in ("owner", "due", "done_when") and v}
+    for k, v in fields.items():
+        clean_field(k, v)
+
+    def op(ticket):
+        if tidied(ticket):
+            raise Refused("This ticket was already tidied.")
+        old = str(ticket.get("title") or "")
+        if title != old:
+            ticket["title"] = title
+            ticket.pop("title_auto", None)
+            add_history(ticket, by, TIDY_LINE + old[:200])
+        filled = [k for k in sorted(fields) if not ticket.get(k)]
+        for k in filled:
+            _set_field(ticket, k, fields[k])
+        if filled:
+            add_history(ticket, by, "Details filled in: " + ", ".join(filled))
+        if title == old and not filled:
+            add_history(ticket, by, "Ticket tidied: nothing to change")
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
     """The agent's goal and 'Not included' of a plan, in its own field (never the person's note)."""
     goal = goal.strip()

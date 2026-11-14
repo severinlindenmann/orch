@@ -97,3 +97,56 @@ def test_cli_new_title_auto_and_title_command(proj, run):
     assert code == 0 and t["title"] == "Real title" and "title_auto" not in t and t["description"] == "Short."
     code, _, err = run("ticket", "title", tid, "Again", "--by", "agent:claude")
     assert code != 0
+
+
+def test_tidy_keeps_the_original_title_in_the_history(proj):
+    t = tickets.create(proj, "recherche ferien in vietnam, top tiriustien destinationen", "human:t")
+    t = tickets.tidy(proj, t["id"], "Research holiday in Vietnam: top tourist destinations", "agent:claude")
+    assert t["title"] == "Research holiday in Vietnam: top tourist destinations"
+    assert any(
+        h["text"] == "Title tidied from: recherche ferien in vietnam, top tiriustien destinationen"
+        for h in t["history"]
+    )
+
+
+def test_tidy_fills_empty_details_only_and_only_once(proj):
+    t = tickets.create(proj, "fix login", "human:t", fields={"owner": "Ana"})
+    t = tickets.tidy(
+        proj,
+        t["id"],
+        "Fix the login page",
+        "agent:claude",
+        {"owner": "Bob", "due": "2026-12-01", "done_when": "Login works"},
+    )
+    assert (
+        t["owner"] == "Ana" and t["due"] == "2026-12-01" and t["done_when"] == "Login works"
+    )  # a person's owner stays
+    with pytest.raises(Refused):
+        tickets.tidy(proj, t["id"], "Another", "agent:claude")
+
+
+def test_start_prompt_tells_the_agent_to_tidy_a_new_ticket_without_asking(proj):
+    t = tickets.create(proj, "fix login", "human:t")
+    p = runs.fresh_prompt(t, [], proj)
+    assert f'orch ticket tidy {t["id"]} "<short clear title>"' in p and "do not ask" in p
+    assert p.index("orch ticket tidy") < p.index("orch check add")
+    done = tickets.tidy(proj, t["id"], "Fix the login page", "agent:claude")
+    assert "orch ticket tidy" not in runs.fresh_prompt(done, [], proj)
+    auto = tickets.create_from_input(proj, LONG, "human:t")
+    assert "orch ticket tidy" not in runs.fresh_prompt(auto, [], proj)  # the title command covers it
+
+
+def test_cli_ticket_tidy(proj, run):
+    t = tickets.create(proj, "fix login", "human:t")
+    code, out = run(
+        "ticket",
+        "tidy",
+        t["id"],
+        "Fix the login page",
+        "--due",
+        "2026-12-01",
+        "--json",
+        "--by",
+        "agent:claude",
+    )[:2]
+    assert code == 0 and json.loads(out)["title"] == "Fix the login page"

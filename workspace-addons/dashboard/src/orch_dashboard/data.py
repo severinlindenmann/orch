@@ -15,15 +15,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import look, mobile, phone_delivery
+from . import look, mobile, people, phone_delivery
 
 _run = subprocess.run  # tests patch this name, never the global subprocess.run (other threads use that)
 
 
-def _me() -> str:
+def _me(root: Path | None = None) -> str:
     from .actions import actor  # actions imports this module
 
-    return actor()
+    return actor(root)
 
 
 STATUS_ORDER = ["open", "ready", "active", "waiting", "review", "done", "dropped"]
@@ -965,7 +965,7 @@ def load_state(
         f_settings = pool.submit(load_settings, root, orch_bin) if with_settings else None
     tickets, skipped = f_tickets.result()
     raw = f_raw.result()
-    addons = load_addons(root, orch_bin, raw) if with_addons else []
+    addons = hide_unset_sharing(load_addons(root, orch_bin, raw), root, orch_bin) if with_addons else []
     if not with_addons:
         for t in tickets:
             t.pop("ext", None)
@@ -1003,9 +1003,12 @@ def load_state(
     settings = f_settings.result() if f_settings else None
     state = {
         "workspace": root.name,
-        "who": actor().removeprefix("human:"),
+        "who": actor(root).removeprefix("human:"),
         "now": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "me": _me() if with_settings else None,  # who "You" is in a history line (the live page only)
+        "me": _me(root) if with_settings else None,
+        "people": people.load(root)
+        if with_settings
+        else None,  # the "You: ..." switch (live page only)  # who "You" is in a history line (the live page only)
         "tickets": tickets,
         "skipped": skipped,
         "addons": addons,
@@ -1025,6 +1028,14 @@ def load_state(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
     ).hexdigest()[:12]
     return state
+
+
+def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:
+    """No sharing set up: the Shared links tab is not there at all (the add-on stays in Settings > Add-ons)."""
+    tabs = [a for a in addons if (a.get("dashboard") or {}).get("panel") == "links"]
+    if not tabs or publish_connected(root, orch_bin):
+        return addons
+    return [{**a, "dashboard": None} if a in tabs else a for a in addons]
 
 
 def publish_connected(root: Path, orch_bin: str | None) -> bool:

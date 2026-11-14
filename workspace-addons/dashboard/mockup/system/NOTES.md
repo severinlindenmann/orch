@@ -26,3 +26,7 @@ Round 2 — working shared components.
 - Used the same live components as the area pages, including keyboard controls, visible close buttons and reduced motion.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+## Behaviour notes (owner feedback 14 Nov)
+- "You: <name>" (kit menu above Settings): pick a person or Add person (name only). The chosen person is the actor of tickets and history lines made from the dashboard.
+- "Send questions to my phone" is shown only when a relay is set up and a phone is paired. The Shared links tab only exists once sharing is set up (the add-on stays in Settings > Add-ons).
