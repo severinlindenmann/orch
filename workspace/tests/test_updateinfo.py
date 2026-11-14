@@ -34,13 +34,21 @@ def test_label_prefers_release_then_short_sha_then_package_version():
 
 def test_changes_are_plain_merged_titles_newest_five_with_more_count():
     msgs = [f"Merge pull request #{i} from u/b{i}\n\nfix: thing number {i}.\n\nbody" for i in range(8, 0, -1)]
-    msgs.insert(3, "Merge pull request #99 from u/release/part18-x\n\nRelease part 18")
+    msgs.insert(3, "Merge pull request #99 from u/release/part18-x\n\nRelease 18: helpers start again")
     msgs.insert(0, "plain commit without a merge")
     lines = updateinfo.changes_from(msgs)
     assert len(lines) == 6
     assert lines[0] == "Thing number 8"  # newest first, no "fix:" prefix, no final dot, capital letter
     assert lines[-1] == "and 3 more"
-    assert not any("Release part" in x for x in lines)
+    assert not any("Release" in x for x in lines)  # five pull requests fill the list: no release line
+
+
+def test_release_titles_follow_the_pull_requests_when_there_is_room():
+    msgs = [
+        "Merge pull request #5 from u/x\n\nfix: Sync keeps its history",
+        "Merge pull request #99 from u/release/part18-x\n\nRelease 18: helpers start again",
+    ]
+    assert updateinfo.changes_from(msgs) == ["Sync keeps its history", "Helpers start again"]
 
 
 def test_changes_text_is_printable_only():

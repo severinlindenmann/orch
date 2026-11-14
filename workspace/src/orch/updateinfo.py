@@ -53,6 +53,16 @@ def changes_from(messages: list[str]) -> list[str]:
         t = _plain(hit["title"])
         if t and t not in titles:
             titles.append(t)
+    if len(titles) < MAX_LINES:  # the release titles are the release notes: they follow the pull requests
+        for m in messages:
+            hit = PR_MERGE.match(m or "")
+            t = (
+                _plain(re.sub(r"^Release \d+:\s*", "", hit["title"]))
+                if hit and RELEASE_MERGE.match(m)
+                else ""
+            )
+            if t and t not in titles:
+                titles.append(t)
     out = titles[:MAX_LINES]
     if len(titles) > MAX_LINES:
         out.append(f"and {len(titles) - MAX_LINES} more")
@@ -63,9 +73,11 @@ def _local_messages(kind: str, a: str, b: str | None) -> list[str] | None:
     from orch import safegit
 
     folder = Path(addons.repo())
-    args = ["log", "--first-parent", "-n", "100" if kind == "at" else "250", "--format=%B%x00"]
+    # 'at' follows the main line (release merges); 'between' sees every merged pull request in the range
+    args = ["log", *(["--first-parent"] if kind == "at" else []), "-n", "100" if kind == "at" else "250"]
+    args.append("--format=%B%x00")
     args.append(a if kind == "at" else f"{a}..{b}")
-    rc, out, _ = safegit.run(args, folder, 10, read_only=True, filters=False, root=folder)
+    rc, out, _ = safegit.run(args, folder, 10, read_only=True, filters=True, root=folder)
     return [m.strip() for m in out.split("\x00") if m.strip()] if rc == 0 else None
 
 
