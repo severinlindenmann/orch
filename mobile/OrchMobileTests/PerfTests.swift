@@ -140,6 +140,24 @@ final class PerfTests: XCTestCase {
         XCTAssertLessThan(abs(MinuteClock.shared.now.timeIntervalSinceNow), 3600 * 24)
     }
 
+    /// Step 5: pictures decode off the main actor at <= 600 px and are remembered per blob id.
+    func testInlineThumbnailIsBoundedAndCached() async throws {
+        Thumbnail.evictAll()
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 3000, height: 2000))
+        let data = renderer.jpegData(withCompressionQuality: 0.8) { ctx in UIColor.red.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 3000, height: 2000)) }
+        XCTAssertNil(Thumbnail.cached(id: "blob_perf"))
+        let first = await Thumbnail.decoded(id: "blob_perf", data: data)
+        let image = try XCTUnwrap(first)
+        XCTAssertLessThanOrEqual(max(image.size.width, image.size.height) * image.scale, 600)
+        XCTAssertTrue(Thumbnail.cached(id: "blob_perf") === image, "the second look is a cache hit, no decode")
+        let again = await Thumbnail.decoded(id: "blob_perf", data: Data())
+        XCTAssertTrue(again === image, "a hit needs no bytes")
+        let b = ContinuousClock().measure { for _ in 0..<5 { _ = Thumbnail.image(from: data) } }
+        print("PERF e_decode_3000px_to_2048_x5 \(b)")
+        let c = ContinuousClock().measure { for _ in 0..<5 { _ = Thumbnail.image(from: data, maxPixel: 600) } }
+        print("PERF e_decode_3000px_to_600_x5 \(c)")
+    }
+
     func testDerivedDataIsRebuiltOnlyWhenAnInputChanges() async throws {
         let m = await loadedModel()
         _ = m.workspaceSummaries

@@ -237,4 +237,21 @@ enum Thumbnail {
                                      kCGImageSourceThumbnailMaxPixelSize: maxPixel, kCGImageSourceShouldCacheImmediately: true]
         return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary).map { UIImage(cgImage: $0) }
     }
+
+    /// Inline chat pictures never need more than this many pixels.
+    static let inlineMaxPixel = 600
+    nonisolated(unsafe) private static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>(); c.countLimit = 120; c.totalCostLimit = 64 * 1024 * 1024; return c
+    }()
+    private static func key(_ id: String, _ maxPixel: Int) -> NSString { "\(id)#\(maxPixel)" as NSString }
+    /// Already decoded picture for this blob id, or nil (cheap, safe on the main actor).
+    static func cached(id: String, maxPixel: Int = inlineMaxPixel) -> UIImage? { cache.object(forKey: key(id, maxPixel)) }
+    /// Decodes off the main actor and remembers the result per (id, size).
+    static func decoded(id: String, data: Data, maxPixel: Int = inlineMaxPixel) async -> UIImage? {
+        if let hit = cached(id: id, maxPixel: maxPixel) { return hit }
+        let image = await Task.detached(priority: .userInitiated) { image(from: data, maxPixel: maxPixel) }.value
+        if let image { cache.setObject(image, forKey: key(id, maxPixel), cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4)) }
+        return image
+    }
+    static func evictAll() { cache.removeAllObjects() }
 }
