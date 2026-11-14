@@ -101,6 +101,11 @@ def ext_unset(root: Path, t: dict, by: str | None = None) -> bool:
 AGENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
 
+def _is_chat_ticket(root: Path, tid: str) -> bool:
+    st = call(root, "chat", "id", by=False)
+    return isinstance(st, dict) and st.get("ticket") == tid
+
+
 def run_start(
     root: Path,
     tid: str,
@@ -117,7 +122,12 @@ def run_start(
 
     if sync_on(root):  # never the record's presence: removing it must not skip the check
         current = ticket(root, tid)
-        if current is None or not allowed(root, current):
+        # The Chat's hidden ticket is in no ticket list and never carries a synced automation block: only it, by its
+        # stored id (core's `orch chat id`, as the Scheduler reads it), is exempt. Any other ticket the lookup does not
+        # return (not found, or the list failed) stays refused: fail closed.
+        if current is None and not _is_chat_ticket(root, tid):
+            return {"result": "failed", "reason": "This synced automation needs local approval."}
+        if current is not None and not allowed(root, current):
             return {"result": "failed", "reason": "This synced automation needs local approval."}
     cmd = [os.environ.get("ORCH_BIN") or "orch", "run", "start", tid, "--json", "--by", by or BY]
     if mode:

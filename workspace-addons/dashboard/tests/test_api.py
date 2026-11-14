@@ -1046,3 +1046,10 @@ def test_a_workbook_with_entity_declarations_is_refused_before_parsing(art, ws):
     (d / "bomb.xlsx").write_bytes(_zip({"xl/workbook.xml": bomb, "xl/worksheets/sheet1.xml": "<worksheet/>"}))
     code, body, _ = _get(art, "/api/file-info?t=t_other000x&k=artifacts&n=bomb.xlsx")
     assert code == 422 and json.loads(body) == {"error": "unreadable"}
+
+
+def test_framed_addon_pages_may_show_blob_images():
+    """Owner feedback 14 Nov (W13): Focus draws a blob: image; the framed add-on page's policy blocked it."""
+    from orch_dashboard import server
+
+    assert "img-src 'self' data: blob:" in server.PROXY_CSP

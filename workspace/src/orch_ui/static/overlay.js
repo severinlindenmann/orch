@@ -5,7 +5,7 @@ const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
 let previousOverflow='', locked=false;
 // The page is locked (no scrolling) only while a modal dialog really is open in it. A dialog that a re-render took out of
 // the page never fires `close`, so every check drops dead entries first and gives the scrolling back when none is left.
-function release(){for(let i=stack.length-1;i>=0;i--)if(!stack[i].isConnected||!stack[i].open)stack.splice(i,1);if(!stack.length&&locked){document.documentElement.style.overflow=previousOverflow;locked=false}}
+function release(){for(let i=stack.length-1;i>=0;i--)if(!stack[i].isConnected||!stack[i].open)stack.splice(i,1);if(!stack.length&&locked){document.documentElement.style.overflow=previousOverflow;locked=false}if(!stack.length&&document.body?.style?.overflow==='hidden')document.body.style.overflow=''}
 const focusables=d=>[...d.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex]')].filter(n=>!n.disabled&&n.tabIndex>=0&&!n.closest('[inert]')&&n.getClientRects().length);
 function prepare(d){if(d.dataset.overlayReady)return;d.dataset.overlayReady='true';d.setAttribute('aria-modal','true');if(!d.hasAttribute('aria-label')&&!d.hasAttribute('aria-labelledby'))d.setAttribute('aria-label',d.querySelector('h1,h2,h3')?.textContent||'Preview');
  const x=document.createElement('button');x.type='button';x.className='btn outline sm ui-overlay-close';x.textContent=d.classList.contains('ui-fullscreen')?'× Exit full screen':'× Close';x.setAttribute('aria-label',x.textContent.slice(2));x.onclick=()=>d.close();d.prepend(x);
