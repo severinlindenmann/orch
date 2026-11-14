@@ -139,7 +139,7 @@ struct WorkspaceView: View {
                 .buttonStyle(SecondaryButtonStyle()).padding(16).background(Theme.bg)
         }
         .sheet(isPresented: $newTopic) {
-            NewTopicScreen(workspaceId: workspaceId, asSheet: true).presentationDetents([.medium, .large])
+            NewTopicScreen(workspaceId: workspaceId, asSheet: true).presentationDetents([.large])
         }
         .refreshable { await model.refresh() }
         .confirmDelete($deleting) { id in model.deleteChat(id) }

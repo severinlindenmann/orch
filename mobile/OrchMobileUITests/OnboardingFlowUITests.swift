@@ -81,6 +81,7 @@ final class OnboardingFlowUITests: XCTestCase {
         XCTAssertTrue(new.waitForExistence(timeout: 15))
         new.tap()
         app.buttons["compose-new-topic"].tap()
+        XCTAssertTrue(app.buttons["nt-type"].waitForExistence(timeout: 10)); app.buttons["nt-type"].tap()   // "Type instead"
         XCTAssertTrue(app.buttons["workspace-picker"].waitForExistence(timeout: 10))
         app.buttons["workspace-picker"].tap()
         XCTAssertTrue(app.buttons["pick-ws_reports001"].waitForExistence(timeout: 10))

@@ -45,6 +45,7 @@ final class RealRelayUITests: XCTestCase {
         shot("03-chats")
         app.buttons["new-chat"].tap()
         app.buttons["compose-new-topic"].tap()
+        if app.buttons["nt-type"].waitForExistence(timeout: 10) { app.buttons["nt-type"].tap() }
         if app.buttons["workspace-picker"].waitForExistence(timeout: 3), app.buttons["workspace-picker"].isHittable {
             app.buttons["workspace-picker"].tap()
             if app.buttons["pick-\(ws)"].waitForExistence(timeout: 3) { app.buttons["pick-\(ws)"].tap() }

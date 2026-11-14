@@ -13,6 +13,7 @@ final class MicUITests: XCTestCase {
 
     func testNewChatMic() {
         let app = launch(["-openNewChat", "YES"])
+        XCTAssertTrue(app.buttons["nt-type"].waitForExistence(timeout: 15)); app.buttons["nt-type"].tap()   // "Type instead"
         let mic = app.descendants(matching: .any)["composer-mic"].firstMatch
         XCTAssertTrue(mic.waitForExistence(timeout: 15), "the shared composer has the mic")
         XCTAssertTrue(app.descendants(matching: .any)["topic-field"].firstMatch.exists)
