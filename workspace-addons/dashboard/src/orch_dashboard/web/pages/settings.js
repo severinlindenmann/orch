@@ -34,11 +34,11 @@ function addonFacts(addon) {
   rows.push(row('Address', [settingsText('span', {className:'mono'}, d.address), h('button', {type:'button', className:'ad-more', 'data-copy':d.address}, 'Copy')]));
   rows.push(row('Status', h('span', {className:'on-dot'}, 'Connected')));
   const ws = array(d.workspaces);
-  if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))));
+  if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot'}, settingsText('span', {}, w.name), settingsText('span', {className:'meta'}, ' · ' + (w.online ? 'Reachable from your phone' : 'Not reachable from your phone'))))));
   return h('dl', {}, rows);
 }
-const FULL_WARNING = 'Full: a helper can change or delete anything in this folder and run any command without asking.';
-const PERMISSION_CHOICES = [['ask', 'Ask', 'A helper asks before it changes anything.'], ['auto', 'Auto', 'A helper works on its own and asks only for risky things.'], ['full', 'Full', 'A helper never asks. It changes things without asking. Only use this if you trust it.']];
+const FULL_WARNING = 'Never asks: a helper can change or delete anything in this folder and run any command without asking.';
+const PERMISSION_CHOICES = [['ask', 'Asks first', 'Before it changes anything. Example: it asks before editing a file.'], ['auto', 'Asks for risky things', 'It works on its own and asks only when something is risky. Example: it asks before deleting.'], ['full', 'Never asks', 'It changes things without asking. Example: it deletes a file straight away. Only use this if you trust it.']];
 function permissionsCard(settings) {
   const current = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
   const rows = PERMISSION_CHOICES.map(([value, label, hint]) => {
@@ -449,18 +449,18 @@ function phonePanel(phoneAddon, settings) {
   const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, '1. Relay connection'), h('div', {className:'card'},
     rowOf('Status', [connected ? h('strong', {className:'on-dot', 'data-key':'phone-relay-status'}, 'Connected') : h('strong', {className:'muted', 'data-key':'phone-relay-status'}, 'Not set up'),
       settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, connected && address ? address : 'No relay connected')],
-      h('div', {className:'row'}, connected ? btn('Reconnect', 'outline', 'relay-reconnect') : null, btn('Set up relay', connected ? 'ghost' : 'primary', 'relay-setup')), 'phone-relay-row'),
+      h('div', {className:'row'}, connected ? btn('Check connection', 'outline', 'relay-reconnect') : btn('Set up relay', 'primary', 'relay-setup')), 'phone-relay-row'),
     settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your relay.')));
   const pair = h('div', {className:'stack', 'data-key':'phone-pair'}, h('h2', {className:'set-sub'}, '2. Pair a phone'), h('div', {className:'card'},
     rowOf('Pairing', [settingsText('p', {}, 'Link a phone to this workspace'), connected ? null : settingsText('p', {className:'meta', 'data-key':'phone-relay-hint'}, 'Connect to your relay first')],
-      btn('Pair a phone', 'primary', 'phone-pair', connected ? {} : {disabled:true}), 'phone-pairing-row'),
+      btn('Pair a phone', 'primary', 'phone-pair', connected ? {} : {disabled:true, title:'Connect your relay first'}), 'phone-pairing-row'),
     mm));
   const allowed = h('div', {className:'stack', 'data-key':'phone-allowed'}, h('div', {className:'row between'}, h('h2', {className:'set-sub'}, 'Allowed workspaces'),
     settingsText('span', {className:'meta'}, (connected ? workspaces.length : 0) + ' allowed')),
     connected && workspaces.length ? h('div', {className:'card'}, workspaces.map(w => h('div', {className:'card-row', 'data-key':'phone-ws-' + w.name}, h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))))
       : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Allow a workspace to send it messages and files.')));
   return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed,
-    h('div', {className:'row between'}, settingsText('p', {className:'meta'}, 'Messages have their own page.'), h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
+    h('div', {className:'row'}, h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
 }
 // The pairing dialog stays inside Settings. A pairing code comes from the relay and this page has no way to ask
 // for one yet, so it shows no code (never a made-up QR), only the relay the phone would go through.
@@ -471,7 +471,7 @@ function phonePairDialog() {
   const {d, actions} = dialog('Pair a phone', 'dialog', 'settings-other');
   actions.firstChild.textContent = 'Close';
   d.append(settingsText('p', {className:'meta', 'data-key':'phone-pair-relay'}, 'Through your relay: ' + (info.address || 'your relay')),
-    settingsText('p', {className:'meta'}, 'A phone is paired with a one-time code from your relay. This page cannot create that code yet, so no code is shown.'),
+    settingsText('p', {className:'meta'}, 'Next step: open orch on your phone and choose "Add a workspace". Your relay shows the one-time code or QR code there.'),
     settingsText('p', {className:'meta'}, 'Your phone talks to this workspace through your relay.'), actions);
   window.orch.open(d);
 }
@@ -553,7 +553,7 @@ function settingsPage() {
       snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'addon-catalog', 'data-key':'settings-addon-catalog'}, 'Add an add-on')),
     optional.length ? h('div', {className:'card'}, optional.map(addonRow))
       : h('div', {className:'card pad empty-note', 'data-key':'settings-addons-empty'}, settingsText('h3', {}, 'No optional add-ons installed'), settingsText('p', {className:'meta'}, 'Add tools for schedules, shared links and more.')),
-    settingsText('p', {className:'meta', 'data-key':'settings-addon-foot'}, 'The dashboard is always on. Turn an add-on off without removing its settings.'));
+    null);
   const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
   if (detailAddon) return addonDetailPage(detailAddon);
   return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
@@ -1152,7 +1152,7 @@ function repeatsDialog(only = null, addonName = null) {
     h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary,
       outside ? h('p', {className:'meta', 'data-key':'repeat-set-by-helper'}, 'Set by your helper: ' + outside + '. Change it with the options above.') : null));
   if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
-  const copy = button('Copy ticket now', 'ghost', async () => {
+  const copy = button('Run once now', 'ghost', async () => {
     if (!ticket.value) return;
     const result = await act('addon.act', {addon:addonName || route().id, verb:'copy', target:ticket.value});
     window.orch.toast(result.ok ? 'Ticket copied.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
