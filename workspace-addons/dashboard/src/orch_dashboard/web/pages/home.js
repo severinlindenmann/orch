@@ -65,10 +65,12 @@ function needRow(row, newest, questionCount = 1, same = []) {
   } else if (!snapshot) {
     actions = h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id}, choice.label);
   }
+  // An add-on's own row (no ticket) is named by the add-on's display name, never its id ("sync").
+  const source = !t && row.source ? addonName(row.source) : '', asked = source || whoAsked(t);
   const question = needQuestion(row), when = typeof age === 'function' ? age(row.since) : '';
   return h('div', {className:'card-row home-need', 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
-    h('h2', {className:'question-title'}, clean(window.DashHelpers.plainWhy(question, 'The helper'))),
-    h('p', {className:'meta question-context'}, whoAsked(t) + ' asked' + (when ? ' ' + when : ''),
+    h('h2', {className:'question-title'}, clean(source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper'))),
+    h('p', {className:'meta question-context'}, asked + ' asked' + (when ? ' ' + when : ''),
       t ? [' on ‘' + clean(t.title) + '’ · ', h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
     actions && options.length ? h('p', {className:'meta choose-line'}, 'Needs you · Choose an answer') : null,
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
@@ -90,6 +92,11 @@ function needNoticeRow(row, key) {
 // Who asked: the helper working on the ticket (the product's name for it), else "Helper".
 function whoAsked(t) {
   return window.DashHelpers.agentLabel ? window.DashHelpers.agentLabel(state?.settings, state?.runs?.[t?.id]?.claim) : 'Helper';
+}
+// The display name of an add-on from its id ("sync" -> "Sync"): its dashboard label, else the id with a capital.
+function addonName(id) {
+  const a = typeof addons === 'function' ? addons().find(x => x.name === id) : null;
+  return typeof addonLabel === 'function' && a ? addonLabel(a) : String(id).replace(/^./, c => c.toUpperCase());
 }
 function needQuestion(row) { return array(ticketOf(row.ticket)?.questions).find(q => q.id === row.answer?.question)?.text || row.title || row.text; }
 // An add-on row that names its own buttons (needs.schema.json `actions`, e.g. sync): each runs that add-on's verb on

@@ -475,3 +475,11 @@ test('toasts: successes leave after 5 s even under the pointer, sit bottom-right
     assert.doesNotMatch(css, /\.ui-toasts\{[^}]*translateX\(-50%\)/);
   }
 });
+test('home: an add-on row without a ticket carries the add-on display name, not its id', () => {
+  const needs = [{id:'n1', source:'sync', title:'sync', text:'Sync stopped', answer:{options:[]}}];
+  const c = context([], {needsList:() => needs, button:label => ({tag:'button', children:[label]}), addons:() => [{name:'sync', dashboard:{label:'Sync'}}], addonLabel:a => a.dashboard.label});
+  const text = JSON.stringify(c.home());
+  assert.doesNotMatch(text, /"sync"/);
+  assert.match(text, /Sync asked/);
+  assert.doesNotMatch(text, /(Helper|Claude) asked/);
+});
