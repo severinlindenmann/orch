@@ -456,3 +456,13 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
 });
+test('home: headline, subtitle and badge are one number (questions + things to look at + results + changes)', () => {
+  const items = [{id:'a', title:'T a', status:'active'}, {id:'r1', title:'R one', status:'review'}, {id:'r2', title:'R two', status:'review'},
+    {id:'c1', title:'C one', status:'done', bring_back:{state:'waiting'}}];
+  const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
+  const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
+  const text = JSON.stringify(c.home());
+  assert.equal(c.needsToday().count, 4);
+  assert.match(text, /4 things need you/);
+  assert.match(text, /1 question · 2 results to check · 1 change to add/);
+});

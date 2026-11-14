@@ -258,11 +258,15 @@ function needsFold(groups, failed, newest) {
   const more = groups.length + failed.length - 1; // stacked identical questions count once
   return [first, h('div', {className:'card-row needs-fold', 'data-key':'needs-fold'}, button(more + (more === 1 ? ' more question' : ' more questions'), 'outline sm', () => { needsOpen = true; render(); }))];
 }
-// What needs the person today (Home, the Home badge and the Menu count all use this).
+// What needs the person today (Home, the Home badge and the Menu count all use this): the parts of the Home subtitle, summed.
 function needsToday() {
   const needs = needsList().filter(r => !laterToday(r));
   const failed = tickets().map(t => [t, window.DashHelpers.startFailure(t, state.runs?.[t.id], state.settings)]).filter(([t, sf]) => sf && !needs.some(n => n.ticket === t.id));
-  return {needs, failed, count:window.DashHelpers.needsYouCount(needs, failed)};
+  const groups = homeNeeds(needs), all = tickets();
+  const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id));
+  const changes = all.filter(t => t.bring_back?.state === 'waiting');
+  const asked = groups.length + failed.length;
+  return {needs, failed, groups, review, changes, asked, count:asked + review.length + changes.length};
 }
 // The one needs-you number: sidebar badge, Menu, Home and Tickets headers all read it.
 function needsYouTotal() { return state ? needsToday().count : 0; }
@@ -276,12 +280,11 @@ function backgroundBanner() {
 }
 // Home: what needs the person first, in order: questions, results to check, changes to add, then what is working.
 function home() {
-  const {needs, failed} = needsToday(), needCount = needsYouTotal(), groupedNeeds = homeNeeds(needs), all = tickets();
+  const {needs, failed, groups:groupedNeeds, review, changes, asked, count:needCount} = needsToday(), all = tickets();
   const rowsShown = groupedNeeds.length + failed.length; // stacked identical questions are one row
   if (rowsShown < 3) needsOpen = false;
   const working = sorted(all.filter(t => shown(t).status === 'active' && !needs.some(n => n.ticket === t.id)));
-  const review = all.filter(t => t.status === 'review' && !needs.some(n => n.ticket === t.id)), results = resultGroups(review);
-  const changes = all.filter(t => t.bring_back?.state === 'waiting');
+  const results = resultGroups(review);
   const finished = all.filter(t => t.status === 'done' && finishedAt(t)?.toDateString() === now().toDateString());
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
   const banner = backgroundBanner();
@@ -298,7 +301,7 @@ function home() {
   const needsBody = rowsShown >= 3 && !needsOpen ? needsFold(groupedNeeds, failed, newest) : [...groupedNeeds.map(({row, count, same}) => needRow(row, newest, count, same)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), rowsShown >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null];
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      needCount ? attentionCard('needs-you', (allQuestions ? '! Question · ' : '! Needs you · ') + needCount, 'needs', needsBody, groupedNeeds.length ? whoAsked(ticketOf(groupedNeeds[0].row.ticket)) : '') : null,
+      asked ? attentionCard('needs-you', (allQuestions ? '! Question · ' : '! Needs you · ') + asked, 'needs', needsBody, groupedNeeds.length ? whoAsked(ticketOf(groupedNeeds[0].row.ticket)) : '') : null,
       results.length ? attentionCard('check-result', '◇ Check · ' + review.length, 'review', [...results.slice(0, 3).map(resultRow),
         results.length > 3 ? h('div', {className:'card-row', 'data-key':'results-all'}, h('a', {className:'btn ghost sm', href:'#tickets'}, 'Show all (' + review.length + ')')) : null], (() => {
         const newestResult = results[0][results[0].length - 1], at = finishedAt(newestResult) || parse(newestResult.updated_at);
