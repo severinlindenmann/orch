@@ -290,8 +290,11 @@ def apply_set(
     save_settings(root, settings)
     from . import loop, service
 
+    service.set_idle(root, mode == "off")
     if service.running_pid(root):
         loop.wake_up(root)  # the loop reads the new settings now (and ends when set to off)
+    elif mode != "off":
+        service.ensure_running(root)  # turned on: it runs now, not only after the next `orch start`
     return settings, notice
 
 
@@ -542,6 +545,7 @@ def main(argv=None):
             if (
                 settings["mode"] == "off"
             ):  # a normal state (orch start starts every add-on): quiet, not an error
+                service.set_idle(root, True)
                 result = {"running": False, "off": True, "message": "Sync is off here: nothing to start."}
             elif (active := orchcli.is_active(root)) is None:
                 raise repo.Refused(
@@ -553,6 +557,7 @@ def main(argv=None):
                     "The sync add-on is not on here. A person turns it on: orch addon add sync"
                 )
             else:
+                service.set_idle(root, False)
                 result = {"running": True, "pid": service.start(root)}
         elif args.cmd == "stop":
             from . import service

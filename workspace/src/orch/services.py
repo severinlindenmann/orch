@@ -293,6 +293,8 @@ def _start(root: Path, only: set[str] | None, envs: dict[str, dict[str, str]]) -
             continue
         res = _call(root, name, m, "start", envs.get(name))
         row = {"addon": name, "running": bool(res.get("running")) and "error" not in res}
+        if res.get("off") is True and not row["running"]:
+            row["idle"] = True  # the add-on is off on purpose (its own setting): not a failure
         if pid_alive(res.get("pid")):
             row["pid"] = res["pid"]
         if local_url(res.get("url")):
@@ -399,6 +401,15 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _idle(root: Path, name: str) -> bool:
+    """The add-on says it is off on purpose (its own setting): `.orch/run/<name>/idle` is a file. Only a hint
+    that silences a "not running" warning; it never starts, stops or trusts anything."""
+    try:
+        return (root / ".orch" / "run" / name / "idle").is_file()
+    except OSError:
+        return False
+
+
 def workspace_rows(root: Path) -> list[dict]:
     """One row per active background add-on here: {addon, name, running, since, last_seen, pid?, url?}.
     `last_seen` is the last time it was seen running (kept in .orch/run/last-seen.json)."""
@@ -423,6 +434,8 @@ def workspace_rows(root: Path) -> list[dict]:
         }
         if e is not None:
             row.update({k: e[k] for k in ("pid", "url") if k in e})
+        elif _idle(root, name):
+            row["idle"] = True  # not running because the person turned it off: nothing to warn about
         rows.append(row)
     if changed:
         p = _seen_path(root)

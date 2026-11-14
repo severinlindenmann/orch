@@ -130,7 +130,7 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
         if item.get("bring_back") and item["ticket"] not in seen:
             rows.append(_bring_back_row(item["ticket"], item["ticket"], item, now))
     for r in services.workspace_rows(root):
-        if not r["running"]:
+        if not r["running"] and not r.get("idle"):
             rows.append(
                 {
                     "id": f"core:down:{r['name']}",

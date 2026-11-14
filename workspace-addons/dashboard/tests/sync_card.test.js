@@ -346,6 +346,7 @@ test('fb9: a paused sync says in plain words what is wrong and has one button to
   const card = c.syncCard(ON);
   const line = text(byKey(card, 'sync-paused-help'));
   assert.match(line, /password or access key/);
+  assert.match(line, /^Sync stopped: a ticket or file may contain a password or access key\. /);
   assert.doesNotMatch(line, /t_awwgkw|: secret/);
   const button = byKey(card, 'sync-paused-button');
   assert.equal(button.tag, 'a');

@@ -8,6 +8,8 @@ private enum ShellSheet: String, Identifiable {
 struct ChatsListView: View {
     @AppStorage("workspaceAliasRevision") private var aliasRevision = 0
     @Environment(AppModel.self) private var model
+    @Environment(HiddenQuestions.self) private var hidden
+    @State private var hideToast: ArchiveToast?
     @State private var query = ""
     @State private var filter = "All"
     @State private var sheet: ShellSheet?
@@ -31,13 +33,14 @@ struct ChatsListView: View {
                     ModelMessage()
                     searchField
                     chips
-                    MuteAllBanner()
+                    NotificationBanner()
                     content
                 }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 24)
             }
             .background(Theme.bg.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .refreshable { await model.refresh() }
+            .archiveToast($hideToast, bottom: 12)
             // `-startTab settings` (tests, screenshots) and old callers that set `model.tab = .settings`.
             .task(id: model.tab) { if model.tab == .settings { model.tab = .chats; showSettings = true } }
             .navigationDestination(isPresented: $showSettings) { SettingsView().toolbar(.visible, for: .navigationBar) }
@@ -171,7 +174,11 @@ struct ChatsListView: View {
     }
 
     @ViewBuilder private var attentionCards: some View {
-        let questions = ChatsRowRules.needsYou(model.questions, answers: model.answers)
+        let all = ChatsRowRules.needsYou(model.questions, answers: model.answers)
+        let activity = HiddenQuestions.newestActivity(for: all, messages: model.messages, allQuestions: model.questions)
+        let isHidden: (Question) -> Bool = { hidden.isHidden($0.id, newestActivity: activity[HiddenQuestions.key($0)]) }
+        let questions = all.filter { !isHidden($0) }
+        let hiddenQuestions = all.filter(isHidden)
         if !questions.isEmpty && (filter == "All" || filter == "Needs your OK") {
             // Pinned: at most three, the rest behind "See all (n)" (the Needs your OK filter lists them all).
             let pinned = filter == "All" ? ChatsRowRules.pinned(questions) : questions
@@ -180,25 +187,7 @@ struct ChatsListView: View {
                     .accessibilityAddTraits(.isHeader)
                 VStack(spacing: 0) {
                     ForEach(pinned) { question in
-                        let ws = question.message.from
-                        let summary = model.workspaceSummaries.first { $0.id == ws }
-                        let wsName = summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? question.workspaceName
-                        let topic = summary?.topics.first { $0.id.ticket == question.message.ticket && question.message.ticket != nil }
-                        let title = topic?.title ?? question.message.body.title ?? (question.message.ticket == nil ? "Your helper" : wsName)
-                        NavigationLink(value: question.message.ticket.map { ChatRoute.ticket(workspace: ws, ticket: $0) } ?? .workspace(ws)) {
-                            HStack(spacing: 12) {
-                                WorkspaceBadge(name: wsName, icon: summary?.workspace.icon, color: summary?.workspace.color, size: 32)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(title).font(.system(size: questionTitleSize, weight: .semibold)).foregroundColor(Theme.text)
-                                        .lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
-                                    Text([wsName, ShellTime.day(question.message.createdAt)].filter { !$0.isEmpty }.joined(separator: " · "))
-                                        .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
-                                    Text(question.message.body.text).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
-                                }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
-                                ShellChevron()
-                            }.padding(.horizontal, 16).padding(.vertical, 14).contentShape(Rectangle())
-                        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
-                            .accessibilityIdentifier("needs-you-\(question.id)")
+                        questionRow(question, hideable: true, mark: HiddenQuestions.mark(for: question, activity: activity))
                         if question.id != pinned.last?.id { ShellDivider() }
                     }
                     if pinned.count < questions.count {
@@ -213,6 +202,51 @@ struct ChatsListView: View {
                     }
                 }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             }
+        }
+        if filter == "Needs your OK" && !hiddenQuestions.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Hidden (\(hiddenQuestions.count))").themeFont(13, .semibold).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
+                VStack(spacing: 0) {
+                    ForEach(hiddenQuestions) { question in
+                        questionRow(question, hideable: false, mark: nil).opacity(0.75)
+                        if question.id != hiddenQuestions.last?.id { ShellDivider() }
+                    }
+                    ShellDivider()
+                    Text("Comes back when the helper writes again.").themeFont(13).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 12)
+                }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            }.accessibilityIdentifier("needs-you-hidden")
+        }
+    }
+
+    @ViewBuilder private func questionRow(_ question: Question, hideable: Bool, mark: Date?) -> some View {
+        let ws = question.message.from
+        let summary = model.workspaceSummaries.first { $0.id == ws }
+        let wsName = summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? question.workspaceName
+        let topic = summary?.topics.first { $0.id.ticket == question.message.ticket && question.message.ticket != nil }
+        let title = topic?.title ?? question.message.body.title ?? (question.message.ticket == nil ? "Your helper" : wsName)
+        let link = NavigationLink(value: question.message.ticket.map { ChatRoute.ticket(workspace: ws, ticket: $0) } ?? .workspace(ws)) {
+            HStack(spacing: 12) {
+                WorkspaceBadge(name: wsName, icon: summary?.workspace.icon, color: summary?.workspace.color, size: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: questionTitleSize, weight: .semibold)).foregroundColor(Theme.text)
+                        .lineLimit(ChatsRowRules.titleLines(typeSize.isAccessibilitySize))
+                    Text([wsName, ShellTime.day(question.message.createdAt)].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(question.message.body.text).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
+                }.frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
+                ShellChevron()
+            }.padding(.horizontal, 16).padding(.vertical, 14).contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+            .accessibilityIdentifier("needs-you-\(question.id)")
+        if hideable {
+            link.swipeToHide(id: question.id) {
+                hidden.hide(question.id, at: mark ?? Date())
+                hideToast = ArchiveToast(text: "Hidden. It stays open in \(wsName).", undo: { hidden.show(question.id) }, kind: "hidden")
+            }
+        } else {
+            link.contextMenu { Button("Show again", systemImage: "eye") { hidden.show(question.id) } }
         }
     }
 

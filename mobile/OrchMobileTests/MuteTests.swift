@@ -187,3 +187,16 @@ final class AppModelMuteTests: XCTestCase {
         XCTAssertFalse(model.notificationsMuted(workspace: group.host, group: group))
     }
 }
+
+final class MuteWordingTests: XCTestCase {
+    func testChoiceWords() {
+        XCTAssertEqual(MuteChoice.allCases.map(\.rawValue), ["1 hour", "Until tomorrow 8:00", "Until I unmute"])
+    }
+    func testMutedText() {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let now = MuteRules.date("2026-11-09T10:00:00Z")!
+        XCTAssertEqual(MuteRules.mutedText("forever", now: now, calendar: cal), "Muted until you unmute")
+        XCTAssertEqual(MuteRules.mutedText("2026-11-10T08:00:00Z", now: now, calendar: cal), "Muted until tomorrow 8:00")
+        XCTAssertEqual(MuteRules.mutedText("2026-11-09T11:30:00Z", now: now, calendar: cal), "Muted until 11:30")
+    }
+}

@@ -185,18 +185,40 @@ extension AppModel {
     }
 }
 
+/// Where the member badges sit inside the 46x46 logo box (top-left origins and sizes).
+enum GroupBadgeLayout {
+    static let box: CGFloat = 46
+    struct Spot: Equatable { let x: CGFloat; let y: CGFloat; let size: CGFloat; let overflow: Int? }
+    /// 1 member: one 46 badge. 2: the top spots, centred vertically. 3+: a triangle; the third spot shows "+N" past 3 members.
+    static func spots(members: Int) -> [Spot] {
+        switch members {
+        case ...0: return []
+        case 1: return [Spot(x: 0, y: 0, size: box, overflow: nil)]
+        case 2: return [Spot(x: 0, y: 12, size: 22, overflow: nil), Spot(x: 24, y: 12, size: 22, overflow: nil)]
+        case 3: return [Spot(x: 0, y: 1, size: 22, overflow: nil), Spot(x: 24, y: 1, size: 22, overflow: nil), Spot(x: 12, y: 24, size: 22, overflow: nil)]
+        default: return [Spot(x: 0, y: 1, size: 22, overflow: nil), Spot(x: 24, y: 1, size: 22, overflow: nil), Spot(x: 12, y: 24, size: 22, overflow: members - 2)]
+        }
+    }
+}
+
 struct GroupBadges: View {
     let group: PhoneGroup
     var body: some View {
-        HStack(spacing: 3) {
-            ZStack(alignment: .topLeading) {
-                ForEach(Array(group.members.prefix(3).enumerated()), id: \.element.ws) { index, member in
-                    GroupMemberBadge(group: group, ws: member.ws, size: 28)
-                        .offset(x: CGFloat(index * 16), y: CGFloat(index * 10))
-                }
-            }.frame(width: 60, height: 48)
-            if group.members.count > 3 { Text("+\(group.members.count - 3)").themeFont(12) }
-        }.accessibilityLabel(group.members.map { group.name(of: $0.ws) }.joined(separator: ", "))
+        let spots = GroupBadgeLayout.spots(members: group.members.count)
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(spots.enumerated()), id: \.offset) { index, spot in
+                Group {
+                    if let more = spot.overflow {
+                        Text("+\(more)").themeFont(11, .semibold).foregroundStyle(Theme.muted)
+                            .frame(width: spot.size, height: spot.size).background(Theme.surface3, in: Circle())
+                    } else {
+                        GroupMemberBadge(group: group, ws: group.members[index].ws, size: spot.size)
+                    }
+                }.frame(width: spot.size, height: spot.size).position(x: spot.x + spot.size / 2, y: spot.y + spot.size / 2)
+            }
+        }.frame(width: GroupBadgeLayout.box, height: GroupBadgeLayout.box, alignment: .topLeading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(group.members.map { group.name(of: $0.ws) }.joined(separator: ", "))
     }
 }
 

@@ -329,6 +329,27 @@ def view(root: Path) -> dict:
 
     from orch.cli_clients import _exp
 
+    try:
+        net.load_service(root, "publish")
+    except Refused:  # no publish server yet: nothing is shared, which is an empty page, not an error
+        return {
+            "schema": "orch.addon-view/1",
+            "generated_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "blocks": [
+                {
+                    "type": "list",
+                    "title": "Shared",
+                    "compact": True,
+                    "items": [],
+                    "more": 0,
+                    "empty": {
+                        "title": "No shared links yet",
+                        "text": "To share a file by private link, this workspace first needs a publish "
+                        "server. Ask whoever runs it for a setup prompt and paste it into your agent.",
+                    },
+                }
+            ],
+        }
     r = list_all(root)
     cap = 50
     files = [
