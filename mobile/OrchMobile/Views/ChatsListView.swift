@@ -68,7 +68,7 @@ struct ChatsListView: View {
                     composeSheet.presentationDetents([.large]).presentationDragIndicator(.visible)
                         .presentationBackground(Theme.surface)
                 case .newTopic:
-                    NewTopicScreen(workspaceId: nil, asSheet: true).presentationDetents([.medium, .large])
+                    NewTopicScreen(workspaceId: nil, asSheet: true).presentationDetents([.large])
                 case .addWorkspace:
                     AddWorkspaceView().presentationDetents([.medium, .large])
                 }

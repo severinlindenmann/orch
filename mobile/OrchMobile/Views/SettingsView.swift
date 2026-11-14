@@ -247,6 +247,7 @@ struct AutoArchiveDaysView: View {
 
 struct VoiceSettingsView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(NewTopicRules.autoMicKey) private var autoMic = false
     @State private var saving = false
     var body: some View {
         ScrollView {
@@ -265,6 +266,12 @@ struct VoiceSettingsView: View {
                         ShellDivider().padding(.leading, 16)
                         Toggle("I speak Swiss German", isOn: Binding(get: { model.settings.swissGerman }, set: { update(SettingsPatch(swissGerman: $0)) }))
                             .themeFont(17).tint(Theme.brand).padding(16).frame(minHeight: 52)
+                        ShellDivider().padding(.leading, 16)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Start recording right away", isOn: $autoMic).themeFont(17).tint(Theme.brand)
+                                .accessibilityIdentifier("auto-mic")
+                            Text("New topic opens with the microphone on").themeFont(13).foregroundStyle(Theme.muted)
+                        }.padding(16).frame(minHeight: 52)
                     }.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).disabled(saving)
                     Text("Defaults for all chats").themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 16)
                 }
