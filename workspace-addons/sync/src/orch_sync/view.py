@@ -63,13 +63,7 @@ def build(root, settings, now=None):
         }
         unreadable = True
     text, tone = STATE.get(s["shown"], STATE["never"])
-    rows = [
-        {
-            "label": "Current setting",
-            "value": MODE.get(s["mode"], "Off")[:120],
-            "note": "Tickets and their files can be copied. Secrets and private files are never included.",
-        }
-    ]
+    rows = []  # the choice below says the current setting; no extra row (owner sweep 14 Nov)
     if s["mode"] != "off" and not unreadable:
         rows.append({"label": "Status", "value": clean(text, 120), "tone": tone})
         rows.append({"label": "Last synced", "value": local_time(s["last_ok"])})
@@ -87,7 +81,7 @@ def build(root, settings, now=None):
             }
         )
     blocks = [
-        {"type": "settings", "title": "Keep a copy of my tickets", "rows": rows},
+        *([{"type": "settings", "title": "Keep a copy of my tickets", "rows": rows}] if rows else []),
         {
             "type": "radio",
             "title": "Where to keep a copy",
@@ -142,7 +136,6 @@ def build(root, settings, now=None):
     view = {
         "schema": "orch.addon-view/1",
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "header": {"link": {"label": "\u2190 General settings", "to": "app:settings"}},
         "blocks": blocks,
     }
     if unreadable:

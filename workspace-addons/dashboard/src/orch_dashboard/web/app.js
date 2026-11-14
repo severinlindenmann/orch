@@ -420,7 +420,7 @@ async function act(op, args) {
     if (!writing && refreshAgain) refresh();  // a change notice that came during the write
     if (before) {
       starting.delete(args.ticket);
-      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); window.orch.toast('Could not start the helper.', 'error'); }
+      if (!succeeded) { state.tickets = state.tickets.map(t => t.id === args.ticket ? {...t, status:before} : t); window.orch.toast('Could not start the helper' + (ticketOf(args.ticket)?.title ? ' on ' + ticketOf(args.ticket).title : '') + '.', 'error'); }
       render();
     }
   }
@@ -651,7 +651,8 @@ main.addEventListener('click', async event => {
     const result = await act(op, JSON.parse(control.dataset.args));
     locks.delete('agent-bar'); control.disabled = false;
     render();
-    window.orch.toast(result.ok ? (op === 'run.start' ? 'Started' : 'Stopped') : result.text, result.ok ? 'ok' : 'error');
+    const named = ticketOf(JSON.parse(control.dataset.args).ticket), what = named ? ' on ' + (named.title || named.key || 'the ticket') : '';
+    window.orch.toast(result.ok ? (op === 'run.start' ? 'Helper started' : 'Helper stopped') + what : result.text, result.ok ? 'ok' : 'error');
     return;
   }
   if (action === 'task-toggle') { await toggleTask(control.dataset.ticket, control.dataset.check); return; }

@@ -134,6 +134,15 @@ def test_notice_says_next_run_when_running(ws, monkeypatch):
     assert "button" not in v
 
 
+def test_no_notice_row_when_running_with_nothing_planned(ws, monkeypatch):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    v = build(ws, T(8))
+    check(v)
+    assert "notice" not in v and "Nothing planned" not in str(v)
+
+
 @pytest.mark.parametrize(
     "cron,words",
     [

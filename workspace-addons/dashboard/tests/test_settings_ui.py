@@ -33,7 +33,7 @@ def test_settings_navigation_and_cards():
     # the add-on detail page has no Details toggle; "Pair a phone" stays disabled until the relay is connected
     detail = src[src.index("function addonDetailPage(addon)") :][:3500]
     assert "h('summary'" not in detail and "'Details'" not in detail
-    assert "connected ? {} : {disabled:true}" in src
+    assert "connected ? {} : {disabled:true, title:'Connect your relay first'}" in src
     assert "history.replaceState(null, '', '#settings/' + tab)" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
     # folder: plain name + Copy path + quiet full path, no Details toggle

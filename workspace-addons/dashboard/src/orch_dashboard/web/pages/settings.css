@@ -1,7 +1,7 @@
 /* Settings and native add-on cards share the kit's light/dark tokens. */
-.settings-layout{display:grid;grid-template-columns:156px minmax(0,1fr);gap:24px;align-items:start}
+.settings-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
 .settings-content{min-width:0}
-.settings .settings-nav{display:flex;flex-direction:column;gap:4px;border:0;padding:0;align-items:stretch}
+.settings .settings-nav{display:flex;flex-direction:row;gap:4px;border:0;border-bottom:1px solid var(--border);padding:0;overflow-x:auto}
 .settings-nav button,.settings-nav a{display:flex;align-items:center;min-height:44px;padding:10px 12px;border:0;border-radius:8px;text-decoration:none;text-align:left;white-space:nowrap;color:var(--text-muted);background:transparent}
 .settings-nav button[aria-selected=true]{color:var(--text);background:var(--surface-2)}
 .settings .card{border-radius:12px}

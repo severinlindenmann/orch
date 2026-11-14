@@ -35,7 +35,7 @@ def call(fn, *args):
         ("Asked q1, waiting", "Asked a question"),
         ("Answered q1: Yes", "Answered a question"),
         ("Status open -> active", "Moved to Working"),
-        ("Check c2 done", "Finished a task"),
+        ("Check c2 done", "Finished a step"),
         ("Status active -> done", "Moved to Done"),
         ("Patched status (status done -> open)", "Moved to To do"),
         ("Something the agent wrote", "Something the agent wrote"),
@@ -322,7 +322,7 @@ def test_agent_line_with_the_status_shapes_core_really_returns():
 def test_history_lines_name_the_task_and_the_addon():
     tasks = [{"id": "c1", "text": "Ask about the currency"}]
     assert call("historyLine", {"text": "Added check c1"}, tasks) == "Added a task: Ask about the currency"
-    assert call("historyLine", {"text": "Check c1 done"}, tasks) == "Finished a task: Ask about the currency"
+    assert call("historyLine", {"text": "Check c1 done"}, tasks) == "Finished a step: Ask about the currency"
     assert call("historyLine", {"text": "Set ext.automation"}) == "Updated Automation settings"
     assert call("historyLine", {"text": "Removed ext.automation.repeat"}) == "Removed Automation settings"
 
