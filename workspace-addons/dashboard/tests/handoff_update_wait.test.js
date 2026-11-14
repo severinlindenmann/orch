@@ -13,7 +13,7 @@ function page(now, store, reply) {
     ? {then() { return {then() { return {catch(f) { f(); }}; }}; }}
     : {then(f) { const s = f({ok: true, json: () => reply}); return {then(g) { g(s); return {catch() {}}; }}; }};
   const c = vm.createContext({sessionStorage, fetch, Date: {now: () => now}, Number, String, shown: ''});
-  vm.runInContext('var shown = ""; function banner(t) { out.push(t); }\n' + src.slice(start, end) + '\nthis.S = updateStatus; this.go = updateStarted; this.hold = function (b) { startedBanner = b; };', Object.assign(c, {out: banners}));
+  vm.runInContext('var shown = ""; function poll() {} function banner(t) { out.push(t); }\n' + src.slice(start, end) + '\nthis.S = updateStatus; this.go = updateStarted; this.hold = function (b) { startedBanner = b; };', Object.assign(c, {out: banners}));
   return {c, banners};
 }
 
