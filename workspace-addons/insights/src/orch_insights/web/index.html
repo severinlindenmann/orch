@@ -9,10 +9,12 @@
 <link rel="stylesheet" href="__P__/kit/components.css">
 <link rel="stylesheet" href="__P__/kit/motion.css">
 <link rel="stylesheet" href="__P__/kit/interaction.css">
+<link rel="stylesheet" href="__P__/kit/widgets.css">
 <link rel="stylesheet" href="__P__/web/insights.css">
 <script src="__P__/kit/overlay.js" defer></script>
 <script src="__P__/kit/select.js" defer></script>
 <script src="__P__/kit/components.js" defer></script>
+<script src="__P__/kit/widgets.js" defer></script>
 <script src="__P__/web/insights.js" defer></script>
 <script src="__P__/web/settings.js" defer></script>
 </head>
@@ -36,7 +38,7 @@
 <div class="analysis-grid"><section class="card chart-card"><div class="section-head"><h2>Runs over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head"><h2>Skill use</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>
 <section><div class="table-wrap"><table class="data-table"><tbody><tr><td>Loading the list of skills</td><td>Loading</td><td>Loading</td><td>0</td><td>Loading</td></tr><tr><td>Loading the list of skills</td><td>Loading</td><td>Loading</td><td>0</td><td>Loading</td></tr></tbody></table></div></section>
 </div>
-<p id="message" role="status" hidden></p>
+<div id="message" role="status" hidden></div>
 <div id="overview" class="area-body" hidden>
 <section id="needs" class="needs" aria-label="Needs a look" hidden></section>
 <div class="metric-grid" id="metrics"></div>
@@ -50,7 +52,7 @@
 <section class="space-top"><p class="meta" id="services-title"></p><div id="services" class="detail-content pad muted"></div></section></section>
 <div class="footnote"><span>Usage counts describe use, not successful completion.</span><span id="foot-note"></span></div>
 </div>
-<section id="empty" class="card empty state-empty" hidden><span class="file-type" aria-hidden="true">—</span><h2>No activity in this range</h2><p>Your helpers’ activity will appear here after they start work.</p></section>
+<section id="empty" class="state-host" hidden></section>
 </div>
 <section id="settings" class="area-body" aria-label="Insights settings" hidden>
 <p id="settings-status" class="note" role="status"></p>

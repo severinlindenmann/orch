@@ -50,9 +50,14 @@ function showView(which) {
   byId('view-region').setAttribute('aria-busy', String(which === 'loading'));
 }
 
+// The one master empty / error state (UI.state) in a host element; a plain line if the kit is missing.
+function paintState(host, kind, title, text) {
+  if (window.UI && window.UI.state) host.replaceChildren(window.UI.state({kind, title, text}));
+  else host.textContent = title + (text ? ' ' + text : '');
+}
 function showMessage(text) {
   showView('message');
-  byId('message').textContent = text;
+  paintState(byId('message'), 'error', 'Insights can’t show this right now', text);
   overview = null;
 }
 
@@ -260,8 +265,7 @@ async function refresh() {
     overview = answer;
     if (overview.first_day) {
       showView('empty');
-      byId('empty').querySelector('h2').textContent = 'Nothing recorded yet';
-      byId('empty').querySelector('p').textContent = 'Counts appear after the first helper run.';
+      paintState(byId('empty'), 'empty', 'Nothing recorded yet', 'The counts fill after the first helper run.');
       return;
     }
     if (!await loadList('skills')) return;

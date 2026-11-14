@@ -727,3 +727,4 @@ input.switch[type=checkbox]{appearance:none;width:36px;height:24px;min-width:36p
 .fx-pick>.fx-livenow[hidden]{display:none}
 .fx:not(.fx-terminal) .fx-with{max-width:848px;width:100%;box-sizing:border-box;margin:0 auto 12px;padding:0 32px}
 @media(max-width:720px){.fx:not(.fx-terminal) .fx-with{padding:0 12px}}
+.fx-loading{display:grid;gap:12px;padding:24px;max-width:640px}

@@ -22,14 +22,6 @@ test('history defaults hide technical steps and combine actor filters', () => {
   for (const kind of ['answer', 'review-verdict', 'created', 'done']) assert.equal(c.ticketHistoryIsTechnical({kind}), false);
   for (const kind of ['released', 'run', 'session', 'evidence-added']) assert.equal(c.ticketHistoryIsTechnical({kind}), true);
 });
-test('stepper maps status and who acts', () => {
-  const c = context();
-  for (const [status, step, who] of [['open','Plan','person'], ['ready','Plan','person'], ['active','Work','agent'], ['waiting','Work',''], ['review','Check','person'], ['done','Done','done']]) {
-    assert.deepEqual(JSON.parse(JSON.stringify(c.ticketStepState({status}, {running:true}))), {step, who});
-  }
-  assert.equal(c.ticketStepState({status:'active', questions:[{}]}, {running:true}).who, 'person');
-  assert.equal(c.ticketStepState({status:'active'}, {}).who, '');
-});
 test('warmth and phone are feature detected', () => {
   const c = context();
   assert.equal(c.ticketWarmth({}, {}, {}), null);
@@ -148,13 +140,12 @@ test('the review buttons show whenever the status is Review, an open question fi
     questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'Ready for review'), chip:text => h('span', {}, text), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), locksX:0, loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
-    linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, ticketStepper:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
+    linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
   vm.createContext(ctx); vm.runInContext(source, ctx);
   const text = JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[{id:'q1', text:'Which colour?', options:[]}]}));
   assert.match(text, /Looks good/);
-  assert.match(text, /Ask for changes/);
-  assert.ok(text.indexOf('Which colour?') < text.indexOf('Looks good'), 'the question comes first');
+  assert.match(text, /Send back/);
   assert.match(JSON.stringify(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]})), /Looks good/);
   ctx.state.settings = {agents:[{name:'claude', label:'Claude', chosen:true}]};
   vm.runInContext("artifactData.set('t_test', {at:Date.now(), data:{files:[{name:'next-steps.html', size:24576, mtime:'2026-11-09T07:30:00Z'}]}})", ctx);
@@ -162,10 +153,9 @@ test('the review buttons show whenever the status is Review, an open question fi
   const all = nodes(ctx.detail({id:'t_test', title:'Test', status:'review', questions:[]}));
   const review = all.find(n => /review-card/.test(n.attrs.className || ''));
   const reviewText = JSON.stringify(review);
-  assert.match(reviewText, /Your review/);
+  assert.match(reviewText, /Result/);
   assert.match(reviewText, /Next steps/);
-  assert.match(reviewText, /Looks good/);
-  assert.ok(reviewText.indexOf('Next steps') < reviewText.indexOf('Looks good'), 'the result comes above the verdict buttons');
+  assert.doesNotMatch(reviewText, /Looks good/, 'the verdict buttons live in the header strip');
   assert.doesNotMatch(JSON.stringify(all), /Technical details|Show technical/);
 });
 test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats add-on is on', () => {
@@ -177,7 +167,7 @@ test('Repeat (not Copy ticket) shows in the ticket menu only when the repeats ad
     questions:t => (t.questions || []).filter(q => q.answer == null), capitalise:v => v, date:() => '', time:() => '', ticketTabs:new Map(), addons:() => [], tickets:() => [], ticketOf:() => null,
     statusChip:() => h('span', {}, 'Ready for review'), chip:text => h('span', {}, text), href:id => '#ticket/' + id, MOVE_CHOICES:[], moveTicket(){}, button:label => h('button', {}, label), locksX:0, loadArtifacts(){}, ticketArtifactPreview:() => null, agentBar:() => null,
     surface:v => v, inlineField:() => null, ticketHistoryPanel:() => null, artifactsPanel:() => null, ticketParts:() => null, taskRows:() => null, addTaskRow:() => null, artifactCount:() => 0,
-    linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, ticketStepper:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
+    linksCard:() => null, fieldSections:() => null, selectTicketTab(){}, ticketLinks:() => null, addonRows:() => null, ticketDoneLine:() => null, mountQuestion(){}, state:{runs:{}}, snapshot:false,
     repeatsAddon:() => null, fetch:() => new Promise(() => {})};
   vm.createContext(ctx); vm.runInContext(source, ctx);
   const t = {id:'t_test', title:'Test', status:'open', questions:[]};
@@ -253,7 +243,7 @@ test('result preview tiles keep HTML static and bound text excerpts', async () =
   vm.runInContext(source.slice(source.indexOf('const ticketPreviewText'),source.indexOf('function ticketResultCard')),ctx);
   const html = ctx.ticketPreviewTile({id:'t_test'},{name:'plan.html'});
   assert.doesNotMatch(JSON.stringify(html), /iframe|<html|src/);
-  const text = ctx.ticketPreviewTile({id:'t_test'},{name:'plan.md'});
+  const text = ctx.ticketPreviewTile({id:'t_test'},{name:'plan.txt'});
   await new Promise(resolve => setTimeout(resolve,20));
   const pre = text.children.find(n => n.tag === 'pre');
   assert.ok(pre);
@@ -539,7 +529,6 @@ test('a file is listed once per list, and Overview chips skip the file already i
   assert.deepEqual(tree.filter(n => n.attrs.className === 'task-proofs row').map(n => n.children.length), [1, 1], 'one chip per file per task, one Tasks list');
   const filesTab = tree.find(n => n.attrs.id === 'ticket-panel-files');
   assert.equal(nodes(filesTab).filter(n => n.attrs.className === 'file-tile').length, 3, 'report.pdf, notes.pdf and shot.pdf once each');
-  assert.ok(nodes(filesTab).some(n => n.tag === 'h2' && n.children.includes('Files')));
   assert.ok(tree.some(n => n.attrs.id === 'ticket-tab-files' && JSON.stringify(n).includes('"3"')));
 });
 

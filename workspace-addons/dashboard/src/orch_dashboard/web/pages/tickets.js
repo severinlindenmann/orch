@@ -4,7 +4,7 @@ const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '';
 // Saved views live on the address: #tickets?view=needs-you|working|done-week.
-const TICKET_VIEWS = [['', 'All tickets'], ['needs-you', 'Needs me'], ['working', 'Working now'], ['done-week', 'Done this week']];
+const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs me'], ['working', 'Working'],, ['done-week', 'Done this week']];
 function savedView() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?');
   const view = at < 0 ? '' : new URLSearchParams(full.slice(at + 1)).get('view') || '';
@@ -57,7 +57,7 @@ function ticketAttentionChip(t, section) {
   if (section && window.DashHelpers.columnOf(status) === section) return null;
   return statusChip(t);
 }
-const localDay = at => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}) : ''; };
+const localDay = at => window.UI?.stamp ? window.UI.stamp(at, {time:false}) : '';
 // A helper worked on it before (sessions) but it is not running now: paused, not new. Typed tasks alone are not.
 const ticketIsPaused = t => array(t.sessions).length > 0;
 function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView()); }
@@ -68,14 +68,27 @@ function ticketSelect(label, key, choices, value, onChange) {
   select.addEventListener('change', event => onChange(event.currentTarget.value));
   return select;
 }
+// Views as chips on the Tickets page: All, Needs me, Working, Done this week, and the ones saved here.
+const SAVED_VIEWS = 'orch.tickets.saved';
+function savedViews() { try { const v = JSON.parse(localStorage.getItem(SAVED_VIEWS) || '[]'); return Array.isArray(v) ? v.filter(x => x && typeof x.label === 'string') : []; } catch (_) { return []; } }
+function writeSavedViews(list) { try { localStorage.setItem(SAVED_VIEWS, JSON.stringify(list.slice(0, 6))); } catch (_) { /* no storage: nothing is kept */ } }
+function applySaved(v) { ticketSearch = v.search || ''; ticketPerson = v.person || ''; ticketMine = false; location.hash = v.view ? '#tickets?view=' + v.view : '#tickets'; render(); }
+function viewChips() {
+  const current = savedView(), filtered = !!(ticketSearch || ticketPerson);
+  const chip = (label, active, attrs) => h('a', Object.assign({className:'chip view-chip' + (active ? ' active' : ''), 'aria-current':active ? 'true' : null}, attrs), label);
+  const own = savedViews().map((v, i) => { const c = chip(v.label, false, {href:'#tickets', 'data-key':'saved-view-' + i}); c.addEventListener('click', e => { e.preventDefault(); applySaved(v); }); return c; });
+  const label = ticketSearch || (ticketPerson && (name(ticketPerson) || ticketPerson)) || (TICKET_VIEWS.find(([id]) => id === current) || [])[1] || '';
+  const save = h('button', {type:'button', className:'chip view-chip add', 'data-key':'save-view', disabled:filtered || current ? null : '', 'aria-label':'Save this view'}, '+ Save view');
+  save.addEventListener('click', () => { if (!label) return; const list = savedViews().filter(v => v.label !== label); list.push({label, view:current, search:ticketSearch, person:ticketPerson}); writeSavedViews(list); render(); });
+  return h('div', {className:'view-chips row', role:'group', 'aria-label':'Ticket views', 'data-key':'view-chips'},
+    TICKET_VIEWS.map(([id, text]) => chip(id ? text : 'All', id === current && !filtered, {href:id ? '#tickets?view=' + id : '#tickets', 'data-key':'view-chip-' + (id || 'all')})), own, save);
+}
 function ticketFilters() {
   const input = h('input', {className:'input', type:'search', placeholder:'Search tickets…', 'aria-label':'Search tickets', 'data-key':'ticket-search', value:ticketSearch});
   input.addEventListener('input', event => { ticketSearch = event.currentTarget.value; render(); });
-  const active = TICKET_VIEWS.find(([id]) => id && id === savedView());
-  const chipEl = active ? h('a', {className:'chip active view-chip', href:'#tickets', 'data-key':'ticket-view-chip', 'aria-label':'Showing ' + active[1] + '. Show all tickets'}, active[1], ' ✕') : null;
   const owners = [...new Set(tickets().map(t => String(t.owner || '')).filter(Boolean))].sort();
   const person = owners.length > 1 || ticketPerson ? ticketSelect('Person', 'ticket-person', [['', 'Everyone'], ...owners.map(o => [o, name(o) || o])], ticketPerson, value => { ticketPerson = value; render(); }) : null;
-  return [chipEl, h('span', {className:'grow'}), person, h('label', {className:'search-field'}, input)];
+  return [h('span', {className:'grow'}), person, h('label', {className:'search-field'}, input)];
 }
 function clearTicketFilters() {
   ticketSearch = ''; ticketMine = false; ticketPerson = '';
@@ -156,6 +169,8 @@ function treeBranch(rows, index, section) {
     h('td', {className:'meta when', title:String(at || '')}, at && window.DashHelpers.ago ? (shown(t).status === 'done' ? 'Finished ' : '') + window.DashHelpers.ago(at, Date.now()) : ''),
     h('td', {className:'ticket-actions'}, h('div', {className:'ticket-actions-row'}, nextAction, ticketMenu(t, 'tree'))));
   node.dataset.depth = String(Math.min(row.depth, 6));
+  node.classList.add('row-click');
+  node.addEventListener('click', e => { if (!e.target.closest('a,button,select,input,[role="menu"]')) location.hash = href(t.id); });
   return fragment(node, open ? children.map(i => treeBranch(rows, i, section)) : null);
 }
 const changesLine = t => changesPending(t) ? h('p', {className:'meta changes-pending', 'data-key':'changes-' + t.id}, 'Changes to add') : null;
@@ -168,7 +183,7 @@ function whenLine(t) {
 let ticketView = 'list';
 try { if (localStorage.getItem('orch.tickets.view') === 'board') ticketView = 'board'; } catch (_) { /* no storage: the list */ }
 const boardMore = new Set();
-const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'},
+const viewToggle = () => h('div', {className:'board-toolbar row', 'data-key':'board-tools'}, viewChips(),
   h('div', {className:'view-toggle', role:'group', 'aria-label':'How to show tickets'}, [['list', 'List', 'text'], ['board', 'Board', 'table']].map(([id, label, icon]) => h('button', {type:'button', className:'btn ghost seg', 'aria-pressed':ticketView === id, 'data-action':'view', 'data-view':id, 'data-key':'view-' + id}, iconEl(icon), label))), ticketFilters());
 function boardCard(t, nested = false, column = '') {
   const tasks = array(t.checklist), done = tasks.filter(window.DashHelpers.resolved).length;
@@ -194,9 +209,9 @@ function board() {
     const cap = status === 'done' && !boardMore.has('done') ? 3 : roots.length;
     const branch = row => h('div', {className:'board-family', 'data-key':'family-' + row.ticket.id}, boardCard(row.ticket, row.depth > 0, status),
       rows.filter(child => child.depth === row.depth + 1 && [row.ticket.id, row.ticket.key].includes(child.ticket.parent)).map(branch));
-    return h('section', {className:'kanban-col', 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
+    return h('section', {className:'kanban-col' + (mine.length ? '' : ' col-collapsed'), 'data-status':status, 'data-key':'col-' + status, 'aria-label':label + ', ' + mine.length},
       h('div', {className:'col-head'}, h('h2', {className:'grow'}, (STATUS_BADGE[status] || STATUS_BADGE.open)[0] + ' ' + label), h('span', {className:'status-count'}, String(mine.length))),
-      h('div', {className:'col-body', 'data-key':'col-body-' + status}, roots.slice(0, cap).map(branch), !mine.length ? h('p', {className:'meta board-none'}, COLUMN_EMPTY[status]) : null,
+      h('div', {className:'col-body', 'data-key':'col-body-' + status}, roots.slice(0, cap).map(branch), !mine.length ? h('p', {className:'meta board-none', title:COLUMN_EMPTY[status]}, COLUMN_EMPTY[status]) : null,
         status === 'done' && roots.length > 3 ? h('button', {type:'button', className:'btn ghost sm show-done', 'data-action':'board-more', 'data-key':'board-more'}, boardMore.has('done') ? 'Show fewer' : 'Show ' + (roots.length - 3) + ' more') : null));
   });
   return h('div', {className:'board', 'data-key':'board'}, h('div', {className:'board-track', title:snapshot ? null : 'Drag a card to move it, or use its ⋯ menu'}, cols));
@@ -239,6 +254,20 @@ function moveTicket(id, status, undoing = false, extra = {}) {
 const GROUP_ORDER = ['waiting', 'review', 'active', 'open', 'done'];
 const foldedGroups = new Set();
 let foldSeen = false;
+// The group's main action for all its tickets: "Answer 2 questions" opens the first question, "Check 3 results" the first result.
+function groupAction(status, group) {
+  if (snapshot || foldedGroups.has(status)) return null;
+  const withQuestions = group.filter(t => questions(t).length);
+  if (status === 'waiting' && withQuestions.length) {
+    const n = withQuestions.reduce((sum, t) => sum + questions(t).length, 0);
+    return button('Answer ' + n + (n === 1 ? ' question' : ' questions'), 'outline sm group-action', event => {
+      const need = needsList().find(x => withQuestions.some(t => t.id === x.ticket));
+      if (need) openNeed(need, event.currentTarget); else location.hash = href(withQuestions[0].id);
+    });
+  }
+  if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Check ' + group.length + (group.length === 1 ? ' result' : ' results'));
+  return null;
+}
 function ticketTable(visible) {
   const groups = ticketGroups(visible);
   if (!foldSeen) { foldSeen = true; if ((groups.find(g => g.status === 'done')?.tickets.length || 0) > 5) foldedGroups.add('done'); }
@@ -250,7 +279,7 @@ function ticketTable(visible) {
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = foldedGroups.has(status);
     const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(group.tickets.length)));
     toggle.addEventListener('click', () => { if (foldedGroups.has(status)) foldedGroups.delete(status); else foldedGroups.add(status); render(); });
-    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, toggle)));
+    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets)))));
     if (!folded) for (const {i} of roots) body.push(treeBranch(rows, i, status));
   }
   return h('div', {className:'table-wrap', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},
@@ -261,7 +290,7 @@ function list() {
   const visible = filteredTickets();
   const needN = typeof needsYouTotal === 'function' ? needsYouTotal() : 0;
   const top = [heading('Tickets', 'Every ticket, from To do to Done.', {actions:needN ? h('span', {className:'badge needs', 'data-key':'needs-pill'}, '● ' + window.DashHelpers.needsYou(needN)) : null}), viewToggle()];
-  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || savedView())) return fragment(top, h('div', {className:'card card-row'}, h('p', {className:'grow'}, 'No tickets match.'), button('Clear', 'outline sm', clearTicketFilters)));
+  if (!visible.length && (ticketSearch || ticketMine || ticketPerson || savedView())) return fragment(top, window.UI.state({kind:'empty', title:'No tickets match', text:'Try another view or clear the search.', action:{label:'Show all', onClick:clearTicketFilters}}));
   if (ticketView === 'board' && tickets().length) return fragment(top, board());
   return fragment(top, !tickets().length ? h('section', {className:'card tickets-empty', 'data-key':'empty'}, h('h2', {}, 'No tickets yet'),
     h('p', {className:'muted'}, 'Describe a job in plain words. A helper plans it, works on it, asks you when it needs a decision, and shows you the result to check.'),

@@ -374,7 +374,7 @@
     const s = span(nowMs - when);
     return s === 'just now' ? s : s + ' ago';
   }
-  /* When something was added, in the person's own time: "today 16:05", "yesterday 09:12", "5 Nov 09:12". */
+  /* When something was added, in the person's own time: "today 16:05", "yesterday 09:12", "Mon 08:00", "5 Nov 2026, 09:12". */
   function stamp(iso, nowMs) {
     const d = new Date(iso), now = new Date(nowMs);
     if (!iso || Number.isNaN(d.getTime()) || Number.isNaN(now.getTime())) return '';
@@ -383,8 +383,9 @@
     const two = n => String(n).padStart(2, '0'), time = two(d.getHours()) + ':' + two(d.getMinutes());
     if (diff === 0) return 'today ' + time;
     if (diff === 1) return 'yesterday ' + time;
+    if (diff > -7 && diff < 7) return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] + ' ' + time;  // same format as the kit's UI.stamp
     const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
-    return d.getDate() + ' ' + month + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') + ' ' + time;
+    return d.getDate() + ' ' + month + ' ' + d.getFullYear() + ', ' + time;
   }
   /* A file proof: its title or file name, the size core saved in `text`, and when it was added ("hello.txt · 1 KB · today 16:05"). */
   function fileProofLabel(ev, nowMs) {

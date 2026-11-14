@@ -14,6 +14,7 @@ EXAMPLES = (
     "tomorrow 09:00 · today 17:30"
 )
 DAYS = {"sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3, "thursday": 4, "friday": 5, "saturday": 6}
+MIN_MINUTES = 5  # the shortest steady interval (fb20)
 _TIME = r"([01]?\d|2[0-3]):([0-5]\d)"
 
 
@@ -64,6 +65,8 @@ def parse(text: str, tz: str, now: datetime | None = None) -> Plan:
     m = re.fullmatch(r"every (\d{1,3}) (minutes?|hours?)", t)
     if m and int(m[1]) >= 1:
         n = int(m[1])
+        if m[2].startswith("minute") and n < MIN_MINUTES:
+            raise Plain(f"A repeat can run at most every {MIN_MINUTES} minutes. Pick {MIN_MINUTES} or more.")
         if m[2].startswith("minute") and n <= 59:
             return Plan(cron=f"*/{n} * * * *")
         if m[2].startswith("hour") and n <= 23:

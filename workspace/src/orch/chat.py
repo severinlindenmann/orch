@@ -885,6 +885,16 @@ def _contacts_list(root: Path) -> list[dict]:
         }
         if lk := _valid_look(row.get("look")):
             item["look"] = lk
+        desc = row.get("description")
+        if isinstance(desc, str) and (desc := relay.clean_untrusted(desc, 280).strip()):
+            item["description"] = desc  # what the workspace says it is for (the chat header shows it once)
+        tags = [
+            relay.clean_untrusted(t, 24).strip()
+            for t in (row.get("tags") if isinstance(row.get("tags"), list) else [])[:8]
+            if isinstance(t, str)
+        ]
+        if tags := [t for t in tags if t]:
+            item["tags"] = tags
         count, last_at = _dm_summary(root, ws)
         item.update(count=count, last_at=last_at)
         out[ws] = item

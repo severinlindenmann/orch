@@ -215,7 +215,7 @@ the right of the page heading), block `meta` (quiet text at the right of a block
 `empty` (mark, title, sentence, one button or link when a list has no rows), blocks `footnote` (one quiet line plus a link),
 `settings` (label / value / note rows) and `radio` (one choice, drawn in the card of the `settings` block before it). Links may
 also be `app:<page>[/<sub>]`, a page of the dashboard (`app:settings/phone`). The extra ops the dashboard draws are fixed:
-`addon.edit` (the schedule dialog of a ticket), `addon.refresh` (read the view again), `link.share|copy|extend|stop` (the shared
+`addon.edit` (the schedule dialog of a ticket), `addon.refresh` (read the view again), `addon.allow` (a row's "Allow on this computer": the person signs sync's Allow for that ticket and this add-on's block), `link.share|copy|extend|stop` (the shared
 links of the publish add-on) and, for `radio`, `addon.act` with a plain verb and a plain-word target.
 
 **One product:** the dashboard renders blocks with the orch design system only (tokens, the fixed icon set, motion, skeleton

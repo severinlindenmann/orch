@@ -60,7 +60,7 @@ function ticketForm(t) {
     const label = el('label', '', 'What needs doing?');
     const input = el('textarea', 'input new-ticket-text');
     input.name = 'text'; input.id = 'field-' + serial + '-text';
-    input.rows = 8; input.maxLength = 500000; input.required = true;
+    input.rows = 3; input.maxLength = 500000; input.required = true;
     input.placeholder = 'What should the helper do? A sentence or a long text; it is split into tasks.';
     // Grows with the text (about 4 lines at first); CSSOM height, no style attribute.
     grow = () => { if (!input.style) return; input.style.height = 'auto'; if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight + 2, 480) + 'px'; };
@@ -272,6 +272,7 @@ function ticketForm(t) {
         window.orch.toast('Ticket created', 'ok');
         window.orch.close(d);
         await startNow();
+        if (startAfter && typeof href === 'function') location.hash = href(created.id);  // Start opens the new ticket
         return;
       }
     }
