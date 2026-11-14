@@ -396,6 +396,25 @@ def test_recent_runs_and_last_result_read_the_same_runs(ws):
     assert lst["items"][0]["chips"] == [{"label": "Started", "tone": "neutral"}]
 
 
+def test_a_synced_schedule_not_allowed_here_offers_allow_instead_of_run_now(ws, monkeypatch):
+    from orch_automation import view
+
+    add_ticket(
+        ws,
+        "t_rec00002",
+        title="From the other computer",
+        status="active",
+        ext={"automation": {"recurring": True, "cron": "0 8 * * *", "tz": "Europe/Zurich"}},
+    )
+    monkeypatch.setattr(view, "allowed", lambda root, t: False)
+    v = build(ws, T(8))
+    check(v)
+    (sch,) = blocks(v, "table")
+    (row,) = sch["rows"]
+    assert [a["label"] for a in row["actions"]] == ["Allow on this computer", "Edit"]
+    assert row["actions"][0]["action"] == {"op": "addon.allow", "args": {"target": "t_rec00002"}}
+
+
 @pytest.mark.parametrize(
     "phrase",
     ["daily 08:00", "every monday 08:00", "0 8 * * 1,3", "monthly 5 08:00", "0 8 */3 * *"],
