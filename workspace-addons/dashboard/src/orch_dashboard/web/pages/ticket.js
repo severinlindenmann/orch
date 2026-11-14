@@ -1559,6 +1559,14 @@ async function openNeed(row, trigger) {
     window.orch.toast(result.ok ? 'Started again' : result.text, result.ok ? 'ok' : 'error');
     return;
   }
+  if (action.kind === 'start') {  // a background add-on stopped: one press starts it (no dialog to read first)
+    if (trigger.disabled) return;
+    trigger.disabled = true;
+    const result = await act('addon.start', {});
+    trigger.disabled = false;
+    window.orch.toast(result.ok ? 'Started' : result.text, result.ok ? 'ok' : 'error');
+    return;
+  }
   if (action.kind === 'answer' || action.kind === 'review') {
     const {d, actions} = dialog(row.title, 'dialog', 'needs-you');
     const host = el('div');
@@ -1569,11 +1577,7 @@ async function openNeed(row, trigger) {
   else {
     const a = addons().find(a => a.dashboard && (a.name === row.source || String(row.kind).startsWith(a.name + ':')));
     if (a) location.hash = '#addon/' + encodeURIComponent(a.name);
-    else {
-      const {d, actions} = dialog(row.title);
-      d.append(el('p', 'preserve-lines', clean(row.text || 'No further details.')), actions);
-      window.orch.open(d);
-    }
+    else window.orch.toast(clean(row.text || row.title || 'Nothing to do here.'));  // nothing to press: say it, no dead-end dialog
   }
 }
 
