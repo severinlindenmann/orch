@@ -530,3 +530,6 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .topbar-wait:hover{text-decoration:underline}
 .topbar-wait:not([hidden])+.topbar-actions{margin-left:12px}
 @media(max-width:720px){.topbar-wait{display:none}}
+
+/* The add-on page frame stays invisible (but loading) while its skeleton shows */
+iframe.embed.embed-loading{position:absolute;width:1px;height:1px;min-height:0;opacity:0;pointer-events:none}

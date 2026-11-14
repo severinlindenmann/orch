@@ -117,8 +117,10 @@ const OrchBlocks = (() => {
   const shownLink = to => typeof to === 'string' && (APP.test(to) || TICKET.test(to) || HTTPS.test(to));
   const MARKS = {arrow: '\u2197', repeat: '\u21ba', dash: '\u2014'};
   function emptyState(e) {
-    const d = el('div', 'empty blk-empty'), mark = el('span', 'empty-mark', MARKS[e.mark] || MARKS.arrow); mark.setAttribute('aria-hidden', 'true');
-    d.append(mark, el('h3', '', e.title)); if (e.text) d.append(el('p', '', e.text));
+    // The one master empty state (UI.state); the buttons stay real links checked by shownLink.
+    let d;
+    if (window.UI && window.UI.state) { d = window.UI.state({kind: 'empty', title: e.title, text: e.text}); d.classList.add('blk-empty'); }
+    else { d = el('div', 'empty blk-empty'); const mark = el('span', 'empty-mark', MARKS[e.mark] || MARKS.arrow); mark.setAttribute('aria-hidden', 'true'); d.append(mark, el('h3', '', e.title)); if (e.text) d.append(el('p', '', e.text)); }
     for (const [key, cls] of [['button', 'btn primary sm'], ['link', 'btn ghost sm']]) {
       const x = e[key]; if (!x || !shownLink(x.to)) continue;
       const a = linked(cls, x.to, [x.label + (key === 'link' ? ' \u2192' : '')]);

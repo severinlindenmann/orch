@@ -715,10 +715,14 @@ function pageFrame(r) {
   if (stopped) return stopped;
   const src = '/addon/' + r.id + '/' + r.path;
   const frame = h('iframe', {className:'embed', 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
+  const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
+  if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
   // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session
   if (!addons().find(a => a.name === r.id)?.shipped) frame.setAttribute('sandbox', 'allow-scripts');
-  return fragment(frame);
+  return fragment(skeleton, frame);
 }
+const framesLoaded = new Set();
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
 // Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };
@@ -794,7 +798,7 @@ function paintAddon(id) {
   const blocks = template.querySelector('#addon-blocks');
   if (blocks) {
     blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
-    if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
+    if (!blocks.childNodes.length) blocks.append(stateNote('Nothing to show yet', 'It fills in as work happens.'));
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
     blocks.querySelectorAll('svg').forEach(n => {
       n.replaceWith(iconEl('external'));

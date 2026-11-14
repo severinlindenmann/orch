@@ -344,7 +344,7 @@ function chatHistory() {
   [...dayRows, ...groupRows].forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(query); });
   const ready = chatDays.status === 'ready';
   return h('div', {className:'chat-history', 'data-key':'history-list'}, chatSearch(true),
-    h('h2', {}, 'Earlier days'), ready ? dayRows.length ? dayRows : chatText('p', 'chat-muted', 'No earlier days yet.') : chatHistoryStatus(chatDays.status, 'retry-days'),
+    h('h2', {}, 'Earlier days'), ready ? dayRows.length ? dayRows : stateNote('No earlier days yet', 'Yesterday’s messages will be here tomorrow.') : chatHistoryStatus(chatDays.status, 'retry-days'),
     groups.length ? h('h2', {}, 'Finished groups') : null, groupRows,
     ready && query && [...dayRows, ...groupRows].every(row => row.hidden) ? chatText('p', 'chat-muted', 'Nothing matches.') : null);
 }
