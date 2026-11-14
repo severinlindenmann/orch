@@ -3480,7 +3480,7 @@ def write_update_status(
 
 
 def _drop_update_requests(root: Path) -> None:
-    """The update is over: an `orch update` request still waiting no longer applies (it would update again)."""
+    """The update is over: an `orch update` request still waiting no longer applies."""
     try:
         d = key_dir(root, create=False)
         with _key_lock(d):

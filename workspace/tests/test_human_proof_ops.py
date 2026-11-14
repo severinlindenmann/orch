@@ -2347,7 +2347,7 @@ def test_runner_waits_for_windows_result(ws, monkeypatch, result):
     assert hp.take_update_status(ws) is None
 
 
-# ------------------------------------------------------------------ owner feedback 14 Nov: stale update requests
+# ------------------------------------------------------------- owner feedback 14 Nov: stale update requests
 
 
 def test_a_finished_update_drops_the_update_requests_still_waiting(ws, monkeypatch):
@@ -2368,7 +2368,9 @@ def test_a_running_update_keeps_the_requests(ws):
 def test_confirming_one_update_request_supersedes_the_others(ws):
     hp.request_handoff(ws, "update", "orch@x", argv=["update"])
     hp.request_handoff(ws, "update", "orch@y", argv=["update", "--project-only"])
-    hp.request_handoff(ws, "ticket.answer", "t_a:q1:" + "a" * 64, argv=["answer", "t_a", "q1", "--", "x"], value="x")
+    hp.request_handoff(
+        ws, "ticket.answer", "t_a:q1:" + "a" * 64, argv=["answer", "t_a", "q1", "--", "x"], value="x"
+    )
     first = next(h for h in hp.handoffs(ws) if h["op"] == "update")
     assert hp.handoff_take(ws, first["id"]) is not None
     assert [h["op"] for h in hp.handoffs(ws)] == ["ticket.answer"]

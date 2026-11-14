@@ -952,9 +952,10 @@ function repeatsDialog(only = null, addonName = null) {
     const plan = repeatPlan(choice);
     if (save.disabled || !ticket.value || !plan.phrase) return;
     save.disabled = true;
+    const label = save.textContent; save.textContent = 'Saving…';  // saving takes a few seconds: say so
     const result = await act('addon.act', {addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase});
     window.orch.toast(result.ok ? 'Schedule saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    save.disabled = false;
+    save.disabled = false; save.textContent = label;
     if (result.ok) await window.orch.close(d);
     if (route().kind === 'addon') await loadAddon(route().id);
   });
@@ -1014,9 +1015,10 @@ function repeatsDialog(only = null, addonName = null) {
   const remove = button('Delete schedule', 'outline danger', async () => {
     if (remove.disabled) return;
     remove.disabled = true;
+    const label = remove.textContent; remove.textContent = 'Removing…';
     const result = await act('addon.act', {addon:addonName || route().id, verb:'delete', target:only});
     window.orch.toast(result.ok ? 'Schedule removed. Its tickets stay.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    remove.disabled = false;
+    remove.disabled = false; remove.textContent = label;
     if (result.ok) await window.orch.close(d);
     if (route().kind === 'addon') await loadAddon(route().id);
   });
