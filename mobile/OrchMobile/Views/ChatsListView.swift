@@ -31,7 +31,7 @@ struct ChatsListView: View {
                     ModelMessage()
                     searchField
                     chips
-                    MuteAllBanner()
+                    NotificationBanner()
                     content
                 }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 24)
             }

@@ -71,8 +71,8 @@ final class M1ShellUITests: XCTestCase {
         let notifications = app.buttons["workspace-notifications"]
         XCTAssertTrue(notifications.waitForExistence(timeout: 5))
         notifications.tap()
-        XCTAssertTrue(app.buttons["Until I turn it on"].waitForExistence(timeout: 5))
-        app.buttons["Until I turn it on"].tap()
+        XCTAssertTrue(app.buttons["Until I unmute"].waitForExistence(timeout: 5))
+        app.buttons["Until I unmute"].tap()
         let muted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Muted'"), object: notifications)
         XCTAssertEqual(XCTWaiter.wait(for: [muted], timeout: 5), .completed)
         app.navigationBars.buttons.element(boundBy: 0).tap()

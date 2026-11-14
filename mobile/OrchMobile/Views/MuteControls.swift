@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 struct MuteChoices: View {
     let select: (Mute) -> Void
@@ -49,19 +50,62 @@ struct MuteAllSettings: View {
     @State private var choosing = false
     var body: some View {
         TimelineView(.everyMinute) { context in
+            let muted = model.isMutedAll(now: context.date)
             VStack(alignment: .leading, spacing: 6) {
-                Toggle("Mute all", isOn: Binding(get: { model.isMutedAll(now: context.date) }, set: { on in
+                Toggle("Mute all", isOn: Binding(get: { muted }, set: { on in
                     if on { choosing = true } else { Task { await model.muteAll(.off) } }
                 })).themeFont(17).tint(Theme.brand).accessibilityIdentifier("mute-all")
-                Text("Silences notifications inside the app").themeFont(13).foregroundStyle(Theme.muted)
-                if model.isMutedAll(now: context.date) {
-                    Text(MuteRules.endLabel(model.settings.muteAllUntil, now: context.date)).themeFont(13).foregroundStyle(Theme.muted)
-                }
+                Text(muted ? MuteRules.mutedText(model.settings.muteAllUntil, now: context.date)
+                           : "You get a notification for questions and finished work.")
+                    .themeFont(13).foregroundStyle(Theme.muted)
+                NotificationDeniedNote()
             }.padding(16)
         }.confirmationDialog("Mute all", isPresented: $choosing, titleVisibility: .visible) {
             MuteChoices { mute in Task { await model.muteAll(mute) } }
             Button("Cancel", role: .cancel) {}
         }
+    }
+}
+
+/// Yellow note shown only while iPhone Settings has notifications off for orch.
+struct NotificationDeniedNote: View {
+    @State private var access: NotificationAccess = .allowed
+    @Environment(\.scenePhase) private var scenePhase
+    var body: some View {
+        Group {
+            if access == .denied {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Notifications are off in iPhone Settings.").themeFont(15, .semibold)
+                    Text("orch can't tell you about questions.").themeFont(13)
+                    Button("Open iPhone Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }.themeFont(15, .semibold).foregroundStyle(Theme.brand).frame(minHeight: 44).accessibilityIdentifier("open-ios-settings")
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    .background(Theme.warn.opacity(0.18), in: RoundedRectangle(cornerRadius: Theme.Radius.m))
+                    .accessibilityElement(children: .contain).accessibilityIdentifier("notifications-denied-note")
+            }
+        }
+        .task { await read() }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await read() } } }
+    }
+    private func read() async {
+        access = NotificationAccess.from(await UNUserNotificationCenter.current().notificationSettings().authorizationStatus)
+    }
+}
+
+/// Top of the Chats list: the yellow permission note when iPhone blocks notifications, else the mute-all banner (never both).
+struct NotificationBanner: View {
+    @State private var denied = false
+    @Environment(\.scenePhase) private var scenePhase
+    var body: some View {
+        Group {
+            if denied { NotificationDeniedNote() } else { MuteAllBanner() }
+        }
+        .task { await read() }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await read() } } }
+    }
+    private func read() async {
+        denied = NotificationAccess.from(await UNUserNotificationCenter.current().notificationSettings().authorizationStatus) == .denied
     }
 }
 
@@ -72,10 +116,10 @@ struct MuteAllBanner: View {
             if model.isMutedAll(now: context.date) {
                 HStack(spacing: 8) {
                     Image(systemName: "bell.slash").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Text("Notifications off · " + MuteRules.endLabel(model.settings.muteAllUntil, banner: true, now: context.date))
+                    Text(MuteRules.mutedText(model.settings.muteAllUntil, now: context.date))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     Spacer(minLength: 0)
-                    Button("Turn on") { Task { await model.muteAll(.off) } }
+                    Button("Unmute") { Task { await model.muteAll(.off) } }
                         .foregroundStyle(Theme.brand).frame(minHeight: 44).buttonStyle(PressStyle())
                         .accessibilityIdentifier("mute-all-off")
                 }.themeFont(13).padding(.horizontal, 12).padding(.vertical, 4)
