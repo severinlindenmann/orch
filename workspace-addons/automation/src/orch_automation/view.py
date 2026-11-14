@@ -334,7 +334,10 @@ def _schedules(
                         "action": _act("toggle", t["id"]),
                     },
                     "actions": [
-                        {"label": "Allow on this computer", "action": {"op": "addon.allow", "args": {"target": t["id"]}}}
+                        {
+                            "label": "Allow on this computer",
+                            "action": {"op": "addon.allow", "args": {"target": t["id"]}},
+                        }
                         if t["id"] in waiting
                         else {"label": "Run now", "action": _act("run", t["id"])},
                         {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
