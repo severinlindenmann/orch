@@ -41,7 +41,7 @@ The deny **set** is the same for every adapter; an adapter only says how its too
 | `secrets` | `<workspace>/.orch/secrets/` (old key files) | no read, no write | refused |
 | `record` | `<workspace>/.orch/record/` | write refused, read allowed | refused (reading goes through `orch record ...`) |
 | `local-id` | `<workspace>/.orch/.local-id` | write refused, read allowed | refused |
-| `copies` | agent in a copy: every other entry of the copies folders at its start (other tickets, other workspaces, `<ws8>/.owner`, `.trash`); any other agent: every copies folder | no read, no write | refused |
+| `copies` | agent in a copy: every other entry of the copies folders at its start (`.owner`, `.trash`, other workspaces first, then other tickets; at most 16 rows); any other agent: every copies folder | no read, no write | refused (a copy agent's rows: the path up to `/ \ " ' ; & \|` or the end, never a bare prefix, first 6 rows) |
 
 `home` covers the key store, key files, `profiles.toml`, `human.key`, the nonce store, `human-settings.json`,
 `proposals.json`, `permissions.json`, `agent-approvals.json` and the relay and dev records. Never denied: the workspace

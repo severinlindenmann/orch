@@ -15,6 +15,9 @@ ROOTS = (
     ("record", False, ".orch/record"),
     ("local-id", False, ".orch/.local-id"),
 )
+SHELL_ROWS = 6  # copies rows that also get shell patterns
+COPY_ROWS = 16  # copies rows at most
+BOUNDS = ("/", "\\", '"', "'", ";", "&", "|")  # what can follow a path in a command (a space cannot: _BAD)
 _BAD = re.compile(r"[,() \t\r\n\0]")
 _DRIVE = re.compile(r"^([A-Za-z]):[\\/]")
 
@@ -201,32 +204,42 @@ def copies_rules(
         if own:
             break
 
-    def row(path: str) -> dict:
-        # file tools only: a shell text pattern is a substring match, so a sibling named like a prefix of
-        # the agent's own folder (`t_1` next to `t_10`, or one the agent made) would refuse every shell
-        # command naming its own folder; and `../sibling` is reachable by the shell anyway
+    def row(path: str, bounded: bool = True, shell: bool = True) -> dict:
+        # A plain shell text pattern is a substring match: a sibling named like a prefix of the agent's own
+        # folder (`t_ab` next to `t_abc`, or a name the agent made) would refuse every shell command naming
+        # its own folder. So a copy agent's shell rows match the path only up to a boundary (BOUNDS, or the
+        # end of the command); `../sibling` stays reachable by the shell (Level 1).
+        f = path_forms(path, workspace, account_home)
+        if not bounded:
+            return {"root": "copies", "path": path, "read": True, **f}
         return {
             "root": "copies",
             "path": path,
             "read": True,
-            **path_forms(path, workspace, account_home),
+            **f,
             "text": [],
+            "text_bounded": [t for t in f["text"] if t[:1] in "/~" or _DRIVE.match(t)] if shell else [],
         }
 
-    if own is None:
-        return [row(_norm(b)) for b in dict.fromkeys(bases)]
-    out = []
+    if own is None:  # not in a copy: every copies folder, whole (no own folder to keep clear)
+        return [row(_norm(b), bounded=False) for b in dict.fromkeys(bases)]
+    first: list[str] = []
+    rest: list[str] = []
     for b in dict.fromkeys(bases):
         base = _norm(b)
         keep_ws = own[1] if _norm(own[0]).lower() == base.lower() else None
         for n in _list(base):
             if keep_ws is None or n.lower() != keep_ws.lower():
-                out.append(row(base + "/" + n))
+                (first if re.fullmatch(r"[0-9a-f]{8}", n) else rest).append(base + "/" + n)
         if keep_ws is not None:
             for n in _list(base + "/" + keep_ws):
                 if n.lower() != own[2].lower():
-                    out.append(row(base + "/" + keep_ws + "/" + n))
-    return out
+                    p = base + "/" + keep_ws + "/" + n
+                    (first if n in (".owner", ".trash") else rest).append(p)
+    # bounded (a Windows command line holds 32767 characters, and names the agent makes must not stop the
+    # next start): `.owner`, `.trash` and other workspaces first; past COPY_ROWS none (defense in depth only)
+    order = sorted(first, key=lambda p: not p.endswith(("/.owner", "/.trash"))) + rest
+    return [row(p, shell=k < SHELL_ROWS) for k, p in enumerate(order[:COPY_ROWS])]
 
 
 def _list(folder: str) -> list[str]:
@@ -245,6 +258,8 @@ def tool_patterns(rule_list: list[dict]) -> list[str]:
             for tool in tools:
                 pats += [f"{tool}({f})", f"{tool}({f}/**)"]
         pats += [f"Bash(*{t}*)" for t in r["text"]]
+        for t in r.get("text_bounded", ()):
+            pats += [f"Bash(*{t}{b}*)" for b in BOUNDS] + [f"Bash(*{t})"]
     return list(dict.fromkeys(pats))
 
 

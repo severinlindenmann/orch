@@ -624,7 +624,7 @@ def test_windows_copy_paths_any_case_find_the_own_copy():
     out = denyrules.copies_rules("C:\\Users\\Bob\\proj", ws, "C:\\Users\\Bob", bases)
     pats = _set(out)
     assert "Read(//c/Users/Bob/.orch-work/**)" in pats and "Edit(C:/Users/Bob/.orch-work/**)" in pats
-    assert not any(p.startswith("Bash(") for p in pats)  # file tools only (see copies_rules)
+    assert "Bash(*~\\.orch-work*)" in pats  # not in a copy: the copies folder whole, shell included
 
 
 def test_a_sibling_named_like_a_prefix_of_the_own_copy_never_blocks_its_shell(proj_ws):
@@ -633,7 +633,39 @@ def test_a_sibling_named_like_a_prefix_of_the_own_copy_never_blocks_its_shell(pr
     (base / "ab").mkdir()
     argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, own)
     pats = argv[argv.index("--disallowedTools") + 1].split(",")
-    texts = [p[len("Bash(*") : -2] for p in pats if p.startswith("Bash(*")]
-    assert not any(t in f"cd {own} && ls" for t in texts)
+    import fnmatch
+
+    shell = [p[len("Bash(") : -1] for p in pats if p.startswith("Bash(")]
+    for cmd in (
+        f"cd {own} && ls",
+        f"cat {own}/a.py",
+        f"ls {own}",
+        f'cat "{own}/x"',
+        f"ls {base}/ab12cd34/t_own001",
+    ):
+        assert not any(fnmatch.fnmatchcase(cmd, g) for g in shell), cmd
+    sib = base / "ab12cd34" / "t_own"
+    for cmd in (
+        f"cat {sib}/a.py",
+        f"ls {sib}",
+        f'cat "{sib}"',
+        f"cat {base}/ab12cd34/.owner",
+        f"ls {base}/ffff0000/x",
+    ):
+        assert any(fnmatch.fnmatchcase(cmd, g) for g in shell), cmd
     assert _covered(pats, "Read", str(base / "ab12cd34" / "t_own" / "x"))
     assert not _covered(pats, "Read", str(own / "x"))
+
+
+def test_many_sibling_tickets_keep_the_command_line_short(proj_ws):
+    home, base, own = _copy_world(proj_ws)
+    for i in range(300):  # e.g. names an agent made to make the next start fail
+        (base / "ab12cd34" / f"t_sib{i:03d}").mkdir()
+    argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, own)
+    flag = argv[argv.index("--disallowedTools") + 1]
+    pats = flag.split(",")
+    assert _covered(pats, "Read", str(base / "ffff0000" / "x"))  # other workspaces and .owner come first
+    assert any(p.startswith("Bash(") and p.endswith("/ab12cd34/.owner)") for p in pats)
+    assert _covered(pats, "Read", str(base / "ab12cd34" / "t_other1" / "x"))
+    assert not _covered(pats, "Read", str(own / "x"))
+    assert len(flag) < 30000
