@@ -954,10 +954,15 @@ function repeatsDialog(only = null, addonName = null) {
     if (save.disabled || !ticket.value || !plan.phrase) return;
     save.disabled = true;
     const label = save.textContent; save.textContent = 'Saving…';  // saving takes a few seconds: say so
-    const result = await act('addon.act', {addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase});
+    // Saving always ends: the answer, or after 30 s a plain "taking too long" (the schedule may still have been saved)
+    let timer;
+    const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list below, then try again.'}), 30000); });
+    let result;
+    try { result = await Promise.race([act('addon.act', {addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase}), late]); }
+    catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
+    finally { clearTimeout(timer); save.disabled = false; save.textContent = label; }
     window.orch.toast(result.ok ? 'Schedule saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    save.disabled = false; save.textContent = label;
-    if (result.ok) await window.orch.close(d);
+    if (result.ok) await window.orch.close(d);  // close first: the list below refreshes right after
     if (route().kind === 'addon') await loadAddon(route().id);
   });
   const refreshSummary = () => {
