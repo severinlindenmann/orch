@@ -302,7 +302,8 @@ def rows(root):
                     paused["since"],
                     f"orch sync resolve {shlex.quote(path)} --keep mine|theirs"
                     + (" --proof-stdin" if path == "ticket-counter.json" else ""),
-                    ["Keep mine", "Keep theirs"],
+                    # a secret with no file to leave out has no choice to offer: a notice, not a question
+                    None if secret and not any(acts) else ["Keep mine", "Keep theirs"],
                     title=Path(path).name,
                     actions=[a for a in acts if a],
                 )
