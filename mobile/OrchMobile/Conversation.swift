@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // The phone as a messenger (v3): per workspace one General conversation plus topics (tickets). Pure builders over what the
 // relay returned (workspaces, messages, updates, questions) and the Outbox; read state is phone-local. The one rule
@@ -309,6 +310,7 @@ enum ConversationBuilder {
     // MARK: One conversation
 
     static func items(_ id: ConversationID, _ d: ConversationInputs) -> [ConvItem] {
+        let sp = PerfSignpost.begin("ConversationBuilder.items"); defer { PerfSignpost.end(sp) }
         let ix = index(d)
         var out: [ConvItem] = []
         var listed = Set<String>()
@@ -416,7 +418,8 @@ enum ConversationBuilder {
 
     /// The workspace list: open questions first, then newest activity.
     static func summaries(_ d: ConversationInputs, read: ReadState) -> [WorkspaceSummary] {
-        d.workspaces.map { w in
+        let sp = PerfSignpost.begin("ConversationBuilder.summaries"); defer { PerfSignpost.end(sp) }
+        return d.workspaces.map { w in
             WorkspaceSummary(workspace: w, presence: w.presence(now: d.now), general: general(workspace: w.id, d, read: read),
                              topics: topics(workspace: w.id, d, read: read),
                              openQuestions: ChatsRowRules.openQuestions(d.questions, answers: d.answers, workspace: w.id).count)
