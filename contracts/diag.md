@@ -49,8 +49,8 @@ the key values the hider guards).
 
 1. `kv` has at most 24 keys; a key is `[a-z][a-z0-9_]{0,39}`. A value is a scalar (string, number, boolean, `null`) or a list of at
    most 20 scalars. Objects, bytes and anything else are left out.
-2. A string is cut at 300 characters, **then** passes the workspace's key hider (`orch.hider`): every stored key value, in all its
-   encodings, becomes `[hidden: <name>]`. Without a hider that can be built the line is not written (counted as `hider_off`).
+2. A string passes the workspace's key hider (`orch.hider`) **whole**, then is cut at 300 characters (a cut first could split a
+   key value so the hider no longer finds it): every stored key value, in all its encodings, becomes `[hidden: <name>]`. Without a hider that can be built the line is not written (counted as `hider_off`).
 3. A key whose name says it is secret (`secret token passw passphrase key auth cookie credential bearer signature proof`) holds
    `"[hidden]"` instead of any string or list.
 4. Ticket titles, descriptions, comments, helper conversations and file contents never go in `kv`. Content is a later,
@@ -87,6 +87,7 @@ of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until
 | `relay.send_failed` | `what`, `reason` (the exception class), `why` (its message, cut at 300, key values hidden) |
 | `run.live_submit` | `what` (a live run's input hand-over step; `ticket` and `run` are the event fields) |
 | `copies.clean` | `line` (one step of the clean-up of separate copies) |
+| `diag.disabled` | `actor` (written just before a person switches the log off; an agent cannot) |
 | `diag.dropped` | `count`, `n_<reason>` |
 
 New events add a row here and keep their `kv` keys stable; readers skip names they do not know.

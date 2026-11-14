@@ -352,3 +352,19 @@ def test_diag_folder_is_git_ignored():
     from orch import harness
 
     assert "diag/" in harness.CONTRACT_IGNORE
+
+
+def test_secret_straddling_the_cut_is_hidden(proj):
+    with hider.use_hider(Hider({"api": SECRET})):
+        diag.log("test.straddle", root=proj, text="a" * (diag.STR_MAX - 10) + SECRET + " tail")
+        diag.log("test.straddle2", root=proj, ticket="x" * (diag.STR_MAX - 5) + SECRET)
+    raw = "".join(p.read_text() for p in (proj / ".orch" / "diag").iterdir())
+    assert SECRET not in raw and SECRET[:10] not in raw
+
+
+def test_an_agent_cannot_switch_the_debug_log_off(proj, run):
+    code, _, err = run("config", "set", "diag.enabled", "off", "--by", "agent:claude")
+    assert code == 2 and "Only a person" in err
+    assert run("config", "get", "diag.enabled", "--json")[1].count("true") == 1
+    assert run("config", "set", "diag.enabled", "off", "--by", "human:lume")[0] == 0
+    assert any(e["ev"] == "diag.disabled" and e["kv"]["actor"] == "human:lume" for e in events(proj))

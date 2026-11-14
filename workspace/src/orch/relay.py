@@ -534,12 +534,12 @@ def _set_problem(root: Path, text: str | None) -> None:
 
 def log_send_failure(root: Path, what: str, why: object) -> None:
     """One `relay.send_failed` event in the debug log (diag.md) for a phone send that failed and was
-    not shown to anybody (the proposal question): what, the exception class, its message (cut, keys hidden).
+    not shown to anybody (the proposal question): what, the exception class, its message.
     Never fails the caller, never printed."""
     reason = type(why).__name__ if isinstance(why, BaseException) else ""
     diag.log(
-        "relay.send_failed", "warn", root=root, what=" ".join(str(what).split())[:200], reason=reason,
-        why=" ".join(str(why).split())[:300],
+        "relay.send_failed", "warn", root=root, what=" ".join(str(what).split()), reason=reason,
+        why=" ".join(str(why).split()),
     )  # fmt: skip
 
 

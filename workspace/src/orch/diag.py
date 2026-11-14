@@ -202,7 +202,7 @@ def _scalar(value, hide):
     if isinstance(value, float):
         return (value, True) if value == value and abs(value) != float("inf") else (None, True)
     if isinstance(value, str):
-        return hide(value[:STR_MAX]), True
+        return hide(value)[:STR_MAX], True  # hide the whole string first: a cut could split a key value
     return None, False
 
 
@@ -378,7 +378,7 @@ def _emit(
     }
     for field in ("ticket", "run", "job", "ws"):
         if event[field] is not None:
-            event[field] = hide(str(event[field])[:STR_MAX])
+            event[field] = hide(str(event[field]))[:STR_MAX]
     lines = []
     if pending:
         lines.append(_dropped_event(event, pending))  # takes seq - 1
