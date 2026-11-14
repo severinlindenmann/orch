@@ -1,6 +1,7 @@
 """Idea, draft and proposal lifecycle. All mutations run under the Factory writer lock."""
 
 import json
+import re
 
 from . import authority, orchcli
 from .render import START_OPTIONS, question_text
@@ -29,6 +30,46 @@ def idea(root, title, data, ticket_id=None):
         store.write(path, data, frozen=True)
         orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)
     return {"order": ticket["id"], "draft": str(store.path(path))}
+
+
+IDEA_MAX = 500
+PERSON = re.compile(r"human:[A-Za-z0-9_.@ -]{1,64}")
+
+
+def _idea_title(text):
+    """The order's title: the idea's first words (at most 80 characters, cut at a word), never starting with "-"."""
+    title = text if len(text) <= 80 else text[:80].rsplit(" ", 1)[0].rstrip(" ,.;:") + "…"
+    return title.lstrip("-– ") or "Idea"
+
+
+def idea_act(root, text, by):
+    """The Factory page's idea box (`orch factory act idea --by human:<name> -- <text>`, run by the dashboard for the
+    person who pressed the button): a new order whose draft v1 is the idea, recorded as that person, then the
+    manager run is started to write the first real draft. `--by` is a record, never proof: the dashboard runs this
+    only for a click with a page session. Agents file ideas with `orch factory idea` as themselves."""
+    if not isinstance(by, str) or not PERSON.fullmatch(by):
+        raise Refused("Only a person's click files an idea here. Agents use orch factory idea.", "refused")
+    text = " ".join(str(text or "").split())
+    if not text:
+        raise Refused("Write your idea first.", "invalid")
+    if len(text) > IDEA_MAX:
+        raise Refused(f"An idea here has at most {IDEA_MAX} characters.", "invalid")
+    store = Store(root)
+    with store.locked():
+        ticket = orchcli.call(root, "ticket", "new", _idea_title(text), write=True, by=by)
+        store.write(f"drafts/{ticket['id']}/v1.md", text.encode() + b"\n", frozen=True)
+        orchcli.set_ext(root, ticket, by=by, role="order", kind="run", stage="draft", draft=1)
+    try:  # the agent writes the first real draft; when no agent can start, the idea is still saved
+        orchcli.call(root, "run", "start", ticket["id"], write=True, by=by)
+        started = True
+    except Refused:
+        started = False
+    words = (
+        "Idea saved. Your agent is writing the first draft."
+        if started
+        else "Idea saved. Start your agent on it to get the first draft."
+    )
+    return {"order": ticket["id"], "started": started, "text": words}
 
 
 def _adopt(root, store, ticket_id, data):

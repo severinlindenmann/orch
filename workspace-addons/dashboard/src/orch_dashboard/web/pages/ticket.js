@@ -1549,14 +1549,20 @@ async function openNeed(row, trigger) {
 // NAMES a ticket and a question; it never carries text, options or an answer, and it never answers anything. The person
 // presses an option in the native card, which sends the answer through the normal proof path.
 const EMBED_TICKET = /^t_[a-z0-9]{6,16}$/, EMBED_QUESTION = /^q[A-Za-z0-9_-]{0,31}$/;
-function embedQuestionRequest(e) {
-  const data = e && e.data;
-  if (!data || typeof data !== 'object' || data.type !== 'orch.question') return null;
-  if (e.origin !== location.origin || snapshot) return null;  // a shared read-only copy answers nothing
+// The frame of the shown page of an add-on shipped with orch, when this message came from it (same origin); else null.
+function shippedFrame(e) {
+  if (e.origin !== location.origin || snapshot) return null;  // a shared read-only copy acts on nothing
   const r = route();
   if (r.kind !== 'page' || !addons().find(a => a.name === r.id)?.shipped) return null;
   const frame = document.querySelector('iframe.embed[data-key="embed"]');
   if (!frame || !frame.contentWindow || e.source !== frame.contentWindow) return null;
+  return {frame, addon:r.id};
+}
+function embedQuestionRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.question') return null;
+  const frame = shippedFrame(e)?.frame;
+  if (!frame) return null;
   if (typeof data.ticket !== 'string' || typeof data.question !== 'string' || !EMBED_TICKET.test(data.ticket) || !EMBED_QUESTION.test(data.question)) return null;
   return {ticket:data.ticket, question:data.question, frame};
 }
@@ -1590,3 +1596,38 @@ async function openEmbedQuestion(req) {
   window.orch.open(d);
 }
 addEventListener('message', e => { const req = embedQuestionRequest(e); if (req) openEmbedQuestion(req); });
+
+// The Factory idea box: ONE click files the idea as the person's own action. The shown shipped add-on page names only
+// the text; the dashboard runs that add-on's `idea` act through its own op (`addon.act`, which needs this page's
+// session: the person's click, never an agent's or a foreign frame's) and tells the page the new order, or why not.
+const EMBED_IDEA_ID = /^[a-z0-9]{8,32}$/, IDEA_MAX = 500;
+// eslint-disable-next-line no-control-regex
+const IDEA_HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
+function embedIdeaRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.idea') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id) || typeof data.text !== 'string') return null;
+  const text = data.text.replace(IDEA_HIDDEN, ' ').replace(/\s+/g, ' ').trim().replace(/^-+\s*/, '');
+  if (!text) return null;
+  return {...shown, id:data.id, text};
+}
+let embedIdeaBusy = false;  // one idea at a time: a second click while saving is dropped
+async function fileEmbedIdea(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (req.text.length > IDEA_MAX) return reply({type:'orch.idea.failed', error:'An idea here has at most ' + IDEA_MAX + ' characters.'});
+  if (embedIdeaBusy) return;
+  embedIdeaBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:'idea', target:req.text});
+    const answer = result.ok ? result.state?.act_answer : null;
+    const order = answer && answer.addon === req.addon ? answer.answer?.order : null;
+    if (typeof order === 'string' && EMBED_TICKET.test(order)) {
+      reply({type:'orch.idea.done', order});
+      if (typeof answer.answer.text === 'string') window.orch.toast(answer.answer.text.slice(0, 200));
+    } else {
+      reply({type:'orch.idea.failed', error:result.ok ? '' : String(result.text || '').slice(0, 300)});
+    }
+  } finally { embedIdeaBusy = false; }
+}
+addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });

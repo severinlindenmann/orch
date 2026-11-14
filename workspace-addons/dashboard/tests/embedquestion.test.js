@@ -64,8 +64,8 @@ test('an unknown or already answered question says so plainly and mounts no card
   assert.equal(calls.dialogs.length, 3);
   for (const d of calls.dialogs) assert.match(JSON.stringify(d), /no longer waiting for you/);
 });
-test('the message handler never calls act', () => {
-  assert.doesNotMatch(marker, /\bact\(/);
+test('the question handler never calls act', () => {
+  assert.doesNotMatch(marker.slice(0, marker.indexOf('// The Factory idea box')), /\bact\(/);
 });
 
 test('a shared read-only snapshot opens nothing', () => {
