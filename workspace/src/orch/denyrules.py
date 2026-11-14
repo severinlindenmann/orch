@@ -261,6 +261,7 @@ def _known_ws8(base: str) -> list[str]:
 
         return sorted(worktrees._known_copies(Path(base)))
     except Exception:  # noqa: BLE001 - no record: no rows for other workspaces (defense in depth only)
+        print("orch: other workspaces' copies are not covered by this agent's deny rules.", file=sys.stderr)
         return []
 
 
