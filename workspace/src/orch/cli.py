@@ -811,6 +811,11 @@ def run(args: argparse.Namespace) -> None:
             # channel or the one the install came from). It is part of what the person approves AND of the
             # proof's target, so a proof for one source never installs another (no aiming a click at a fork).
             repo, ref = addons.repo(), addons.ref()
+            if not args.json:
+                from orch import updateinfo
+
+                for line in updateinfo.announce_lines():  # the versions, before waiting for the click
+                    print(line, file=sys.stderr)
             if not humanproof.person_by(
                 root,
                 args,

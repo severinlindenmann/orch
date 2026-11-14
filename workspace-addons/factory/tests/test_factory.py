@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -314,3 +315,55 @@ def test_idea_needs_a_title_or_a_ticket_and_refuses_finished_or_sub_tickets(ws, 
     assert run("idea", "--ticket", done["id"], code=2)["code"] == "invalid"
     child = core(ws, "ticket", "new", "Child", "--parent", done["id"])
     assert run("idea", "--ticket", child["id"], code=2)["code"] == "invalid"
+
+
+def _act(ws, *args):
+    """Exactly what the dashboard runs for a click: `orch factory act <verb> --by <actor> --json -- <target>`."""
+    result = subprocess.run(
+        [sys.executable, "-m", "orch_factory", "act", *args],
+        cwd=ws,
+        capture_output=True,
+        check=False,
+        env=os.environ,
+        timeout=30,
+    )
+    return result.returncode, json.loads(result.stdout)
+
+
+def test_act_idea_files_the_order_as_the_person_and_starts_the_agent(ws):
+    code, r = _act(
+        ws, "idea", "--by", "human:alex", "--json", "--", "A page with our  opening hours\nand a map"
+    )
+    assert code == 0 and r["started"] is True and r["text"].startswith("Idea saved.")
+    t = json.loads((ws / "fake-tickets" / f"{r['order']}.json").read_text())
+    assert t["title"] == "A page with our opening hours and a map"
+    assert t["ext"]["factory"] == {"role": "order", "kind": "run", "stage": "draft", "draft": 1}
+    assert (
+        Store(ws).path(f"drafts/{r['order']}/v1.md").read_text()
+        == "A page with our opening hours and a map\n"
+    )
+    writes = [c for c in map(json.loads, (ws / "calls.jsonl").read_text().splitlines()) if c["by"]]
+    assert writes and {c["by"] for c in writes} == {"human:alex"}  # ticket, ext and run: all the person's
+    assert json.loads((ws / "runs.jsonl").read_text())["ticket"] == r["order"]
+
+
+def test_act_idea_is_saved_when_no_agent_can_start_and_titles_are_cut(ws):
+    (ws / "fail-run").write_text("")
+    long = "-- " + "word " * 40
+    code, r = _act(ws, "idea", "--by", "human:alex", "--json", "--", long)
+    assert code == 0 and r["started"] is False and "Start your agent" in r["text"]
+    title = json.loads((ws / "fake-tickets" / f"{r['order']}.json").read_text())["title"]
+    assert title.startswith("word") and title.endswith("…") and len(title) <= 81
+
+
+def test_act_idea_refuses_without_a_person_or_text(ws):
+    for by in ([], ["--by", "agent:helper"], ["--by", "human:"]):
+        code, r = _act(ws, "idea", *by, "--json", "--", "An idea")
+        assert code == 2 and r["code"] == "refused"
+    code, r = _act(ws, "idea", "--by", "human:alex", "--json", "--", "   ")
+    assert code == 2 and r["code"] == "invalid"
+    code, r = _act(ws, "idea", "--by", "human:alex", "--json", "--", "x" * 501)
+    assert code == 2 and r["code"] == "invalid"
+    code, r = _act(ws, "nope", "--by", "human:alex", "--json", "--", "An idea")
+    assert code == 2
+    assert not (ws / "fake-tickets").exists() or not list((ws / "fake-tickets").iterdir())

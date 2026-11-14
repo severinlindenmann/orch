@@ -56,6 +56,12 @@ ORCH_OK = ["--allowedTools", ",".join(f"Bash(orch {c}:*)" for c in RUN_CMDS)]
 # ask and auto mode also deny the approval commands and the approval store (defense in depth, git step 1)
 DENY = adapters.permission_args("claude", None, "ask")
 assert DENY[0] == "--disallowedTools" and "orch private" in DENY[1] and "agent-approvals" in DENY[1]
+# Claude Code refuses a Write(...) deny rule ("never matches, use Edit"): Edit covers every write tool
+for _mode in ("ask", "auto"):
+    _d = adapters.permission_args("claude", None, _mode)
+    _rules = _d[_d.index("--disallowedTools") + 1].split(",")
+    assert "Edit(**/agent-approvals.json)" in _rules, _mode
+    assert not any(r.startswith("Write(") for r in _rules), _mode
 # the reminder hooks go in inline for a one-shot run (`orch work-check --hook claude`, never blocks)
 _REMINDER_CMD = reminder_settings.hook_command("claude")  # absolute, quoted, never errors
 # ... and in the SAME blob the record hooks (`orch record hook`, before and after every tool call, a failed

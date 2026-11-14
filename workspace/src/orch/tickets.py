@@ -1232,9 +1232,28 @@ def resume_after_start_wait(root: Path, tid: str, by: str) -> None:
             raise
 
 
+RECHECK_TEXT = "Please run the checks again and record them with orch check record."  # as the dashboard's
+
+
+def _recheck_first(root: Path, tid: str, status: str, by: str) -> None:
+    """An agent sends a ticket to Review while a step's proof is changed or failed: ask it ONCE per
+    transition to run the checks again (the answer is this refusal text); the next try goes through, with
+    the honest proof line as today. Never a loop, never a block."""
+    if status != "review" or not (agent_tool() or by.startswith("agent:")):
+        return
+    t = load(root, tid)
+    if t.get("status") == "review" or t.get("general") is True or t.get("recheck_asked"):
+        return
+    if not {"changed", "failed"} & set(proof_state(t, root)["per_item"].values()):
+        return
+    apply_op(root, tid, lambda tk: tk.__setitem__("recheck_asked", True), by=by)
+    raise Refused(f"{RECHECK_TEXT} Then send the ticket to Review again.")
+
+
 def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
+    _recheck_first(root, tid, status, by)
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by)
@@ -1246,6 +1265,8 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
             ticket["waiting_on"].pop("start", None)  # a person's choice: no hook turns it back
         old = ticket["status"]
         ticket["status"] = target
+        if old != target:
+            ticket.pop("recheck_asked", None)  # the next Review transition asks again
         if old != target and target == status:
             add_history(ticket, actor, f"Status {old} -> {target}")
         if target == "done" and old != "done":
@@ -2690,6 +2711,20 @@ def attach_file(
         return _attach_file(root, tid, path, title, role, summary)
 
 
+def _own_copy(root: Path, tid: str) -> Path | None:
+    """The resolved folder of THIS ticket's own working copy (worktrees.path_for), or None when there is none
+    (no copy, not made by orch, a link). Never another ticket's or workspace's copy."""
+    from orch import addons, worktrees
+
+    try:
+        want = worktrees.path_for(addons.workspace_id(root) or "", tid, addons.home(root))
+        if want.is_symlink() or not want.is_dir() or not worktrees.is_orch_copy(want):
+            return None
+        return Path(os.path.realpath(want))
+    except (Refused, OSError, RuntimeError, ValueError):
+        return None
+
+
 def _attach_file(
     root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
 ) -> dict:
@@ -2705,16 +2740,26 @@ def _attach_file(
     base = Path(os.path.realpath(root))
     given = Path(os.path.abspath(os.path.expanduser(path)))
     rel = None
+    src_base = base
     for b in (Path(os.path.abspath(root)), base):
         try:
             rel = given.relative_to(b)
             break
         except ValueError:
             continue
-    inside = Refused("proof files must be inside this workspace.")
+    if rel is None:  # a helper works in this ticket's own copy: files from THAT copy (only) count too
+        own = _own_copy(root, tid)
+        if own is not None:
+            for b in (Path(os.path.abspath(own)), own):
+                try:
+                    rel, src_base = given.relative_to(b), own
+                    break
+                except ValueError:
+                    continue
+    inside = Refused("proof files must be inside this workspace or this ticket's own working copy.")
     if rel is None or ".." in rel.parts:
         raise inside
-    cur = base
+    cur = src_base
     for part in rel.parts:
         cur = cur / part
         if cur.is_symlink():

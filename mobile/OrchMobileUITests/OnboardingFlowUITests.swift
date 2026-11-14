@@ -80,7 +80,6 @@ final class OnboardingFlowUITests: XCTestCase {
         let new = app.buttons["new-chat"]
         XCTAssertTrue(new.waitForExistence(timeout: 15))
         new.tap()
-        app.buttons["compose-new-topic"].tap()
         XCTAssertTrue(app.buttons["nt-type"].waitForExistence(timeout: 10)); app.buttons["nt-type"].tap()   // "Type instead"
         XCTAssertTrue(app.buttons["workspace-picker"].waitForExistence(timeout: 10))
         app.buttons["workspace-picker"].tap()

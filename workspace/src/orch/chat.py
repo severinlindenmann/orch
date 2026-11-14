@@ -483,8 +483,14 @@ def _make_ticket(root: Path, mid: str, title: str | None = None, by: str | None 
             start = next((i for i in range(boundary, end + 1) if entries[i].get("by") == "you"), None)
             if start is None:
                 raise Refused("Nothing new to make a ticket from.")
-            # Keep helper context after an explicit boundary; legacy histories begin at the first person.
-            conversation = entries[boundary if max(convo, moved_end) >= 0 else start : end + 1]
+            # Only the exchange the proposal answers: the helper's turns before it and the person's last
+            # run of messages before those, never earlier unrelated Chat.
+            i = end
+            while i >= start and entries[i].get("by") != "you":
+                i -= 1
+            while i - 1 >= start and entries[i - 1].get("by") == "you":
+                i -= 1
+            conversation = entries[max(i, start) : end + 1]
             making = {"id": tickets.new_id(root), "messages": [m["id"] for m in conversation]}
             message["making"] = making
             proposal_document = next(d for d in documents if any(m is message for m in d["messages"]))

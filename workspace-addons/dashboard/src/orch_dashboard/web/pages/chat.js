@@ -64,7 +64,7 @@ function chatAvatar(member, helper = false) {
   const palette = ['var(--brand)', 'var(--warning)', 'var(--info)', 'var(--chart-4)'];
   const hash = [...label].reduce((n, c) => n + c.charCodeAt(0), 0);
   const initials = member?.look?.letter ? clean(member.look.letter).slice(0, 1) : label.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-  const badge = h('span', {className:'chat-avatar', 'aria-hidden':'true'}, initials, helper ? h('span', {className:'chat-spark'}, '✦') : null);
+  const badge = h('span', {className:'avatar chat-avatar', 'aria-hidden':'true'}, initials, helper ? h('span', {className:'avatar-spark'}, '✦') : null);
   const color = member?.look?.color;
   badge.style.color = palette[hash % palette.length];
   badge.style.backgroundColor = 'color-mix(in srgb, ' + palette[hash % palette.length] + ' 14%, transparent)';

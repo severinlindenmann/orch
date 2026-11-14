@@ -103,8 +103,7 @@ final class AccessibilityIdUITests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons["new-chat"].waitForExistence(timeout: 15))
         app.buttons["new-chat"].tap()
-        XCTAssertTrue(element(app, "new-chat-sheet").waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["contact-ws_reports001"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["nt-mic"].waitForExistence(timeout: 5))   // + opens New topic directly
         assertUniqueIds(in: app)
     }
 

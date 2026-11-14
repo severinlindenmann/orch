@@ -115,3 +115,11 @@ test('the icon picker opens behind Change with 12 icons, More icons and one prev
   assert.ok(tree.some(x => x.attrs.role === 'tablist'));
   assert.equal(textOf(tree.find(x => x.attrs['data-lk'] === 'more')), 'Fewer icons');
 });
+
+test('the owner row shows the chosen person, stays local and is plain text', () => {
+  const s = fs.readFileSync(path.join(WEB, 'look.js'), 'utf8');
+  assert.ok(s.includes("owner = clean(e.detail && e.detail.people && e.detail.people.me) || null;"));
+  assert.ok(s.includes("owner || 'Not set'"));
+  assert.ok(s.includes('it is not sent to other workspaces'));
+  assert.ok(s.includes('ownerRow(),'));
+});

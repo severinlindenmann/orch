@@ -388,6 +388,16 @@ class Handler(BaseHTTPRequestHandler):
             from . import handoff
 
             return self._send(200, json.dumps(handoff.listing(self.root)).encode(), "application/json")
+        if path == "/api/term":  # the live helper session's screen (read only; typing is POST /api/term/keys)
+            if not self._same_origin():
+                return self._send(403, b"forbidden", "text/plain")
+            from . import termsession
+
+            tid = parse_qs(self.path.partition("?")[2]).get("ticket", [""])[0]
+            snap = termsession.snapshot(self.root, self.orch_bin, tid)
+            return self._send(
+                200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
+            )
         if path == "/api/events":
             return self._events()
         if path == "/api/ref-file":
@@ -582,6 +592,34 @@ class Handler(BaseHTTPRequestHandler):
             return "This request came from another website and was refused."
         return check_request("POST", self.headers, self.server.server_address[1], api=True)
 
+    def _term_keys(self):
+        """Type into the live helper session: the person's own dashboard session only (cookie + page secret, loopback
+        Host, no proxy headers: the same rule as a human-only action). A script or an agent has none of it."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if not (
+            self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
+        ):
+            return self._send(
+                403, b"Open the dashboard from this computer to type here.", "text/plain; charset=utf-8"
+            )
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._send(415, b"send JSON", "text/plain")
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= 16384:
+                raise ValueError
+            body = json.loads(self.rfile.read(n))
+            if not isinstance(body, dict) or set(body) != {"ticket", "items"}:
+                raise ValueError
+        except (ValueError, RecursionError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        from . import termsession
+
+        code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
+        self._send(code, text.encode(), "application/json" if code == 200 else "text/plain; charset=utf-8")
+
     def _session_post(self):
         """POST /session: the page hands over the one-time launch token it got in the URL fragment; the server
         spends it and sets the session cookie (H1). Same fence as an action; loopback Host, no proxy headers."""
@@ -650,6 +688,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._session_post()
         if path == "/session/reopen":
             return self._session_reopen()
+        if path == "/api/term/keys":
+            return self._term_keys()
         px = PROXY.fullmatch(path)
         if path != "/api/act" and not (px and px.group(2) == "/api/act"):
             return self._refuse()
