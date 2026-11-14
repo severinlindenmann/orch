@@ -354,6 +354,7 @@ final class AppModel {
     private var arrivalCounter = 0
 
     private func rebuildGroups() {
+        let sp = PerfSignpost.begin("AppModel.rebuildGroups"); defer { PerfSignpost.end(sp) }
         let names = Dictionary(workspaces.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first })
         let snapshot = GroupStore.build(messages: messages, workspaces: names, ownPhoneId: credentials?.phoneId ?? "",
                                         ownMessageIds: Set(messages.filter(\.fromPhone).map(\.id)), receivedAt: firstSeen, arrival: arrival)
@@ -370,6 +371,7 @@ final class AppModel {
     }
 
     private func merge(_ items: [PhoneMessage]) {
+        let sp = PerfSignpost.begin("AppModel.merge"); defer { PerfSignpost.end(sp) }
         for m in items.reversed() where arrival[m.id] == nil {
             arrival[m.id] = arrivalCounter
             arrivalCounter += 1
