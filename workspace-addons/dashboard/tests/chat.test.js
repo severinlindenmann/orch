@@ -88,7 +88,7 @@ test('"Your helper" is the thread title, the Chat row title, the bubble, the com
   assert.match(JSON.stringify(c.chatThinking('Your helper', true)), /Your helper is thinking/);
 });
 
-test('the chip row is gone: one From my phone checkbox, and "Working on N tickets" only when N > 0', () => {
+test('the chip row is gone: no From my phone checkbox (the New chat picker has Your phone), and "Working on N tickets" only when N > 0', () => {
   const c = context();
   c.state.chat = {day:'2026-11-11', activity:{phone_today:2, from_workspaces:{Home:3}, running:0}, messages:[
     {id:'p1', by:'you', via:'phone', text:'From the phone'}, {id:'r1', by:'ws_x', via:'helper', text:'Reply to phone', reply_to:'p1'},
@@ -96,7 +96,7 @@ test('the chip row is gone: one From my phone checkbox, and "Working on N ticket
   const page = JSON.stringify(c.chatPage());
   assert.doesNotMatch(page, /From phone · |From Home · |Running · /);
   assert.doesNotMatch(page, /Working on/);
-  assert.match(page, /From my phone/); assert.match(page, /Phone & workspaces/);
+  assert.doesNotMatch(page, /From my phone/); assert.match(page, /Contacts/);
   assert.doesNotMatch(page, /chat-list"/, 'relay off: no conversation list');
   c.state.chat.activity.running = 2;
   assert.match(JSON.stringify(c.chatHeader(null, false)), /Working on 2 tickets/);
@@ -186,15 +186,27 @@ test('a finished group is only under Earlier, a live one only under Groups', () 
   }
 });
 
-test('thread header: helper title with workspace and "Working on N tickets", then the phone filter and workspace link (no extra row)', () => {
+test('thread header: helper title with workspace and "Working on N tickets", then the workspace link (no checkbox)', () => {
   const c = context();
   c.state.chat = {day:'2026-11-11', activity:{running:2}, messages:[]};
   const head = c.chatHeader(null, false);
   const top = nodes(head, n => n.attrs?.className === 'chat-head-top')[0];
   assert.deepEqual(top.children.map(n => n.textContent), ['✧', 'Your helperFish workspace · Working on 2 tickets', 'Earlier']);
   const row = nodes(head, n => n.attrs?.className === 'chat-head-row')[0];
-  assert.equal(row.textContent, 'From my phonePhone & workspaces');
+  assert.equal(row.textContent, 'New chatContacts');
   assert.equal(head.children.length, 2, 'the title row and the filter row');
+});
+
+test('New chat picker offers your helper, workspaces and your phone; Your phone shows the phone messages', async () => {
+  const c = context();
+  c.state.chat = {day:'2026-11-11', activity:{}, messages:[{id:'p1', by:'you', via:'phone', text:'From the phone'}, {id:'d1', by:'you', via:'dashboard', text:'At the desk'}]};
+  const picker = JSON.stringify(c.chatNewChatRows());
+  assert.match(picker, /Your helper/); assert.match(picker, /Your phone/);
+  vm.runInContext("chatNewChatPick('phone')", c);
+  assert.equal(vm.runInContext('chatUi.filter', c), 'phone');
+  assert.match(JSON.stringify(c.chatHeader(null, false)), /Your phone/);
+  vm.runInContext("chatNewChatPick('helper')", c);
+  assert.equal(vm.runInContext('chatUi.filter', c), 'all');
 });
 
 test('Earlier: one entry point, past days first without today, then finished groups with their day', async () => {
@@ -298,4 +310,17 @@ test('header reads Your helper once a message exists, and Send works while the h
   assert.match(JSON.stringify(thread), /is thinking/);
   const send = nodes(thread, n => n.attrs?.['data-key'] === 'send')[0];
   assert.equal(send.attrs.disabled, false);
+});
+
+test('orch.say from the shown add-on frame fills the draft; a URL does not; a typed draft is kept', () => {
+  const c = context(), frameWin = {};
+  c.location = {hash:'#addon/factory', origin:'http://x'};
+  c.route = () => ({kind:'page', id:'factory'});
+  c.state.addons = [{name:'factory', shipped:true}];
+  c.document.querySelector = () => ({contentWindow:frameWin});
+  const msg = (text, extra = {}) => ({data:{type:'orch.say', text}, origin:'http://x', source:frameWin, ...extra});
+  assert.equal(c.chatSayRequest(msg('Factory: a page\nwith hours\u0007')).text, 'Factory: a page with hours');
+  assert.equal(c.chatSayRequest(msg('x'.repeat(900))).text.length, 500);
+  assert.equal(c.chatSayRequest(msg('hi', {origin:'http://evil'})), null);
+  assert.equal(c.chatSayRequest(msg('hi', {source:{}})), null);
 });

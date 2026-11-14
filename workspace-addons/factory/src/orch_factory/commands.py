@@ -14,14 +14,41 @@ def order_ticket(root, order):
     return ticket
 
 
-def idea(root, title, data):
+ADOPTABLE = {"open", "ready", "waiting", "active"}  # active: the helper adopts the ticket it was started on
+
+
+def idea(root, title, data, ticket_id=None):
+    """A new order, or (`--ticket`) an existing ticket turned into one: e.g. the ticket the owner made from Chat
+    while asking for a Factory run. Its note becomes draft v1 when no draft text is given."""
     store = Store(root)
     with store.locked():
+        if ticket_id is not None:
+            return _adopt(root, store, ticket_id, data)
         ticket = orchcli.call(root, "ticket", "new", title, write=True)
         path = f"drafts/{ticket['id']}/v1.md"
         store.write(path, data, frozen=True)
         orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)
     return {"order": ticket["id"], "draft": str(store.path(path))}
+
+
+def _adopt(root, store, ticket_id, data):
+    ticket = orchcli.ticket(root, ticket_id)
+    ext = ticket.get("ext", {}).get("factory")
+    if ext:
+        if ext.get("role") == "order":
+            return {"order": ticket["id"], "draft": None, "adopted": False}  # already an order: idempotent
+        raise Refused("This ticket is a crew task of a Factory order.", "invalid")
+    if ticket.get("parent"):
+        raise Refused("A sub-ticket cannot become a Factory order.", "invalid")
+    if ticket.get("status") not in ADOPTABLE:
+        raise Refused(
+            "Only an open ticket (not in review, done or dropped) can become a Factory order.", "invalid"
+        )
+    text = data or str(ticket.get("note") or ticket.get("title") or "").encode()
+    path = f"drafts/{ticket['id']}/v1.md"
+    store.write(path, text, frozen=True)
+    orchcli.set_ext(root, ticket, role="order", kind="run", stage="draft", draft=1)
+    return {"order": ticket["id"], "draft": str(store.path(path)), "adopted": True}
 
 
 def draft(root, order, data):

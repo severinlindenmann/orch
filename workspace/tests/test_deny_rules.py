@@ -529,3 +529,149 @@ def test_missing_claude_code_message_is_plain(monkeypatch, tmp_path):
         str(e.value)
         == "Claude Code is missing or too old on this computer. Install or update it, then press Continue."
     )
+
+
+# ---- THE isolation invariant: an agent reads and writes its own ticket copy (instruction file, skills) and
+# never the orch home (keys, secrets, approvals) or other tickets' copies. Copies live NEXT TO the home
+# (addons.copies_base), so the home deny stays one blanket rule and the copy is simply not under it.
+
+
+def _covered(pats, tool, path):
+    """A file pattern of `tool` covers `path` (patterns are //<p> and //<p>/**, or ~/ forms)."""
+    p = "//" + path.lstrip("/")
+    for x in pats:
+        if not x.startswith(tool + "("):
+            continue
+        body = x[len(tool) + 1 : -1]
+        if body == p or (body.endswith("/**") and (p + "/").startswith(body[:-2])):
+            return True
+    return False
+
+
+def _copy_world(proj, monkeypatch=None):
+    from orch import addons
+
+    if monkeypatch is not None:  # the signed copies record knows the other workspace
+        monkeypatch.setattr(denyrules, "_known_ws8", lambda base: ["ab12cd34", "ffff0000"])
+
+    home = addons.home(proj).resolve()
+    (home / "keys").mkdir(parents=True, exist_ok=True)
+    (home / "keys" / "person.key").write_text("x")
+    base = addons.copies_base(home)
+    own = base / "ab12cd34" / "t_own001abc"
+    for d in (own / ".agents/skills/orch", base / "ab12cd34" / "t_other1", base / "ffff0000" / "t_9zz999"):
+        d.mkdir(parents=True, exist_ok=True)
+    (own / "CLAUDE.local.md").write_text("hi")
+    (base / "ab12cd34" / ".owner").write_text(str(proj))
+    return home, base, own
+
+
+def test_copies_live_next_to_the_orch_home_never_inside_it(tmp_path):
+    from orch import addons
+
+    for h in (tmp_path / ".orch-tool", tmp_path / "x" / "toolhome", tmp_path / "y" / ".orch-dev-home"):
+        h.mkdir(parents=True)
+        b = addons.copies_base(h)
+        assert b.parent == h.resolve().parent and h.resolve() not in (b, *b.parents)
+        assert h.name not in b.name  # the home's own name is a shell deny text: never in the copies path
+    assert addons.copies_base(tmp_path / ".orch-tool").name == ".orch-work"
+    assert addons.copies_base(tmp_path / "x/toolhome") != addons.copies_base(tmp_path / "x/other")
+
+
+def test_an_agent_in_its_copy_reads_it_but_never_the_home_or_other_copies(proj_ws, monkeypatch):
+    home, base, own = _copy_world(proj_ws, monkeypatch)
+    argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, own / "src")
+    pats = argv[argv.index("--disallowedTools") + 1].split(",")
+    for tool in ("Read", "Edit"):
+        assert _covered(pats, tool, str(home))  # the WHOLE home, one blanket rule
+        assert _covered(pats, tool, str(home / "keys" / "person.key"))
+        assert _covered(pats, tool, str(home / "secrets" / "made-later.json"))  # created after the start
+        assert _covered(pats, tool, str(base / "ab12cd34" / "t_other1" / "a.py"))  # another ticket
+        assert _covered(pats, tool, str(base / "ffff0000" / "t_9zz999"))  # another workspace's copy
+        assert _covered(pats, tool, str(base / "ab12cd34" / ".owner"))
+        for mine in (own, own / "CLAUDE.local.md", own / ".agents/skills/orch/SKILL.md"):
+            assert not _covered(pats, tool, str(mine)), (tool, mine)
+    assert "Read(./.orch/secrets/**)" in pats
+
+
+def test_an_agent_outside_any_copy_is_denied_every_copy(proj_ws, monkeypatch):
+    home, base, own = _copy_world(proj_ws, monkeypatch)
+    for wd in (None, proj_ws):
+        argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, wd)
+        pats = argv[argv.index("--disallowedTools") + 1].split(",")
+        assert _covered(pats, "Read", str(own / "CLAUDE.local.md"))
+        assert _covered(pats, "Read", str(home / "keys"))
+
+
+def test_relative_paths_from_the_copy_cannot_reach_the_home_without_its_name(proj_ws):
+    """The copy is not under the home: every relative path from it into the home spells the home's name,
+    which the shell deny matches as text; a link planted in the copy resolves to a path the home rule
+    covers."""
+    home, base, own = _copy_world(proj_ws)
+    argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, own)
+    pats = argv[argv.index("--disallowedTools") + 1].split(",")
+    texts = [p[len("Bash(*") : -2] for p in pats if p.startswith("Bash(*")]
+    for target in (home / "keys" / "person.key", home / "consent.json"):
+        rel = os.path.relpath(target, own)
+        assert any(t in rel for t in texts), rel
+        assert any(t in rel.replace("/", "\\") for t in texts), rel
+    (own / "k").symlink_to(home / "keys")
+    assert _covered(pats, "Read", os.path.realpath(own / "k" / "person.key"))
+
+
+def test_windows_copy_paths_any_case_find_the_own_copy():
+    bases = ["C:\\Users\\Bob\\.orch-work"]
+    ws = "C:\\Users\\Bob\\proj"
+    out = denyrules.copies_rules("c:/users/bob/.ORCH-WORK/ab12cd34/t_own001/src", ws, "C:\\Users\\Bob", bases)
+    assert out == []  # its own copy (nothing else listed on this machine): no blanket deny over it
+    out = denyrules.copies_rules("C:\\Users\\Bob\\proj", ws, "C:\\Users\\Bob", bases)
+    pats = _set(out)
+    assert "Read(//c/Users/Bob/.orch-work/**)" in pats and "Edit(C:/Users/Bob/.orch-work/**)" in pats
+    assert "Bash(*~\\.orch-work*)" in pats  # not in a copy: the copies folder whole, shell included
+
+
+def test_a_sibling_named_like_a_prefix_of_the_own_copy_never_blocks_its_shell(proj_ws, monkeypatch):
+    home, base, own = _copy_world(proj_ws, monkeypatch)
+    (base / "ab12cd34" / "t_own001").mkdir()  # a prefix of the own t_own001abc
+    (base / "ab").mkdir()
+    argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, own)
+    pats = argv[argv.index("--disallowedTools") + 1].split(",")
+    import fnmatch
+
+    shell = [p[len("Bash(") : -1] for p in pats if p.startswith("Bash(")]
+    for cmd in (
+        f"cd {own} && ls",
+        f"cat {own}/a.py",
+        f"ls {own}",
+        f'cat "{own}/x"',
+        f"ls {base}/ab12cd34/t_own001abc",
+    ):
+        assert not any(fnmatch.fnmatchcase(cmd, g) for g in shell), cmd
+    sib = base / "ab12cd34" / "t_own001"
+    for cmd in (
+        f"cat {sib}/a.py",
+        f"ls {sib}",
+        f'cat "{sib}"',
+        f"cat {base}/ab12cd34/.owner",
+        f"ls {base}/ffff0000/x",
+    ):
+        assert any(fnmatch.fnmatchcase(cmd, g) for g in shell), cmd
+    assert _covered(pats, "Read", str(base / "ab12cd34" / "t_own001" / "x"))
+    assert not _covered(pats, "Read", str(own / "x"))
+
+
+def test_many_sibling_tickets_keep_the_command_line_short(proj_ws, monkeypatch, capsys):
+    home, base, own = _copy_world(proj_ws, monkeypatch)
+    for i in range(300):  # e.g. names an agent made to make the next start fail
+        (base / "ab12cd34" / f"t_sib{i:04d}").mkdir()
+    (base / "ab12cd34" / ("t_" + "z" * 200)).mkdir()  # not a ticket id: never a row
+    (base / "deadbeef").mkdir()  # an 8-hex name orch's record does not know: never a row
+    argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, own)
+    flag = argv[argv.index("--disallowedTools") + 1]
+    pats = flag.split(",")
+    assert any(p.startswith("Bash(") and p.endswith("/ab12cd34/.owner)") for p in pats)  # first
+    assert _covered(pats, "Read", str(base / "ab12cd34" / "t_other1" / "x"))  # this workspace's tickets next
+    assert not _covered(pats, "Read", str(base / "deadbeef" / "x")) and "z" * 200 not in flag
+    assert not _covered(pats, "Read", str(own / "x"))
+    assert len(flag) < 30000
+    assert "other copies are not covered" in capsys.readouterr().err  # said, never dropped silently

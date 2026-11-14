@@ -64,8 +64,8 @@ const OrchBlocks = (() => {
   const toneTag = t => TONE_WORD[tone(t)] ? el('span', 'tone-word t-' + tone(t), TONE_WORD[tone(t)]) : null;
   const chip = c => { const s = el('span', 'chip' + (c.tone && c.tone !== 'neutral' ? ' t-' + tone(c.tone) : ''), c.label); return s; };
   const parseDate = v => { const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + 'T00:00:00' : v); return Number.isNaN(d.getTime()) ? null : d; };
-  const hm = d => d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
-  const dayLabel = d => d.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
+  const hm = d => typeof window !== 'undefined' && window.UI?.clock ? window.UI.clock(d) : d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', hour12: false});
+  const dayLabel = d => typeof window !== 'undefined' && window.UI?.stamp ? window.UI.stamp(d, {time: false}) : d.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
   function duration(sec) {
     const n = Number(sec);
     if (!Number.isFinite(n)) return '';
@@ -92,6 +92,8 @@ const OrchBlocks = (() => {
     // shared-link ops only on the page of the add-on with the `links` panel (opts.links)
     const nat = a && /^link\.(copy|extend|stop)$/.exec(String(a.op));
     if (nat && opts.links === true && FILE.test(String(args.id))) { node.dataset.native = 'link-' + nat[1]; node.dataset.linkId = String(args.id); node.textContent = LINK_LABEL[a.op]; node.setAttribute('aria-label', LINK_LABEL[a.op]); return true; }   // always orch's words
+    // A schedule that came by sync: "Allow on this computer" (the page signs it with the sync add-on; DOM = ticket id only)
+    if (a && a.op === 'addon.allow' && TICKET.test(String(args.target))) { node.dataset.syncAllow = String(args.target); node.textContent = 'Allow on this computer'; node.setAttribute('aria-label', 'Allow on this computer'); return true; }   // always orch's words
     const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
     if (!ok) return false;
     node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
@@ -117,8 +119,10 @@ const OrchBlocks = (() => {
   const shownLink = to => typeof to === 'string' && (APP.test(to) || TICKET.test(to) || HTTPS.test(to));
   const MARKS = {arrow: '\u2197', repeat: '\u21ba', dash: '\u2014'};
   function emptyState(e) {
-    const d = el('div', 'empty blk-empty'), mark = el('span', 'empty-mark', MARKS[e.mark] || MARKS.arrow); mark.setAttribute('aria-hidden', 'true');
-    d.append(mark, el('h3', '', e.title)); if (e.text) d.append(el('p', '', e.text));
+    // The one master empty state (UI.state); the buttons stay real links checked by shownLink.
+    let d;
+    if (typeof window !== 'undefined' && window.UI && window.UI.state) { d = window.UI.state({kind: 'empty', title: e.title, text: e.text}); d.classList.add('blk-empty'); }
+    else { d = el('div', 'empty blk-empty'); const mark = el('span', 'empty-mark', MARKS[e.mark] || MARKS.arrow); mark.setAttribute('aria-hidden', 'true'); d.append(mark, el('h3', '', e.title)); if (e.text) d.append(el('p', '', e.text)); }
     for (const [key, cls] of [['button', 'btn primary sm'], ['link', 'btn ghost sm']]) {
       const x = e[key]; if (!x || !shownLink(x.to)) continue;
       const a = linked(cls, x.to, [x.label + (key === 'link' ? ' \u2192' : '')]);
@@ -264,7 +268,7 @@ const OrchBlocks = (() => {
       return s;
     },
     calendar(b) {
-      const s = el('section', 'blk blk-above'), strip = el('ol', 'strip'), head = blkHead(b);
+      const s = el('section', 'blk blk-above'), strip = el('ol', 'week-strip'), head = blkHead(b);
       if (head) s.append(head);
       const box = el('div', 'blk-card card strip-panel');
       const today = new Date().toDateString();

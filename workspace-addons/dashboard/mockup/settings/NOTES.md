@@ -238,3 +238,6 @@ Round 2 — working shared components.
 - Phone pairing now has a working demo confirmation and a phone question preview; cancel leaves questions off.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+### settings-about.html (owner feedback 14 Nov, fb1)
+- New tab "About & updates": installed release, newest release, "What changed" (max 5 plain lines), one Update button, steps (Downloading / Installing / Restarting / Done) and "Updated 16 → 17". Click the button to see the steps.

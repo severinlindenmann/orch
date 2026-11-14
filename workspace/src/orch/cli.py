@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 from orch import (
-    __version__,
     addons,
     cli_addons,
     cli_chat,
@@ -89,11 +88,17 @@ def _find_root() -> Path:
     if not _noted:  # a stale export in a shell sends every command to that workspace: say so once
         _noted = True
         here = _walk_up()
-        if here != env and not any(
-            (h / "worktrees") in (here, *here.parents) for h in addons.home_candidates(include_real=True)
-        ):
+        if here != env and not any(c in (here, *here.parents) for c in _copies_folders()):
             print(f"Note: ORCH_ROOT sends this to {env}, not to {here}.", file=sys.stderr)
     return env
+
+
+def _copies_folders() -> list[Path]:
+    """Where orch's copies live (addons.copies_base), and where they lived until 14 Nov 2026."""
+    return [
+        *addons.copies_candidates(include_real=True),
+        *(h / "worktrees" for h in addons.home_candidates(include_real=True)),
+    ]
 
 
 def _out(args, data, text: str) -> None:
@@ -354,6 +359,25 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
             hide(a, names)
 
 
+class _Version(argparse.Action):
+    """`orch --version`: the release the install records ("orch 16"), read only when asked."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):  # noqa: A002
+        super().__init__(
+            option_strings,
+            dest,
+            default=default,
+            nargs=0,
+            help=help or "show program's version number and exit",
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from orch import updateinfo
+
+        print(updateinfo.current_label())
+        parser.exit()
+
+
 def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
@@ -363,7 +387,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )  # human proof (H1): first line of stdin
 
     p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
-    p.add_argument("--version", action="version", version=f"orch {__version__}")
+    p.add_argument("--version", action=_Version)
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")
@@ -450,6 +474,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
     )
+    x = t.add_parser(
+        "tidy",
+        parents=[common],
+        help="tidy a new ticket when work starts: clear title, owner, due, done when",
+    )
+    x.add_argument("id")
+    x.add_argument("title")
+    x.add_argument("--owner")
+    x.add_argument("--due", metavar="YYYY-MM-DD")
+    x.add_argument("--done-when", dest="done_when")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
     x.add_argument("--goal", required=True)
@@ -643,7 +677,7 @@ def _init_guard(cwd: Path) -> None:
             f"ORCH_ROOT is set to {env}. Run orch init there, "
             "or unset ORCH_ROOT to start a new workspace here."
         )
-    if any((h / "worktrees") in (here, *here.parents) for h in addons.home_candidates(include_real=True)):
+    if any(c in (here, *here.parents) for c in _copies_folders()):
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
 
 
@@ -909,6 +943,10 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "title":
         t = tickets.set_auto_title(root, args.id, args.title, by(), args.description)
         _out(args, t, f'Title written: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "tidy":
+        fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
+        t = tickets.tidy(root, args.id, args.title, by(), fields)
+        _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "plan":
         t = tickets.set_plan(root, args.id, args.goal, args.not_included, by())
         _out(args, t, "Plan written.")

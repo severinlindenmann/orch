@@ -41,10 +41,17 @@ The deny **set** is the same for every adapter; an adapter only says how its too
 | `secrets` | `<workspace>/.orch/secrets/` (old key files) | no read, no write | refused |
 | `record` | `<workspace>/.orch/record/` | write refused, read allowed | refused (reading goes through `orch record ...`) |
 | `local-id` | `<workspace>/.orch/.local-id` | write refused, read allowed | refused |
+| `copies` | agent in a copy: every other entry of the copies folders at its start (its workspace's `.owner`, `.trash` and other tickets, then the other workspaces in orch's signed copies record; rows past what fits on a command line are left out with a warning); any other agent: every copies folder | no read, no write | refused (a copy agent's rows: the path up to `/ " ' ; & \|` or the end, never a bare prefix; first 6 rows) |
 
 `home` covers the key store, key files, `profiles.toml`, `human.key`, the nonce store, `human-settings.json`,
 `proposals.json`, `permissions.json`, `agent-approvals.json` and the relay and dev records. Never denied: the workspace
-itself, `.orch/` tickets, `.orch/run/`, anything `orch ...` prints. A shell command is refused when its **text** contains
+itself, `.orch/` tickets, `.orch/run/`, anything `orch ...` prints. **Isolation invariant:** ticket copies live next to the orch home (`addons.copies_base`, `~/.orch-work`), never
+inside it, so the `home` row stays ONE blanket deny for every agent and a copy agent's own folder (its instruction file and
+skills) is simply not under it; no rule ever opens a part of the home. `copies` rows hold project files only (defense in depth): a copy agent's
+rows come from a listing at its start, so a copy made later, or a name the agent makes itself, is not denied, and its shell
+reaches `../` anyway. Level 1 cannot do better: a deny rule has no "except", and with Claude Code 2.1.325 both `[!x]`
+character classes and a one-level `<base>/*` also deny the agent's own copy (checked with the real CLI, 14 Nov 2026).
+Real isolation between copies needs OS-level separation (Level 2). A shell command is refused when its **text** contains
 a path form; orch commands never contain one, so `orch record query` and `orch secret env <profile> -- ...` work.
 
 **Format `patterns/1`** (tools with `--disallowedTools`, i.e. Claude Code): one comma-joined value merged into the tool's

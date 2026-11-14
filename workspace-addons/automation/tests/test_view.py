@@ -61,8 +61,7 @@ def test_schedule_listed_as_a_table_with_the_week_ahead(ws, monkeypatch):
     (row,) = table["rows"]
     assert row["cells"]["schedule"] == "Weekly breport/b" and row["cells"]["repeats"] == "Mondays at 07:00"
     assert row["cells"]["last"] == "Not yet" and row["link"] == "t_rec00001"
-    (week,) = blocks(v, "calendar")
-    assert len(week["days"]) == 7 and any(d["items"] for d in week["days"])
+    assert not blocks(v, "calendar")  # one schedule: no week strip (fb20)
 
 
 def test_recent_runs_short_list_with_titles(ws):
@@ -133,6 +132,15 @@ def test_notice_says_next_run_when_running(ws, monkeypatch):
     check(v)
     assert v["notice"].startswith("On. Next: ")
     assert "button" not in v
+
+
+def test_no_notice_row_when_running_with_nothing_planned(ws, monkeypatch):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    v = build(ws, T(8))
+    check(v)
+    assert "notice" not in v and "Nothing planned" not in str(v)
 
 
 @pytest.mark.parametrize(
@@ -365,6 +373,9 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     add_ticket(
         ws, "t_rec00009", title="Weekly report", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}}
     )
+    add_ticket(
+        ws, "t_rec00010", title="Daily note", ext={"automation": {"recurring": True, "cron": "0 9 * * *"}}
+    )
     v = build(ws, T(7))
     check(v)
     (table,) = blocks(v, "table")
@@ -394,3 +405,76 @@ def test_recent_runs_and_last_result_read_the_same_runs(ws):
     (lst,) = blocks(v, "list", "Recent runs")
     assert [i["title"] for i in lst["items"]] == ["Weekly report"]
     assert lst["items"][0]["chips"] == [{"label": "Started", "tone": "neutral"}]
+
+
+def test_a_synced_schedule_not_allowed_here_offers_allow_instead_of_run_now(ws, monkeypatch):
+    from orch_automation import view
+
+    add_ticket(
+        ws,
+        "t_rec00002",
+        title="From the other computer",
+        status="active",
+        ext={"automation": {"recurring": True, "cron": "0 8 * * *", "tz": "Europe/Zurich"}},
+    )
+    monkeypatch.setattr(view, "allowed", lambda root, t: False)
+    v = build(ws, T(8))
+    check(v)
+    (sch,) = blocks(v, "table")
+    (row,) = sch["rows"]
+    assert [a["label"] for a in row["actions"]] == ["Allow on this computer", "Edit"]
+    assert row["actions"][0]["action"] == {"op": "addon.allow", "args": {"target": "t_rec00002"}}
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["daily 08:00", "every monday 08:00", "0 8 * * 1,3", "monthly 5 08:00", "0 8 */3 * *"],
+)
+def test_every_phrase_the_dashboard_sends_is_saved_and_listed(ws, monkeypatch, phrase):
+    """The dashboard's Save schedule sends one of these phrases: after the save the list must show that row."""
+    from orch_automation import service
+    from orch_automation.actions import act
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    add_ticket(ws, "t_save0001", title="TEST: save then list")
+    assert act(ws, "repeat", "t_save0001", by="human:tester", value=phrase)["recurring"] is True
+    (rep,) = blocks(build(ws, T(15, 2)), "table")
+    assert [r for r in rep["rows"] if "save then list" in json.dumps(r)], "the saved schedule is not listed"
+
+
+def _two(ws, monkeypatch, cron_a="0 8 * * 1", cron_b="0 9 * * *"):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    add_ticket(ws, "t_wk000001", title="Weekly", ext={"automation": {"recurring": True, "cron": cron_a}})
+    add_ticket(ws, "t_wk000002", title="Daily", ext={"automation": {"recurring": True, "cron": cron_b}})
+
+
+def test_week_strip_comes_first_and_only_with_two_schedules(ws, monkeypatch):
+    """Owner feedback 14 Nov (fb20): the week strip sits above the table; one schedule needs no calendar."""
+    _two(ws, monkeypatch)
+    v = build(ws, T(7))
+    check(v)
+    types = [b["type"] for b in v["blocks"]]
+    assert types.index("calendar") < types.index("table")
+    (week,) = blocks(v, "calendar")
+    assert len(week["days"]) == 7 and any(d["items"] for d in week["days"])
+    assert len(blocks(v, "table")[0]["rows"]) == 2
+
+
+def test_one_schedule_has_no_week_strip(ws, monkeypatch):
+    from orch_automation import service
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    add_ticket(ws, "t_wk000003", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}})
+    v = build(ws, T(7))
+    check(v)
+    assert blocks(v, "table") and not blocks(v, "calendar")
+
+
+def test_a_repeat_every_few_hours_is_one_item_a_day(ws, monkeypatch):
+    """Not the same ticket six times in one day: one item, 'Every 4 h', with the run count."""
+    _two(ws, monkeypatch, cron_a="0 */4 * * *")
+    (week,) = blocks(build(ws, T(7)), "calendar")
+    today = [i for i in week["days"][1]["items"] if i["title"] == "Weekly"]
+    assert len(today) == 1 and today[0]["every"] == "Every 4 h" and "6 runs/day" in today[0]["note"]

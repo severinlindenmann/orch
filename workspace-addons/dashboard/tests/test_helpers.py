@@ -35,7 +35,7 @@ def call(fn, *args):
         ("Asked q1, waiting", "Asked a question"),
         ("Answered q1: Yes", "Answered a question"),
         ("Status open -> active", "Moved to Working"),
-        ("Check c2 done", "Finished a task"),
+        ("Check c2 done", "Finished a step"),
         ("Status active -> done", "Moved to Done"),
         ("Patched status (status done -> open)", "Moved to To do"),
         ("Something the agent wrote", "Something the agent wrote"),
@@ -211,11 +211,12 @@ def test_a_file_proof_shows_when_it_was_added():
         == "hello.txt · 1 KB · yesterday 09:12"
     )
     assert (
-        call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now) == "hello.txt · 1 KB · 30 Oct 09:12"
+        call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now)
+        == "hello.txt · 1 KB · 30 Oct 2026, 09:12"
     )
     assert (
         call("fileProofLabel", {**ev, "at": "2025-12-24T07:00:00Z"}, now)
-        == "hello.txt · 1 KB · 24 Dec 2025 07:00"
+        == "hello.txt · 1 KB · 24 Dec 2025, 07:00"
     )
     assert call("fileProofLabel", {**ev, "at": "nonsense"}, now) == "hello.txt · 1 KB"
     assert call("fileProofLabel", {k: v for k, v in ev.items() if k != "at"}, now) == "hello.txt · 1 KB"
@@ -321,7 +322,7 @@ def test_agent_line_with_the_status_shapes_core_really_returns():
 def test_history_lines_name_the_task_and_the_addon():
     tasks = [{"id": "c1", "text": "Ask about the currency"}]
     assert call("historyLine", {"text": "Added check c1"}, tasks) == "Added a task: Ask about the currency"
-    assert call("historyLine", {"text": "Check c1 done"}, tasks) == "Finished a task: Ask about the currency"
+    assert call("historyLine", {"text": "Check c1 done"}, tasks) == "Finished a step: Ask about the currency"
     assert call("historyLine", {"text": "Set ext.automation"}) == "Updated Automation settings"
     assert call("historyLine", {"text": "Removed ext.automation.repeat"}) == "Removed Automation settings"
 
@@ -671,8 +672,6 @@ def test_one_label_per_status_single_sourced():
     src = webjs.all_js()
     for word in ("Ready to start", "Backlog"):
         assert word not in src and word not in (WEB / "helpers.js").read_text()
-    # Lifecycle step names are separate from status labels.
-    src = src.split("function ticketStepState")[0] + src.split("function ticketStepper")[1]
     for pair in ("open:'To do'", "active:'Working'", "review:'Check'", "done:'Done'"):
         assert pair not in src.replace(" ", "")
     words = node_value("STATUS_WORD")

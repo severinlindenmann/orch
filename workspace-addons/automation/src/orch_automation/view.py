@@ -13,6 +13,7 @@ from . import listen, needs, orchcli, service
 from .cron import fmt, next_after, parse
 from .loop import scheduled
 from .plain import zone
+from .syncapproval import allowed
 
 DAYS = (
     "Sundays",
@@ -105,7 +106,9 @@ def cron_human(expr: str, tz=None, now: datetime | None = None, local=None) -> s
 
 
 def _every(gap: int) -> str:
-    return "Every minute" if gap <= 60 else f"Every {gap // 60} min"
+    if gap <= 60:
+        return "Every minute"
+    return f"Every {gap // 3600} h" if gap >= HOUR and gap % HOUR == 0 else f"Every {gap // 60} min"
 
 
 def _in(delta: timedelta) -> str:
@@ -191,7 +194,9 @@ def _day_items(
         if not left:
             continue
         gaps = [(b - a).total_seconds() for a, b in pairwise(whole)]
-        if gaps and min(gaps) < HOUR:
+        if (
+            len(whole) >= 3
+        ):  # three or more a day: one item with the rhythm, never the same ticket again and again
             first = left[0].astimezone().strftime("%H:%M")
             lead = f"next {first}" if today else (f"from {first}" if first != "00:00" else "")
             note = " · ".join(x for x in (lead, f"{len(whole)} runs/day") if x)
@@ -292,9 +297,15 @@ def _started(tickets: list[dict], runs: list[dict]) -> list[tuple[datetime, dict
 
 
 def _schedules(
-    tickets: list[dict], now: datetime, running: bool = True, runs: list[dict] | None = None
+    tickets: list[dict],
+    now: datetime,
+    running: bool = True,
+    runs: list[dict] | None = None,
+    waiting: frozenset = frozenset(),
 ) -> list[dict]:
-    """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown."""
+    """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown.
+    `waiting`: ids of schedules that arrived by sync and are not allowed on this computer yet: they offer
+    "Allow on this computer" (the person signs it) instead of Run now."""
     rows = []
     for t in tickets:
         if not scheduled(t) or not (cron := _repeats(t, True)):
@@ -327,7 +338,12 @@ def _schedules(
                         "action": _act("toggle", t["id"]),
                     },
                     "actions": [
-                        {"label": "Run now", "action": _act("run", t["id"])},
+                        {
+                            "label": "Allow on this computer",
+                            "action": {"op": "addon.allow", "args": {"target": t["id"]}},
+                        }
+                        if t["id"] in waiting
+                        else {"label": "Run now", "action": _act("run", t["id"])},
                         {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
                     ],
                 },
@@ -406,21 +422,20 @@ def build(root: Path, now: datetime | None = None) -> dict:
     pid = service.running_pid(root, clean=False)
     blocks: list[dict] = []
 
-    sched_rows = _schedules(tickets, now, bool(pid), runs)
+    waiting = frozenset(t["id"] for t in tickets if scheduled(t) and not allowed(root, t))
+    sched_rows = _schedules(tickets, now, bool(pid), runs, waiting)
     if sched_rows:
-        blocks.append(
-            {
-                "type": "table",
-                "columns": [
-                    {"key": "schedule", "label": "Schedule", "type": "text"},
-                    {"key": "repeats", "label": "Repeats", "type": "text"},
-                    {"key": "next", "label": "Next run", "type": "text"},
-                    {"key": "last", "label": "Last result", "type": "text"},
-                ],
-                "rows": sched_rows[:20],
-                "more": max(0, len(sched_rows) - 20),
-            }
-        )
+        table = {
+            "type": "table",
+            "columns": [
+                {"key": "schedule", "label": "Schedule", "type": "text"},
+                {"key": "repeats", "label": "Repeats", "type": "text"},
+                {"key": "next", "label": "Next run", "type": "text"},
+                {"key": "last", "label": "Last result", "type": "text"},
+            ],
+            "rows": sched_rows[:20],
+            "more": max(0, len(sched_rows) - 20),
+        }
         days = []
         local_now = now.astimezone()
         for n in range(7):
@@ -437,9 +452,14 @@ def build(root: Path, now: datetime | None = None) -> dict:
             if first.month == last.month
             else f"{first.day} {first:%B} \u2013 {last.day} {last:%B}"
         )
-        blocks.append(
-            {"type": "calendar", "title": "Coming up", "meta": f"{span} \u00b7 Workspace time", "days": days}
-        )
+        week = {
+            "type": "calendar",
+            "title": "Coming up",
+            "meta": f"{span} \u00b7 Workspace time",
+            "days": days,
+        }
+        # the week strip sits above the stable table, and only with two or more schedules (one needs no calendar)
+        blocks += [week, table] if len(sched_rows) >= 2 else [table]
     else:
         blocks.append(
             {
@@ -564,12 +584,11 @@ def build(root: Path, now: datetime | None = None) -> dict:
     view = {"schema": "orch.addon-view/1", "generated_at": fmt(now), "blocks": blocks}
     if pid:
         nxt = events[0][0] if events else None
-        line = "On." + (
-            f" Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}" if nxt else " Nothing planned"
-        )
-        if ran >= 5:
-            line += f". Ran {ran} times today"
-        view.update(notice=line, notice_tone="good")
+        if nxt:  # nothing planned: no row at all (owner sweep 14 Nov)
+            line = f"On. Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}"
+            if ran >= 5:
+                line += f". Ran {ran} times today"
+            view.update(notice=line, notice_tone="good")
     else:
         view.update(
             notice="Automation is stopped: nothing starts by itself.",

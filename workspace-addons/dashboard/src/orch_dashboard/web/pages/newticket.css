@@ -9,12 +9,6 @@
 .new-ticket-check { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; min-height: 44px; }
 .new-ticket-check .meta { grid-column: 2; }
 .new-ticket .new-ticket-check input { min-height: 0; width: 18px; height: 18px; }
-.new-ticket-options > summary {
-  min-height: 44px;
-  align-content: center;
-  cursor: pointer;
-  color: var(--text-muted);
-}
 .new-ticket .input, .new-ticket .btn { min-height: 44px; }
 .new-ticket .new-ticket-attach, .new-ticket .new-ticket-link {
   align-self: flex-start; min-height: 44px; padding: 0; border: 0; background: transparent;
@@ -50,7 +44,7 @@ ul.new-ticket-files { list-style: none; margin: 0; padding: 0; max-height: 160px
 .new-ticket{max-width:560px;width:calc(100vw - 32px)}
 .new-ticket h2{margin:0 40px 4px 0}
 .new-ticket .new-ticket-sub{margin:0 0 16px}
-.new-ticket .new-ticket-text{min-height:12em}
+.new-ticket .new-ticket-text{min-height:96px}
 dialog.new-ticket .actions{justify-content:flex-end;align-items:center}
 dialog.new-ticket .actions .new-ticket-link{margin-right:auto;min-height:32px;color:var(--text-muted);text-decoration:none}
 dialog.new-ticket .actions .new-ticket-link:hover{color:var(--text)}

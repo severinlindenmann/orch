@@ -378,20 +378,6 @@ def test_web_files_from_a_fixed_list(srv):
     assert get(srv, "/web/__init__.py")[0] == 404 and get(srv, "/web/")[0] == 404
 
 
-def test_kit_fallback_to_the_dashboard_copy(srv, monkeypatch, tmp_path):
-    kit = tmp_path / "pkgs" / "orch_dashboard" / "web" / "kit"
-    kit.mkdir(parents=True)
-    (kit.parents[1] / "__init__.py").write_text("")
-    (kit / "tokens.css").write_bytes(b":root{}")
-    monkeypatch.setitem(sys.modules, "orch_ui", None)  # orch_ui gone
-    monkeypatch.delitem(sys.modules, "orch_dashboard", raising=False)
-    monkeypatch.syspath_prepend(str(tmp_path / "pkgs"))
-    code, body, r = get(srv, "/kit/tokens.css")
-    assert (code, body) == (200, b":root{}") and r.getheader("Content-Type").startswith("text/css")
-    assert get(srv, "/kit/icons.js")[0] == 404  # not in the copy
-    assert get(srv, "/kit/server.py")[0] == 404
-
-
 def test_kit_missing_everywhere_is_404(srv, monkeypatch):
     monkeypatch.setitem(sys.modules, "orch_ui", None)
     monkeypatch.setitem(sys.modules, "orch_dashboard", None)
@@ -579,6 +565,19 @@ def test_page_decisions_only_post_the_open_question():
 
     js = (Path(__file__).resolve().parents[1] / "src/orch_factory/web/factory.js").read_text(encoding="utf-8")
     posts = re.findall(r"postMessage\(([^;]*)\);", js)
-    assert len(posts) == 1 and "'orch.question'" in posts[0] and "location.origin" in posts[0]
+    assert len(posts) == 2 and all("location.origin" in x for x in posts)
+    assert (
+        sum("'orch.question'" in x for x in posts) == 1 and sum("'orch.say'" in x for x in posts) == 1
+    )  # the idea box types text into Chat, never sends it
     assert "window.top !== window" in js
     assert not re.search(r"fetch\([^)]*method|method:\s*['\"]POST", js)
+
+
+def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
+    html = get(srv, "/")[1]
+    assert b'id="navigation"' not in html and b"New idea in Chat" not in html
+    assert b"/kit/widgets.css" in html
+    js = get(srv, "/web/factory.js")[1].decode()
+    assert "Start with this idea" in js and "Ask me at every stop" in js
+    assert "setting-row" in js and "'switch'" in js
+    assert "Open Chat" not in js

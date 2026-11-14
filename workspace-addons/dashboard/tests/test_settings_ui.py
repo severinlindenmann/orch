@@ -33,7 +33,7 @@ def test_settings_navigation_and_cards():
     # the add-on detail page has no Details toggle; "Pair a phone" stays disabled until the relay is connected
     detail = src[src.index("function addonDetailPage(addon)") :][:3500]
     assert "h('summary'" not in detail and "'Details'" not in detail
-    assert "connected ? {} : {disabled:true}" in src
+    assert "connected ? {} : {disabled:true, title:'Connect your relay first'}" in src
     assert "history.replaceState(null, '', '#settings/' + tab)" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
     # folder: plain name + Copy path + quiet full path, no Details toggle
@@ -144,6 +144,19 @@ loadAddon = async () => {};
   assert.equal(plan({freq:'custom', every:3, time:'06:10'}).phrase, '10 6 */3 * *');
   assert.equal(plan({freq:'custom', every:1, time:'06:10'}).phrase, 'daily 06:10');
   assert.equal(plan({freq:'custom', every:0, time:'06:10'}).phrase, null);
+  // owner feedback 14 Nov (fb20): custom = every N minutes (5 or more) or hours, no time of day
+  assert.deepEqual(plan({freq:'custom', unit:'minutes', every:5, time:''}), {phrase:'every 5 minutes', summary:'Runs every 5 minutes', hint:''});
+  assert.equal(plan({freq:'custom', unit:'minutes', every:4}).phrase, null);
+  assert.equal(plan({freq:'custom', unit:'minutes', every:60}).phrase, null);
+  assert.equal(plan({freq:'custom', unit:'hours', every:2}).phrase, 'every 2 hours');
+  assert.equal(plan({freq:'custom', unit:'hours', every:1}).summary, 'Runs every 1 hour');
+  assert.equal(plan({freq:'custom', unit:'hours', every:24}).phrase, null);
+  assert.deepEqual(cronToChoice('*/10 * * * *'), {freq:'custom', days:[1], monthday:1, time:'08:00', unit:'minutes', every:10});
+  assert.equal(cronToChoice('0 */3 * * *').unit, 'hours');
+  assert.equal(cronToChoice('*/2 * * * *'), null);
+  assert.equal(cronToChoice('0 8 */3 * *').unit, 'days');
+  assert.equal(cronWords('*/2 * * * *'), 'every 2 minutes');
+  assert.equal(cronWords('5 4 * * 1,3'), 'a custom plan');
   assert.equal(plan({freq:'daily', time:''}).phrase, null);
   assert.equal(plan({freq:'daily', time:'25:00'}).phrase, null);
   global.location = {hash:''};
@@ -282,3 +295,22 @@ def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
     )  # its service starts with the add
     assert "state.settings?.available" in body
     assert "not connected yet" not in body and "innerHTML" not in body
+
+
+def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
+    from orch_dashboard import data
+
+    rows = [
+        {
+            "name": "publish",
+            "active": True,
+            "dashboard": {"label": "Shared links", "icon": "link", "panel": "links"},
+        },
+        {"name": "other", "active": True, "dashboard": {"label": "Other", "icon": "link", "panel": None}},
+    ]
+    monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: False)
+    out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
+    assert {a["name"]: bool(a["dashboard"]) for a in out} == {"publish": False, "other": True}
+    monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: True)
+    out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
+    assert all(a["dashboard"] for a in out)

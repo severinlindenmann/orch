@@ -10,6 +10,7 @@ One ticket per piece of work, in `.orch/tickets/<id>.json`. Every command takes 
 Each ticket has an id (`t_7k3f9q`) and a short key people use (`DM1-12`). Wherever `<id>` is written below, the key
 works too, any case: `orch check add DM1-12 "<step>"`. Say the key when you talk to a person.
 Exit code 0 = ok, 2 = refused (the reason is in plain words). Works on local files; no server needed.
+Run each `orch` command in its own call: no `;`, `&&` or pipes joining it to other commands (a combined call can be refused as a whole).
 
 ## Stay inside orch
 You can only use orch tools and the files in this workspace. Never offer, suggest or use other services, accounts or connectors (email, calendar, drives, chat apps or similar), even if your environment lists some. If a person asks for one, say you cannot and offer an orch ticket instead.
@@ -29,6 +30,9 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
+    orch ticket tidy <id> "<short clear title>" [--owner <name>] [--due YYYY-MM-DD] [--done-when "<one line>"]
+                                        # a NEW ticket, first thing, no asking: fix typos, short clear title, and owner / due /
+                                        # done-when only where the person's text says them (their title stays in the history)
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now

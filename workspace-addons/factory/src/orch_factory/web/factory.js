@@ -175,6 +175,30 @@
       ...(b.warn ? [meta('Budget needs attention · review the order ticket.')] : []));
   }
   const tail = (...nodes) => group('actions', ...nodes);
+  // The page is read-only: an idea or a change of "Ask me at every stop" goes to your helper in Chat as typed text (postMessage to the dashboard); you press Send there.
+  function toChat(message) {
+    window.parent.postMessage({type: 'orch.say', text: message}, location.origin);
+  }
+  function ideaBox() {
+    const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));
+    const field = node('textarea', null, 'text-input'); field.rows = 3; field.setAttribute('aria-label', 'Your idea');
+    field.placeholder = 'For example: a page that shows our opening hours'; field.style.width = '100%';
+    const go = node('button', 'Start with this idea', 'btn primary'); go.type = 'button'; go.disabled = true;
+    field.addEventListener('input', () => { go.disabled = !field.value.trim(); });
+    go.addEventListener('click', () => { if (field.value.trim()) toChat('Factory: ' + field.value.trim()); });
+    el.append(field, group('row', go)); el.classList.add('f-idea'); return el;
+  }
+  function askRow(auto) {
+    const asks = !auto?.on, row = group('setting-row f-ask');
+    const input = node('input', null, 'switch'); input.type = 'checkbox'; input.checked = asks; input.setAttribute('aria-label', 'Ask me at every stop');
+    const word = node('span', asks ? 'On' : 'Off', 'meta');
+    input.addEventListener('change', () => { input.checked = asks; toChat(asks ? 'Factory: run to the end with Autopilot' : 'Factory: ask me at every stop again'); });
+    const label = node('label', null, 'row'); label.append(word, input);
+    row.append(node('div', 'Ask me at every stop', 'row-label'),
+      group('row-value', document.createTextNode('Factory waits for your OK after each step'), meta('Turn off to let it run to the end.')),
+      group('row-action', label));
+    return group('card', row);
+  }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
     const needing = orders.filter(o => o.open);
@@ -182,20 +206,16 @@
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'thing needs you', 'things need you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
       : 'Nothing needs you right now. Your ideas and planned runs are below.'));
-    let autoCard;
+    view.append(ideaBox(), askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
-      autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
+      const autoCard = card('Autopilot on · ' + (days > 1 ? days + ' days left' : days === 1 ? '1 day left' : 'ends today'),
         meta('Ends ' + when(auto.until) + ' · ' + plural(Number(auto.decided_today) || 0, 'decision', 'decisions') + ' today'),
         meta('Your agent answers routine stops. Ship still asks you.'),
         tail(link('What it decided', '#/autopilot')));
-    } else {
-      autoCard = card('Autopilot off', meta('Your agent asks you at every planned stop.'), ...(auto ? [tail(link('What it decided', '#/autopilot'))] : []));
-    }
-    autoCard.classList.add('f-autopilot'); view.append(autoCard);
-    if (!orders.length) {
-      view.append(card('Start with an idea', p('Tell your agent an idea in Chat — it plans the run here.'), tail(link('Open Chat', '/#chat', true)))); return;
-    }
+      autoCard.classList.add('f-autopilot'); view.append(autoCard);
+    } else if (auto) view.append(tail(link('What it decided', '#/autopilot')));
+    if (!orders.length) return;
     const primary = group('stack'), secondary = group('stack');
     const section = (parent, title, rows, render, empty) => {
       const el = node('section', null, 'f-section'); el.append(node('h2', title));
