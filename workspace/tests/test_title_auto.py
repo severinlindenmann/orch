@@ -160,3 +160,11 @@ def test_tidied_still_counts_when_its_history_line_shows_as_unverified(proj):
     shown = dict(t, history=[dict(h, text=history.SYNCED_UNVERIFIED + h["text"]) for h in t["history"]])
     assert tickets.tidied(proj, shown)
     assert not tickets.tidied(proj, tickets.create(proj, "other", "human:t"))
+
+
+def test_tidy_leaves_a_title_a_person_edited_after_creation(proj):
+    t = tickets.create(proj, "fix login", "human:t")
+    tickets.edit(proj, t["id"], "My own wording", "human:t")
+    t = tickets.tidy(proj, t["id"], "Fix the login page", "agent:claude", {"due": "2026-12-01"})
+    assert t["title"] == "My own wording" and t["due"] == "2026-12-01"
+    assert not any(h["text"].startswith("Title tidied from") for h in t["history"])

@@ -1416,7 +1416,11 @@ def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) 
         if tidied(root, ticket):
             raise Refused("This ticket was already tidied.")
         old = str(ticket.get("title") or "")
-        if title != old:
+        edited = any(  # someone renamed it after it was created: that title is theirs, tidy leaves it
+            str(h.get("text", "")).removeprefix(history.SYNCED_UNVERIFIED) == "Title changed"
+            for h in history.lines(root, ticket)
+        )
+        if title != old and not edited:
             ticket["title"] = title
             ticket.pop("title_auto", None)
             add_history(ticket, by, TIDY_LINE + old[:200])
@@ -1425,7 +1429,7 @@ def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) 
             _set_field(ticket, k, fields[k])
         if filled:
             add_history(ticket, by, "Details filled in: " + ", ".join(filled))
-        if title == old and not filled:
+        if (title == old or edited) and not filled:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
