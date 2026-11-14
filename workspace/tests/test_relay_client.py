@@ -2194,3 +2194,24 @@ def test_a_sync_free_workspace_keeps_applying_with_duplicate_question_ids(proj, 
 
     src = pathlib.Path(relay.__file__).read_text()
     assert "if synced and len(ids) != len(set(ids)):" in src
+
+
+def test_view_names_the_real_sender_of_phone_messages(proj, run, rel):
+    """F22: what the workspace sent to the phones reads "Helper → your phone", never "you → the phones"."""
+    from orch import relay_view
+
+    connect(run, rel)
+    relay_view.record_sent(
+        proj,
+        {
+            "id": "m_phone0000000001",
+            "to": "phones",
+            "type": "text",
+            "created_at": "2026-11-04T10:00:00Z",
+            "body": {"text": "Tasks: 3 of 3 done"},
+        },
+    )
+    v = json.loads(run("relay", "view", "--json")[1])
+    titles = {i["title"] for i in v["blocks"][0]["items"]}
+    assert "Helper → your phone" in titles
+    assert not any("the phones" in t or t.startswith("you →") for t in titles)
