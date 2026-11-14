@@ -4,6 +4,7 @@ import SwiftUI
 struct OrchMobileApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
+    @State private var hiddenQuestions = HiddenQuestions()
 
     init() { Theme.applyBarAppearance() }
 
@@ -11,6 +12,7 @@ struct OrchMobileApp: App {
         WindowGroup {
             root
                 .environment(model)
+                .environment(hiddenQuestions)
                 .preferredColorScheme(.dark)
                 .task { AppDelegate.model = model; await model.seedIfRequested() }
                 .onOpenURL { url in model.openInvite(url.absoluteString) }
