@@ -371,7 +371,7 @@ def test_start_text_lists_tasks(ws, run):
     order = run("idea", "x")["order"]
     run("propose", order, "--file", "-", data=run_proposal())
     text = core(ws, "ticket", "show", order)["questions"][0]["text"]
-    assert "Tasks: Booking form (builder); Prepare the release (builder)" in text
+    assert "Steps: Booking form (builder); Prepare the release (builder)" in text
 
 
 def test_ship_step_needs_human_ship_it(ws, run):

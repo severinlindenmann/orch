@@ -321,7 +321,7 @@ def test_agent_line_with_the_status_shapes_core_really_returns():
 @node
 def test_history_lines_name_the_task_and_the_addon():
     tasks = [{"id": "c1", "text": "Ask about the currency"}]
-    assert call("historyLine", {"text": "Added check c1"}, tasks) == "Added a task: Ask about the currency"
+    assert call("historyLine", {"text": "Added check c1"}, tasks) == "Added a step: Ask about the currency"
     assert call("historyLine", {"text": "Check c1 done"}, tasks) == "Finished a step: Ask about the currency"
     assert call("historyLine", {"text": "Set ext.automation"}) == "Updated Automation settings"
     assert call("historyLine", {"text": "Removed ext.automation.repeat"}) == "Removed Automation settings"
@@ -728,7 +728,7 @@ def test_ui2_small_bugs_in_markup_and_css():
 @node
 def test_history_line_shows_names_not_actor_ids():
     line = call("historyLine", {"text": "agent:claude finished the work and moved it to Review"}, [])
-    assert line == "Claude finished the work and moved it to Review"
+    assert line == "Claude finished the work and sent it to Check"
 
 
 @node
