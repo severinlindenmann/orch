@@ -85,3 +85,4 @@
 .ticket-table tr.row-click:hover td{background:var(--surface-2)}
 @media(hover:hover){.ticket-table tr.row-click .ticket-menu,.ticket-table tr.row-click .ticket-actions-row>:not(:first-child){opacity:0;transition:opacity var(--dur-fast) var(--ease-move)}
   .ticket-table tr.row-click:hover .ticket-actions-row>*,.ticket-table tr.row-click:focus-within .ticket-actions-row>*{opacity:1}}
+.ticket-table th{white-space:nowrap}.ticket-table .ticket-actions .btn{white-space:nowrap}.ticket-table td:nth-child(4){min-width:96px}

@@ -40,3 +40,8 @@ test('waiting requests are one quiet top-bar line', () => {
   assert.match(app, /topbar-wait/);
   assert.match(web('index.html'), /id="topbar-wait"/);
 });
+test('dialogs have one close button: the master removes a repeated plain Close', () => {
+  const o = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/overlay.js'), 'utf8');
+  assert.match(o, /one close button/);
+  assert.match(o, /textContent\.trim\(\)==='Close'/);
+});
