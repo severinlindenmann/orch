@@ -64,8 +64,8 @@ const OrchBlocks = (() => {
   const toneTag = t => TONE_WORD[tone(t)] ? el('span', 'tone-word t-' + tone(t), TONE_WORD[tone(t)]) : null;
   const chip = c => { const s = el('span', 'chip' + (c.tone && c.tone !== 'neutral' ? ' t-' + tone(c.tone) : ''), c.label); return s; };
   const parseDate = v => { const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v + 'T00:00:00' : v); return Number.isNaN(d.getTime()) ? null : d; };
-  const hm = d => d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
-  const dayLabel = d => d.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
+  const hm = d => window.UI?.clock ? window.UI.clock(d) : d.toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit', hour12: false});
+  const dayLabel = d => window.UI?.stamp ? window.UI.stamp(d, {time: false}) : d.toLocaleDateString('en-GB', {weekday: 'short', day: 'numeric', month: 'short'});
   function duration(sec) {
     const n = Number(sec);
     if (!Number.isFinite(n)) return '';

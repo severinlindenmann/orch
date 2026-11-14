@@ -211,7 +211,7 @@ def test_a_file_proof_shows_when_it_was_added():
         == "hello.txt · 1 KB · yesterday 09:12"
     )
     assert (
-        call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now) == "hello.txt · 1 KB · 30 Oct 09:12"
+        call("fileProofLabel", {**ev, "at": "2026-10-30T09:12:00Z"}, now) == "hello.txt · 1 KB · 30 Oct 2026, 09:12"
     )
     assert (
         call("fileProofLabel", {**ev, "at": "2025-12-24T07:00:00Z"}, now)
@@ -671,8 +671,6 @@ def test_one_label_per_status_single_sourced():
     src = webjs.all_js()
     for word in ("Ready to start", "Backlog"):
         assert word not in src and word not in (WEB / "helpers.js").read_text()
-    # Lifecycle step names are separate from status labels.
-    src = src.split("function ticketStepState")[0] + src.split("function ticketStepper")[1]
     for pair in ("open:'To do'", "active:'Working'", "review:'Check'", "done:'Done'"):
         assert pair not in src.replace(" ", "")
     words = node_value("STATUS_WORD")

@@ -10,10 +10,11 @@ const ticketSrc = fs.readFileSync(path.join(WEB, 'pages/ticket.js'), 'utf8');
 const listSrc = fs.readFileSync(path.join(WEB, 'pages/tickets.js'), 'utf8');
 const h = (tag, attrs = {}, ...kids) => ({tag, attrs, children:kids.flat(Infinity).filter(x => x != null && x !== false), setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {}, dataset:{}});
 const text = n => !n ? '' : typeof n === 'string' ? n : (n.children || []).map(text).join('');
+const kitWindow = () => { const w = {}; vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/date.js'), 'utf8'), vm.createContext({window:w})); return w.UI; };
 const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
 
 function listCtx(extra = {}) {
-  const c = {h, window:{DashHelpers:helpers}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
+  const c = {h, window:{DashHelpers:helpers, UI:kitWindow()}, array:v => Array.isArray(v) ? v : [], clean:String, questions:t => (t.questions || []).filter(q => q.answer == null),
     shown:t => t, chip:(t, cls) => h('span', {className:'chip ' + cls}, t), statusChip:t => h('span', {className:'chip'}, t.status), state:{runs:{}}, starting:new Set(),
     needsList:() => [], tickets:() => [], name:v => String(v || ''), location:{hash:'#tickets'}, snapshot:false, href:id => '#t/' + id, render(){}, localStorage:{getItem:() => null},
     button:(label, cls, fn) => { const b = h('button', {className:'btn ' + cls}, label); b.onclick = fn; return b; }, ...extra};
@@ -38,7 +39,7 @@ test('the list takes the finish day from the done history entry, like the ticket
   const c = listCtx();
   vm.runInContext(ticketSrc.slice(ticketSrc.indexOf('function ticketDoneEvent'), ticketSrc.indexOf('function ticketDoneLine')), c);
   const t = {status:'done', updated_at:'2026-12-20T10:00:00Z', history:[{at:'2026-11-03T10:00:00Z', text:'open -> done'}]};
-  assert.equal(text(c.ticketAttentionChip(t, 'done')), 'Finished ' + new Date('2026-11-03T10:00:00Z').toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}));
+  assert.equal(text(c.ticketAttentionChip(t, 'done')), 'Finished ' + c.window.UI.stamp('2026-11-03T10:00:00Z', {time:false}));
 });
 test('Tickets toolbar: search and a Person choice when there is more than one owner', () => {
   const c = listCtx({tickets:() => [{id:'a', owner:'anna'}, {id:'b', owner:'ben'}]});
@@ -76,7 +77,7 @@ test('Dash 20/23/34/02: Tasks tab, Resume when paused, Properties without Detail
   assert.ok(all.some(n => n.attrs.id === 'ticket-tab-tasks'), 'Tasks tab exists');
   assert.deepEqual(all.filter(n => n.attrs.role === 'tab').map(n => n.attrs['data-tab']), ['overview', 'tasks', 'files', 'activity']);
   assert.equal(all.filter(n => n.attrs['data-key'] === 'parts').length, 0);
-  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-paused') && /Resume/.test(body) && !/Start helper/.test(body));
+  assert.ok(all.find(n => n.attrs['data-key'] === 'ticket-resume') && /Resume/.test(body) && !/Start helper/.test(body));
   assert.ok(!all.find(n => n.attrs.id === 'ticket-panel-tasks').attrs.hidden, 'the Tasks choice opens the Tasks tab');
   assert.ok(nodes(all.find(n => n.attrs.id === 'ticket-panel-overview')).some(n => n.attrs['data-field'] === 'note'), 'Note in Overview');
   assert.match(text(all.find(n => n.attrs.className === 'side-panel properties')), /Properties.*Owner.*Due.*Done when/);

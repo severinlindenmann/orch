@@ -490,7 +490,7 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   assert.equal(helpers.helperAlive({status:'active'}, {running:false}), false);
   assert.equal(helpers.helperAlive({status:'active'}, null), false);
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
-  assert.match(ticket, /liveLink && alive \? h\('a'/); assert.match(ticket, /alive \? ticketButton\('Stop helper'/);
+  assert.match(ticket, /live = alive \? liveLinkFor\(t\)/); assert.match(ticket, /else if \(alive\) \{ actions\.push\(ticketButton\('Stop'/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
 });
 test('the Automation page heading is the add-on menu name, not a second name', () => {

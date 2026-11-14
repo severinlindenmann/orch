@@ -57,7 +57,7 @@ function ticketAttentionChip(t, section) {
   if (section && window.DashHelpers.columnOf(status) === section) return null;
   return statusChip(t);
 }
-const localDay = at => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}) : ''; };
+const localDay = at => window.UI?.stamp ? window.UI.stamp(at, {time:false}) : '';
 // A helper worked on it before (sessions) but it is not running now: paused, not new. Typed tasks alone are not.
 const ticketIsPaused = t => array(t.sessions).length > 0;
 function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView()); }
