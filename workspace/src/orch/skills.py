@@ -191,7 +191,7 @@ def apply_agent_files(root: Path) -> list[str]:
 def apply_copy_files(root: Path, work: Path) -> None:
     """apply_agent_files for a separate copy of the project (git worktree) at `work`: the same skill links and
     local instruction files, but the links point at the WORKSPACE's harness (the copy has no .orch/harness) and
-    the instruction file imports it by full path. The excludes live in the shared .git/info/exclude of the
+    the instruction file imports the copy's own .orch-harness/AGENTS.orch.md (written from the workspace's). The excludes live in the shared .git/info/exclude of the
     repository, already written for the workspace. One refused link does not stop the others."""
     from orch import adapters
 
@@ -279,6 +279,7 @@ def _exclude_lines(root: Path) -> list[str]:
     for sh in _shared_skills(root):
         en = harness.glob_escape(sh.name)
         lines += [f".agents/skills/{en}/", *[f"{w}/{en}" for w in _skill_places(root)[1:]]]
+    lines.append(f"{harness.COPY_HARNESS}/")  # a copy's own AGENTS.orch.md (apply_copy_files)
     return list(dict.fromkeys(lines))
 
 
