@@ -89,11 +89,17 @@ def _find_root() -> Path:
     if not _noted:  # a stale export in a shell sends every command to that workspace: say so once
         _noted = True
         here = _walk_up()
-        if here != env and not any(
-            (h / "worktrees") in (here, *here.parents) for h in addons.home_candidates(include_real=True)
-        ):
+        if here != env and not any(c in (here, *here.parents) for c in _copies_folders()):
             print(f"Note: ORCH_ROOT sends this to {env}, not to {here}.", file=sys.stderr)
     return env
+
+
+def _copies_folders() -> list[Path]:
+    """Where orch's copies live (addons.copies_base), and where they lived until 14 Nov 2026."""
+    return [
+        *addons.copies_candidates(include_real=True),
+        *(h / "worktrees" for h in addons.home_candidates(include_real=True)),
+    ]
 
 
 def _out(args, data, text: str) -> None:
@@ -653,7 +659,7 @@ def _init_guard(cwd: Path) -> None:
             f"ORCH_ROOT is set to {env}. Run orch init there, "
             "or unset ORCH_ROOT to start a new workspace here."
         )
-    if any((h / "worktrees") in (here, *here.parents) for h in addons.home_candidates(include_real=True)):
+    if any(c in (here, *here.parents) for c in _copies_folders()):
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
 
 

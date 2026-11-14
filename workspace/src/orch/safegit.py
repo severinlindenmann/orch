@@ -182,7 +182,8 @@ def _avoid(cwd: Path, root: Path | None) -> frozenset:
         homes.append(addons.home(root))
     except Exception:  # noqa: BLE001 - no usable orch home: the candidates above are enough
         pass
-    out.update(str(h / "worktrees") for h in homes)
+    out.update(str(addons.copies_base(h)) for h in homes)
+    out.update(str(h / "worktrees") for h in homes)  # where copies were before (still never a git from there)
     return frozenset(out)
 
 
@@ -588,7 +589,7 @@ ALLOWED = {
 # (rev-list and check-attr only read: commit graph / attribute names. B13 uses them for ancestry counts and to
 # refuse files that need filters. Neither runs a filter, textconv or external program.)
 _CHECK_IGNORE_OK = {"-q", "--quiet", "-v", "--verbose", "-n", "--non-matching", "--no-index"}
-_WORKTREE_OK = {"add", "remove", "prune", "list"}
+_WORKTREE_OK = {"add", "remove", "prune", "list", "move"}  # move: copies leaving the orch home (14 Nov)
 # rev-list and check-attr only read: exact flag sets (no --output=<file>, no abbreviations, no bundles)
 _REV_LIST_OK = {
     "--count", "--parents", "--first-parent", "--no-merges", "--merges", "--reverse", "-q", "--quiet", "-n",
@@ -641,7 +642,7 @@ def refusal(args: list[str]) -> str | None:
         return f"git {cmd} is not one of the git commands orch runs"
     flags = rest[: rest.index("--")] if "--" in rest else rest
     if cmd == "worktree" and not (rest and rest[0] in _WORKTREE_OK):
-        return "git worktree: only add, remove, prune and list are run"
+        return "git worktree: only add, remove, move, prune and list are run"
     if cmd == "stash" and not (rest and rest[0] in ("list", "show")):
         return "git stash: only list and show are run"
     if cmd == "check-ignore" and not (

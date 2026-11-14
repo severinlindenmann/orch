@@ -95,13 +95,28 @@ def _ws8(ws_id: str) -> str:
     return ws_id[:8]
 
 
+def _copies_base(home: Path) -> Path:
+    """addons.copies_base(home), refused when it is a link or lies inside (or holds) any orch home: a copy
+    must never be under the folder every agent is denied (THE isolation invariant, see addons.copies_base)."""
+    raw = addons.copies_base(home)
+    if os.path.lexists(raw) and _is_link(raw):
+        raise Refused("orch cannot use its copies folder (it is a link). Nothing was made.")
+    base = raw.resolve()
+    for h in {*addons.home_candidates(include_real=True), Path(home).resolve()}:
+        for a, b in ((base, h), (h, base)):
+            if a == b or b in a.parents:
+                raise Refused("orch's copies folder overlaps its own folder. Nothing was made.")
+    return base
+
+
 def path_for(ws_id: str, ticket: str, home: Path | None = None) -> Path:
-    """<orch home>/worktrees/<ws8>/<ticket>. Refuses an odd workspace id or ticket id, and a result that is
-    not inside <orch home>/worktrees/<ws8>/ once resolved (a link in the way, a `..` that slipped through)."""
+    """<copies base>/<ws8>/<ticket> (addons.copies_base: a sibling of the orch home, never inside it).
+    Refuses an odd workspace id or ticket id, and a result that is not inside <copies base>/<ws8>/ once
+    resolved (a link in the way, a `..` that slipped through)."""
     if not isinstance(ticket, str) or not _TID.fullmatch(ticket):
         raise Refused(f"'{ticket}' is not a ticket id. Nothing was made.")
     ws8 = _ws8(ws_id)
-    base = ((home or addons.home()) / "worktrees").resolve()
+    base = _copies_base(home or addons.home())
     folder = (base / ws8).resolve()
     p = folder / ticket
     try:
@@ -115,11 +130,11 @@ def path_for(ws_id: str, ticket: str, home: Path | None = None) -> Path:
 
 
 def copies_dir(root: Path) -> Path | None:
-    """<orch home>/worktrees/<ws8> of this workspace, or None when it has no id."""
+    """<copies base>/<ws8> of this workspace, or None when it has no id."""
     wid = addons.workspace_id(root)
     if not wid:
         return None
-    return ((addons.home(root) / "worktrees").resolve()) / wid[:8]
+    return addons.copies_home(root).resolve() / wid[:8]
 
 
 def _check_copies_home(home: Path) -> None:
@@ -220,11 +235,15 @@ def _save_copies_store(home: Path, key: bytes, counter: int, entries: dict) -> N
 
 
 def _known_copies(base: Path) -> dict:
-    """Only the current, whole-store authenticated mapping is deletion authority."""
+    """Only the current, whole-store authenticated mapping is deletion authority. `base` is a copies base;
+    the store is in the orch home it belongs to (never in the copies base, which agents can write)."""
     try:
-        key = _copies_key(base.parent)
-        with runs.locked(base.parent / ".copies-state", "_known_copies"):
-            return _copies_store(base.parent, key)[1]
+        home = addons.home_of_copies(base)
+        if home is None:
+            return {}
+        key = _copies_key(home)
+        with runs.locked(home / ".copies-state", "_known_copies"):
+            return _copies_store(home, key)[1]
     except (OSError, ValueError, Refused):
         return {}
 
@@ -288,9 +307,11 @@ def _remember_copies(root: Path, folder: Path) -> None:
     wid = addons.workspace_id(root)
     if not wid or _ws8(wid) != folder.name:
         raise Refused("The copies folder does not match this workspace's id.")
-    home = folder.parent.parent
+    home = addons.home(root)
+    if folder.parent.resolve() != _copies_base(home):
+        raise Refused("The copies folder is not in orch's copies folder.")
     _check_copies_home(home)
-    with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
+    with runs.locked(home / ".copies-state", "_known_copies"):
         try:
             key = _copies_key(home, create=True)
             counter, known = _copies_store(home, key)
@@ -442,15 +463,14 @@ def start_lock(root: Path):
 
 
 def is_orch_copy(path: Path) -> bool:
-    """True for a folder inside a copy orch made: under <orch home>/worktrees/<ws8>/<ticket>, with `.owner`
+    """True for a folder inside a copy orch made: under <copies base>/<ws8>/<ticket>, with `.owner`
     naming a workspace whose id starts with ws8 and whose registry lists that ticket's copy. (The agent
     adapters ask this before they mark such a folder trusted; the person's consent was for the workspace.)"""
     try:
         p = Path(path).resolve()
     except (OSError, RuntimeError):
         return False
-    for h in addons.home_candidates():
-        base = (h / "worktrees").resolve()
+    for base in addons.copies_candidates():
         try:
             parts = p.relative_to(base).parts
         except ValueError:
@@ -508,6 +528,54 @@ def workdir_for(root: Path, rec: dict | None, ticket: str | None = None) -> Path
 
 
 # ---------------------------------------------------------------- make one
+
+
+def _move_legacy(root: Path, ticket: str) -> bool:
+    """Until 14 Nov 2026 copies lived in <orch home>/worktrees/<ws8>/<ticket>, inside the folder every agent
+    is denied. At the ticket's next start (start lock held, no run on it) its copy is MOVED to path_for with
+    `git worktree move` (every change, committed or not, goes along) and the registry is pointed there.
+    Only the exact old path of THIS workspace's ticket, with a plain `.owner` naming this workspace; anything
+    else stays where it is, and the start goes on as for a copy that is gone. True when it moved."""
+    try:
+        home = addons.home(root)
+        wid = addons.workspace_id(root) or ""
+        old = home.resolve() / "worktrees" / _ws8(wid) / ticket
+        want = path_for(wid, ticket, home)
+        reg = registry(root)
+        hit = [
+            e for e in (reg.get(ticket) or {"paths": []})["paths"] if os.path.abspath(e["path"]) == str(old)
+        ]
+        if not hit or os.path.lexists(want):
+            return False
+        if _is_link(old.parent.parent) or _is_link(old.parent) or _is_link(old) or not old.is_dir():
+            return False
+        if not _owned(root, old) or old.resolve() != old:
+            return False
+        top = _top_of(root)
+        if top is None:
+            return False
+        folder = want.parent
+        _check_copies_home(home)
+        folder.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        folder.mkdir(exist_ok=True)
+        _remember_copies(root, folder)
+        if not (folder / ".owner").is_file():
+            _write_copies_owner(folder, str(root.resolve()))
+        rc, _, err = _git(["worktree", "move", str(old), str(want)], top, GIT_ADD_TIMEOUT)
+        if rc != 0:
+            _log(root, f"{ticket}: copy not moved out of orch's folder: {(err or '').strip()[-200:]}")
+            return False
+        for e in hit:
+            e["path"] = str(want)
+        _save_registry(root, reg)
+        _log(root, f"{ticket}: copy moved out of orch's folder")
+        with contextlib.suppress(OSError):  # the old <ws8> folder, once nothing else is in it
+            if not any(n != ".owner" for n in os.listdir(old.parent)):
+                (old.parent / ".owner").unlink()
+                old.parent.rmdir()
+        return True
+    except (OSError, ValueError, RuntimeError, Refused):
+        return False
 
 
 def _repo(root: Path) -> tuple[Path, str, str] | None:
@@ -576,8 +644,9 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
     folder = dest.parent
     owner = folder / ".owner"
     try:
-        _check_copies_home(folder.parent.parent)
-        folder.mkdir(parents=True, exist_ok=True)
+        _check_copies_home(addons.home(root))
+        folder.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        folder.mkdir(exist_ok=True)
         _remember_copies(root, folder)
         if owner.is_symlink():
             return None, "orch cannot use that folder for copies."
@@ -2526,6 +2595,8 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
         return workdir_for(root, rec), [], []
     reg = registry(root).get(ticket)
     if reg:
+        _move_legacy(root, ticket)
+        reg = registry(root).get(ticket) or reg
         for e in reg["paths"]:
             if _mine(root, ticket, e):
                 return work_dir(e), [], []
@@ -3501,7 +3572,7 @@ def _owner_workspace_here(d: Path) -> bool | None:
 def orphaned(root: Path) -> list[dict]:
     """Copy folders of workspaces that are not there any more (project moved or deleted, or its id changed):
     [{ws8, copies}]. Only reported, never deleted by a sweep: a moved project looks the same."""
-    base = (addons.home(root) / "worktrees").resolve()
+    base = addons.copies_home(root).resolve()
     mine = copies_dir(root)
     out: list[dict] = []
     try:
@@ -3535,7 +3606,7 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
         raise Refused("Only a person can remove copies of a project that is gone.")
     if not isinstance(ws8, str) or not _WS8.fullmatch(ws8):
         raise Refused("That is not a copies folder.")
-    base = (addons.home(root) / "worktrees").resolve()
+    base = addons.copies_home(root).resolve()
     d = base / ws8
     notes: list[str] = []
     if _is_link(d) or not d.is_dir() or not _known_gone(d) or d == copies_dir(root):
@@ -3571,8 +3642,8 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
             _TID.fullmatch(e.name) for e in os.scandir(d)
         ):
             with runs.locked(addons.home(root) / ".copies-state", "_known_copies"):
-                key = _copies_key(base.parent)
-                counter, known = _copies_store(base.parent, key)
+                key = _copies_key(addons.home(root))
+                counter, known = _copies_store(addons.home(root), key)
                 if ws8 not in known or not _known_gone(d, known):
                     raise Refused("The copies identity changed. Nothing more was removed.")
                 try:
@@ -3589,7 +3660,7 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
                 else:
                     known.pop(ws8)
                     try:
-                        _save_copies_store(base.parent, key, counter, known)
+                        _save_copies_store(addons.home(root), key, counter, known)
                     except OSError as e:
                         notes.append(
                             f"{ws8}: copies folder removed, but could not update the identity store: {e}"

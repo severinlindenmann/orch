@@ -77,9 +77,11 @@ def _route(root, ticket):
 # ---------------------------------------------------------------- path_for
 
 
-def test_path_for_is_inside_the_worktrees_folder(proj):
+def test_path_for_is_in_the_copies_folder_next_to_the_orch_home(proj):
     p = worktrees.path_for(WS, "t_abc123")
-    assert p == (addons.home() / "worktrees").resolve() / "01234567" / "t_abc123"
+    home = addons.home().resolve()
+    assert p == addons.copies_base(home) / "01234567" / "t_abc123"
+    assert p.parent.parent.parent == home.parent and home not in p.parents
 
 
 @pytest.mark.parametrize(
@@ -98,12 +100,12 @@ def test_path_for_refuses_odd_workspace_ids(proj, ws):
 
 
 def test_path_for_refuses_a_link_that_leaves_the_folder(proj, tmp_path):
-    base = addons.home() / "worktrees"
+    base = addons.copies_home()
     base.mkdir(parents=True)
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     (base / "01234567").symlink_to(outside, target_is_directory=True)
-    # the ws8 folder resolves outside <home>/worktrees: refused
+    # the ws8 folder resolves outside the copies folder: refused
     with pytest.raises(Refused):
         worktrees.path_for(WS, "t_abc123")
 
@@ -791,3 +793,39 @@ def _copies_test_home(monkeypatch):
     # Legacy proj fixtures live outside the fake account's .orch-test directory.
     # Keep the real private-directory, file, and key checks on their isolated home.
     monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
+
+
+# ---------------------------------------------------------------- copies made before 14 Nov 2026
+
+
+def _to_old_place(repo, ticket, owner=None):
+    """Put the ticket's copy where copies lived before: <orch home>/worktrees/<ws8>/<ticket>."""
+    new = Path(worktrees.create(repo, ticket)["path"])
+    (new / "wip.txt").write_text("not committed\n")
+    old = addons.home(repo).resolve() / "worktrees" / new.parent.name / ticket
+    old.parent.mkdir(parents=True)
+    (old.parent / ".owner").write_text((owner or str(repo.resolve())) + "\n")
+    git(repo, "worktree", "move", str(new), str(old))
+    reg_file = repo / ".orch/run/worktrees.json"
+    doc = json.loads(reg_file.read_text())
+    doc["tickets"][ticket]["paths"][0]["path"] = str(old)
+    reg_file.write_text(json.dumps(doc))
+    return new, old
+
+
+def test_a_copy_inside_the_orch_home_moves_out_at_the_next_start_with_its_changes(repo):
+    a, _ = repo.tids
+    new, old = _to_old_place(repo, a)
+    folder, _ = _route(repo, a)
+    assert folder == new and (new / "wip.txt").read_text() == "not committed\n"
+    assert worktrees.registry(repo)[a]["paths"][0]["path"] == str(new)
+    assert not old.exists() and not old.parent.exists()
+    assert worktrees.is_orch_copy(new)
+    assert git(new, "rev-parse", "--abbrev-ref", "HEAD").strip() == f"orch/{a}"
+
+
+def test_an_old_place_copy_of_another_owner_stays_where_it_is(repo):
+    a, _ = repo.tids
+    new, old = _to_old_place(repo, a, owner="/somewhere/else")
+    assert worktrees._move_legacy(repo, a) is False
+    assert old.is_dir() and (old / "wip.txt").exists() and not new.exists()
