@@ -98,6 +98,16 @@ final class AppModel {
 
     private let outboxDirectory: URL
     private let defaults: UserDefaults
+    /// Last known lists on disk (LocalSnapshot.swift): shown at launch before the first refresh answers.
+    private let snapshotURL: URL
+    /// Rows came from the snapshot: the Chats list shows them instead of the loading skeleton while the first refresh runs.
+    private(set) var restoredFromSnapshot = false
+    @ObservationIgnored private var snapshotTask: Task<Void, Never>?
+    @ObservationIgnored private var snapshotRevision = -1
+    /// Debounce before a changed state is written (tests shorten it).
+    @ObservationIgnored var snapshotDelay: Duration = .seconds(2)
+    /// The Chats list shows the loading placeholder only when there is nothing to show yet.
+    var showsLoadingPlaceholder: Bool { !hasLoaded && !restoredFromSnapshot }
     static let installedMarkerKey = "installedMarker"
     static let pairAgainMessage = "This phone needs to be paired again. Open the invitation from your computer to connect."
 
@@ -112,6 +122,7 @@ final class AppModel {
         self.voiceMode = voiceMode
         self.outboxDirectory = outboxDirectory
         self.defaults = defaults
+        self.snapshotURL = LocalSnapshotStore.url(besideOutbox: outboxDirectory)
         // The keychain outlives deleting the app. No marker in this app container = a fresh install: drop the stale pairing
         // quietly and show the welcome screen (the red "signed out" message is only for a real sign-out/revoke while installed).
         if !defaults.bool(forKey: AppModel.installedMarkerKey) {
@@ -132,6 +143,44 @@ final class AppModel {
             defaults.removeObject(forKey: "pairedPhoneId")
         }
         holder.make = { [weak self] in self?.client }
+        if let c = creds { restoreSnapshot(phoneId: c.phoneId) } else { LocalSnapshotStore.delete(at: snapshotURL) }
+    }
+
+    /// Cold launch: the last known rows, set through the normal setters (revision, groups) before the first frame.
+    private func restoreSnapshot(phoneId: String) {
+        guard let s = LocalSnapshotStore.load(from: snapshotURL, phoneId: phoneId) else { return }
+        workspaces = s.workspaces
+        questions = s.questions
+        questionLog = s.questionLog
+        updates = s.updates
+        answers = s.answers
+        messagesNext = s.messagesNext
+        merge(s.messages)
+        lastUpdated = s.savedAt
+        restoredFromSnapshot = true
+        snapshotRevision = revision
+    }
+
+    /// Writes the current lists a moment after the last change (never while nothing changed since the last write).
+    private func scheduleSnapshot() {
+        guard credentials != nil, revision != snapshotRevision else { return }
+        snapshotTask?.cancel()
+        snapshotTask = Task { [weak self, delay = snapshotDelay] in
+            try? await Task.sleep(for: delay)
+            if Task.isCancelled { return }
+            self?.persistSnapshotNow()
+        }
+    }
+
+    /// Hands the current lists to the background writer now.
+    func persistSnapshotNow() {
+        snapshotTask?.cancel(); snapshotTask = nil
+        guard let phone = credentials?.phoneId, revision != snapshotRevision else { return }
+        snapshotRevision = revision
+        let cut = messages.count > LocalSnapshot.messageLimit
+        LocalSnapshotStore.save(LocalSnapshot(phoneId: phone, savedAt: lastUpdated ?? Date(), workspaces: workspaces, questions: questions,
+            questionLog: questionLog, messages: Array(messages.prefix(LocalSnapshot.messageLimit)), updates: updates, answers: answers,
+            messagesNext: cut ? nil : messagesNext), to: snapshotURL)
     }
 
     /// Lets the (Sendable) speech fetch reach the current client, which changes with sign-in.
@@ -289,7 +338,7 @@ final class AppModel {
             let c = Credentials(relay: invite.relay, phoneId: r.phoneId, token: r.token, phoneName: phoneName)
             Keychain.save(c); credentials = c
             defaults.set(c.phoneId, forKey: "pairedPhoneId")
-            if outbox.phone != c.phoneId { outbox.wipe(); outbox = Outbox(directory: outboxDirectory, phone: c.phoneId) }
+            if outbox.phone != c.phoneId { LocalSnapshotStore.delete(at: snapshotURL); outbox.wipe(); outbox = Outbox(directory: outboxDirectory, phone: c.phoneId) }
             pairedWorkspaces = r.workspaces
             inviteState = .none
             phase = .notifyStep
@@ -328,6 +377,7 @@ final class AppModel {
             if Task.isCancelled { break }
             await refresh(retry: false, quiet: true)
         }
+        persistSnapshotNow()   // the app went to the background: keep what the debounce has not written yet
     }
 
     /// `quiet`: the periodic refresh must not flip `isLoading`.
@@ -376,6 +426,7 @@ final class AppModel {
             if !hasLoaded { hasLoaded = true }
             if lastUpdated == nil || Date().timeIntervalSince(lastUpdated ?? .distantPast) > 30 { lastUpdated = Date() }
             await flushOutbox()
+            scheduleSnapshot()
         }
     }
 
@@ -469,6 +520,7 @@ final class AppModel {
         do {
             let page = try await client.messages(after: cursor, limit: pageSize)
             merge(page.items); messagesNext = page.next
+            scheduleSnapshot()
         } catch RelayError.unauthorized { handle(RelayError.unauthorized) } catch { olderFailed = true }
     }
     var hasOlderMessages: Bool { messagesNext != nil }
@@ -788,6 +840,8 @@ final class AppModel {
     }
 
     private func reset() {
+        snapshotTask?.cancel(); snapshotTask = nil; snapshotRevision = -1; restoredFromSnapshot = false
+        LocalSnapshotStore.delete(at: snapshotURL)
         defaults.removeObject(forKey: "pairedPhoneId")
         for t in undoTimers.values { t.cancel() }
         undoTimers = [:]; pendingAnswers = [:]; pendingAnswerAt = [:]; sendingAnswers = []

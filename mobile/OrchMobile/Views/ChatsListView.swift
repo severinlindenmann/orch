@@ -120,7 +120,7 @@ struct ChatsListView: View {
     @ViewBuilder private var content: some View {
         if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             searchResults(ChatBuilder.search(query, model.chatData, rows: model.chatRooms))
-        } else if !model.hasLoaded && model.message == nil {
+        } else if model.showsLoadingPlaceholder && model.message == nil {
             VStack(spacing: 0) {
                 ForEach(0..<3, id: \.self) { _ in
                     HStack(spacing: 12) {
