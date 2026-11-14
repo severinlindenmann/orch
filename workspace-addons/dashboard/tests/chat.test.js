@@ -311,3 +311,12 @@ test('header reads Your helper once a message exists, and Send works while the h
   const send = nodes(thread, n => n.attrs?.['data-key'] === 'send')[0];
   assert.equal(send.attrs.disabled, false);
 });
+
+test('#chat?say=text opens the helper chat with the text typed in (Factory idea box)', () => {
+  const c = context();
+  c.location.hash = '#chat?say=' + encodeURIComponent('Factory: a page with opening hours');
+  c.history = {replaceState(_a, _b, to) { c.location.hash = to; }};
+  vm.runInContext('chatSayFromHash()', c);
+  assert.equal(vm.runInContext('chatUi.drafts.chat', c), 'Factory: a page with opening hours');
+  assert.equal(c.location.hash, '#chat');
+});

@@ -568,3 +568,13 @@ def test_page_decisions_only_post_the_open_question():
     assert len(posts) == 1 and "'orch.question'" in posts[0] and "location.origin" in posts[0]
     assert "window.top !== window" in js
     assert not re.search(r"fetch\([^)]*method|method:\s*['\"]POST", js)
+
+
+def test_page_has_no_frame_header_and_an_idea_box_with_the_ask_switch(srv):
+    html = get(srv, "/")[1]
+    assert b'id="navigation"' not in html and b"New idea in Chat" not in html
+    assert b"/kit/widgets.css" in html
+    js = get(srv, "/web/factory.js")[1].decode()
+    assert "Start with this idea" in js and "Ask me at every stop" in js
+    assert "setting-row" in js and "'switch'" in js
+    assert "Open Chat" not in js

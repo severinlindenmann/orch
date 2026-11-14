@@ -564,7 +564,16 @@ async function chatDmLoad(force = false) {
     }
   }
 }
+// "#chat?say=<text>" (from Factory's idea box) opens the helper chat with that text typed in; you press Send.
+function chatSayFromHash() {
+  const m = /^#chat\?(?:.*&)?say=([^&]*)/.exec(location.hash || '');
+  if (!m || snapshot) return;
+  let text = ''; try { text = decodeURIComponent(m[1]).slice(0, 2000); } catch { return; }
+  history.replaceState(null, '', '#chat');
+  chatUi.open = 'chat'; chatUi.listOpen = false; chatUi.filter = 'all'; chatUi.drafts.chat = text;
+}
 function chatDmRoute() {
+  chatSayFromHash();
   const ws = location.hash.slice(6);
   if (chatDmId(ws)) { chatUi.open = ws; chatUi.listOpen = false; chatUi.day = null; }
   if (route().kind === 'chat') { render(); chatDmLoad(); }
