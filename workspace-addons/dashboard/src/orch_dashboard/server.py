@@ -93,9 +93,23 @@ def web_file(name: str) -> bytes:
     return resources.files("orch_dashboard").joinpath("web", name).read_bytes()
 
 
-_PORTS: dict[tuple[str, str], tuple[float, int | None]] = {}
+_PORTS: dict[tuple[str, str], tuple[float, int | None, object]] = {}
 PORT_KEEP = 60.0  # seconds a running add-on's port is remembered: `orch status` costs about 0.2 s
 # Files a browser may keep for a minute: an add-on page's own styles, scripts and pictures (never its pages or data)
+
+
+def _services_stamp():
+    """A fingerprint of orch's own record of what runs (running.json: size and time). It changes whenever an add-on
+    starts, stops or restarts, so a remembered port is trusted only while it is the same. None = cannot tell."""
+    try:
+        from orch import addons
+
+        st = (addons.home() / "running.json").stat()
+        return (st.st_mtime_ns, st.st_size)
+    except Exception:  # noqa: BLE001 - no orch here, no file, an untrusted home: then nothing is remembered
+        return None
+
+
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
 
 
@@ -189,7 +203,8 @@ class Handler(BaseHTTPRequestHandler):
         """The local port of a running add-on that declares a [page]: both facts come from orch's own add-on data."""
         hit = _PORTS.get((str(self.root), name))
         # a found port is kept (a move is noticed by the failed connection in _proxy); "not running" is looked at again soon
-        if hit and time.monotonic() - hit[0] < (PORT_KEEP if hit[1] else 3):
+        stamp = _services_stamp()
+        if hit and time.monotonic() - hit[0] < (PORT_KEEP if hit[1] and stamp is not None and hit[2] == stamp else 3):
             return hit[1]
         port = None
         if any(a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)):
@@ -202,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
                     and 0 < int(m.group(1)) < 65536
                 ):
                     port = int(m.group(1))
-        _PORTS[(str(self.root), name)] = (time.monotonic(), port)
+        _PORTS[(str(self.root), name)] = (time.monotonic(), port, stamp)
         return port
 
     def _proxy(self, method: str, name: str, rest: str, query: str, cross: bool = False):
@@ -593,6 +608,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if px:
             return self._proxy("POST", px.group(1), px.group(2), "")
+        _PORTS.clear()  # an action may start, stop or restart add-ons: every port is looked up live next time
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
             return self._send(415, b"send JSON", "text/plain")
         try:

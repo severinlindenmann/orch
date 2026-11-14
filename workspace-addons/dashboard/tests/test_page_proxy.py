@@ -332,7 +332,7 @@ def _status_calls(tmp_path):
     return len(f.read_text()) if f.exists() else 0
 
 
-def test_fb22_switching_back_to_an_addon_page_does_not_ask_orch_again_for_its_port(stack, tmp_path):
+def test_fb22_switching_back_to_an_addon_page_does_not_ask_orch_again_for_its_port(stack, tmp_path, monkeypatch):
     """Owner feedback 14 Nov fb22: each switch ran `orch status` again (about 0.2 s) after only 3 s."""
     import orch_dashboard.server as srvmod
 
@@ -342,8 +342,12 @@ def test_fb22_switching_back_to_an_addon_page_does_not_ask_orch_again_for_its_po
     first = _status_calls(tmp_path)
     assert first >= 1
     # the port was found 20 s ago: still known, no second look
-    for key, (stamp, p) in list(srvmod._PORTS.items()):
-        srvmod._PORTS[key] = (stamp - 20, p)
+    monkeypatch.setattr(srvmod, "_services_stamp", lambda: (1, 1))  # orch's record of what runs is unchanged
+    srvmod._PORTS.clear()
+    assert call(base + "/addon/viewer/")[0] == 200
+    first = _status_calls(tmp_path)
+    for key, (stamp, p, st) in list(srvmod._PORTS.items()):
+        srvmod._PORTS[key] = (stamp - 20, p, st)
     assert call(base + "/addon/viewer/")[0] == 200
     assert _status_calls(tmp_path) == first
 
@@ -355,7 +359,7 @@ def test_fb22_a_moved_addon_port_is_found_again_without_waiting(stack, tmp_path)
     srvmod._PORTS.clear()
     assert call(base + "/addon/viewer/")[0] == 200
     key = next(k for k in srvmod._PORTS if k[1] == "viewer")
-    srvmod._PORTS[key] = (srvmod._PORTS[key][0], 1)  # a stale port nobody listens on
+    srvmod._PORTS[key] = (srvmod._PORTS[key][0], 1, srvmod._PORTS[key][2])  # a stale port nobody listens on
     assert call(base + "/addon/viewer/")[0] == 200
 
 
@@ -369,3 +373,32 @@ def test_fb22_static_files_of_an_addon_page_may_be_kept_by_the_browser_the_page_
     assert h["Cache-Control"] == "no-store"
     code, _, h = call(base + "/addon/viewer/api/state.json")
     assert h["Cache-Control"] == "no-store"
+
+
+def test_fb22_a_changed_record_of_what_runs_drops_the_remembered_port(stack, tmp_path, monkeypatch):
+    """The add-on restarted (running.json changed): the remembered port is not trusted, so a port another add-on
+    has taken over can never be shown under this add-on's name and fence."""
+    import orch_dashboard.server as srvmod
+
+    base, port = stack
+    stamp = {"v": (1, 1)}
+    monkeypatch.setattr(srvmod, "_services_stamp", lambda: stamp["v"])
+    srvmod._PORTS.clear()
+    assert call(base + "/addon/viewer/")[0] == 200
+    first = _status_calls(tmp_path)
+    key = next(k for k in srvmod._PORTS if k[1] == "viewer")
+    srvmod._PORTS[key] = (srvmod._PORTS[key][0] - 20, 1, stamp["v"])  # remembered, and wrong
+    stamp["v"] = (2, 1)  # orch's record changed
+    code, body, h = call(base + "/addon/viewer/")
+    assert code == 200 and b"hi" in body  # looked up live: the real port, not the remembered one
+    assert _status_calls(tmp_path) == first + 1
+    assert srvmod._PORTS[key][1] == port
+
+
+def test_fb22_an_action_clears_every_remembered_port(stack):
+    import orch_dashboard.server as srvmod
+
+    base, port = stack
+    srvmod._PORTS[("x", "y")] = (0.0, 5, None)
+    call(base + "/api/act", "POST", {"Content-Type": "application/json", "Origin": base}, b"{}")
+    assert ("x", "y") not in srvmod._PORTS
