@@ -1918,7 +1918,7 @@ def test_b13f_orphan_copy_of_another_project_is_still_saved(repo, tmp_path):
     git(old, "add", "a.txt")
     git(old, "commit", "-qm", "init")
     tid = "t_orphan01"
-    folder = addons.home(repo) / "worktrees" / "bbbbbbbb"
+    folder = addons.copies_home(repo) / "bbbbbbbb"
     folder.mkdir(parents=True)
     copy = folder / tid
     git(old, "worktree", "add", "-q", "-b", f"orch/{tid}", str(copy))

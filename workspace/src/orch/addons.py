@@ -408,6 +408,53 @@ def home(root: Path | None = None) -> Path:
     return real
 
 
+def copies_base(h: Path) -> Path:
+    """Where the ticket copies of orch home `h` live: a SIBLING of the home, never inside it. Agents work in
+    these copies, and every agent is denied the whole orch home (denyrules: keys, secrets, approvals); a copy
+    inside the home would be denied too, and a carve-out cannot be made safe.
+    `~/.orch-tool` -> `~/.orch-work`; any other home -> `<parent>/.orch-work-<8 hex of its path>` (one per
+    home; the name never holds the home's own name, which the agent's shell deny rules match as text)."""
+    h = h.resolve()
+    tag = hashlib.sha256(str(h).casefold().encode("utf-8")).hexdigest()
+    names = [".orch-work"] if h.name == ".orch-tool" else []
+    names += [f".orch-work-{tag[:8]}", f".oc-{tag[:16]}"]
+    for n in names:
+        if not names_clash(h, h.parent / n):
+            return h.parent / n
+    return h.parent / names[-1]
+
+
+def names_clash(h: Path, base: Path) -> bool:
+    """`base` holds a text the agent's shell deny matches for home `h` (denyrules.rules: the home's name and
+    <parent>/<name> when the name has 6+ characters): every shell command naming the copy would be refused."""
+    if len(h.name) < 6:
+        return False
+    b = str(base).replace("\\", "/").casefold()
+    return h.name.casefold() in b or f"{h.parent.name}/{h.name}".casefold() in b
+
+
+def copies_home(root: Path | None = None) -> Path:
+    """copies_base(home(root))."""
+    return copies_base(home(root))
+
+
+def copies_candidates(include_real: bool = False) -> list[Path]:
+    """copies_base of every home_candidates() entry: for "is this path inside an orch copy" questions."""
+    return list(dict.fromkeys(copies_base(h) for h in home_candidates(include_real)))
+
+
+def home_of_copies(base: Path) -> Path | None:
+    """The orch home whose copies_base is `base` (resolved), or None."""
+    try:
+        b = base.resolve()
+    except (OSError, RuntimeError):
+        return None
+    for h in home_candidates(include_real=True):
+        if copies_base(h) == b:
+            return h
+    return None
+
+
 def registry_path() -> Path:
     """The add-on list: home()/addons.json, always the same home as every other piece of state (running.json,
     run/, installed.json). Reading it from a trusted ORCH_HOME is safe because registry() drops what a crafted

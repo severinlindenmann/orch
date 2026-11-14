@@ -101,13 +101,16 @@ def test_init_works_when_orch_root_is_this_folder(proj, run, monkeypatch):
 def test_init_refuses_inside_the_orch_worktrees_folder(proj, run, monkeypatch):
     from orch import addons
 
-    copy = addons.home() / "worktrees" / "ws1" / "T-1"
-    copy.mkdir(parents=True)
-    monkeypatch.chdir(copy)
-    monkeypatch.delenv("ORCH_ROOT", raising=False)
-    code, _, err = run("init", "--yes")
-    assert code == 2 and "copy that orch made" in err
-    assert not (copy / ".orch").exists()
+    for copy in (
+        addons.copies_home() / "ws1" / "T-1",
+        addons.home() / "worktrees" / "ws1" / "T-1",  # where copies lived until 14 Nov 2026
+    ):
+        copy.mkdir(parents=True)
+        monkeypatch.chdir(copy)
+        monkeypatch.delenv("ORCH_ROOT", raising=False)
+        code, _, err = run("init", "--yes")
+        assert code == 2 and "copy that orch made" in err
+        assert not (copy / ".orch").exists()
 
 
 def test_agent_environment_names_the_workspace(proj, monkeypatch):
@@ -220,7 +223,7 @@ def test_init_guard_with_orch_home_unset_uses_the_default_home(proj, run, monkey
 
     monkeypatch.delenv("ORCH_HOME", raising=False)
     monkeypatch.delenv("ORCH_ROOT", raising=False)
-    copy = addons.real_home() / ".orch-tool" / "worktrees" / "ws1" / "T-1"
+    copy = addons.real_home() / ".orch-work" / "ws1" / "T-1"
     copy.mkdir(parents=True)
     monkeypatch.chdir(copy)
     code, _, err = run("init", "--yes")
@@ -231,7 +234,7 @@ def test_init_guard_with_orch_home_unset_uses_the_default_home(proj, run, monkey
 def test_init_guard_sees_a_symlinked_cwd_that_resolves_into_worktrees(proj, run, monkeypatch):
     from orch import addons
 
-    copy = addons.home_candidates()[0] / "worktrees" / "ws1" / "T-1"
+    copy = addons.copies_candidates()[0] / "ws1" / "T-1"
     copy.mkdir(parents=True)
     link = proj / "link"
     try:
@@ -254,7 +257,7 @@ def test_a_note_names_a_stale_orch_root_but_not_inside_a_copy(proj, run, monkeyp
     monkeypatch.setattr(cli, "_noted", False)
     _, _, err = run("ticket", "new", "A", "--by", "human:t")
     assert "Note: ORCH_ROOT sends this to" in err
-    copy = addons.home_candidates()[0] / "worktrees" / "ws1" / "T-1"
+    copy = addons.copies_candidates()[0] / "ws1" / "T-1"
     copy.mkdir(parents=True)
     monkeypatch.chdir(copy)
     monkeypatch.setattr(cli, "_noted", False)
