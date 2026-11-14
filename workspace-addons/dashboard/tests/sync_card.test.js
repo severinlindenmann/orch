@@ -362,3 +362,39 @@ test('Sync now is not offered while the saved sync mode is off', () => {
   const i = src.indexOf("'data-key':'sync-now'");
   assert.ok(/saved\.where === 'off'/.test(src.slice(i, i + 120)));
 });
+
+// Owner feedback 14 Nov (fb18): the Sync page says where, what and when, the last 5 syncs, and one plain error line + one button.
+const INFO = {folder:'Demo', next_run:'2026-11-11T09:30:00Z', counts:{tickets:24, files:31, bytes:18e6}, running:true,
+  history:[{at:'2026-11-11T09:15:00Z', ok:true, text:'12 tickets, 3 files'}, {at:'2026-11-11T08:45:00Z', ok:false, text:'could not reach your storage'}]};
+function syncPage(card) {
+  const {c, ui, calls} = context({settings:{...ON}});
+  vm.runInContext("route = () => ({kind:'addon', id:'sync'}); addons = () => [{name:'sync', active:true, dashboard:{label:'Sync', subtitle:'Keep another copy.'}}];", c);
+  ui.card = card;
+  return {page:c.addonTab('sync'), c, calls, ui};
+}
+test('fb18: the Sync page shows Where, What and When, then the last syncs', () => {
+  const {page} = syncPage({...BASE, ...INFO});
+  assert.match(text(byKey(page, 'sync-where-info')), /This computer.*The Demo folder.*Your own storage.*files\.example\.org/);
+  assert.match(text(byKey(page, 'sync-what-info')), /24 tickets · 31 files · 18 MB.*Never included: passwords and keys, your private files\./);
+  assert.match(text(byKey(page, 'sync-when-info')), /Last: .*Next: .*every 15 minutes/);
+  assert.match(text(byKey(page, 'sync-service')), /Sync is running/);
+  const rows = all(byKey(page, 'sync-history'), n => n.attrs?.['data-key'] === 'sync-history-row');
+  assert.equal(rows.length, 2);
+  assert.match(text(rows[0]), /12 tickets, 3 files/);
+  assert.match(text(rows[1]), /could not reach your storage/);
+});
+test('fb18: the storage choice says "Another computer or your own storage" and gives an example address', () => {
+  const {page} = syncPage({...BASE, ...INFO});
+  assert.match(text(byKey(page, 'sync-where-row-remote')), /Another computer or your own storage/);
+  assert.match(text(byKey(page, 'sync-addr-example')), /github\.com\/your-name\/orch-copy/);
+});
+test('fb18: a failed sync is one plain sentence and one button, never a raw error', async () => {
+  const {page, calls} = syncPage({...BASE, ...INFO, shown:'offline', last_error:'offline'});
+  const banner = byKey(page, 'sync-error');
+  assert.match(text(banner), /The last sync did not finish\..*could not reach your storage/);
+  assert.equal(all(banner, n => n.tag === 'button').length, 1);
+  assert.doesNotMatch(text(banner), /offline$/);
+  const ok = syncPage({...BASE, ...INFO});
+  assert.equal(byKey(ok.page, 'sync-error'), undefined);
+  assert.equal(byKey(syncPage({...BASE, ...INFO, mode:'off', shown:'off'}).page, 'sync-where-info'), undefined);
+});

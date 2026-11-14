@@ -16,7 +16,7 @@ from pathlib import Path
 
 from orch import config, humanproof
 
-from . import cli, paths, repo
+from . import cli, history, paths, repo
 
 # Needs rows that are part of a pause: Sync now never clears them (the card says "Still paused: N things need you").
 PAUSE_KINDS = ("sync:paused", "sync:secret", "sync:key-clash", "sync:case", "sync:history")
@@ -187,7 +187,34 @@ def status(root, settings):
         "public": cli.safe_address(public["remote"]) if public else None,
         "remote_allowed": result["remote_allowed"],
         "running": result["running"],
+        "next_run": result["next_run"],
+        "folder": Path(root).name[:80],
+        "counts": _counts(root),
+        "history": history.read(root),
     }
+
+
+def _counts(root):
+    """{tickets, files, bytes} of what the last sync keeps (the committed tree); zeros before the first one."""
+    out = {"tickets": 0, "files": 0, "bytes": 0}
+    try:
+        raw = repo.git(root, "ls-tree", "-r", "-l", "-z", "HEAD", allowed_codes=(0, 128)).stdout
+    except (repo.Refused, OSError, ValueError):
+        return out
+    for row in raw.split(b"\0"):
+        meta, _, name = row.partition(b"\t")
+        parts = meta.split()
+        if len(parts) < 4 or not parts[3].isdigit():
+            continue
+        path = name.decode("utf-8", "replace")
+        if paths.TICKET.fullmatch(path):
+            out["tickets"] += 1
+        elif paths.ARTIFACT.fullmatch(path):
+            out["files"] += 1
+        else:
+            continue
+        out["bytes"] += int(parts[3])
+    return out
 
 
 def check(root, address):

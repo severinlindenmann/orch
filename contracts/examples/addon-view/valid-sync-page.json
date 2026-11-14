@@ -7,7 +7,7 @@
     {"type": "radio", "title": "Where to keep a copy", "options": [
       {"label": "Off", "selected": true, "action": {"op": "addon.act", "args": {"verb": "set", "target": "off"}}},
       {"label": "On this computer only", "selected": false, "action": {"op": "addon.act", "args": {"verb": "set", "target": "local"}}},
-      {"label": "Also on another computer or server", "selected": false, "link": "app:settings"}
+      {"label": "Another computer or your own storage", "selected": false, "link": "app:settings"}
     ]}
   ]
 }

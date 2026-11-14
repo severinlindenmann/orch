@@ -35,6 +35,11 @@ def local_time(iso):
     return dt.astimezone().strftime("%-d %b, %H:%M")
 
 
+def size(n):
+    """Bytes in the words a person reads: 18 MB, 3 KB."""
+    return f"{n / 1e6:.0f} MB" if n >= 1e6 else f"{max(1, round(n / 1e3))} KB" if n else "0 KB"
+
+
 def build(root, settings, now=None):
     """The Sync page: the saved setting as rows, the three places to keep a copy as one choice, then what was kept
     here. When the status can't be read the saved setting still shows, with one plain line and Try again."""
@@ -51,6 +56,10 @@ def build(root, settings, now=None):
             "remote": None,
             "not_synced": [],
             "last_error": None,
+            "next_run": None,
+            "folder": "",
+            "counts": {"tickets": 0, "files": 0, "bytes": 0},
+            "history": [],
         }
         unreadable = True
     text, tone = STATE.get(s["shown"], STATE["never"])
@@ -64,8 +73,19 @@ def build(root, settings, now=None):
     if s["mode"] != "off" and not unreadable:
         rows.append({"label": "Status", "value": clean(text, 120), "tone": tone})
         rows.append({"label": "Last synced", "value": local_time(s["last_ok"])})
+        if s.get("next_run"):
+            rows.append({"label": "Next sync", "value": local_time(s["next_run"])})
+        rows.append({"label": "Where", "value": clean(f"This computer: the {s['folder']} folder", 120)})
         if s["mode"] == "remote" and s["remote"]:
-            rows.append({"label": "Where", "value": clean(s["remote"], 120)})
+            rows.append({"label": "Your own storage", "value": clean(s["remote"], 120)})
+        c = s["counts"]
+        rows.append(
+            {
+                "label": "What",
+                "value": f"{c['tickets']} tickets, {c['files']} files, {size(c['bytes'])}",
+                "note": "Never included: passwords and keys, your private files.",
+            }
+        )
     blocks = [
         {"type": "settings", "title": "Keep a copy of my tickets", "rows": rows},
         {
@@ -83,13 +103,27 @@ def build(root, settings, now=None):
                     "action": {"op": "addon.act", "args": {"verb": "set", "target": "local"}},
                 },
                 {
-                    "label": "Also on another computer or server",
+                    "label": "Another computer or your own storage",
                     "selected": s["mode"] == "remote",
                     "link": "app:settings",  # the address is chosen and signed in Settings > General
                 },
             ],
         },
     ]
+    if s["history"]:
+        blocks.append(
+            {
+                "type": "list",
+                "title": "Last 5 syncs",
+                "items": [
+                    {
+                        "title": f"{local_time(e['at'])}: {clean(e['text'])}",
+                        "tone": "good" if e["ok"] else "warn",
+                    }
+                    for e in s["history"][:5]
+                ],
+            }
+        )
     problems = s["not_synced"]
     if problems:
         blocks.append(

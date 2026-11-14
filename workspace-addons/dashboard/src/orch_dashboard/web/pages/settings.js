@@ -174,7 +174,7 @@ function copiesCard(settings) {
 // the sync add-on's own verbs on the ONE generic op: `orch sync act status|check|set|now|use-public -- <target>`.
 // The address and the choice come only from the person's clicks here; choices that decide for the person are signed.
 const SYNC = 'sync';
-const SYNC_WHERE = [['off', 'Off'], ['local', 'On this computer only'], ['remote', 'Also on another computer or server']];
+const SYNC_WHERE = [['off', 'Off'], ['local', 'On this computer only'], ['remote', 'Another computer or your own storage']];
 const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
 const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
 const SYNC_STATUS = {synced:['ok', 'Last synced'], never:['', 'Not synced yet'], offline:['', 'Offline, will sync when connected'], syncing:['live', 'Syncing…'], paused:['you', 'Paused, review below']};
@@ -255,6 +255,35 @@ function syncPausedHelp(card) {
   go.addEventListener('click', event => { event.preventDefault(); location.hash = '#home'; requestAnimationFrame(() => { const n = document.getElementById('needs-you'); if (n) { n.scrollIntoView({block:'start'}); n.focus({preventScroll:true}); } }); });
   return h('div', {className:'sync-warn sync-paused', 'data-key':'sync-paused-help'}, h('p', {}, what), h('div', {className:'row'}, go));
 }
+// ---- The Sync page (fb18): where, what and when, the last 5 syncs, one plain error with one button. ----
+const syncSize = n => n >= 1e6 ? Math.round(n / 1e6) + ' MB' : n > 0 ? Math.max(1, Math.round(n / 1e3)) + ' KB' : '0 KB';
+function syncWhen(value) {
+  const d = new Date(value);
+  if (!value || Number.isNaN(d.getTime())) return '';
+  const hhmm = d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  return (d.toDateString() === now().toDateString() ? 'today' : d.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'})) + ' ' + hhmm;
+}
+function syncInfo(card) {
+  if (!card || card.mode === 'off') return null;
+  const c = card.counts || {tickets:0, files:0, bytes:0}, remote = card.mode === 'remote' && card.remote;
+  const box = (key, title, ...body) => h('section', {className:'card', 'data-key':key}, h('header', {className:'card-h'}, h('h3', {}, title)), h('div', {className:'pad-card'}, ...body));
+  const failed = card.shown === 'offline' || (card.last_error && card.shown !== 'paused' && card.shown !== 'syncing');
+  const banner = failed ? h('div', {className:'banner error', role:'alert', 'data-key':'sync-error'},
+    h('div', {className:'grow'}, h('strong', {}, 'The last sync did not finish.'),
+      h('p', {}, card.shown === 'offline' || card.last_error === 'offline' ? 'orch could not reach your storage. Check the address or your internet connection.' : 'orch will try again by itself, or you can try now.')),
+    (() => { const b = button('Try again', 'primary sm', syncNowClick); b.dataset.key = 'sync-error-retry'; return b; })()) : null;
+  const history = array(card.history).slice(0, 5);
+  return h('div', {className:'stack', 'data-key':'sync-info'}, banner,
+    h('div', {className:'grid-3'},
+      box('sync-where-info', 'Where', h('strong', {}, 'This computer'), h('p', {className:'meta'}, 'The ' + (card.folder || 'workspace') + ' folder'),
+        remote ? [h('hr', {}), h('strong', {}, 'Your own storage'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, ''))] : null),
+      box('sync-what-info', 'What', h('strong', {}, c.tickets + ' tickets · ' + c.files + ' files · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
+      box('sync-when-info', 'When', h('strong', {}, 'Last: ' + (syncWhen(card.last_ok) || 'not yet')),
+        h('p', {className:'meta'}, 'Next: ' + (card.running && card.next_run ? syncWhen(card.next_run) + ' · ' : card.running ? '' : 'not while sync is stopped · ') + 'every ' + (card.interval || 15) + ' minutes'),
+        h('p', {className:'meta', 'data-key':'sync-service'}, card.running ? 'Sync is running.' : 'Sync is stopped on this computer.'))),
+    history.length ? h('section', {className:'card', 'data-key':'sync-history'}, h('header', {className:'card-h'}, h('h3', {}, 'Last ' + history.length + (history.length === 1 ? ' sync' : ' syncs'))),
+      history.map(e => h('div', {className:'card-row', 'data-key':'sync-history-row'}, h('span', {className:'dot ' + (e.ok ? 'ok' : 'bad'), 'aria-hidden':'true'}), h('span', {className:'meta'}, syncWhen(e.at)), h('span', {className:'grow'}, e.text)))) : null);
+}
 function syncCard(settings) {
   const addon = array(settings.addons).find(a => a.name === SYNC);
   if (!addon || snapshot) return null;
@@ -274,7 +303,7 @@ function syncCard(settings) {
     radio.addEventListener('change', () => { syncUi.draft = {...syncNow(), where:value}; render(); });
     return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio, h('span', {}, label));
   });
-  const addr = h('input', {type:'text', className:'input mono', id:'sync-addr', 'data-key':'sync-addr', 'data-settings-field':'sync-addr', value:cur.addr, placeholder:'https://…', spellcheck:'false', autocomplete:'off', disabled:off});
+  const addr = h('input', {type:'text', className:'input mono', id:'sync-addr', 'data-key':'sync-addr', 'data-settings-field':'sync-addr', value:cur.addr, placeholder:'https://github.com/your-name/orch-copy', spellcheck:'false', autocomplete:'off', disabled:off});
   addr.addEventListener('input', () => { syncUi.draft = {...syncNow(), addr:addr.value}; syncUi.check = null; render(); });
   const check = button('Check connection', '', async () => {
     const target = (syncNow().addr || '').trim();
@@ -296,7 +325,8 @@ function syncCard(settings) {
   const now = h('button', {type:'button', className:'btn ' + (blocked ? 'ghost' : 'primary'), 'data-key':'sync-now', disabled:off || syncUi.nowBusy || saved.where === 'off'}, iconEl('refresh'), 'Sync now');
   now.addEventListener('click', syncNowClick);
   const remoteBox = cur.where === 'remote' ? h('div', {className:'sync-sub', 'data-key':'sync-remote'},
-    h('div', {className:'sync-field'}, h('label', {className:'meta', for:'sync-addr'}, 'Sync address'), h('div', {className:'sync-field-line'}, addr, check), res),
+    h('div', {className:'sync-field'}, h('label', {className:'meta', for:'sync-addr'}, 'Sync address'), h('div', {className:'sync-field-line'}, addr, check), res,
+      h('span', {className:'meta', 'data-key':'sync-addr-example'}, 'For example: github.com/your-name/orch-copy, a private repository you own.')),
     h('div', {className:'sync-every'}, h('span', {className:'meta', id:'sync-every-lbl'}, 'Sync every'), h('div', {className:'sync-chips', role:'group', 'aria-labelledby':'sync-every-lbl'}, chips)),
     h('div', {className:'sync-act'}, now, syncUi.note ? h('span', {className:'sync-note', role:'status', 'data-key':'sync-note'}, syncUi.note) : null)) : null;
   const review = changed ? h('div', {className:'sync-review', role:'group', 'aria-label':'Review before saving', 'data-key':'sync-review'},
@@ -740,7 +770,7 @@ function addonTab(id) {
   // Sync is changed on its own page: the same card as in Settings, no trip to another page.
   if (id === SYNC && syncNative()) {
     const a = addons().find(a => a.name === id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, syncCard(state.settings)));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, syncInfo(syncUi.card), syncCard(state.settings)));
   }
   // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
@@ -905,6 +935,11 @@ const REPEAT_DAYS = [['Mon', 'Monday', 1], ['Tue', 'Tuesday', 2], ['Wed', 'Wedne
 const andList = list => list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
 // {freq: daily|weekly|monthly|custom, days: [cron weekday numbers], monthday, every, time: 'HH:MM'} -> {phrase, summary, hint}
 function repeatPlan(c) {
+  if (c.freq === 'custom' && (c.unit === 'minutes' || c.unit === 'hours')) {  // a steady rhythm: no time of day
+    const n = Number(c.every), mins = c.unit === 'minutes', word = mins ? 'minutes' : n === 1 ? 'hour' : 'hours';
+    if (!Number.isInteger(n) || n < (mins ? 5 : 1) || n > (mins ? 59 : 23)) return {phrase:null, summary:mins ? 'Choose between 5 and 59 minutes.' : 'Choose between 1 and 23 hours.', hint:''};
+    return {phrase:'every ' + n + ' ' + word, summary:'Runs every ' + n + ' ' + word, hint:''};
+  }
   const [hh, mm] = String(c.time || '').split(':').map(Number);
   if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return {phrase:null, summary:'Choose a time.', hint:''};
   const at = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
@@ -928,14 +963,25 @@ function repeatPlan(c) {
 // The reverse of repeatPlan for the plans it writes: a saved 5-field cron -> the dialog's choices (null when it is some other plan).
 function cronToChoice(cron) {
   const f = String(cron || '').trim().split(/\s+/);
+  const base0 = {freq:'custom', days:[1], monthday:1, time:'08:00'};
+  if (f.length === 5 && /^\*\/\d+$/.test(f[0]) && f.slice(1).every(x => x === '*') && Number(f[0].slice(2)) >= 5 && Number(f[0].slice(2)) <= 59) return {...base0, unit:'minutes', every:Number(f[0].slice(2))};
+  if (f.length === 5 && f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f.slice(2).every(x => x === '*') && Number(f[1].slice(2)) >= 1 && Number(f[1].slice(2)) <= 23) return {...base0, unit:'hours', every:Number(f[1].slice(2))};
   if (f.length !== 5 || !/^\d+$/.test(f[0]) || !/^\d+$/.test(f[1]) || f[3] !== '*') return null;
   const time = String(f[1]).padStart(2, '0') + ':' + String(f[0]).padStart(2, '0'), base = {freq:'weekly', days:[1], monthday:1, every:2, time};
   if (f[2] === '*' && f[4] === '*') return {...base, freq:'daily'};
   if (f[2] === '*' && /^[0-6](,[0-6])*$/.test(f[4])) return {...base, freq:'weekly', days:f[4].split(',').map(Number)};
   if (/^\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'monthly', monthday:Math.min(28, Number(f[2]))};
-  if (/^\*\/\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'custom', every:Number(f[2].slice(2))};
+  if (/^\*\/\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'custom', unit:'days', every:Number(f[2].slice(2))};
   return null;
 }
+// A saved rule the choices below cannot show (set by the helper): its plain words, read-only. null when it is one of ours.
+function cronWords(cron) {
+  const f = String(cron || '').trim().split(/\s+/);
+  if (f.length === 5 && /^\*\/\d+$/.test(f[0]) && f.slice(1).every(x => x === '*')) return 'every ' + f[0].slice(2) + ' minutes';
+  if (f.length === 5 && f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f.slice(2).every(x => x === '*')) return 'every ' + f[1].slice(2) + ' hours';
+  return 'a custom plan';
+}
+const REPEAT_UNITS = [['minutes', 'minutes'], ['hours', 'hours'], ['days', 'days']];
 const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];
 // The ticket is chosen in the window, or fixed when it is opened from a ticket's menu (`only`).
 function repeatsDialog(only = null, addonName = null) {
@@ -945,7 +991,9 @@ function repeatsDialog(only = null, addonName = null) {
   const {d, actions} = dialog(had ? 'Edit schedule' : 'New schedule', 'dialog repeat-dialog');
   const ticket = h('select', {className:'input', name:'ticket', id:'repeat-ticket'});
   tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
-  const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00'};
+  const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00', unit:'minutes'};
+  const outside = !had && saved?.recurring === true && saved.cron ? cronWords(saved.cron) : null;  // set by the helper: shown, never overwritten silently
+  if (outside) Object.assign(choice, {freq:'custom', unit:'minutes', every:5});
   const summary = h('p', {className:'repeat-summary', role:'status'}), hint = h('span', {className:'meta'});
   const rowsHost = h('div', {className:'schedule-fields'});
   const row = (label, ...kids) => h('div', {className:'schedule-row'}, h('span', {}, label), ...kids);
@@ -973,9 +1021,14 @@ function repeatsDialog(only = null, addonName = null) {
   const draw = () => {
     const plan = repeatPlan(choice), kids = [];
     if (choice.freq === 'custom') {
-      const n = h('input', {className:'input', type:'number', min:'1', max:'30', value:String(choice.every), 'aria-label':'Number of days'});
+      const unit = h('select', {className:'input', 'aria-label':'Minutes, hours or days'});
+      REPEAT_UNITS.forEach(([v, label]) => unit.append(new Option(label, v)));
+      unit.value = choice.unit || 'days';
+      const n = h('input', {className:'input', type:'number', min:unit.value === 'minutes' ? '5' : '1', max:unit.value === 'minutes' ? '59' : unit.value === 'hours' ? '23' : '30', value:String(choice.every), 'aria-label':'How many'});
       n.oninput = () => { choice.every = n.value; refreshSummary(); };
-      kids.push(row('Repeat every', h('div', {className:'custom-interval'}, n, h('span', {}, 'days'))));
+      unit.onchange = () => { choice.unit = unit.value; choice.every = unit.value === 'minutes' ? Math.max(5, Number(choice.every) || 5) : Math.min(Number(choice.every) || 1, unit.value === 'hours' ? 23 : 30); draw(); };
+      kids.push(row('Every', h('div', {className:'custom-interval'}, n, unit)));
+      if (choice.unit !== 'days') kids.push(h('p', {className:'meta'}, 'Pick minutes or hours for a steady rhythm. For fixed times of day choose Every day or Every week.'));
     }
     if (choice.freq === 'weekly') {
       const chips = REPEAT_DAYS.map(([short, long, num]) => {
@@ -993,9 +1046,11 @@ function repeatsDialog(only = null, addonName = null) {
       day.onchange = () => { choice.monthday = Number(day.value); refreshSummary(); };
       kids.push(row('Day of month', h('div', {className:'schedule-value'}, day, plan.hint ? hint : null)));
     }
-    const time = h('input', {className:'input', type:'time', value:choice.time, required:'', 'aria-label':'Time'});
-    time.oninput = () => { choice.time = time.value; refreshSummary(); };
-    kids.push(row('Time', h('div', {className:'schedule-value'}, time, h('span', {className:'meta'}, 'Uses the workspace’s time zone.'))));
+    if (choice.freq !== 'custom' || choice.unit === 'days') {
+      const time = h('input', {className:'input', type:'time', value:choice.time, required:'', 'aria-label':'Time'});
+      time.oninput = () => { choice.time = time.value; refreshSummary(); };
+      kids.push(row('Time', h('div', {className:'schedule-value'}, time, h('span', {className:'meta'}, 'Uses the workspace’s time zone.'))));
+    }
     rowsHost.replaceChildren(...kids);
     refreshSummary();
   };
@@ -1003,11 +1058,12 @@ function repeatsDialog(only = null, addonName = null) {
     REPEAT_FREQ.map(([value, label]) => {
       const input = h('input', {type:'radio', name:'frequency', value});
       input.checked = value === choice.freq;
-      input.onchange = () => { choice.freq = value; draw(); };
+      input.onchange = () => { choice.freq = value; if (value === 'custom') { choice.unit = choice.unit || 'minutes'; if (choice.unit === 'minutes' && !(Number(choice.every) >= 5)) choice.every = 5; } draw(); };
       return h('label', {}, input, h('span', {}, label));
     }));
   const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket),
-    h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary));
+    h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary,
+      outside ? h('p', {className:'meta', 'data-key':'repeat-set-by-helper'}, 'Set by your helper: ' + outside + '. Change it with the options above.') : null));
   if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
   const copy = button('Copy ticket now', 'ghost', async () => {
     if (!ticket.value) return;
