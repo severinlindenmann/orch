@@ -82,6 +82,11 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 - SX-19 Dates: "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32", 24 h, elapsed as "running 53 min" (F4, round-2 note).
 - SX-20 One source per count and status: sidebar badge = Home headline = Tickets group count; a newer system event
 
+## Behaviour notes (owner feedback 14 Nov)
+
+- "You: <name>" (kit menu above Settings): pick a person or Add person (name only). The chosen person is the actor of tickets and history lines made from the dashboard.
+- "Send questions to my phone" is shown only when a relay is set up and a phone is paired. The Shared links tab only exists once sharing is set up (the add-on stays in Settings > Add-ons).
+
 ## Reference: the 13 Nov shared visual system
 
 The text below is the original system guide. Where it conflicts with the rules above, the rules above win.
