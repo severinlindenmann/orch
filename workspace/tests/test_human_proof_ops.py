@@ -2284,7 +2284,7 @@ def test_copies_identity_key_survives_workspace_deletion(ws, monkeypatch):
 
     wid = addons.workspace_id(ws, create=True)
     home = hp.guarded_home(ws)
-    folder = home / "worktrees" / wid[:8]
+    folder = addons.copies_base(home) / wid[:8]
     folder.mkdir(parents=True)
     (folder / ".owner").write_text(str(ws.resolve()))
     worktrees._remember_copies(ws, folder)
