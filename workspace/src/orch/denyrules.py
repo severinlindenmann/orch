@@ -6,6 +6,7 @@ anywhere."""
 
 import os
 import re
+import sys
 from pathlib import Path, PurePosixPath
 
 # (name, read denied, path under the workspace or None = every guarded orch home)
@@ -16,8 +17,9 @@ ROOTS = (
     ("local-id", False, ".orch/.local-id"),
 )
 SHELL_ROWS = 6  # copies rows that also get shell patterns
-COPY_ROWS = 16  # copies rows at most
-BOUNDS = ("/", "\\", '"', "'", ";", "&", "|")  # what can follow a path in a command (a space cannot: _BAD)
+COPY_BUDGET = 12000  # characters of copies patterns at most
+_TID = re.compile(r"t_[a-z0-9]{6,16}")
+BOUNDS = ("/", '"', "'", ";", "&", "|")  # what can follow a path in a command (a space cannot: _BAD)
 _BAD = re.compile(r"[,() \t\r\n\0]")
 _DRIVE = re.compile(r"^([A-Za-z]):[\\/]")
 
@@ -223,23 +225,43 @@ def copies_rules(
 
     if own is None:  # not in a copy: every copies folder, whole (no own folder to keep clear)
         return [row(_norm(b), bounded=False) for b in dict.fromkeys(bases)]
-    first: list[str] = []
-    rest: list[str] = []
+    # Order: this workspace's `.owner` and `.trash`, its other tickets (ticket-id names only), then the
+    # other workspaces orch knows (its signed copies record, never any folder name an agent could make).
+    order: list[str] = []
     for b in dict.fromkeys(bases):
         base = _norm(b)
-        keep_ws = own[1] if _norm(own[0]).lower() == base.lower() else None
-        for n in _list(base):
-            if keep_ws is None or n.lower() != keep_ws.lower():
-                (first if re.fullmatch(r"[0-9a-f]{8}", n) else rest).append(base + "/" + n)
-        if keep_ws is not None:
-            for n in _list(base + "/" + keep_ws):
-                if n.lower() != own[2].lower():
-                    p = base + "/" + keep_ws + "/" + n
-                    (first if n in (".owner", ".trash") else rest).append(p)
-    # bounded (a Windows command line holds 32767 characters, and names the agent makes must not stop the
-    # next start): `.owner`, `.trash` and other workspaces first; past COPY_ROWS none (defense in depth only)
-    order = sorted(first, key=lambda p: not p.endswith(("/.owner", "/.trash"))) + rest
-    return [row(p, shell=k < SHELL_ROWS) for k, p in enumerate(order[:COPY_ROWS])]
+        if _norm(own[0]).lower() != base.lower():
+            continue
+        ws = base + "/" + own[1]
+        names = _list(ws)
+        order += [ws + "/" + n for n in (".owner", ".trash") if n in names]
+        order += [ws + "/" + n for n in names if _TID.fullmatch(n) and n.lower() != own[2].lower()]
+        order += [base + "/" + n for n in _known_ws8(base) if n != own[1] and n in _list(base)]
+    out: list[dict] = []
+    used = 0
+    for k, p in enumerate(order):
+        r = row(p, shell=k < SHELL_ROWS)
+        size = sum(len(x) + 1 for x in tool_patterns([r]))
+        if used + size > COPY_BUDGET:  # a Windows command line holds 32767 characters
+            print(
+                f"orch: {len(order) - k} other copies are not covered by this agent's deny rules "
+                f"(more than fit on its command line).",
+                file=sys.stderr,
+            )
+            break
+        out.append(r)
+        used += size
+    return out
+
+
+def _known_ws8(base: str) -> list[str]:
+    """The workspaces orch's signed copies record names for this copies folder (worktrees._known_copies)."""
+    try:
+        from orch import worktrees
+
+        return sorted(worktrees._known_copies(Path(base)))
+    except Exception:  # noqa: BLE001 - no record: no rows for other workspaces (defense in depth only)
+        return []
 
 
 def _list(folder: str) -> list[str]:
