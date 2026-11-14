@@ -455,7 +455,7 @@ function phonePanel(phoneAddon, settings) {
       settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, connected && address ? address : 'No relay connected')],
       h('div', {className:'row'}, btn(connected ? 'Check connection' : 'Check again', 'outline', 'relay-reconnect')), 'phone-relay-row'),
     // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
-    connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta', style:'margin:0;padding-left:20px'},
+    connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
       h('li', {}, 'Open the admin page of your relay and add this workspace. It gives you one line to copy.'),
       h('li', {}, 'Paste that line into a terminal in this workspace’s folder and press Enter. It starts with “orch relay connect”.'),
       h('li', {}, 'Come back here and press Check again.'))),
