@@ -44,3 +44,13 @@ def test_watch_only_page_cannot_switch_person(tmp_path):
 def test_state_carries_people_and_who(tmp_path, monkeypatch):
     people.choose(tmp_path, "Anna", add=True)
     assert data._me(tmp_path) == "human:Anna"
+
+
+def test_agent_written_workspace_file_cannot_change_the_recorded_person(tmp_path):
+    import json
+
+    people.choose(tmp_path, "Anna", add=True)
+    f = tmp_path / ".orch" / "run" / "dashboard" / "people.json"
+    f.write_text(json.dumps({"me": "Mallory", "people": ["Anna", "Mallory"]}))
+    assert people.current(tmp_path) == "Anna"
+    assert actions.actor(tmp_path) == "human:Anna"
