@@ -288,7 +288,7 @@ test('with groups or workspace chats: grouped list (This workspace, Other worksp
   assert.doesNotMatch(page.attrs.className, /chat-simple/);
   const list = page.children[0].textContent;
   assert.ok(list.indexOf('This workspace') < list.indexOf('Your helper') && list.indexOf('Groups') < list.indexOf('Live group'));
-  assert.equal(nodes(page.children[0], n => n.attrs?.className === 'chat-avatar' && n.textContent === 'HO').length, 1, 'workspace initials');
+  assert.equal(nodes(page.children[0], n => n.attrs?.className === 'avatar chat-avatar' && n.textContent === 'HO').length, 1, 'workspace initials');
   vm.runInContext("chatUi.search = 'live'", c);
   assert.equal(nodes(c.chatList(), n => n.attrs?.['data-id'] === 'chat')[0].hidden, true);
   c.state.groups = {hosted:[], joined:[]};

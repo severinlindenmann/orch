@@ -2711,6 +2711,20 @@ def attach_file(
         return _attach_file(root, tid, path, title, role, summary)
 
 
+def _own_copy(root: Path, tid: str) -> Path | None:
+    """The resolved folder of THIS ticket's own working copy (worktrees.path_for), or None when there is none
+    (no copy, not made by orch, a link). Never another ticket's or workspace's copy."""
+    from orch import addons, worktrees
+
+    try:
+        want = worktrees.path_for(addons.workspace_id(root) or "", tid, addons.home(root))
+        if want.is_symlink() or not want.is_dir() or not worktrees.is_orch_copy(want):
+            return None
+        return Path(os.path.realpath(want))
+    except (Refused, OSError, RuntimeError, ValueError):
+        return None
+
+
 def _attach_file(
     root: Path, tid: str, path: str, title: str | None, role: str | None, summary: str | None = None
 ) -> dict:
@@ -2726,16 +2740,26 @@ def _attach_file(
     base = Path(os.path.realpath(root))
     given = Path(os.path.abspath(os.path.expanduser(path)))
     rel = None
+    src_base = base
     for b in (Path(os.path.abspath(root)), base):
         try:
             rel = given.relative_to(b)
             break
         except ValueError:
             continue
-    inside = Refused("proof files must be inside this workspace.")
+    if rel is None:  # a helper works in this ticket's own copy: files from THAT copy (only) count too
+        own = _own_copy(root, tid)
+        if own is not None:
+            for b in (Path(os.path.abspath(own)), own):
+                try:
+                    rel, src_base = given.relative_to(b), own
+                    break
+                except ValueError:
+                    continue
+    inside = Refused("proof files must be inside this workspace or this ticket's own working copy.")
     if rel is None or ".." in rel.parts:
         raise inside
-    cur = base
+    cur = src_base
     for part in rel.parts:
         cur = cur / part
         if cur.is_symlink():

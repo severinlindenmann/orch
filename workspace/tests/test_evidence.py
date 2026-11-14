@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -335,3 +336,28 @@ def test_record_refuses_a_path_through_a_linked_folder(proj, run, tid, tmp_path)
     (outside / "log.txt").write_text("secret", encoding="utf-8")
     (proj / "lnk").symlink_to(outside)
     assert run("check", "record", tid, "c1", "--cmd", "x", "--output", "lnk/log.txt")[0] == 2
+
+
+def test_own_copy_file_accepted_other_refused(proj, run, tid, tmp_path, monkeypatch):
+    copy = tmp_path.parent / f"{tmp_path.name}_copy"
+    other = tmp_path.parent / f"{tmp_path.name}_other"
+    for d in (copy, other):
+        d.mkdir()
+        (d / "result.csv").write_text("a,b\n")
+    (copy / ".git").mkdir()
+    (copy / ".git" / "config").write_text("x")
+    monkeypatch.setattr(tickets, "_own_copy", lambda root, t: Path(os.path.realpath(copy)))
+    code, text, _ = run("check", "done", tid, "c1", "--file", str(copy / "result.csv"))
+    assert code == 0 and "Proof copied" in text
+    ev = read(proj, tid)["checklist"][0]["evidence"][0]
+    assert (proj / ev["ref"]).read_text() == "a,b\n"
+    for p in (other / "result.csv", copy / ".git" / "config", copy / ".." / other.name / "result.csv"):
+        code, _, err = run("check", "done", tid, "c2", "--file", str(p))
+        assert code == 2 and "must be inside this workspace" in err, p
+    os.symlink(other / "result.csv", copy / "link.csv")
+    code, _, err = run("check", "done", tid, "c2", "--file", str(copy / "link.csv"))
+    assert code == 2 and "refs" in err
+
+
+def test_own_copy_resolves_none_without_copy(proj, tid):
+    assert tickets._own_copy(proj, tid) is None
