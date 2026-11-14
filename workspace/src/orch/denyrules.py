@@ -15,23 +15,54 @@ ROOTS = (
     ("local-id", False, ".orch/.local-id"),
 )
 # A ticket agent works in <orch home>/worktrees/<ws8>/<ticket>: its instruction file, its skills and its code
-# live there. A deny rule has no "except", so for the tool the home is denied child by child and `worktrees`
-# is the one child left open (without_worktrees). The names in HOME_CHILDREN are denied even when absent.
+# live there. A deny rule has no "except", so for such an agent the home is denied child by child and the one
+# folder it works in stays open (without_worktrees). Everything else under the home is denied: the
+# names below, the patterns (any new file of these kinds), and whatever is there at the start. A test fails
+# when code names a new top-level file under the home that this list does not cover.
 OPEN_CHILD = "worktrees"
 HOME_CHILDREN = (
     "keys",
     "secrets",
+    "copies",
+    "finish",
+    "finish.pending",
+    "finish.updating",
+    "projects",
+    "tmp",
     "addons.json",
+    "agent-approvals.json",
+    "agent-commands-seen.json",
+    "connections.json",
     "consent.json",
     "copies.json",
+    "dev-workspaces.json",
     "finish.log",
     "human-settings.json",
     "installed.json",
+    "look-set-by.json",
+    "permissions.json",
     "ports.json",
+    "protection-reset.log",
     "running.json",
     "services.lock",
     "shared-pages.json",
+    "update-before.json",
+    ".copies-state",
 )
+HOME_PATTERNS = (
+    "*.json",
+    "*.log",
+    "*.lock",
+    "*.pending",
+    "*.updating",
+    "*.tmp",
+    "*.tmp*",
+    "*.db",
+    "*.bak",
+    "*.txt",
+    ".*",
+)
+TRAVERSAL = ("../keys", "../secrets", "../../", "..\\keys", "..\\secrets", "..\\..\\")
 _BAD = re.compile(r"[,() \t\r\n\0]")
 _DRIVE = re.compile(r"^([A-Za-z]):[\\/]")
 
@@ -184,27 +215,75 @@ def rules(root: Path, homes: list[str] | None = None, account_home: str | None =
     return out
 
 
-def _home_children(home: str) -> list[str]:
-    names = list(HOME_CHILDREN)
+def _children(folder: str, extra: tuple[str, ...], keep: str | None) -> list[str]:
+    names = list(extra)
     try:
-        names += sorted(os.listdir(home))
+        names += sorted(os.listdir(folder))
     except OSError:
         pass
-    return [n for n in dict.fromkeys(names) if n.lower() != OPEN_CHILD]
+    return [n for n in dict.fromkeys(names) if keep is None or n.lower() != keep.lower()]
 
 
-def without_worktrees(rule_list: list[dict], workspace: str, account_home: str | None) -> list[dict]:
-    """The deny set the tool is told: each home row keeps its text forms (shell) and its file forms are
-    replaced by one row per child of the home, except `worktrees` (the agent's own copy of the project)."""
+def _own_parts(workdir: str | None, home: str) -> list[str] | None:
+    """[worktrees, ws8, ticket] when workdir is inside <home>/worktrees/<ws8>/<ticket>, else None."""
+    if not workdir:
+        return None
+    for w in dict.fromkeys((str(workdir), os.path.realpath(workdir))):
+        under = _under(w, home)
+        parts = [x for x in (under or "").split("/") if x]
+        if len(parts) >= 3 and parts[0].lower() == OPEN_CHILD and ".." not in parts:
+            return parts[:3]
+    return None
+
+
+def check_worktree_links(workdir: str, homes: list[str]) -> None:
+    """Refuse the start when a link or junction inside the worktree points into an orch home outside it."""
+    from orch.errors import Refused
+
+    top = os.path.realpath(workdir)
+    for dirpath, dirs, files in os.walk(workdir, followlinks=False):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for n in dirs + files:
+            p = os.path.join(dirpath, n)
+            if not (os.path.islink(p) or getattr(os.path, "isjunction", lambda _: False)(p)):
+                continue
+            real = os.path.realpath(p)
+            if _under(real, top) is not None:
+                continue
+            for h in homes:
+                if _under(real, h) is not None or _under(real, os.path.realpath(h)) is not None:
+                    raise Refused(
+                        "A link in this copy of the project points into orch's own folder. "
+                        "Remove it, then try again."
+                    )
+
+
+def without_worktrees(
+    rule_list: list[dict], workspace: str, account_home: str | None, workdir: str | None = None
+) -> list[dict]:
+    """The deny set the tool is told. A home row stays a blanket deny unless `workdir` is inside
+    <home>/worktrees/<ws8>/<ticket>: then the home is denied child by child, and so are the other
+    workspaces' and tickets' folders under worktrees, and only that ticket's folder stays open."""
     out = []
     for r in rule_list:
-        if r["root"] != "home":
+        own = _own_parts(workdir, r["path"]) if r["root"] == "home" else None
+        if own is None:
             out.append(r)
             continue
-        out.append({**r, "file": []})
-        for child in _home_children(r["path"]):
-            cp = _norm(r["path"]) + "/" + child
-            out.append({**r, "path": cp, "file": path_forms(cp, workspace, account_home)["file"], "text": []})
+        out.append({**r, "file": [], "text": [*r["text"], *TRAVERSAL]})
+        base = _norm(r["path"])
+
+        def row(path, r=r):
+            return {**r, "path": path, "file": path_forms(path, workspace, account_home)["file"], "text": []}
+
+        for n in _children(base, (*HOME_CHILDREN, *HOME_PATTERNS), OPEN_CHILD):
+            out.append(row(base + "/" + n))
+        wt = base + "/" + OPEN_CHILD
+        for n in _children(wt, (".known.json",), own[1]):
+            out.append(row(wt + "/" + n))
+        ws8 = wt + "/" + own[1]
+        for n in _children(ws8, (".owner", ".known.json"), own[2]):
+            out.append(row(ws8 + "/" + n))
     return out
 
 
@@ -245,7 +324,9 @@ def merge_flag(extra: list[str], patterns: list[str]) -> list[str]:
     return [*out, "--disallowedTools", ",".join([*old, ",".join(patterns)])]
 
 
-def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[str]:
+def deny_args(
+    deny: dict | None, extra: list[str], root: Path | None, workdir: str | Path | None = None
+) -> list[str]:
     """`extra` (the tool's permission flags) plus the deny rules for the adapter's `deny.format`."""
     fmt = (deny or {}).get("format", "none")
     if fmt == "none":
@@ -256,5 +337,10 @@ def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[st
         raise Refused("orch cannot start this tool without its deny rules (no workspace given).")
     if fmt == "patterns/1":
         acct = _account_home()
-        return merge_flag(extra, tool_patterns(without_worktrees(rules(root), str(root), acct)))
+        rl = rules(root)
+        if workdir:
+            check_worktree_links(str(workdir), [r["path"] for r in rl if r["root"] == "home"])
+        return merge_flag(
+            extra, tool_patterns(without_worktrees(rl, str(root), acct, str(workdir) if workdir else None))
+        )
     raise RuntimeError(f"unknown deny format {fmt}")
