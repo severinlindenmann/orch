@@ -632,7 +632,6 @@ main.addEventListener('click', async event => {
   }
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
   if (action === 'phone-pair') { phonePairDialog(); return; }
-  if (action === 'relay-setup') { relaySetupDialog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {

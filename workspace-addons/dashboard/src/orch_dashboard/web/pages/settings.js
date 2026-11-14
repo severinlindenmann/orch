@@ -453,11 +453,16 @@ function phonePanel(phoneAddon, settings) {
   const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, '1. Relay connection'), h('div', {className:'card'},
     rowOf('Status', [connected ? h('strong', {className:'on-dot', 'data-key':'phone-relay-status'}, 'Connected') : h('strong', {className:'muted', 'data-key':'phone-relay-status'}, 'Not set up'),
       settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, connected && address ? address : 'No relay connected')],
-      h('div', {className:'row'}, connected ? btn('Check connection', 'outline', 'relay-reconnect') : btn('Set up relay', 'primary', 'relay-setup')), 'phone-relay-row'),
+      h('div', {className:'row'}, btn(connected ? 'Check connection' : 'Check again', 'outline', 'relay-reconnect')), 'phone-relay-row'),
+    // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
+    connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
+      h('li', {}, 'Open the admin page of your relay and add this workspace. It gives you one line to copy.'),
+      h('li', {}, 'Paste that line into a terminal in this workspace’s folder and press Enter. It starts with “orch relay connect”.'),
+      h('li', {}, 'Come back here and press Check again.'))),
     settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your relay.')));
   const pair = h('div', {className:'stack', 'data-key':'phone-pair'}, h('h2', {className:'set-sub'}, '2. Pair a phone'), h('div', {className:'card'},
-    rowOf('Pairing', [settingsText('p', {}, 'Link a phone to this workspace'), connected ? null : settingsText('p', {className:'meta', 'data-key':'phone-relay-hint'}, 'Connect to your relay first')],
-      btn('Pair a phone', 'primary', 'phone-pair', connected ? {} : {disabled:true, title:'Connect your relay first'}), 'phone-pairing-row'),
+    rowOf('Pairing', [settingsText('p', {}, 'Link a phone to this workspace'), connected ? null : settingsText('p', {className:'meta', 'data-key':'phone-relay-hint'}, 'First connect your relay (step 1 above). Then you can pair a phone here.')],
+      connected ? btn('Pair a phone', 'primary', 'phone-pair') : null, 'phone-pairing-row'),
     mm));
   const allowed = h('div', {className:'stack', 'data-key':'phone-allowed'}, h('div', {className:'row between'}, h('h2', {className:'set-sub'}, 'Allowed workspaces'),
     settingsText('span', {className:'meta'}, (connected ? workspaces.length : 0) + ' allowed')),
@@ -477,13 +482,6 @@ function phonePairDialog() {
   d.append(settingsText('p', {className:'meta', 'data-key':'phone-pair-relay'}, 'Through your relay: ' + (info.address || 'your relay')),
     settingsText('p', {className:'meta'}, 'Next step: open orch on your phone and choose "Add a workspace". Your relay shows the one-time code or QR code there.'),
     settingsText('p', {className:'meta'}, 'Your phone talks to this workspace through your relay.'), actions);
-  window.orch.open(d);
-}
-function relaySetupDialog() {
-  const {d, actions} = dialog('Set up relay', 'dialog', 'settings-other');
-  actions.firstChild.textContent = 'Close';
-  d.append(settingsText('p', {className:'meta'}, 'Connecting a relay needs its address, a setup code from its administrator and your signature. This page cannot do that yet.'),
-    settingsText('p', {className:'meta'}, 'Once a relay is connected, its address and status show here.'), actions);
   window.orch.open(d);
 }
 async function relayReconnect(control) {
