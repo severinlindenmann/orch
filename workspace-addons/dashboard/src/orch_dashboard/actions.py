@@ -19,7 +19,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import runfiles
+from . import people, runfiles
 from .data import forget_static, publish_connected, run_orch
 from .look import LOOK_OPS
 from .look import forget as look_forget
@@ -932,7 +932,12 @@ OPS = {
 }
 
 
-def actor() -> str:
+def actor(root: Path | None = None) -> str:
+    """Who acts from this dashboard: the person picked in "You: ..." (people.py), else the computer's user."""
+    if root is not None:
+        me = people.current(root)
+        if me:
+            return f"human:{me}"
     try:
         who = re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:64]
     except (OSError, KeyError, ImportError):
@@ -940,7 +945,7 @@ def actor() -> str:
     return f"human:{who or 'dashboard'}"
 
 
-def build_argv(op, args) -> list[str]:
+def build_argv(op, args, root: Path | None = None) -> list[str]:
     """The argv after the orch command, for one op. Raises BadRequest for anything outside the table."""
     fn = OPS.get(op) if isinstance(op, str) else None
     if fn is None:
@@ -950,7 +955,7 @@ def build_argv(op, args) -> list[str]:
     words, flags, tail = fn(args)
     if op == "config.agent.test":
         return [*words, "--json"]
-    return [*words, *flags, "--by", actor(), "--json", *(["--", *tail] if tail else [])]
+    return [*words, *flags, "--by", actor(root), "--json", *(["--", *tail] if tail else [])]
 
 
 def _addon_is_on(root: Path, orch_bin: str, name: str) -> bool:
@@ -992,7 +997,7 @@ def _audit(root: Path, op: str, args: dict) -> None:
     line = json.dumps(
         {
             "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "by": actor(),
+            "by": actor(root),
             "via": "dashboard",
             "op": op,
             **keep,
@@ -1035,7 +1040,7 @@ def _attach_all(root: Path, orch_bin: str, tid: str, files: list[tuple[str, byte
     for hint, raw in files:
         try:
             r = _run(
-                [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
+                [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(root), "--json"],
                 check=False,
                 cwd=root,
                 capture_output=True,
@@ -1161,7 +1166,16 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
     proof for a request that carries a page session; None = watch-only (the click is refused)."""
     if op == "link.share":
         return share_file(root, orch_bin, args, mint)
-    argv = build_argv(op, args)
+    if op in ("person.set", "person.add"):  # "You: <name>": a name only, kept here, nothing runs
+        if not isinstance(args, dict):
+            raise BadRequest("The arguments must be an object.")
+        if mint is None:  # watch-only: choosing who you are is the person's click
+            raise NeedsPerson("Open the dashboard from this computer to do this.")
+        try:
+            return 200, "", {"people": people.choose(root, args.get("name"), add=op == "person.add")}
+        except people.BadName as e:
+            raise BadRequest(str(e)) from None
+    argv = build_argv(op, args, root)
     if orch_bin == SELF and needs_session(op) and mint is None:  # before anything is read, hashed or run (F8)
         raise NeedsPerson("Open the dashboard from this computer to do this.")
     need = (

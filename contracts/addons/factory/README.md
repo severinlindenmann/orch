@@ -17,7 +17,7 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 ## Commands (all `--json`, exit 0 / 2 refused / 1 bug, CLI contract of addon-manifest.md)
 | Command | Does |
 |---|---|
-| `orch factory idea "<title>" [--file draft.md]` | Creates the order (stage `draft`) and stores draft v1; `orch factory draft <order> --file -` adds v<N+1> |
+| `orch factory idea "<title>" [--file draft.md]` / `idea --ticket <id> [--file …]` | Creates the order (stage `draft`) and stores draft v1 — or turns an existing ticket (open, ready, waiting or active; not a sub-ticket) into the order, its note becoming draft v1 (e.g. the ticket the owner made from Chat); idempotent. `orch factory draft <order> --file -` adds v<N+1> |
 | `orch factory propose <order> --file -` | Validates `$defs/proposal`, freezes p<N>, supersedes the open start question, asks `factory:start` (text rendered by the add-on), stage `proposed`. Refused once the order has started |
 | `orch factory autopilot <order> --file -` | Same for `$defs/autopilot`; asks `factory:autopilot` |
 | `orch factory next <order>` | For the manager run: consumes newly answered `factory:*` questions once (journal `consumed`), returns `{"step": "wait" \| "start-crew" \| "work" \| "stop" \| "ship" \| "edit" \| "parked" \| "resume" \| "done", …}` |

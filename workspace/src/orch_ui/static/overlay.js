@@ -9,6 +9,8 @@ function release(){for(let i=stack.length-1;i>=0;i--)if(!stack[i].isConnected||!
 const focusables=d=>[...d.querySelectorAll('button,a[href],input,textarea,select,summary,[tabindex]')].filter(n=>!n.disabled&&n.tabIndex>=0&&!n.closest('[inert]')&&n.getClientRects().length);
 function prepare(d){if(d.dataset.overlayReady)return;d.dataset.overlayReady='true';d.setAttribute('aria-modal','true');if(!d.hasAttribute('aria-label')&&!d.hasAttribute('aria-labelledby'))d.setAttribute('aria-label',d.querySelector('h1,h2,h3')?.textContent||'Preview');
  const x=document.createElement('button');x.type='button';x.className='btn outline sm ui-overlay-close';x.textContent=d.classList.contains('ui-fullscreen')?'× Exit full screen':'× Close';x.setAttribute('aria-label',x.textContent.slice(2));x.onclick=()=>d.close();d.prepend(x);
+ /* one close button: a dialog's own plain "Close" button repeats the × Close above, so it goes (and its empty row with it) */
+ d.querySelectorAll?.('button').forEach(b=>{if(b!==x&&!b.classList.contains('ui-overlay-close')&&b.textContent.trim()==='Close'){const row=b.parentElement;b.remove();if(row&&row!==d&&!row.children.length&&!row.textContent.trim())row.remove()}});
  d.addEventListener('cancel',e=>{e.preventDefault();e.stopImmediatePropagation();d.close()},true);
  d.addEventListener('click',e=>{if(e.target!==d)return;const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){e.stopImmediatePropagation();d.close()}},true);
  d.addEventListener('submit',e=>{if((e.submitter?.formMethod||e.target.method)==='dialog'){e.preventDefault();d.close(e.submitter?.value||'')}},true);
