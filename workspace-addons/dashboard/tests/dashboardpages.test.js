@@ -466,3 +466,12 @@ test('home: headline, subtitle and badge are one number (questions + things to l
   assert.match(text, /4 things need you/);
   assert.match(text, /1 question · 2 results to check · 1 change to add/);
 });
+test('toasts: successes leave after 5 s even under the pointer, sit bottom-right and do not centre over the page', () => {
+  for (const dir of ['../src/orch_dashboard/web/kit', '../mockup/system']) {
+    const js = fs.readFileSync(path.join(__dirname, dir, 'components.js'), 'utf8'), css = fs.readFileSync(path.join(__dirname, dir, 'interaction.css'), 'utf8');
+    assert.doesNotMatch(js, /if\(box\.matches\(':hover'\)\|\|/);
+    assert.match(js, /undo&&box\.matches\(':hover'\)/);
+    assert.match(css, /\.ui-toasts\{[^}]*right:24px/);
+    assert.doesNotMatch(css, /\.ui-toasts\{[^}]*translateX\(-50%\)/);
+  }
+});
