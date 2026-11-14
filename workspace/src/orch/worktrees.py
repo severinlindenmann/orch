@@ -2654,7 +2654,12 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
         reg = registry(root).get(ticket) or reg
         for e in reg["paths"]:
             if _mine(root, ticket, e):
-                return work_dir(e), [], []
+
+                def refresh(e=e) -> list[str]:  # the harness may have changed since: same files as a new copy
+                    with _scoped(root):
+                        return _prepare_files(root, e)
+
+                return work_dir(e), [], [refresh]
         # registered but gone from the disk: make it again below (same path, same branch)
     mode = config.copies_mode(root)
     if mode == "off" and not reg:
