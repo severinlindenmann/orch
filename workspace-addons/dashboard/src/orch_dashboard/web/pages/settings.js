@@ -739,7 +739,7 @@ function addonTab(id) {
   // Sync is changed on its own page: the same card as in Settings, no trip to another page.
   if (id === SYNC && syncNative()) {
     const a = addons().find(a => a.name === id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), syncCard(state.settings));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, syncCard(state.settings)));
   }
   // The add-on that repeats tickets is the Schedules page: its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
