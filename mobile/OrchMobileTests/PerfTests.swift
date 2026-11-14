@@ -123,4 +123,24 @@ final class PerfTests: XCTestCase {
         }
         print(String(format: "PERF c_message_arrives_merge_plus_reads %.2f", best))
     }
+
+    func testDerivedDataIsRebuiltOnlyWhenAnInputChanges() async throws {
+        let m = await loadedModel()
+        _ = m.workspaceSummaries
+        let base = m.derivedRebuilds
+        for _ in 0..<4 { _ = m.workspaceSummaries }
+        _ = m.conversationInputs; _ = m.archivedCount; _ = m.tickets; _ = m.chatRooms
+        XCTAssertEqual(m.derivedRebuilds, base, "reads with no change in between rebuild nothing")
+        let before = m.workspaceSummaries
+        let box = currentBox!
+        box.items.insert(PhoneMessage(message: TextMessage(id: "m_arrive", from: "ws_perf0", to: "ph_perf01", type: "text", createdAt: iso(20_000),
+                                                           ticket: "t_ws_perf0_0", body: TextBody(text: "Arrived")), workspaceName: "Perf workspace 0"), at: 0)
+        await m.reloadMessages()
+        for _ in 0..<4 { _ = m.workspaceSummaries }
+        XCTAssertEqual(m.derivedRebuilds, base + 1, "a new message = exactly one more rebuild on the next read")
+        XCTAssertNotEqual(m.workspaceSummaries, before, "and the rebuilt summaries show it")
+        m.markRead(.general(workspace: "ws_perf0"))
+        _ = m.workspaceSummaries; _ = m.workspaceSummaries
+        XCTAssertLessThanOrEqual(m.derivedRebuilds, base + 2, "a read-state change is one more rebuild at most")
+    }
 }

@@ -15,10 +15,7 @@ enum ChatDay {
 
     static func key(of item: ConvItem, calendar: Calendar = .current) -> String {
         if let day = item.day { return day }
-        let parser = ISO8601DateFormatter()
-        if let date = parser.date(from: item.at) { return key(for: date, calendar: calendar) }
-        parser.formatOptions.insert(.withFractionalSeconds)
-        if let date = parser.date(from: item.at) { return key(for: date, calendar: calendar) }
+        if let date = SharedISO.iso.date(from: item.at) ?? SharedISO.isoFraction.date(from: item.at) { return key(for: date, calendar: calendar) }
         return String(item.at.prefix(10))
     }
 
@@ -52,4 +49,12 @@ enum ChatDay {
         if fromPhone { return .me }
         return by == "you" && via == "dashboard" ? .me : .them
     }
+}
+
+/// Shared ISO-8601 parsers: creating one per call (per row) is slow.
+enum SharedISO {
+    nonisolated(unsafe) static let iso = ISO8601DateFormatter()
+    nonisolated(unsafe) static let isoFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f
+    }()
 }

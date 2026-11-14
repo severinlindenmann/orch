@@ -17,15 +17,23 @@ final class AppModel {
     private(set) var pairedWorkspaces: [WorkspaceRef] = []
 
     // Data
-    private(set) var workspaces: [Workspace] = [] { didSet { rebuildGroups() } }
-    private(set) var questions: [Question] = []
+    /// Bumps whenever an input of the derived data (summaries, tickets, chat data, conversation inputs) changes. Views that read a
+    /// derived value read this too, so they redraw exactly when it can have changed; the derived values rebuild lazily, once per bump.
+    private(set) var revision = 0
+    @ObservationIgnored private var derivedCache = DerivedCache()
+    #if DEBUG
+    /// How often the workspace summaries (the expensive derived value) were rebuilt (tests: 4 reads without a change = 1 rebuild).
+    var derivedRebuilds: Int { derivedCache.rebuilds }
+    #endif
+    private(set) var workspaces: [Workspace] = [] { didSet { revision &+= 1; rebuildGroups() } }
+    private(set) var questions: [Question] = [] { didSet { revision &+= 1 } }
     /// Texts between this phone and its workspaces, newest first.
-    private(set) var messages: [PhoneMessage] = [] { didSet { rebuildGroups() } }
+    private(set) var messages: [PhoneMessage] = [] { didSet { revision &+= 1; rebuildGroups() } }
     private(set) var groups = GroupSnapshot(groups: [], dropped: [])
     /// Newest work update per ticket (`GET /v1/phone/updates`).
-    private(set) var updates: [TicketUpdate] = []
+    private(set) var updates: [TicketUpdate] = [] { didSet { revision &+= 1 } }
     /// question message id -> the answer this phone sent
-    private(set) var answers: [String: String] = [:]
+    private(set) var answers: [String: String] = [:] { didSet { revision &+= 1 } }
     /// question message id -> when this phone's answer was sent (this run only; the Make ticket card's 2-min wait)
     private(set) var answerSentAt: [String: Date] = [:]
     /// questions someone else answered first (409): `answers` then holds their answer
@@ -53,15 +61,15 @@ final class AppModel {
     /// Push tap: the question the open chat scrolls to.
     var focusedQuestion: String?
     /// Every question seen since launch, so an answered one stays in its chat.
-    private(set) var questionLog: [String: Question] = [:]
+    private(set) var questionLog: [String: Question] = [:] { didSet { revision &+= 1 } }
     /// Read state per chat (client only, kept in UserDefaults).
-    private(set) var readState = ReadState(seen: UserDefaults.standard.dictionary(forKey: "chatRead") as? [String: String] ?? [:])
+    private(set) var readState = ReadState(seen: UserDefaults.standard.dictionary(forKey: "chatRead") as? [String: String] ?? [:]) { didSet { revision &+= 1 } }
     /// Archive, delete and auto-archive of chats: phone-local (ArchiveStore.swift).
-    private(set) var archive = ArchiveStore.load()
+    private(set) var archive = ArchiveStore.load() { didSet { revision &+= 1 } }
     /// Everything the phone writes (texts, voice, photos, files, locations, feedback, answers): durable, retried with the same client_id.
     private(set) var outbox: Outbox
     /// Per-phone settings kept on the relay (read aloud, Swiss German, monthly cap).
-    private(set) var settings = PhoneSettings()
+    private(set) var settings = PhoneSettings() { didSet { revision &+= 1 } }
     /// Cursor for older messages (`GET /v1/phone/messages?after=`); nil = everything loaded.
     private(set) var messagesNext: String?
     /// Read-aloud player (Speech.swift).
@@ -174,16 +182,55 @@ final class AppModel {
     var relayHost: String { credentials?.relay.host ?? invite?.host ?? "your server" }
     var phoneName: String { credentials?.phoneName ?? "This iPhone" }
     /// "Your tickets": Needs you, Working on, Done.
-    var tickets: [Ticket] { TicketBuilder.build(updates: updates, questions: questions, answers: answers) }
+    var tickets: [Ticket] { cached(\.tickets) { TicketBuilder.build(updates: updates, questions: questions, answers: answers) } }
+
+    /// Cached derived data: valid while `revision`, the outbox items and the clock minute are unchanged.
+    private struct DerivedCache {
+        var revision = -1
+        var outbox: [OutboxItem] = []
+        var minute = 0
+        var rebuilds = 0
+        var tickets: [Ticket]?
+        var chatData: ChatData?
+        var inputs: ConversationInputs?
+        var summaries: [WorkspaceSummary]?
+        var rooms: [RoomRow]?
+        var items: [ConversationID: [ConvItem]] = [:]
+        var resolved: [ConversationID: ConversationID] = [:]
+    }
+    /// Returns the cached value, or builds and stores it. The cache is dropped first if an input changed. Reading `revision` and
+    /// `outbox.items` registers the observation, so a view that reads a derived value redraws when it can have changed.
+    private func cached<T>(_ key: WritableKeyPath<DerivedCache, T?>, _ make: () -> T) -> T {
+        validateCache()
+        if let v = derivedCache[keyPath: key] { return v }
+        let v = make()
+        derivedCache[keyPath: key] = v
+        return v
+    }
+    /// Same, for a value per conversation (items, resolved id).
+    private func cached<K: Hashable, T>(_ key: WritableKeyPath<DerivedCache, [K: T]>, _ k: K, _ make: () -> T) -> T {
+        validateCache()
+        if let v = derivedCache[keyPath: key][k] { return v }
+        let v = make()
+        derivedCache[keyPath: key][k] = v
+        return v
+    }
+    private func validateCache() {
+        let rev = revision, items = outbox.items, minute = Int(Date().timeIntervalSince1970 / 60)
+        if derivedCache.revision != rev || derivedCache.minute != minute || derivedCache.outbox != items {
+            derivedCache = DerivedCache(revision: rev, outbox: items, minute: minute, rebuilds: derivedCache.rebuilds)
+        }
+    }
 
     /// Everything the chat views draw from.
-    var chatData: ChatData {
+    var chatData: ChatData { cached(\.chatData) { buildChatData() } }
+    private func buildChatData() -> ChatData {
         ChatData(workspaces: workspaces, messages: messages, tickets: tickets,
                  questions: questionLog.values.sorted { $0.message.createdAt < $1.message.createdAt }.map { $0 }, answers: answers,
                  outbox: outbox.items.filter { $0.kind == .send && $0.text != nil }.map { QueuedText(id: $0.clientId, workspace: $0.workspace, ticket: $0.ticket, text: $0.text ?? "", at: $0.createdAt, phone: $0.phone) },
                  erased: archive.erased)
     }
-    var chatRooms: [RoomRow] { ChatBuilder.rooms(chatData, read: readState) }
+    var chatRooms: [RoomRow] { cached(\.rooms) { ChatBuilder.rooms(chatData, read: readState) } }
     var totalUnread: Int { chatRooms.reduce(0) { $0 + $1.unread } }
     func workspace(_ id: String) -> Workspace? { workspaces.first { $0.id == id } }
     func ticket(_ ws: String, _ t: String) -> Ticket? { tickets.first { $0.workspace == ws && $0.ticket == t } }
@@ -515,15 +562,19 @@ final class AppModel {
 
     /// What the conversation builders read.
     var conversationInputs: ConversationInputs {
-        let cd = chatData
-        return ConversationInputs(workspaces: workspaces, messages: messages, tickets: tickets, questions: cd.questions, answers: answers,
-                                  outbox: outbox.items, speak: settings.speak, erased: archive.erased)
+        cached(\.inputs) {
+            ConversationInputs(workspaces: workspaces, messages: messages, tickets: tickets, questions: chatData.questions, answers: answers,
+                               outbox: outbox.items, speak: settings.speak, erased: archive.erased)
+        }
     }
     /// The workspace list: presence, General and topics with status, unread, "Starting topic…".
-    var workspaceSummaries: [WorkspaceSummary] { ConversationBuilder.summaries(conversationInputs, read: readState) }
-    func conversationItems(_ id: ConversationID) -> [ConvItem] { ConversationBuilder.items(ConversationBuilder.resolve(id, conversationInputs), conversationInputs) }
+    var workspaceSummaries: [WorkspaceSummary] { cached(\.summaries) { derivedCache.rebuilds += 1; return ConversationBuilder.summaries(conversationInputs, read: readState) } }
+    func conversationItems(_ id: ConversationID) -> [ConvItem] {
+        let r = resolve(id)
+        return cached(\.items, r) { ConversationBuilder.items(r, conversationInputs) }
+    }
     /// A "starting" conversation becomes its topic once the workspace acked it; others are returned unchanged.
-    func resolve(_ id: ConversationID) -> ConversationID { ConversationBuilder.resolve(id, conversationInputs) }
+    func resolve(_ id: ConversationID) -> ConversationID { cached(\.resolved, id) { ConversationBuilder.resolve(id, conversationInputs) } }
     func presence(of workspaceId: String, now: Date = Date()) -> Presence { workspace(workspaceId)?.presence(now: now) ?? .unknown }
     func status(of workspaceId: String, now: Date = Date()) -> WorkspaceStatus { WorkspaceStatus.of(connection: connection, presence: presence(of: workspaceId, now: now)) }
     func status(lastSeen: String?, now: Date = Date()) -> WorkspaceStatus { WorkspaceStatus.of(connection: connection, presence: Presence.of(lastSeen: lastSeen, now: now)) }
