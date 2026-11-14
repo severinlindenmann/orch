@@ -77,6 +77,11 @@
   /* In Terminal mode the person's side (next move, sent back, With Helper, composer) is its own column beside the
      output; in compact it sits in the one column, as before. The same nodes move, so nothing is drawn twice. */
   function placeHuman(terminal) {
+    if (INAPP) {  /* the shell: one result panel on the right, the composer under the live session */
+      els.human.replaceChildren(els.resultHead, els.resultEmpty, els.next, els.sent, els.review, els.complete, els.withH);
+      els.help.before(els.compose);
+      return;
+    }
     if (terminal) els.human.replaceChildren(els.next, els.sent, els.withH, els.review, els.complete, els.compose);
     else {
       els.paneLive.insertBefore(els.next, els.line); els.paneLive.insertBefore(els.sent, els.line);
@@ -85,6 +90,7 @@
     }
   }
   function setMode(terminal) {
+    if (INAPP) { placeHuman(true); els.showTerm.hidden = true; return; }  /* embedded: always the shell, no mode switch */
     placeHuman(terminal);
     root.classList.toggle('fx-terminal', terminal);
     els.modeBtn.setAttribute('aria-pressed', String(terminal));
