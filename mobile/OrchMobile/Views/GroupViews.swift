@@ -206,32 +206,31 @@ struct GroupListRow: View {
     let group: PhoneGroup
     var history = false
     var body: some View {
-        TimelineView(.everyMinute) { context in
-            let muted = model.notificationsMuted(workspace: group.messages.last(where: { !$0.message.fromPhone })?.message.message.from ?? group.key.host, group: group.key, now: context.date)
-            NavigationLink(value: ChatRoute.group(host: group.key.host, id: group.key.id)) {
-                HStack(spacing: 12) {
-                    GroupBadges(group: group)
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: 6) {
-                            Text(group.title).themeFont(17, .semibold).foregroundStyle(history ? Theme.muted : Theme.text)
-                            if muted { MutedIcon() }
-                        }
-                        Text(history
-                             ? "finished \(ShellTime.day(group.messages.last?.at))"
-                             : "\(group.members.count) helpers · started \(ShellTime.short(group.messages.first?.at))")
-                            .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    VStack(spacing: 8) {
-                        if !history { ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)), muted: muted) }
+        let now = MinuteClock.shared.now
+        let muted = model.notificationsMuted(workspace: group.messages.last(where: { !$0.message.fromPhone })?.message.message.from ?? group.key.host, group: group.key, now: now)
+        NavigationLink(value: ChatRoute.group(host: group.key.host, id: group.key.id)) {
+            HStack(spacing: 12) {
+                GroupBadges(group: group)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(group.title).themeFont(17, .semibold).foregroundStyle(history ? Theme.muted : Theme.text)
+                        if muted { MutedIcon() }
                     }
-                }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier(Self.rowID(group))
-                .contextMenu {
-                    MuteMenu(muted: model.isGroupMuted(group.key, now: context.date)) { mute in
-                        Task { await model.setGroupMute(group.key, mute) }
-                    }
+                    Text(history
+                         ? "finished \(ShellTime.day(group.messages.last?.at))"
+                         : "\(group.members.count) helpers · started \(ShellTime.short(group.messages.first?.at))")
+                        .themeFont(13).foregroundStyle(Theme.muted).lineLimit(1)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                VStack(spacing: 8) {
+                    if !history { ShellBadge(count: model.readState.unread(GroupRoomRules.readKey(group), in: GroupRoomRules.readItems(group)), muted: muted) }
                 }
-        }
+            }.padding(14).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
+        }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier(Self.rowID(group))
+            .contextMenu {
+                MuteMenu(muted: model.isGroupMuted(group.key, now: now)) { mute in
+                    Task { await model.setGroupMute(group.key, mute) }
+                }
+            }
     }
 
     private var lastLine: Text {

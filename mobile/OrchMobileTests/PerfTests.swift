@@ -134,6 +134,12 @@ final class PerfTests: XCTestCase {
         XCTAssertFalse(ShellTime.short("2026-11-11T14:02:30.250Z", now: now).isEmpty, "fractional seconds still parse")
     }
 
+    /// Step 4: avatars, presence lines and group rows share one clock instead of one TimelineView each.
+    func testMinuteClockIsShared() {
+        XCTAssertTrue(MinuteClock.shared === MinuteClock.shared)
+        XCTAssertLessThan(abs(MinuteClock.shared.now.timeIntervalSinceNow), 3600 * 24)
+    }
+
     func testDerivedDataIsRebuiltOnlyWhenAnInputChanges() async throws {
         let m = await loadedModel()
         _ = m.workspaceSummaries
