@@ -61,6 +61,17 @@ function showMessage(text) {
   overview = null;
 }
 
+// First day, nothing recorded yet: the same three tiles as the overview, at 0, each saying when it fills.
+function emptyTiles(view) {
+  const note = 'Fills after the first helper run';
+  const cards = [['Runs', '0'], ['Skills used', '0'], ['Connected services', String(view.tabs.connections.count)]];
+  return cards.map(([label, value]) => {
+    const card = node('article', undefined, 'card metric');
+    card.append(node('p', label, 'meta'), node('strong', value), node('small', note));
+    return card;
+  });
+}
+
 function fillMetrics() {
   const skills = (lists.skills && lists.skills.rows) || [];
   const used = skills.filter(row => row.uses);
@@ -265,7 +276,9 @@ async function refresh() {
     overview = answer;
     if (overview.first_day) {
       showView('empty');
-      paintState(byId('empty'), 'empty', 'Nothing recorded yet', 'The counts fill after the first helper run.');
+      const grid = node('div', undefined, 'metric-grid');
+      grid.append(...emptyTiles(overview));
+      byId('empty').replaceChildren(grid);
       return;
     }
     if (!await loadList('skills')) return;

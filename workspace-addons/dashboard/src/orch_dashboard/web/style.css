@@ -149,7 +149,9 @@ h1 .inline-host{display:block}
 @keyframes v4-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.dot.starting:after{animation:none}}
 .dot.bg{background:var(--info)}.dot.stopped{background:var(--text-faint)}
-iframe.embed{display:block;width:100%;height:calc(100vh - 96px);min-height:480px;border:0;border-radius:12px}
+/* Add-on pages draw their own gutter (24 px, 16 px on a phone), so the frame bleeds out of the page padding and the content sits on the same edges as dashboard pages (SX-1). */
+iframe.embed{--embed-bleed:24px;display:block;width:calc(100% + 2*var(--embed-bleed));margin:-32px calc(-1*var(--embed-bleed)) 0;height:calc(100vh - var(--topbar-height));min-height:480px;border:0}
+@media(max-width:899px){iframe.embed{--embed-bleed:var(--page-gutter)}}
 .cal{position:fixed;inset:auto;margin:0;overflow:visible;color:var(--text);z-index:80;width:264px;padding:10px;background:var(--surface);border:1px solid var(--border-strong);border-radius:12px;box-shadow:0 12px 32px rgb(0 0 0 / .5)}
 .cal-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:14px}
 .cal-g{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}

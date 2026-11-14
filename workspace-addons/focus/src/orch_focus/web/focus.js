@@ -23,7 +23,7 @@
     els.live.toggleAttribute('data-hold', shownText !== stateText);
     const phase = window.FocusHelpers.phase(v);
     els.steps.replaceChildren(...['Plan', 'Work', 'Check', 'Done'].map((name, i) => h('span', {'aria-current': i === phase ? 'step' : null, text: name})));
-    els.mobileTasks.textContent = 'Tasks ' + v.done + '/' + v.total;
+    els.mobileTasks.textContent = 'Steps ' + v.done + '/' + v.total;
     els.review.querySelector('p').textContent = els.agent.textContent + ' finished — check the result';
     els.count.textContent = v.done + ' of ' + v.total;
     els.bar.style.width = (v.total ? Math.round(v.done / v.total * 100) : 0) + '%';
