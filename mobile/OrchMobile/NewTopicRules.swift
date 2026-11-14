@@ -32,6 +32,19 @@ enum NewTopicRules {
 
     static func longEnough(_ segments: [VoiceSegment]) -> Bool { segments.reduce(0) { $0 + $1.duration } >= minimumSeconds }
 
+    /// Where the person lands after Send: the workspace with the new chat on top of it (Back goes to the workspace). The new chat
+    /// is the newest topic of that workspace: still "starting" (it opens as "New topic" and turns into the ticket in place) or, when
+    /// the workspace already acked, the ticket. Nothing found: just the workspace.
+    static func pathAfterSend(workspace: String, topics: [TopicSummary]) -> [ChatRoute] {
+        let base = ChatRoute.workspace(workspace)
+        guard let newest = topics.max(by: { ($0.lastAt ?? "") < ($1.lastAt ?? "") }) else { return [base] }
+        switch newest.id {
+        case .starting(let ws, let id): return [base, .starting(workspace: ws, id: id)]
+        case .topic(let ws, let ticket): return [base, .ticket(workspace: ws, ticket: ticket)]
+        case .general: return [base]
+        }
+    }
+
     /// mm:ss for the big timer.
     static func clock(_ seconds: TimeInterval) -> String {
         let s = max(0, Int(seconds)); return String(format: "%02d:%02d", s / 60, s % 60)

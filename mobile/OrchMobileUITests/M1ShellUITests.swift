@@ -44,9 +44,6 @@ final class M1ShellUITests: XCTestCase {
         let app = paired()
         XCTAssertTrue(app.buttons["new-chat"].waitForExistence(timeout: 15))
         app.buttons["new-chat"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["new-chat-sheet"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["compose-add-workspace"].waitForExistence(timeout: 5))
-        app.buttons["compose-new-topic"].tap()
         XCTAssertTrue(app.buttons["nt-type"].waitForExistence(timeout: 10)); app.buttons["nt-type"].tap()   // "Type instead"
         let picker = app.buttons["workspace-picker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
@@ -91,10 +88,10 @@ final class M1ShellUITests: XCTestCase {
     /// Add workspace sheet: a bad link is explained inline and the typed text stays.
     func testAddWorkspaceRejectsABadLink() {
         let app = paired()
-        XCTAssertTrue(app.buttons["new-chat"].waitForExistence(timeout: 15))
-        app.buttons["new-chat"].tap()
-        XCTAssertTrue(app.buttons["compose-add-workspace"].waitForExistence(timeout: 5))
-        app.buttons["compose-add-workspace"].tap()
+        XCTAssertTrue(app.buttons["settings-button"].waitForExistence(timeout: 15))
+        app.buttons["settings-button"].tap()
+        XCTAssertTrue(app.buttons["add-workspace"].waitForExistence(timeout: 5))
+        app.buttons["add-workspace"].tap()
         XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 5))
         app.buttons["invite-paste"].tap()
         let field = app.textFields["invite-field"]
@@ -153,11 +150,10 @@ final class M1ShellUITests: XCTestCase {
             app.buttons["voice-settings"].tap(); XCTAssertTrue(app.buttons["voice-replies-menu"].waitForExistence(timeout: 5)); try snap(app, "5-voice")
             app.terminate()
             app = paired(extra)
-            app.buttons["new-chat"].tap(); XCTAssertTrue(app.buttons["compose-new-topic"].waitForExistence(timeout: 5)); try snap(app, "6-compose")
-            app.buttons["compose-new-topic"].tap(); XCTAssertTrue(app.buttons["nt-type"].waitForExistence(timeout: 5)); try snap(app, "7-new-topic-home"); app.buttons["nt-type"].tap(); XCTAssertTrue(app.buttons["workspace-picker"].waitForExistence(timeout: 5)); try snap(app, "7-new-topic")
+            app.buttons["new-chat"].tap(); XCTAssertTrue(app.buttons["nt-type"].waitForExistence(timeout: 5)); try snap(app, "7-new-topic-home"); app.buttons["nt-type"].tap(); XCTAssertTrue(app.buttons["workspace-picker"].waitForExistence(timeout: 5)); try snap(app, "7-new-topic")
             app.terminate(); extra = extra + []
             app = paired(extra)
-            app.buttons["new-chat"].tap(); app.buttons["compose-add-workspace"].tap()
+            app.buttons["settings-button"].tap(); app.buttons["add-workspace"].tap()
             XCTAssertTrue(app.buttons["invite-paste"].waitForExistence(timeout: 5)); try snap(app, "8-add-workspace")
             app.terminate()
         }
