@@ -22,7 +22,7 @@ $ orch stop
 
 The board has six columns: Backlog, Ready, Working, Waiting, Review, and Done. Done initially shows three tickets. Review cards offer **Mark done** and **Send back**. An agent's activity appears separately on its ticket; Start moves the card to Working immediately.
 
-Settings ends with **Workflow → Agents may mark tickets Done**, off by default. Browser actions are recorded as a person, including when an agent started the dashboard.
+Settings ends with **Let helpers finish tickets**, off by default. Browser actions are recorded as a person, including when an agent started the dashboard.
 
 **References** holds tickets, web addresses, project files, and artifacts. Project text and image previews use stored references and the core's safe file reader. Files outside the project say **On this computer only** and remain text. Shared snapshots keep references but do not open files or artifacts.
 

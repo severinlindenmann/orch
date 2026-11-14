@@ -122,7 +122,7 @@ function linksCard(t) {
 function referenceRow(t, ref, removable) {
   const other = ticketOf(ref.ticket), n = ref.n || array(t.refs).indexOf(ref) + 1;
   const title = ref.kind === 'ticket' ? clean(other?.title) || 'Ticket unavailable' : ref.name || (ref.path + (ref.line ? ':' + ref.line : ''));
-  const sub = ref.local ? 'On this computer only' : ref.kind === 'ticket' ? 'Ticket · ' + (other ? statusWord(other) : 'Unavailable') : ref.kind === 'artifact' ? 'Artifact' + (other ? ' · ' + clean(other.title) : '') : 'File in this project';
+  const sub = ref.local ? 'On this computer only' : ref.kind === 'ticket' ? 'Ticket · ' + (other ? statusWord(other) : 'Unavailable') : ref.kind === 'artifact' ? 'Result' + (other ? ' · ' + clean(other.title) : '') : 'File in this project';
   const attrs = {className:'lk'};
   let tag = 'span';
   if (ref.kind === 'ticket' && other) { tag = 'a'; attrs.href = href(other.id); }
@@ -141,17 +141,17 @@ async function startLinkAdd(control) {
   const draw = async label => {
     mode = label; target = ''; addBtn.disabled = true; body.replaceChildren();
     tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-selected', b.textContent === mode));
-    if (label === 'Artifact') {
-      const select = el('select', 'input'); select.setAttribute('aria-label', 'Artifact');
+    if (label === 'Result') {
+      const select = el('select', 'input'); select.setAttribute('aria-label', 'Result');
       body.append(select);
       try {
         const r = await fetch('/api/artifacts/' + encodeURIComponent(t.id));
         const data = await r.json();
         if (mode !== label) return;
-        select.append(new Option('Choose an artifact', ''));
+        select.append(new Option('Choose a result', ''));
         array(data.files).forEach(f => select.append(new Option(f.name, 'artifact:' + f.name)));
         select.onchange = () => { target = select.value; addBtn.disabled = !target; };
-      } catch (_) { err.textContent = 'The artifacts could not be loaded.'; }
+      } catch (_) { err.textContent = 'The results could not be loaded.'; }
       return;
     }
     const input = el('input', 'input'); input.maxLength = 2000;
@@ -178,7 +178,7 @@ async function startLinkAdd(control) {
     input.focus();
   };
   tabs.setAttribute('role', 'tablist'); tabs.classList.add('ref-tabs');
-  ['Ticket', 'Web address', 'File', 'Artifact'].forEach(label => { const tab = button(label, 'ghost', () => draw(label)); tab.setAttribute('role', 'tab'); tabs.append(tab); });
+  ['Ticket', 'Web address', 'File', 'Result'].forEach(label => { const tab = button(label, 'ghost', () => draw(label)); tab.setAttribute('role', 'tab'); tabs.append(tab); });
   const addBtn = button('Add', 'primary', async () => {
     if (!target) { err.textContent = 'Choose a reference first.'; return; }
     const result = await act('ref.add', {ticket:t.id, target});
@@ -1189,7 +1189,7 @@ function ticketHelperDid(t) {
   if (!done.length) return null;
   const shown = done.slice(0, 6);
   return h('section', {className:'card helper-did', 'data-key':'helper-did'}, h('div', {className:'section-head'}, h('h2', {}, 'What the helper did')),
-    h('ul', {className:'lines'}, shown.map(c => h('li', {}, taskTitle(c))), done.length > shown.length ? h('li', {className:'meta'}, '+ ' + (done.length - shown.length) + ' more on the Tasks tab') : null));
+    h('ul', {className:'lines'}, shown.map(c => h('li', {}, taskTitle(c))), done.length > shown.length ? h('li', {className:'meta'}, '+ ' + (done.length - shown.length) + ' more on the Steps tab') : null));
 }
 // What the helper (or you) said when a task was finished: the note shown in Results of a Done ticket.
 function completionNotes(t) {
@@ -1228,7 +1228,7 @@ function ticketSelectedTab(t) {
   const raw = ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
   return ['overview', 'tasks', 'files', 'activity'].includes(tab) ? tab : 'overview';
 }
-const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Tasks', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
+const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
 function ticketProperties(t, parent, agent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = ev?.at || t.done_at || t.updated_at;
@@ -1332,7 +1332,7 @@ function detail(t) {
     h('div', {className:'columns ticket-layout' + (selected === 'files' ? ' wide' : '')},
       h('div', {className:'stack story'},
         panel('overview', 'Overview', overview),
-        panel('tasks', 'Tasks', card('tasks', 'Tasks', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No tasks yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
+        panel('tasks', 'Steps', card('tasks', 'Steps', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No steps yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
       h('div', {className:'stack ticket-side'}, ticketProperties(t, parent, agent), fieldSections(t)))));

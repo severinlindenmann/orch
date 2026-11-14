@@ -738,7 +738,7 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
                 "Changed " + f + (f" (now {STATUS_WORDS.get(m.group(2), m.group(2))})" if m.group(2) else "")
             )
     if m := re.fullmatch(r"Added check (c\d+)", t):
-        return "Added a task" + task(m.group(1))
+        return "Added a step" + task(m.group(1))
     if m := re.fullmatch(r"Check (c\d+) done", t):
         return "Finished a task" + task(m.group(1))
     if m := re.fullmatch(r"Marked (c\d+) as won't do", t):
@@ -1034,7 +1034,7 @@ def _finish_status(root: Path, ticket: dict, status: str, by: str) -> tuple[str,
     if status == "done" and by.startswith("agent:"):
         _check_can_finish(ticket)
         if not config.agents_may_finish(root):
-            add_history(ticket, by, f"{by} finished the work and moved it to Review")
+            add_history(ticket, by, f"{by} finished the work and sent it to Check")
             return "review", by
     return status, by
 

@@ -86,13 +86,13 @@
   }
 
   function build() {
-    els.rail = h('button', {class: 'btn ghost icon sm', 'data-act': 'rail', 'aria-label': 'Show or hide tasks', 'aria-expanded': 'true', title: 'Tasks ( [ )', icon: 'table'});
+    els.rail = h('button', {class: 'btn ghost icon sm', 'data-act': 'rail', 'aria-label': 'Show or hide steps', 'aria-expanded': 'true', title: 'Tasks ( [ )', icon: 'table'});
     els.key = h('span', {class: 'mono key', text: TID});
     els.title = h('span', {text: ''});
     els.areaChip = h('span', {class: 'chip success fx-area-chip', hidden: true, text: ''});  // the area this ticket works in (a label only)
     els.count = h('span', {text: ''});
     els.bar = h('span');
-    els.prog = h('div', {class: 'progress', role: 'progressbar', 'aria-label': 'Tasks done', 'aria-valuemin': '0'}, els.bar);
+    els.prog = h('div', {class: 'progress', role: 'progressbar', 'aria-label': 'Steps done', 'aria-valuemin': '0'}, els.bar);
     els.agent = h('b', {text: ''});
     els.stateText = h('span', {role: 'status', 'aria-live': 'polite', text: ''});
     els.time = h('span', {class: 't', text: ''});
@@ -131,7 +131,7 @@
     els.railNote = h('p', {class: 'meta', style: false});
     els.addInput = h('input', {class: 'input', type: 'text', maxlength: '500', placeholder: 'Add a task', 'aria-label': 'Add a task', name: 'task'});
     els.addForm = h('form', {class: 'fx-add-task', id: 'fx-add-task'}, els.addInput);  // one full-width field; Enter adds the task
-    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Tasks'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Work log'}), els.railCount = h('span')), els.logMeta = h('p', {class: 'meta fx-log-meta', text: ''}), els.tasks), els.helpers, els.railNote, h('div', {class: 'fx-add-wrap'}, els.addForm));
+    const rail = h('aside', {class: 'fx-rail', 'aria-label': 'Steps'}, h('div', {}, h('p', {class: 'eyebrow'}, h('span', {text: 'Work log'}), els.railCount = h('span')), els.logMeta = h('p', {class: 'meta fx-log-meta', text: ''}), els.tasks), els.helpers, els.railNote, h('div', {class: 'fx-add-wrap'}, els.addForm));
     els.tabs = [['live', 'Live'], ['proof', 'Results'], ['files', 'Files'], ['used', 'What it read']].map(([id, label], i) => h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-' + id, 'aria-controls': 'fx-p-' + id, 'aria-selected': String(i === 0), tabindex: i ? '-1' : '0', title: label + ' (' + (i + 1) + ')', 'data-tab': i, text: label}));
     els.sub = h('span', {class: 'meta', text: ''});
     els.feed = h('div', {class: 'fx-feed', role: 'log', 'aria-label': 'What the agent is doing'});

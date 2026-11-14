@@ -160,7 +160,7 @@ test('Separate copies card: one plain row with a switch; when, cap, setup and th
   assert.equal(all(card, n => n.tag === 'details').length, 0, 'no Details disclosure');
   const details = all(card, n => n.attrs?.['data-key'] === 'settings-copies-details')[0];
   const outside = text({children:all(card, n => n.tag === 'div' && n.attrs?.className === 'card')[0].children.filter(n => n !== details)});
-  assert.match(outside, /Helpers working at the same time: each gets its own copy of your files/);
+  assert.match(outside, /Several helpers at once/);
   assert.doesNotMatch(text(vm.runInContext('copiesCard', c)({copies:'together'})), /\bgit\b|npm ci|\.env|nested repositories|warning line|e\.g\./i);
   const sw = all(card, n => n.attrs?.['data-key'] === 'settings-switch-copies')[0];
   assert.equal(sw.attrs.role, 'switch'); assert.equal(sw.attrs['aria-checked'], true); assert.equal(sw.attrs['data-mode'], 'off');
@@ -213,6 +213,29 @@ test('Copies on this computer line: count, size, "Counting…" then a real empty
   assert.equal(all(card, n => n.tag === 'details').length, 0);
 });
 
+test('Settings helper cards (fb10): title, one sentence and an example each; copy details only while Several helpers at once is on', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  const h = (tag, attrs, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(c => c != null)});
+  const c = vm.createContext({h, array:x => Array.isArray(x) ? x : [], snapshot:false, settingsBusy:new Set(), settingsText:(tag, a, t) => h(tag, a, t)});
+  vm.runInContext(src.slice(src.indexOf('function shareCard'), src.indexOf('function settingsPage')), c);
+  const all = (n, f) => !n || typeof n !== 'object' ? [] : [...(f(n) ? [n] : []), ...(n.children || []).flatMap(x => all(x, f))];
+  const text = n => typeof n === 'string' ? n : (n.children || []).map(text).join(' ');
+  const get = name => vm.runInContext(name, c);
+  for (const [fn, title, key] of [['shareCard', 'Tell teammates about orch', 'settings-share'], ['workflowCard', 'Let helpers finish tickets', 'settings-workflow'], ['copiesCard', 'Several helpers at once', 'settings-copies']]) {
+    for (const settings of [{share:false, agents_may_finish:false, copies:'off'}, {share:true, agents_may_finish:true, copies:'together'}]) {
+      const card = get(fn)(settings), t = text(card);
+      assert.ok(t.includes(title), fn + ' title');
+      assert.match(t, /Example: /, fn + ' has an example');
+      assert.equal(all(card, n => n.tag === 'h3').length >= 1, true);
+      assert.equal(all(card, n => n.attrs?.className === 'meta' && /^Example: /.test(text(n))).length, 1, fn + ' one example line');
+    }
+  }
+  const off = get('copiesCard')({copies:'off'}), on = get('copiesCard')({copies:'together'});
+  assert.equal(all(off, n => n.attrs?.['data-key'] === 'settings-copies-details').length, 0, 'no copy details while off');
+  assert.equal(all(on, n => n.attrs?.['data-key'] === 'settings-copies-details').length, 1, 'copy details while on');
+  assert.doesNotMatch(text(get('workflowCard')({})), /Review/);
+});
+
 test('Settings review step: Share, the copies switch, Clean up now and "Helpers may mark tickets Done" show a plain review, then one click', async () => {
   const calls = [], focused = [];
   const c = context([], {snapshot:false, addons:() => [], render:() => {}, document:{querySelector:sel => ({focus:() => focused.push(sel)})},
@@ -225,7 +248,7 @@ test('Settings review step: Share, the copies switch, Clean up now and "Helpers 
   assert.equal(panels(c.settingsPage()).length, 0, 'no review until a control is clicked');
   const cases = [
     ['share', 'shareCard', 'settings-switch-share', 'Share', /^Your team will see that this workspace uses orch\./, /AGENTS\.md/, ['share.set', {on:true}]],
-    ['workflow', 'workflowCard', 'settings-switch-workflow', 'Turn on', /^Helpers will mark their finished work Done themselves\./, /Review stay there/, ['workflow.set', {on:true}]],
+    ['workflow', 'workflowCard', 'settings-switch-workflow', 'Turn on', /^Helpers will mark their finished work Done themselves\./, /waiting for your check stay there/, ['workflow.set', {on:true}]],
     ['copies-switch', 'copiesCard', 'settings-switch-copies', 'Turn off', /^Helpers will all work in your own folder/, /Your own files are not touched/, ['copies.set', {mode:'off'}]],
     ['copies-clean', 'copiesCard', 'settings-copies-clean', 'Clean up', /no helper needs any more will be removed/, /^Up to 3 copies will be removed.*Your own files are not touched\.$/, ['copies.clean', {}]],
   ];
@@ -261,6 +284,7 @@ test('Settings review step: Share, the copies switch, Clean up now and "Helpers 
   Object.assign(settings, {share:true, agents_may_finish:true, copies:'off', copies_disk:{copies:0, bytes:0}});
   for (const [id, cardFn, verb, re] of [['share', 'shareCard', 'Stop sharing', /taken out of AGENTS\.md/], ['workflow', 'workflowCard', 'Turn off', /already Done stay Done/],
     ['copies-switch', 'copiesCard', 'Turn on', /At most 4 copies/], ['copies-clean', 'copiesCard', 'Clean up', /no copies right now, so nothing will be removed/]]) {
+    settings.copies = id === 'copies-clean' ? 'together' : 'off';  // the copy details (Clean up now) show only while it is on
     c.settingsReviewOpen(id, {disabled:false, dataset:{key:'x'}});
     const [panel] = panels(c[cardFn](settings));
     assert.equal(text(nodes(panel, n => n.tag === 'button')[0]), verb);

@@ -53,7 +53,7 @@
     // the lines orch writes itself (same words as the CLI): a task line names the task, add-on settings their add-on
     const task = id => { const c = (Array.isArray(checklist) ? checklist : []).find(x => x && x.id === id); return c && c.text ? ': ' + c.text : ''; };
     const addon = key => key.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase());
-    if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a task' + task(m[1]);
+    if ((m = /^Added check (c\d+)$/.exec(text))) return 'Added a step' + task(m[1]);
     if ((m = /^Marked (c\d+) as won't do$/.exec(text))) return "Marked as won't do" + task(m[1]);
     if ((m = /^Check (c\d+) done$/.exec(text))) return 'Finished a step' + task(m[1]);
     if ((m = /^Set ext\.([a-z][a-z0-9-]*)$/.exec(text))) return 'Updated ' + addon(m[1]) + ' settings';
@@ -67,13 +67,13 @@
     if (/^Answered q\d+/.test(text)) return 'Answered a question';
     if ((m = /^(?:Patched status \(status|Status) \w+ -> (\w+)/.exec(text))) return 'Moved to ' + (STATUS_WORD[m[1]] || m[1]);
     if (/^Summary/.test(text)) return 'Updated the summary';
-    if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a task: ' + m[1];
+    if ((m = /^Added (?:task|check)[:\s]+(.+)$/i.exec(text))) return 'Added a step: ' + m[1];
     if ((m = /^Finished a (?:task|step)[:\s]+(.+)$/i.exec(text))) return 'Finished a step: ' + m[1];
     if (/^(Updated|Removed) .+ settings$/.test(text)) return text;
     if (/^Check c\d+ done/i.test(text) || /^(Checked|Done)\b.*\bc\d+/.test(text) || /^Task .* done/i.test(text)) return 'Finished a step';
-    if (/^Added task|^Added check/i.test(text)) return 'Added a task';
+    if (/^Added task|^Added check/i.test(text)) return 'Added a step';
     if (/^Linked|^Link added/i.test(text)) return 'Added a reference';
-    return plainNames(text);
+    return plainNames(text).replace(/ moved it to Review$/, ' sent it to Check');
   }
 
   /* Plain words for a failure or notice: never a raw ticket id, an internal actor name (agent:/human:) or a UTC time.

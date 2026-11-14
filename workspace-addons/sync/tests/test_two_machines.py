@@ -218,7 +218,7 @@ def test_artifact_conflict_closed(machines):
     save(b, ART, b"B\n")
     success(a)
     tip = remote_sha(bare)
-    assert "Conflicting artifact" in run(b)["last_error"]
+    assert "Conflicting result" in run(b)["last_error"]
     assert (b / ".orch" / ART).read_bytes() == b"B\n"
     assert remote_sha(bare) == tip
 
