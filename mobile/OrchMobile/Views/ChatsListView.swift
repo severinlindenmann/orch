@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum ShellSheet: String, Identifiable {
-    case compose, newTopic, addWorkspace
+    case newTopic, addWorkspace
     var id: String { rawValue }
 }
 
@@ -13,9 +13,6 @@ struct ChatsListView: View {
     @State private var query = ""
     @State private var filter = "All"
     @State private var sheet: ShellSheet?
-    @State private var pendingSheet: ShellSheet?
-    @State private var pendingContact: String?
-    @State private var contactQuery = ""
     @State private var showSettings = false
     @Environment(\.dynamicTypeSize) private var typeSize
     // Concatenated Text can't take themeFont: these follow Dynamic Type live (ScaledMetric reads the environment).
@@ -50,6 +47,7 @@ struct ChatsListView: View {
                     case .workspace(let id): WorkspaceView(workspaceId: id)
                     case .general(let id): ChatRoomView(workspaceId: id)
                     case .ticket(let ws, let ticket): TicketChatView(workspaceId: ws, ticketId: ticket)
+                    case .starting(let ws, let id): ConversationView(id: .starting(workspace: ws, id: id))
                     case .info(let ws, let ticket):
                         ConversationInfoView(conversation: ticket.map { .topic(workspace: ws, ticket: $0) } ?? .general(workspace: ws))
                     case .group(let host, let id): GroupRoomView(key: GroupKey(host: host, id: id))
@@ -59,14 +57,8 @@ struct ChatsListView: View {
                     }
                 }.toolbar({ if case .group = route { return Visibility.hidden }; return Visibility.visible }(), for: .navigationBar)
             }
-            .sheet(item: $sheet, onDismiss: {
-                if let id = pendingContact { pendingContact = nil; model.path.append(ChatRoute.general(id)) }
-                if let next = pendingSheet { pendingSheet = nil; sheet = next }
-            }) { item in
+            .sheet(item: $sheet) { item in
                 switch item {
-                case .compose:
-                    composeSheet.presentationDetents([.large]).presentationDragIndicator(.visible)
-                        .presentationBackground(Theme.surface)
                 case .newTopic:
                     NewTopicScreen(workspaceId: nil, asSheet: true).presentationDetents([.large])
                 case .addWorkspace:
@@ -84,7 +76,7 @@ struct ChatsListView: View {
             }.accessibilityIdentifier("settings-button").accessibilityLabel("Settings")
             Text("Chats").themeFont(34, .bold).accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
-            Button { contactQuery = ""; sheet = .compose } label: {
+            Button { sheet = .newTopic } label: {
                 Image(systemName: "plus").themeFont(22).foregroundStyle(Theme.brand)
                     .frame(width: 44, height: 44).background(Theme.surface, in: Circle())
             }.accessibilityIdentifier("new-chat").accessibilityLabel("New chat")
@@ -323,88 +315,6 @@ struct ChatsListView: View {
                 }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
             }
         }
-    }
-
-    private var composeSheet: some View {
-        let names = Dictionary(model.workspaces.map { ($0.id, WorkspaceAlias.name(for: $0)) }, uniquingKeysWith: { first, _ in first }) // relay data: never trap on a duplicate id
-        let contacts = ContactList.rows(model.workspaces, query: contactQuery, names: names)
-        return VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text("New chat").themeFont(22, .bold).accessibilityAddTraits(.isHeader)
-                Spacer()
-                Button { sheet = nil } label: {
-                    Image(systemName: "xmark").themeFont(20)
-                        .frame(width: 44, height: 44).background(Theme.surface3, in: Circle())
-                }.buttonStyle(PressStyle()).accessibilityLabel("Close").accessibilityIdentifier("new-chat-close")
-            }
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                TextField("Search contacts", text: $contactQuery).themeFont(17)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityIdentifier("contact-search")
-            }.padding(.horizontal, 14).frame(minHeight: 44)
-                .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m).stroke(Theme.border, lineWidth: 1))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    composeOption("New topic", symbol: "square.and.pencil", target: .newTopic, identifier: "compose-new-topic")
-                    ShellDivider()
-                    composeOption("Add workspace", symbol: "plus", target: .addWorkspace, identifier: "compose-add-workspace")
-                    Text("Contacts").themeFont(14, .semibold).foregroundStyle(Theme.muted)
-                        .accessibilityAddTraits(.isHeader).padding(.top, 24).padding(.bottom, 12)
-                    if contacts.isEmpty {
-                        Text(model.workspaces.isEmpty ? "No contacts yet" : "No match")
-                            .themeFont(15).foregroundStyle(Theme.muted).padding(.vertical, 16)
-                    }
-                    ForEach(contacts) { workspace in
-                        contactRow(workspace, name: names[workspace.id] ?? workspace.displayName)
-                        ShellDivider()
-                    }
-                }
-            }.scrollDismissesKeyboard(.interactively)
-        }.padding(16).padding(.top, 12).foregroundStyle(Theme.text)
-            .accessibilityElement(children: .contain).accessibilityIdentifier("new-chat-sheet")
-    }
-
-    private func contactRow(_ workspace: Workspace, name: String) -> some View {
-        let chips = ContactList.chips(workspace.can)
-        return Button { pendingContact = workspace.id; sheet = nil } label: {
-            HStack(spacing: 12) {
-                WorkspaceBadge(name: name, icon: workspace.icon, color: workspace.color, size: 46,
-                               lastSeen: .some(workspace.lastSeen), id: workspace.id)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(name).themeFont(17, .semibold).multilineTextAlignment(.leading)
-                    TimelineView(.everyMinute) { context in
-                        Text(workspace.presence(now: context.date).line(now: context.date))
-                            .themeFont(13).foregroundStyle(Theme.muted)
-                    }
-                    if !chips.isEmpty {
-                        HStack(spacing: 6) {
-                            ForEach(chips, id: \.self) { chip in
-                                Text(chip).themeFont(12).foregroundStyle(Theme.muted)
-                                    .padding(.horizontal, 8).padding(.vertical, 3)
-                                    .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
-                            }
-                        }
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                ShellChevron()
-            }.frame(minHeight: 56).padding(.vertical, 12).contentShape(Rectangle())
-        }.buttonStyle(PressStyle()).accessibilityIdentifier("contact-\(workspace.id)")
-    }
-
-    private func composeOption(_ title: String, symbol: String, target: ShellSheet, identifier: String) -> some View {
-        Button { pendingSheet = target; sheet = nil } label: {
-            HStack(spacing: 12) {
-                Image(systemName: symbol).themeFont(20).foregroundStyle(Theme.brand)
-                    .frame(width: 46, height: 46)
-                    .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m))
-                    .accessibilityHidden(true)
-                Text(title).themeFont(17, .semibold)
-                Spacer()
-                ShellChevron()
-            }.frame(minHeight: 56).padding(.vertical, 8).contentShape(Rectangle())
-        }.buttonStyle(PressStyle()).accessibilityIdentifier(identifier)
     }
 }
 
