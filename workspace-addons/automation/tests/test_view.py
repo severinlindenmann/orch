@@ -413,3 +413,19 @@ def test_a_synced_schedule_not_allowed_here_offers_allow_instead_of_run_now(ws, 
     (row,) = sch["rows"]
     assert [a["label"] for a in row["actions"]] == ["Allow on this computer", "Edit"]
     assert row["actions"][0]["action"] == {"op": "addon.allow", "args": {"target": "t_rec00002"}}
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["daily 08:00", "every monday 08:00", "0 8 * * 1,3", "monthly 5 08:00", "0 8 */3 * *"],
+)
+def test_every_phrase_the_dashboard_sends_is_saved_and_listed(ws, monkeypatch, phrase):
+    """The dashboard's Save schedule sends one of these phrases: after the save the list must show that row."""
+    from orch_automation import service
+    from orch_automation.actions import act
+
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    add_ticket(ws, "t_save0001", title="TEST: save then list")
+    assert act(ws, "repeat", "t_save0001", by="human:tester", value=phrase)["recurring"] is True
+    (rep,) = blocks(build(ws, T(15, 2)), "table")
+    assert [r for r in rep["rows"] if "save then list" in json.dumps(r)], "the saved schedule is not listed"
