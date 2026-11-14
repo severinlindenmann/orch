@@ -139,15 +139,23 @@ function chatMovedBanner(moved) {
   return h('div', {className:'chat-archive-banner'}, 'This conversation now belongs to ticket ', clean(moved.key), ' · ',
     h('a', {href:chatLink(moved.id)}, 'Open ticket'));
 }
-// "Show: All | From my phone" replaces the old counter chips; "Working on N tickets" shows only when N > 0.
-function chatFilter() {
-  const on = chatUi.filter === 'phone';
-  return chatButton('From my phone', 'filter', {className:'chat-check', role:'checkbox', 'aria-checked':String(on), 'data-key':'chat-filter', 'data-id':on ? 'all' : 'phone'});
+// "New chat" picks who to talk to: your helper, a workspace or your phone (no checkbox in the page any more).
+function chatNewChatPick(who) {
+  if (who === 'phone') { chatOpenAgent(); chatUi.filter = 'phone'; }
+  else { chatOpenAgent(); chatUi.filter = 'all'; }
+  render();
+}
+function chatNewChatRows(onPick) {
+  return [['helper', 'Your helper'], ['phone', 'Your phone']].map(([who, label]) => {
+    const row = h('button', {type:'button', className:'chat-contact', 'data-key':'pick-' + who}, chatText('strong', '', label));
+    row.addEventListener('click', () => { chatNewChatPick(who); if (onPick) onPick(); });
+    return row;
+  });
 }
 function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const running = !g && !history && !agent ? chatCount(state?.chat?.activity?.running) : 0;
-  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent && !chatConversation().length ? 'New conversation with your helper' : CHAT_HELPER);
+  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (!g && chatUi.filter === 'phone' ? 'Your phone' : (agent && !chatConversation().length ? 'New conversation with your helper' : CHAT_HELPER));
   const helper = !g && !history, others = g ? chatObjects(g.members).filter(m => m.ws !== 'you').length : 0;
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
@@ -159,7 +167,7 @@ function chatHeader(g, history) {
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null,
       history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g ? null : chatButton('Earlier', 'history')),
     // The phone filter and the workspace link stay visible, no options disclosure.
-    helper && !agent ? h('div', {className:'chat-head-row'}, chatFilter(), chatPhoneLink()) : null,
+    helper && !agent ? h('div', {className:'chat-head-row'}, chatRich() || snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), chatPhoneLink()) : null,
     agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
     moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(chatPlainTitle(moved.title, moved.key))) : null,
     g ? h('div', {className:'chat-member-chips'}, chatObjects(g.members).map(m =>
@@ -566,11 +574,11 @@ window.addEventListener('orch:state', chatDmRoute);
 window.addEventListener('DOMContentLoaded', chatDmRoute);
 
 function chatDmContacts() {
-  const {d, actions} = dialog('Contacts', 'dialog');
+  const {d, actions} = dialog('New chat', 'dialog');
   d.classList.add('chat-page', 'chat-contacts');
   const body = h('div', {className:'chat-contact-list'});
   const paint = () => {
-    const rows = [];
+    const rows = [...chatNewChatRows(() => window.orch.close(d))];
     for (const c of chatDm.loaded ? chatDm.contacts : []) {
       const can = c.can || {}, allowed = can.chat || can.tasks || can.files;
       const row = h('button', {type:'button', className:'chat-contact', disabled:!allowed}, chatText('strong', '', c.name),
