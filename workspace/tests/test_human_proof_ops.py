@@ -2345,3 +2345,37 @@ def test_runner_waits_for_windows_result(ws, monkeypatch, result):
     monkeypatch.setattr(winfinish, "updating", lambda h: False)
     assert hp.take_update_status(ws)["state"] == ("finished" if result == "ok" else "failed")
     assert hp.take_update_status(ws) is None
+
+
+# ------------------------------------------------------------------ owner feedback 14 Nov: stale update requests
+
+
+def test_a_finished_update_drops_the_update_requests_still_waiting(ws, monkeypatch):
+    assert hp.request_handoff(ws, "update", "orch@x", argv=["update"]) is True
+    assert hp.request_handoff(ws, "update", "orch@y", argv=["update", "--project-only"]) is True
+    assert _run_runner(ws, monkeypatch, "import sys; sys.stdin.read()") == 0
+    assert hp.take_update_status(ws)["state"] == "finished"
+    assert [h for h in hp.handoffs(ws) if h["op"] == "update"] == []
+
+
+def test_a_running_update_keeps_the_requests(ws):
+    assert hp.request_handoff(ws, "update", "orch@x", argv=["update"]) is True
+    hp.write_update_status(ws, "running")
+    assert hp.take_update_status(ws)["state"] == "running"
+    assert len([h for h in hp.handoffs(ws) if h["op"] == "update"]) == 1
+
+
+def test_confirming_one_update_request_supersedes_the_others(ws):
+    hp.request_handoff(ws, "update", "orch@x", argv=["update"])
+    hp.request_handoff(ws, "update", "orch@y", argv=["update", "--project-only"])
+    hp.request_handoff(ws, "ticket.answer", "t_a:q1:" + "a" * 64, argv=["answer", "t_a", "q1", "--", "x"], value="x")
+    first = next(h for h in hp.handoffs(ws) if h["op"] == "update")
+    assert hp.handoff_take(ws, first["id"]) is not None
+    assert [h["op"] for h in hp.handoffs(ws)] == ["ticket.answer"]
+
+
+def test_a_waiting_request_is_not_an_error_on_the_command_line(ws, run):
+    tid, q = _ask(ws, run)
+    code, out, err = run("answer", tid, q, "A", "--by", "human:pat")
+    assert code == 2 and "Waiting for your click" in err
+    assert not err.startswith("Refused:") and "Refused:" not in err

@@ -3089,7 +3089,13 @@ def handoff_take(root: Path, hid: str) -> dict | None:
             hit = next((i for i in items if i.get("id") == hid and i.get("exp", 0) > time.time()), None)
             if hit is None:
                 return None
-            _write_private(d / "handoffs.json", json.dumps([i for i in items if i is not hit]))
+            # taking an update request answers every other waiting update request too (one update at a time)
+            gone = [i for i in items if i is hit or (hit.get("op") == "update" and i.get("op") == "update")]
+            _write_private(d / "handoffs.json", json.dumps([i for i in items if i not in gone]))
+            for i in gone:
+                if i is not hit:
+                    with contextlib.suppress(OSError, TypeError):
+                        (d / f"handoff-{i.get('id')}.secret").unlink()
             secret = d / f"handoff-{hid}.secret"
             token = None
             if SECRET_MARK in json.dumps(hit.get("argv")):
@@ -3165,7 +3171,7 @@ def _dashboard_note(root: Path, open_ok: bool = True) -> str:
         open_browser(launch_url(root, "dashboard", url))
         return f"Opened the dashboard ({url}): press Continue to send this to the agent."
     if url:
-        return f"Waiting for your click: open the dashboard ({url}) and press Continue to send this."
+        return f"Waiting for your click in the dashboard: open {url} and press Continue to send this."
     return "Waiting for your click: open the dashboard on this computer and press Continue."
 
 
@@ -3473,9 +3479,24 @@ def write_update_status(
             )
 
 
+def _drop_update_requests(root: Path) -> None:
+    """The update is over: an `orch update` request still waiting no longer applies (it would update again)."""
+    try:
+        d = key_dir(root, create=False)
+        with _key_lock(d):
+            f = d / "handoffs.json"
+            items = [i for i in _read_json(root, f, []) if isinstance(i, dict)]
+            keep = [i for i in items if i.get("op") != "update"]
+            if len(keep) != len(items):
+                _write_private(f, json.dumps(keep))
+    except (Refused, OSError, ValueError):
+        pass
+
+
 def take_update_status(root: Path) -> dict | None:
     """The detached update's result for the page. A finished or failed result is read ONCE (then cleared); a
     running one stays."""
+    done = False
     try:
         d = key_dir(root, create=False)
         with _key_lock(d):
@@ -3495,8 +3516,11 @@ def take_update_status(root: Path) -> dict | None:
             if isinstance(data, dict) and data.get("state") in ("finished", "failed"):
                 with contextlib.suppress(OSError):
                     f.unlink()
+                done = True
     except (Refused, OSError, ValueError):
         return None
+    if done:
+        _drop_update_requests(root)
     if not isinstance(data, dict) or data.get("state") not in ("running", "finished", "failed"):
         return None
     return {"state": data["state"], "reason": str(data.get("reason") or "")[:200]}
