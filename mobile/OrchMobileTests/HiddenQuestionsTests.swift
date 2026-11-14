@@ -39,6 +39,9 @@ final class HiddenQuestionsTests: XCTestCase {
         XCTAssertEqual(SwipeToHideRules.outcome(offset: -10, width: 360), .springBack)
         XCTAssertEqual(SwipeToHideRules.outcome(offset: -60, width: 360), .reveal)
         XCTAssertEqual(SwipeToHideRules.outcome(offset: -250, width: 360), .hide)
+        XCTAssertEqual(SwipeToHideRules.outcome(offset: -150, predicted: -500, width: 360), .hide, "a quick fling hides")
+        XCTAssertEqual(SwipeToHideRules.outcome(offset: -150, predicted: -200, width: 360), .reveal, "a slow half swipe only reveals")
+        XCTAssertEqual(SwipeToHideRules.outcome(offset: -20, predicted: -500, width: 360), .springBack, "a tiny flick does nothing")
         XCTAssertTrue(SwipeToHideRules.isHorizontal(CGSize(width: -40, height: 5)))
         XCTAssertFalse(SwipeToHideRules.isHorizontal(CGSize(width: 10, height: 40)))
     }
