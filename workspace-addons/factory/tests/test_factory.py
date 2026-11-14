@@ -283,3 +283,34 @@ def test_skill_names_the_schema_command_and_steps():
     text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
     assert "orch factory schema proposal" in text and "propose --help" not in text
     assert "`resume`" in text and "`done`" in text
+
+
+def test_idea_adopts_a_ticket_made_from_chat(ws, run, proposal):
+    """The owner made a plain ticket from Chat while asking for a Factory run: the helper turns it into the order."""
+    plain = core(ws, "ticket", "new", "Booking page from Chat")
+    path = ws / "fake-tickets" / f"{plain['id']}.json"
+    t = json.loads(path.read_text())
+    t["note"] = "You: plan it as a factory run with one stop"
+    path.write_text(json.dumps(t))
+    r = run("idea", "--ticket", plain["id"])
+    assert r["order"] == plain["id"] and r["adopted"] is True
+    assert (
+        Store(ws).path(f"drafts/{plain['id']}/v1.md").read_text()
+        == "You: plan it as a factory run with one stop"
+    )
+    assert run("idea", "--ticket", plain["id"])["adopted"] is False  # already an order: same answer
+    p = run("propose", plain["id"], "--file", "-", data=proposal)
+    assert p["order"] == plain["id"] and run("show", plain["id"])["proposal"] == 1
+
+
+def test_idea_needs_a_title_or_a_ticket_and_refuses_finished_or_sub_tickets(ws, run):
+    assert run("idea", code=2)["code"] == "invalid"
+    assert run("idea", "Title", "--ticket", "t_000001", code=2)["code"] == "invalid"
+    done = core(ws, "ticket", "new", "Done one")
+    path = ws / "fake-tickets" / f"{done['id']}.json"
+    t = json.loads(path.read_text())
+    t["status"] = "done"
+    path.write_text(json.dumps(t))
+    assert run("idea", "--ticket", done["id"], code=2)["code"] == "invalid"
+    child = core(ws, "ticket", "new", "Child", "--parent", done["id"])
+    assert run("idea", "--ticket", child["id"], code=2)["code"] == "invalid"

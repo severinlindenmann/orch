@@ -475,6 +475,7 @@ class Handler(BaseHTTPRequestHandler):
             "index.html",
             "app.js",
             "mobile-mode.js",
+            "people.js",
             "look.js",
             "look-icons.js",
             "look.css",
