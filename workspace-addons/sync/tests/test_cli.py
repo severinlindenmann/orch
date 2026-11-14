@@ -153,6 +153,46 @@ def test_start_is_quiet_while_off(root, capsys):
     assert run(root, "needs") == 0
 
 
+def test_start_while_off_leaves_the_idle_mark_that_says_off_is_meant(root, capsys):
+    # owner feedback 14 Nov (W6): sync off is not "stopped": core must be able to tell the two apart
+    assert run(root, "start") == 0
+    assert (root / ".orch/run/sync/idle").is_file()
+    assert run(root, "set", "--mode", "local") == 0
+    assert not (root / ".orch/run/sync/idle").exists()
+    assert run(root, "set", "--mode", "off") == 0
+    assert (root / ".orch/run/sync/idle").is_file()
+
+
+def test_turning_sync_on_starts_the_loop(root, monkeypatch):
+    # owner feedback 14 Nov (W5): "Sync is on" while no loop ran, because only `orch start` ever started it
+    from conftest import REAL_ENSURE_RUNNING
+
+    from orch_sync import service
+
+    started = []
+    monkeypatch.setattr(service, "ensure_running", REAL_ENSURE_RUNNING)
+    monkeypatch.setattr(service, "running_pid", lambda r: None)
+    monkeypatch.setattr(service, "start", lambda r: started.append(r) or 4242)
+    assert run(root, "set", "--mode", "local") == 0
+    assert len(started) == 1
+    assert run(root, "set", "--mode", "off") == 0
+    assert len(started) == 1  # off does not start anything
+
+
+def test_a_loop_that_does_not_start_never_fails_the_set(root, monkeypatch, capsys):
+    from conftest import REAL_ENSURE_RUNNING
+
+    from orch_sync import service
+
+    def refused(r):
+        raise repo.Refused("Sync did not start. See .orch/run/sync/loop.log")
+
+    monkeypatch.setattr(service, "ensure_running", REAL_ENSURE_RUNNING)
+    monkeypatch.setattr(service, "running_pid", lambda r: None)
+    monkeypatch.setattr(service, "start", refused)
+    assert run(root, "set", "--mode", "local") == 0
+
+
 def test_start_needs_the_addon_on_here(root, monkeypatch, capsys):
     from orch_sync import orchcli, service
 

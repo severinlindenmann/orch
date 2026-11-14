@@ -20,6 +20,7 @@ RECORD = "run/sync/process.json"
 LOCK = "run/sync/loop.lock"
 STOP = "run/sync/stop"  # `orch sync stop` asks: the loop finishes its pass and ends
 LOG = "run/sync/loop.log"
+IDLE = "run/sync/idle"  # "off is what the person chose here": core shows no "not running" warning for it
 LOG_CAP = 1_000_000  # bytes: a longer loop.log starts empty on the next `orch sync start`
 NONCE = re.compile(r"[0-9a-f]{32}")
 TAKE = 2.0  # seconds a new loop tries for the lock (a status check holds it for a moment)
@@ -190,6 +191,31 @@ def start(root, wait=15.0):
     if proc.poll() is None:
         proc.terminate()  # our own child (never a pid read from a file)
     raise repo.Refused("Sync did not start. See .orch/run/sync/loop.log")
+
+
+def set_idle(root, idle):
+    """Mark (or unmark) that sync is off on purpose, so core does not call the missing loop a problem."""
+    try:
+        if idle:
+            from .step import write
+
+            write(root, IDLE, b"")
+        else:
+            repo.safe(root, IDLE).unlink(missing_ok=True)
+    except (OSError, repo.Refused):
+        pass  # only a hint for the warning; never fails a setting
+
+
+def ensure_running(root):
+    """After the person turned sync on: the loop runs (a loop that is already running is only woken by the caller).
+    Best effort: a loop that cannot start is told by `orch sync status` and the log, never a failed setting."""
+    pid = running_pid(root)
+    if pid:
+        return pid
+    try:
+        return start(root)
+    except (OSError, repo.Refused):
+        return None
 
 
 def stop(root, wait=STOP_WAIT):
