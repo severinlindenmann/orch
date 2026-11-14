@@ -835,3 +835,9 @@ def test_agent_line_shows_the_core_hold_reason_and_drops_it_when_absent():
     assert w["status"] == why and w["hold"] == why
     w = call("agentLine", T, run, now, None)
     assert "hold" not in w and why not in w["status"]
+
+
+def test_table_cells_and_button_labels_do_not_wrap():
+    css = (WEB / "style.css").read_text()
+    assert ".blk-table td:not(:first-child),.blk-table td .btn{white-space:nowrap}" in css
+    assert ".blk-table td:has(.row){width:1%}" in css

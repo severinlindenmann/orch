@@ -206,9 +206,10 @@ struct BlobImage: View {
         }.clipped()
             .task(id: "\(id)#\(attempt)#\(model.connection == .unreachable)") {
                 guard image == nil else { return }
+                if let hit = Thumbnail.cached(id: id) { image = hit; state = .loaded; return }
                 state = .loading
                 let data = await model.blob(id)
-                let picture = data.flatMap { Thumbnail.image(from: $0) }
+                let picture: UIImage? = if let data { await Thumbnail.decoded(id: id, data: data) } else { nil }
                 image = picture
                 state = BlobImageState.after(data: data, isImage: picture != nil)
             }
@@ -527,7 +528,12 @@ private struct QueuedConversationImage: View {
             if let image { Image(uiImage: image).resizable().scaledToFill() }
             else { Image(systemName: "photo").foregroundStyle(Theme.muted) }
         }.frame(height: 190).clipped().clipShape(RoundedRectangle(cornerRadius: Theme.Radius.s, style: .continuous)).accessibilityLabel(name)
-            .task(id: url) { if let data = try? Data(contentsOf: url) { image = Thumbnail.image(from: data) } }
+            .task(id: url) {
+                let key = url.path
+                if let hit = Thumbnail.cached(id: key) { image = hit; return }
+                let data = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: url) }.value
+                if let data { image = await Thumbnail.decoded(id: key, data: data) }
+            }
     }
 }
 

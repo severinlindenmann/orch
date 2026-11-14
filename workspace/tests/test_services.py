@@ -291,6 +291,35 @@ def test_status_says_when_an_addon_is_not_running(svc, proj, run):
     assert "hello" in out and "not running (last seen just now) - start it: orch start" in out
 
 
+def test_an_addon_that_is_off_on_purpose_is_not_a_problem(svc, proj, run):
+    # owner feedback 14 Nov (W6): sync is off by default; `orch start` left it "not running" and the
+    # dashboard asked the person to start it for ever. The add-on says "off is meant": run/<name>/idle.
+    from orch import needs
+
+    run("start")
+    run("stop")
+    assert any(r["id"] == "core:down:hello" for r in needs.core_rows(proj))
+    idle = proj / ".orch/run/hello/idle"
+    idle.parent.mkdir(parents=True, exist_ok=True)
+    idle.write_text("", encoding="utf-8")
+    row = json.loads(run("status", "--json")[1])[0]["addons"][0]
+    assert row["running"] is False and row["idle"] is True
+    assert not any(r["id"] == "core:down:hello" for r in needs.core_rows(proj))
+    assert "off here" in run("status")[1]
+    run("start")  # running again: the mark does not matter
+    row = json.loads(run("status", "--json")[1])[0]["addons"][0]
+    assert row["running"] is True and "idle" not in row
+
+
+def test_start_never_calls_a_stopped_addon_running():
+    from orch import cli_status
+
+    assert "running" not in cli_status._service_line({"addon": "sync", "running": False, "idle": True})
+    assert "off here" in cli_status._service_line({"addon": "sync", "running": False, "idle": True})
+    assert "not running" in cli_status._service_line({"addon": "sync", "running": False})
+    assert "running (pid 5)" in cli_status._service_line({"addon": "sync", "running": True, "pid": 5})
+
+
 def test_ago_words():
     assert services.ago(None) == "never seen"
     from datetime import UTC, datetime, timedelta

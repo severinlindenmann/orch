@@ -121,9 +121,20 @@ def is_on(root: Path) -> bool:
     return bool(settle(root).get("on"))
 
 
+def phones_paired(root: Path) -> int | None:
+    """How many phones are paired with this workspace (the relay's list); None when it cannot be read."""
+    from orch import relay
+
+    try:
+        return sum(1 for p in relay._read_dir(root).get("phones", []) if isinstance(p, dict))
+    except Exception:
+        return None
+
+
 def status(root: Path) -> dict:
     d = settle(root)
     out = {
+        "phones": phones_paired(root),
         "on": bool(d.get("on")),
         "default_hours": default_hours(root),
         "hours_choices": list(HOURS),

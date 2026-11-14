@@ -325,7 +325,7 @@ function liveSessionStrip(t) {
     copy('Watch (read only)', 'orch run attach ' + ref + ' --watch'), copy('Take over (you can type)', 'orch run attach ' + ref));
 }
 function agentBar(t) {
-  const liveLink = liveLinkFor(t), run = state.runs?.[t.id];
+  const liveLink = liveLinkFor(t), run = state.runs?.[t.id], alive = window.DashHelpers.helperAlive(t, run);
   const line = window.DashHelpers.agentLine(t, run, Date.now(), liveLink, state.settings);
   const session = array(t.sessions).slice().sort((a, b) => (Date.parse(b.last_used) || 0) - (Date.parse(a.last_used) || 0))[0];
   const step = array(t.checklist).find(task => !task.wont_do && task.state === 'doing');
@@ -333,8 +333,8 @@ function agentBar(t) {
     h('span', {className:'dot ' + (line.startFailed ? 'error' : run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
     line.startFailed ? h('span', {className:'ab-text grow', 'data-key':'start-failed'}, clean(line.status))
       : h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), line.startFailed ? null : ticketWarmth(t, run, session),
-    snapshot ? null : h('div', {className:'ab-actions'}, liveLink ? h('a', {className:'btn outline', href:liveLink.url}, 'Watch live') : null,
-      run?.running ? ticketButton('Stop', 'outline', () => act('run.stop', {ticket:t.id})) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
+    snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn outline', href:liveLink.url}, 'Watch live') : null,
+      alive ? ticketButton('Stop', 'outline', () => act('run.stop', {ticket:t.id})) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
 }
 
 // "X is also changing this folder": one quiet line from the core (orch run status), no banner. A hint, not a lock.
@@ -1328,11 +1328,11 @@ function detail(t) {
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
     h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? null : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
-  const live = run?.running ? liveLinkFor(t) : null;
+  const alive = window.DashHelpers.helperAlive(t, run), live = alive ? liveLinkFor(t) : null;
   const [tone, word] = ticketStatusWord(t, run);
   const actions = snapshot ? null : h('div', {className:'plain-actions'},
     t.status === 'done' ? ticketButton('Reopen ticket', 'ghost sm', () => moveTicket(t.id, 'active'), {'data-key':'ticket-reopen'}) : null,
-    run?.running ? ticketButton('Stop helper', 'ghost sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : null, menu);
+    alive ? ticketButton('Stop helper', 'ghost sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : null, menu);
   const stateLine = h('p', {className:'state-line'}, t.owner ? h('span', {}, 'for ' + name(t.owner)) : null,
     h('strong', {className:'status-word status-change ' + tone, 'data-key':'status-' + t.status + '-' + tone}, word),
     h('span', {className:'muted'}, ticketStateSentence(t, run, fresh)),
@@ -1559,21 +1559,27 @@ async function openNeed(row, trigger) {
     window.orch.toast(result.ok ? 'Started again' : result.text, result.ok ? 'ok' : 'error');
     return;
   }
+  if (action.kind === 'start') {  // a background add-on stopped: one press starts it (no dialog to read first)
+    if (trigger.disabled) return;
+    trigger.disabled = true;
+    const result = await act('addon.start', {});
+    trigger.disabled = false;
+    window.orch.toast(result.ok ? 'Started' : result.text, result.ok ? 'ok' : 'error');
+    return;
+  }
   if (action.kind === 'answer' || action.kind === 'review') {
     const {d, actions} = dialog(row.title, 'dialog', 'needs-you');
     const host = el('div');
     d.append(host, actions);
     mountQuestion(host, {ticket:row.ticket, id:row.answer.question, digest:row.answer.digest, title:row.title, text:row.text, options:array(row.answer.options).map(o => ({text:o, suggested:o === row.answer.recommended}))}, {dialog:d, row:trigger.closest('[data-need-row]'), lock:'needs-you'});
     window.orch.open(d);
+    // "Write your own…" opens the answer box with its Send button at once, not a second page of choices
+    if (trigger.dataset?.write === 'own') d.querySelector('.qoptions .quiet')?.click();
   } else if (row.ticket) location.hash = href(row.ticket);
   else {
     const a = addons().find(a => a.dashboard && (a.name === row.source || String(row.kind).startsWith(a.name + ':')));
     if (a) location.hash = '#addon/' + encodeURIComponent(a.name);
-    else {
-      const {d, actions} = dialog(row.title);
-      d.append(el('p', 'preserve-lines', clean(row.text || 'No further details.')), actions);
-      window.orch.open(d);
-    }
+    else window.orch.toast(clean(row.text || row.title || 'Nothing to do here.'));  // nothing to press: say it, no dead-end dialog
   }
 }
 

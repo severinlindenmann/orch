@@ -377,3 +377,20 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     foot = v["blocks"][-1]
     assert foot["type"] == "footnote" and foot["link"]["to"] == "app:addon/relay"
     assert foot["text"].startswith("Incoming from your phone and other workspaces")
+
+
+def test_recent_runs_and_last_result_read_the_same_runs(ws):
+    """A run that started (Last result shows it) is in Recent runs too, never "Nothing has run yet"."""
+    add_ticket(
+        ws,
+        "t_rec00009",
+        title="Weekly report",
+        ext={"automation": {"recurring": True, "cron": "0 8 * * 1", "last_run": "2026-11-04T08:00:00Z"}},
+    )
+    v = build(ws, T(9))
+    check(v)
+    (table,) = blocks(v, "table")
+    assert table["rows"][0]["cells"]["last"].startswith("Started")
+    (lst,) = blocks(v, "list", "Recent runs")
+    assert [i["title"] for i in lst["items"]] == ["Weekly report"]
+    assert lst["items"][0]["chips"] == [{"label": "Started", "tone": "neutral"}]

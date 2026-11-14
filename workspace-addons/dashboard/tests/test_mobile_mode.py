@@ -119,6 +119,14 @@ def test_no_switch_when_the_relay_is_not_on(ws, act_orch):
     assert load_mobile(ws, None) is None
 
 
+def test_paired_phone_count_passes_through(ws, tmp_path):
+    for n, (sent, shown) in enumerate(((0, 0), (2, 2), (-1, None), (True, None), ("x", None), (None, None))):
+        sub = tmp_path / str(n)
+        sub.mkdir()
+        m = load_mobile(ws, str(fake(sub, {**OFF, "phones": sent})))
+        assert m["phones"] == shown
+
+
 def test_odd_values_are_cleaned(ws, tmp_path):
     orch = fake(
         tmp_path, {**OFF, "default_hours": 7, "awake": "maybe", "hours_choices": [3, 4], "machine": "x" * 500}

@@ -456,3 +456,45 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
 });
+test('home: headline, subtitle and badge are one number (questions + things to look at + results + changes)', () => {
+  const items = [{id:'a', title:'T a', status:'active'}, {id:'r1', title:'R one', status:'review'}, {id:'r2', title:'R two', status:'review'},
+    {id:'c1', title:'C one', status:'done', bring_back:{state:'waiting'}}];
+  const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
+  const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
+  const text = JSON.stringify(c.home());
+  assert.equal(c.needsToday().count, 4);
+  assert.match(text, /4 things need you/);
+  assert.match(text, /1 question · 2 results to check · 1 change to add/);
+});
+test('toasts: successes leave after 5 s even under the pointer, sit bottom-right and do not centre over the page', () => {
+  for (const dir of ['../src/orch_dashboard/web/kit', '../mockup/system']) {
+    const js = fs.readFileSync(path.join(__dirname, dir, 'components.js'), 'utf8'), css = fs.readFileSync(path.join(__dirname, dir, 'interaction.css'), 'utf8');
+    assert.doesNotMatch(js, /if\(box\.matches\(':hover'\)\|\|/);
+    assert.match(js, /undo&&box\.matches\(':hover'\)/);
+    assert.match(css, /\.ui-toasts\{[^}]*right:24px/);
+    assert.doesNotMatch(css, /\.ui-toasts\{[^}]*translateX\(-50%\)/);
+  }
+});
+test('home: an add-on row without a ticket carries the add-on display name, not its id', () => {
+  const needs = [{id:'n1', source:'sync', title:'sync', text:'Sync stopped', answer:{options:[]}}];
+  const c = context([], {needsList:() => needs, button:label => ({tag:'button', children:[label]}), addons:() => [{name:'sync', dashboard:{label:'Sync'}}], addonLabel:a => a.dashboard.label});
+  const text = JSON.stringify(c.home());
+  assert.doesNotMatch(text, /"sync"/);
+  assert.match(text, /Sync asked/);
+  assert.doesNotMatch(text, /(Helper|Claude) asked/);
+});
+test('Watch live and Stop exist only while a helper is at work (not on a ticket waiting for its check)', () => {
+  assert.equal(helpers.helperAlive({status:'active'}, {running:true}), true);
+  assert.equal(helpers.helperAlive({status:'review'}, {running:true}), false);
+  assert.equal(helpers.helperAlive({status:'done'}, {running:true}), false);
+  assert.equal(helpers.helperAlive({status:'active'}, {running:false}), false);
+  assert.equal(helpers.helperAlive({status:'active'}, null), false);
+  const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(ticket, /liveLink && alive \? h\('a'/); assert.match(ticket, /alive \? ticketButton\('Stop helper'/);
+  assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
+});
+test('the Automation page heading is the add-on menu name, not a second name', () => {
+  const settings = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
+  assert.doesNotMatch(settings, /heading\('Schedules'/);
+  assert.match(settings, /heading\(addonTitle\(a\), a\?\.dashboard\?\.subtitle \|\| 'Repeat work on a plan you choose\.'/);
+});
