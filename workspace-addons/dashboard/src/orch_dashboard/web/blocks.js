@@ -119,7 +119,7 @@ const OrchBlocks = (() => {
   function emptyState(e) {
     // The one master empty state (UI.state); the buttons stay real links checked by shownLink.
     let d;
-    if (window.UI && window.UI.state) { d = window.UI.state({kind: 'empty', title: e.title, text: e.text}); d.classList.add('blk-empty'); }
+    if (typeof window !== 'undefined' && window.UI && window.UI.state) { d = window.UI.state({kind: 'empty', title: e.title, text: e.text}); d.classList.add('blk-empty'); }
     else { d = el('div', 'empty blk-empty'); const mark = el('span', 'empty-mark', MARKS[e.mark] || MARKS.arrow); mark.setAttribute('aria-hidden', 'true'); d.append(mark, el('h3', '', e.title)); if (e.text) d.append(el('p', '', e.text)); }
     for (const [key, cls] of [['button', 'btn primary sm'], ['link', 'btn ghost sm']]) {
       const x = e[key]; if (!x || !shownLink(x.to)) continue;
