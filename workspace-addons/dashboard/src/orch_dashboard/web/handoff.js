@@ -108,7 +108,7 @@
       ok.disabled = true;
       post("handoff.confirm", i.id).then(function (r) {
         if (r.ok) {
-          if (r.status === 202) { updateStarted(); r.text().then(function (t) { banner(t); }); }
+          if (r.status === 202) { updateStarted(); r.text().then(function (t) { startedBanner = banner(t); }); }
           poll();
         } else { return r.text().then(function (t) { ok.disabled = false; banner(t); }); }
       });
@@ -186,10 +186,13 @@
     b.className = "banner info orch-notice"; b.style.cssText = "margin:8px 16px 0";
     var x = el("button", "Got it"); x.type = "button"; x.style.cssText = "margin-left:12px"; x.onclick = function () { b.remove(); };
     b.appendChild(x); place(b);
+    return b;
   }
   // the detached update: "Update finished" / "Update failed: <reason>" (also after the page reconnects)
   // The page stops waiting after 3 minutes (the start time survives the page reloading while orch restarts).
   var UPDATE_WAIT = 180000, UPDATE_KEY = "orch-update-started";
+  var startedBanner = null;  // "Update started": replaced by the outcome, never stacked with it
+  function startedGone() { if (startedBanner) { try { startedBanner.remove(); } catch (e) {} startedBanner = null; } }
   function updateStarted() { try { sessionStorage.setItem(UPDATE_KEY, String(Date.now())); } catch (e) {} }
   function updateDone() { try { sessionStorage.removeItem(UPDATE_KEY); } catch (e) {} }
   function updateOverdue(unreachable) {
@@ -201,7 +204,7 @@
     var t = unreachable === true
       ? "orch restarted. Reload the dashboard."
       : "The update did not finish. orch is still the old version. Start the update again when you are ready.";
-    if (t !== shown) { shown = t; banner(t); }
+    if (t !== shown) { shown = t; startedGone(); banner(t); }
   }
   function updateStatus() {
     var gone = false;
@@ -210,7 +213,7 @@
       updateDone();
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
       var t = s.state === "finished" ? "Update finished." : "Update failed: " + why + ".";
-      if (t !== shown) { shown = t; banner(t); }
+      if (t !== shown) { shown = t; startedGone(); banner(t); }
     }).catch(function () { updateOverdue(true); });
   }
   notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
