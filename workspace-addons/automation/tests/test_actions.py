@@ -139,7 +139,7 @@ def test_run_now_records_last_run_and_the_view_shows_it(ws):
     last = parse(ext(ws, "t_rec00001")["last_run"])
     assert last and before.replace(microsecond=0) <= last <= datetime.now(UTC)
     row = _schedules(tickets(ws), datetime.now(UTC))[0]
-    assert row["cells"]["last"] == last.astimezone().strftime("%a %d %b, %H:%M")
+    assert row["cells"]["last"] == f"Started \u00b7 {last.astimezone():%a %H:%M}"
 
 
 def test_run_now_without_a_schedule_writes_no_ext(ws):

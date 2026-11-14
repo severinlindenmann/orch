@@ -283,6 +283,7 @@ final class OutboxTests: XCTestCase {
         XCTAssertThrowsError(try ob.enqueue(MessageDraft(feedback: DraftFeedback(artifactId: "a_9b27f17f5357", artifactRev: "r1", verdict: .changes)), to: .topic(workspace: "ws_pilatus001", ticket: "t_q3sum1")))   // no pins
         XCTAssertNoThrow(try ob.enqueue(MessageDraft(feedback: DraftFeedback(artifactId: "a_9b27f17f5357", artifactRev: "r1", verdict: .approve)), to: .topic(workspace: "ws_pilatus001", ticket: "t_q3sum1")))
         XCTAssertEqual(ob.items.count, 1)
+        ob.flushWrites()
         XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.filter { $0 != "outbox.json" }.count, 1)
     }
     func testVoiceFeedbackPinsAndLocationUploadAndSend() async throws {

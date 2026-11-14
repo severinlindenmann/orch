@@ -24,7 +24,7 @@ dialog.ui-closing::backdrop{animation:ui-fade var(--ui-exit) reverse forwards}
 .ui-option{width:100%;text-align:left;display:block;padding:9px 10px;border:0;border-radius:5px;font:inherit;font-size:13px;color:inherit;background:transparent;cursor:pointer}
 .ui-option:hover,.ui-option:focus-visible{background:var(--surface-2,#f1f1f8);outline-offset:-2px}
 .ui-option[aria-selected=true]{background:var(--brand-soft,#173c33);font-weight:600}
-.ui-toasts{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:10000;width:max-content;max-width:calc(100vw - 32px)}
+.ui-toasts{position:fixed;bottom:24px;right:24px;z-index:10000;width:max-content;max-width:min(380px,calc(100vw - 32px))}
 .ui-toast{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--border,#ddd);border-radius:10px;background:var(--surface,#fff);box-shadow:0 8px 30px #17203425;animation:ui-enter 150ms ease-out}
 .ui-toast [role=status]{max-width:500px}
 .ui-calendar{width:360px}

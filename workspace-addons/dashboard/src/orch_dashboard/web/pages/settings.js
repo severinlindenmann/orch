@@ -235,6 +235,7 @@ function syncStatusLine(card) {
 }
 // "Not synced: tickets/t_x.json: secret" in the words a person reads; other texts stay as the add-on wrote them.
 const SYNC_WHY = {secret:'it may contain a password or access key', path:'its name or folder is never synced', 'cannot-check':'it could not be checked'};
+const SYNC_STOP = {secret:'a ticket or file may contain a password or access key', path:'a file name or folder is never synced', 'cannot-check':'a file could not be checked'};
 function syncPlainError(text) {
   const m = /^Not synced: (.+): (secret|path|cannot-check)$/.exec(String(text));
   if (!m) return String(text);
@@ -249,7 +250,7 @@ function syncLastError(card) {
 // Paused: what is wrong in one plain line, and the one button that goes to the place where the person decides.
 function syncPausedHelp(card) {
   const m = /^Not synced: .+: (secret|path|cannot-check)$/.exec(String(card.last_error || ''));
-  const what = m ? 'Sync stopped because a ticket or file ' + SYNC_WHY[m[1]] + '.' : 'Sync stopped because something needs your decision.';
+  const what = m ? 'Sync stopped: ' + SYNC_STOP[m[1]] + '.' : 'Sync stopped: something needs your decision.';
   const go = h('a', {className:'btn primary sm', href:'#home', 'data-key':'sync-paused-button'}, 'Review it now');
   go.addEventListener('click', event => { event.preventDefault(); location.hash = '#home'; requestAnimationFrame(() => { const n = document.getElementById('needs-you'); if (n) { n.scrollIntoView({block:'start'}); n.focus({preventScroll:true}); } }); });
   return h('div', {className:'sync-warn sync-paused', 'data-key':'sync-paused-help'}, h('p', {}, what), h('div', {className:'row'}, go));
@@ -741,12 +742,12 @@ function addonTab(id) {
     const a = addons().find(a => a.name === id);
     return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, syncCard(state.settings)));
   }
-  // The add-on that repeats tickets is the Schedules page: its main button sits in the heading.
+  // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
   if (panelOf(id) === 'repeats') {
     const add = snapshot ? null : h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ New schedule');
     if (add) add.onclick = () => repeatsDialog(null, id);
-    return fragment(heading('Schedules', 'Repeat work on a plan you choose.', {actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || 'Repeat work on a plan you choose.', {actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
   }
   return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {actions:slot}), addonHost(id));
 }
@@ -952,9 +953,10 @@ function repeatsDialog(only = null, addonName = null) {
     const plan = repeatPlan(choice);
     if (save.disabled || !ticket.value || !plan.phrase) return;
     save.disabled = true;
+    const label = save.textContent; save.textContent = 'Saving…';  // saving takes a few seconds: say so
     const result = await act('addon.act', {addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase});
     window.orch.toast(result.ok ? 'Schedule saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    save.disabled = false;
+    save.disabled = false; save.textContent = label;
     if (result.ok) await window.orch.close(d);
     if (route().kind === 'addon') await loadAddon(route().id);
   });
@@ -1014,9 +1016,10 @@ function repeatsDialog(only = null, addonName = null) {
   const remove = button('Delete schedule', 'outline danger', async () => {
     if (remove.disabled) return;
     remove.disabled = true;
+    const label = remove.textContent; remove.textContent = 'Removing…';
     const result = await act('addon.act', {addon:addonName || route().id, verb:'delete', target:only});
     window.orch.toast(result.ok ? 'Schedule removed. Its tickets stay.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    remove.disabled = false;
+    remove.disabled = false; remove.textContent = label;
     if (result.ok) await window.orch.close(d);
     if (route().kind === 'addon') await loadAddon(route().id);
   });

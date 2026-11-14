@@ -154,7 +154,16 @@ function editPin(pin,index=-1){viewer.edit={...pin,index};$('#pin-editor').inner
 function sendFeedback(){if(!viewer.pins.length){toast('Add a comment on the preview first.');return;}const v=viewer;closeModal(true);navigate(v.c);sendMessage('feedback','',{artifact:v.id,pins:v.pins});toast('Feedback sent to your helper');}
 
 // A workspace-scoped composer creates a topic for text, voice and attachments alike.
-function newChat(w=selectedWorkspace){selectedWorkspace=state.workspaces[w]?w:workspaces()[0];if(!selectedWorkspace){pair();return;}chat=selectedWorkspace;newTopicDraft=true;sheet('New topic',`<div class="destination-row"><span>To:</span>${actionButton('workspace-picker',esc(names[selectedWorkspace])+' ▾','','destination-button')}</div><footer class="composer" id="composer"></footer><p class="sheet-note">Start something with ${esc(names[selectedWorkspace])}.</p>`);renderComposer();requestAnimationFrame(()=>$('#message-input')?.focus());}
+let ntTimer=null,ntSecs=0;
+function ntClock(){return String(Math.floor(ntSecs/60)).padStart(2,'0')+':'+String(ntSecs%60).padStart(2,'0');}
+/* New topic, hands busy (phone E): workspace tiles, one huge mic, Photo / Camera, "Type instead"; recording state with big Send / Cancel. */
+function newChat(w=selectedWorkspace,mode='home'){selectedWorkspace=state.workspaces[w]?w:workspaces()[0];if(!selectedWorkspace){pair();return;}chat=selectedWorkspace;newTopicDraft=true;clearInterval(ntTimer);
+ const all=workspaces(),last=localStorage.getItem('orch-last-workspace'),order=[...(all.includes(last)?[last]:[]),...all.filter(c=>c!==last)];let shown=order.slice(0,3);if(!shown.includes(selectedWorkspace))shown[shown.length-1]=selectedWorkspace;
+ const nm=esc(names[selectedWorkspace]);
+ if(mode==='type'){sheet('New topic',`<div class="destination-row"><span>To:</span>${actionButton('workspace-picker',nm+' ▾','','destination-button')}</div><footer class="composer" id="composer"></footer><p class="sheet-note">Start something with ${nm}.</p>`);renderComposer();requestAnimationFrame(()=>$('#message-input')?.focus());return;}
+ if(mode==='rec'){ntSecs=0;sheet('New topic',`<div class="destination-row"><b>${nm}</b><span>new topic</span></div><p style="text-align:center;font-size:56px;font-weight:600;margin:28px 0 4px" id="ntClock">00:00</p><p style="text-align:center"><span style="color:#ff6b6b">●</span> Recording</p><div style="display:flex;justify-content:center;gap:5px;height:56px;align-items:center">${[18,34,50,26,44,20,38,52,24,40,16,30].map(h=>`<i style="width:6px;height:${h}px;background:#2fc6a3;border-radius:3px;display:block"></i>`).join('')}</div><div style="display:flex;flex-direction:column;align-items:center;gap:28px;margin-top:24px">${actionButton('nt-send','↑','','wide-btn primary')}${actionButton('nt-cancel','Cancel','','wide-btn')}</div>`);const b=$('[data-action="nt-send"]');if(b)b.style.cssText='width:96px;height:96px;border-radius:50%;font-size:36px';ntTimer=setInterval(()=>{ntSecs++;const c=$('#ntClock');if(c)c.textContent=ntClock();},1000);return;}
+ const tile=c=>actionButton('choose-destination',`<b>${esc(names[c])}</b>`,c,'destination-button'+(c===selectedWorkspace?' primary':''));
+ sheet('New topic',`<div class="destination-row">${all.length>1?shown.map(tile).join('')+(all.length>3?actionButton('nt-more','More','','destination-button'):''):'<span>To '+nm+'</span>'}</div><div style="display:flex;flex-direction:column;align-items:center;gap:6px;margin:20px 0"><button data-action="nt-mic" aria-label="Talk to ${nm}" style="width:168px;height:168px;border-radius:50%;border:0;background:#2fc6a3;font-size:64px">🎤</button><b style="font-size:22px">Tap and talk</b><span class="sheet-note">to ${nm}</span></div><div style="display:flex;gap:12px">${actionButton('nt-photo','Photo','','wide-btn')}${actionButton('nt-camera','Camera','','wide-btn')}</div><p style="text-align:center">${actionButton('nt-type','Type instead','','')}</p>`);}
 function createTopic(w,text){
  const id='topic-'+uid(),prefix=w==='rigi'?'RIG':w==='pilatus'?'PIL':names[w].slice(0,3).toUpperCase();
  const max=Math.max(12,...Object.keys(parent).filter(c=>parent[c]===w).map(c=>Number(names[c]?.split('-').at(-1))||0));
@@ -347,3 +356,11 @@ render();
 
 // Reset the versioned store atomically, including workspace/topic metadata.
 document.addEventListener('click',e=>{const a=e.target.closest('[data-action]')?.dataset.action;if(a==='reset'){e.stopImmediatePropagation();localStorage.removeItem(STORE);location.reload();}if(a==='close'&&newTopicDraft){if(recording)cancelRecord();newTopicDraft=false;}},true);
+
+document.addEventListener('click',e=>{const a=e.target.closest('[data-action]')?.dataset.action;if(!a||!a.startsWith('nt-'))return;e.stopImmediatePropagation();
+ if(a==='nt-mic')newChat(selectedWorkspace,'rec');else if(a==='nt-type')newChat(selectedWorkspace,'type');
+ else if(a==='nt-cancel'){clearInterval(ntTimer);newChat(selectedWorkspace);}
+ else if(a==='nt-send'){clearInterval(ntTimer);if(ntSecs<1){newChat(selectedWorkspace);return;}sendMessage('voice','',{transcript:'A new request by voice'});}
+ else if(a==='nt-more')sheet('Send to',`<div class="setting-block">${workspaces().map(c=>actionButton('choose-destination',esc(names[c]),c,'setting-row')).join('')}</div>`);
+ else if(a==='nt-photo'||a==='nt-camera'){clearInterval(ntTimer);sendMessage('photo','',{});}
+},true);

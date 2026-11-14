@@ -142,6 +142,36 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
 /// Delivered (second tick) and started/working come from the messages themselves (`ConversationBuilder`).
 /// Every retry reuses the item's `client_id`, so the relay never stores a message twice. Survives restarts; one folder per item
 /// holds its files. `directory` can be an app group container (see `defaultDirectory`).
+/// Writes `outbox.json` off the main actor. `submit` keeps only the newest items while a write is running.
+private final class IndexWriter: @unchecked Sendable {
+    static let queue = DispatchQueue(label: "io.severin.orch.outbox-index", qos: .utility)
+    private static let log = Logger(subsystem: "io.severin.orch", category: "outbox")
+    private let url: URL
+    private let lock = NSLock()
+    private var pending: [OutboxItem]?
+    private var scheduled = false
+    init(url: URL) { self.url = url }
+    func submit(_ items: [OutboxItem], result: @escaping @Sendable (String?) -> Void) {
+        lock.lock(); pending = items; let start = !scheduled; scheduled = true; lock.unlock()
+        guard start else { return }
+        Self.queue.async { [self] in
+            while true {
+                lock.lock()
+                guard let next = pending else { scheduled = false; lock.unlock(); return }
+                pending = nil; lock.unlock()
+                do {
+                    let d = try JSONEncoder().encode(next)
+                    try d.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                    result(nil)
+                } catch {
+                    Self.log.error("outbox save failed: \(error.localizedDescription, privacy: .public)")
+                    result(error.localizedDescription)
+                }
+            }
+        }
+    }
+}
+
 @MainActor @Observable
 final class Outbox {
     enum Event: Equatable {
@@ -167,6 +197,7 @@ final class Outbox {
 
     init(directory: URL, phone: String) {
         self.directory = directory; self.phone = phone
+        IndexWriter.queue.sync {}      // a write from an earlier Outbox on this folder must have landed before we read it
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
         if let d = try? Data(contentsOf: indexURL), let all = try? JSONDecoder().decode([OutboxItem].self, from: d) {
             items = all.filter { $0.phone == phone }
@@ -190,17 +221,16 @@ final class Outbox {
     /// Set when the index could not be written (disk full...): the queue only lives in memory until the next good save.
     private(set) var lastSaveError: String?
     private static let protection = FileProtectionType.completeUntilFirstUserAuthentication
+    /// The queue in memory is the truth and updates at once; the index file is written afterwards on a background queue,
+    /// coalesced (only the newest state is written when saves come in quick succession), atomic and file-protected as before.
     private func save() {
-        do {
-            let d = try JSONEncoder().encode(items)
-            try d.write(to: indexURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            lastSaveError = nil
-        } catch {
-            lastSaveError = error.localizedDescription
-            Self.log.error("outbox save failed: \(error.localizedDescription, privacy: .public)")
-            assertionFailure("outbox save failed: \(error)")
+        writer.submit(items) { [weak self] error in
+            Task { @MainActor in self?.lastSaveError = error }
         }
     }
+    @ObservationIgnored private lazy var writer = IndexWriter(url: indexURL)
+    /// Waits until every queued index write has reached the disk (restore, wipe and tests that read the file).
+    func flushWrites() { IndexWriter.queue.sync {} }
 
     // MARK: Enqueue
 
@@ -267,6 +297,7 @@ final class Outbox {
     /// Sign-out: nothing may stay for the next person.
     func wipe() {
         items = []
+        flushWrites()
         do { try fm.removeItem(at: directory) } catch { Self.log.error("outbox wipe failed: \(error.localizedDescription, privacy: .public)") }
         do { try fm.createDirectory(at: directory, withIntermediateDirectories: true) } catch { Self.log.error("outbox recreate failed: \(error.localizedDescription, privacy: .public)") }
     }
