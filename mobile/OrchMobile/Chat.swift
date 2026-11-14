@@ -7,6 +7,7 @@ enum ChatRoute: Hashable {
     case workspace(String)
     case general(String)   // the General conversation of a workspace (debug `-open general:<ws>`)
     case ticket(workspace: String, ticket: String)
+    case starting(workspace: String, id: String)   // a topic just sent, not acked yet: opens at once, turns into the ticket in place
     case group(host: String, id: String)
     case groupHistory
     case newChat

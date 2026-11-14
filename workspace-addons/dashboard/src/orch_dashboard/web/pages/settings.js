@@ -538,6 +538,8 @@ function settingsPage() {
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),
+      snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
+        h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'kit/gallery.html', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))),
       h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings))]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
@@ -873,6 +875,13 @@ async function addonAct(control) {
   actions.append(button('Yes', 'primary', async () => { await window.orch.close(d); send(); }));
   d.append(actions);
   window.orch.open(d);
+}
+// "Allow on this computer" on a schedule that came by sync: the person signs sync's own Allow for that ticket's
+// block (the sign step shows exactly the block); afterwards the page reads the add-on again.
+async function syncAllow(tid) {
+  const id = shownAddon();
+  if (!id || !/^t_[a-z0-9]{6,16}$/.test(String(tid)) || locks.has('addon-act')) return;
+  await signedAct({addon:SYNC, verb:'allow', target:tid + ':' + id}, 'Allowed on this computer.', () => loadAddon(id));
 }
 async function addonRadio(input) {
   const id = shownAddon();

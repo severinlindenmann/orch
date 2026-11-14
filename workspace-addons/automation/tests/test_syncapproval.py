@@ -225,3 +225,41 @@ def test_without_a_key_nothing_is_approved(tmp_path, root):
     (other / ".orch/run/sync/local-ext.json").write_text((root / ".orch/run/sync/local-ext.json").read_text())
     assert addons.workspace_id(other, create=False) is None
     assert not syncapproval.allowed(other, {"id": "t_new001", "ext": {"automation": {"enabled": True}}})
+
+
+def test_a_schedule_made_here_runs_even_though_the_sync_folder_exists(root, monkeypatch):
+    """The sync folder is there but sync never recorded anything (no local-ext.json): a schedule this computer
+    wrote is approved by this machine's own record, so Run now is not refused."""
+    block = {"enabled": True, "recurring": True}
+    assert not (root / ".orch/run/sync/local-ext.json").exists()
+    syncapproval.record_local(root, {"id": TID, "ext": {}}, block)  # what set_ext does at creation
+    ticket = {"id": TID, "ext": {"automation": block}}
+    assert syncapproval.allowed(root, ticket)
+    # started: the guard does not stop it (the fake run answers ok)
+    monkeypatch.setattr(orchcli, "ticket", lambda *a: ticket)
+    ran = SimpleNamespace(returncode=0, stdout='{"run": "r1", "log": "l"}', stderr="")
+    monkeypatch.setattr(
+        orchcli, "subprocess", SimpleNamespace(run=lambda *a, **k: ran, TimeoutExpired=TimeoutError)
+    )
+    assert orchcli.run_start(root, TID)["result"] == "started"
+    # a different block on the same ticket (arrived by sync) is not covered by that record
+    other = {"id": TID, "ext": {"automation": {"enabled": True, "recurring": False}}}
+    assert not syncapproval.allowed(root, other)
+    # another ticket is not covered either
+    assert not syncapproval.allowed(root, {"id": "t_other9", "ext": {"automation": block}})
+
+
+def test_a_synced_schedule_is_refused_until_it_is_allowed_here(root, monkeypatch):
+    block = {"enabled": True, "recurring": True}
+    ticket = {"id": TID, "ext": {"automation": block}}
+    write_ext(root, {TID: {}})  # sync received it; nobody allowed it here
+    no_start(monkeypatch, ticket)
+    assert orchcli.run_start(root, TID)["result"] == "failed"
+    write_ext(root, {TID: {"automation": digest(block)}})  # the person's Allow (sync records it)
+    assert syncapproval.allowed(root, ticket)
+
+
+def test_without_any_record_a_synced_schedule_stays_refused(root, monkeypatch):
+    ticket = {"id": TID, "ext": {"automation": {"enabled": True}}}
+    no_start(monkeypatch, ticket)  # no local-ext.json, no local-blocks.json
+    assert orchcli.run_start(root, TID)["result"] == "failed"

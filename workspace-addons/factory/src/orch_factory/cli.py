@@ -80,8 +80,9 @@ def main(argv=None):
         common.add_argument("--json", action="store_true")
         sub = parser.add_subparsers(dest="cmd", required=True)
         p = sub.add_parser("idea", parents=[common])
-        p.add_argument("title")
+        p.add_argument("title", nargs="?")
         p.add_argument("--file")
+        p.add_argument("--ticket", help="turn this existing ticket (e.g. one made from Chat) into the order")
         kinds = {"propose": "proposal", "autopilot": "autopilot", "change": "change", "stop": "stop"}
 
         def epilog(command):
@@ -161,7 +162,14 @@ def main(argv=None):
                 "change": flow.change,
                 "stop": flow.stop,
             }[args.cmd]
-            result = fn(root, target, data)
+            if args.cmd == "idea":
+                if bool(args.title) == bool(args.ticket):
+                    raise Refused(
+                        "Give a title for a new idea, or --ticket <id> to turn a ticket into one.", "invalid"
+                    )
+                result = commands.idea(root, args.title, data, args.ticket)
+            else:
+                result = fn(root, target, data)
         elif args.cmd in ("next", "ship"):
             result = {"next": flow.next_step, "ship": flow.ship}[args.cmd](root, args.order)
         elif args.cmd == "crew":

@@ -179,8 +179,7 @@ final class RealRelayE2ETests: XCTestCase {
     func test03NewTopicFromPlus() {
         let app = launch()
         must(app, app.buttons["new-chat"], "+ in Chats"); app.buttons["new-chat"].tap()
-        shot("30-plus-menu")
-        must(app, app.buttons["compose-new-topic"], "New topic"); app.buttons["compose-new-topic"].tap()
+        shot("30-new-topic")   // + opens New topic directly
         if app.buttons["nt-type"].waitForExistence(timeout: 10) { app.buttons["nt-type"].tap() }
         if app.buttons["workspace-picker"].waitForExistence(timeout: 3), app.buttons["workspace-picker"].isHittable {
             app.buttons["workspace-picker"].tap(); shot("31-workspace-picker")

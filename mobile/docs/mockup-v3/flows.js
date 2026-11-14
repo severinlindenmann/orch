@@ -96,7 +96,7 @@ function workspaceRow(c){
  return `<div class="workspace-entry" data-key="${c}"><button class="row-content" data-action="navigate" data-value="${c}">${avatar(c,true)}<span class="fill"><span class="title">${esc(names[c])}${state.workspaces[c].pinned?' · ⌖':''}${state.workspaces[c].muted?' · ◌':''}</span><span class="preview">${esc(ids.map(k=>state.drafts[k]).find(Boolean)?'Draft: '+ids.map(k=>state.drafts[k]).find(Boolean):(ids.some(busy)&&!n?'Working…':last?.text)||'Say hello to '+names[c])}</span>${w?`<span class="waiting-label">${w===1?'1 question':w+' questions'}</span>`:''}</span><span class="meta">${last?time(last):''}${n?`<span class="badge ${state.workspaces[c].muted?'muted':''}">${n}</span>`:''}</span></button>${btn('navigate','Open workspace','chevron',`data-value="${c}"`)}</div>`;
 }
 renderChats=function(){
- contentRoot().innerHTML=`<div class="list-head">${btn('navigate','Settings','settings','data-value="settings"')}<h2 data-title="Chats">${title('Chats')}</h2><div>${btn('compose-menu','Compose','plus')}</div></div><div id="mini-slot"></div><div class="search revealed">${icon('search')}<input id="search" placeholder="Search chats and messages" aria-label="Search chats and messages" value="${esc(query)}"></div><div class="chips">${['All','Unread','Needs your OK'].map(f=>actionButton('filter',f,f,`chip ${filter===f?'active':''}`)).join('')}</div>${needsYouStrip()}<div class="scroll" id="chat-list">${workspaces().length?listRows():`<div class="empty"><img class="quiet-logo" src="logo.svg" alt=""><h3>No workspaces</h3><p>Pair a workspace to bring your work here.</p>${actionButton('pair','Pair a workspace')}</div>`}</div>`;
+ contentRoot().innerHTML=`<div class="list-head">${btn('navigate','Settings','settings','data-value="settings"')}<h2 data-title="Chats">${title('Chats')}</h2><div>${btn('new-chat','New topic','plus')}</div></div><div id="mini-slot"></div><div class="search revealed">${icon('search')}<input id="search" placeholder="Search chats and messages" aria-label="Search chats and messages" value="${esc(query)}"></div><div class="chips">${['All','Unread','Needs your OK'].map(f=>actionButton('filter',f,f,`chip ${filter===f?'active':''}`)).join('')}</div>${needsYouStrip()}<div class="scroll" id="chat-list">${workspaces().length?listRows():`<div class="empty"><img class="quiet-logo" src="logo.svg" alt=""><h3>No workspaces</h3><p>Pair a workspace to bring your work here.</p>${actionButton('pair','Pair a workspace')}</div>`}</div>`;
  $('#search').oninput=e=>{query=e.target.value;$('#chat-list').innerHTML=listRows();};
 }
 function topicRow(c){const t=state.topics[c],m=state.messages[c]?.at(-1);if(!t)return '';return `<button class="row-content topic-row" data-action="navigate" data-value="${c}"><span class="topic-symbol ${statusFor(c)==='Needs your OK'?'amber':''}">#</span><span class="fill"><span class="title">${esc(topicTitle(c))}</span><span class="topic-status ${statusFor(c)==='Needs your OK'?'amber':''}">${esc(topicDay(c))} · ${esc(statusFor(c))}</span><span class="preview">${esc(m?.text||'Updates and results show up here.')}</span></span>${unread(c)?`<span class="badge">${unread(c)}</span>`:icon('chevron')}</button>`;}
@@ -153,6 +153,7 @@ function openArtifact(id,keep=false){
 function editPin(pin,index=-1){viewer.edit={...pin,index};$('#pin-editor').innerHTML=`<label>Comment ${index<0?viewer.pins.length+1:index+1}<textarea id="pin-text" class="caption-input" placeholder="What should change?">${esc(pin.text)}</textarea></label><div class="pin-editor-actions">${actionButton('pin-voice','🎤 Speak','','chip')}${actionButton('pin-save','Save comment','','chip')}${actionButton('pin-cancel','Cancel','','chip')}</div>`;$('#pin-text').focus();}
 function sendFeedback(){if(!viewer.pins.length){toast('Add a comment on the preview first.');return;}const v=viewer;closeModal(true);navigate(v.c);sendMessage('feedback','',{artifact:v.id,pins:v.pins});toast('Feedback sent to your helper');}
 
+// "+" in Chats opens New topic directly (Add workspace lives in Settings); after Send the new topic's chat opens at once ("Getting started…", then the real topic in place).
 // A workspace-scoped composer creates a topic for text, voice and attachments alike.
 let ntTimer=null,ntSecs=0,ntText='';
 function ntClock(){return String(Math.floor(ntSecs/60)).padStart(2,'0')+':'+String(ntSecs%60).padStart(2,'0');}
@@ -271,7 +272,6 @@ renderPush=function(){
 document.addEventListener('click',async e=>{
  const el=e.target.closest('[data-action]');if(!el||el.disabled)return;const a=el.dataset.action,v=el.dataset.value;
  switch(a){
- case 'compose-menu':sheet('Compose',`${actionButton('new-chat','New topic')}${actionButton('pair','Add workspace')}`);break;
  case 'new-chat':newChat(v||selectedWorkspace);break;
  case 'pick-workspace':if(recording)cancelRecord();newChat(v);break;
  case 'topic-segment':topicSegment=v;renderTopics();enhanceScreen();break;

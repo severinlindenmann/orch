@@ -20,6 +20,13 @@ the crew works → stops → Ship it**. Propose, don't configure: never hand the
 
     orch factory idea "Online booking page" --file draft.md      # creates the order, stores draft v1
 
+Do this yourself, also when the owner writes in Chat ("plan it as a factory run", "make this happen"): file the idea with
+`orch factory idea`, then answer in Chat (`orch chat reply`) with 3–5 lines and "It is in Factory now." Do NOT offer a
+"Make ticket" proposal card for it: that makes a plain ticket that Factory does not see. If the owner already made a ticket
+from Chat for a Factory run (you are working on it), turn that ticket into the order instead of making a second one:
+
+    orch factory idea --ticket <id> [--file draft.md]            # its Chat note becomes draft v1 without --file
+
 The draft is one short page in plain words: what it is, for whom, 3 rough parts or screens, open questions. Answer in the
 chat with 3–5 lines and say where the draft is. Keep it small: the goal is that you and the owner mean the same thing.
 

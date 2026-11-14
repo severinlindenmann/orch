@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="kit/components.css">
 <link rel="stylesheet" href="kit/motion.css">
 <link rel="stylesheet" href="kit/interaction.css">
+<link rel="stylesheet" href="kit/widgets.css">
 <link rel="stylesheet" href="kit/fileviewer.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="pages/home.css">
@@ -36,13 +37,14 @@
 <p class="meta side-mode" id="workspace-mode"></p>
 </div>
 <div class="side-foot">
+<div id="side-person" class="person-switch" hidden></div>
 <button type="button" class="mm-toggle phone-toggle" id="mm-toggle" role="switch" aria-checked="false" data-testid="mobile-mode-toggle" hidden><span class="mm-label">Send questions to my phone</span><i class="mm-sw"></i></button>
 <nav id="side-settings" class="side-settings" aria-label="Settings"></nav>
 </div>
 </aside>
 <div class="shell-body">
 <div id="mm-bar" class="mm-bar" hidden></div>
-<header class="topbar"><a class="topbar-ws" id="topbar-ws" href="#home" aria-label="Home"><img src="logo.svg" alt=""></a><span class="meta breadcrumb"><span id="crumb">Home</span><span id="updated"></span></span><span class="topbar-actions"><button type="button" class="btn ghost sm" id="open-agent" data-action="open-agent" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Ask the helper</button><button type="button" class="btn primary sm" id="new-ticket" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</button><button type="button" class="btn ghost sm mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-menu">Menu</button></span></header>
+<header class="topbar"><a class="topbar-ws" id="topbar-ws" href="#home" aria-label="Home"><img src="logo.svg" alt=""></a><span class="meta breadcrumb"><span id="crumb">Home</span><span id="updated"></span></span><a class="topbar-wait meta" id="topbar-wait" href="#home" hidden></a><span class="topbar-actions"><button type="button" class="btn ghost sm" id="open-agent" data-action="open-agent" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2 6 7 3-7 2-2 7-2-7-7-2 7-3z"/></svg>Ask the helper</button><button type="button" class="btn primary sm" id="new-ticket" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New ticket</button><button type="button" class="btn ghost sm mobile-menu" id="menu-toggle" aria-expanded="false" aria-controls="side-menu">Menu</button></span></header>
 <div id="connection" class="banner attn" role="status" hidden></div>
 <main id="content" class="page" tabindex="-1" aria-label="Dashboard"><div class="skeleton-page sk-home loading-home" aria-busy="true"><p class="sr-only" role="status">Loading…</p><div class="skeleton sk-title" aria-hidden="true"></div><div class="skeleton sk-card" aria-hidden="true"></div><div class="skeleton sk-card" aria-hidden="true"></div></div></main>
 </div>
@@ -53,6 +55,7 @@
 <script src="kit/overlay.js"></script>
 <script src="kit/components.js"></script>
 <script src="kit/select.js"></script>
+<script src="kit/widgets.js"></script>
 <script src="kit/date.js"></script>
 <script src="kit/question-card-state.js"></script>
 <script src="kit/question-card.js"></script>
@@ -61,6 +64,7 @@
 <script src="helpers.js"></script>
 <script src="blocks.js"></script>
 <script src="mobile-mode.js"></script>
+<script src="people.js"></script>
 <script src="look-icons.js"></script>
 <script src="look.js"></script>
 <script src="switcher.js"></script>

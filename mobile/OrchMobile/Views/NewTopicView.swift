@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 /// New topic, built for busy hands (driving, carrying): pick the workspace tile, one huge microphone, Photo / Camera, and
 /// "Type instead" for the old text field. With the "Start recording right away" setting the screen opens recording.
@@ -16,7 +17,9 @@ struct NewTopicScreen: View {
     @State private var selectedId: String?
     @State private var picking = false
     @State private var morePicking = false
-    @State private var media: MediaPicker.Start?
+    @State private var photosOpen = false
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var cameraOpen = false
     @State private var error: String?
     @State private var success = 0
     @State private var autoStarted = false
@@ -53,8 +56,15 @@ struct NewTopicScreen: View {
         }
         .sheet(isPresented: $picking) { ShellWorkspacePicker(selectedId: selected?.id) { id in choose(id) } }
         .sheet(isPresented: $morePicking) { WorkspaceGridPicker(selectedId: selected?.id) { id in choose(id) } }
-        .sheet(item: $media) { start in
-            MediaPicker(start: start) { selection in Task { await sendMedia(selection) } }.tint(Theme.brand)
+        // Photo and Camera open the system picker straight away (no choices sheet in between); the picture is sent as it is.
+        .photosPicker(isPresented: $photosOpen, selection: $photoItems, maxSelectionCount: 10, matching: .images)
+        .task(id: photoItems) { await sendPhotos() }
+        .fullScreenCover(isPresented: $cameraOpen) {
+            MediaCamera { result in
+                cameraOpen = false
+                if case .success(let data)? = result { Task { await sendPictures(data, name: { _ in "photo.jpg" }) } }
+                else if case .failure(let e)? = result { error = e.localizedDescription }
+            }.ignoresSafeArea()
         }
     }
 
@@ -78,8 +88,8 @@ struct NewTopicScreen: View {
                     }.accessibilityHidden(true)
                     if let error { Text(error).themeFont(14).foregroundStyle(Theme.danger).multilineTextAlignment(.center) }
                     HStack(spacing: 12) {
-                        bigButton("Photo", "photo", "nt-photo") { media = .library }
-                        if UIImagePickerController.isSourceTypeAvailable(.camera) { bigButton("Camera", "camera", "nt-camera") { media = .camera } }
+                        bigButton("Photo", "photo", "nt-photo") { photosOpen = true }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) { bigButton("Camera", "camera", "nt-camera") { cameraOpen = true } }
                     }
                     Button { mode = .typing } label: {
                         Text("Type instead").themeFont(15, .semibold).foregroundStyle(Theme.muted)
@@ -172,6 +182,27 @@ struct NewTopicScreen: View {
         guard selected != nil, mode != .recording else { return }
         error = nil; mode = .recording
     }
+    private func sendPhotos() async {
+        guard !photoItems.isEmpty else { return }
+        let items = photoItems; photoItems = []
+        var data: [Data] = []
+        for item in items {
+            guard let bytes = try? await item.loadTransferable(type: Data.self) else { error = MediaPrep.Problem.notAnImage.localizedDescription; return }
+            data.append(bytes)
+        }
+        await sendPictures(data, name: { "photo-\($0 + 1).jpg" })
+    }
+    /// Pictures from the system picker or the camera: the topic starts with them, no preview step.
+    private func sendPictures(_ data: [Data], name: (Int) -> String) async {
+        var prepared: [DraftFile] = []
+        do {
+            for (i, bytes) in data.enumerated() { prepared.append(try MediaPrep.photoDraft(from: bytes, name: name(i))) }
+        } catch {
+            for file in prepared { try? FileManager.default.removeItem(at: file.url) }
+            self.error = error.localizedDescription; return
+        }
+        await sendMedia(.files(prepared, caption: nil))
+    }
     /// A photo or camera shot from the big buttons: the topic starts with that picture.
     private func sendMedia(_ selection: MediaSelection) async {
         defer { selection.cleanUp() }
@@ -189,30 +220,15 @@ struct NewTopicScreen: View {
         } catch { self.error = error.localizedDescription }
     }
     private func remember() { if let id = selected?.id { lastUsed = id } }
-    /// The first message is queued or sent: leave the sheet and show the workspace (the topic reads "Starting topic…").
-    /// When the workspace acks within a few seconds the new topic opens by itself.
+    /// The first message is queued or sent: leave the sheet and open the new chat at once. It shows the sent message; when the
+    /// workspace acks, the chat turns into the real topic in place. Back goes to the workspace.
     private func opened() {
         guard let ws = selected?.id else { return }
-        model.path = [.workspace(ws)]
+        model.path = NewTopicRules.pathAfterSend(workspace: ws, topics: model.workspaceSummaries.first { $0.id == ws }?.topics ?? [])
         if asSheet { dismiss() }
-        Task { @MainActor in
-            for _ in 0..<15 {
-                // Newest text this phone sent to the workspace; the workspace's ack names the ticket it started.
-                let mine = model.messages.filter { $0.fromPhone && $0.workspaceId == ws }.max { $0.message.createdAt < $1.message.createdAt }
-                if let mine, let ticket = mine.message.ticket ?? model.ack(for: mine.id)?.ticket,
-                   model.path == [.workspace(ws)] {
-                    model.path = [.workspace(ws), .ticket(workspace: ws, ticket: ticket)]; return
-                }
-                try? await Task.sleep(for: .milliseconds(700))
-                await model.reloadMessages(); await model.refreshUpdates()
-                guard model.path == [.workspace(ws)] else { return }   // the person went elsewhere
-            }
-        }
     }
 }
 
-
-extension MediaPicker.Start: Identifiable { var id: Int { self == .library ? 0 : 1 } }
 
 /// "Send to": every workspace as a big tile, one tap picks and closes.
 private struct WorkspaceGridPicker: View {

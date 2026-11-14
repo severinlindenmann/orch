@@ -93,3 +93,21 @@ final class NewTopicOneTopicTests: XCTestCase {
         XCTAssertTrue(NewTopicVoiceFlow.restDrafts([d("a")]).isEmpty)
     }
 }
+
+final class NewTopicAfterSendTests: XCTestCase {
+    private func topic(_ id: ConversationID, at: String, starting: Bool) -> TopicSummary {
+        TopicSummary(id: id, title: "t", key: nil, status: .working, lastLine: "", lastAt: at, unread: 0, isStarting: starting, ticket: nil)
+    }
+    func testAfterSendOpensTheStartingChatOnTopOfTheWorkspace() {
+        let topics = [topic(.topic(workspace: "w", ticket: "t_old"), at: "2026-11-14T10:00:00Z", starting: false),
+                      topic(.starting(workspace: "w", id: "c1"), at: "2026-11-14T11:00:00Z", starting: true)]
+        XCTAssertEqual(NewTopicRules.pathAfterSend(workspace: "w", topics: topics), [.workspace("w"), .starting(workspace: "w", id: "c1")])
+    }
+    func testAfterSendOpensTheTicketWhenTheAckAlreadyCame() {
+        let topics = [topic(.topic(workspace: "w", ticket: "t_new"), at: "2026-11-14T11:00:00Z", starting: false)]
+        XCTAssertEqual(NewTopicRules.pathAfterSend(workspace: "w", topics: topics), [.workspace("w"), .ticket(workspace: "w", ticket: "t_new")])
+    }
+    func testAfterSendWithNothingFoundStaysOnTheWorkspace() {
+        XCTAssertEqual(NewTopicRules.pathAfterSend(workspace: "w", topics: []), [.workspace("w")])
+    }
+}

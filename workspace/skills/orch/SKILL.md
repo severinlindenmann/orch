@@ -29,6 +29,9 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
     orch ticket new "<title>"             # none fits
     orch ticket show <id>                 # read it before you work
     orch ticket status <id> active
+    orch ticket tidy <id> "<short clear title>" [--owner <name>] [--due YYYY-MM-DD] [--done-when "<one line>"]
+                                        # a NEW ticket, first thing, no asking: fix typos, short clear title, and owner / due /
+                                        # done-when only where the person's text says them (their title stays in the history)
     orch check add <id> "<step>"          # one per piece of the person's work, plain words (no ids, paths, commands);
                                         # BEFORE you start; 0 steps is wrong
     orch check start <id> <c>             # the step you work on now
