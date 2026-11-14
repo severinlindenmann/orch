@@ -870,8 +870,8 @@ def write_local_file(root: Path, fn: str, line: str | None, harness_root: Path |
         imp = HARNESS / "AGENTS.orch.md"
         if harness_root:
             # a separate copy has no .orch/harness of its own. It gets the workspace's AGENTS.orch.md as a
-            # file of its own, imported relatively: an import outside the folder the tool runs in makes
-            # Claude Code ask "Allow external CLAUDE.md file imports?" and an unattended helper hangs there
+            # file of its own, imported relatively: an import outside the folder the tool runs in makes the
+            # agent tool ask to allow external imports, and an unattended helper hangs there
             own = root / COPY_HARNESS
             if is_link(own) or (own.exists() and not own.is_dir()) or is_link(own / "AGENTS.orch.md"):
                 return False

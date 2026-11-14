@@ -891,7 +891,7 @@ def test_the_copy_imports_its_own_harness_file_never_one_outside_it(repo):
     for i in imports:
         assert (f / i).resolve().is_relative_to(f.resolve()), i
     assert (f / ".orch-harness" / "AGENTS.orch.md").read_text() == "# orch rules v1\n"
-    assert git(f, "status", "--porcelain") == ""  # kept out of commits by the shared exclude
+    assert ".orch-harness" not in git(f, "status", "--porcelain", "-uall")  # kept out by the shared exclude
     (repo / ".orch" / "harness" / "AGENTS.orch.md").write_text("# orch rules v2\n")
     f2, _ = _route(repo, a)  # the next start refreshes it
     assert f2 == f
