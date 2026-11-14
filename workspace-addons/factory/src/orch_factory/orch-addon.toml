@@ -29,3 +29,8 @@ format = "text"
 field = "eta"
 label = "ETA"
 format = "time"
+
+[acts.idea]
+summary = "File the idea box's text as a new order and start your agent on its first draft"
+who = "people"
+writes = ["ext.factory"]

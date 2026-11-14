@@ -7,10 +7,11 @@ import subprocess
 from .store import Refused
 
 
-def call(root, *args, write=False):
+def call(root, *args, write=False, by=None):
+    """`by`: who a write is recorded as (a person's dashboard click passes `human:<name>`); default the add-on."""
     cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"]
     if write:
-        cmd += ["--by", "agent:factory"]
+        cmd += ["--by", by or "agent:factory"]
     env = dict(os.environ, ORCH_ROOT=str(root))
     try:
         result = subprocess.run(
@@ -44,7 +45,7 @@ def tickets(root):
     return call(root, "ticket", "list", "--all")
 
 
-def set_ext(root, ticket, **changes):
+def set_ext(root, ticket, by=None, **changes):
     ext = dict(ticket.get("ext", {}).get("factory", {}))
     ext.update(changes)
     return call(
@@ -57,4 +58,5 @@ def set_ext(root, ticket, **changes):
         "--if-revision",
         str(ticket["revision"]),
         write=True,
+        by=by,
     )

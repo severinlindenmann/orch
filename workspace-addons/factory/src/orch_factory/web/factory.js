@@ -175,18 +175,52 @@
       ...(b.warn ? [meta('Budget needs attention · review the order ticket.')] : []));
   }
   const tail = (...nodes) => group('actions', ...nodes);
-  // The page is read-only: an idea or a change of "Ask me at every stop" goes to your helper in Chat as typed text (postMessage to the dashboard); you press Send there.
+  // The page never writes by itself. "Ask me at every stop" goes to your helper in Chat as typed text (you press Send
+  // there). The idea box asks the dashboard to file the idea as YOUR click (orch.idea): the dashboard checks this frame and
+  // runs the person's action with your page session; it answers orch.idea.done {id, order} or orch.idea.failed {id, error}.
   function toChat(message) {
     window.parent.postMessage({type: 'orch.say', text: message}, location.origin);
+  }
+  const IDEA_MAX = 500;
+  const ideaWait = new Map();  // request id -> callback, for the dashboard's answer
+  window.addEventListener('message', e => {
+    const d = e.data;
+    if (e.source !== window.parent || e.origin !== location.origin || !d || typeof d.id !== 'string' || !ideaWait.has(d.id)) return;
+    if (d.type === 'orch.idea.done' && validId(d.order)) ideaWait.get(d.id)({order: d.order});
+    else if (d.type === 'orch.idea.failed') ideaWait.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+  });
+  function fileIdea(textValue) {
+    return new Promise(resolve => {
+      const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
+      const timer = setTimeout(() => finish({error: ''}), 30000);  // an older dashboard never answers
+      function finish(result) { clearTimeout(timer); ideaWait.delete(id); resolve(result); }
+      ideaWait.set(id, finish);
+      window.parent.postMessage({type: 'orch.idea', id, text: textValue}, location.origin);
+    });
   }
   function ideaBox() {
     const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));
     const field = node('textarea', null, 'text-input'); field.rows = 3; field.setAttribute('aria-label', 'Your idea');
-    field.placeholder = 'For example: a page that shows our opening hours'; field.style.width = '100%';
+    field.placeholder = 'For example: a page that shows our opening hours'; field.style.width = '100%'; field.maxLength = IDEA_MAX;
     const go = node('button', 'Start with this idea', 'btn primary'); go.type = 'button'; go.disabled = true;
-    field.addEventListener('input', () => { go.disabled = !field.value.trim(); });
-    go.addEventListener('click', () => { if (field.value.trim()) toChat('Factory: ' + field.value.trim()); });
-    el.append(field, group('row', go)); el.classList.add('f-idea'); return el;
+    const status = node('p', null, 'meta f-idea-status'); status.setAttribute('role', 'status'); status.hidden = true;
+    const fallback = node('button', 'Send it to your helper in Chat instead', 'btn outline sm'); fallback.type = 'button'; fallback.hidden = true;
+    const say = value => { status.textContent = value; status.hidden = !value; };
+    field.addEventListener('input', () => { go.disabled = !field.value.trim(); fallback.hidden = true; say(''); });
+    fallback.addEventListener('click', () => { if (field.value.trim()) toChat('Factory: ' + field.value.trim()); });
+    go.addEventListener('click', async () => {
+      const idea = field.value.trim();
+      if (!idea) return;
+      if (!embedded()) { say('Open Factory in the dashboard to start an idea with one click.'); return; }
+      go.disabled = true; field.readOnly = true; fallback.hidden = true; say('Saving your idea…');
+      const result = await fileIdea(idea);
+      field.readOnly = false;
+      if (result.order) { field.value = ''; say(''); location.hash = '#/order/' + result.order + '/draft/1'; return; }
+      go.disabled = false;
+      say((result.error ? result.error + ' ' : "That didn't work. ") + 'Your idea is still here.');
+      fallback.hidden = false;
+    });
+    el.append(field, group('row', go, fallback), status); el.classList.add('f-idea'); return el;
   }
   function askRow(auto) {
     const asks = !auto?.on, row = group('setting-row f-ask');

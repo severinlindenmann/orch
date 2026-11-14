@@ -15,6 +15,10 @@ things it just does and notes (at most 3 changes or 30 minutes in total); anythi
 with the extra time and the new ETA (**Accept**, **Edit**, **Save for later**). At the last stop you decide **Ship it** or
 **Send back**.
 
+Or type it straight into **Start with an idea** on the Factory page in the dashboard: one click saves it as a new order (as
+you, not as an agent), starts your agent on the first draft and opens the draft. If that can't be done (for example the
+page is open without your dashboard session), your text stays and one more click sends it to your helper in Chat instead.
+
 **Autopilot.** You can also ask the agent to keep improving how you work. It proposes an autopilot for 1, 3 or 7 days with
 what it may decide alone (routine and taste items) and its limits. Shipping, scope changes, more budget, new connections,
 anything that cannot be undone and other workspaces always come back to you. Every decision it takes alone is logged with
