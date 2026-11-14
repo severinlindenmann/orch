@@ -21,6 +21,7 @@ EXPECTED = {
         ("do_POST", "can_mint"),  # /api/act (every op, handoff.confirm/dismiss, notice.ack), proxied act
         ("do_POST", "mint"),  # the callable handed down ONLY when can_mint passed
         ("_session_post", "launch"),
+        ("_term_keys", "can_mint"),  # POST /api/term/keys: typing into the live helper session (person only)
     },
     "focus": {
         ("_area_op", "can_mint"),  # area.accept / area.remove
