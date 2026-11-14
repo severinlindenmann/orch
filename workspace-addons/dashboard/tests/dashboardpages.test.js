@@ -483,3 +483,13 @@ test('home: an add-on row without a ticket carries the add-on display name, not 
   assert.match(text, /Sync asked/);
   assert.doesNotMatch(text, /(Helper|Claude) asked/);
 });
+test('Watch live and Stop exist only while a helper is at work (not on a ticket waiting for its check)', () => {
+  assert.equal(helpers.helperAlive({status:'active'}, {running:true}), true);
+  assert.equal(helpers.helperAlive({status:'review'}, {running:true}), false);
+  assert.equal(helpers.helperAlive({status:'done'}, {running:true}), false);
+  assert.equal(helpers.helperAlive({status:'active'}, {running:false}), false);
+  assert.equal(helpers.helperAlive({status:'active'}, null), false);
+  const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(ticket, /liveLink && alive \? h\('a'/); assert.match(ticket, /alive \? ticketButton\('Stop helper'/);
+  assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
+});
