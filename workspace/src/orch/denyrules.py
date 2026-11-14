@@ -202,7 +202,16 @@ def copies_rules(
             break
 
     def row(path: str) -> dict:
-        return {"root": "copies", "path": path, "read": True, **path_forms(path, workspace, account_home)}
+        # file tools only: a shell text pattern is a substring match, so a sibling named like a prefix of
+        # the agent's own folder (`t_1` next to `t_10`, or one the agent made) would refuse every shell
+        # command naming its own folder; and `../sibling` is reachable by the shell anyway
+        return {
+            "root": "copies",
+            "path": path,
+            "read": True,
+            **path_forms(path, workspace, account_home),
+            "text": [],
+        }
 
     if own is None:
         return [row(_norm(b)) for b in dict.fromkeys(bases)]

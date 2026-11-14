@@ -624,4 +624,16 @@ def test_windows_copy_paths_any_case_find_the_own_copy():
     out = denyrules.copies_rules("C:\\Users\\Bob\\proj", ws, "C:\\Users\\Bob", bases)
     pats = _set(out)
     assert "Read(//c/Users/Bob/.orch-work/**)" in pats and "Edit(C:/Users/Bob/.orch-work/**)" in pats
-    assert "Bash(*~\\.orch-work*)" in pats and "Bash(*%USERPROFILE%\\.orch-work*)" in pats
+    assert not any(p.startswith("Bash(") for p in pats)  # file tools only (see copies_rules)
+
+
+def test_a_sibling_named_like_a_prefix_of_the_own_copy_never_blocks_its_shell(proj_ws):
+    home, base, own = _copy_world(proj_ws)
+    (base / "ab12cd34" / "t_own").mkdir()  # an agent can make such a name
+    (base / "ab").mkdir()
+    argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, own)
+    pats = argv[argv.index("--disallowedTools") + 1].split(",")
+    texts = [p[len("Bash(*") : -2] for p in pats if p.startswith("Bash(*")]
+    assert not any(t in f"cd {own} && ls" for t in texts)
+    assert _covered(pats, "Read", str(base / "ab12cd34" / "t_own" / "x"))
+    assert not _covered(pats, "Read", str(own / "x"))

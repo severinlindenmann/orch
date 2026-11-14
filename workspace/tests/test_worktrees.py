@@ -827,5 +827,43 @@ def test_a_copy_inside_the_orch_home_moves_out_at_the_next_start_with_its_change
 def test_an_old_place_copy_of_another_owner_stays_where_it_is(repo):
     a, _ = repo.tids
     new, old = _to_old_place(repo, a, owner="/somewhere/else")
-    assert worktrees._move_legacy(repo, a) is False
+    assert worktrees._move_legacy(repo, a) == "the old copy belongs to another project"
     assert old.is_dir() and (old / "wip.txt").exists() and not new.exists()
+    folder, notes = _route(repo, a)  # the start works in the project folder and says why
+    assert folder == repo and "could not be moved out" in notes[0] and old.is_dir()
+
+
+def test_a_move_that_git_did_but_the_registry_missed_is_recorded_next_time(repo):
+    a, _ = repo.tids
+    new, old = _to_old_place(repo, a)
+    git(repo, "worktree", "move", str(old), str(new))  # git moved it; orch crashed before writing its list
+    assert worktrees._move_legacy(repo, a) is None
+    assert worktrees.registry(repo)[a]["paths"][0]["path"] == str(new)
+    assert (new / "wip.txt").read_text() == "not committed\n"
+
+
+def test_the_sweep_moves_every_old_place_copy_out_also_of_tickets_never_started_again(repo):
+    a, b = repo.tids
+    new_a, old_a = _to_old_place(repo, a)
+    worktrees.sweep(repo)
+    assert worktrees.registry(repo)[a]["paths"][0]["path"] == str(new_a) and new_a.is_dir()
+    assert not old_a.exists()
+
+
+def test_an_old_place_copy_that_is_gone_is_made_again_in_the_new_place(repo):
+    import shutil
+
+    a, _ = repo.tids
+    new, old = _to_old_place(repo, a)
+    shutil.rmtree(old)
+    folder, notes = _route(repo, a)
+    assert folder == new and new.is_dir() and worktrees.is_orch_copy(new)
+    assert worktrees.registry(repo)[a]["paths"][0]["path"] == str(new)
+
+
+def test_the_copies_folder_never_carries_the_homes_name(tmp_path):
+    for name in ("orch-work", ".orch-w", "work-1"):
+        h = tmp_path / "p" / name
+        h.mkdir(parents=True)
+        b = addons.copies_base(h)
+        assert not addons.names_clash(h, b) and b.parent == h.resolve().parent, (name, b)

@@ -415,9 +415,22 @@ def copies_base(h: Path) -> Path:
     `~/.orch-tool` -> `~/.orch-work`; any other home -> `<parent>/.orch-work-<8 hex of its path>` (one per
     home; the name never holds the home's own name, which the agent's shell deny rules match as text)."""
     h = h.resolve()
-    if h.name == ".orch-tool":
-        return h.parent / ".orch-work"
-    return h.parent / (".orch-work-" + hashlib.sha256(str(h).casefold().encode("utf-8")).hexdigest()[:8])
+    tag = hashlib.sha256(str(h).casefold().encode("utf-8")).hexdigest()
+    names = [".orch-work"] if h.name == ".orch-tool" else []
+    names += [f".orch-work-{tag[:8]}", f".oc-{tag[:16]}"]
+    for n in names:
+        if not names_clash(h, h.parent / n):
+            return h.parent / n
+    return h.parent / names[-1]
+
+
+def names_clash(h: Path, base: Path) -> bool:
+    """`base` holds a text the agent's shell deny matches for home `h` (denyrules.rules: the home's name and
+    <parent>/<name> when the name has 6+ characters): every shell command naming the copy would be refused."""
+    if len(h.name) < 6:
+        return False
+    b = str(base).replace("\\", "/").casefold()
+    return h.name.casefold() in b or f"{h.parent.name}/{h.name}".casefold() in b
 
 
 def copies_home(root: Path | None = None) -> Path:

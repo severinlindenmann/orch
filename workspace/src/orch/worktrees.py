@@ -103,6 +103,8 @@ def _copies_base(home: Path) -> Path:
         raise Refused("orch cannot use its copies folder (it is a link). Nothing was made.")
     base = raw.resolve()
     for h in {*addons.home_candidates(include_real=True), Path(home).resolve()}:
+        if addons.names_clash(h, base):  # the agent's shell deny would match the copies path
+            raise Refused("orch's copies folder would carry the name of its own folder. Nothing was made.")
         for a, b in ((base, h), (h, base)):
             if a == b or b in a.parents:
                 raise Refused("orch's copies folder overlaps its own folder. Nothing was made.")
@@ -134,7 +136,10 @@ def copies_dir(root: Path) -> Path | None:
     wid = addons.workspace_id(root)
     if not wid:
         return None
-    return addons.copies_home(root).resolve() / wid[:8]
+    try:
+        return _copies_base(addons.home(root)) / wid[:8]
+    except Refused:
+        return None
 
 
 def _check_copies_home(home: Path) -> None:
@@ -530,12 +535,19 @@ def workdir_for(root: Path, rec: dict | None, ticket: str | None = None) -> Path
 # ---------------------------------------------------------------- make one
 
 
-def _move_legacy(root: Path, ticket: str) -> bool:
+LEGACY_MOVE_NOTE = (
+    "This ticket's copy is still in orch's own folder and could not be moved out ({why}), so this works in "
+    "your own folder. Close programs that use the copy, then start again."
+)
+
+
+def _move_legacy(root: Path, ticket: str) -> str | None:
     """Until 14 Nov 2026 copies lived in <orch home>/worktrees/<ws8>/<ticket>, inside the folder every agent
-    is denied. At the ticket's next start (start lock held, no run on it) its copy is MOVED to path_for with
+    is denied. With the start lock held and no run on the ticket, its copy is MOVED to path_for with
     `git worktree move` (every change, committed or not, goes along) and the registry is pointed there.
-    Only the exact old path of THIS workspace's ticket, with a plain `.owner` naming this workspace; anything
-    else stays where it is, and the start goes on as for a copy that is gone. True when it moved."""
+    Only the exact old path of THIS workspace's ticket, with a plain `.owner` naming this workspace.
+    Idempotent: a move that happened but was not recorded (crash between git and the registry) is
+    recognised from git's own list and recorded. None = nothing to do or moved; else why it stayed."""
     try:
         home = addons.home(root)
         wid = addons.workspace_id(root) or ""
@@ -545,26 +557,35 @@ def _move_legacy(root: Path, ticket: str) -> bool:
         hit = [
             e for e in (reg.get(ticket) or {"paths": []})["paths"] if os.path.abspath(e["path"]) == str(old)
         ]
-        if not hit or os.path.lexists(want):
-            return False
-        if _is_link(old.parent.parent) or _is_link(old.parent) or _is_link(old) or not old.is_dir():
-            return False
-        if not _owned(root, old) or old.resolve() != old:
-            return False
+        if not hit:
+            return None
         top = _top_of(root)
         if top is None:
-            return False
-        folder = want.parent
-        _check_copies_home(home)
-        folder.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        folder.mkdir(exist_ok=True)
-        _remember_copies(root, folder)
-        if not (folder / ".owner").is_file():
-            _write_copies_owner(folder, str(root.resolve()))
-        rc, _, err = _git(["worktree", "move", str(old), str(want)], top, GIT_ADD_TIMEOUT)
-        if rc != 0:
-            _log(root, f"{ticket}: copy not moved out of orch's folder: {(err or '').strip()[-200:]}")
-            return False
+            return "git cannot reach the project"
+        if not os.path.lexists(want) and not os.path.lexists(old):
+            # gone from the disk: the entry moves to the new place as "registered but gone" (made again at
+            # the next start, same branch); git forgets the missing folder so the branch can be checked out
+            _git(["worktree", "prune"], top, filters=False)
+        elif os.path.lexists(want):
+            if os.path.lexists(old) or not _git_has_worktree(top, want, f"orch/{ticket}"):
+                return "the new place is taken"
+        else:
+            if _is_link(old.parent.parent) or _is_link(old.parent) or _is_link(old) or not old.is_dir():
+                return "the old copy is not a plain folder"
+            if not _owned(root, old) or old.resolve() != old:
+                return "the old copy belongs to another project"
+            folder = want.parent
+            _check_copies_home(home)
+            folder.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            folder.mkdir(exist_ok=True)
+            _remember_copies(root, folder)
+            if not (folder / ".owner").is_file():
+                _write_copies_owner(folder, str(root.resolve()))
+            rc, _, err = _git(["worktree", "move", str(old), str(want)], top, GIT_ADD_TIMEOUT)
+            if rc != 0:
+                why = (err or "").strip().splitlines()[-1:] or ["git refused"]
+                _log(root, f"{ticket}: copy not moved out of orch's folder: {why[0][-200:]}")
+                return why[0][-200:]
         for e in hit:
             e["path"] = str(want)
         _save_registry(root, reg)
@@ -573,9 +594,40 @@ def _move_legacy(root: Path, ticket: str) -> bool:
             if not any(n != ".owner" for n in os.listdir(old.parent)):
                 (old.parent / ".owner").unlink()
                 old.parent.rmdir()
-        return True
-    except (OSError, ValueError, RuntimeError, Refused):
+        return None
+    except (OSError, ValueError, RuntimeError, Refused) as e:
+        return str(e) or "unknown"
+
+
+def _git_has_worktree(top: Path, path: Path, branch: str) -> bool:
+    """git's own list has a worktree at exactly `path` on `branch`."""
+    rc, out, _ = _git(["worktree", "list", "--porcelain"], top, read_only=True, filters=False)
+    if rc != 0:
         return False
+    want = os.path.normcase(os.path.realpath(path))
+    for block in out.split("\n\n"):
+        lines = block.splitlines()
+        wt = [x[len("worktree ") :] for x in lines if x.startswith("worktree ")]
+        if (
+            wt
+            and os.path.normcase(os.path.realpath(wt[0])) == want
+            and f"branch refs/heads/{branch}" in lines
+        ):
+            return True
+    return False
+
+
+def _sweep_legacy(root: Path, top, deadline: float, notes: list[str]) -> None:
+    """Every copy of this workspace still in the old place, with no run on it, moves out (see _move_legacy):
+    done tickets are never started again, and only a copy in its new place is cleaned up."""
+    for tid in sorted(registry(root)):
+        if time.monotonic() > deadline:
+            return
+        if _alive_here(root, tid):
+            continue
+        why = _move_legacy(root, tid)
+        if why:
+            notes.append(f"{tid}: copy still in orch's own folder: {why}")
 
 
 def _repo(root: Path) -> tuple[Path, str, str] | None:
@@ -2595,7 +2647,10 @@ def _route(root: Path, ticket: str) -> tuple[Path, list[str], list]:
         return workdir_for(root, rec), [], []
     reg = registry(root).get(ticket)
     if reg:
-        _move_legacy(root, ticket)
+        why = _move_legacy(root, ticket)
+        if why:
+            _note(root, ticket, LEGACY_MOVE_NOTE.format(why=why), "")
+            return root, [LEGACY_MOVE_NOTE.format(why=why)], []
         reg = registry(root).get(ticket) or reg
         for e in reg["paths"]:
             if _mine(root, ticket, e):
@@ -3572,7 +3627,10 @@ def _owner_workspace_here(d: Path) -> bool | None:
 def orphaned(root: Path) -> list[dict]:
     """Copy folders of workspaces that are not there any more (project moved or deleted, or its id changed):
     [{ws8, copies}]. Only reported, never deleted by a sweep: a moved project looks the same."""
-    base = addons.copies_home(root).resolve()
+    try:
+        base = _copies_base(addons.home(root))
+    except Refused:
+        return []
     mine = copies_dir(root)
     out: list[dict] = []
     try:
@@ -3606,7 +3664,7 @@ def remove_orphaned(root: Path, ws8: str, discard: bool = False) -> list[str]:
         raise Refused("Only a person can remove copies of a project that is gone.")
     if not isinstance(ws8, str) or not _WS8.fullmatch(ws8):
         raise Refused("That is not a copies folder.")
-    base = addons.copies_home(root).resolve()
+    base = _copies_base(addons.home(root))
     d = base / ws8
     notes: list[str] = []
     if _is_link(d) or not d.is_dir() or not _known_gone(d) or d == copies_dir(root):
@@ -3737,7 +3795,7 @@ def sweep(root: Path, budget: float = SWEEP_BUDGET) -> list[str]:
                     _ctx.deadline = deadline
                     try:
                         top = _top_of(root)
-                        for step in (_sweep_registry, _sweep_orphans, _sweep_branches):
+                        for step in (_sweep_legacy, _sweep_registry, _sweep_orphans, _sweep_branches):
                             step(root, top, deadline, notes)
                     finally:
                         _ctx.deadline = before
