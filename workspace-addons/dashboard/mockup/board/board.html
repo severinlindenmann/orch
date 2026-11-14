@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Tickets · orch</title>
-<link rel="stylesheet" href="../system/system.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/preview.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/gallery.css">
 <style>
 :root{--surface-raised:#1b1f26;--surface-hover:#20252d;--border-card:#3a414b;--border-card-hover:#56606c;--lane:#14171c}
 /* top bar carries the page title, count, what waits on you */
@@ -147,7 +147,7 @@ html[data-state=loading] .toolbar .jump,html[data-state=empty] .toolbar .jump{op
 
 .board-page .board{grid-template-columns:repeat(5,minmax(200px,1fr))!important;overflow-x:auto;padding-bottom:16px}.board-page .col[data-col=done] .col-h,.board-page .col[data-col=done] .col-body{display:flex!important;visibility:visible!important}.board-page .col[data-col=done] .col-body{display:block!important}.board-page .col[data-col=done]{width:auto!important;min-width:200px}.rail,.collapse-done{display:none!important}.toolbar{flex-wrap:nowrap!important}.toolbar .search{width:220px;min-width:140px}.tc-line{flex-wrap:wrap}.n{white-space:nowrap}
 .result-snippet{display:flex;gap:8px;align-items:center;font-size:12px;text-decoration:none}.result-snippet>span:last-child{line-height:18px}.board .tc-title{-webkit-line-clamp:3}.board .tc-meta{flex-wrap:wrap}</style>
-<link rel="stylesheet" href="../system/interaction.css"><script src="../system/overlay.js"></script><script src="../system/select.js"></script><script src="../system/date.js"></script><script src="../system/components.js"></script></head>
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/interaction.css"><script src="../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../workspace/src/orch_ui/static/select.js"></script><script src="../../../../workspace/src/orch_ui/static/date.js"></script><script src="../../../../workspace/src/orch_ui/static/components.js"></script></head>
 <body class="has-shell">
 <a class="skip-link btn primary" href="#content">Skip to content</a>
 <div class="shell">
@@ -324,4 +324,4 @@ const params=new URLSearchParams(location.search);q.value=params.get('q')||'';pe
 document.querySelector('#skel').innerHTML=Array.from({length:5},()=>'<div class="sk-col"><div class="sk-card skeleton"></div><div class="sk-card skeleton"></div></div>').join('');
 document.querySelectorAll('.tc-more').forEach(b=>b.remove());document.querySelectorAll('[data-act="start"]').forEach(b=>b.onclick=()=>location.href='../ticket/ticket-copy.html');
 filter();document.querySelector('#waitn').textContent='3';document.querySelector('#nav-count').textContent='3';
-})();</script><script src="../home/demo-data.js"></script><script src="../system/preview-controls.js"></script></body></html>
+})();</script><script src="../home/demo-data.js"></script><script src="../../../../workspace/src/orch_ui/static/state-controls.js"></script></body></html>

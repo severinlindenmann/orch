@@ -282,3 +282,22 @@ def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
     )  # its service starts with the add
     assert "state.settings?.available" in body
     assert "not connected yet" not in body and "innerHTML" not in body
+
+
+def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
+    from orch_dashboard import data
+
+    rows = [
+        {
+            "name": "publish",
+            "active": True,
+            "dashboard": {"label": "Shared links", "icon": "link", "panel": "links"},
+        },
+        {"name": "other", "active": True, "dashboard": {"label": "Other", "icon": "link", "panel": None}},
+    ]
+    monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: False)
+    out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
+    assert {a["name"]: bool(a["dashboard"]) for a in out} == {"publish": False, "other": True}
+    monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: True)
+    out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
+    assert all(a["dashboard"] for a in out)
