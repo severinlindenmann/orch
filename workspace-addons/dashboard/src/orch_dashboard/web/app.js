@@ -148,7 +148,6 @@ function skeletonFor(kind) {
   const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(3), stack(1))]
     : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
-    : kind === 'notes' ? [bar('sk-title'), bar('sk-toolbar'), stack(3, 'sk-row')]
     : kind === 'section' ? [stack(3, 'sk-row')]
     : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-stack sk-side'}, stack(4, 'sk-tab')), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
     : [bar('sk-title'), stack(3)];
@@ -157,7 +156,7 @@ function skeletonFor(kind) {
 // The skeleton for an address before the state is there (no state needed).
 function hashKind(hash) {
   const k = String(hash || '').split('?')[0].replace(/^#/, '').split('/')[0];
-  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : k === 'settings' ? 'settings' : k === 'notes' || k === 'note' ? 'notes' : ['addon', 'open', 'chat', 'general'].includes(k) ? 'page' : 'home';
+  return k === 'ticket' ? 'ticket' : k === 'tickets' ? 'tickets' : k === 'settings' ? 'settings' : ['addon', 'open', 'chat', 'general'].includes(k) ? 'page' : 'home';
 }
 function notFoundPage() {
   return fragment(heading('Page not found', 'Your workspace is still here. Choose where to go next.'),
@@ -250,6 +249,8 @@ function accept(next) {
 function route() {
   const full = location.hash || '#home', query = full.indexOf('?'), hash = query < 0 ? full : full.slice(0, query) || '#home';
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
+  // The Notes page is gone: its "What changed" is on Home, and old note links land there.
+  if (hash === '#notes' || hash.startsWith('#note/')) { history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
   const settingsHash = /^#settings(?:\/(general|agent|phone|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
@@ -258,7 +259,6 @@ function route() {
   if (['#chat', '#general'].includes(hash) && (state?.chat || state?.general)) return {kind:'chat', hash:'#chat'};
   try {
     if (hash.startsWith('#ticket/')) return {kind:'ticket', id:decodeURIComponent(hash.slice(8)), hash};
-    if (hash.startsWith('#note/')) return {kind:'note', id:decodeURIComponent(hash.slice(6)), hash};
     // One address per add-on page: #addon/<name>[/<path>]. The old #open/<name>/<path> forwards to it.
     const open = /^#open\/([a-z][a-z0-9-]{1,31})\/([A-Za-z0-9_./-]*)$/.exec(hash);
     if (open && !open[2].startsWith('/') && !open[2].includes('..') && addons().some(a => a.name === open[1] && a.page)) return {kind:'page', id:open[1], path:open[2], hash:'#addon/' + open[1] + (open[2] ? '/' + open[2] : '')};
@@ -270,7 +270,7 @@ function route() {
     }
   } catch (_) { /* Malformed links show Page not found. */ }
   // a known page this workspace does not offer (no chat, a shared copy's settings) stays Home, as before
-  const kind = {'#home':'home', '#tickets':'tickets', '#notes':'notes', '#settings':'home', '#chat':'home', '#general':'home'}[hash] || (hash.startsWith('#chat/') ? 'home' : '');
+  const kind = {'#home':'home', '#tickets':'tickets', '#settings':'home', '#chat':'home', '#general':'home'}[hash] || (hash.startsWith('#chat/') ? 'home' : '');
   return kind ? {kind, hash:full} : {kind:'notfound', hash:full};
 }
 function render(arrived = new Set()) {
@@ -281,7 +281,7 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : (r.kind === 'notes' || r.kind === 'note') ? 'Notes' : r.kind === 'notfound' ? 'Page not found' : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'notfound' ? 'Page not found' : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -290,10 +290,6 @@ function render(arrived = new Set()) {
     const tk = ticketOf(r.id);
     title = clean(tk?.title) || 'Ticket';
     crumb.replaceChildren(h('a', {href:'#tickets'}, 'Tickets'), ' › ', title);
-  } else if (r.kind === 'note') {
-    const nt = ticketOf(r.id), words = nt && typeof noteWords === 'function' ? noteWords(nt).headline : '';
-    title = clean(words) || 'Note';
-    crumb.replaceChildren(h('a', {href:'#notes'}, 'Notes'), ' › ', title);
   } else if (r.kind === 'page') {
     const last = r.path.split('/').filter(Boolean).pop() || '', tk = /^t_[A-Za-z0-9]+$/.test(last) ? ticketOf(last) : null;
     title = clean(tk?.title) || last || pageName;
@@ -313,7 +309,7 @@ function render(arrived = new Set()) {
   }
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
-  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'note' ? '#notes' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
+  const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
   const navLink = (url, text, glyph, tail = null) => h('a', {className:'nav-item', href:url, 'aria-label':text, 'aria-current':here === url ? 'page' : null}, NAV_ICON[glyph] ? navIcon(glyph) : iconEl(glyph), h('span', {className:'nav-label'}, text), tail);
   const needsWords = window.DashHelpers.needsYou(needCount);
   reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null));
@@ -327,7 +323,7 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'notes' ? notesPage() : r.kind === 'note' ? notePage(ticketOf(r.id)) : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
@@ -735,7 +731,7 @@ document.querySelector('.sidebar')?.addEventListener('mouseout', () => clearTime
 if (snapshot) accept(window.ORCH_SNAPSHOT || {});
 else {
   main.replaceChildren(skeletonFor(hashKind(location.hash)));
-  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', notes:'Notes', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
+  { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
   setInterval(paintUpdated, 30000);
   refresh();
   let poll = setInterval(refresh, 3000), pending;

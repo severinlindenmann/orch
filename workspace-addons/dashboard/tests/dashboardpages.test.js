@@ -375,22 +375,24 @@ test('home needs: fold shows the oldest card with answers; identical questions a
   const sent = [], toasts = [];
   const button = (label, cls, click) => ({tag:'button', attrs:{}, children:[label], click, dataset:{}});
   const c = context(items, {snapshot:false, document:{getElementById:() => null}, needsList:() => needs, button, locks:new Set(), render(){}, act:async (op, args) => { sent.push(args.ticket); return {ok:true}; }});
-  c.window.orch = {toast:t => toasts.push(t)};
+  c.window.orch = {toast:t => toasts.push(t)}; c.setTimeout = setTimeout; c.clearTimeout = clearTimeout; vm.runInContext('ANSWER_UNDO_MS = 5', c);
   const home = c.home(), text = JSON.stringify(home);
   assert.match(text, /Asked on 3 tickets – answer once/);
   assert.match(text, /2 more questions"/); // 3 rows: the stacked one, d and e
   const cards = nodes(home, n => n.attrs?.className === 'card-row home-need');
   assert.equal(cards.length, 1);
-  const host = {querySelectorAll:() => []};
+  const host = {querySelectorAll:() => [], classList:{add(){}}};
   await nodes(cards[0], n => n.tag === 'button')[0].onclick({currentTarget:{closest:() => host}});
-  assert.deepEqual(sent, ['a', 'b', 'c']); assert.deepEqual(toasts, ['Answered on 3 tickets']);
+  assert.deepEqual(sent, [], 'nothing is sent inside the Undo window');
+  await new Promise(r => setTimeout(r, 60));
+  assert.deepEqual(sent, ['a', 'b', 'c']); assert.deepEqual(toasts, ['Answered · 3 tickets']);
 });
 const sameNeeds = (n, act) => {
   const items = Array.from({length:n}, (_, i) => ({id:'t' + i, title:'T' + i, status:'waiting', questions:[{id:'q' + i, text:'Tuesday or Friday?'}]}));
   const needs = items.map((t, i) => ({id:'q' + i, ticket:t.id, since:'2026-11-0' + (i + 1) + 'T00:00:00Z', answer:{question:'q' + i, digest:'x', options:['Tuesday', 'Friday']}}));
   const toasts = [], button = (label, cls, click) => ({tag:'button', attrs:{}, children:[label], click, dataset:{}});
   const c = context(items, {snapshot:false, document:{getElementById:() => null}, needsList:() => needs, button, locks:new Set(), render(){}, act});
-  c.window.orch = {toast:(t, kind) => toasts.push([t, kind])};
+  c.window.orch = {toast:(t, kind) => toasts.push([t, kind])}; c.setTimeout = setTimeout; c.clearTimeout = clearTimeout; vm.runInContext('ANSWER_UNDO_MS = 5', c);
   return {c, toasts};
 };
 test('home needs: three identical questions are one row, not folded', () => {
@@ -405,8 +407,9 @@ test('home needs: a failed answer on stacked questions says how many were answer
   const {c, toasts} = sameNeeds(3, async () => ++n === 2 ? {ok:false, status:409, text:'Nope'} : {ok:true});
   c.window.DashHelpers.scrubText = t => t;
   const card = nodes(c.home(), n => n.attrs?.className === 'card-row home-need')[0];
-  await nodes(card, n => n.tag === 'button')[0].onclick({currentTarget:{closest:() => ({querySelectorAll:() => []})}});
-  assert.deepEqual(toasts, [['Answered on 2 of 3 tickets. Nope', 'error']]);
+  await nodes(card, n => n.tag === 'button')[0].onclick({currentTarget:{closest:() => ({querySelectorAll:() => [], classList:{add(){}}})}});
+  await new Promise(r => setTimeout(r, 60));
+  assert.deepEqual(toasts, [['Answered · 3 tickets', 'ok'], ['Answered on 2 of 3 tickets. Nope', 'error']]);
 });
 
 // Dash 01: clean() drops leading test tags and trailing machine stamps, keeps a title that is only a tag.
