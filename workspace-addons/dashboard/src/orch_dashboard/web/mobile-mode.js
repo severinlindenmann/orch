@@ -5,7 +5,9 @@
 (() => {
   const ASK_OFF_KEY = 'orch.mobileMode.dontAsk';
   const HOURS = [4, 8, 12, 24];
+  const NO_PHONE = 'Pair a phone first';
   let mm = null, busy = false, asking = false;
+  const needsPhone = () => !!mm && !mm.on && mm.phones === 0;
   const bar = document.getElementById('mm-bar');
   const toggle = document.getElementById('mm-toggle');
   const store = {
@@ -62,7 +64,12 @@
     } else bar.hidden = true;
     toggle.hidden = false;
     toggle.setAttribute('aria-checked', mm.on ? 'true' : 'false');
-    toggle.disabled = busy;
+    // No phone paired yet: nothing to send to, so the switch cannot be turned on (it can always be turned off).
+    const noPhone = needsPhone();
+    toggle.disabled = busy || noPhone;
+    toggle.title = noPhone ? NO_PHONE : '';
+    const label = toggle.querySelector('.mm-label');
+    if (label) label.textContent = noPhone ? NO_PHONE : 'Send questions to my phone';
   }
 
   function paint() {
@@ -86,6 +93,7 @@
   document.addEventListener('click', async event => {
     const t = event.target.closest('#mm-toggle,[data-mm],[data-mm-hours]');
     if (!t || !mm) return;
+    if (needsPhone() && (t.id === 'mm-toggle' || t.dataset.mm === 'switch')) return;
     if (t.id === 'mm-toggle' || t.dataset.mm === 'switch') {
       if (mm.on) await call('mobile.set', {on: false});
       else if (store.get()) await turnOn();
@@ -116,9 +124,9 @@
       return h('div', {'data-key': 'settings-mobile-mode'},
         h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Send questions'),
           h('div', {className: 'grow set-ctl'}, h('p', {}, 'Questions also go to your phone'),
-            h('p', {className: 'meta'}, 'This computer stays awake while this is on. Closing the lid still puts it to sleep.')),
+            h('p', {className: 'meta'}, needsPhone() ? NO_PHONE : 'This computer stays awake while this is on. Closing the lid still puts it to sleep.')),
           h('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': mm.on ? 'true' : 'false', 'aria-label': 'Send questions to my phone',
-            'data-mm': 'switch', 'data-key': 'mm-switch', 'data-testid': 'mobile-mode-switch', disabled: busy}, mm.on ? 'On' : 'Off')),
+            'data-mm': 'switch', 'data-key': 'mm-switch', 'data-testid': 'mobile-mode-switch', disabled: busy || needsPhone()}, mm.on ? 'On' : 'Off')),
         h('div', {className: 'card-row name-row'}, h('span', {className: 'set-label'}, 'Switch off after'),
           h('div', {className: 'grow set-ctl mm-hours', role: 'radiogroup', 'aria-label': 'Switch off by itself after', 'data-testid': 'mobile-mode-hours'},
             choices.map(n => h('button', {type: 'button', className: 'btn sm ' + (n === mm.default_hours ? 'primary' : 'ghost'), role: 'radio',
