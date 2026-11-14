@@ -30,6 +30,8 @@ KIT_FILES = (
     "overlay.js",
     "select.js",
     "components.js",
+    "widgets.css",
+    "widgets.js",
 )
 WEB_FILES = ("index.html", "insights.css", "insights.js", "settings.js")
 PLAIN = "text/plain; charset=utf-8"
@@ -40,7 +42,7 @@ TYPES = {
     "js": "text/javascript",
 }
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
-CSP = "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"
 
 
 def read_counts(root, orch_bin=None):
@@ -80,17 +82,14 @@ def _web(name):
 
 
 def _kit(name):
-    """A kit file from orch_ui's static folder, else the dashboard's own copy; None when neither has it."""
+    """A kit file from orch_ui's static folder (the one master kit); None when it is not installed."""
     try:
         import orch_ui
 
         return (Path(orch_ui.__file__).parent / "static" / name).read_bytes()
     except (ImportError, OSError, TypeError):
         pass
-    try:
-        return resources.files("orch_dashboard").joinpath("web", "kit", name).read_bytes()
-    except (ImportError, OSError, TypeError):
-        return None
+    return None
 
 
 class Handler(BaseHTTPRequestHandler):
