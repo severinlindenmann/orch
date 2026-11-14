@@ -1,7 +1,7 @@
 /* Settings and native add-on cards share the kit's light/dark tokens. */
-.settings-layout{display:grid;grid-template-columns:156px minmax(0,1fr);gap:24px;align-items:start}
+.settings-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
 .settings-content{min-width:0}
-.settings .settings-nav{display:flex;flex-direction:column;gap:4px;border:0;padding:0;align-items:stretch}
+.settings .settings-nav{display:flex;flex-direction:row;gap:4px;border:0;border-bottom:1px solid var(--border);padding:0;overflow-x:auto}
 .settings-nav button,.settings-nav a{display:flex;align-items:center;min-height:44px;padding:10px 12px;border:0;border-radius:8px;text-decoration:none;text-align:left;white-space:nowrap;color:var(--text-muted);background:transparent}
 .settings-nav button[aria-selected=true]{color:var(--text);background:var(--surface-2)}
 .settings .card{border-radius:12px}
@@ -67,6 +67,7 @@
 /* Sync (draft sync-card.html, Variant A): below Workspace; head with the one status line, where to keep a copy,
    the sync address with its check, Sync every, Sync now, the review line, then Details. */
 .settings [data-key=settings-sync]{order:-1}
+.settings[data-key=sync-page] [data-key=settings-sync]{order:0}  /* on its own page the facts come first, then the settings */
 .settings .sync-head{padding:14px 16px 0;display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
 .settings .sync-head h3{font-weight:600;flex:1;min-width:120px;margin:0}
 .settings .sync-status-line{display:flex;gap:4px 12px;align-items:center;flex-wrap:wrap}
@@ -160,3 +161,12 @@
 .settings .lk-swatches{gap:10px}
 
 .catalog-done{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:8px}
+/* About & updates */
+.upd-steps{display:flex;flex-wrap:wrap;gap:8px 16px;list-style:none;margin:0;padding:0;font-size:14px}
+.upd-step.next{color:var(--text-muted)}
+.upd-step.now{font-weight:600}
+.upd-step.done{color:var(--text)}
+.upd-done{font-weight:600}
+.upd-changes{margin:0;padding-left:20px;display:grid;gap:4px}
+
+.settings .relay-steps{margin:0;padding-left:20px}

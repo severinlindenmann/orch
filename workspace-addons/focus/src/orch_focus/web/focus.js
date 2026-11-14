@@ -13,6 +13,7 @@
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
     els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
+    document.getElementById('fx-loading')?.remove();  /* the skeleton goes when the first view is there */
     root.dataset.state = v.state;
     if (prev && !root.hasAttribute('data-live')) root.setAttribute('data-live', '');  /* motion only after a live change */
     els.agent.textContent = 'Helper';  // never the vendor's name on screen
@@ -22,7 +23,7 @@
     els.live.toggleAttribute('data-hold', shownText !== stateText);
     const phase = window.FocusHelpers.phase(v);
     els.steps.replaceChildren(...['Plan', 'Work', 'Check', 'Done'].map((name, i) => h('span', {'aria-current': i === phase ? 'step' : null, text: name})));
-    els.mobileTasks.textContent = 'Tasks ' + v.done + '/' + v.total;
+    els.mobileTasks.textContent = 'Steps ' + v.done + '/' + v.total;
     els.review.querySelector('p').textContent = els.agent.textContent + ' finished — check the result';
     els.count.textContent = v.done + ' of ' + v.total;
     els.bar.style.width = (v.total ? Math.round(v.done / v.total * 100) : 0) + '%';
@@ -76,6 +77,11 @@
   /* In Terminal mode the person's side (next move, sent back, With Helper, composer) is its own column beside the
      output; in compact it sits in the one column, as before. The same nodes move, so nothing is drawn twice. */
   function placeHuman(terminal) {
+    if (INAPP) {  /* the shell: one result panel on the right, the composer under the live session */
+      els.human.replaceChildren(els.resultHead, els.resultEmpty, els.next, els.sent, els.review, els.complete, els.withH);
+      els.help.before(els.compose);
+      return;
+    }
     if (terminal) els.human.replaceChildren(els.next, els.sent, els.withH, els.review, els.complete, els.compose);
     else {
       els.paneLive.insertBefore(els.next, els.line); els.paneLive.insertBefore(els.sent, els.line);
@@ -84,6 +90,7 @@
     }
   }
   function setMode(terminal) {
+    if (INAPP) { placeHuman(true); els.showTerm.hidden = true; return; }  /* embedded: always the shell, no mode switch */
     placeHuman(terminal);
     root.classList.toggle('fx-terminal', terminal);
     els.modeBtn.setAttribute('aria-pressed', String(terminal));
@@ -193,7 +200,7 @@
     let cur = 0;
     document.addEventListener('keydown', e => {
       if (e.metaKey || e.ctrlKey || e.altKey || proof.isOpen()) return;
-      if (e.target.closest('input,textarea,select')) return;
+      if (e.target.closest('input,textarea,select,[data-term]')) return;
       const k = e.key;
       if (k === 'Escape' || (!els.help.hidden && k.toLowerCase() === 'x')) { if (!els.help.hidden) toggleHelp(false); else if (root.classList.contains('is-full')) setFull(false); return; }
       if (k === '?') { e.preventDefault(); toggleHelp(); return; }
@@ -248,5 +255,5 @@
     window.addEventListener('pagehide', () => { stream.close(); live = false; });
     window.addEventListener('pageshow', e => { if (e.persisted) connect(); });
   }
-  S.views.ticket.build(); S.views.compose.mount(); wire(); poll();
+  S.views.ticket.build(); S.views.compose.mount(); if (INAPP && S.views.term) S.views.term.mount(els.paneLive); wire(); poll();
 })();

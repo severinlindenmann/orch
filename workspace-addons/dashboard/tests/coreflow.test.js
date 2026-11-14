@@ -103,7 +103,7 @@ test('ticket search matches title, key, owner and note; Mine excludes agents', (
 // A small DOM double exercises the page controls without a browser dependency.
 function pageContext(snapshot = false) {
   class Element {
-    constructor(tag, attrs = {}, ...children) { this.tag = tag; this.attrs = attrs; this.dataset = {}; this.children = children.flat(Infinity).filter(x => x != null); this.disabled = false; }
+    constructor(tag, attrs = {}, ...children) { this.tag = tag; this.attrs = attrs; this.dataset = {}; this.children = children.flat(Infinity).filter(x => x != null); this.disabled = false; this.classList = {add(){}}; }
     querySelectorAll(tag) { return this.children.flatMap(c => c instanceof Element ? [...(c.tag === tag ? [c] : []), ...c.querySelectorAll(tag)] : []); }
     replaceChildren(...children) { this.children = children; }
   }
@@ -112,10 +112,11 @@ function pageContext(snapshot = false) {
   const ctx = {snapshot, state:{runs:{}}, locks:new Set(), document:{getElementById:() => connection},
     h:(...args) => new Element(...args), button:(label, cls, click) => Object.assign(new Element('button', {}, label), {click}),
     array:v => Array.isArray(v) ? v : [], clean:x => x, href:id => '#ticket/' + id, ticketOf:() => t, ticketTitle:() => new Element('h3'), parentLine:() => null,
-    window:{DashHelpers:{needAction:() => ({label:'Answer'}), plainWhy:text => text}, orch:{toast:text => toasts.push(text)}}, render:() => calls.push('render'), refresh:() => calls.push('refresh')};
+    setTimeout, clearTimeout, window:{DashHelpers:{needAction:() => ({label:'Answer'}), plainWhy:text => text}, orch:{toast:text => toasts.push(text)}}, render:() => calls.push('render'), refresh:() => calls.push('refresh')};
   vm.createContext(ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function changeUnavailable'), homeSource.indexOf('function ticketTitle')), ctx);
-  vm.runInContext(homeSource.slice(homeSource.indexOf('function needRow'), homeSource.indexOf('function workingRow')), ctx);
+  vm.runInContext(homeSource.slice(homeSource.indexOf('// Answered on Home but not sent yet'), homeSource.indexOf('function workingRow')), ctx);
+  vm.runInContext('ANSWER_UNDO_MS = 5', ctx);
   vm.runInContext(homeSource.slice(homeSource.indexOf('function connectionNotice'), homeSource.indexOf('// Chat (former General)')), ctx);
   return {ctx, connection, toasts, calls};
 }
@@ -130,9 +131,11 @@ test('inline options send the question and selected answer, disable together, an
   assert.match(JSON.stringify(row), /Write your own/);
   const pending = options[0].onclick({currentTarget:{closest:() => row}});
   assert.ok(buttons.every(b => b.disabled));
+  assert.equal(sent, undefined, 'nothing is sent inside the Undo window');
+  await new Promise(r => setTimeout(r, 40));
   assert.deepEqual(sent, {op:'answer', ticket:'t_one', question:'q1', digest:'a'.repeat(64), answer:'Hi'});
-  complete({ok:true}); await pending;
-  assert.ok(buttons.every(b => !b.disabled)); assert.deepEqual(toasts, ['Answered']); assert.deepEqual(calls, ['render']);
+  complete({ok:true}); await pending; await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(toasts, ['Answered · Launch']); assert.ok(calls.includes('render'));
 });
 test('offline answers do not send; network failures show the plain message; snapshots have no answer buttons', async () => {
   const {ctx, connection, toasts} = pageContext();
@@ -140,8 +143,8 @@ test('offline answers do not send; network failures show the plain message; snap
   let sent = 0; ctx.act = async () => { sent++; return {ok:false, status:0}; };
   const row = ctx.needRow(data), control = row.querySelectorAll('button')[0], event = {currentTarget:{closest:() => row}};
   connection.hidden = false; await control.onclick(event); assert.equal(sent, 0);
-  connection.hidden = true; await control.onclick(event); assert.equal(sent, 1);
-  assert.ok(toasts.every(text => text === "Can't reach orch. Your change was not sent."));
+  connection.hidden = true; await control.onclick(event); await new Promise(r => setTimeout(r, 40)); assert.equal(sent, 1);
+  assert.ok(toasts.slice(0, 1).every(text => text === "Can't reach orch. Your change was not sent.") && toasts.at(-1) === "Can't reach orch. Your change was not sent.");
   assert.equal(pageContext(true).ctx.needRow(data).querySelectorAll('button').length, 0);
 });
 test('connection notice keeps the saved view and offers Try again', () => {

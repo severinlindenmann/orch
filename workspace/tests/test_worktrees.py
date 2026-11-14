@@ -77,9 +77,11 @@ def _route(root, ticket):
 # ---------------------------------------------------------------- path_for
 
 
-def test_path_for_is_inside_the_worktrees_folder(proj):
+def test_path_for_is_in_the_copies_folder_next_to_the_orch_home(proj):
     p = worktrees.path_for(WS, "t_abc123")
-    assert p == (addons.home() / "worktrees").resolve() / "01234567" / "t_abc123"
+    home = addons.home().resolve()
+    assert p == addons.copies_base(home) / "01234567" / "t_abc123"
+    assert p.parent.parent.parent == home.parent and home not in p.parents
 
 
 @pytest.mark.parametrize(
@@ -98,12 +100,12 @@ def test_path_for_refuses_odd_workspace_ids(proj, ws):
 
 
 def test_path_for_refuses_a_link_that_leaves_the_folder(proj, tmp_path):
-    base = addons.home() / "worktrees"
+    base = addons.copies_home()
     base.mkdir(parents=True)
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     (base / "01234567").symlink_to(outside, target_is_directory=True)
-    # the ws8 folder resolves outside <home>/worktrees: refused
+    # the ws8 folder resolves outside the copies folder: refused
     with pytest.raises(Refused):
         worktrees.path_for(WS, "t_abc123")
 
@@ -184,7 +186,7 @@ def test_without_git_no_copy_is_made(proj, new_ticket):
     assert worktrees.count(proj) == 0
     folder, notes = _route(proj, t)
     assert folder == proj and notes == []
-    assert not (addons.home() / "worktrees").exists() or not any((addons.home() / "worktrees").rglob("t_*"))
+    assert not addons.copies_home().exists() or not any(addons.copies_home().rglob("t_*"))
 
 
 def test_a_repo_without_a_commit_makes_no_copy(proj, new_ticket):
@@ -791,3 +793,107 @@ def _copies_test_home(monkeypatch):
     # Legacy proj fixtures live outside the fake account's .orch-test directory.
     # Keep the real private-directory, file, and key checks on their isolated home.
     monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
+
+
+# ---------------------------------------------------------------- copies made before 14 Nov 2026
+
+
+def _to_old_place(repo, ticket, owner=None):
+    """Put the ticket's copy where copies lived before: <orch home>/worktrees/<ws8>/<ticket>."""
+    new = Path(worktrees.create(repo, ticket)["path"])
+    (new / "wip.txt").write_text("not committed\n")
+    old = addons.home(repo).resolve() / "worktrees" / new.parent.name / ticket
+    old.parent.mkdir(parents=True)
+    (old.parent / ".owner").write_text((owner or str(repo.resolve())) + "\n")
+    git(repo, "worktree", "move", str(new), str(old))
+    reg_file = repo / ".orch/run/worktrees.json"
+    doc = json.loads(reg_file.read_text())
+    doc["tickets"][ticket]["paths"][0]["path"] = str(old)
+    reg_file.write_text(json.dumps(doc))
+    return new, old
+
+
+def test_a_copy_inside_the_orch_home_moves_out_at_the_next_start_with_its_changes(repo):
+    a, _ = repo.tids
+    new, old = _to_old_place(repo, a)
+    folder, _ = _route(repo, a)
+    assert folder == new and (new / "wip.txt").read_text() == "not committed\n"
+    assert worktrees.registry(repo)[a]["paths"][0]["path"] == str(new)
+    assert not old.exists() and not old.parent.exists()
+    assert worktrees.is_orch_copy(new)
+    assert git(new, "rev-parse", "--abbrev-ref", "HEAD").strip() == f"orch/{a}"
+
+
+def test_an_old_place_copy_of_another_owner_stays_where_it_is(repo):
+    a, _ = repo.tids
+    new, old = _to_old_place(repo, a, owner="/somewhere/else")
+    assert worktrees._move_legacy(repo, a) == "the old copy belongs to another project"
+    assert old.is_dir() and (old / "wip.txt").exists() and not new.exists()
+    folder, notes = _route(repo, a)  # the start works in the project folder and says why
+    assert folder == repo and "could not be moved out" in notes[0] and old.is_dir()
+
+
+def test_a_move_that_git_did_but_the_registry_missed_is_recorded_next_time(repo):
+    a, _ = repo.tids
+    new, old = _to_old_place(repo, a)
+    git(repo, "worktree", "move", str(old), str(new))  # git moved it; orch crashed before writing its list
+    assert worktrees._move_legacy(repo, a) is None
+    assert worktrees.registry(repo)[a]["paths"][0]["path"] == str(new)
+    assert (new / "wip.txt").read_text() == "not committed\n"
+
+
+def test_the_sweep_moves_every_old_place_copy_out_also_of_tickets_never_started_again(repo):
+    a, b = repo.tids
+    new_a, old_a = _to_old_place(repo, a)
+    worktrees.sweep(repo)
+    assert worktrees.registry(repo)[a]["paths"][0]["path"] == str(new_a) and new_a.is_dir()
+    assert not old_a.exists()
+
+
+def test_an_old_place_copy_that_is_gone_is_made_again_in_the_new_place(repo):
+    import shutil
+
+    a, _ = repo.tids
+    new, old = _to_old_place(repo, a)
+    shutil.rmtree(old)
+    folder, notes = _route(repo, a)
+    assert folder == new and new.is_dir() and worktrees.is_orch_copy(new)
+    assert worktrees.registry(repo)[a]["paths"][0]["path"] == str(new)
+
+
+def test_the_copies_folder_never_carries_the_homes_name(tmp_path):
+    for name in ("orch-work", ".orch-w", "work-1"):
+        h = tmp_path / "p" / name
+        h.mkdir(parents=True)
+        b = addons.copies_base(h)
+        assert not addons.names_clash(h, b) and b.parent == h.resolve().parent, (name, b)
+
+
+def test_the_copy_imports_its_own_harness_file_never_one_outside_it(repo):
+    """An import outside the folder the tool runs in makes Claude Code ask "Allow external CLAUDE.md file
+    imports?": an unattended helper in a copy hung there. The copy gets the workspace's AGENTS.orch.md as
+    a file of its own (refreshed at each start), imported relatively, kept out of git."""
+    import re
+
+    from orch import harness
+
+    blocks = repo / ".orch" / "harness" / "blocks"
+    blocks.mkdir(parents=True, exist_ok=True)
+    (blocks / "orch.md").write_text("# orch rules\n")
+    (repo / ".orch" / "harness" / "AGENTS.orch.md").write_text("# orch rules v1\n")
+    a, _ = repo.tids
+    config.set_copies_mode(repo, "always")
+    f, _ = _route(repo, a)
+    assert harness.write_local_file(f, "CLAUDE.local.md", "@AGENTS.md", harness_root=repo)
+    text = (f / "CLAUDE.local.md").read_text()
+    imports = re.findall(r"^@(\S+)", text, re.M)
+    assert imports and all(not Path(i).is_absolute() and ".." not in Path(i).parts for i in imports), text
+    for i in imports:
+        assert (f / i).resolve().is_relative_to(f.resolve()), i
+    assert (f / ".orch-harness" / "AGENTS.orch.md").read_text() == "# orch rules v1\n"
+    assert ".orch-harness" not in git(f, "status", "--porcelain", "-uall")  # kept out by the shared exclude
+    (repo / ".orch" / "harness" / "AGENTS.orch.md").write_text("# orch rules v2\n")
+    f2, _ = _route(repo, a)  # the next start refreshes it
+    assert f2 == f
+    harness.write_local_file(f, "CLAUDE.local.md", "@AGENTS.md", harness_root=repo)
+    assert (f / ".orch-harness" / "AGENTS.orch.md").read_text() == "# orch rules v2\n"

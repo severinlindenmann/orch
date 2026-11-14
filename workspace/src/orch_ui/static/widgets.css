@@ -93,7 +93,10 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .person-switch>summary::-webkit-details-marker{display:none}
 .person-switch>summary strong{color:var(--text);font-weight:500}
 .person-switch>summary:hover{background:var(--surface-2)}
-.person-switch .menu{top:auto;bottom:calc(100% + 8px);left:0;width:216px}
+.person-switch .menu{top:auto;bottom:calc(100% + 8px);left:0;width:min(216px,100%);box-sizing:border-box}
+.person-switch>summary .nav-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.person-switch .menu-pop{grid-template-columns:minmax(0,1fr)}
+.person-switch .menu-item>.truncate{min-width:0}
 .person-switch .menu-item .ck{margin-left:auto;color:var(--brand)}
 .qr{width:168px;height:168px;border-radius:8px;background:#fff;padding:8px;flex:none}
 .stepper .done-s{color:var(--success)}
@@ -157,3 +160,15 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .mo-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
 .mo-cell{border:1px solid var(--border);border-radius:8px;padding:12px;min-height:120px;display:grid;gap:8px;align-content:start;overflow:hidden}
 .swatch-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+
+/* Settings row (14 Nov, lane owner-fb-v3): one row style for every setting: label, value with one plain sentence, action. */
+.setting-row{display:grid;grid-template-columns:136px minmax(0,1fr) auto;gap:16px;align-items:center;padding:16px;min-height:64px}
+.setting-row+.setting-row,.card-h+.setting-row,.pad-card+.setting-row{border-top:1px solid var(--border)}
+.setting-row .row-label{color:var(--text-muted)}
+.setting-row .row-value p,.setting-row .row-value .meta{margin-top:4px}
+.setting-row .row-action{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.setting-row .row-action:empty{display:none}
+/* Mini table: a small CSV preview inside a file card thumbnail (header and 5 rows at most). */
+.mini-table{border-collapse:collapse;font-size:11px;line-height:16px;color:var(--text-muted);width:calc(100% - 24px);table-layout:fixed}
+.mini-table th{text-align:left;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);padding:2px 6px}
+.mini-table td{padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

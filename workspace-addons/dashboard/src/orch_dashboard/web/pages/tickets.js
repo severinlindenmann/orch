@@ -4,7 +4,7 @@ const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '';
 // Saved views live on the address: #tickets?view=needs-you|working|done-week.
-const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs me'], ['working', 'Working'],, ['done-week', 'Done this week']];
+const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs me'], ['working', 'Working'], ['done-week', 'Done this week']];
 function savedView() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?');
   const view = at < 0 ? '' : new URLSearchParams(full.slice(at + 1)).get('view') || '';
@@ -57,7 +57,7 @@ function ticketAttentionChip(t, section) {
   if (section && window.DashHelpers.columnOf(status) === section) return null;
   return statusChip(t);
 }
-const localDay = at => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}) : ''; };
+const localDay = at => window.UI?.stamp ? window.UI.stamp(at, {time:false}) : '';
 // A helper worked on it before (sessions) but it is not running now: paused, not new. Typed tasks alone are not.
 const ticketIsPaused = t => array(t.sessions).length > 0;
 function filteredTickets() { return filterTickets(ticketParents(tickets()), ticketSearch, ticketMine, typeof state?.who === 'string' ? state.who : '', ticketPerson, savedView()); }
@@ -254,6 +254,20 @@ function moveTicket(id, status, undoing = false, extra = {}) {
 const GROUP_ORDER = ['waiting', 'review', 'active', 'open', 'done'];
 const foldedGroups = new Set();
 let foldSeen = false;
+// The group's main action for all its tickets: "Answer 2 questions" opens the first question, "Check 3 results" the first result.
+function groupAction(status, group) {
+  if (snapshot || foldedGroups.has(status)) return null;
+  const withQuestions = group.filter(t => questions(t).length);
+  if (status === 'waiting' && withQuestions.length) {
+    const n = withQuestions.reduce((sum, t) => sum + questions(t).length, 0);
+    return button('Answer ' + n + (n === 1 ? ' question' : ' questions'), 'outline sm group-action', event => {
+      const need = needsList().find(x => withQuestions.some(t => t.id === x.ticket));
+      if (need) openNeed(need, event.currentTarget); else location.hash = href(withQuestions[0].id);
+    });
+  }
+  if (status === 'review' && group.length) return h('a', {className:'btn outline sm group-action', href:href(group[0].id)}, 'Check ' + group.length + (group.length === 1 ? ' result' : ' results'));
+  return null;
+}
 function ticketTable(visible) {
   const groups = ticketGroups(visible);
   if (!foldSeen) { foldSeen = true; if ((groups.find(g => g.status === 'done')?.tickets.length || 0) > 5) foldedGroups.add('done'); }
@@ -265,7 +279,7 @@ function ticketTable(visible) {
     const [icon] = STATUS_BADGE[status] || STATUS_BADGE.open, folded = foldedGroups.has(status);
     const toggle = h('button', {type:'button', className:'group-toggle', 'aria-expanded':String(!folded), 'data-key':'group-toggle-' + status}, (folded ? '› ' : '⌄ ') + icon + ' ' + group.title + ' ', h('span', {className:'meta'}, String(group.tickets.length)));
     toggle.addEventListener('click', () => { if (foldedGroups.has(status)) foldedGroups.delete(status); else foldedGroups.add(status); render(); });
-    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, toggle)));
+    body.push(h('tr', {className:'group-row', 'data-key':'group-' + status}, h('th', {colSpan:6}, h('div', {className:'group-head'}, toggle, groupAction(status, group.tickets)))));
     if (!folded) for (const {i} of roots) body.push(treeBranch(rows, i, status));
   }
   return h('div', {className:'table-wrap', 'data-key':'ticket-table'}, h('table', {className:'ticket-table'},

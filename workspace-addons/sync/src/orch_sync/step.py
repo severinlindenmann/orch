@@ -12,7 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from orch import humanproof, procs, syncgate, tickets
 from orch.errors import Refused as CoreRefused
 
-from . import cli, incoming, merge, paths, pause, records, repo
+from . import cli, history, incoming, merge, paths, pause, records, repo
 
 MB = 1_000_000
 
@@ -452,7 +452,7 @@ def merged_tree(root, head, remote, index, now, first=False):
         and remote_rows.get(p) != base_rows.get(p)
     ]
     if both_changed:
-        raise pause.Pause("Conflicting artifact needs a person", sorted(both_changed))
+        raise pause.Pause("Conflicting result needs a person", sorted(both_changed))
     bases = repo.git(root, "merge-base", "--all", head, checked_remote, allowed_codes=(0, 1)).stdout.split()
     chosen_all = bool(decisions) and set(entries(root, remote)) <= set(decisions)
     if len(bases) > 1 or (not bases and not first and not chosen_all):
@@ -493,7 +493,7 @@ def merged_tree(root, head, remote, index, now, first=False):
         if not paths.TICKET.fullmatch(p) and p != "ticket-counter.json" and p not in decisions
     ]
     if unresolved:
-        raise pause.Pause("Conflicting artifact needs a person", unresolved)
+        raise pause.Pause("Conflicting result needs a person", unresolved)
     repo.git(root, "read-tree", tree, index=index)
     base_result = repo.git(root, "merge-base", head, remote, allowed_codes=(0, 1))
     base = entries(root, base_result.stdout.decode().strip() or None)
@@ -740,7 +740,7 @@ def _run(root, reason, now, remote_allowed):
             return previous
         previous = {**previous, "paused": None}  # the remote changed: look again
     state = previous | {"last_error": None, "skipped": [], "notices": [], "reason": reason}
-    remote = None
+    remote = started = None
     try:
         repo.local_dir(root)
         settings = cli.DEFAULTS | cli.read(root, "settings")
@@ -757,6 +757,7 @@ def _run(root, reason, now, remote_allowed):
             )  # settings.json is agent-writable: only the address a person chose
         repo.ensure(root)
         repo.recover(root)
+        started = oid(root, "HEAD")  # for the history line: what this pass changed
         for attempt in range(2):
             head, remote, offline = oid(root, "HEAD"), None, False
             url = settings.get("remote")
@@ -932,6 +933,7 @@ def _run(root, reason, now, remote_allowed):
     )
     state.update(ahead=int(counts[0]), behind=int(counts[1]))
     write(root, "run/sync/state.json", encoded(state))
+    history.record(root, now, started, head, state["last_error"])
     return state
 
 

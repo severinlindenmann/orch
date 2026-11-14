@@ -22,3 +22,9 @@ test('Save schedule gives up waiting after 30 s and always restores the button',
   assert.match(body, /finally \{[^}]*save\.disabled = false; save\.textContent = label;/);
   assert.ok(body.indexOf('window.orch.close(d)') < body.indexOf('loadAddon('), 'the dialog closes before the list reloads');
 });
+
+// owner feedback 14 Nov: choosing Custom must start on a valid value (5 minutes), so Save is never disabled at the start
+test('Custom starts at 5 minutes (the lowest allowed), never below the limit', () => {
+  assert.match(src, /choice\.unit = choice\.unit \|\| 'minutes'; if \(choice\.unit === 'minutes' && !\(Number\(choice\.every\) >= 5\)\) choice\.every = 5;/);
+  assert.match(src, /unit\.value === 'minutes' \? Math\.max\(5, Number\(choice\.every\) \|\| 5\)/);
+});

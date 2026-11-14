@@ -63,3 +63,6 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - The No date button stays clickable and toggles the calendar; clicking outside closes it and returns focus to the button.
 - Checked date selection, arrow keys, clearing the date, focus return, and loaded, loading and empty previews at 1280 × 800.
 - Ran `node /Users/lume/orch-dev/state/ux-challenge-1113/mockup/base/scripts/qa-components.cjs 1280`: all 60 pages passed, including `board/new.html`, with no reported problems.
+
+## Owner feedback 14 Nov (lane owner-fb-v2)
+New ticket: 560 px, the box starts at 3 rows and grows, Start opens the new ticket, Save stays on the list (`../sweep/d-new-ticket.html`). Files tab: `../sweep/d-files.html`.

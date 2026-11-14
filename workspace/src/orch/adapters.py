@@ -207,7 +207,7 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
     if (a.get("deny") or {}).get("format", "none") != "none":
         _deny_version_ok(a, out[0])  # the binary this run really starts
     extra = denyrules.deny_args(
-        a.get("deny"), extra, root
+        a.get("deny"), extra, root, v.get("workdir")
     )  # orch's own folders, every mode (secrets.md); last
     if extra:
         at = out.index("--") if "--" in out else len(out)

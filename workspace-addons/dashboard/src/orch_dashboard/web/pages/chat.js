@@ -139,15 +139,23 @@ function chatMovedBanner(moved) {
   return h('div', {className:'chat-archive-banner'}, 'This conversation now belongs to ticket ', clean(moved.key), ' · ',
     h('a', {href:chatLink(moved.id)}, 'Open ticket'));
 }
-// "Show: All | From my phone" replaces the old counter chips; "Working on N tickets" shows only when N > 0.
-function chatFilter() {
-  const on = chatUi.filter === 'phone';
-  return chatButton('From my phone', 'filter', {className:'chat-check', role:'checkbox', 'aria-checked':String(on), 'data-key':'chat-filter', 'data-id':on ? 'all' : 'phone'});
+// "New chat" picks who to talk to: your helper, a workspace or your phone (no checkbox in the page any more).
+function chatNewChatPick(who) {
+  if (who === 'phone') { chatOpenAgent(); chatUi.filter = 'phone'; }
+  else { chatOpenAgent(); chatUi.filter = 'all'; }
+  render();
+}
+function chatNewChatRows(onPick) {
+  return [['helper', 'Your helper'], ['phone', 'Your phone']].map(([who, label]) => {
+    const row = h('button', {type:'button', className:'chat-contact', 'data-key':'pick-' + who}, chatText('strong', '', label));
+    row.addEventListener('click', () => { chatNewChatPick(who); if (onPick) onPick(); });
+    return row;
+  });
 }
 function chatHeader(g, history) {
   const agent = !g && !history && chatUi.agentConversation, moved = !g && !history ? chatConversation().at(-1)?.moved_to : null;
   const running = !g && !history && !agent ? chatCount(state?.chat?.activity?.running) : 0;
-  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (agent && !chatConversation().length ? 'New conversation with your helper' : CHAT_HELPER);
+  const title = history ? (chatUi.day ? chatDayLabel(chatUi.day) : 'Earlier') : g?.title || (!g && chatUi.filter === 'phone' ? 'Your phone' : (agent && !chatConversation().length ? 'New conversation with your helper' : CHAT_HELPER));
   const helper = !g && !history, others = g ? chatObjects(g.members).filter(m => m.ws !== 'you').length : 0;
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
@@ -159,7 +167,7 @@ function chatHeader(g, history) {
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null,
       history ? chatUi.day ? chatButton('Earlier', 'all-history') : chatButton('Back to today', 'today') : g ? null : chatButton('Earlier', 'history')),
     // The phone filter and the workspace link stay visible, no options disclosure.
-    helper && !agent ? h('div', {className:'chat-head-row'}, chatFilter(), chatPhoneLink()) : null,
+    helper && !agent ? h('div', {className:'chat-head-row'}, chatRich() || snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), chatPhoneLink()) : null,
     agent ? chatText('p', 'chat-muted', 'Talk it through first. When you are ready, the helper can make the ticket.') : null,
     moved ? h('a', {className:'chat-ticket-link', href:chatLink(moved.id)}, 'Ticket ', h('span', {className:'chat-member-chip'}, clean(moved.key)), ' · ', clean(chatPlainTitle(moved.title, moved.key))) : null,
     g ? h('div', {className:'chat-member-chips'}, chatObjects(g.members).map(m =>
@@ -213,7 +221,7 @@ function chatTicketCard(ref, key, readOnly) {
   const word = open.length ? 'Needs your OK' : ticket?.status ? window.DashHelpers.statusWord(ticket.status) : '';
   const pending = q ? chatUi.pending.has('answer-' + ticket.id + '-' + q.id) : false;
   // Only actions the ticket already offers: a plain question's options (one tap, like Home), else Answer on
-  // the ticket; a ticket ready for review gets Mark done / Send back. Nothing in a day you can only read.
+  // the ticket; a ticket to check gets Looks good / Send back. Nothing in a day you can only read.
   const actions = readOnly || snapshot || !ticket ? null : q ? q.kind == null && array(q.options).length
     ? array(q.options).slice(0, 4).map((option, i) => chatButton(option, 'answer', {'data-key':key + '-answer-' + i, 'data-ticket':ticket.id, 'data-q':q.id, 'data-digest':q.digest, 'data-answer':option, disabled:pending}))
     : h('a', {className:'chat-button', href:chatLink(ticket.id)}, 'Answer')
@@ -344,7 +352,7 @@ function chatHistory() {
   [...dayRows, ...groupRows].forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(query); });
   const ready = chatDays.status === 'ready';
   return h('div', {className:'chat-history', 'data-key':'history-list'}, chatSearch(true),
-    h('h2', {}, 'Earlier days'), ready ? dayRows.length ? dayRows : chatText('p', 'chat-muted', 'No earlier days yet.') : chatHistoryStatus(chatDays.status, 'retry-days'),
+    h('h2', {}, 'Earlier days'), ready ? dayRows.length ? dayRows : stateNote('No earlier days yet', 'Yesterday’s messages will be here tomorrow.') : chatHistoryStatus(chatDays.status, 'retry-days'),
     groups.length ? h('h2', {}, 'Finished groups') : null, groupRows,
     ready && query && [...dayRows, ...groupRows].every(row => row.hidden) ? chatText('p', 'chat-muted', 'Nothing matches.') : null);
 }
@@ -556,6 +564,25 @@ async function chatDmLoad(force = false) {
     }
   }
 }
+// Factory's idea box hands text to the helper chat by postMessage (same origin, from the shown shipped add-on frame only,
+// never from a URL). The text lands in the draft; you press Send. A draft you already typed is kept.
+function chatSayRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.say' || typeof data.text !== 'string') return null;
+  if (e.origin !== location.origin || snapshot) return null;
+  const r = route();
+  if (r.kind !== 'page' || !state?.addons?.find?.(a => a.name === r.id)?.shipped) return null;
+  const frame = document.querySelector('iframe.embed[data-key="embed"]');
+  if (!frame || !frame.contentWindow || e.source !== frame.contentWindow) return null;
+  const text = data.text.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 500);
+  return text ? {text} : null;
+}
+window.addEventListener('message', e => {
+  const req = chatSayRequest(e); if (!req) return;
+  if (!(chatUi.drafts.chat || '').trim()) chatUi.drafts.chat = req.text;
+  chatUi.open = 'chat'; chatUi.listOpen = false; chatUi.filter = 'all';
+  location.hash = '#chat';
+});
 function chatDmRoute() {
   const ws = location.hash.slice(6);
   if (chatDmId(ws)) { chatUi.open = ws; chatUi.listOpen = false; chatUi.day = null; }
@@ -566,11 +593,11 @@ window.addEventListener('orch:state', chatDmRoute);
 window.addEventListener('DOMContentLoaded', chatDmRoute);
 
 function chatDmContacts() {
-  const {d, actions} = dialog('Contacts', 'dialog');
+  const {d, actions} = dialog('New chat', 'dialog');
   d.classList.add('chat-page', 'chat-contacts');
   const body = h('div', {className:'chat-contact-list'});
   const paint = () => {
-    const rows = [];
+    const rows = [...chatNewChatRows(() => window.orch.close(d))];
     for (const c of chatDm.loaded ? chatDm.contacts : []) {
       const can = c.can || {}, allowed = can.chat || can.tasks || can.files;
       const row = h('button', {type:'button', className:'chat-contact', disabled:!allowed}, chatText('strong', '', c.name),
@@ -606,8 +633,10 @@ function chatDmThread() {
   const draft = chatUi.drafts[ws] || '';
   return h('div', {className:'chat-main', 'data-key':'dm-' + ws},
     h('header', {className:'chat-thread-head'}, h('div', {className:'chat-head-top'}, chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}), chatAvatar(c || title),
-      h('div', {className:'chat-head-text'}, chatText('p', 'chat-eyebrow', 'Workspace · ' + title), h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
-        chatText('p', 'chat-muted chat-head-meta', 'You (' + chatWorkspace() + ') · ' + title)))),
+      // The name once; under it ONE line about the workspace (its description, then small tags). No repeated name.
+      h('div', {className:'chat-head-text'}, h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title)),
+        c?.description ? chatText('p', 'chat-muted chat-head-meta chat-desc', clean(c.description)) : null,
+        array(c?.tags).length ? h('p', {className:'chat-member-chips chat-tags'}, array(c.tags).slice(0, 6).map(t => chatText('small', 'chat-member-chip', clean(t)))) : null))),
     chatDm.error ? chatButton('Could not load messages · Try again', 'retry-dm') : null,
     h('div', {className:'chat-log', 'data-key':'log-' + ws, role:'log', 'aria-live':'polite'}, messages.map(m =>
       h('article', {className:'chat-message' + (m.by === 'you' ? ' chat-out' : ''), 'data-key':'message-' + m.id},
@@ -615,7 +644,7 @@ function chatDmThread() {
         m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,
         m.by === 'you' ? h('small', {className:'chat-delivery'},
           m.state === 'failed' ? fragment('Not sent · ', chatButton('Try again', 'retry-send', {'data-id':m.id})) :
-          m.state === 'delivered' ? 'Delivered to ' + clean(title) : 'Sending…') : null))),
+          m.state === 'delivered' ? 'Delivered — their helper answers when it runs' : 'Sending…') : null))),
     !snapshot && c?.can?.chat ? h('form', {className:'chat-compose', 'data-key':'form-' + ws},
       h('textarea', {rows:1, maxLength:2000, className:'chat-draft', 'data-key':'draft-' + ws, 'data-chat-input':'draft', 'data-thread':ws,
         'aria-label':'Message ' + title, placeholder:'Message ' + title}, draft),

@@ -33,7 +33,13 @@ final class RefreshTests: XCTestCase {
         let m = pairedModel()
         m.watchInMock = true
         let t = Task { await m.watchWhileOpen(every: .milliseconds(30)) }
-        try await Task.sleep(for: .milliseconds(300))
+        // Wait for at least 3 polls of both lists instead of a fixed 300 ms: a busy CI runner can be slower per poll
+        // (CI 14 Nov: "1 is less than 3" while the loop itself was fine). Deadline 10 s.
+        func polls(_ path: String) -> Int { StubProtocol.seen.filter { $0.url?.path == path }.count }
+        let deadline = Date().addingTimeInterval(10)
+        while (polls("/v1/phone/updates") < 3 || polls("/v1/phone/messages") < 3) && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(30))
+        }
         t.cancel()
         try await Task.sleep(for: .milliseconds(150))   // a request already in flight may still land
         let n = StubProtocol.seen.filter { $0.url?.path == "/v1/phone/updates" }.count

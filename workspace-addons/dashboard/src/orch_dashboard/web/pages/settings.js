@@ -34,11 +34,11 @@ function addonFacts(addon) {
   rows.push(row('Address', [settingsText('span', {className:'mono'}, d.address), h('button', {type:'button', className:'ad-more', 'data-copy':d.address}, 'Copy')]));
   rows.push(row('Status', h('span', {className:'on-dot'}, 'Connected')));
   const ws = array(d.workspaces);
-  if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))));
+  if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot'}, settingsText('span', {}, w.name), settingsText('span', {className:'meta'}, ' · ' + (w.online ? 'Reachable from your phone' : 'Not reachable from your phone'))))));
   return h('dl', {}, rows);
 }
-const FULL_WARNING = 'Full: a helper can change or delete anything in this folder and run any command without asking.';
-const PERMISSION_CHOICES = [['ask', 'Ask', 'A helper asks before it changes anything.'], ['auto', 'Auto', 'A helper works on its own and asks only for risky things.'], ['full', 'Full', 'A helper never asks. It changes things without asking. Only use this if you trust it.']];
+const FULL_WARNING = 'Never asks: a helper can change or delete anything in this folder and run any command without asking.';
+const PERMISSION_CHOICES = [['ask', 'Asks first', 'Before it changes anything. Example: it asks before editing a file.'], ['auto', 'Asks for risky things', 'It works on its own and asks only when something is risky. Example: it asks before deleting.'], ['full', 'Never asks', 'It changes things without asking. Example: it deletes a file straight away. Only use this if you trust it.']];
 function permissionsCard(settings) {
   const current = PERMISSION_CHOICES.some(([value]) => value === settings.permissions) ? settings.permissions : 'auto';
   const rows = PERMISSION_CHOICES.map(([value, label, hint]) => {
@@ -56,9 +56,10 @@ function shareCard(settings) {
   const on = settings.share === true;
   return h('div', {className:'stack', 'data-key':'settings-share'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
-      h('div', {className:'grow'}, settingsText('h3', {}, 'Share with team'),
-        settingsText('p', {className:'meta'}, on ? 'AGENTS.md has a short orch entry. Turn off to remove it.' : 'Off: orch files stay on this computer and your team sees nothing.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Share with team', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Tell teammates about orch'),
+        settingsText('p', {}, 'Adds a short note to your project’s guide file so your teammates’ helpers know orch is used here.'),
+        settingsText('p', {className:'meta'}, 'Example: a colleague’s helper learns how to open your tickets.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Tell teammates about orch', 'data-key':'settings-switch-share', 'data-action':'settings-share', disabled:snapshot || settingsBusy.has('share')})),
       reviewPanel('share', settings)));
 }
 // The CLI hint stays out of the page: a missing sign-in is said in plain words.
@@ -86,9 +87,10 @@ function privateCard(settings) {
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
-      h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers may mark tickets Done'),
-        settingsText('p', {className:'meta'}, 'On: a helper marks its finished work Done. Off: helpers send finished work to Review and you decide when it is Done.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Helpers may mark tickets Done', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
+      h('div', {className:'grow'}, settingsText('h3', {}, 'Let helpers finish tickets'),
+        settingsText('p', {}, 'A helper may mark its own ticket Done. When this is off it asks you to check first.'),
+        settingsText('p', {className:'meta'}, 'Example: the helper fixes a typo and closes the ticket; you find it under Done.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Let helpers finish tickets', 'aria-checked':!!settings.agents_may_finish, 'data-key':'settings-switch-workflow', 'data-action':'workflow-set', disabled:snapshot || settingsBusy.has('workflow')})),
       reviewPanel('workflow', settings)));
 }
 // Separate copies (draft 1f, owner pass 11 Nov): one plain row with a switch; when, how many, what is on this
@@ -107,8 +109,8 @@ function settingsReviewText(id, settings) {
     ? {verb:'Stop sharing', what:'Your team will no longer see that this workspace uses orch.', affects:'The short orch entry is taken out of AGENTS.md. Nothing else in your files changes.'}
     : {verb:'Share', what:'Your team will see that this workspace uses orch.', affects:'A short orch entry is added to AGENTS.md in your team’s files. Everything else from orch stays on this computer.'};
   if (id === 'workflow') return settings.agents_may_finish
-    ? {verb:'Turn off', what:'Helpers will send finished work to Review, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
-    : {verb:'Turn on', what:'Helpers will mark their finished work Done themselves.', affects:'You will not be asked to look at it first. Tickets already waiting in Review stay there.'};
+    ? {verb:'Turn off', what:'Helpers will ask you to check finished work, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
+    : {verb:'Turn on', what:'Helpers will mark their finished work Done themselves.', affects:'You will not be asked to look at it first. Tickets already waiting for your check stay there.'};
   if (id === 'copies-switch') return copiesModeOf(settings) !== 'off'
     ? {verb:'Turn off', what:'Helpers will all work in your own folder, also when they work at the same time.', affects:'Copies that already exist stay until their ticket is done. Your own files are not touched.'}
     : {verb:'Turn on', what:'When helpers work at the same time, each one gets its own copy of your files.', affects:'At most ' + (settings.copies_max || 3) + ' copies at the same time. They take space on this computer and are removed when their ticket is done. Your own files are not touched.'};
@@ -153,10 +155,12 @@ function copiesCard(settings) {
   const row = (title, hint, ...rest) => h('div', {className:'copies-sub'}, settingsText('h3', {}, title), hint ? settingsText('p', {className:'meta'}, hint) : null, ...rest);
   return h('div', {className:'stack', 'data-key':'settings-copies'},
     h('div', {className:'card'},
-      h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Helpers working at the same time: each gets its own copy of your files')),
-        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Each helper gets its own copy of your files', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
+      h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Several helpers at once'),
+        settingsText('p', {}, 'Each helper works in its own copy of your folder, so two helpers never change the same file.'),
+        settingsText('p', {className:'meta'}, 'Example: one helper writes the newsletter while another fixes the website.')),
+        h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':on, 'aria-label':'Several helpers at once', 'data-key':'settings-switch-copies', 'data-action':'copies-switch', 'data-mode':on ? 'off' : 'together', disabled:off})),
       reviewPanel('copies-switch', settings),
-      h('div', {className:'copies-details', 'data-key':'settings-copies-details'},
+      !on ? null : h('div', {className:'copies-details', 'data-key':'settings-copies-details'},
         h('div', {className:'stack copies-more'},
           row('When', '', h('div', {className:'row copies-choices', role:'radiogroup', 'aria-label':'When each helper gets its own copy'}, COPY_CHOICES.map(([id, label]) =>
             h('button', {type:'button', className:'btn sm ' + (mode === id ? 'primary' : 'ghost'), role:'radio', 'aria-checked':mode === id, 'data-key':'settings-copies-' + id, 'data-action':'copies-mode', 'data-mode':id, disabled:off || !on}, label)))),
@@ -174,7 +178,7 @@ function copiesCard(settings) {
 // the sync add-on's own verbs on the ONE generic op: `orch sync act status|check|set|now|use-public -- <target>`.
 // The address and the choice come only from the person's clicks here; choices that decide for the person are signed.
 const SYNC = 'sync';
-const SYNC_WHERE = [['off', 'Off'], ['local', 'On this computer only'], ['remote', 'Also on another computer or server']];
+const SYNC_WHERE = [['off', 'Off'], ['local', 'On this computer only'], ['remote', 'Another computer or your own storage']];
 const SYNC_EVERY = [['5', '5 min'], ['15', '15 min'], ['60', '1 hour']];
 const SYNC_PUBLIC = 'This sync address is public. Anyone can read your tickets.';
 const SYNC_STATUS = {synced:['ok', 'Last synced'], never:['', 'Not synced yet'], offline:['', 'Offline, will sync when connected'], syncing:['live', 'Syncing…'], paused:['you', 'Paused, review below']};
@@ -255,6 +259,35 @@ function syncPausedHelp(card) {
   go.addEventListener('click', event => { event.preventDefault(); location.hash = '#home'; requestAnimationFrame(() => { const n = document.getElementById('needs-you'); if (n) { n.scrollIntoView({block:'start'}); n.focus({preventScroll:true}); } }); });
   return h('div', {className:'sync-warn sync-paused', 'data-key':'sync-paused-help'}, h('p', {}, what), h('div', {className:'row'}, go));
 }
+// ---- The Sync page (fb18): where, what and when, the last 5 syncs, one plain error with one button. ----
+const syncSize = n => n >= 1e6 ? Math.round(n / 1e6) + ' MB' : n > 0 ? Math.max(1, Math.round(n / 1e3)) + ' KB' : '0 KB';
+function syncWhen(value) {
+  const d = new Date(value);
+  if (!value || Number.isNaN(d.getTime())) return '';
+  const hhmm = d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  return (d.toDateString() === now().toDateString() ? 'today' : d.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'})) + ' ' + hhmm;
+}
+function syncInfo(card) {
+  if (!card || card.mode === 'off') return null;
+  const c = card.counts || {tickets:0, files:0, bytes:0}, remote = card.mode === 'remote' && card.remote;
+  const box = (key, title, ...body) => h('section', {className:'card', 'data-key':key}, h('header', {className:'card-h'}, h('h3', {}, title)), h('div', {className:'card-row sync-info-body'}, h('div', {className:'stack'}, ...body)));
+  const failed = card.shown === 'offline' || (card.last_error && card.shown !== 'paused' && card.shown !== 'syncing');
+  const banner = failed ? h('div', {className:'banner error', role:'alert', 'data-key':'sync-error'},
+    h('div', {className:'grow'}, h('strong', {}, 'The last sync did not finish.'),
+      h('p', {}, card.shown === 'offline' || card.last_error === 'offline' ? 'orch could not reach your storage. Check the address or your internet connection.' : 'orch will try again by itself, or you can try now.')),
+    (() => { const b = button('Try again', 'primary sm', syncNowClick); b.dataset.key = 'sync-error-retry'; return b; })()) : null;
+  const history = array(card.history).slice(0, 5);
+  return h('div', {className:'stack', 'data-key':'sync-info'}, banner,
+    h('div', {className:'grid-3'},
+      box('sync-where-info', 'Where', h('strong', {}, 'This computer'), h('p', {className:'meta'}, 'The ' + (card.folder || 'workspace') + ' folder'),
+        remote ? [h('strong', {}, 'Your own storage'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, ''))] : null),
+      box('sync-what-info', 'What', h('strong', {}, c.tickets + ' tickets · ' + c.files + ' files · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
+      box('sync-when-info', 'When', h('strong', {}, 'Last: ' + (syncWhen(card.last_ok) || 'not yet')),
+        h('p', {className:'meta'}, 'Next: ' + (card.running && card.next_run ? syncWhen(card.next_run) + ' · ' : card.running ? '' : 'not while sync is stopped · ') + 'every ' + (card.interval || 15) + ' minutes'),
+        h('p', {className:'meta', 'data-key':'sync-service'}, card.running ? 'Sync is running.' : 'Sync is stopped on this computer.'))),
+    history.length ? h('section', {className:'card', 'data-key':'sync-history'}, h('header', {className:'card-h'}, h('h3', {}, 'Last ' + history.length + (history.length === 1 ? ' sync' : ' syncs'))),
+      history.map(e => h('div', {className:'card-row', 'data-key':'sync-history-row'}, h('span', {className:'dot ' + (e.ok ? 'ok' : 'bad'), 'aria-hidden':'true'}), h('span', {className:'meta'}, syncWhen(e.at)), h('span', {className:'grow'}, e.text)))) : null);
+}
 function syncCard(settings) {
   const addon = array(settings.addons).find(a => a.name === SYNC);
   if (!addon || snapshot) return null;
@@ -274,7 +307,7 @@ function syncCard(settings) {
     radio.addEventListener('change', () => { syncUi.draft = {...syncNow(), where:value}; render(); });
     return h('label', {className:'card-row radio-row', 'data-key':'sync-where-row-' + value}, radio, h('span', {}, label));
   });
-  const addr = h('input', {type:'text', className:'input mono', id:'sync-addr', 'data-key':'sync-addr', 'data-settings-field':'sync-addr', value:cur.addr, placeholder:'https://…', spellcheck:'false', autocomplete:'off', disabled:off});
+  const addr = h('input', {type:'text', className:'input mono', id:'sync-addr', 'data-key':'sync-addr', 'data-settings-field':'sync-addr', value:cur.addr, placeholder:'https://github.com/your-name/orch-copy', spellcheck:'false', autocomplete:'off', disabled:off});
   addr.addEventListener('input', () => { syncUi.draft = {...syncNow(), addr:addr.value}; syncUi.check = null; render(); });
   const check = button('Check connection', '', async () => {
     const target = (syncNow().addr || '').trim();
@@ -296,7 +329,8 @@ function syncCard(settings) {
   const now = h('button', {type:'button', className:'btn ' + (blocked ? 'ghost' : 'primary'), 'data-key':'sync-now', disabled:off || syncUi.nowBusy || saved.where === 'off'}, iconEl('refresh'), 'Sync now');
   now.addEventListener('click', syncNowClick);
   const remoteBox = cur.where === 'remote' ? h('div', {className:'sync-sub', 'data-key':'sync-remote'},
-    h('div', {className:'sync-field'}, h('label', {className:'meta', for:'sync-addr'}, 'Sync address'), h('div', {className:'sync-field-line'}, addr, check), res),
+    h('div', {className:'sync-field'}, h('label', {className:'meta', for:'sync-addr'}, 'Sync address'), h('div', {className:'sync-field-line'}, addr, check), res,
+      h('span', {className:'meta', 'data-key':'sync-addr-example'}, 'For example: github.com/your-name/orch-copy, a private repository you own.')),
     h('div', {className:'sync-every'}, h('span', {className:'meta', id:'sync-every-lbl'}, 'Sync every'), h('div', {className:'sync-chips', role:'group', 'aria-labelledby':'sync-every-lbl'}, chips)),
     h('div', {className:'sync-act'}, now, syncUi.note ? h('span', {className:'sync-note', role:'status', 'data-key':'sync-note'}, syncUi.note) : null)) : null;
   const review = changed ? h('div', {className:'sync-review', role:'group', 'aria-label':'Review before saving', 'data-key':'sync-review'},
@@ -419,18 +453,23 @@ function phonePanel(phoneAddon, settings) {
   const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, '1. Relay connection'), h('div', {className:'card'},
     rowOf('Status', [connected ? h('strong', {className:'on-dot', 'data-key':'phone-relay-status'}, 'Connected') : h('strong', {className:'muted', 'data-key':'phone-relay-status'}, 'Not set up'),
       settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, connected && address ? address : 'No relay connected')],
-      h('div', {className:'row'}, connected ? btn('Reconnect', 'outline', 'relay-reconnect') : null, btn('Set up relay', connected ? 'ghost' : 'primary', 'relay-setup')), 'phone-relay-row'),
+      h('div', {className:'row'}, btn(connected ? 'Check connection' : 'Check again', 'outline', 'relay-reconnect')), 'phone-relay-row'),
+    // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
+    connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
+      h('li', {}, 'Open the admin page of your relay and add this workspace. It gives you one line to copy.'),
+      h('li', {}, 'Paste that line into a terminal in this workspace’s folder and press Enter. It starts with “orch relay connect”.'),
+      h('li', {}, 'Come back here and press Check again.'))),
     settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your relay.')));
   const pair = h('div', {className:'stack', 'data-key':'phone-pair'}, h('h2', {className:'set-sub'}, '2. Pair a phone'), h('div', {className:'card'},
-    rowOf('Pairing', [settingsText('p', {}, 'Link a phone to this workspace'), connected ? null : settingsText('p', {className:'meta', 'data-key':'phone-relay-hint'}, 'Connect to your relay first')],
-      btn('Pair a phone', 'primary', 'phone-pair', connected ? {} : {disabled:true}), 'phone-pairing-row'),
+    rowOf('Pairing', [settingsText('p', {}, 'Link a phone to this workspace'), connected ? null : settingsText('p', {className:'meta', 'data-key':'phone-relay-hint'}, 'First connect your relay (step 1 above). Then you can pair a phone here.')],
+      connected ? btn('Pair a phone', 'primary', 'phone-pair') : null, 'phone-pairing-row'),
     mm));
   const allowed = h('div', {className:'stack', 'data-key':'phone-allowed'}, h('div', {className:'row between'}, h('h2', {className:'set-sub'}, 'Allowed workspaces'),
     settingsText('span', {className:'meta'}, (connected ? workspaces.length : 0) + ' allowed')),
     connected && workspaces.length ? h('div', {className:'card'}, workspaces.map(w => h('div', {className:'card-row', 'data-key':'phone-ws-' + w.name}, h('span', {className:w.online ? 'on-dot' : 'off-dot', title:w.online ? 'online' : 'offline'}, settingsText('span', {}, w.name)))))
       : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Allow a workspace to send it messages and files.')));
   return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed,
-    h('div', {className:'row between'}, settingsText('p', {className:'meta'}, 'Messages have their own page.'), h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
+    h('div', {className:'row'}, h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
 }
 // The pairing dialog stays inside Settings. A pairing code comes from the relay and this page has no way to ask
 // for one yet, so it shows no code (never a made-up QR), only the relay the phone would go through.
@@ -441,15 +480,8 @@ function phonePairDialog() {
   const {d, actions} = dialog('Pair a phone', 'dialog', 'settings-other');
   actions.firstChild.textContent = 'Close';
   d.append(settingsText('p', {className:'meta', 'data-key':'phone-pair-relay'}, 'Through your relay: ' + (info.address || 'your relay')),
-    settingsText('p', {className:'meta'}, 'A phone is paired with a one-time code from your relay. This page cannot create that code yet, so no code is shown.'),
+    settingsText('p', {className:'meta'}, 'Next step: open orch on your phone and choose "Add a workspace". Your relay shows the one-time code or QR code there.'),
     settingsText('p', {className:'meta'}, 'Your phone talks to this workspace through your relay.'), actions);
-  window.orch.open(d);
-}
-function relaySetupDialog() {
-  const {d, actions} = dialog('Set up relay', 'dialog', 'settings-other');
-  actions.firstChild.textContent = 'Close';
-  d.append(settingsText('p', {className:'meta'}, 'Connecting a relay needs its address, a setup code from its administrator and your signature. This page cannot do that yet.'),
-    settingsText('p', {className:'meta'}, 'Once a relay is connected, its address and status show here.'), actions);
   window.orch.open(d);
 }
 async function relayReconnect(control) {
@@ -523,11 +555,11 @@ function settingsPage() {
       snapshot ? null : h('button', {type:'button', className:'btn primary sm', 'data-action':'addon-catalog', 'data-key':'settings-addon-catalog'}, 'Add an add-on')),
     optional.length ? h('div', {className:'card'}, optional.map(addonRow))
       : h('div', {className:'card pad empty-note', 'data-key':'settings-addons-empty'}, settingsText('h3', {}, 'No optional add-ons installed'), settingsText('p', {className:'meta'}, 'Add tools for schedules, shared links and more.')),
-    settingsText('p', {className:'meta', 'data-key':'settings-addon-foot'}, 'The dashboard is always on. Turn an add-on off without removing its settings.'));
+    null);
   const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
   if (detailAddon) return addonDetailPage(detailAddon);
   return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
-    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
+    h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
       // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
@@ -545,8 +577,82 @@ function settingsPage() {
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),
     phoneAddon ? panel('phone', phonePanel(phoneAddon, settings)) : null,
-    panel('addons', addonsPanel)))
+    panel('addons', addonsPanel),
+    panel('about', aboutPanel())))
   ));
+}
+// ---- About & updates (Settings): the installed release, the newest one, what changed, one Update button, the steps.
+// Data: GET /api/update-info (orch asks its install source; nothing is sent). The click runs the same detached update
+// as "Continue" on a request from the terminal. The phase comes from handoff.js ("orch-update-state" events).
+const updUi = {info:null, loading:false, phase:'idle', from:null, to:null, reason:''};
+const UPD_STEPS = ['Downloading', 'Installing', 'Restarting', 'Done'];
+function updLoad(force = false) {
+  if (updUi.loading || (updUi.info && !force)) return;
+  updUi.loading = true;
+  fetch('/api/update-info', {cache:'no-store'}).then(r => r.ok ? r.json() : {}).catch(() => ({})).then(info => {
+    updUi.info = info && typeof info === 'object' ? info : {}; updUi.loading = false;
+    if (updUi.phase === 'restarting' || updUi.phase === 'running') return;
+    if (updUi.phase === 'done' && updUi.info.installed) updUi.to = updUi.info.installed.release || updUi.info.installed.label;
+    if (route().kind === 'settings') render();
+  });
+}
+async function updStart() {
+  const was = updUi.info?.installed;
+  updUi.from = was?.release || was?.label || null; updUi.phase = 'running'; updUi.reason = ''; render();
+  try { sessionStorage.setItem('orch-update-from', JSON.stringify(updUi.from)); } catch (e) {}
+  let res = null;
+  try { res = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({op:'update.start', args:{}})}); } catch (e) { /* the server may already be restarting */ }
+  if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
+  try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
+}
+if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('orch-update-state', event => {
+  const d = event.detail || {};
+  if (d.state === 'running' && updUi.phase === 'idle') updUi.phase = 'running';
+  else if (d.state === 'unreachable' && updUi.phase === 'running') updUi.phase = 'restarting';
+  else if (d.state === 'finished') {
+    if (updUi.from == null) { try { updUi.from = JSON.parse(sessionStorage.getItem('orch-update-from')); } catch (e) {} }
+    updUi.phase = 'done'; updUi.info = null; updUi.loading = false;
+  } else if (d.state === 'failed') { updUi.phase = 'failed'; updUi.reason = String(d.reason || 'It did not finish.'); }
+  if (route().kind === 'settings') render();
+  if (d.state === 'finished') updLoad(true);
+});
+function updButton(text, key, fn) { const b = button(text, 'primary', fn); b.dataset.key = key; return b; }
+function updNum(v) { return typeof v === 'number' ? 'orch ' + v : String(v || ''); }
+function aboutPanel() {
+  if (settingsTab === 'about') updLoad();  // the check runs when the tab is open, not on every Settings page
+  const info = updUi.info, have = info?.installed, newest = info?.newest, phase = updUi.phase;
+  const line = (label, body) => h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, label), h('div', {className:'grow set-ctl'}, body));
+  const steps = h('ol', {className:'upd-steps', 'data-key':'update-steps', 'aria-label':'Update steps'}, UPD_STEPS.map((name, i) => {
+    const at = phase === 'done' ? 4 : phase === 'restarting' ? 2 : phase === 'running' ? 0 : -1;  // Downloading + Installing run as one step
+    const state = i < at ? 'done' : (i === at || (at === 0 && i === 1)) && phase !== 'failed' ? 'now' : 'next';
+    return h('li', {className:'upd-step ' + state, 'aria-current':state === 'now' ? 'step' : null}, (state === 'done' ? '✓ ' : '') + name);
+  }));
+  let body;
+  if (phase === 'running' || phase === 'restarting') {
+    body = [steps, settingsText('p', {className:'meta', role:'status', 'data-key':'update-note'}, 'Your helpers keep their work and carry on after the restart.')];
+  } else if (phase === 'done') {
+    const to = updUi.to ?? have?.release ?? have?.label;
+    const text = updUi.from != null && to != null && updUi.from !== to ? 'Updated ' + (typeof updUi.from === 'number' ? updUi.from : String(updUi.from).replace(/^orch /, '')) + ' → ' + (typeof to === 'number' ? to : String(to).replace(/^orch /, '')) : 'Updated';
+    body = [steps, settingsText('p', {className:'upd-done', role:'status', 'data-key':'update-done'}, text),
+      array(info?.changes).length ? h('ul', {className:'upd-changes', 'data-key':'update-changes'}, array(info.changes).map(c => settingsText('li', {}, c))) : null];
+  } else if (phase === 'failed') {
+    body = [settingsText('p', {className:'bad', role:'alert', 'data-key':'update-failed'}, 'The update did not finish: ' + clean(updUi.reason).replace(/[.\s]+$/, '') + '. orch is still the old version.'),
+      snapshot ? null : updButton('Try again', 'update-retry', () => { updUi.phase = 'idle'; render(); })];
+  } else if (!info) {
+    body = settingsText('p', {className:'meta', 'data-key':'update-loading'}, 'Checking for a newer version…');
+  } else {
+    const ready = info.update_available === true && newest;
+    body = [
+      !newest ? settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.')
+        : ready ? h('div', {className:'upd-ready'}, settingsText('strong', {}, updNum(newest.release) || newest.label), settingsText('span', {className:'meta'}, ' is ready to install'))
+        : settingsText('p', {className:'meta', 'data-key':'update-current'}, 'You have the newest version.'),
+      ready && array(info.changes).length ? h('div', {className:'stack', 'data-key':'update-changes'}, h('h3', {}, 'What changed'), h('ul', {className:'upd-changes'}, array(info.changes).map(c => settingsText('li', {}, c)))) : null,
+      ready && !snapshot ? h('div', {className:'row'}, updButton('Update to ' + String(newest.release || newest.label).replace(/^orch /, ''), 'update-start', updStart),
+        info.source ? settingsText('span', {className:'meta'}, 'From ' + info.source) : null) : null];
+  }
+  return h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'Version'), h('div', {className:'card'},
+    line('Installed', settingsText('strong', {'data-key':'update-installed'}, have?.label || (info ? 'orch' : '…'))),
+    line(phase === 'idle' || phase === 'failed' ? 'Newest' : 'Update', h('div', {className:'stack'}, body))));
 }
 // An agent that is started with a command: a small form that opens in the list; the command is shown before it is added.
 function openAgentForm(control) {
@@ -714,11 +820,23 @@ function pageFrame(r) {
   const stopped = pageStopped(r);
   if (stopped) return stopped;
   const src = '/addon/' + r.id + '/' + r.path;
-  const frame = h('iframe', {className:'embed', 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  const frame = h('iframe', {className:'embed' + (shellAddons.has(r.id) ? ' embed-shell' : ''), 'data-key':'embed', src, title:addonLabel(addons().find(a => a.name === r.id)), allow:'fullscreen', allowfullscreen:''});
+  // A skeleton shows until the add-on page has painted, then goes (no blank frame on add-on switch).
+  const skeleton = framesLoaded.has(src) ? null : skeletonFor('page'), done = () => { framesLoaded.add(src); document.querySelectorAll('[data-key="embed-skeleton"]').forEach(n => n.remove()); };
+  if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
   // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session
   if (!addons().find(a => a.name === r.id)?.shipped) frame.setAttribute('sandbox', 'allow-scripts');
-  return fragment(frame);
+  return fragment(skeleton, frame);
 }
+const framesLoaded = new Set();
+// A page that is the dashboard's own shell (three columns, no header) says so once; its frame then fills the page.
+const shellAddons = new Set();
+globalThis.addEventListener?.('message', event => {
+  const name = event.origin === location.origin && event.data?.orch === 'embed-shell' && /^\/addon\/([a-z][a-z0-9-]{1,31})\//.exec(String(event.data.path || ''))?.[1];
+  if (!name || shellAddons.has(name)) return;
+  shellAddons.add(name);
+  document.querySelectorAll('iframe.embed').forEach(f => { if ((f.getAttribute('src') || '').startsWith('/addon/' + name + '/')) f.classList.add('embed-shell'); });
+});
 const addonHost = id => h('div', {id:'addon-body', className:'stack', 'data-name':id});
 // Shared-link controls belong to the built-in sharing add-on only: a `panel` in some other add-on's manifest never earns them.
 const isPublish = id => { const a = addons().find(a => a.name === id); return !!a && a.name === 'publish' && a.shipped === true; };
@@ -742,7 +860,7 @@ function addonTab(id) {
   // Sync is changed on its own page: the same card as in Settings, no trip to another page.
   if (id === SYNC && syncNative()) {
     const a = addons().find(a => a.name === id);
-    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, syncCard(state.settings)));
+    return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || '', {}), h('div', {className:'settings stack', 'data-key':'sync-page'}, h('div', {className:'stack'}, syncInfo(syncUi.card), syncCard(state.settings))));
   }
   // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
@@ -794,7 +912,7 @@ function paintAddon(id) {
   const blocks = template.querySelector('#addon-blocks');
   if (blocks) {
     blocks.append(OrchBlocks.render(addonViews[id].view.blocks, {addonUrl, self:id, links:isPublish(id), inApp:name => addons().some(a => a.name === name && a.page) ? path => pageHash(name, path) : null}));
-    if (!blocks.childNodes.length) blocks.append(h('section', {className:'card pad muted'}, 'Nothing to show yet.'));
+    if (!blocks.childNodes.length) blocks.append(stateNote('Nothing to show yet', 'It fills in as work happens.'));
     blocks.querySelectorAll('.blk:not(.blk-above)').forEach(n => n.classList.add('card'));
     blocks.querySelectorAll('svg').forEach(n => {
       n.replaceWith(iconEl('external'));
@@ -914,6 +1032,11 @@ const REPEAT_DAYS = [['Mon', 'Monday', 1], ['Tue', 'Tuesday', 2], ['Wed', 'Wedne
 const andList = list => list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
 // {freq: daily|weekly|monthly|custom, days: [cron weekday numbers], monthday, every, time: 'HH:MM'} -> {phrase, summary, hint}
 function repeatPlan(c) {
+  if (c.freq === 'custom' && (c.unit === 'minutes' || c.unit === 'hours')) {  // a steady rhythm: no time of day
+    const n = Number(c.every), mins = c.unit === 'minutes', word = mins ? 'minutes' : n === 1 ? 'hour' : 'hours';
+    if (!Number.isInteger(n) || n < (mins ? 5 : 1) || n > (mins ? 59 : 23)) return {phrase:null, summary:mins ? 'Choose between 5 and 59 minutes.' : 'Choose between 1 and 23 hours.', hint:''};
+    return {phrase:'every ' + n + ' ' + word, summary:'Runs every ' + n + ' ' + word, hint:''};
+  }
   const [hh, mm] = String(c.time || '').split(':').map(Number);
   if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return {phrase:null, summary:'Choose a time.', hint:''};
   const at = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
@@ -937,14 +1060,25 @@ function repeatPlan(c) {
 // The reverse of repeatPlan for the plans it writes: a saved 5-field cron -> the dialog's choices (null when it is some other plan).
 function cronToChoice(cron) {
   const f = String(cron || '').trim().split(/\s+/);
+  const base0 = {freq:'custom', days:[1], monthday:1, time:'08:00'};
+  if (f.length === 5 && /^\*\/\d+$/.test(f[0]) && f.slice(1).every(x => x === '*') && Number(f[0].slice(2)) >= 5 && Number(f[0].slice(2)) <= 59) return {...base0, unit:'minutes', every:Number(f[0].slice(2))};
+  if (f.length === 5 && f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f.slice(2).every(x => x === '*') && Number(f[1].slice(2)) >= 1 && Number(f[1].slice(2)) <= 23) return {...base0, unit:'hours', every:Number(f[1].slice(2))};
   if (f.length !== 5 || !/^\d+$/.test(f[0]) || !/^\d+$/.test(f[1]) || f[3] !== '*') return null;
   const time = String(f[1]).padStart(2, '0') + ':' + String(f[0]).padStart(2, '0'), base = {freq:'weekly', days:[1], monthday:1, every:2, time};
   if (f[2] === '*' && f[4] === '*') return {...base, freq:'daily'};
   if (f[2] === '*' && /^[0-6](,[0-6])*$/.test(f[4])) return {...base, freq:'weekly', days:f[4].split(',').map(Number)};
   if (/^\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'monthly', monthday:Math.min(28, Number(f[2]))};
-  if (/^\*\/\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'custom', every:Number(f[2].slice(2))};
+  if (/^\*\/\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'custom', unit:'days', every:Number(f[2].slice(2))};
   return null;
 }
+// A saved rule the choices below cannot show (set by the helper): its plain words, read-only. null when it is one of ours.
+function cronWords(cron) {
+  const f = String(cron || '').trim().split(/\s+/);
+  if (f.length === 5 && /^\*\/\d+$/.test(f[0]) && f.slice(1).every(x => x === '*')) return 'every ' + f[0].slice(2) + ' minutes';
+  if (f.length === 5 && f[0] === '0' && /^\*\/\d+$/.test(f[1]) && f.slice(2).every(x => x === '*')) return 'every ' + f[1].slice(2) + ' hours';
+  return 'a custom plan';
+}
+const REPEAT_UNITS = [['minutes', 'minutes'], ['hours', 'hours'], ['days', 'days']];
 const REPEAT_FREQ = [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['custom', 'Custom']];
 // The ticket is chosen in the window, or fixed when it is opened from a ticket's menu (`only`).
 function repeatsDialog(only = null, addonName = null) {
@@ -954,7 +1088,9 @@ function repeatsDialog(only = null, addonName = null) {
   const {d, actions} = dialog(had ? 'Edit schedule' : 'New schedule', 'dialog repeat-dialog');
   const ticket = h('select', {className:'input', name:'ticket', id:'repeat-ticket'});
   tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
-  const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00'};
+  const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00', unit:'minutes'};
+  const outside = !had && saved?.recurring === true && saved.cron ? cronWords(saved.cron) : null;  // set by the helper: shown, never overwritten silently
+  if (outside) Object.assign(choice, {freq:'custom', unit:'minutes', every:5});
   const summary = h('p', {className:'repeat-summary', role:'status'}), hint = h('span', {className:'meta'});
   const rowsHost = h('div', {className:'schedule-fields'});
   const row = (label, ...kids) => h('div', {className:'schedule-row'}, h('span', {}, label), ...kids);
@@ -982,9 +1118,14 @@ function repeatsDialog(only = null, addonName = null) {
   const draw = () => {
     const plan = repeatPlan(choice), kids = [];
     if (choice.freq === 'custom') {
-      const n = h('input', {className:'input', type:'number', min:'1', max:'30', value:String(choice.every), 'aria-label':'Number of days'});
+      const unit = h('select', {className:'input', 'aria-label':'Minutes, hours or days'});
+      REPEAT_UNITS.forEach(([v, label]) => unit.append(new Option(label, v)));
+      unit.value = choice.unit || 'days';
+      const n = h('input', {className:'input', type:'number', min:unit.value === 'minutes' ? '5' : '1', max:unit.value === 'minutes' ? '59' : unit.value === 'hours' ? '23' : '30', value:String(choice.every), 'aria-label':'How many'});
       n.oninput = () => { choice.every = n.value; refreshSummary(); };
-      kids.push(row('Repeat every', h('div', {className:'custom-interval'}, n, h('span', {}, 'days'))));
+      unit.onchange = () => { choice.unit = unit.value; choice.every = unit.value === 'minutes' ? Math.max(5, Number(choice.every) || 5) : Math.min(Number(choice.every) || 1, unit.value === 'hours' ? 23 : 30); draw(); };
+      kids.push(row('Every', h('div', {className:'custom-interval'}, n, unit)));
+      if (choice.unit !== 'days') kids.push(h('p', {className:'meta'}, 'Pick minutes or hours for a steady rhythm. For fixed times of day choose Every day or Every week.'));
     }
     if (choice.freq === 'weekly') {
       const chips = REPEAT_DAYS.map(([short, long, num]) => {
@@ -1002,9 +1143,11 @@ function repeatsDialog(only = null, addonName = null) {
       day.onchange = () => { choice.monthday = Number(day.value); refreshSummary(); };
       kids.push(row('Day of month', h('div', {className:'schedule-value'}, day, plan.hint ? hint : null)));
     }
-    const time = h('input', {className:'input', type:'time', value:choice.time, required:'', 'aria-label':'Time'});
-    time.oninput = () => { choice.time = time.value; refreshSummary(); };
-    kids.push(row('Time', h('div', {className:'schedule-value'}, time, h('span', {className:'meta'}, 'Uses the workspace’s time zone.'))));
+    if (choice.freq !== 'custom' || choice.unit === 'days') {
+      const time = h('input', {className:'input', type:'time', value:choice.time, required:'', 'aria-label':'Time'});
+      time.oninput = () => { choice.time = time.value; refreshSummary(); };
+      kids.push(row('Time', h('div', {className:'schedule-value'}, time, h('span', {className:'meta'}, 'Uses the workspace’s time zone.'))));
+    }
     rowsHost.replaceChildren(...kids);
     refreshSummary();
   };
@@ -1012,13 +1155,14 @@ function repeatsDialog(only = null, addonName = null) {
     REPEAT_FREQ.map(([value, label]) => {
       const input = h('input', {type:'radio', name:'frequency', value});
       input.checked = value === choice.freq;
-      input.onchange = () => { choice.freq = value; draw(); };
+      input.onchange = () => { choice.freq = value; if (value === 'custom') { choice.unit = choice.unit || 'minutes'; if (choice.unit === 'minutes' && !(Number(choice.every) >= 5)) choice.every = 5; } draw(); };
       return h('label', {}, input, h('span', {}, label));
     }));
   const fields = h('div', {className:'form-fields'}, h('label', {className:'field'}, 'Ticket', ticket),
-    h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary));
+    h('fieldset', {className:'repeat-block'}, h('legend', {}, 'How often'), freq, rowsHost, summary,
+      outside ? h('p', {className:'meta', 'data-key':'repeat-set-by-helper'}, 'Set by your helper: ' + outside + '. Change it with the options above.') : null));
   if (!ticket.options.length) fields.append(h('p', {className:'meta'}, 'No open tickets yet.'));
-  const copy = button('Copy ticket now', 'ghost', async () => {
+  const copy = button('Run once now', 'ghost', async () => {
     if (!ticket.value) return;
     const result = await act('addon.act', {addon:addonName || route().id, verb:'copy', target:ticket.value});
     window.orch.toast(result.ok ? 'Ticket copied.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');

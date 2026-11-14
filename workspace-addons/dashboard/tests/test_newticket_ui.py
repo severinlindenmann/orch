@@ -6,8 +6,8 @@ from .webjs import WEB, all_js
 def test_new_ticket_has_one_large_paste_box_and_optional_metadata():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "'What needs doing?'" in js
-    assert "input.rows = 8; input.maxLength = 500000; input.required = true" in js
-    assert "What should the helper do? A sentence or a long text; it is split into tasks." in js
+    assert "input.rows = 3; input.maxLength = 500000; input.required = true" in js
+    assert "What should the helper do? A sentence or a long text; it is split into steps." in js
     # Simpler window: helper, due date and "done when" are shown plainly, not behind "More options".
     assert "More options" not in js
     assert "el('div', 'new-ticket-options')" in js

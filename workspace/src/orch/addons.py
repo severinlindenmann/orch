@@ -408,6 +408,53 @@ def home(root: Path | None = None) -> Path:
     return real
 
 
+def copies_base(h: Path) -> Path:
+    """Where the ticket copies of orch home `h` live: a SIBLING of the home, never inside it. Agents work in
+    these copies, and every agent is denied the whole orch home (denyrules: keys, secrets, approvals); a copy
+    inside the home would be denied too, and a carve-out cannot be made safe.
+    `~/.orch-tool` -> `~/.orch-work`; any other home -> `<parent>/.orch-work-<8 hex of its path>` (one per
+    home; the name never holds the home's own name, which the agent's shell deny rules match as text)."""
+    h = h.resolve()
+    tag = hashlib.sha256(str(h).casefold().encode("utf-8")).hexdigest()
+    names = [".orch-work"] if h.name == ".orch-tool" else []
+    names += [f".orch-work-{tag[:8]}", f".oc-{tag[:16]}"]
+    for n in names:
+        if not names_clash(h, h.parent / n):
+            return h.parent / n
+    return h.parent / names[-1]
+
+
+def names_clash(h: Path, base: Path) -> bool:
+    """`base` holds a text the agent's shell deny matches for home `h` (denyrules.rules: the home's name and
+    <parent>/<name> when the name has 6+ characters): every shell command naming the copy would be refused."""
+    if len(h.name) < 6:
+        return False
+    b = str(base).replace("\\", "/").casefold()
+    return h.name.casefold() in b or f"{h.parent.name}/{h.name}".casefold() in b
+
+
+def copies_home(root: Path | None = None) -> Path:
+    """copies_base(home(root))."""
+    return copies_base(home(root))
+
+
+def copies_candidates(include_real: bool = False) -> list[Path]:
+    """copies_base of every home_candidates() entry: for "is this path inside an orch copy" questions."""
+    return list(dict.fromkeys(copies_base(h) for h in home_candidates(include_real)))
+
+
+def home_of_copies(base: Path) -> Path | None:
+    """The orch home whose copies_base is `base` (resolved), or None."""
+    try:
+        b = base.resolve()
+    except (OSError, RuntimeError):
+        return None
+    for h in home_candidates(include_real=True):
+        if copies_base(h) == b:
+            return h
+    return None
+
+
 def registry_path() -> Path:
     """The add-on list: home()/addons.json, always the same home as every other piece of state (running.json,
     run/, installed.json). Reading it from a trusted ORCH_HOME is safe because registry() drops what a crafted
@@ -2252,8 +2299,18 @@ def _stored_sha() -> str | None:
     return _sha_or_none(d.get("sha")) if isinstance(d, dict) else None
 
 
-def _save_installed(sha: str | None) -> None:
-    _write_atomic(home() / "installed.json", json.dumps({"sha": _sha_or_none(sha)}))
+def _save_installed(sha: str | None, release: int | None = None) -> None:
+    """The commit this install came from and, when known, its release number (what a person reads)."""
+    data: dict = {"sha": _sha_or_none(sha)}
+    if isinstance(release, int) and not isinstance(release, bool) and release > 0:
+        data["release"] = release
+    _write_atomic(home() / "installed.json", json.dumps(data))
+
+
+def _stored_release() -> int | None:
+    from orch import updateinfo
+
+    return updateinfo.installed()["release"]
 
 
 def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
@@ -2290,6 +2347,8 @@ def _load_snapshot(root: Path, nonce: str | None) -> dict | None:
         return None
     path.unlink(missing_ok=True)
     d["sha"] = _sha_or_none(d.get("sha"))
+    rel = d.get("release")
+    d["release"] = rel if isinstance(rel, int) and not isinstance(rel, bool) and rel > 0 else None
     return d
 
 
@@ -2579,7 +2638,10 @@ def update(
     """Reinstall orch + every installed add-on together, then refresh this project's skills and blocks.
     after_install: the install script just put a bare orch in place; put the registered add-ons back."""
     if after_install:
-        _save_installed(_source_sha())
+        from orch import updateinfo
+
+        sha_now = _source_sha()
+        _save_installed(sha_now, updateinfo.release_now(sha_now))
         reg = _current_registry()
         if reg:
             names = ", ".join(e["name"] for e in reg)
@@ -2597,6 +2659,7 @@ def update(
             "orch": _orch_version(),
             "addons": {e["name"]: e["version"] for e in registry()},
             "sha": _stored_sha(),
+            "release": _stored_release(),
         }
         before_path = home() / "update-before.json"
         _write_atomic(before_path, json.dumps(snapshot))
@@ -2650,6 +2713,10 @@ def update(
     sha = _source_sha()
     if before is not None:
         lines, _changed = _update_lines(before, found, sha)
+        from orch import updateinfo
+
+        new_release, more = updateinfo.after_update(before.get("sha"), before.get("release"), sha)
+        lines += more  # "Updated orch 15 → 16", then what changed
         if not json_output:
             _say("\n".join(lines))
         restart_lines = _restart_updated(root)  # whatever changed: what runs is the old install
@@ -2665,5 +2732,5 @@ def update(
                 entry["version"] = found[entry["name"]]["version"]
         _save_registry(reg)
         if sha:
-            _save_installed(sha)
+            _save_installed(sha, new_release)
     return done

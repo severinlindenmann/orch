@@ -1,10 +1,12 @@
 """Deny rules for the agent's own tools (contracts/secrets.md, "Deny rules"; Level 1).
 
 One deny set for every adapter (`roots`); an adapter's `deny.format` only says how its tool is told.
-Pure string work on paths (no reads), so Windows forms can be tested anywhere."""
+Pure string work on paths (only copies_rules lists the copies folders), so Windows forms can be tested
+anywhere."""
 
 import os
 import re
+import sys
 from pathlib import Path, PurePosixPath
 
 # (name, read denied, path under the workspace or None = every guarded orch home)
@@ -14,6 +16,10 @@ ROOTS = (
     ("record", False, ".orch/record"),
     ("local-id", False, ".orch/.local-id"),
 )
+SHELL_ROWS = 6  # copies rows that also get shell patterns
+COPY_BUDGET = 12000  # characters of copies patterns at most
+_TID = re.compile(r"t_[a-z0-9]{6,16}")
+BOUNDS = ("/", '"', "'", ";", "&", "|")  # what can follow a path in a command (a space cannot: _BAD)
 _BAD = re.compile(r"[,() \t\r\n\0]")
 _DRIVE = re.compile(r"^([A-Za-z]):[\\/]")
 
@@ -166,6 +172,106 @@ def rules(root: Path, homes: list[str] | None = None, account_home: str | None =
     return out
 
 
+def _copies_bases() -> list[str]:
+    from orch import addons
+
+    out: list[str] = []
+    try:
+        for b in addons.copies_candidates(include_real=True):
+            for x in (str(b), os.path.realpath(b)):
+                if x not in out:
+                    out.append(x)
+    except (OSError, RuntimeError):
+        pass
+    return out
+
+
+def copies_rules(
+    workdir: str | None, workspace: str, account_home: str | None, bases: list[str] | None = None
+) -> list[dict]:
+    """Other tickets' copies. Copies live OUTSIDE the orch home (addons.copies_base), so the home deny
+    (keys, secrets, approvals) holds whole for every agent, its own copy is simply not under it. On top:
+    an agent that does not work in a copy is denied every copies folder; an agent in
+    <base>/<ws8>/<ticket> is denied every other entry there at its start (other workspaces' copies, the
+    other tickets, `.owner`, `.trash`). Copies hold project files, never orch's secrets: this row is
+    defense in depth, the secret boundary is the home deny."""
+    bases = _copies_bases() if bases is None else bases
+    own: tuple[str, str, str] | None = None
+    for w in dict.fromkeys(x for x in (workdir, workdir and os.path.realpath(workdir)) if x):
+        for b in bases:
+            parts = [x for x in (_under(w, b) or "").split("/") if x]
+            if len(parts) >= 2 and ".." not in parts:
+                own = (b, parts[0], parts[1])
+                break
+        if own:
+            break
+
+    def row(path: str, bounded: bool = True, shell: bool = True) -> dict:
+        # A plain shell text pattern is a substring match: a sibling named like a prefix of the agent's own
+        # folder (`t_ab` next to `t_abc`, or a name the agent made) would refuse every shell command naming
+        # its own folder. So a copy agent's shell rows match the path only up to a boundary (BOUNDS, or the
+        # end of the command); `../sibling` stays reachable by the shell (Level 1).
+        f = path_forms(path, workspace, account_home)
+        if not bounded:
+            return {"root": "copies", "path": path, "read": True, **f}
+        return {
+            "root": "copies",
+            "path": path,
+            "read": True,
+            **f,
+            "text": [],
+            "text_bounded": [t for t in f["text"] if t[:1] in "/~" or _DRIVE.match(t)] if shell else [],
+        }
+
+    if own is None:  # not in a copy: every copies folder, whole (no own folder to keep clear)
+        return [row(_norm(b), bounded=False) for b in dict.fromkeys(bases)]
+    # Order: this workspace's `.owner` and `.trash`, its other tickets (ticket-id names only), then the
+    # other workspaces orch knows (its signed copies record, never any folder name an agent could make).
+    order: list[str] = []
+    for b in dict.fromkeys(bases):
+        base = _norm(b)
+        if _norm(own[0]).lower() != base.lower():
+            continue
+        ws = base + "/" + own[1]
+        names = _list(ws)
+        order += [ws + "/" + n for n in (".owner", ".trash") if n in names]
+        order += [ws + "/" + n for n in names if _TID.fullmatch(n) and n.lower() != own[2].lower()]
+        order += [base + "/" + n for n in _known_ws8(base) if n != own[1] and n in _list(base)]
+    out: list[dict] = []
+    used = 0
+    for k, p in enumerate(order):
+        r = row(p, shell=k < SHELL_ROWS)
+        size = sum(len(x) + 1 for x in tool_patterns([r]))
+        if used + size > COPY_BUDGET:  # a Windows command line holds 32767 characters
+            print(
+                f"orch: {len(order) - k} other copies are not covered by this agent's deny rules "
+                f"(more than fit on its command line).",
+                file=sys.stderr,
+            )
+            break
+        out.append(r)
+        used += size
+    return out
+
+
+def _known_ws8(base: str) -> list[str]:
+    """The workspaces orch's signed copies record names for this copies folder (worktrees._known_copies)."""
+    try:
+        from orch import worktrees
+
+        return sorted(worktrees._known_copies(Path(base)))
+    except Exception:  # noqa: BLE001 - no record: no rows for other workspaces (defense in depth only)
+        print("orch: other workspaces' copies are not covered by this agent's deny rules.", file=sys.stderr)
+        return []
+
+
+def _list(folder: str) -> list[str]:
+    try:
+        return sorted(os.listdir(folder))
+    except OSError:
+        return []
+
+
 def tool_patterns(rule_list: list[dict]) -> list[str]:
     """patterns/1: Read/Edit/Write patterns and Bash text patterns, de-duplicated, in a stable order."""
     pats: list[str] = []
@@ -175,6 +281,8 @@ def tool_patterns(rule_list: list[dict]) -> list[str]:
             for tool in tools:
                 pats += [f"{tool}({f})", f"{tool}({f}/**)"]
         pats += [f"Bash(*{t}*)" for t in r["text"]]
+        for t in r.get("text_bounded", ()):
+            pats += [f"Bash(*{t}{b}*)" for b in BOUNDS] + [f"Bash(*{t})"]
     return list(dict.fromkeys(pats))
 
 
@@ -203,7 +311,9 @@ def merge_flag(extra: list[str], patterns: list[str]) -> list[str]:
     return [*out, "--disallowedTools", ",".join([*old, ",".join(patterns)])]
 
 
-def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[str]:
+def deny_args(
+    deny: dict | None, extra: list[str], root: Path | None, workdir: str | Path | None = None
+) -> list[str]:
     """`extra` (the tool's permission flags) plus the deny rules for the adapter's `deny.format`."""
     fmt = (deny or {}).get("format", "none")
     if fmt == "none":
@@ -213,5 +323,7 @@ def deny_args(deny: dict | None, extra: list[str], root: Path | None) -> list[st
 
         raise Refused("orch cannot start this tool without its deny rules (no workspace given).")
     if fmt == "patterns/1":
-        return merge_flag(extra, tool_patterns(rules(root)))
+        rl = rules(root)
+        rl += copies_rules(str(workdir) if workdir else None, str(root), _account_home())
+        return merge_flag(extra, tool_patterns(rl))
     raise RuntimeError(f"unknown deny format {fmt}")

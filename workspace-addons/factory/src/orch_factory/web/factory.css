@@ -1,5 +1,5 @@
 /* Factory composition; dashboard owns the surrounding shell. */
-.factory-page{max-width:1280px;gap:24px}
+.factory-page{gap:24px}
 #factory-view,.f-section,.f-card,.f-loading{display:grid;gap:16px}
 #factory-view{gap:24px}
 .f-heading{display:flex;align-items:start;justify-content:space-between;gap:16px;flex-wrap:wrap}

@@ -50,10 +50,26 @@ function showView(which) {
   byId('view-region').setAttribute('aria-busy', String(which === 'loading'));
 }
 
+// The one master empty / error state (UI.state) in a host element; a plain line if the kit is missing.
+function paintState(host, kind, title, text) {
+  if (window.UI && window.UI.state) host.replaceChildren(window.UI.state({kind, title, text}));
+  else host.textContent = title + (text ? ' ' + text : '');
+}
 function showMessage(text) {
   showView('message');
-  byId('message').textContent = text;
+  paintState(byId('message'), 'error', 'Insights can’t show this right now', text);
   overview = null;
+}
+
+// First day, nothing recorded yet: the same three tiles as the overview, at 0, each saying when it fills.
+function emptyTiles(view) {
+  const note = 'Fills after the first helper run';
+  const cards = [['Runs', '0'], ['Skills used', '0'], ['Connected services', String(view.tabs.connections.count)]];
+  return cards.map(([label, value]) => {
+    const card = node('article', undefined, 'card metric');
+    card.append(node('p', label, 'meta'), node('strong', value), node('small', note));
+    return card;
+  });
 }
 
 function fillMetrics() {
@@ -260,8 +276,9 @@ async function refresh() {
     overview = answer;
     if (overview.first_day) {
       showView('empty');
-      byId('empty').querySelector('h2').textContent = 'Nothing recorded yet';
-      byId('empty').querySelector('p').textContent = 'Counts appear after the first helper run.';
+      const grid = node('div', undefined, 'metric-grid');
+      grid.append(...emptyTiles(overview));
+      byId('empty').replaceChildren(grid);
       return;
     }
     if (!await loadList('skills')) return;

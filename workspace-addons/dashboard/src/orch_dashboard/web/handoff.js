@@ -10,7 +10,23 @@
   // can not cover the review bar or any other action. One request = one sentence and two buttons; several =
   // "2 requests waiting" that opens a list, each row with its own buttons. Plain words only: the sentence comes
   // from orch as structured parts; the person's own text is a separate "Exact text" block.
-  var open = false;
+  var open = false, updInfo = null, lastItems = [];
+  // The versions come from orch's own update info (the same as Settings > About & updates), never from the request.
+  function updateWords(info) {
+    if (!info || info.update_available !== true || !info.newest || !info.newest.label) return null;
+    var have = info.installed && info.installed.label;
+    return have ? "Update from " + have + " to " + info.newest.label + "?" : "Update orch to " + info.newest.label + "?";
+  }
+  function updateChanges(info) {
+    return info && info.update_available === true && Array.isArray(info.changes) ? info.changes.map(String).join("\n") : "";
+  }
+  function loadUpdateInfo() {
+    if (updInfo !== null) return;
+    updInfo = {};
+    fetch("/api/update-info", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : {}; }).then(function (d) {
+      updInfo = d || {}; seen = ""; render(lastItems);
+    }).catch(function () {});
+  }
   // One FIXED template per op. Every untrusted fragment (a title, a question, a path, a host, a name) goes into its
   // own <span> with textContent: nothing is ever substituted into a string, so a title that says "{value}" or
   // carries quotes can only ever be shown as itself. The exact text the person approves is a separate block.
@@ -29,7 +45,7 @@
     var n = Number(p.n) > 0 ? "step " + Number(p.n) + ", " : "";
     var s = el("span"); s.appendChild(document.createTextNode(n)); s.appendChild(q(p.step)); return s;
   }
-  var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Review?"], back: ["Send ", " back to work?"]};
+  var STATUS = {done: ["Move ", " to Done?"], review: ["Move ", " to Check?"], back: ["Send ", " back to work?"]};
   var INSIGHTS_SETTING = {"insights.keep_days": "how long full detail is kept", "insights.max_mb": "the largest size of the record", "insights.share_counts": "sharing counts with your admin", "insights.share_names": "sharing this workspace's names"};
   function insightsValue(key, v) {  // plain words for the value; anything unexpected is shown capped, never as markup
     var n = Number(v);
@@ -67,7 +83,7 @@
     "group.remove_member": function (p) { return ["Remove ", q(p.workspace), " from the group ", q(p.title), "?"]; },
     "group.share_file": function (p) { return ["Share ", q(p.file), " with the group ", q(p.title), p.host ? " (host " + p.host + ")" : "", "?"]; },
     "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
-    "update": function (p) { return ["Update orch from ", full(p.source), "?"]; },
+    "update": function (p) { var w = updateWords(updInfo); return w ? [full(w)] : ["Update orch from ", full(p.source), "?"]; },
     "relay.connect": function (p) {
       var s = p.scheme === "http" ? "http://" : "https://";
       return ["Connect to ", full(s + p.host), "?" + (p.scheme === "http" ? " This address is not encrypted." : "")];
@@ -96,6 +112,7 @@
   function exact(i) {  // the exact text / target that will be used, never merged into the sentence, never cut
     var w = el("div"); w.style.cssText = "flex-basis:100%";
     if (i.exact) w.appendChild(block(EXACT_LABEL[i.op] || "Exact value:", i.exact));
+    if (i.op === "update" && updateChanges(updInfo)) w.appendChild(block("What changed:", updateChanges(updInfo)));
     if (i.value && !(i.op === "ticket.answer" && shortValue(String(i.value)))) w.appendChild(block("Exact text:", i.value));
     return w.childNodes.length ? w : null;
   }
@@ -138,6 +155,8 @@
     return p;
   }
   function render(items) {
+    lastItems = items;
+    if (items.some(function (i) { return i.op === "update"; })) loadUpdateInfo(); else updInfo = null;
     var key = JSON.stringify(items) + open + Math.floor(Date.now() / 60000);
     if (key === seen) return;
     seen = key;
@@ -217,16 +236,24 @@
       : "The update did not finish. orch is still the old version. Start the update again when you are ready.";
     if (t !== shown) { shown = t; startedGone(); banner(t); }
   }
+  function tell(state, reason) {
+    if (!state) return;
+    try { window.dispatchEvent(new CustomEvent("orch-update-state", {detail: {state: state, reason: reason || ""}})); } catch (e) {}
+  }
   function updateStatus() {
     var gone = false;
     fetch("/api/update-status", {headers: {"Accept": "application/json"}}).then(function (r) { gone = !r.ok; return r.ok ? r.json() : {}; }).then(function (s) {
-      if (!s || !s.state || s.state === "running") { updateOverdue(gone); return; }
+      if (!s || !s.state || s.state === "running") {
+        tell(s && s.state === "running" ? "running" : gone ? "unreachable" : "");  // Settings > About & updates shows the steps
+        updateOverdue(gone); return;
+      }
+      tell(s.state, s.reason);
       updateDone();
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
       var t = s.state === "finished" ? "Update finished." : "Update failed: " + why + ".";
       if (t !== shown) { shown = t; startedGone(); banner(t); }
       poll();  // an update request that waited no longer applies: it is gone from the list now
-    }).catch(function () { updateOverdue(true); });
+    }).catch(function () { tell("unreachable"); updateOverdue(true); });
   }
   notices(); poll(); updateStatus(); setInterval(poll, 4000); setInterval(updateStatus, 4000);
 })();

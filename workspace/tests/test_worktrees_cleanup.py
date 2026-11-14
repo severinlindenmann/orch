@@ -113,7 +113,7 @@ def wid8(repo):
 def test_decoys_are_never_deleted(repo, tmp_path):
     mine = make(repo, 0)  # a real copy of ticket 0: must stay while ticket 0 is open
     home = addons.home(repo)
-    base = home / "worktrees"
+    base = addons.copies_base(home)
     folder = mine.parent
     reg = worktrees.registry(repo)
 
@@ -510,7 +510,7 @@ def test_orphans_are_left_when_the_owner_is_not_this_workspace(repo):
 
 
 def _gone_folder(repo, ws8="aaaaaaaa", owner="/nonexistent/workspace", old=True):
-    d = addons.home(repo) / "worktrees" / ws8
+    d = addons.copies_home(repo) / ws8
     (d / "t_abcdef12" / "sub").mkdir(parents=True)
     (d / "t_abcdef12" / "sub" / "f.txt").write_text("x")
     (d / ".owner").write_text(owner + "\n")
@@ -566,7 +566,7 @@ def test_remove_orphaned_saves_changes_first_when_the_repository_is_reachable(re
     tickets.ticket_path(repo, t).unlink()
     worktrees._save_registry(repo, {})
     assert worktrees.orphaned(repo) == [] or True  # (our own folder is never listed as orphaned)
-    other = addons.home(repo) / "worktrees" / "bbbbbbbb"
+    other = addons.copies_home(repo) / "bbbbbbbb"
     other.mkdir()
     p2 = other / t
     git(repo, "worktree", "move", str(p), str(p2))
@@ -771,7 +771,7 @@ def test_forget_refuses_a_folder_outside_the_copies_folder(repo, tmp_path):
     d = projects / re.sub(r"[^A-Za-z0-9]", "-", str(victim.resolve()))
     d.mkdir(parents=True)
     cj.write_text(json.dumps({"projects": {str(victim.resolve()): {"hasTrustDialogAccepted": True}}}))
-    assert adapters.forget_folder("claude", victim, addons.home(repo) / "worktrees") == []
+    assert adapters.forget_folder("claude", victim, addons.copies_home(repo)) == []
     assert d.is_dir() and str(victim.resolve()) in cj.read_text()
 
 
@@ -1193,7 +1193,7 @@ def test_known_copy_record_is_created_outside_ws8_and_owner_must_agree(repo):
 
 
 def test_known_copies_rejects_wrong_workspace_id(repo):
-    folder = addons.home(repo) / "worktrees" / "aaaaaaaa"
+    folder = addons.copies_home(repo) / "aaaaaaaa"
     with pytest.raises(Refused, match="id"):
         worktrees._remember_copies(repo, folder)
 
@@ -1363,7 +1363,7 @@ def test_task_d_missing_main_cannot_rebind_different_full_id(repo, moved):
 
 @pytest.mark.parametrize("equal", [False, True])
 def test_task_d_legacy_string_migration_requires_same_main(repo, equal):
-    folder = addons.home(repo) / "worktrees" / wid8(repo)
+    folder = addons.copies_home(repo) / wid8(repo)
     folder.mkdir(parents=True)
     main = str(repo.resolve())
     (folder.parent / ".known.json").write_text(json.dumps({folder.name: main if equal else main + "-gone"}))
@@ -1403,7 +1403,7 @@ def test_task_d_replayed_store_is_unknown(repo, update):
         worktrees.remove_orphaned(repo, d.name, discard=True)
     # A replay must not become a fresh empty registry on the next write either.
     with pytest.raises(Refused):
-        worktrees._remember_copies(repo, addons.home(repo) / "worktrees" / wid8(repo))
+        worktrees._remember_copies(repo, addons.copies_home(repo) / wid8(repo))
 
 
 def test_task_e_real_guard_round_trip(repo, monkeypatch):
@@ -1437,7 +1437,7 @@ def test_task_e_real_guard_outside_refused(repo, monkeypatch):
     assert "cannot make the copy folder" in note
     assert "Traceback" not in note
     assert {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
-    assert not (home / "worktrees").exists()
+    assert not (home / "worktrees").exists() and not addons.copies_base(home).exists()
     assert not (home / "keys" / "copies").exists()
 
 
@@ -1498,7 +1498,7 @@ def test_task_f_unbound_existing_copies_refused_without_store_change(repo, owner
     remember_gone(repo, existing, main)
     store = addons.home(repo) / "keys" / "copies" / "registry.json"
     before = store.read_bytes(), store.with_name("counter").read_bytes()
-    folder = addons.home(repo) / "worktrees" / wid8(repo)
+    folder = addons.copies_home(repo) / wid8(repo)
     (folder / repo.tids[0]).mkdir(parents=True)
     if owner == "other":
         (folder / ".owner").write_text(str(repo.parent / "other-main") + "\n")
