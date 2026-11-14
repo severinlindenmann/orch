@@ -591,6 +591,15 @@ def chat_id(root: Path) -> dict:
     return {"ticket": gid, "paused": paused}
 
 
+def _helper_busy(root: Path, gid: str) -> bool:
+    """The helper is working now: a run holds the Chat ticket and, for a live session, it is not idle or
+    waiting for a person (a live helper stays alive between answers; "thinking" must not)."""
+    rec = runs.read(root, gid)
+    if not rec or runs.state(rec) == "dead":
+        return False
+    return not (rec.get("mode") == "live" and (rec.get("live") or {}).get("state") in ("idle", "attention"))
+
+
 def status(root: Path, now=None) -> dict:
     """What the dashboard shows: helper name, today, the day's texts, the strip, the History list."""
     gid = tickets.general_id(root)
@@ -605,7 +614,7 @@ def status(root: Path, now=None) -> dict:
         "messages": _read_day(root, today)["messages"][-200:],
         "activity": activity(root, now),
         "days": days(root),
-        "running": bool(gid and runs.running(root, gid)),
+        "running": bool(gid and _helper_busy(root, gid)),
         "human_pending_ids": waiting,
     }
 

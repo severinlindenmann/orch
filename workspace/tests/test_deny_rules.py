@@ -529,3 +529,109 @@ def test_missing_claude_code_message_is_plain(monkeypatch, tmp_path):
         str(e.value)
         == "Claude Code is missing or too old on this computer. Install or update it, then press Continue."
     )
+
+
+# ---- a ticket agent reads its own instruction file and skills in <orch home>/worktrees/<ws8>/<ticket>
+
+
+def _wt_rules(tmp_path, workdir=True):
+    home = tmp_path / ".orch-tool"
+    for d in ("worktrees/ab12cd34/t_1", "worktrees/ab12cd34/t_2", "worktrees/ffff0000/t_9", "keys"):
+        (home / d).mkdir(parents=True, exist_ok=True)
+    (home / "worktrees" / "ab12cd34" / ".owner").write_text("x")
+    (home / "newthing.json").write_text("{}")
+    ws = tmp_path / "ws"
+    ws.mkdir(exist_ok=True)
+    wd = str(home / "worktrees/ab12cd34/t_1") if workdir else None
+    rl = denyrules.rules(ws, homes=[str(home)], account_home=str(tmp_path))
+    return home, ws, denyrules.without_worktrees(rl, str(ws), str(tmp_path), wd), wd
+
+
+def test_only_the_running_tickets_folder_stays_open(tmp_path):
+    home, ws, rl, wd = _wt_rules(tmp_path)
+    pats = _set(rl)
+    h = str(home).lstrip("/")
+    for tool in ("Read", "Edit"):
+        for denied in (
+            "keys/**",
+            "consent.json",
+            "permissions.json",
+            "agent-approvals.json",
+            "newthing.json",
+            "*.json",
+            "*.tmp*",
+            ".*",
+            "worktrees/ffff0000/**",  # another workspace's copies
+            "worktrees/ab12cd34/t_2/**",  # another ticket
+            "worktrees/ab12cd34/.owner",
+            "worktrees/.known.json",
+        ):
+            assert f"{tool}(//{h}/{denied})" in pats, (tool, denied)
+        assert not any(p.startswith(f"{tool}(") and "/t_1" in p for p in pats)  # its own copy
+        assert f"{tool}(//{h}/**)" not in pats and f"{tool}(//{h}/worktrees/**)" not in pats
+    assert "Read(./.orch/secrets/**)" in pats
+    assert "Bash(*../keys*)" in pats and "Bash(*../../*)" in pats and "Bash(*../secrets*)" in pats
+
+
+def test_without_a_worktree_the_home_stays_a_blanket_deny(tmp_path):
+    home, ws, rl, _ = _wt_rules(tmp_path, workdir=False)
+    h = str(home).lstrip("/")
+    assert f"Read(//{h}/**)" in _set(rl)
+    other = denyrules.without_worktrees(rl, str(ws), str(tmp_path), str(ws))  # the workspace itself
+    assert f"Read(//{h}/**)" in _set(other)
+
+
+def test_a_link_out_of_the_worktree_into_the_home_refuses_the_start(tmp_path):
+    from orch.errors import Refused
+
+    home, ws, _, wd = _wt_rules(tmp_path)
+    os.symlink(home / "keys", Path(wd) / "k")
+    with pytest.raises(Refused, match="points into orch's own folder"):
+        denyrules.check_worktree_links(wd, [str(home)])
+    os.remove(Path(wd) / "k")
+    os.symlink(home / "worktrees/ab12cd34/t_2", Path(wd) / "sibling")  # a sibling copy is inside the home too
+    with pytest.raises(Refused):
+        denyrules.check_worktree_links(wd, [str(home)])
+    os.remove(Path(wd) / "sibling")
+    os.symlink(Path(wd) / "a", Path(wd) / "inside")  # a link that stays in the copy is fine
+    os.symlink(tmp_path, Path(wd) / "elsewhere")  # outside the home entirely: not this check's business
+    denyrules.check_worktree_links(wd, [str(home / "nothere")])
+
+
+def test_deny_args_with_a_workdir_checks_links_and_opens_the_copy(proj_ws, tmp_path):
+    from orch.errors import Refused
+
+    home = Path(denyrules._candidates(proj_ws)[0])
+    wd = home / "worktrees/ab12cd34/t_1"
+    wd.mkdir(parents=True)
+    argv = denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, wd)
+    pats = argv[argv.index("--disallowedTools") + 1].split(",")
+    assert not any(p.startswith("Read(") and "/t_1" in p for p in pats)
+    os.symlink(home, wd / "up")
+    with pytest.raises(Refused):
+        denyrules.deny_args({"format": "patterns/1"}, [], proj_ws, wd)
+
+
+def test_every_top_level_name_orch_writes_under_its_home_is_denied():
+    """Fails when code names a new file or folder directly under the orch home that HOME_CHILDREN and
+    HOME_PATTERNS do not cover: add it there (a deny rule has no default for names it does not know)."""
+    import fnmatch
+    import re
+
+    src = Path(denyrules.__file__).parent.parent
+    rx = re.compile(
+        r"\b(?:home|HOME|_home|orch_home|guarded|addons\.home\([^)]*\)|home\([^)]*\))\s*/\s*\"([\w.-]+)\""
+    )
+    names = set()
+    for f in list(src.rglob("*.py")) + list((src.parents[1] / "workspace-addons").rglob("*.py")):
+        if "tests" in f.parts or ".venv" in f.parts or "node_modules" in f.parts:
+            continue
+        names |= set(rx.findall(f.read_text(encoding="utf-8", errors="ignore")))
+    names -= {denyrules.OPEN_CHILD, ".orch-tool", ".claude", ".local", ".cache"}
+    covered = set(denyrules.HOME_CHILDREN)
+    missing = sorted(
+        n
+        for n in names
+        if n not in covered and not any(fnmatch.fnmatchcase(n, p) for p in denyrules.HOME_PATTERNS)
+    )
+    assert not missing, f"new names under the orch home are not in denyrules.HOME_CHILDREN: {missing}"

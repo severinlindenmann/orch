@@ -1380,3 +1380,22 @@ def test_helper_reply_without_a_relay_is_kept_in_the_chat(proj, run, monkeypatch
     assert code == 0, (out, err)
     last = chat.read_day(proj, chat.day_key(proj))["messages"][-1]
     assert last["text"] == "Four." and last["via"] == "helper" and last["by"] != "you"
+
+
+def test_status_running_is_false_while_a_live_helper_is_idle(proj, monkeypatch):
+    gid = "t_general"
+    monkeypatch.setattr(tickets, "general_id", lambda root: gid)
+    monkeypatch.setattr(runs, "check_start_timeout", lambda root, tid: None)
+    monkeypatch.setattr(runs, "human_waiting", lambda root, tid: [])
+    rec = {"pid": 1, "mode": "live", "live": {"state": "working"}}
+    monkeypatch.setattr(runs, "read", lambda root, tid: rec)
+    monkeypatch.setattr(runs, "state", lambda r, at=None: "alive")
+    assert chat.status(proj)["running"] is True
+    for st in ("idle", "attention"):
+        rec["live"]["state"] = st
+        assert chat.status(proj)["running"] is False, st
+    rec["mode"] = "oneshot"  # a one-shot run is working until it ends
+    assert chat.status(proj)["running"] is True
+    monkeypatch.setattr(runs, "state", lambda r, at=None: "dead")
+    assert chat.status(proj)["running"] is False
+    assert gid
