@@ -3,7 +3,8 @@ import Observation
 
 /// Phone-local "Hide" for a question on Chats ("Needs your OK"). Nothing is sent: the question stays open on the
 /// workspace. Rule: a question stays hidden until its conversation gets something newer ("comes back when the helper
-/// writes again"). Stored as [questionId: hiddenAt ISO string].
+/// writes again"). Stored as [questionId: mark ISO string]. The mark is the newest server time in the conversation when
+/// the person hid it (not the phone clock), so a phone clock that runs ahead or behind cannot hide or reveal it wrongly.
 @Observable
 final class HiddenQuestions {
     static let defaultsKey = "hiddenQuestions"
@@ -18,7 +19,8 @@ final class HiddenQuestions {
         self.entries = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
     }
 
-    func hide(_ id: String, at date: Date = Date()) {
+    /// `date`: the newest activity time of the question's conversation (server clock), see `mark(for:activity:)`.
+    func hide(_ id: String, at date: Date) {
         entries[id] = formatter.string(from: date)
         save()
     }
@@ -30,7 +32,16 @@ final class HiddenQuestions {
 
     func hiddenAt(_ id: String) -> Date? { entries[id].flatMap { formatter.date(from: $0) } }
 
-    /// Hidden while the hide time is not older than the newest thing in the conversation.
+    /// The hide mark for a question: the newest activity in its conversation, else the question's own time (server clock).
+    static func mark(for question: Question, activity: [String: Date]) -> Date {
+        activity[key(question)] ?? parse(question.message.createdAt) ?? Date()
+    }
+    static func key(_ question: Question) -> String { question.message.from + "|" + (question.message.ticket ?? "") }
+    nonisolated(unsafe) private static let iso = ISO8601DateFormatter()   // ISO8601DateFormatter is thread-safe
+    nonisolated(unsafe) private static let isoFraction: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions.insert(.withFractionalSeconds); return f }()
+    static func parse(_ s: String) -> Date? { iso.date(from: s) ?? isoFraction.date(from: s) }
+
+    /// Hidden while the hide mark is not older than the newest thing in the conversation.
     func isHidden(_ id: String, newestActivity: Date?) -> Bool {
         guard let at = hiddenAt(id) else { return false }
         guard let newest = newestActivity else { return true }
@@ -45,9 +56,7 @@ final class HiddenQuestions {
         func note(_ k: String, _ at: String) { if wanted.contains(k), (newest[k] ?? "") < at { newest[k] = at } }
         for m in messages where !m.fromPhone { note(conv(m.workspaceId, m.message.ticket), m.message.createdAt) }
         for q in allQuestions { note(conv(q.message.from, q.message.ticket), q.message.createdAt) }
-        let parse = ISO8601DateFormatter()
-        let fractional = ISO8601DateFormatter(); fractional.formatOptions.insert(.withFractionalSeconds)
-        return newest.compactMapValues { parse.date(from: $0) ?? fractional.date(from: $0) }
+        return newest.compactMapValues { parse($0) }
     }
 
     private func save() { defaults.set(entries, forKey: key) }

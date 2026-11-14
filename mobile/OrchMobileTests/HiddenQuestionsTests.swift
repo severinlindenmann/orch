@@ -42,4 +42,19 @@ final class HiddenQuestionsTests: XCTestCase {
         XCTAssertTrue(SwipeToHideRules.isHorizontal(CGSize(width: -40, height: 5)))
         XCTAssertFalse(SwipeToHideRules.isHorizontal(CGSize(width: 10, height: 40)))
     }
+
+    func testMarkUsesTheServerClockNotThePhoneClock() {
+        // A phone clock far ahead must not keep the question hidden after the helper writes again.
+        let q = Question(message: QuestionMessage(schema: "orch.msg/1", id: "q1", from: "ws", to: "phones", type: "question",
+            createdAt: "2026-11-14T10:00:00Z", ticket: "t", body: QuestionBody(questionId: "r1", title: "Fish", text: "Done?",
+                options: ["accept", "changes"], recommended: nil, review: true)), workspaceName: "Workspace")
+        let store = HiddenQuestions(defaults: suite())
+        let mark = HiddenQuestions.mark(for: q, activity: [:])
+        XCTAssertEqual(mark, t0, "no other activity: the question's own time")
+        store.hide("q1", at: mark)
+        XCTAssertTrue(store.isHidden("q1", newestActivity: t0))
+        XCTAssertFalse(store.isHidden("q1", newestActivity: t0.addingTimeInterval(5)), "a newer helper message brings it back")
+        let later = t0.addingTimeInterval(300)
+        XCTAssertEqual(HiddenQuestions.mark(for: q, activity: [HiddenQuestions.key(q): later]), later)
+    }
 }

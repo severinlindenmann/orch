@@ -176,7 +176,7 @@ struct ChatsListView: View {
     @ViewBuilder private var attentionCards: some View {
         let all = ChatsRowRules.needsYou(model.questions, answers: model.answers)
         let activity = HiddenQuestions.newestActivity(for: all, messages: model.messages, allQuestions: model.questions)
-        let isHidden: (Question) -> Bool = { hidden.isHidden($0.id, newestActivity: activity[$0.message.from + "|" + ($0.message.ticket ?? "")]) }
+        let isHidden: (Question) -> Bool = { hidden.isHidden($0.id, newestActivity: activity[HiddenQuestions.key($0)]) }
         let questions = all.filter { !isHidden($0) }
         let hiddenQuestions = all.filter(isHidden)
         if !questions.isEmpty && (filter == "All" || filter == "Needs your OK") {
@@ -187,7 +187,7 @@ struct ChatsListView: View {
                     .accessibilityAddTraits(.isHeader)
                 VStack(spacing: 0) {
                     ForEach(pinned) { question in
-                        questionRow(question, hideable: true)
+                        questionRow(question, hideable: true, mark: HiddenQuestions.mark(for: question, activity: activity))
                         if question.id != pinned.last?.id { ShellDivider() }
                     }
                     if pinned.count < questions.count {
@@ -209,7 +209,7 @@ struct ChatsListView: View {
                     .accessibilityAddTraits(.isHeader)
                 VStack(spacing: 0) {
                     ForEach(hiddenQuestions) { question in
-                        questionRow(question, hideable: false).opacity(0.75)
+                        questionRow(question, hideable: false, mark: nil).opacity(0.75)
                         if question.id != hiddenQuestions.last?.id { ShellDivider() }
                     }
                     ShellDivider()
@@ -220,7 +220,7 @@ struct ChatsListView: View {
         }
     }
 
-    @ViewBuilder private func questionRow(_ question: Question, hideable: Bool) -> some View {
+    @ViewBuilder private func questionRow(_ question: Question, hideable: Bool, mark: Date?) -> some View {
         let ws = question.message.from
         let summary = model.workspaceSummaries.first { $0.id == ws }
         let wsName = summary.map { WorkspaceAlias.name(for: $0.workspace) } ?? question.workspaceName
@@ -242,7 +242,7 @@ struct ChatsListView: View {
             .accessibilityIdentifier("needs-you-\(question.id)")
         if hideable {
             link.swipeToHide(id: question.id) {
-                hidden.hide(question.id)
+                hidden.hide(question.id, at: mark ?? Date())
                 hideToast = ArchiveToast(text: "Hidden. It stays open in \(wsName).", undo: { hidden.show(question.id) }, kind: "hidden")
             }
         } else {
