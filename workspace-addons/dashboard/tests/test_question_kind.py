@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 WEB = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
+KIT = Path(__file__).resolve().parents[3] / "workspace" / "src" / "orch_ui" / "static"
 FOCUS = Path(__file__).resolve().parents[2] / "focus" / "src" / "orch_focus" / "web" / "live.js"
 
 
@@ -26,5 +27,5 @@ def test_focus_passes_the_kind_with_one_tap():
 
 
 def test_the_shared_card_needs_both_oneTap_and_no_kind():
-    card = (WEB / "kit" / "question-card.js").read_text()
+    card = (KIT / "question-card.js").read_text()
     assert "immediate: question.oneTap === true && question.kind == null" in card

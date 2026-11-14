@@ -202,17 +202,41 @@ WEBDIR = Path(__file__).resolve().parents[1] / "src" / "orch_dashboard" / "web"
 KITDIR = Path(__file__).resolve().parents[3] / "workspace" / "src" / "orch_ui" / "static"
 
 
-def test_kit_copy_is_in_sync_with_orch_ui():
-    """Every kit css/js file (not the demo pages) is copied next to the page, served, and byte-equal."""
+def test_dashboard_keeps_no_kit_copy():
+    """The master kit lives in orch_ui only: no web/kit folder next to the page, and every add-on folder is clean too."""
     assert KITDIR.is_dir(), "the workspace kit folder must be next to this add-on in the repo"
-    from orch_dashboard.server import KIT
+    addons = Path(__file__).resolve().parents[2]
+    assert not list(addons.glob("*/src/*/web/kit")), "a copy of the kit was added again; use orch_ui/static"
 
-    kit = sorted(
-        p.name for p in KITDIR.iterdir() if p.suffix in (".css", ".js") and not p.name.startswith("demo")
+
+def _page_kit_links(html):
+    return re.findall(r'(?:href|src)="(kit/[^"]+)"', html)
+
+
+def test_every_kit_file_the_page_links_is_served_from_the_master(server):
+    import urllib.request
+
+    html = (WEBDIR / "index.html").read_text()
+    links = _page_kit_links(html)
+    assert len(links) > 10
+    for link in links:
+        body = urllib.request.urlopen(f"{server}/{link}").read()
+        assert body == (KITDIR / link[4:]).read_bytes(), link
+
+
+def test_gallery_and_design_rules_are_served(server):
+    import urllib.request
+
+    r = urllib.request.urlopen(f"{server}/kit/gallery.html")
+    page = r.read().decode()
+    assert (
+        r.status == 200
+        and "orch design system" in page
+        and "style-src 'self' 'unsafe-inline'" in r.headers["Content-Security-Policy"]
     )
-    assert kit and kit == sorted(KIT), "server.KIT must list exactly the kit files"
-    for name in kit:
-        assert (WEBDIR / "kit" / name).read_bytes() == (KITDIR / name).read_bytes(), f"copy kit/{name} again"
+    for link in re.findall(r'(?:href|src)="([a-z0-9./-]+\.(?:css|js|svg|pdf|csv|md))"', page):
+        assert urllib.request.urlopen(f"{server}/kit/{link}").status == 200, link
+    assert b"the one master" in urllib.request.urlopen(f"{server}/kit/DESIGN.md").read()
 
 
 def test_page_has_no_inline_code_and_loads_the_kit():
@@ -462,7 +486,7 @@ def test_settings_wording_and_one_toast_at_a_time():
         assert text in js, text
     assert "'Workflow'" not in js  # a plain word for the heading
     assert "AGENTS.md has the orch entry" not in js.split("settings-share")[1][:400]
-    motion = (WEBDIR / "kit" / "motion.js").read_text()
+    motion = (KITDIR / "motion.js").read_text()
     assert "toastQueue" not in motion and "host.replaceChildren()" in motion and "remaining=4000" in motion
     assert ".mm-hours .btn.ghost:hover{background:transparent" in (WEBDIR / "style.css").read_text()
 

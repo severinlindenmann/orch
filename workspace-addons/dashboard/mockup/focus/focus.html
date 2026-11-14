@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Focus · orch</title>
-<link rel="stylesheet" href="../system/system.css">
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/preview.css"><link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/gallery.css">
 <style>
 /* ---------- Page frame: left-aligned, fills 1920 with a second column instead of air ---------- */
 .focus-page{max-width:1680px;margin:0;gap:24px}
@@ -124,7 +124,7 @@ body[data-state=loading] .not-loading{display:none!important}
 
 @media(max-width:1279px){.pv-panel{grid-template-columns:1fr;padding-left:16px}.lrow{grid-template-columns:8px minmax(0,1fr) 140px auto}.lrow .ltime{display:none}}
 #live-h .live-dot{display:inline-block;margin-right:6px}.lrow{cursor:pointer}.nrow{grid-template-columns:auto minmax(240px,1fr) auto}#row-q .nact{max-width:530px;justify-content:flex-start}.lprog .progress>span{transition:width 150ms var(--ease-move)}@media(max-width:900px){.nrow{grid-template-columns:auto 1fr}.nact{grid-column:2}} </style>
-<link rel="stylesheet" href="../system/interaction.css"><script src="../system/overlay.js"></script><script src="../system/select.js"></script><script src="../system/date.js"></script><script src="../system/components.js"></script><style>.newsletter-focus{display:grid;gap:12px;margin:16px 0}.newsletter-focus .question-card{padding:16px;border:1px solid var(--warning);border-radius:8px}.newsletter-focus h2{font-size:16px}.newsletter-focus p{margin:6px 0}.newsletter-focus .controls,.newsletter-focus .section-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.newsletter-focus .result-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.newsletter-focus .result-card{padding:12px;border:1px solid var(--border);border-radius:8px}.newsletter-focus h3{font-size:14px}.newsletter-focus .paper-mini{background:#ebe7dc;color:#303a31;padding:8px}.newsletter-focus .paper-mini b{display:block}@media(max-width:700px){.newsletter-focus .result-cards{grid-template-columns:1fr}}</style></head>
+<link rel="stylesheet" href="../../../../workspace/src/orch_ui/static/interaction.css"><script src="../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../workspace/src/orch_ui/static/select.js"></script><script src="../../../../workspace/src/orch_ui/static/date.js"></script><script src="../../../../workspace/src/orch_ui/static/components.js"></script><style>.newsletter-focus{display:grid;gap:12px;margin:16px 0}.newsletter-focus .question-card{padding:16px;border:1px solid var(--warning);border-radius:8px}.newsletter-focus h2{font-size:16px}.newsletter-focus p{margin:6px 0}.newsletter-focus .controls,.newsletter-focus .section-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.newsletter-focus .result-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.newsletter-focus .result-card{padding:12px;border:1px solid var(--border);border-radius:8px}.newsletter-focus h3{font-size:14px}.newsletter-focus .paper-mini{background:#ebe7dc;color:#303a31;padding:8px}.newsletter-focus .paper-mini b{display:block}@media(max-width:700px){.newsletter-focus .result-cards{grid-template-columns:1fr}}</style></head>
 <body class="has-shell">
 <script>document.body.dataset.state=(new URLSearchParams(location.search).get('state'))||'loaded';</script>
 <a class="skip-link btn primary" href="#content">Skip to content</a>
@@ -350,6 +350,6 @@ body[data-state=loading] .not-loading{display:none!important}
   document.querySelectorAll('.lrow').forEach(row=>{row.tabIndex=0;row.setAttribute('role','link');const follow=()=>location.href=row.querySelector('a').href;row.onclick=e=>{if(!e.target.closest('button,a'))follow()};row.onkeydown=e=>{if(e.key==='Enter'&&e.target===row)follow()}});
 })();
 </script>
-<script src="../home/demo-data.js"></script><script src="../system/preview-controls.js"></script><script src="focus-copy.js"></script><script src="focus-list-sync.js"></script></body>
+<script src="../home/demo-data.js"></script><script src="../../../../workspace/src/orch_ui/static/state-controls.js"></script><script src="focus-copy.js"></script><script src="focus-list-sync.js"></script></body>
 
 </html>

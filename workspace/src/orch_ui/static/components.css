@@ -1,3 +1,12 @@
+:root{--chev:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")}
+/* ONE chevron everywhere (select, nav groups, workspace switch, disclosures): .chev, drawn with a mask, never a text glyph. */
+.chev{display:inline-block;width:16px;height:16px;flex:none;background:currentColor;-webkit-mask:var(--chev) center/16px no-repeat;mask:var(--chev) center/16px no-repeat;transition:transform var(--dur-base) var(--ease-move)}
+[open]>summary .chev,[aria-expanded=true] .chev,.is-open .chev{transform:rotate(180deg)}
+.ui-select-trigger .chev{color:var(--text-muted)}
+.ui-select-trigger[aria-expanded=true] .chev{transform:rotate(180deg)}
+.ui-select-trigger{gap:8px;border-color:var(--input,var(--border-strong))}
+.menu,.menu-pop{padding:4px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface-2);box-shadow:var(--lift-shadow);min-width:192px}
+@media(min-width:1600px){.grid-wide-3{grid-template-columns:repeat(3,minmax(0,1fr))}}
 /* orch UI kit: dark, token-based components. Ported from the shared system (mockup/system/system.css, SYSTEM.md).
    Four font sizes 12/14/20/28; flat cards; shadows only on raised overlays. */
 *{box-sizing:border-box}
@@ -66,11 +75,13 @@ kbd{display:inline-grid;place-items:center;min-width:24px;padding:2px 4px;border
 .nav-item[aria-current=page]{background:var(--nav-selected);color:var(--text)}
 .nav-item .count,.nav-item .addon-tag{margin-left:auto}
 .ic{flex:none;display:block}
+/* An icon sizes itself (owner 14 Nov: an unsized SVG rendered as a giant circle). :where keeps every specific size rule winning. */
+:where(svg.ic,svg.ico,.ico>svg){width:20px;height:20px}
 svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .sidebar .eyebrow{padding:8px}
 .nav-group>summary{list-style:none;padding:8px}
 .nav-group>summary::-webkit-details-marker{display:none}
-.nav-group>summary:after{content:'⌄';margin-left:auto;color:var(--text-faint)}
+.nav-group>summary:after{content:'';display:block;width:16px;height:16px;margin-left:auto;background:var(--text-faint);-webkit-mask:var(--chev) center/16px no-repeat;mask:var(--chev) center/16px no-repeat;transition:transform var(--dur-base) var(--ease-move)}.nav-group[open]>summary:after{transform:rotate(180deg)}
 .nav-group nav{margin-top:4px}
 .saved-views{padding-left:28px;margin-top:4px}
 .saved-views a{font-size:12px;line-height:16px;min-height:28px;padding:4px 8px}
@@ -82,7 +93,7 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .ws-switch{width:100%;display:flex;gap:12px;align-items:center;padding:12px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);text-align:left}
 .ws-switch:hover{border-color:var(--border-strong)}
 .ws-text{display:grid;gap:2px;flex:1;min-width:0}
-.ws-chev{color:var(--text-muted)}
+.ws-chev{font-size:0;width:16px;height:16px;background:var(--text-muted);-webkit-mask:var(--chev) center/16px no-repeat;mask:var(--chev) center/16px no-repeat}
 .wsb,.avatar{display:inline-grid;place-items:center;flex:none;width:28px;height:28px;border-radius:50%;background:var(--surface-3);color:var(--text-muted);font-size:12px;line-height:16px;font-weight:500}
 .wsb{width:32px;height:32px;border-radius:8px;background:var(--brand-soft);color:var(--brand)}
 .avatar.helper{border-radius:8px;color:var(--info);background:var(--info-soft)}

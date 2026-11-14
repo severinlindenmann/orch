@@ -93,7 +93,7 @@ if(dialog){
  document.documentElement.style.overflow='hidden';
  $('#close-viewer').focus();
  document.addEventListener('DOMContentLoaded',()=>{
-   const expand=$('.ui-expand',dialog);
+   let expand=$('.ui-expand',dialog);if(!expand){expand=document.createElement('button');expand.className='btn outline sm ui-expand';expand.textContent='Full screen';dialog.prepend(expand)}
    $('.viewer-actions .row',dialog).append(expand);
    expand.onclick=()=>{
      UI.fullscreen(dialog,expand);

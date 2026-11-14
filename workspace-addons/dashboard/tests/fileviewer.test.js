@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/kit/fileviewer.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/fileviewer.js'), 'utf8');
 const win = {};
 vm.runInNewContext(source, {window: win});
 const V = win.FileViewer;

@@ -3,8 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const KIT = path.resolve(__dirname, '../../src/orch_dashboard/web/kit');
-const {validate, render, isSafeHttps, LIMITS} = require('../../src/orch_dashboard/web/kit/blocks.js');
+const KIT = path.resolve(__dirname, '../../../../workspace/src/orch_ui/static');
+const {validate, render, isSafeHttps, LIMITS} = require('../../../../workspace/src/orch_ui/static/blocks.js');
 class Element {
   constructor(tag) { this.tagName = tag; this.className = ''; this.attributes = {}; this.style = {setProperty(k, v) { this[k] = v; }}; this.children = []; this.text = ''; }
   get childNodes() { return this.children; }
@@ -226,11 +226,9 @@ test('invalid raw JSON is bounded and input is never mutated', () => {
     const before = JSON.parse(JSON.stringify(c.doc)); draw(c.doc,{fileUrl:()=>null}); assert.deepEqual(c.doc,before);
   }
 });
-test('source guard and byte-identical kit copies', () => {
+test('source guard on the master kit', () => {
   const source = fs.readFileSync(path.join(KIT,'blocks.js'),'utf8');
   assert.doesNotMatch(source,/innerHTML|insertAdjacentHTML|outerHTML|document\.write|eval\s*\(|new Function/);
-  const root = path.resolve(__dirname,'../../../..');
-  for (const name of ['blocks.js','blocks.css']) assert.deepEqual(fs.readFileSync(path.join(KIT,name)), fs.readFileSync(path.join(root,'workspace/src/orch_ui/static',name)));
 });
 test('demo data contains every valid fixture', () => {
   const vm = require('node:vm'), context = {window:{}};

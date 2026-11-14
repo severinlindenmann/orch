@@ -28,25 +28,53 @@ MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = 5 * 1024 * 1024  # a new ticket with a long text and up to 5 attached files
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
-KIT = (
-    "tokens.css",
-    "components.css",
-    "motion.css",
-    "motion.js",
-    "interaction.css",
-    "overlay.js",
-    "select.js",
-    "date.js",
-    "components.js",
-    "icons.js",
-    "question-card-state.js",
-    "question-card.js",
-    "evidence.js",
-    "fileviewer.js",
-    "fileviewer.css",
-    "blocks.js",
-    "blocks.css",
+KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
+KIT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".md": "text/plain; charset=utf-8",
+    ".json": "application/json",
+    ".csv": "text/csv; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".webm": "video/webm",
+    ".wav": "audio/wav",
+    ".pdf": "application/pdf",
+    ".zip": "application/zip",
+}
+# The gallery is a fixed static page of the master kit (no data from the workspace): inline styles are allowed there.
+GALLERY_CSP = (
+    "default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "object-src 'self'; frame-src 'self'; frame-ancestors 'self'"
 )
+
+
+def kit_dir() -> Path | None:
+    """The master kit: orch_ui's static folder (the dashboard keeps no copy of it)."""
+    try:
+        import orch_ui
+
+        return Path(orch_ui.__file__).resolve().parent / "static"
+    except (ImportError, OSError, TypeError):
+        return None
+
+
+def kit_file(name: str) -> tuple[bytes, str] | None:
+    """(bytes, content type) of a kit file by its name under kit/, or None. Only plain names (and samples/<name>)."""
+    root = kit_dir()
+    if root is None or not KIT_NAME.fullmatch(name) or name.startswith("demo"):
+        return None
+    ext = "." + name.rsplit(".", 1)[-1] if "." in name else ""
+    ctype = TYPES.get(ext) or KIT_TYPES.get(ext)
+    top = not name.startswith("samples/")
+    if ctype is None or (top and ext not in (".css", ".js", ".html", ".md")):
+        return None
+    path = (root / name).resolve()
+    try:
+        path.relative_to(root)
+        return path.read_bytes(), ctype
+    except (ValueError, OSError):
+        return None
+
+
 TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -89,6 +117,16 @@ PROXY_MAX_REPLY = 4 * 1024 * 1024
 
 def web_file(name: str) -> bytes:
     return resources.files("orch_dashboard").joinpath("web", name).read_bytes()
+
+
+def page_asset(name: str) -> bytes:
+    """A file the page links: kit/<file> comes from the master kit (orch_ui), anything else from web/."""
+    if name.startswith("kit/"):
+        got = kit_file(name[4:])
+        if got is None:
+            raise FileNotFoundError(name)
+        return got[0]
+    return web_file(name)
 
 
 _PORTS: dict[tuple[str, str], tuple[float, int | None, object]] = {}
@@ -457,10 +495,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, json.dumps(self.puller.pull(name)).encode(), "application/json")
         name = {"/": "index.html"}.get(path, path.lstrip("/"))
-        if (
-            name.startswith("kit/") and name[4:] in KIT
-        ):  # the orch_ui kit, copied next to the page (a test keeps it in sync)
-            return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
+        if name.startswith("kit/"):  # the master kit, served from orch_ui (no copy next to the page)
+            got = kit_file(name[4:])
+            if got is None:
+                return self._send(404, b"not found", "text/plain")
+            static = name == "kit/gallery.html" or name.startswith("kit/samples/")
+            return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
             r"pages/(home|tickets|ticket|newticket|settings|chat|notes|desktop)\.(js|css)", name
         ):  # the page modules

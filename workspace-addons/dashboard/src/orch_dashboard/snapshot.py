@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from .data import load_state
-from .server import web_file
+from .server import page_asset, web_file
 from .views import ViewPuller
 
 
@@ -35,14 +35,14 @@ def render_snapshot(root: Path, with_addons: bool = False, orch_bin: str | None 
     html = html.replace('<link rel="apple-touch-icon" href="apple-touch-icon.png">\n', "")
     html = re.sub(
         r'<link rel="stylesheet" href="([\w./-]+)">',
-        lambda m: f"<style>{web_file(m.group(1)).decode()}</style>",
+        lambda m: f"<style>{page_asset(m.group(1)).decode()}</style>",
         html,
     )
     data = f"<script>window.ORCH_SNAPSHOT={_inline_json(state)};</script>"
     html = html.replace('<script src="blocks.js">', data + '<script src="blocks.js">', 1)
     html = re.sub(
         r'<script src="([\w./-]+)"></script>',
-        lambda m: f"<script>{web_file(m.group(1)).decode()}</script>",
+        lambda m: f"<script>{page_asset(m.group(1)).decode()}</script>",
         html,
     )
     return html
