@@ -1,10 +1,98 @@
+# orch design system: the one master
+
+This folder (`workspace/src/orch_ui/static/`) is the single component library and style guide for the dashboard, every add-on page and every mockup page. Open `gallery.html` (served at `/kit/gallery.html` by the dashboard and linked from Settings, About) to see every component in every state with motion Replay.
+
+## The rules (owner, 14 Nov 2026)
+
+1. Build on the master. Use existing components and tokens; never write a page-local look, a copied kit file or a new "system" sheet.
+2. Need something missing? Add it here first: (a) the component in `widgets.css` / `widgets.js` (or the file it belongs to), (b) an entry in `gallery.html` / `gallery.js` with its states (default, loading, empty, error where they apply), (c) a test in `workspace/tests/test_orch_ui_kit.py` if it adds a file, then use it from the page.
+3. Mockup pages link these files by relative path (`../../../../workspace/src/orch_ui/static/...`); the mockup folder keeps no stylesheet of its own.
+4. Owner wording rules: one click, no typed words; minimal plain words; no "Details" / "Technical details" toggles (show the detail plainly lower down); no "NetBird" (say "private network"). Old reference examples below that show a Details disclosure are legacy and must not be copied.
+5. Never change tokens in a page. Colour and size tokens come from `brand/tokens.json` via `brand/gen_tokens.py` (`tokens.css` is generated).
+
+## Files
+
+| File | What |
+|---|---|
+| `tokens.css` | Generated tokens: colour, type, spacing, shape, motion durations and easings. |
+| `components.css` | Shell, sidebar, topbar, page, card, button, input, badge, chip, table, tabs, segmented, progress, empty/error, skeleton, tooltip, toast, dialog, sheet, menu, the one `.chev` chevron. |
+| `widgets.css`, `widgets.js` | Added 14 Nov: status icon set, pill, empty/error/loading state, stat tile, labelled progress, sortable table, `data-tip` tooltip, sheet, dialog S/M/L, strip, board, file card, type utilities. `UI.statusIcon`, `UI.state`, `UI.stat`, `UI.progress`, `UI.table`, `UI.sheet`, `UI.chevron`. |
+| `interaction.css`, `overlay.js`, `select.js`, `date.js`, `components.js` | Dialog lifecycle, custom select (one SVG chevron), calendar, toast with Undo (`UI.toast`), menus, tabs and segments keyboard. |
+| `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
+| `icons.js` | One icon set, `icon('check', 16)`. |
+| `preview.css`, `fileviewer.*`, `evidence.js`, `blocks.*` | File and result previews, viewer, proof, blocks. |
+| `question-card*.js`, `composer.*` | Question card, chat composer. |
+| `gallery.html`, `gallery.js`, `gallery.css`, `state-controls.js`, `samples/` | The living style guide, its fixtures, and the Loaded / Loading / Empty / Error switcher the mockup pages use. |
+| `COMPONENT-QA.md` | The 13 Nov component audit (QA-01..30). |
+| `demo.html` | Older question-card and proof demo. |
+
+## How to add a component
+
+1. Read this file and open `gallery.html`; check it does not already exist (search the gallery and `components.css`).
+2. Write the CSS on tokens only (no hex colours, no px outside the spacing scale, durations from `--dur-*`).
+3. If it needs script, add a builder to `widgets.js` that uses `textContent` for text.
+4. Add the gallery entry with every state; run the gallery check (`uv run pytest tests/test_orch_ui_kit.py`).
+5. Use it from the page; update the matching mockup page in the same PR.
+
+## Sweep rules SX-1..20 (14 Nov)
+
+- SX-1 Content width: one column x=256 to 1240 at 1280, max 1200 centred at 1920 for reading pages, full-bleed only
+  for board and tables; banners, notices, frames (Factory/Focus) and dialogs' backdrops obey the same edges (BP-01).
+- SX-2 Type scale: 28/36 page title, 20/28 section and dialog title, 16/24 row and card title, 14/20 body, 13/18
+  meta, 12/16 eyebrow and labels; monospace 13/20 only inside file previews and the terminal. Nothing else (BP-07).
+  Today: question cards and completion notes at 20 px bold, tab counts at 11 px mono, "Updated" value at 16 px.
+- SX-3 Spacing: 4-pt scale; 20 px card padding, 16 px row padding, 24 px between cards, 32 px between sections; the
+  shell never shifts (F15) and the sidebar never scrolls at 800 px (F12).
+- SX-4 Page header: eyebrow (optional) + h1 + one subtitle + actions right on the h1 baseline; no in-page breadcrumb,
+  no back link, no frame header (Factory, Focus, Sync all break this). Topbar crumb = "Tickets › DT-4" only.
+- SX-5 Buttons: Primary (one per page, counts the topbar), Secondary, Ghost, Danger; icon buttons have aria-labels;
+  "Got it", pill buttons, underlined text actions, full-width outline buttons are deleted.
+- SX-6 Selects and chevrons: one Select (36 px, border like inputs, SVG chevron), the same chevron on nav groups, ticket
+  groups and the workspace switcher (fb26).
+- SX-7 Segmented and radio: one segmented control (raised surface = selected, ring = focus only) for List/Board,
+  7/30/90 days, Every day…Custom, 4/8/12/24 h, All/People/Helper; one radio style (Sync rows, helper tools, "What a
+  helper may do"); green fill is reserved for primary and toggles-on; a "Suggested" tag never fills.
+- SX-8 Toggles: a toggle sits at the right end of a settings row with title + one-line description; a toggle that
+  cannot work yet is disabled with the reason in the description (phone toggle).
+- SX-9 Status icon set: SVG icons for To do / Working / Needs you / Check / Done used in pills, group headers, board
+  columns, sidebar badges and the stepper (if it survives); no "!" "◇" "○" "✓" text glyphs; each status one colour
+  (amber only for "needs you", live colour for Working, green for Done, neutral for To do and Check).
+- SX-10 Empty state: one component ≤ 240 px tall: icon from the page's own icon, one sentence "what will appear and
+  when", one secondary button; never inside a card with a title, never with search/filters above it, never twice on a
+  page (Messages, Factory).
+- SX-11 Error state: same shape as SX-10 with the red dot: cause in plain words, the next step, one button that does
+  it; technical text behind "Details" (Publish, Can't reach the workspace, sync "secret" error fb9).
+- SX-12 Toasts and notices: toast = bottom right, 5 s, one visible, names the object, Undo where possible; error toast
+  persists; page notices only for blocking states and only one, under the topbar, inside SX-1 width; system events
+  (update started/finished) are toasts.
+- SX-13 Dialogs: sizes S/M/L, one icon-only close, title 20/28, footer rule [tertiary] … [Cancel] [Primary]; info-only
+  dialogs become inline text; the question card never opens a dialog.
+- SX-14 List row: 40-48 px, one line, [status icon] title · owner avatar · one time fact · attention marker; the row is
+  the click target, the single action appears on hover/focus and always in the group header; no "…" per row.
+- SX-15 Card: 20 px padding, title 16/24, optional meta right (time only), one action in the footer row; cards hold
+  previews or grouped content, never a single sentence (Autopilot off, Finished today, Insights empty).
+- SX-16 Skeletons: every route and every add-on frame shows a skeleton shaped like its final layout within 100 ms
+  (BP-61/62); never text + bars together; "No items" only after loading finished (BP-56).
+- SX-17 Motion tokens: hover/press 100 ms, open/close 150 ms (QA-09), page change 200 ms, panels 240 ms, enter
+  ease-out / exit ease-in (BP-70), reduced-motion = instant; used by: route change, tab switch, dialog, list
+  insert/remove (Home answered card), status pill change (one pulse), skeleton → content cross-fade.
+- SX-18 Words: helper / step / result / ticket / schedule / phone / Check (status) / Check result (action) / Looks good
+  · Send back; the person = chosen name (fb13); "agent", "artifact", "autopilot", "relay", "copy" (worktree), "Exact
+  text", "Reference" are banned on level 1 (BP-78, F2, F3).
+- SX-19 Dates: "today 10:32", "Mon 08:00", "14 Nov 2026, 10:32", 24 h, elapsed as "running 53 min" (F4, round-2 note).
+- SX-20 One source per count and status: sidebar badge = Home headline = Tickets group count; a newer system event
+
+## Reference: the 13 Nov shared visual system
+
+The text below is the original system guide. Where it conflicts with the rules above, the rules above win.
+
 # orch shared visual system
 
 A calm workspace with enough information to make the next decision. Bring back old core's aligned rows, darker navigation, restrained cards and useful side panels. Keep the owner's plain language and remove technical decoration.
 
 ## Files and use
 
-- `system.css`: standalone tokens, primitives, shell, states, result frames, motion and responsive rules. No imports or dependencies.
+- (legacy name) the mockup `system.css`: standalone tokens, primitives, shell, states, result frames, motion and responsive rules. No imports or dependencies.
 - `shell.html`: reusable app chrome with an intentionally empty `<main id="content" class="page">`. Copy the shell; set the active route's `aria-current="page"`. Its empty canvas is an integration slot, not a product empty state.
 - `components.html`: complete visual reference with local examples, native controls, density switch, typed previews and Loaded / Loading / Empty / Error controls.
 - `motion.html`: explicit Replay demos; all motion is idle until requested.
