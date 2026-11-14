@@ -10,7 +10,23 @@
   // can not cover the review bar or any other action. One request = one sentence and two buttons; several =
   // "2 requests waiting" that opens a list, each row with its own buttons. Plain words only: the sentence comes
   // from orch as structured parts; the person's own text is a separate "Exact text" block.
-  var open = false;
+  var open = false, updInfo = null, lastItems = [];
+  // The versions come from orch's own update info (the same as Settings > About & updates), never from the request.
+  function updateWords(info) {
+    if (!info || info.update_available !== true || !info.newest || !info.newest.label) return null;
+    var have = info.installed && info.installed.label;
+    return have ? "Update from " + have + " to " + info.newest.label + "?" : "Update orch to " + info.newest.label + "?";
+  }
+  function updateChanges(info) {
+    return info && info.update_available === true && Array.isArray(info.changes) ? info.changes.map(String).join("\n") : "";
+  }
+  function loadUpdateInfo() {
+    if (updInfo !== null) return;
+    updInfo = {};
+    fetch("/api/update-info", {headers: {"Accept": "application/json"}}).then(function (r) { return r.ok ? r.json() : {}; }).then(function (d) {
+      updInfo = d || {}; seen = ""; render(lastItems);
+    }).catch(function () {});
+  }
   // One FIXED template per op. Every untrusted fragment (a title, a question, a path, a host, a name) goes into its
   // own <span> with textContent: nothing is ever substituted into a string, so a title that says "{value}" or
   // carries quotes can only ever be shown as itself. The exact text the person approves is a separate block.
@@ -67,7 +83,7 @@
     "group.remove_member": function (p) { return ["Remove ", q(p.workspace), " from the group ", q(p.title), "?"]; },
     "group.share_file": function (p) { return ["Share ", q(p.file), " with the group ", q(p.title), p.host ? " (host " + p.host + ")" : "", "?"]; },
     "chat.make_ticket": function () { return ["Make a ticket from this Chat conversation?"]; },
-    "update": function (p) { return ["Update orch from ", full(p.source), "?"]; },
+    "update": function (p) { var w = updateWords(updInfo); return w ? [full(w)] : ["Update orch from ", full(p.source), "?"]; },
     "relay.connect": function (p) {
       var s = p.scheme === "http" ? "http://" : "https://";
       return ["Connect to ", full(s + p.host), "?" + (p.scheme === "http" ? " This address is not encrypted." : "")];
@@ -96,6 +112,7 @@
   function exact(i) {  // the exact text / target that will be used, never merged into the sentence, never cut
     var w = el("div"); w.style.cssText = "flex-basis:100%";
     if (i.exact) w.appendChild(block(EXACT_LABEL[i.op] || "Exact value:", i.exact));
+    if (i.op === "update" && updateChanges(updInfo)) w.appendChild(block("What changed:", updateChanges(updInfo)));
     if (i.value && !(i.op === "ticket.answer" && shortValue(String(i.value)))) w.appendChild(block("Exact text:", i.value));
     return w.childNodes.length ? w : null;
   }
@@ -138,6 +155,8 @@
     return p;
   }
   function render(items) {
+    lastItems = items;
+    if (items.some(function (i) { return i.op === "update"; })) loadUpdateInfo(); else if (updInfo && updInfo.__done !== false) updInfo = null;
     var key = JSON.stringify(items) + open + Math.floor(Date.now() / 60000);
     if (key === seen) return;
     seen = key;
