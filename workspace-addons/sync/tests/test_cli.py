@@ -414,7 +414,9 @@ def test_view_matches_the_addon_view_contract(root, capsys):
     assert not list(check.iter_errors(off))
     assert "notice" not in off  # off is the saved setting, not a problem
     radio = off["blocks"][0]
-    assert radio["type"] == "radio" and not any(b["type"] == "settings" for b in off["blocks"])  # no "Current setting" row
+    assert radio["type"] == "radio" and not any(
+        b["type"] == "settings" for b in off["blocks"]
+    )  # no "Current setting" row
     assert [(o["label"], o["selected"]) for o in radio["options"]] == [
         ("Off", True),
         ("On this computer only", False),
