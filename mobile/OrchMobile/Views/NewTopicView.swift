@@ -17,11 +17,7 @@ struct NewTopicScreen: View {
     @State private var picking = false
     @State private var morePicking = false
     @State private var media: MediaPicker.Start?
-    @State private var recorder: VoiceRecorder?
-    @State private var starting = false
-    @State private var sending = false
     @State private var error: String?
-    @State private var hint = false
     @State private var success = 0
     @State private var autoStarted = false
     private var ids: [String] { model.workspaceSummaries.map(\.id) }
@@ -29,7 +25,6 @@ struct NewTopicScreen: View {
         model.workspaceSummaries.first { $0.id == selectedId } ?? model.workspaceSummaries.first
     }
     private var name: String { selected.map { WorkspaceAlias.name(for: $0.workspace) } ?? "a workspace" }
-    private var recording: Bool { recorder?.isRecording == true }
 
     var body: some View {
         let _ = aliasRevision
@@ -37,7 +32,11 @@ struct NewTopicScreen: View {
             switch mode {
             case .home: home
             case .typing: typing
-            case .recording: recordingView
+            case .recording:
+                if let selected {
+                    NewTopicVoiceView(workspace: selected, name: name, onCancel: { mode = .home },
+                                      onFailed: { error = $0; mode = .home }, onSent: { remember(); opened() })
+                }
             }
         }
         .background(Theme.bg.ignoresSafeArea()).foregroundStyle(Theme.text)
@@ -52,7 +51,6 @@ struct NewTopicScreen: View {
                 autoStarted = true; await startRecording()
             }
         }
-        .onDisappear { if !sending { recorder?.cancel(); recorder = nil } }
         .sheet(isPresented: $picking) { ShellWorkspacePicker(selectedId: selected?.id) { id in choose(id) } }
         .sheet(isPresented: $morePicking) { WorkspaceGridPicker(selectedId: selected?.id) { id in choose(id) } }
         .sheet(item: $media) { start in
@@ -168,83 +166,11 @@ struct NewTopicScreen: View {
         }.padding(.horizontal, 16).frame(minHeight: 44).background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)).foregroundStyle(Theme.text)
     }
 
-    // MARK: Recording
-
-    private var recordingView: some View {
-        VStack(spacing: 20) {
-            if let selected {
-                HStack(spacing: 12) {
-                    WorkspaceBadge(name: name, icon: selected.workspace.icon, color: selected.workspace.color, size: 44)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(name).themeFont(17, .semibold); Text("new topic").themeFont(13).foregroundStyle(Theme.muted)
-                    }
-                    Spacer()
-                }.padding(12).background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-                    .accessibilityElement(children: .combine)
-            }
-            Spacer(minLength: 0)
-            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-                let seconds = (recorder?.elapsed ?? 0) + (recorder?.finished.reduce(0) { $0 + $1.duration } ?? 0)
-                Text(NewTopicRules.clock(seconds)).font(.system(size: 64, weight: .semibold).monospacedDigit())
-                    .accessibilityLabel("Recording, \(Int(seconds)) seconds")
-            }
-            HStack(spacing: 8) {
-                Circle().fill(Theme.danger).frame(width: 12, height: 12)
-                Text(starting ? "Starting…" : "Recording").themeFont(17, .semibold)
-            }.accessibilityElement(children: .combine)
-            waves
-            if hint { Text("Too short. Hold on a little longer.").themeFont(14).foregroundStyle(Theme.warn) }
-            if let error { Text(error).themeFont(14).foregroundStyle(Theme.danger).multilineTextAlignment(.center) }
-            Spacer(minLength: 0)
-            Button { Task { await sendRecording() } } label: {
-                Image(systemName: "arrow.up").font(.system(size: 36, weight: .bold)).foregroundStyle(Theme.onBrand)
-                    .frame(width: 96, height: 96).background(Theme.brand, in: Circle())
-            }.buttonStyle(PressStyle()).disabled(sending || starting).accessibilityLabel("Send").accessibilityIdentifier("nt-send")
-            Button { cancelRecording() } label: {
-                Text("Cancel").themeFont(17, .semibold).frame(maxWidth: .infinity, minHeight: 60)
-                    .background(Theme.surface3, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).disabled(sending).padding(.top, 28).accessibilityIdentifier("nt-cancel")
-        }.padding(16)
-    }
-    private var waves: some View {
-        HStack(alignment: .center, spacing: 5) {
-            ForEach(Array((recorder?.levels ?? [Double](repeating: 0, count: VoiceRecorder.barCount)).enumerated()), id: \.offset) { _, level in
-                Capsule().fill(Theme.brand).frame(width: 6, height: 8 + 44 * level)
-            }
-        }.frame(height: 56).animation(reduceMotion ? nil : .linear(duration: 0.08), value: recorder?.levels).accessibilityHidden(true)
-    }
+    // MARK: Recording (NewTopicVoice.swift)
 
     private func startRecording() async {
-        guard selected != nil, !starting, !recording else { return }
-        error = nil; hint = false; starting = true; mode = .recording
-        let r = model.makeVoiceRecorder(); recorder = r
-        do { try await r.start() }
-        catch {
-            self.error = r.error ?? "Could not start the microphone."
-            r.cancel(); recorder = nil; mode = .home
-        }
-        starting = false
-    }
-    private func cancelRecording() {
-        recorder?.cancel(); recorder = nil; hint = false; mode = .home
-    }
-    private func sendRecording() async {
-        guard let target = selected.map({ SendTarget.newTopic(workspace: $0.id) }), let recorder, !sending else { return }
-        let segments = recorder.stop()
-        guard NewTopicRules.longEnough(segments) else {
-            recorder.cancel(); self.recorder = nil
-            hint = true; mode = .home; error = "Too short. Hold on a little longer."
-            return
-        }
-        sending = true; defer { sending = false }
-        do {
-            try await model.sendVoiceSegments(segments, to: target)
-            self.recorder = nil; success += 1; remember()
-            UIAccessibility.post(notification: .announcement, argument: "Sent to \(name)")
-            opened()
-        } catch {
-            self.error = error.localizedDescription
-        }
+        guard selected != nil, mode != .recording else { return }
+        error = nil; mode = .recording
     }
     /// A photo or camera shot from the big buttons: the topic starts with that picture.
     private func sendMedia(_ selection: MediaSelection) async {
