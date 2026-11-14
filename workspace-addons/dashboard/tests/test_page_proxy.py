@@ -59,6 +59,7 @@ if a[:2] == ["addon", "list"]:
         "page": {{"path": "/", "label": "Open"}}, "ticket_view": []}},
       {{"name": "nopage", "active": True, "description": "d", "dashboard": {{"label": "N", "icon": "bolt"}}, "ticket_view": []}}]))
 elif a[:2] == ["status", "--json"]:
+    open({str(tmp_path / "status-calls")!r}, "a").write("x")
     print(json.dumps([{{"workspace": {str(ws.resolve())!r}, "addons": [
       {{"addon": "viewer", "running": True, "url": "http://127.0.0.1:{port}/"}},
       {{"addon": "focus", "running": True, "url": "http://127.0.0.1:{port}/"}},
@@ -324,3 +325,47 @@ def test_proxy_path_tricks(stack):
         "/addon/focus/page/t_abcdef",
     ):
         assert call(base + p, headers=cross)[0] in (403, 404), p
+
+
+def _status_calls(tmp_path):
+    f = tmp_path / "status-calls"
+    return len(f.read_text()) if f.exists() else 0
+
+
+def test_fb22_switching_back_to_an_addon_page_does_not_ask_orch_again_for_its_port(stack, tmp_path):
+    """Owner feedback 14 Nov fb22: each switch ran `orch status` again (about 0.2 s) after only 3 s."""
+    import orch_dashboard.server as srvmod
+
+    base, port = stack
+    srvmod._PORTS.clear()
+    assert call(base + "/addon/viewer/")[0] == 200
+    first = _status_calls(tmp_path)
+    assert first >= 1
+    # the port was found 20 s ago: still known, no second look
+    for key, (stamp, p) in list(srvmod._PORTS.items()):
+        srvmod._PORTS[key] = (stamp - 20, p)
+    assert call(base + "/addon/viewer/")[0] == 200
+    assert _status_calls(tmp_path) == first
+
+
+def test_fb22_a_moved_addon_port_is_found_again_without_waiting(stack, tmp_path):
+    import orch_dashboard.server as srvmod
+
+    base, port = stack
+    srvmod._PORTS.clear()
+    assert call(base + "/addon/viewer/")[0] == 200
+    key = next(k for k in srvmod._PORTS if k[1] == "viewer")
+    srvmod._PORTS[key] = (srvmod._PORTS[key][0], 1)  # a stale port nobody listens on
+    assert call(base + "/addon/viewer/")[0] == 200
+
+
+def test_fb22_static_files_of_an_addon_page_may_be_kept_by_the_browser_the_page_itself_may_not(stack):
+    base, port = stack
+    code, _, h = call(base + "/addon/viewer/kit/tokens.css")
+    assert code == 200 and h["Cache-Control"].startswith("private, max-age=")
+    code, _, h = call(base + "/addon/viewer/web/app.js")
+    assert h["Cache-Control"].startswith("private, max-age=")
+    code, _, h = call(base + "/addon/viewer/")
+    assert h["Cache-Control"] == "no-store"
+    code, _, h = call(base + "/addon/viewer/api/state.json")
+    assert h["Cache-Control"] == "no-store"

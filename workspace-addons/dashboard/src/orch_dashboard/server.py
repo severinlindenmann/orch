@@ -94,6 +94,9 @@ def web_file(name: str) -> bytes:
 
 
 _PORTS: dict[tuple[str, str], tuple[float, int | None]] = {}
+PORT_KEEP = 60.0  # seconds a running add-on's port is remembered: `orch status` costs about 0.2 s
+# Files a browser may keep for a minute: an add-on page's own styles, scripts and pictures (never its pages or data)
+STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
 
 
 def _link_msg(session, name: str) -> bytes:
@@ -159,10 +162,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", (extra or {}).get("Cache-Control", "no-store"))
         self.send_header("X-Content-Type-Options", "nosniff")
         for k, v in (extra or {}).items():
-            self.send_header(k, v)
+            if k != "Cache-Control":
+                self.send_header(k, v)
         self.send_header(
             "Content-Security-Policy",
             csp or "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; frame-ancestors 'self'",
@@ -184,7 +188,8 @@ class Handler(BaseHTTPRequestHandler):
     def _upstream_port(self, name: str) -> int | None:
         """The local port of a running add-on that declares a [page]: both facts come from orch's own add-on data."""
         hit = _PORTS.get((str(self.root), name))
-        if hit and time.monotonic() - hit[0] < 3:
+        # a found port is kept (a move is noticed by the failed connection in _proxy); "not running" is looked at again soon
+        if hit and time.monotonic() - hit[0] < (PORT_KEEP if hit[1] else 3):
             return hit[1]
         port = None
         if any(a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)):
@@ -219,16 +224,24 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, OSError):
                 return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
             up.update({"Origin": f"http://127.0.0.1:{port}", "Content-Type": "application/json"})
-        try:
-            conn = HTTPConnection("127.0.0.1", port, timeout=20)
-            conn.request(method, (rest or "/") + (("?" + query) if query else ""), body=body, headers=up)
-            r = conn.getresponse()
-            data = r.read(PROXY_MAX_REPLY + 1)
-            ctype, rev = r.getheader("Content-Type") or "application/octet-stream", r.getheader("X-Revision")
-            page_csp = r.getheader("Content-Security-Policy")
-            conn.close()
-        except (OSError, ValueError):
-            return self._send(502, b"That page is not answering.", "text/plain; charset=utf-8")
+        for attempt in (0, 1):
+            try:
+                conn = HTTPConnection("127.0.0.1", port, timeout=20)
+                conn.request(method, (rest or "/") + (("?" + query) if query else ""), body=body, headers=up)
+                r = conn.getresponse()
+                data = r.read(PROXY_MAX_REPLY + 1)
+                ctype, rev = r.getheader("Content-Type") or "application/octet-stream", r.getheader("X-Revision")
+                page_csp = r.getheader("Content-Security-Policy")
+                conn.close()
+                break
+            except (OSError, ValueError):
+                moved = _PORTS.pop((str(self.root), name), None)
+                if attempt or method != "GET" or moved is None:
+                    return self._send(502, b"That page is not answering.", "text/plain; charset=utf-8")
+                port = self._upstream_port(name)  # the add-on may have restarted on another port: look once
+                if port is None:
+                    return self._send(404, b"not found", "text/plain")
+                up["Host"] = f"127.0.0.1:{port}"
         if len(data) > PROXY_MAX_REPLY:
             return self._send(502, b"That page is too large.", "text/plain; charset=utf-8")
         extra = {"X-Revision": rev} if rev else {}
@@ -240,6 +253,8 @@ class Handler(BaseHTTPRequestHandler):
         # a page that orch did not ship gets an opaque origin: it cannot call this server's /api/act or hand-off
         # confirm with the person's cookie (the fence refuses an origin of "null"; SameSite withholds the cookie)
         csp = PROXY_CSP if self._shipped(name) else PROXY_CSP + "; sandbox allow-scripts"
+        if method == "GET" and r.status == 200 and rest.lower().endswith(STATIC_EXT):
+            extra = {**extra, "Cache-Control": "private, max-age=60"}
         self._send(r.status, data, ctype, extra or None, csp=csp)
 
     def _same_origin(self) -> bool:

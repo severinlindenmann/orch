@@ -825,6 +825,28 @@ async function loadAddon(id, manual = false) {
   if (isPublish(id) && !snapshot) await loadSharedLinks();
   if (shownAddon() === id) paintAddon(id);
 }
+// The view of an add-on tab costs the server about half a second the first time. Fetch each once in the background
+// (a quiet start after the first screen, one at a time) so the first click has something to show; a menu entry that
+// is hovered is fetched at once. The page add-ons (own web page) and the native Sync card have no view to fetch.
+let addonsWarmed = false;
+const warmable = id => { const a = addons().find(a => a.name === id); return !!a && !!a.dashboard && !a.page && !(id === SYNC && syncNative()); };
+async function warmAddonView(id) {
+  if (snapshot || addonViews[id] || addonBusy.has(id) || !warmable(id)) return;
+  await loadAddon(id);
+}
+function warmAddons() {
+  if (addonsWarmed || snapshot || !state) return;
+  const queue = addons().map(a => a.name).filter(warmable);
+  if (!addons().length) return;  // the add-ons are not known yet: look again at the next render
+  addonsWarmed = true;
+  const step = async () => {
+    const id = queue.shift();
+    if (id === undefined) return;
+    await warmAddonView(id);
+    setTimeout(step, 400);
+  };
+  setTimeout(step, 1500);
+}
 function startAddon(id) {
   clearInterval(addonTimer);
   activeAddon = id;
