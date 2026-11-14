@@ -353,10 +353,23 @@ def _hide_advanced(parser: argparse.ArgumentParser) -> None:
             hide(a, names)
 
 
-def _version_text() -> str:
-    from orch import updateinfo
+class _Version(argparse.Action):
+    """`orch --version`: the release the install records ("orch 16"), read only when asked."""
 
-    return updateinfo.current_label()
+    def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):  # noqa: A002
+        super().__init__(
+            option_strings,
+            dest,
+            default=default,
+            nargs=0,
+            help=help or "show program's version number and exit",
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from orch import updateinfo
+
+        print(updateinfo.current_label())
+        parser.exit()
 
 
 def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -> argparse.ArgumentParser:
@@ -368,7 +381,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )  # human proof (H1): first line of stdin
 
     p = _Parser(prog="orch", description="orch: tickets with evidence for any agent tool")
-    p.add_argument("--version", action="version", version=_version_text())
+    p.add_argument("--version", action=_Version)
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
     x = sub.add_parser("init", parents=[common], help="set up this folder (safe to repeat)")

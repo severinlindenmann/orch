@@ -571,7 +571,7 @@ async function updStart() {
   if (res && res.status !== 202) { updUi.phase = 'failed'; updUi.reason = (await res.text()).slice(0, 200) || 'It did not start.'; render(); return; }
   try { sessionStorage.setItem('orch-update-started', String(Date.now())); } catch (e) {}
 }
-window.addEventListener?.('orch-update-state', event => {
+if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('orch-update-state', event => {
   const d = event.detail || {};
   if (d.state === 'running' && updUi.phase === 'idle') updUi.phase = 'running';
   else if (d.state === 'unreachable' && updUi.phase === 'running') updUi.phase = 'restarting';
