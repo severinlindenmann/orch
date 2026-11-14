@@ -349,7 +349,13 @@ function render(arrived = new Set()) {
     [...document.querySelectorAll('a,button,summary')].find(n => nodeKey(n) === activeKey)?.focus({preventScroll:true});
   }
   window.scrollTo(...(changed ? [0, 0] : scroll));
+  warmAddons();
 }
+// Pointing at an add-on in the menu starts fetching its view, so the click finds it ready.
+document.addEventListener('pointerover', event => {
+  const link = event.target.closest?.('.sidebar a[href^="#addon/"]');
+  if (link) warmAddonView(decodeURIComponent(link.getAttribute('href').slice(7)));
+});
 
 // Every notice goes through one scrub: no raw ids, actor names or UTC times reach a person.
 if (window.orch && !window.orch.__scrubbed) {
