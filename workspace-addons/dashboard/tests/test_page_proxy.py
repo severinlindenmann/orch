@@ -332,11 +332,13 @@ def _status_calls(tmp_path):
     return len(f.read_text()) if f.exists() else 0
 
 
-def test_fb22_switching_back_to_an_addon_page_does_not_ask_orch_again_for_its_port(stack, tmp_path, monkeypatch):
+def test_fb22_switching_back_to_an_addon_page_does_not_ask_orch_again_for_its_port(
+    stack, tmp_path, monkeypatch
+):
     """Owner feedback 14 Nov fb22: each switch ran `orch status` again (about 0.2 s) after only 3 s."""
     import orch_dashboard.server as srvmod
 
-    base, port = stack
+    base, _port = stack
     srvmod._PORTS.clear()
     assert call(base + "/addon/viewer/")[0] == 200
     first = _status_calls(tmp_path)
@@ -355,7 +357,7 @@ def test_fb22_switching_back_to_an_addon_page_does_not_ask_orch_again_for_its_po
 def test_fb22_a_moved_addon_port_is_found_again_without_waiting(stack, tmp_path):
     import orch_dashboard.server as srvmod
 
-    base, port = stack
+    base, _port = stack
     srvmod._PORTS.clear()
     assert call(base + "/addon/viewer/")[0] == 200
     key = next(k for k in srvmod._PORTS if k[1] == "viewer")
@@ -364,7 +366,7 @@ def test_fb22_a_moved_addon_port_is_found_again_without_waiting(stack, tmp_path)
 
 
 def test_fb22_static_files_of_an_addon_page_may_be_kept_by_the_browser_the_page_itself_may_not(stack):
-    base, port = stack
+    base, _port = stack
     code, _, h = call(base + "/addon/viewer/kit/tokens.css")
     assert code == 200 and h["Cache-Control"].startswith("private, max-age=")
     code, _, h = call(base + "/addon/viewer/web/app.js")
@@ -389,7 +391,7 @@ def test_fb22_a_changed_record_of_what_runs_drops_the_remembered_port(stack, tmp
     key = next(k for k in srvmod._PORTS if k[1] == "viewer")
     srvmod._PORTS[key] = (srvmod._PORTS[key][0] - 20, 1, stamp["v"])  # remembered, and wrong
     stamp["v"] = (2, 1)  # orch's record changed
-    code, body, h = call(base + "/addon/viewer/")
+    code, body, _h = call(base + "/addon/viewer/")
     assert code == 200 and b"hi" in body  # looked up live: the real port, not the remembered one
     assert _status_calls(tmp_path) == first + 1
     assert srvmod._PORTS[key][1] == port
@@ -398,7 +400,7 @@ def test_fb22_a_changed_record_of_what_runs_drops_the_remembered_port(stack, tmp
 def test_fb22_an_action_clears_every_remembered_port(stack):
     import orch_dashboard.server as srvmod
 
-    base, port = stack
+    base, _port = stack
     srvmod._PORTS[("x", "y")] = (0.0, 5, None)
     call(base + "/api/act", "POST", {"Content-Type": "application/json", "Origin": base}, b"{}")
     assert ("x", "y") not in srvmod._PORTS

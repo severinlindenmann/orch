@@ -204,7 +204,9 @@ class Handler(BaseHTTPRequestHandler):
         hit = _PORTS.get((str(self.root), name))
         # a found port is kept (a move is noticed by the failed connection in _proxy); "not running" is looked at again soon
         stamp = _services_stamp()
-        if hit and time.monotonic() - hit[0] < (PORT_KEEP if hit[1] and stamp is not None and hit[2] == stamp else 3):
+        if hit and time.monotonic() - hit[0] < (
+            PORT_KEEP if hit[1] and stamp is not None and hit[2] == stamp else 3
+        ):
             return hit[1]
         port = None
         if any(a["name"] == name and a.get("page") for a in load_addons(self.root, self.orch_bin)):
@@ -245,7 +247,10 @@ class Handler(BaseHTTPRequestHandler):
                 conn.request(method, (rest or "/") + (("?" + query) if query else ""), body=body, headers=up)
                 r = conn.getresponse()
                 data = r.read(PROXY_MAX_REPLY + 1)
-                ctype, rev = r.getheader("Content-Type") or "application/octet-stream", r.getheader("X-Revision")
+                ctype, rev = (
+                    r.getheader("Content-Type") or "application/octet-stream",
+                    r.getheader("X-Revision"),
+                )
                 page_csp = r.getheader("Content-Security-Policy")
                 conn.close()
                 break
