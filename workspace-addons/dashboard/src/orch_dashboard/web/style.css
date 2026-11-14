@@ -518,3 +518,9 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 @media(max-width:600px){.error-hero{padding:24px;min-height:240px}}
 /* Page heading with an actions slot: actions sit at the end of the title row */
 .page-heading:has(>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+
+/* "You: <name>" person switch above Settings: the kit menu, opening upward from the sidebar foot. */
+.person-switch .person-menu>.menu-pop{top:auto;bottom:calc(100% + 4px);left:0;right:auto;width:100%;min-width:200px}
+.person-switch .person-add{display:flex;gap:8px;padding:4px}
+.person-switch .person-add .input{flex:1;min-width:0}
+.person-switch .ck{color:var(--brand)}

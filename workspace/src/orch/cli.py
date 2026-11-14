@@ -450,6 +450,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument(
         "--description", help="what it is about, 1 to 3 sentences (shown as the agent's description)"
     )
+    x = t.add_parser(
+        "tidy",
+        parents=[common],
+        help="tidy a new ticket when work starts: clear title, owner, due, done when",
+    )
+    x.add_argument("id")
+    x.add_argument("title")
+    x.add_argument("--owner")
+    x.add_argument("--due", metavar="YYYY-MM-DD")
+    x.add_argument("--done-when", dest="done_when")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
     x.add_argument("--goal", required=True)
@@ -909,6 +919,10 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "title":
         t = tickets.set_auto_title(root, args.id, args.title, by(), args.description)
         _out(args, t, f'Title written: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "tidy":
+        fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
+        t = tickets.tidy(root, args.id, args.title, by(), fields)
+        _out(args, t, f'Tidied: "{t["title"]}"')
     elif cmd == "ticket" and sub == "plan":
         t = tickets.set_plan(root, args.id, args.goal, args.not_included, by())
         _out(args, t, "Plan written.")
