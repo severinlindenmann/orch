@@ -216,3 +216,11 @@ def test_ticket_agent_goes_to_run_start(ws):
     Scheduler(ws).tick(T(7, 1, d=5))
     start = next(c["args"] for c in calls(ws) if c["args"][:2] == ["run", "start"])
     assert start[start.index("--agent") + 1] == "codex" and "oneshot" in start
+
+
+def test_interval_is_at_least_five_minutes():
+    """Owner feedback 14 Nov (fb20): a repeat every N minutes starts at 5; hours are unchanged."""
+    assert plain.parse("every 5 minutes", "UTC").cron == "*/5 * * * *"
+    for text in ("every 1 minute", "every 4 minutes"):
+        with pytest.raises(plain.Plain, match="every 5 minutes"):
+            plain.parse(text, "UTC")
