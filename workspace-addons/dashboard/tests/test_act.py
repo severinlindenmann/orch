@@ -482,6 +482,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 {"op": "addon.set", "args": {"name": "alpha", "on": False}},
                 ["addon", "remove", "alpha", *common],
             ),
+            (  # Remove: the same CLI path as `orch addon uninstall`
+                {"op": "addon.uninstall", "args": {"name": "alpha"}},
+                ["addon", "uninstall", "alpha", *common],
+            ),
             (  # the Add of the catalogue: an available (not installed) add-on, same op as the switch
                 {"op": "addon.set", "args": {"name": "avail", "on": True}},
                 ["addon", "add", "avail", "--yes", *common],
@@ -522,6 +526,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             {"op": "addon.set", "args": {"name": "ticket", "on": True}},
             {"op": "addon.set", "args": {"name": "alpha", "on": "yes"}},
             {"op": "addon.set", "args": {"name": "alpha"}},
+            {"op": "addon.uninstall", "args": {"name": "gamma"}},  # not installed
+            {"op": "addon.uninstall", "args": {"name": "avail"}},  # available, not added
+            {"op": "addon.uninstall", "args": {"name": "dashboard"}},  # never from itself
+            {"op": "addon.uninstall", "args": {"name": "alpha", "x": 1}},
             {
                 "op": "addon.set",
                 "args": {"name": "avail", "on": False},
@@ -532,7 +540,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
         assert not [
             c
             for c in calls(act_orch)[n:]
-            if c[0] in ("config", "addon") and c[1] in ("set", "agent", "add", "remove")
+            if c[0] in ("config", "addon") and c[1] in ("set", "agent", "add", "remove", "uninstall")
         ]
         assert actions.MAX_COMMAND == 500
         # a command that starts with a dash is still one argv value that begins with --command=

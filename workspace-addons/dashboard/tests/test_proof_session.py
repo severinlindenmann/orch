@@ -547,6 +547,7 @@ ACT_ARGS = {
     "private.move": {},
     "private.allow": {"name": "mine", "key": "a" * 64},
     "addon.set": {"name": "scheduler", "on": True},
+    "addon.uninstall": {"name": "scheduler"},
     "share.set": {"on": True},
     "workflow.set": {"on": True},
     "copies.set": {"mode": "off"},

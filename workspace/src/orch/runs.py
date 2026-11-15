@@ -581,7 +581,7 @@ def pending_discard(root: Path, tid: str, item_id: str) -> None:
             _write(root, rec)
 
 
-def pending_take_back(root: Path, tid: str, item_id: str) -> dict:
+def unsend_input(root: Path, tid: str, item_id: str) -> dict:
     """A person takes back ONE message that the agent has not read yet. The item is looked up again inside the
     ticket's run lock: read meanwhile (or not there) means refuse, never a half-removed message. Returns the
     removed item (its text goes back into the person's message box)."""

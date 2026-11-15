@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import actions, adapterdata, areas, chat, livecards, proofs, runfiles, selfupdate
+from . import actions, adapterdata, areas, chat, livecards, proofs, results, runfiles, selfupdate
 from .board import Board, TicketWatcher
 from .clock import WorkClock
 from .events import RUN_ID, EventLog, for_display
@@ -585,21 +585,22 @@ class Tracker:
                     if started or t["status"] == "waiting"
                     else "Start"
                 )
-                out.append(
-                    {
-                        "id": t["id"],
-                        "next_step": next_step,
-                        "question_count": len(questions),
-                        "key": t.get("key"),
-                        "updated_at": t.get("updated_at") or t.get("created_at"),
-                        "title": str(t.get("title", ""))[:200],
-                        "status": t["status"],
-                        "closed_at": (t.get("closed_at") or ((t.get("history") or [{}])[-1] or {}).get("at"))
-                        if t["status"] == "done"
-                        else None,
-                        "started": bool(t.get("started") or (t.get("ticket_view") or {}).get("started")),
-                    }
-                )
+                row = {
+                    "id": t["id"],
+                    "next_step": next_step,
+                    "question_count": len(questions),
+                    "key": t.get("key"),
+                    "updated_at": t.get("updated_at") or t.get("created_at"),
+                    "title": str(t.get("title", ""))[:200],
+                    "status": t["status"],
+                    "closed_at": (t.get("closed_at") or ((t.get("history") or [{}])[-1] or {}).get("at"))
+                    if t["status"] == "done"
+                    else None,
+                    "started": bool(t.get("started") or (t.get("ticket_view") or {}).get("started")),
+                }
+                if t["status"] == "review":  # the newest result, from the ticket as listed (no file is read)
+                    row["result"] = results.newest_result(t)
+                out.append(row)
         return out[:200]
 
 

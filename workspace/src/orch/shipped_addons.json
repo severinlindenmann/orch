@@ -130,6 +130,7 @@
   "orch_api": 1,
   "page": {
    "label": "Open Focus",
+   "live_session": true,
    "path": "/"
   },
   "recommended": true,

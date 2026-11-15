@@ -326,12 +326,12 @@ def _send(args, root: Path, tid: str, by: str) -> None:
     _out(args, res, runs_live.send_text(res, tid))
 
 
-def _take_back(args, root: Path, tid: str, by: str) -> None:
+def _unsend(args, root: Path, tid: str, by: str) -> None:
     """Take back one message the agent has not read yet; the answer carries its text for the message box."""
     if tickets.agent_tool() or by.startswith("agent:") or os.environ.get("ORCH_RUN"):
         raise Refused("Only a person can take back a message.")
     tickets.load(root, tid)
-    item = runs.pending_take_back(root, tid, args.item)
+    item = runs.unsend_input(root, tid, args.item)
     _out(
         args,
         {"ticket": tid, "id": item["id"], "text": item["text"]},
@@ -378,7 +378,7 @@ def dispatch(args, root: Path) -> bool:
     elif sub == "send":
         _send(args, root, tid, by)
     elif sub == "take-back":
-        _take_back(args, root, tid, by)
+        _unsend(args, root, tid, by)
     elif sub == "attach":
         runs_live.attach(root, tid, args.watch)
     elif sub == "stop":
