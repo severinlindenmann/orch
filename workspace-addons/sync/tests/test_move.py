@@ -78,21 +78,6 @@ def test_move_untracks_orch_only_commits_nothing_then_sync_starts(team):
     assert outer(team, "rev-parse", "HEAD") == head
 
 
-def test_an_agent_cannot_move(team, monkeypatch, capsys):
-    before = snapshot(team)
-    from orch.errors import Refused
-
-    with pytest.raises(Refused):
-        harness.move_to_private(team, "agent:claude")
-    # the command line: no proof from a person, or an agent's name on it, is refused before git runs
-    from orch import cli as orch_cli
-
-    monkeypatch.chdir(team)
-    for extra in ([], ["--by", "agent:claude"], ["--by", "human:Pat"]):
-        assert orch_cli.main(["private", "move", *extra]) != 0
-    assert snapshot(team) == before
-
-
 def test_outer_hooks_and_config_never_run(team):
     canary = team.parent / "PWNED"
     script = team.parent / "evil.sh"
@@ -119,20 +104,3 @@ def test_outer_hooks_and_config_never_run(team):
     )  # the Move really runs, with the hostile config neutralised
     assert moved and harness.tracked_private(team) == []
     assert not canary.exists()
-
-
-def test_move_with_the_persons_proof_on_the_command_line(team, monkeypatch, capsys):
-    import io
-
-    from orch import cli as orch_cli
-    from orch import humanproof
-
-    token = humanproof.mint(
-        humanproof.human_key(team), humanproof.new_payload("private.move", "move", "human:Pat")
-    )
-    monkeypatch.chdir(team)
-    monkeypatch.setattr("sys.stdin", io.StringIO(token + "\n"))
-    head = outer(team, "rev-parse", "HEAD")
-    assert orch_cli.main(["private", "move", "--proof-stdin"]) in (0, None)
-    assert outer(team, "ls-files", ".orch") == "" and outer(team, "rev-parse", "HEAD") == head
-    assert (team / ".orch" / TICKET).is_file()

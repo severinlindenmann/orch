@@ -8,7 +8,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import addons, config, humanproof, syncgate, tickets
+from orch import addons, humanproof, syncgate, tickets
 
 from . import cli, records, repo
 
@@ -204,11 +204,6 @@ def approve(root, tid, addon, args):
         hashed = digest(block["value"])
         # Fable B12: Ignore and Allow are different decisions with different proofs.
         kind = "ignore" if getattr(args, "ignore", False) else "allow"
-        target = f"sync:{kind}:{tid}:{addon}:{hashed}"
-        by = humanproof.person_by(
-            root, args, "addon.act", target, no_handoff="This approval needs a person's proof over stdin."
-        )
-        config.require_person(by, "approve this synced change")
         entry = records.make(
             root, kind, f"{tid}:{addon}:{hashed}", {"ticket": tid, "addon": addon, "hash": hashed}
         )

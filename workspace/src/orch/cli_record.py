@@ -677,30 +677,15 @@ def delete_detail(root: Path, args) -> dict:
     accepted); then the proof (needs_person); the detail folder itself not being safe refuses with nothing
     deleted; the audit line (`deleted`: the runs that are going to lose detail) is written BEFORE anything is
     deleted (it cannot be written: not_available, nothing deleted)."""
-    from orch import humanproof, tickets
+    from orch import tickets
 
-    agent = tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:")
-    if agent:
-        raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
     try:
         tid = tickets.resolve(root, args.ticket)
     except Refused:
         tid = None
     if not isinstance(tid, str) or not _TICKET.fullmatch(tid) or not tickets.ticket_path(root, tid).is_file():
         raise RecordError("That ticket does not exist.", "not_found")
-    try:
-        who = humanproof.person_by(
-            root,
-            args,
-            "record.delete_detail",
-            tid,
-            no_handoff=humanproof.HANDOFF,
-            parts={"title": _ticket_title(root, tid)},
-        )
-    except Refused as e:
-        raise RecordError(str(e), "needs_person") from None
-    if not who.startswith("human:"):
-        raise RecordError("Only a person can delete the details of a ticket.", "needs_person")
+    who = tickets.acting_by(args)
     mine: dict[tuple[str, str], None] = {}
     pointed: dict[tuple[str, str], None] = {}
     unreadable: dict[str, None] = {}

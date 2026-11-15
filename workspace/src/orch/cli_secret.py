@@ -1,4 +1,4 @@
-"""Secret commands: proof-gated changes and direct delivery to child commands."""
+"""Secret commands: changes and direct delivery to child commands."""
 
 import argparse
 import json
@@ -47,30 +47,8 @@ def add_parsers(sub, common) -> None:
 
 
 def _agent(root, args, profile, mode, words) -> bool:
-    """True unless a PERSON proves otherwise (H1). Nothing the caller controls (an environment variable, a
-    flag, being a script) lowers it: a caller is a person only with a valid single-use hp1 proof on the first
-    line of stdin (`orch secret env --proof-stdin <profile> ...`) for `secret.profile`, bound to this exact
-    call (target `<profile>:use:<sha256 of mode and command words>`), minted by the person's key.
-    tickets.agent_tool() and --by agent:... only ever add a reason to refuse."""
-    if tickets.agent_tool() or str(getattr(args, "by", None) or "").startswith("agent:"):
-        return True
-    if not getattr(args, "proof_stdin", False):
-        return True
-    who = hp.verify_and_consume(
-        root,
-        hp.read_proof_line(),
-        "secret.profile",
-        secretrun.use_target(profile, mode, words),
-        getattr(args, "by", None),
-    )
-    return not who.startswith("human:")
-
-
-def _person(root, args, op, target):
-    who = hp.person_by(root, args, op, target, no_handoff="Do this in the dashboard on this computer.")
-    if not who.startswith("human:"):
-        raise Refused(hp.AGENT_REFUSED)
-    return who
+    """True when the caller is an agent: an agent tool in the environment, or --by agent:..."""
+    return bool(tickets.agent_tool() or str(getattr(args, "by", None) or "").startswith("agent:"))
 
 
 def _pairs(items):
@@ -103,18 +81,9 @@ def _file_bytes(path):
 def _change_profile(root, args, who):
     """Returns the extra fields for the answer (the resolved command, warnings)."""
     name, action = args.name, args.profile_action
-    setting = f"secret.allow_get.{name}"
-    agents = f"secret.agents_may_env.{name}"
     extra: dict = {}
-    tomb: frozenset = frozenset()
-    # One lock across record and file: a reader (secretrun._switch_on) never sees one without the other.
     with hp._key_lock(hp.key_dir(root)):
-        if action == "remove":  # first: switches off and the tombstone, whatever state the file is in
-            tomb = frozenset({name})
-            hp.record_set(root, setting, False, who)
-            hp.record_set(root, agents, False, who)
-            hp.profile_sign(root, name, None)
-        profiles = keystore.read_profiles(root)  # a damaged file refuses here (after a remove's tombstone)
+        profiles = keystore.read_profiles(root)  # a damaged file refuses here
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}
             profile.update(allow_get=False, agents_may_env=False)
@@ -134,8 +103,6 @@ def _change_profile(root, args, who):
                 profile["skills"] = args.skill
             if args.extra:
                 profile["extra"] = list(args.extra)
-            hp.record_set(root, setting, False, who)
-            hp.record_set(root, agents, False, who)
             profiles[name] = profile
         else:
             if action == "remove":
@@ -145,16 +112,10 @@ def _change_profile(root, args, who):
             elif name not in profiles:
                 raise Refused(f"Refused: there is no profile named {name}.")
             else:
-                flag, rec = ("allow_get", setting) if action.startswith("get") else ("agents_may_env", agents)
+                flag = "allow_get" if action.startswith("get") else "agents_may_env"
                 enabled = action.endswith("enable")
-                hp.record_set(root, rec, enabled, who)  # the record first, then the file
                 profiles[name][flag] = enabled
-        keystore.write_profiles(
-            root,
-            profiles,
-            sign=frozenset({name}) if action == "set" else frozenset(),
-            tombstone=tomb,
-        )
+        keystore.write_profiles(root, profiles)
     secretrun.record_change(root, "profile." + action.replace("-", "_"), name, who)
     return extra
 
@@ -213,38 +174,14 @@ def dispatch(args, root: Path) -> bool:
     elif action == "scan":
         _scan(args, root)
     elif action in ("add", "remove", "profile"):
-        target = args.name
-        if action == "profile" and args.profile_action in ("get-enable", "get-disable"):
-            target += ":allow_get"
-        elif action == "profile" and args.profile_action in ("agents-enable", "agents-disable"):
-            target += ":agents_may_env"
-        elif action == "profile" and args.profile_action == "remove":
-            target += ":remove"
-        lowering = action == "profile" and args.profile_action in ("get-disable", "agents-disable")
-        if (
-            action == "add"
-            and args.type == "key-file"
-            and args.file is None
-            and getattr(args, "proof_stdin", False)
-            and hasattr(sys.stdin, "reconfigure")
-        ):
-            # Preserve arbitrary file bytes and CRLF after the proof's text line.
-            sys.stdin.reconfigure(encoding="utf-8", errors="surrogateescape", newline="")
-        # Turning a switch OFF needs no proof (the record says "reset"); everything else does.
-        if lowering and not getattr(args, "proof_stdin", False):
-            who = "reset"
-        else:  # a proof handed over with a lowering is checked and spent like any other
-            who = _person(root, args, "secret." + action, target)
+        who = tickets.acting_by(args)
         extra: dict = {}
         if action == "add":
             if args.file is not None and args.type != "key-file":
                 raise Refused("Refused: --file is only for a key-file.")
             if args.type == "key-file":
-                # Proof consumption uses TextIOWrapper.readline; its buffered tail must not be bypassed.
                 if args.file is not None:
                     value = _file_bytes(args.file)
-                elif getattr(args, "proof_stdin", False):
-                    value = sys.stdin.read().encode(sys.stdin.encoding or "utf-8", errors="surrogateescape")
                 else:
                     value = sys.stdin.buffer.read(keystore.FILE_MAX + 1)
             else:

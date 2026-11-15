@@ -148,7 +148,7 @@ def test_default_reads_the_real_proof_grant_store(tmp_path, monkeypatch):
     monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
     _mcp(root, {"s": {"command": ["srv"]}}, {"s": ["write", "read"]})
     assert conn_config.proof_grants(root) == {}
-    humanproof.record_set(root, "conn.allow.s", ["read"], "human:test")
+    (root / ".orch" / "config.toml").write_text('[conn.allow]\ns = ["read"]\n')
     assert conn_config.proof_grants(root) == {"s": ["read"]}
     got = conn_config.effective(root)["connections"][0]
     assert got["allowed_actions"] == ["read"] and not got["allow_all"]
