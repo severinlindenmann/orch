@@ -260,7 +260,10 @@ def _show(t: dict, root: Path) -> str:
     if block := review.applies_now_block(t, root):
         out.append("\n" + block.rstrip("\n"))
     for q in (x for x in t["questions"] if x["answer"] is not None):
-        out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
+        if (gone := tickets.taken_back_text(q)) is not None:
+            out.append(f"  Taken back {q['id']}: {q['text']} - {gone[len(tickets.TAKEN_BACK) :]}")
+        else:
+            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
     rows = refs.all_refs(root, t)
     if rows:
         kinds = refs.active_kinds(root)
@@ -582,6 +585,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("text")
     x.add_argument("--option", action="append", default=[])
     x.add_argument("--recommend", "--recommended", dest="recommend")
+    x.add_argument(
+        "--take-back",
+        metavar="QID",
+        help='take back your question; the text is the reason: --take-back q3 "why"',
+    )
     x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
     x.add_argument(
         "--preview",
@@ -1127,6 +1135,24 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.log(root, args.id, args.text, by())
         h = history.lines(root, t)[-1]
         _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
+    elif cmd == "ask" and args.take_back:
+        if (
+            args.phone
+            or args.option
+            or args.recommend
+            or args.kind
+            or args.action
+            or args.check
+            or (cli_review.has_card_flags(args))
+        ):
+            raise Refused("--take-back goes with the reason only: orch ask <ticket> --take-back q3 'why'.")
+        t, q, changed = tickets.take_back(root, args.id, args.take_back, args.text, by())
+        _out(
+            args,
+            q,
+            (f"Taken back {q['id']}." if changed else f"{q['id']} was already taken back.")
+            + " Next: keep working on the ticket.",
+        )
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):
             raise Refused(addons.not_on_message(root, "relay"))
@@ -1172,6 +1198,8 @@ def run(args: argparse.Namespace) -> None:
             (x for x in tickets.load(root, args.id).get("questions") or [] if x.get("id") == args.question),
             None,
         )
+        if shown_q is not None:
+            tickets.refuse_if_taken_back(shown_q)  # said before anything is asked of the person
         shown_digest = tickets.question_digest(shown_q)  # no question shown: any answer is refused
         given = getattr(args, "question_digest", None)
         if given is not None and not re.fullmatch(r"[0-9a-f]{64}", given):
