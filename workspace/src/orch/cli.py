@@ -430,6 +430,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
     )
     x.add_argument(
+        "--read-only",
+        action="store_true",
+        help="a run on it may only read (for agents that can be held to that)",
+    )
+    x.add_argument("--allow-cmd", action="append", default=[], metavar="CMD", help=argparse.SUPPRESS)
+    x.add_argument(
         "--start-requires",
         metavar="TICKET:QUESTION=ANSWER",
         help="no run starts on it until a person gave this answer to that question (set once, here)",
@@ -873,6 +879,7 @@ def run(args: argparse.Namespace) -> None:
             title_auto=args.title_auto,
             plan_first=args.plan_first,
             start_requires=args.start_requires,
+            read_only=_read_only_arg(args),
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -1297,6 +1304,12 @@ def _resolve_keys(args: argparse.Namespace, root: Path | None) -> None:
         args.on = "ticket:" + tickets.resolve_cli(
             root, on[len("ticket:") :], json_output=getattr(args, "json", False)
         )
+
+
+def _read_only_arg(args) -> list[str] | None:
+    if not args.read_only and args.allow_cmd:
+        raise Refused("--allow-cmd needs --read-only.")
+    return list(args.allow_cmd) if args.read_only else None
 
 
 def _sub_word(argv: list[str]) -> str:

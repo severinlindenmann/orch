@@ -159,9 +159,28 @@ def _change_profile(root, args, who):
     return extra
 
 
+def _in_read_only_run(root: Path) -> bool:
+    """The caller is a run on a read-only ticket whose agent was held to the read-only tool list."""
+    tid, agent = os.environ.get("ORCH_TICKET"), os.environ.get("ORCH_AGENT")
+    if not tid or not agent:
+        return False
+    try:
+        return runs_fence(root, tid, agent)
+    except (Refused, OSError, ValueError):
+        return False
+
+
+def runs_fence(root: Path, tid: str, agent: str) -> bool:
+    from orch import runs
+
+    return runs.fence_cmds(root, tickets.load(root, tid), agent) is not None
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "secret":
         return False
+    if _in_read_only_run(root):
+        raise Refused("A read-only run cannot use keys.")
     action = args.sub
     if action in ("env", "file", "exec"):
         rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest

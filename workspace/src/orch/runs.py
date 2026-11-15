@@ -1212,6 +1212,15 @@ def resume_prompt(ticket: dict, items: list[dict], since: str | None, agent: str
     return "\n\n".join(parts)[:12000]
 
 
+def fence_cmds(root: Path, ticket: dict, name: str) -> tuple[str, ...] | None:
+    """The extra commands of a read-only ticket (`orch ticket new --read-only`) when this agent can be held to
+    the read-only tool list; None = run normally (no such ticket, or no read-only profile)."""
+    ro = ticket.get("read_only")
+    if not isinstance(ro, dict) or adapters.readonly(name, root) is None:
+        return None
+    return tuple(ro.get("allow") or ())
+
+
 def plan(
     root: Path,
     tid: str,
@@ -1234,6 +1243,9 @@ def plan(
         ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
     a = adapters.load(name, root)
+    fence = fence_cmds(root, ticket, name)
+    if fence is not None:  # a read-only ticket: always fresh and one turn at a time, no extra allowed tools
+        fresh, allow, mode = True, None, "oneshot"
     person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
     adapters.check_start_folder(name, root)
     items = undelivered(root, tid) if items is None else items
@@ -1290,6 +1302,8 @@ def plan(
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
     argv = store_access(argv, name, root, workdir_for(root, read(root, tid), tid))
+    if fence is not None:
+        argv = adapters.readonly_argv(name, argv, tid, root, fence)
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1365,6 +1379,8 @@ def start(
     adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
+    if fence_cmds(root, tickets.load(root, tid), name) is not None:
+        mode = "oneshot"  # a read-only ticket is never a live session
     notes = []
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):

@@ -43,7 +43,6 @@ MESSAGES = {
     "not_tested": "Test it first.",
     "admin_only": "Shared by your admin: ask your admin.",
     "conflict": "Changed since it was applied. Nothing was rolled back.",
-    "not_supported": "Check-up needs Claude as the agent for now.",
 }
 PROPOSAL = re.compile(r"pr_[a-z0-9]{8,16}")  # contracts/proposal.schema.json `id`
 HASH = re.compile(r"[0-9a-f]{64}")  # `hash` of `checkup show`: sha256 hex

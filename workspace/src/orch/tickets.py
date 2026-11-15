@@ -836,6 +836,20 @@ def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
 START_REQUIRES = re.compile(r"(t_[a-z0-9]{6,16}):(q[A-Za-z0-9_-]{0,31})=([^\x00-\x1f\x7f]{1,60})")
 
 
+_ALLOW_CMD = re.compile(r"[a-z][a-z-]{0,30}( [a-z][a-z-]{0,30}){0,2}")
+
+
+def clean_allow_cmds(cmds) -> list[str]:
+    """The `orch` commands (words after `orch`) a read-only run may use besides the fixed list."""
+    if (
+        not isinstance(cmds, list)
+        or len(cmds) > 10
+        or not all(isinstance(c, str) and _ALLOW_CMD.fullmatch(c) for c in cmds)
+    ):
+        raise Refused("--allow-cmd takes the words after `orch`, like: insights propose")
+    return list(dict.fromkeys(cmds))
+
+
 def parse_start_requires(root: Path, value: str) -> dict:
     """Parse "<ticket>:<question>=<answer>" into {"ticket", "question", "answer"}; the ticket and its question
     must exist."""
@@ -880,8 +894,11 @@ def create(
     title_auto: bool = False,
     plan_first: bool = False,
     start_requires: str | None = None,
+    read_only: list[str] | None = None,
 ) -> dict:
-    """`start_requires` ("<ticket>:<question>=<answer>", set at creation only): no run starts on this ticket
+    """`read_only` (set at creation only; extra `orch` commands the run may use, maybe none): a run on
+    this ticket is held to the agent's read-only tool list when its adapter has one (adapters.readonly).
+    `start_requires` ("<ticket>:<question>=<answer>", set at creation only): no run starts on this ticket
     until a person answered that question with that answer (see start_blocked).
     `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
@@ -921,6 +938,8 @@ def create(
         start_requires is not None
     ):  # a gate an add-on sets (Factory: a crew task waits for the person's Start)
         ticket["start_requires"] = parse_start_requires(root, start_requires)
+    if read_only is not None:
+        ticket["read_only"] = {"allow": clean_allow_cmds(read_only)}
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1355,7 +1374,13 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
 # ------------------------------------------------------- plain fields (owner, due, note, done_when, summary)
 
 
-PROTECTED_FIELDS = ("title_auto", "plan_first", "description", "description_by")  # orch writes these itself
+PROTECTED_FIELDS = (
+    "title_auto",
+    "plan_first",
+    "read_only",
+    "description",
+    "description_by",
+)  # orch writes these itself
 
 
 def clean_field(key: str, value):
