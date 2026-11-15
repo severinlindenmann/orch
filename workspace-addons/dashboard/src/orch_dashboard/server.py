@@ -490,6 +490,8 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype, extra = ticketfiles.read_file(
                 self.root, one("t"), one("k"), one("n"), one("dl") == "1"
             )
+            if one("k") == "reviewed":  # a card's own copy: inert, sandboxed, never sniffed
+                return self._send(code, body, ctype, extra, csp=ticketfiles.REVIEWED_CSP)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
             if (
                 code == 200
