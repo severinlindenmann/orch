@@ -145,7 +145,7 @@ async fn container_idle_app_sleeps_and_wakes_on_request() {
         c.idle_secs = 2;
         c.sleep_sweep_secs = 1;
     });
-    let ws = t.workspace("A", basic_rights()).await;
+    let ws = t.workspace("A", all_rights()).await;
     let toml = "name = \"nap\"\nstack = \"python\"\nstart = \"python main.py\"\nhealth = \"/health\"\npublic = true\n";
     let r = t
         .api(

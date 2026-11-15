@@ -421,6 +421,7 @@ async fn deploy_inner(
     st.runner.stop(name).await;
     st.runner.rename(&format!("{name}~new"), name);
     st.sleep.sleeping.lock().unwrap().remove(name);
+    st.sleep.cooldown.lock().unwrap().remove(name);
     touch(st, name);
     let mut view_token = None;
     let mut hash = existing.and_then(|e| e.view_token_hash.clone());
@@ -502,6 +503,7 @@ pub fn app_json(st: &State, a: &AppRow) -> Value {
 async fn start_existing(st: &State, a: &AppRow) -> &'static str {
     st.runner.stop(&a.name).await;
     st.sleep.sleeping.lock().unwrap().remove(&a.name);
+    st.sleep.cooldown.lock().unwrap().remove(&a.name);
     touch(st, &a.name);
     if a.stack == "docker" && !crate::runner::docker_apps_enabled() {
         // keep the reason where the owner looks: the app's log
@@ -772,17 +774,22 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
     let woken;
     let app = if st.cfg.idle_secs > 0 {
         // the port changes on every wake: use the row as it is now, not as the caller read it
-        if is_sleeping(st, &app.name) {
+        let fresh = if is_sleeping(st, &app.name) {
             match wake(st, &app.name).await {
-                Ok(a) => woken = a,
+                Ok(a) => a,
                 Err(r) => return *r,
             }
         } else {
             match db::get_app(&st.db.lock().unwrap(), &app.name) {
-                Ok(Some(a)) => woken = a,
-                _ => return offline_page(),
+                Ok(Some(a)) => a,
+                _ => return notice_gone(),
             }
+        };
+        // the caller was authorized for the OLD row: refuse if access changed meanwhile
+        if let Some(r) = access_changed(app, &fresh) {
+            return r;
         }
+        woken = fresh;
         &woken
     } else {
         app
@@ -949,7 +956,58 @@ pub async fn sleep_sweep(st: &State) {
     }
 }
 
-/// Starts a sleeping app for a request. One wake per app at a time; others wait for it.
+fn notice_gone() -> Response {
+    crate::web::notice(
+        404,
+        "link",
+        "This app isn\u{2019}t available",
+        "Check the link or ask the sender for a new one.",
+        false,
+    )
+}
+
+/// Compares what the request was authorized against with the row now: None = same access.
+fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
+    if new.status == "stopped" {
+        return Some(paused_page());
+    }
+    if new
+        .expires_at
+        .as_deref()
+        .is_some_and(|e| e <= util::now().as_str())
+    {
+        return Some(crate::web::notice(
+            410,
+            "clock",
+            "This app has expired",
+            "It is no longer available. Ask the owner to share it again.",
+            false,
+        ));
+    }
+    if new.workspace != old.workspace
+        || new.public != old.public
+        || new.view_token_hash != old.view_token_hash
+        || new.stack != old.stack
+    {
+        return Some(private_page());
+    }
+    None
+}
+
+const WAKE_COOLDOWN: Duration = Duration::from_secs(30);
+
+fn wake_503() -> Box<Response> {
+    Box::new(crate::web::notice(
+        503,
+        "offline",
+        "This app could not start",
+        "Try again in a moment.",
+        true,
+    ))
+}
+
+/// Starts a sleeping app for a request. One wake per app at a time (others wait for it).
+/// The global app_lock is only taken briefly (re-check before, commit after), never during the start.
 async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
     let lock = st
         .sleep
@@ -961,42 +1019,85 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
         .clone();
     let _w = lock.lock().await;
     let t0 = Instant::now();
-    let _g = st.app_lock.lock().await;
-    let row = match db::get_app(&st.db.lock().unwrap(), name) {
-        Ok(Some(r)) => r,
-        _ => return Err(Box::new(offline_page())),
+    // a failed wake is not retried for 30 s
+    if st
+        .sleep
+        .cooldown
+        .lock()
+        .unwrap()
+        .get(name)
+        .is_some_and(|t| t.elapsed() < WAKE_COOLDOWN)
+    {
+        return Err(wake_503());
+    }
+    let (row, m, port) = {
+        let _g = st.app_lock.lock().await;
+        let row = match db::get_app(&st.db.lock().unwrap(), name) {
+            Ok(Some(r)) => r,
+            _ => return Err(Box::new(notice_gone())),
+        };
+        if row.status == "stopped" {
+            return Err(Box::new(paused_page()));
+        }
+        if !is_sleeping(st, name) {
+            return Ok(row); // woken by an earlier request, or restarted
+        }
+        let dir = PathBuf::from(&row.code_dir);
+        match (parse_manifest(&dir), choose_port(st)) {
+            (Ok(m), Ok(p)) => (row, m, p),
+            _ => return Err(wake_fail(st, name, "bad manifest or no free port".into())),
+        }
     };
-    if row.status == "stopped" {
-        return Err(Box::new(paused_page()));
-    }
-    if !is_sleeping(st, name) {
-        return Ok(row); // woken by an earlier request, or restarted
-    }
     let dir = PathBuf::from(&row.code_dir);
-    // stays sleeping on failure: the next request tries again
-    let failed = |why: String| {
-        tracing::warn!("app {name} could not wake: {}", util::tail(&why, 1500));
-        crate::web::notice(
-            503,
-            "offline",
-            "This app could not start",
-            "Try again in a moment.",
-            true,
-        )
-    };
-    let (m, port) = match (parse_manifest(&dir), choose_port(st)) {
-        (Ok(m), Ok(p)) => (m, p),
-        _ => return Err(Box::new(failed("bad manifest or no free port".into()))),
-    };
-    if let Err(log) = start_and_check(st, name, name, &dir, &m, port, 25).await {
-        return Err(Box::new(failed(log)));
+    let key = format!("{name}~wake");
+    if let Err(log) = start_and_check(st, &key, name, &dir, &m, port, 25).await {
+        return Err(wake_fail(st, name, log));
     }
-    let mut row = row;
-    row.port = port;
-    let _ = db::put_app(&st.db.lock().unwrap(), &row, &row.updated_at.clone());
+    // commit: still the same app, still asleep, not stopped/deleted/redeployed meanwhile
+    let _g = st.app_lock.lock().await;
+    let found = db::get_app(&st.db.lock().unwrap(), name);
+    let cur = match found {
+        Ok(Some(r)) if r.code_dir == row.code_dir && is_sleeping(st, name) => r,
+        Ok(None) => {
+            st.runner.stop(&key).await;
+            return Err(Box::new(notice_gone()));
+        }
+        Ok(Some(r)) if r.status == "stopped" => {
+            st.runner.stop(&key).await;
+            return Err(Box::new(paused_page()));
+        }
+        Ok(Some(r)) if r.code_dir == row.code_dir => {
+            // restarted by someone else meanwhile: use theirs
+            st.runner.stop(&key).await;
+            return Ok(r);
+        }
+        _ => {
+            st.runner.stop(&key).await;
+            return Err(wake_503());
+        }
+    };
+    st.runner.rename(&key, name);
+    let mut cur = cur;
+    cur.port = port;
+    let _ = db::put_app(&st.db.lock().unwrap(), &cur, &cur.updated_at.clone());
     st.sleep.sleeping.lock().unwrap().remove(name);
+    st.sleep.cooldown.lock().unwrap().remove(name);
     tracing::info!("app {name} woke in {} ms", t0.elapsed().as_millis());
-    Ok(row)
+    Ok(cur)
+}
+
+/// Failed wake: log once, start the cooldown. The app stays asleep (not failed).
+fn wake_fail(st: &State, name: &str, why: String) -> Box<Response> {
+    tracing::warn!(
+        "app {name} could not wake (no new try for 30 s): {}",
+        util::tail(&why, 1500)
+    );
+    st.sleep
+        .cooldown
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), Instant::now());
+    wake_503()
 }
 
 fn content_type(p: &FsPath) -> &'static str {

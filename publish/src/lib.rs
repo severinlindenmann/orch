@@ -29,6 +29,8 @@ pub struct SleepState {
     pub activity: Mutex<std::collections::HashMap<String, (std::time::Instant, usize)>>,
     /// apps stopped for idleness (DB status stays "running"); they wake on the next request
     pub sleeping: Mutex<std::collections::HashSet<String>>,
+    /// failed wakes: no new try for 30 s
+    pub cooldown: Mutex<std::collections::HashMap<String, std::time::Instant>>,
     /// one wake at a time per app
     pub wake: Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
