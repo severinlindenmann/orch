@@ -505,3 +505,83 @@ async fn sleep_redeploy_during_wake_is_served() {
     assert_eq!(g.status, 200, "{}", g.text());
     assert_eq!(g.text(), "hi");
 }
+
+/// Stopping a taken process hits that process only, not a newer one under the same name.
+#[tokio::test]
+async fn sleep_stop_taken_does_not_touch_a_newer_process() {
+    let t = setup();
+    let mk = |port: u16, log: &str| orch_publish::runner::Spec {
+        dir: t.dir.path().to_path_buf(),
+        start: "sleep 30".into(),
+        port,
+        base_path: "/a/x".into(),
+        data_dir: t.dir.path().join("d"),
+        store: "none".into(),
+        log: t.dir.path().join(log),
+        stack: "python".into(),
+        image: None,
+    };
+    let r = &t.st.runner;
+    r.spawn("tk", &mk(18990, "a.log")).await.unwrap();
+    let old = r.take("tk").unwrap();
+    assert!(!r.is_alive("tk"));
+    r.spawn("tk", &mk(18991, "b.log")).await.unwrap();
+    r.stop_taken(old).await;
+    assert!(
+        r.is_alive("tk"),
+        "the new process was killed by the old handle's stop"
+    );
+    r.stop("tk").await;
+}
+
+/// Sweep and request at the same moment: the request is answered and the app stays up.
+#[tokio::test]
+async fn sleep_sweep_racing_a_request_leaves_the_app_up() {
+    for _ in 0..3 {
+        let t = setup_with(|c| c.idle_secs = 1);
+        let ws = t.workspace("A", all_rights()).await;
+        sleep_app(&t, &ws, "race", "0.1").await;
+        // wake it, let it go idle again, then sweep while a request arrives
+        assert_eq!(
+            call(&t.public, "GET", "/a/race/", &[], vec![]).await.status,
+            200
+        );
+        idle_for(1.3).await;
+        let r = t.public.clone();
+        let st = t.st.clone();
+        let (_, g) = tokio::join!(
+            apps::sleep_sweep(&st),
+            call(&r, "GET", "/a/race/", &[], vec![])
+        );
+        assert_eq!(g.status, 200, "{}", g.text());
+        idle_for(0.3).await;
+        assert_eq!(
+            call(&t.public, "GET", "/a/race/", &[], vec![]).await.status,
+            200
+        );
+        assert_eq!(row(&t, "race")["awake"], true);
+    }
+}
+
+/// WebSocket upgrades are refused with 501 and never wake the app.
+#[tokio::test]
+async fn sleep_websocket_upgrade_is_refused() {
+    let t = setup_with(|c| c.idle_secs = 1);
+    let ws = t.workspace("A", all_rights()).await;
+    sleep_app(&t, &ws, "wsapp", "0.1").await;
+    let g = call(
+        &t.public,
+        "GET",
+        "/a/wsapp/",
+        &[("upgrade", "websocket"), ("connection", "Upgrade")],
+        vec![],
+    )
+    .await;
+    assert_eq!(g.status, 501);
+    assert!(
+        g.text().contains("can\u{2019}t use WebSockets here")
+            || g.text().contains("use WebSockets here")
+    );
+    assert_eq!(starts(&t, "wsapp"), 1);
+    assert_eq!(row(&t, "wsapp")["awake"], false);
+}

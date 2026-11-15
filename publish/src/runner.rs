@@ -42,6 +42,9 @@ struct Proc {
     unit: String,
 }
 
+/// A process entry taken out of the runner (see `Runner::take`).
+pub struct Taken(Proc);
+
 #[derive(Default)]
 pub struct Runner {
     procs: Mutex<HashMap<String, Proc>>,
@@ -1057,22 +1060,32 @@ impl Runner {
 
     /// Kill the process (if any). Returns when it is gone.
     pub async fn stop(&self, name: &str) {
-        let p = self.procs.lock().unwrap().remove(name);
-        if let Some(mut p) = p {
-            if sandboxed() {
-                let _ = Command::new("systemctl")
-                    .args(["stop", &p.unit])
-                    .output()
-                    .await;
-            }
-            if container_mode() {
-                let _ = Command::from(docker_std())
-                    .args(["stop", "-t", "5", &p.unit])
-                    .output()
-                    .await;
-            }
-            let _ = p.child.kill().await;
+        if let Some(p) = self.take(name) {
+            self.stop_taken(p).await;
         }
+    }
+
+    /// Takes the process entry out of the table without stopping it. Stop exactly this handle later
+    /// with `stop_taken` (never by name: the name may belong to a newer process by then).
+    pub fn take(&self, name: &str) -> Option<Taken> {
+        self.procs.lock().unwrap().remove(name).map(Taken)
+    }
+
+    /// Stops a process taken with `take` (its own container/unit name), returns when it is gone.
+    pub async fn stop_taken(&self, Taken(mut p): Taken) {
+        if sandboxed() {
+            let _ = Command::new("systemctl")
+                .args(["stop", &p.unit])
+                .output()
+                .await;
+        }
+        if container_mode() {
+            let _ = Command::from(docker_std())
+                .args(["stop", "-t", "5", &p.unit])
+                .output()
+                .await;
+        }
+        let _ = p.child.kill().await;
     }
 
     /// Moves a process to another key (used when a new version replaces the old one).

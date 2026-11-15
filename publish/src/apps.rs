@@ -771,7 +771,28 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
     proxy(&st, &app, &rest, &query, req).await
 }
 
+const HOP_BY_HOP: [&str; 8] = [
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
+
 async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) -> Response {
+    // WebSockets are not forwarded (the proxy speaks plain HTTP request/response)
+    if req.headers().contains_key(header::UPGRADE) {
+        return crate::web::notice(
+            501,
+            "offline",
+            "This app can\u{2019}t use WebSockets here.",
+            "Plain page loads and live updates over normal requests work.",
+            false,
+        );
+    }
     // count the request first: an app with requests in flight never sleeps (only where apps sleep)
     let guard = (st.cfg.idle_secs > 0).then(|| InFlight::new(st, &app.name));
     let woken;
@@ -809,6 +830,7 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
     for (k, v) in parts.headers.iter() {
         let n = k.as_str();
         if k == header::HOST
+            || HOP_BY_HOP.contains(&n)
             || k == header::COOKIE
             || k == header::AUTHORIZATION
             || n.starts_with("x-orch-")
@@ -920,6 +942,7 @@ pub async fn sleep_sweep(st: &State) {
         .into_iter()
         .filter(|a| a.status == "running" && a.stack != "static")
     {
+        let taken;
         let due = |st: &State| -> bool {
             if !st.runner.is_alive(&a.name) {
                 return false;
@@ -945,9 +968,13 @@ pub async fn sleep_sweep(st: &State) {
                 continue;
             }
             st.sleep.sleeping.lock().unwrap().insert(a.name.clone());
+            // take the process out under the locks; the slow stop below hits exactly this handle,
+            // never "whatever runs under the name" (a request may have woken a new one by then)
+            taken = st.runner.take(&a.name);
         }
-        // the (slow) container stop runs outside the global lock
-        st.runner.stop(&a.name).await;
+        if let Some(p) = taken {
+            st.runner.stop_taken(p).await;
+        }
         tracing::info!("app {} sleeps (idle)", a.name);
     }
 }
@@ -1041,6 +1068,10 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
         return Err(wake_503());
     }
     let _slot = st.sleep.wake_slots.acquire().await;
+    // a dead leftover entry of an earlier run goes first, outside the global lock (a live process is never touched)
+    if is_sleeping(st, name) && !st.runner.is_alive(name) {
+        st.runner.stop(name).await;
+    }
     let (row, m, port, _reserved) = {
         let _g = st.app_lock.lock().await;
         let found = db::get_app(&st.db.lock().unwrap(), name);
@@ -1061,8 +1092,6 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
         let Ok(m) = parse_manifest(&dir) else {
             return Err(wake_fail(st, name, "bad manifest".into()));
         };
-        // leftovers of an earlier run (e.g. before a server restart)
-        st.runner.stop(name).await;
         let mut reserved = Reserved {
             st: st.clone(),
             port: None,
