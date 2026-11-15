@@ -7,7 +7,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 1. Build on the master. Use existing components and tokens; never write a page-local look, a copied kit file or a new "system" sheet.
 2. Need something missing? Add it here first: (a) the component in `widgets.css` / `widgets.js` (or the file it belongs to), (b) an entry in `gallery.html` / `gallery.js` with its states (default, loading, empty, error where they apply), (c) a test in `workspace/tests/test_orch_ui_kit.py` if it adds a file, then use it from the page.
 3. Mockup pages link these files by relative path (`../../../../workspace/src/orch_ui/static/...`); the mockup folder keeps no stylesheet of its own.
-4. Owner wording rules: one click, no typed words; minimal plain words; no "Details" / "Technical details" toggles (show the detail plainly lower down), except the one small `.more-details` toggle for raw folder paths and connection addresses (owner demo review, 15 Nov); no "NetBird" (say "private network"). Old reference examples below that show a Details disclosure are legacy and must not be copied.
+4. Owner wording rules: one click, no typed words; minimal plain words; technical details such as folder paths and connection addresses sit behind one small "Details" click (`.more-details`, AGENTS.md R7.1), everything else is shown plainly lower down; no "NetBird" (say "private network"). Old reference examples below that show a Details disclosure are legacy and must not be copied.
 5. Never change tokens in a page. Colour and size tokens come from `brand/tokens.json` via `brand/gen_tokens.py` (`tokens.css` is generated).
 
 ## Files
