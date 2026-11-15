@@ -720,7 +720,7 @@ def test_a_persons_answer_goes_to_the_agent_that_waits_for_it(proj, run, lab):
         run("ask", tid, "Use CHF?", "--option", "Yes", "--option", "No", "--json", "--by", "agent:fake")[1]
     )["id"]
     code, out, _ = run("answer", tid, qid, "Yes", "--by", "human:anna")
-    assert code == 0 and out.strip() == "Answered: Yes"
+    assert code == 0 and out.splitlines()[0] == "Answered: Yes"
     _until(lambda: len(_lines(lab, "input")) == 2, what="the answer")
     want = f"New input: | - human:anna: |     Answer to your question {qid} (Use CHF?): Yes"
     assert _lines(lab, "input")[1] == want
@@ -749,3 +749,54 @@ def test_stop_closes_a_finished_session_that_has_no_claim(proj, run, lab):
     assert runs_live.session_exists(proj, other)  # only its own, by exact name
     code, out, _ = run("run", "stop", tid)
     assert "Nothing is running" in out
+
+
+# --- take back a waiting message (#692.2) -------------------------------------------------------
+def test_take_back_removes_one_waiting_message_and_answers_its_text(proj, run):
+    tid = _ticket(run)
+    a = runs.pending_add(proj, tid, "human:anna", "message", "First")
+    b = runs.pending_add(proj, tid, "human:anna", "message", "Second one")
+    code, out, _ = run("run", "take-back", tid, b["id"], "--by", "human:anna", "--json")
+    assert code == 0
+    assert json.loads(out) == {"ticket": tid, "id": b["id"], "text": "Second one"}
+    assert [i["id"] for i in runs.undelivered(proj, tid)] == [a["id"]]
+    code, out, _ = run("run", "take-back", tid, a["id"], "--by", "human:anna")
+    assert code == 0 and "Took the message back" in out and "orch run send" in out
+    assert runs.undelivered(proj, tid) == []
+
+
+def test_take_back_refuses_a_message_the_helper_already_read(proj, run):
+    tid = _ticket(run)
+    a = runs.pending_add(proj, tid, "human:anna", "message", "Read already")
+    runs.mark_delivered(proj, tid, [a["id"]])
+    code, out, err = run("run", "take-back", tid, a["id"], "--by", "human:anna", "--json")
+    assert code != 0
+    assert "The helper already read this message; send a correction instead." in out + err
+    assert [i["id"] for i in runs._pending_read(proj, tid)] == [a["id"]]  # untouched
+
+
+def test_take_back_unknown_id_and_start_prompt_are_refused(proj, run):
+    tid = _ticket(run)
+    s = runs.pending_add(proj, tid, "orch", "message", "Start prompt", via="start")
+    code, out, err = run("run", "take-back", tid, "p_nothere01", "--by", "human:anna")
+    assert code != 0 and "no waiting message" in out + err
+    code, out, err = run("run", "take-back", tid, s["id"], "--by", "human:anna")
+    assert code != 0 and "can't be taken back" in out + err
+    assert len(runs.undelivered(proj, tid)) == 1
+
+
+def test_take_back_is_refused_to_an_agent(proj, run):
+    tid = _ticket(run)
+    a = runs.pending_add(proj, tid, "human:anna", "message", "Mine")
+    code, out, err = run("run", "take-back", tid, a["id"], "--by", "agent:helper")
+    assert code != 0 and "Only a person can take back a message." in out + err
+    assert len(runs.undelivered(proj, tid)) == 1
+
+
+def test_take_back_clears_the_pending_flag_of_a_live_claim(proj, run):
+    tid = _ticket(run)
+    runs.claim(proj, tid, "agent:x", "generic", "oneshot", pid=os.getpid())
+    a = runs.pending_add(proj, tid, "human:anna", "message", "Hold on")
+    assert runs.read(proj, tid)["pending"] is True
+    run("run", "take-back", tid, a["id"], "--by", "human:anna")
+    assert runs.read(proj, tid)["pending"] is False

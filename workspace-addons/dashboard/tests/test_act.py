@@ -177,6 +177,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ],
         ),
         (
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": "2026-11-30T18:30"}},
+            ["ticket", "edit", "t_abcdef", "--due=2026-11-30T18:30", *common],
+        ),
+        (
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": ""}},
             ["ticket", "edit", "t_abcdef", "--due=", *common],
         ),
@@ -190,6 +194,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ["run", "start", "t_abcdef", "--fresh", "--take-over", *common],
         ),
         ({"op": "run.stop", "args": {"ticket": "t_abcdef"}}, ["run", "stop", "t_abcdef", *common]),
+        (
+            {"op": "run.take_back", "args": {"ticket": "t_abcdef", "id": "p_abcdef12"}},
+            ["run", "take-back", "t_abcdef", "p_abcdef12", *common],
+        ),
         ({"op": "share.set", "args": {"on": True}}, ["share", "on", *common]),
         ({"op": "share.set", "args": {"on": False}}, ["share", "off", *common]),
         ({"op": "private.move", "args": {}}, ["private", "move", *common]),
@@ -402,6 +410,50 @@ def test_addon_act_runs_one_generic_argv_for_an_active_addon(act_orch, ws):
         srv.server_close()
 
 
+def test_addon_act_edit_takes_one_line_of_plain_text(act_orch, ws):
+    import threading
+
+    from orch_dashboard.server import make_server
+
+    src = act_orch.read_text().replace(
+        'if a[:2] in (["addon", "list"]',
+        'if a[:2] == ["addon", "list"]:\n    print(json.dumps([{"name": "alpha", "active": True}]))\n    sys.exit(0)\n'
+        'if a[:2] in (["addon", "list"]',
+    )
+    act_orch.write_text(src)
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    me = actions.actor()
+    try:
+        args = {"addon": "alpha", "verb": "edit", "target": "l_k2m9q4"}
+        code, text, _ = post(
+            base, {"op": "addon.act", "args": {**args, "value": "  Use npm run test:web.  "}}
+        )
+        assert code == 200, text
+        assert acts(act_orch)[-1] == [
+            "alpha",
+            "act",
+            "edit",
+            "--value=Use npm run test:web.",
+            "--by",
+            me,
+            "--json",
+            "--",
+            "l_k2m9q4",
+        ]
+        n = len(acts(act_orch))
+        for bad in ("", "   ", "x" * 201, "two\nlines", "bell\x07", "zero\u200bwidth", 5, None):
+            assert post(base, {"op": "addon.act", "args": {**args, "value": bad}})[0] == 400, bad
+        # other verbs still refuse a free-text value
+        assert post(base, {"op": "addon.act", "args": {**args, "verb": "rm", "value": "x"}})[0] == 400
+        assert len(acts(act_orch)) == n
+        assert post(base, {"op": "addon.act", "args": {**args, "value": "x" * 200}})[0] == 200
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def _fake_with_addons(act_orch):
     src = act_orch.read_text().replace(
         'if a[:2] in (["addon", "list"]',
@@ -478,6 +530,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 {"op": "addon.set", "args": {"name": "alpha", "on": False}},
                 ["addon", "remove", "alpha", *common],
             ),
+            (  # Remove: the same CLI path as `orch addon uninstall`
+                {"op": "addon.uninstall", "args": {"name": "alpha"}},
+                ["addon", "uninstall", "alpha", *common],
+            ),
             (  # the Add of the catalogue: an available (not installed) add-on, same op as the switch
                 {"op": "addon.set", "args": {"name": "avail", "on": True}},
                 ["addon", "add", "avail", "--yes", *common],
@@ -518,6 +574,10 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
             {"op": "addon.set", "args": {"name": "ticket", "on": True}},
             {"op": "addon.set", "args": {"name": "alpha", "on": "yes"}},
             {"op": "addon.set", "args": {"name": "alpha"}},
+            {"op": "addon.uninstall", "args": {"name": "gamma"}},  # not installed
+            {"op": "addon.uninstall", "args": {"name": "avail"}},  # available, not added
+            {"op": "addon.uninstall", "args": {"name": "dashboard"}},  # never from itself
+            {"op": "addon.uninstall", "args": {"name": "alpha", "x": 1}},
             {
                 "op": "addon.set",
                 "args": {"name": "avail", "on": False},
@@ -528,7 +588,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
         assert not [
             c
             for c in calls(act_orch)[n:]
-            if c[0] in ("config", "addon") and c[1] in ("set", "agent", "add", "remove")
+            if c[0] in ("config", "addon") and c[1] in ("set", "agent", "add", "remove", "uninstall")
         ]
         assert actions.MAX_COMMAND == 500
         # a command that starts with a dash is still one argv value that begins with --command=

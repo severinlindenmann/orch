@@ -503,3 +503,12 @@ html{scrollbar-gutter:stable}
 .week-bands .run.band time{display:inline;color:var(--text-muted)}.week-bands .run.band>span{display:inline}
 .week-bands .band-all{grid-column:1/8}
 @media(max-width:950px){.week-bands{grid-template-columns:1fr}.week-bands .run.band{grid-column:auto!important}}
+
+/* Desktop density (from dashboard pages/desktop.css, #795 A1): opt in with <html data-density="desktop">. A mouse screen
+   (721 px and wider, hover) gets 32 px controls; the 44 px touch targets stay for phones and touch screens. */
+@media (min-width:721px) and (hover:hover) {
+  :where([data-density=desktop]) .btn,:where([data-density=desktop]) .btn.sm{min-height:32px}
+  :where([data-density=desktop]) .btn.xs{min-height:28px}
+  :where([data-density=desktop]) .btn.icon,:where([data-density=desktop]) .btn.icon.sm{width:32px;min-width:32px}
+  :where([data-density=desktop]) .input{min-height:36px;font-size:14px}
+}

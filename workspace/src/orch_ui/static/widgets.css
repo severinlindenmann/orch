@@ -540,6 +540,104 @@ dialog.report-dialog .actions{margin-top:12px}
 @media(prefers-reduced-motion:reduce){.compact-actions{transition:none}}
 .blk-settings .setting-row{border-top:1px solid var(--border)}
 
+/* from Insights (#795 B1): metric card, chart, bar rows, notes, loading mask, settings rows. Tokens only. */
+.section-head.roomy{gap:16px}
+.section-head.roomy h2{font-size:14px;line-height:20px}
+.section-head.roomy:has(>[role=tablist]){margin-bottom:8px}
+.metric{padding:20px;display:grid;gap:8px}
+.metric strong{font-size:28px;line-height:36px;font-variant-numeric:tabular-nums}
+.metric small{font-size:12px;color:var(--text-faint);line-height:16px}
+.chart-card{padding:20px}
+.chart-stage{height:180px;position:relative;display:grid;place-content:center;border-bottom:1px solid var(--border);background:repeating-linear-gradient(to top,transparent 0,transparent 44px,var(--border) 45px,transparent 46px)}
+.chart-message{background:var(--surface);padding:16px;max-width:380px;text-align:center;display:grid;gap:8px;justify-items:center}
+.axis{display:flex;justify-content:space-between;padding-top:12px;color:var(--text-faint);font-size:12px}
+.bar-row{display:grid;gap:8px;margin-top:24px}
+.bar-row .progress{height:8px}
+.bar-row .progress span{background:var(--brand)}
+.bar-row.secondary .progress span{background:var(--info)}
+.footnote{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--text-faint);font-size:12px}
+.note{font-size:12px;color:var(--text-muted)}
+.locked{color:var(--text-muted)}
+.confirm-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
+/* Loading mask: the page keeps its shape while data loads. */
+.loading-mask{pointer-events:none;user-select:none}
+.loading-mask :is(h2,h3,p,strong,small,span,a,button,td,th){color:transparent!important;text-shadow:none!important}
+.loading-mask :is(h2,p,strong,small,td){background:var(--surface-3)!important;border-radius:4px}
+.loading-mask .progress,.loading-mask .chart-message{visibility:hidden}
+.loading-mask .chart-stage{background:var(--surface-3)}
+.loading-mask td{border-color:transparent}
+/* Settings rows and side card */
+.settings-row{display:flex;gap:32px;align-items:center;justify-content:space-between;padding:24px;border-bottom:1px solid var(--border)}
+.settings-row:last-child{border-bottom:0}
+.settings-row p{margin-top:8px;max-width:52ch}
+.settings-row .ui-select,.settings-row select{flex-shrink:0}
+.context-card{padding:24px;display:grid;gap:16px}
+.context-card h2{font-size:14px;line-height:20px}
+.context-card hr{width:100%;border:0;border-top:1px solid var(--border);margin:0}
+.set-block{padding:24px;display:grid;gap:12px}
+@media(min-width:1600px){.chart-stage{height:220px}.metric{padding:24px}}
+@media(max-width:600px){.settings-row{flex-direction:column;align-items:flex-start;gap:12px;padding:16px}}
+
+/* Workspace look (from dashboard look.css, #795 A1): workspace badge .wsb (sizes s16..s46), look picker .lk-*, sidebar switcher.
+   Colours come from [data-c=token] setting --c (dashboard look-colors.css, generated data); without it the badge is muted. */
+.wsb:where(.s16,.s26,.s32,.s46){display:inline-grid;place-items:center;flex:none;color:var(--c,var(--text-muted));background:color-mix(in srgb,var(--c,var(--text-muted)) 18%,var(--surface));border-radius:28%}
+.wsb.light:where(.s16,.s26,.s32,.s46){background:color-mix(in srgb,var(--c,var(--text-muted)) 14%,var(--paper))}
+.wsb:where(.s16,.s26,.s32,.s46) b{font-weight:600;line-height:1}
+.wsb.s16{width:16px;height:16px}.wsb.s16 b{font-size:12px}
+.wsb.s26{width:26px;height:26px}.wsb.s26 b{font-size:12px}
+.wsb.s32{width:32px;height:32px}.wsb.s32 b{font-size:15px}
+.wsb.s46{width:46px;height:46px;border-radius:37%}.wsb.s46 b{font-size:21px}
+/* Settings: picker */
+.lk-current{display:flex;align-items:center;gap:10px;min-width:0}
+.lk-picker{border-top:1px solid var(--border);padding:16px;display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:20px}
+.lk-chips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px}
+.lk-chip{height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);font-size:12px;cursor:pointer}
+.lk-chip[aria-pressed=true]{background:var(--brand-soft);border-color:var(--brand);color:var(--text)}
+.lk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(66px,1fr));gap:4px;max-height:260px;overflow:auto}
+.lk-tile{height:58px;display:flex;flex-direction:column;gap:3px;align-items:center;justify-content:center;border-radius:8px;border:1px solid transparent;background:none;color:var(--text-muted);cursor:pointer}
+.lk-tile span{font-size:12px;line-height:1.1;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lk-tile:hover{background:var(--surface-2);color:var(--text)}
+.lk-tile[aria-pressed=true]{background:color-mix(in srgb,var(--c,var(--brand)) 18%,var(--surface));color:var(--c,var(--brand));border-color:var(--c,var(--brand))}
+.lk-colour-label{margin:14px 0 6px}
+.lk-swatches{display:flex;flex-wrap:wrap;gap:8px}
+.lk-sw{position:relative;width:28px;height:28px;border-radius:50%;border:2px solid transparent;background:var(--c);box-shadow:inset 0 0 0 2px var(--surface);cursor:pointer;padding:0}
+.lk-sw[aria-pressed=true]{border-color:var(--text)}
+.lk-sw[aria-pressed=true]::after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;color:var(--bg);font-weight:700;font-size:14px}
+.lk-sw.auto{background:conic-gradient(var(--brand),var(--warning),var(--danger),var(--info),var(--brand))}
+.lk-preview{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;align-self:start}
+.lk-preview.light{background:var(--paper);color:var(--ink)}.lk-preview.light .meta,.lk-preview.light .eyebrow{color:color-mix(in srgb,var(--ink) 66%,var(--paper))}
+.lk-pv-head{display:flex;align-items:center;gap:8px}
+.lk-pv-row{display:flex;align-items:center;gap:10px}.lk-pv-row .meta{font-size:12px}
+.lk-foot{grid-column:1/-1;display:flex;gap:8px;align-items:center}
+.lk-desc-edit{display:grid;gap:8px}.lk-desc-actions{display:flex;gap:8px}
+.lk-status.bad{color:var(--danger)}.lk-status.ok{color:var(--brand)}
+@media(max-width:720px){.lk-picker{grid-template-columns:1fr}.lk-tile{height:64px}.lk-chip,.lk-sw{min-height:32px}}
+/* Sidebar: the workspace box is the switcher */
+.workspace.ws-switch{display:flex;align-items:center;gap:10px;padding:8px;cursor:pointer;position:relative}
+.workspace.ws-switch:hover{border-color:var(--border-strong)}
+.workspace.ws-switch .ws-text{flex:1;min-width:0;display:block}.ws-text #workspace-name{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workspace.ws-switch .ws-text .meta{margin:0}.workspace.ws-switch .ws-chev{color:var(--text-muted);flex:none}
+.sw-menu{position:absolute;left:8px;right:8px;z-index:40;background:var(--surface);border:1px solid var(--border-strong);border-radius:12px;padding:8px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:2px}
+.sw-menu .eyebrow{padding:4px 8px}
+.sw-item{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;color:var(--text);text-decoration:none}
+a.sw-item:hover{background:var(--surface-2)}.sw-item.off{color:var(--text-muted)}
+.ws-item-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sw-tick{color:var(--brand)}.sw-hint{padding:6px 8px 2px}
+
+/* v3-pages: switcher + mobile mode */
+.workspace.ws-switch{min-height:44px}
+/* In the open Menu on a narrow screen the kit shows the box as a block; the switcher stays one row:
+   icon, name with its sub-label, chevron right. */
+.sidebar[data-open=true] .workspace.ws-switch{display:flex}
+.sw-menu{max-height:70vh;overflow:auto}
+.sw-menu .sw-item{width:100%;min-height:64px;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer}
+.sw-menu .sw-item:hover,.sw-menu .sw-item:focus-visible{background:var(--surface-2)}
+.ws-switch:focus-visible,.sw-menu .sw-item:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.sw-menu .sw-item[aria-current=true]{background:var(--brand-soft)}
+.sw-item-details{min-width:0;display:grid;gap:2px}
+.sw-item-status{display:grid;gap:2px;justify-items:end;flex:none;font-size:12px}
+.sw-current,.sw-needs{color:var(--text)}
+.sw-item-status .meta{font-size:12px}
+
 /* Session dock (the helper's screen: strip, panel, Screen tab), command blocks, queued instruction, hand-off line, result card
    (Focus #692). All six are in the gallery (#focus-screen). The dock is live in Focus; the rest follow in later #692 PRs. */
 .session-dock{display:flex;flex-direction:column;min-height:0;background:var(--sidebar);border-top:1px solid var(--border-strong)}
@@ -585,8 +683,8 @@ body.dock-max .fx-stage>.fx-pane{display:none}
 .cmd-block-out{margin:0;padding:var(--s2) var(--s3) var(--s3);background:var(--sidebar);font-family:var(--font-mono);font-size:13px;line-height:20px;color:var(--text-muted);white-space:pre-wrap;max-height:240px;overflow:auto}
 .cmd-block-foot{display:flex;align-items:center;gap:var(--s2);padding:var(--s1) var(--s3) var(--s2);background:var(--sidebar);font-size:12px;color:var(--text-muted)}
 .cmd-block.failed{border-color:var(--danger)}
-.cmd-block mark,.session-dock mark{background:var(--warning-soft);color:var(--warning);border-radius:2px}
-.cmd-block.dim{opacity:.45}
+.cmd-block mark,.session-dock mark,.fx-history mark{background:var(--warning-soft);color:var(--warning);border-radius:2px}
+.cmd-block.dim,.fx-history .fx-step.dim{opacity:.45}
 .queued-msg{display:grid;gap:var(--s1);padding:var(--s3) var(--s4);border:1px dashed var(--border-strong);border-radius:var(--r2);background:var(--surface);margin:var(--s2) 0}
 .queued-msg p{margin:0}
 .queued-msg .row{display:flex;align-items:center;gap:var(--s2);font-size:12px;color:var(--text-muted)}
@@ -603,8 +701,9 @@ body.dock-max .fx-stage>.fx-pane{display:none}
 .result-card .thumb img{width:100%;height:100%;object-fit:cover}
 .result-card .body{display:grid;gap:var(--s1);padding:var(--s3) var(--s4) var(--s4)}
 .result-card .body strong{font-size:14px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.result-card .body .row{display:flex;align-items:center;gap:var(--s2)}
-.result-card .body .row .grow{flex:1}
+.result-card .body .row{display:flex;align-items:center;flex-wrap:wrap;gap:var(--s2)}
+.result-card .body .row .meta{white-space:nowrap}
+.result-card .body .row .grow{flex:1 1 auto}
 .result-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--s3)}
 .result-grid>.skeleton{height:200px;border-radius:var(--r2)}
 

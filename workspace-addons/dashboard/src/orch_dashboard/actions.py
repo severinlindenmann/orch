@@ -66,7 +66,7 @@ LONG_NOTE = (
 TID = re.compile(r"t_[a-z0-9]{6,16}")
 QID = re.compile(r"q[0-9]{1,4}")
 SHA = re.compile(r"[0-9a-f]{40,64}")
-DAY = re.compile(r"(\d{4}-\d\d-\d\d)?")
+DAY = re.compile(r"(\d{4}-\d\d-\d\d([T ]\d\d:\d\d)?)?")  # a day, or a day and a time (local)
 ADDON = re.compile(r"[a-z][a-z0-9-]{1,31}")
 VERB = re.compile(r"[a-z][a-z-]{0,20}")
 # A name that is also a core command is never an add-on target, whatever the add-on list says.
@@ -376,7 +376,7 @@ def _ticket_new(a):
         if v:
             v = _text(v, k)
             if k == "due" and not DAY.fullmatch(v):
-                raise BadRequest("The due day must look like 2026-11-30.")
+                raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
             flags.append(f"--{k.replace('_', '-')}={v}")
     return ["ticket", "new"], flags, [_text(a.get("title"), "title")]
 
@@ -455,7 +455,7 @@ def _ticket_patch(a):
         if k == "status" and v not in STATUSES:
             raise BadRequest("That is not a status.")
         if k == "due" and not (isinstance(v, str) and DAY.fullmatch(v)):
-            raise BadRequest("The due day must look like 2026-11-30.")
+            raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
         if k not in ("status", "due"):
             _text(v, k, empty=k in ("owner", "note", "done_when"))
     rev = _rev(a.get("if_revision"), required=True)
@@ -485,7 +485,7 @@ def _ticket_edit(a):
         if k in a:
             v = _text(a[k], k, empty=k != "title")
             if k == "due" and not DAY.fullmatch(v):
-                raise BadRequest("The due day must look like 2026-11-30.")
+                raise BadRequest("The due day must look like 2026-11-30 or 2026-11-30 18:30.")
             flags.append(f"--{k.replace('_', '-')}={v}")
     if not flags:
         raise BadRequest("Nothing to change.")
@@ -729,6 +729,14 @@ def _run_send(a):
     return ["run", "send"], [], [_tid(a.get("ticket")), _text(a.get("text"), "message")]
 
 
+def _run_take_back(a):
+    _only(a, ("ticket", "id"))
+    pid = a.get("id")
+    if not isinstance(pid, str) or not re.fullmatch(r"p_[a-z0-9]{6,32}", pid):
+        raise BadRequest("That is not a message id.")
+    return ["run", "take-back", _tid(a.get("ticket")), pid], [], []
+
+
 def _run_stop(a):
     _only(a, ("ticket",))
     return ["run", "stop", _tid(a.get("ticket"))], [], []
@@ -788,6 +796,12 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
             value = a["value"]
+        elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
+            value = _text(a["value"], "text").strip()
+            if HIDDEN_CHARS.search(value):
+                raise BadRequest("Use plain text on one line.")
+            if len(value) > 200:
+                raise BadRequest("Write at most 200 characters.")
         else:
             value = _text(a["value"], "time")
             if verb != "repeat" or len(value) > 200:
@@ -950,6 +964,15 @@ def _addon_set(a):
     return (["addon", "add", name], ["--yes"], []) if a["on"] else (["addon", "remove", name], [], [])
 
 
+def _addon_uninstall(a):
+    """Remove an add-on from this computer: `orch addon uninstall <name>` (the same CLI path as the terminal)."""
+    _only(a, ("name",))
+    name = a.get("name")
+    if not (isinstance(name, str) and ADDON.fullmatch(name) and name not in RESERVED):
+        raise BadRequest("That is not an add-on.")
+    return (["addon", "uninstall", name], [], [])
+
+
 def _link(a, extend=False):
     _only(a, ("id", "days") if extend else ("id",))
     fid = a.get("id")
@@ -988,6 +1011,7 @@ OPS = {
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,
+    "run.take_back": _run_take_back,
     "addon.start": _addon_start,
     "addon.act": _addon_act,
     "config.agent": _config_agent,
@@ -996,6 +1020,7 @@ OPS = {
     "config.permissions": _config_permissions,
     "workspace.set": _workspace_set,
     "addon.set": _addon_set,
+    "addon.uninstall": _addon_uninstall,
     "share.set": _share_set,
     "private.move": _private_move,
     "private.allow": _private_allow,
@@ -1242,7 +1267,7 @@ def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, 
 
 def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
-    if op == "addon.set" and args.get("on") is True:
+    if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
     return 75 if op == "config.agent.test" else 60
 
@@ -1279,6 +1304,10 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
         raise BadRequest("That add-on is not installed.")
+    if op == "addon.uninstall":
+        row = _addon_row(root, orch_bin, args["name"])
+        if row is None or row.get("installed") is False:
+            raise BadRequest("That add-on is not installed.")
     if op == "addon.set" and args.get("on") is False:
         row = _addon_row(root, orch_bin, args["name"])
         if row is not None and row.get("installed") is False:
@@ -1352,6 +1381,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "link.stop",
             "config.agent.add",
             "addon.set",
+            "addon.uninstall",
             "config.agent",
             "config.permissions",
             "workspace.set",

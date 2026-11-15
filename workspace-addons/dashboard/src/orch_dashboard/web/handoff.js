@@ -209,11 +209,15 @@
   }
   var shown = "";
   // the update banners ("started", then the outcome): ONE at a time, a new one replaces the old; "Got it" clears it
-  function banner(text) {
+  function banner(text, changes) {
     var old = document.querySelectorAll ? document.querySelectorAll(".orch-update-banner") : [];
     for (var k = 0; k < old.length; k++) old[k].remove();
     var b = el("div", text, "orch-notice"); b.setAttribute("role", "status");
     b.className = "banner info orch-notice orch-update-banner"; b.style.cssText = "margin:8px 16px 0";
+    if (changes) {  // after an update: where the list of changes is (Settings > About & updates)
+      var a = el("a", "What changed"); a.href = "#settings/about"; a.style.cssText = "margin-left:12px"; a.setAttribute("data-key", "update-changes-link");
+      b.appendChild(a);
+    }
     var x = el("button", "Got it"); x.type = "button"; x.style.cssText = "margin-left:12px"; x.onclick = function () { b.remove(); };
     b.appendChild(x); place(b);
     return b;
@@ -236,6 +240,16 @@
       : "The update did not finish. orch is still the old version. Start the update again when you are ready.";
     if (t !== shown) { shown = t; startedGone(); banner(t); }
   }
+  // "Updated orch 24 → 25." when the version before is known (the Settings button keeps it for the page reload)
+  function finishedWords(release) {
+    var to = Number(release);
+    if (!(to > 0)) return "Update finished.";
+    var from = null;
+    try { from = JSON.parse(sessionStorage.getItem("orch-update-from")); } catch (e) {}
+    try { sessionStorage.removeItem("orch-update-from"); } catch (e) {}
+    from = Number(String(from == null ? "" : from).replace(/^orch /, ""));
+    return from > 0 && from !== to ? "Updated orch " + from + " \u2192 " + to + "." : "Updated to orch " + to + ".";
+  }
   function tell(state, reason) {
     if (!state) return;
     try { window.dispatchEvent(new CustomEvent("orch-update-state", {detail: {state: state, reason: reason || ""}})); } catch (e) {}
@@ -250,8 +264,8 @@
       tell(s.state, s.reason);
       updateDone();
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
-      var t = s.state === "finished" ? (Number(s.release) > 0 ? "Updated to orch " + Number(s.release) + "." : "Update finished.") : "Update failed: " + why + ".";
-      if (t !== shown) { shown = t; startedGone(); banner(t); }
+      var t = s.state === "finished" ? finishedWords(s.release) : "Update failed: " + why + ".";
+      if (t !== shown) { shown = t; startedGone(); banner(t, s.state === "finished"); }
       poll();  // an update request that waited no longer applies: it is gone from the list now
     }).catch(function () { tell("unreachable"); updateOverdue(true); });
   }

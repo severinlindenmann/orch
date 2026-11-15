@@ -88,7 +88,8 @@ const ticketOf = id => tickets().find(t => String(t.id) === String(id) || (typeo
 const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);
-const overdue = t => activeTicket(t) && t.due && t.due < today();
+const overdue = t => window.DashHelpers.dueLate(t.due, t.status, now());
+const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? date(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
 const statusWord = t => window.DashHelpers.statusWord(t.status, t.started);
@@ -329,7 +330,7 @@ function render(arrived = new Set()) {
   reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
     // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
-  const pages = addons().filter(a => a.dashboard && a !== contactsAddon);
+  const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
     h('summary', {className:'nav-item', 'aria-label':'Add-ons'}, navIcon('addons'), h('span', {className:'nav-label'}, 'Add-ons')),
@@ -408,6 +409,29 @@ async function addonSet(name, on, tries = 20, pause = 1500) {
     accept(next);
     const row = array(next.settings?.addons).find(a => a && a.name === name);
     return row && !!row.active === on ? {ok:true, status:200, state:next, recovered:true} : result;
+  }
+  return result;
+}
+// Remove an add-on from this computer (`orch addon uninstall`, refused while it is on: turn it off first). The
+// services restart like for the switch, so a lost answer is checked by reading the state again.
+async function addonUninstall(name, tries = 20, pause = 1500) {
+  const still = rows => array(rows).some(a => a && a.name === name);
+  if (array(state.settings?.addons).find(a => a && a.name === name)?.active) {
+    const off = await addonSet(name, false);
+    if (!off.ok) return off;
+  }
+  const result = await act('addon.uninstall', {name});
+  if (result.ok || result.status !== 0 || snapshot) return result;
+  for (let i = 0; i < tries; i++) {
+    await new Promise(done => setTimeout(done, pause));
+    let next = null;
+    try {
+      const res = await fetch('/api/state', {cache:'no-store'});
+      if (res.ok) next = await res.json();
+    } catch (_) { /* still restarting */ }
+    if (!next) continue;
+    accept(next);
+    return still(next.settings?.addons) ? result : {ok:true, status:200, state:next, recovered:true};
   }
   return result;
 }
@@ -595,6 +619,8 @@ main.addEventListener('click', async event => {
   if (allow) { if (!snapshot) syncAllow(allow.dataset.syncAllow); return; }
   const edit = event.target.closest('[data-addon-edit]');
   if (edit) { if (!snapshot) repeatsDialog(edit.dataset.addonEdit, shownAddon()); return; }
+  const prompt = event.target.closest('[data-addon-prompt]');
+  if (prompt) { promptDialog(prompt); return; }
   const copy = event.target.closest('[data-copy]');
   if (copy) { copyText(copy); return; }
   const control = event.target.closest('[data-action]');
@@ -657,6 +683,20 @@ main.addEventListener('click', async event => {
     const send = () => settingsSend('addon.set', {name:addon.name, on:!addon.active}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
     if (addon.active) await send();
     else settingsConfirm('Turn on ' + capitalise(addon.name) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
+    return;
+  }
+  if (action === 'addon-remove') {
+    const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
+    if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;
+    const send = async () => {
+      settingsBusy.add('addon-' + addon.name); render();
+      const result = await addonUninstall(addon.name);
+      settingsBusy.delete('addon-' + addon.name);
+      window.orch.toast(result.ok ? 'Removed.' : result.text, result.ok ? 'ok' : 'error');
+      if (result.ok) location.hash = '#settings/addons';
+      render();
+    };
+    settingsConfirm('Remove ' + capitalise(addon.name) + '?', 'It is turned off and taken off this computer. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
     return;
   }
   if (action === 'agent') {

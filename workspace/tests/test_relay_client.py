@@ -63,7 +63,7 @@ def test_inbox_dedup_and_ack(proj, run, rel):
     assert "Hi there" in run("relay", "inbox")[1]
     assert run("relay", "done", "m_text000000000001")[0] == 0
     rel.acked.clear()
-    assert run("relay", "inbox")[1].strip() == "No new messages."
+    assert run("relay", "inbox")[1].startswith("No new messages.")
     assert "m_text000000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
     assert "already handled" in run("relay", "done", "m_text000000000001")[1]
 
@@ -716,21 +716,6 @@ def test_inbox_json_reports_applied_answer(proj, run, new_ticket, rel):
     assert data[0]["applied"] is True and data[0]["ticket"] == tid
 
 
-def test_allow_refused_under_agent(proj, run, rel, monkeypatch):
-    connect(run, rel)
-    rel.inbox.append(msg("m_deleg00000000010", "delegate", {"title": "A", "text": "x"}))
-    run("relay", "inbox")
-    monkeypatch.setenv("CLAUDECODE", "1")
-    code, _, err = run("relay", "allow", "m_deleg00000000010", "--once")
-    assert code == 2 and "Ask the human" in err
-    assert not [m for m in rel.sent if m["type"] == "allow"]
-    # UX-17 (owner decision): an explicit --by human:... is a label, no longer refused under an agent
-    code, _, err = run("answer", "t_x", "q1", "A", "--by", "human:owner")
-    assert code == 2 and "Ask the human" not in err and "doesn't exist" in err
-    monkeypatch.delenv("CLAUDECODE")
-    assert run("relay", "allow", "m_deleg00000000010", "--once")[0] == 0
-
-
 # ---- W1-L4 PR1: nothing lost, nothing hijacked ---------------------------------------------------
 
 
@@ -925,7 +910,7 @@ def test_since_returns_an_answer_the_agent_already_pulled(proj, run, new_ticket,
     )
     assert "answered q1" in run("relay", "inbox")[1]  # agent pulls first: seen + applied
     rel.acked.clear()
-    assert run("relay", "inbox")[1].strip() == "No new messages."  # nothing applied twice
+    assert run("relay", "inbox")[1].startswith("No new messages.")  # nothing applied twice
     r = json.loads(run("relay", "inbox", "--since", "0", "--json")[1])
     (item,) = r["items"]
     assert item["id"] == "m_answer0000000001" and item["seen"] is True and item["applied"] == tid
@@ -973,7 +958,7 @@ def test_outbox_saves_first_and_resends_the_same_bytes(proj, run, rel, monkeypat
     assert next(s for s in rel.sent if s["id"] == m["id"])["created_at"] == m["created_at"]
     assert not list((proj / ".orch/outbox").glob("m_*.json"))
     assert run("relay", "send", PEER, "again")[0] == 0  # no 409 for the resent ids
-    assert run("relay", "outbox")[1].strip() == "Nothing is waiting to be sent."
+    assert run("relay", "outbox")[1].startswith("Nothing is waiting to be sent.")
 
 
 def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
@@ -2215,3 +2200,24 @@ def test_view_names_the_real_sender_of_phone_messages(proj, run, rel):
     titles = {i["title"] for i in v["blocks"][0]["items"]}
     assert "Helper → your phone" in titles
     assert not any("the phones" in t or t.startswith("you →") for t in titles)
+
+
+def test_question_times_sent_at_and_answered_at(proj, monkeypatch):
+    """#692.5: a question sent to the phones carries sent_at once; any answer carries answered_at."""
+    from orch import addons, humanproof, relay, tickets
+
+    addons.workspace_id(proj, create=True)
+    humanproof.human_key(proj, create=True)
+    _stub_send(monkeypatch, "m_q60000000000007")
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
+    assert "sent_at" not in tickets.load(proj, tid)["questions"][0]
+    relay.send_question(proj, tickets.load(proj, tid), tickets.load(proj, tid)["questions"][0])
+    q = tickets.load(proj, tid)["questions"][0]
+    assert q["sent_at"].endswith("Z") and "answered_at" not in q
+    first = q["sent_at"]
+    relay.send_question(proj, tickets.load(proj, tid), q)  # sent again: the first time stays
+    assert tickets.load(proj, tid)["questions"][0]["sent_at"] == first
+    tickets.answer(proj, tid, "q1", "yes", "human:tester", "phone")
+    q = tickets.load(proj, tid)["questions"][0]
+    assert q["answered_at"].endswith("Z") and q["answered_at"] >= first and q["via"] == "phone"

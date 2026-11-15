@@ -270,9 +270,7 @@ def test_reserved_config(proj, section, key, default, valid):
         config.path(proj).write_text(f"[{section}]\n{key} = {value}\n")
         assert getter(proj) == default
     if not isinstance(default, bool):  # a whole number <= 0 means "as little as possible": the floor (L2)
-        from orch import humanproof
-
-        floor = humanproof.RETENTION_FLOOR[config._RETENTION_SETTINGS[(section, key)]]
+        floor = config.RETENTION_FLOOR[config._RETENTION_SETTINGS[(section, key)]]
         for value in ("0", "-1"):
             config.path(proj).write_text(f"[{section}]\n{key} = {value}\n")
             assert getter(proj) == floor < default

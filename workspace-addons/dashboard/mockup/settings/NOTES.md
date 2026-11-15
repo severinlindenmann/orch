@@ -250,3 +250,9 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 ## Report a problem (diagnostics D3, 15 Nov)
 `settings.html` (General): card "Report a problem": the row "Debug log" (one switch, on by default, one click, no review) and "Saved reports" (number and time, Delete all, one click). Interim wording until the owner answers on the new noun (R4.2).
+
+## lessons/lessons.html — Lessons (settings-only add-on page)
+
+- `place = "settings"`: Lessons has no nav entry. Its row in Settings › Add-ons (`settings-addons.html`, now 7 installed) leads to its settings page, whose "Open Lessons →" opens this page (the mockup links the row straight to it).
+- The list is drawn exactly as the dashboard draws it: the add-on list rows (accordion; the page's own `style.css` is linked, no new CSS). The first row is open and shows Edit and Delete; the others open with one click. Edit dialog: `?dialog=edit` (one text line prefilled, Save disabled when empty or over 200 characters with a plain hint, Cancel). Empty state: `?state=empty`. Delete is one click, no confirm (routine step).
+- Follow-up: the master kit has no list row with visible actions (issue filed).
