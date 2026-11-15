@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import commands, orchcli
 from .render import clean
-from .store import Refused, Store, no_links
+from .store import Refused, Store
 
 PERSON = commands.PERSON
 TARGET = re.compile(
@@ -36,8 +36,7 @@ def _directory(root):
     """The relay's workspace list (a file orch writes into its skill folder); nothing when relay is off."""
     path = Path(root) / WORKSPACES
     try:
-        no_links(path)
-        raw = path.read_bytes()[: DIRECTORY_MAX + 1]
+        raw = path.read_bytes()  # core links this skill folder itself; the file only names workspaces[: DIRECTORY_MAX + 1]
         value = json.loads(raw) if len(raw) <= DIRECTORY_MAX else None
     except (OSError, ValueError, UnicodeError, Refused):
         return []

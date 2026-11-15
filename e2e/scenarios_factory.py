@@ -399,6 +399,13 @@ def _png(extra: bytes = b"") -> bytes:
 
 @scenario("A22")
 def a22(e):
+    try:
+        return _a22(e)
+    finally:  # the Factory watcher/page server of the host must not outlive the run
+        e.sh(["orch", "factory", "stop", "--json"], cwd=e.ws("Pilatus"))
+
+
+def _a22(e):
     """Ask another workspace at a Factory stop (#816 A): two workspaces on the relay, the scripted fake agent.
     Test 6 first: a password in a picture sends nothing. Test 1: the ask sends only the ticked item, its picture and one
     question; the other side answers; the answer shows on the ask and never decides the stop. Test 2: an agent answer with the
@@ -423,7 +430,8 @@ def a22(e):
     e.orch(host, "relay", "refresh")
 
     def fac(*args, data=None, ok=True):
-        rc, out, err = e.sh(["orch", "factory", *args, "--json"], cwd=e.ws(host), input=data)
+        rc, out, err = e.sh(["orch", "factory", *args, *(["--file", "-"] if data is not None else []), "--json"],
+                            cwd=e.ws(host), input=data)
         if ok:
             check(rc == 0, f"orch factory {' '.join(map(str, args))[:70]} exit {rc}: {(err or out).strip()[-300:]}")
             return json.loads(out)
@@ -452,9 +460,15 @@ def a22(e):
     (folder / "leak.png").write_bytes(_png(b"ghp_" + b"a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"))
     e.orch(host, "relay", "refresh")
     who = ids[member]
+    listing = (e.ws(host) / ".agents/skills/orch-relay/workspaces.json").read_text()
+    entry = next((w for w in json.loads(listing)["workspaces"] if w["id"] == who), None)
+    check(entry and entry["can_send"].get("text") and entry["accepts_from"].get("text"), f"{member} is not connected both ways for text: {entry}")
 
     def inbox():
-        return e.orchj(member, "relay", "inbox")
+        rc, out, err = e.orch(member, "relay", "inbox", "--json")
+        rows = [x for x in out.splitlines() if x.startswith("[")]  # an update notice may come first
+        check(rows, f"relay inbox printed no JSON list: {out[:150]}")
+        return json.loads(rows[-1])
 
     before = len(inbox())
     # test 6: a password in a picture: the whole ask is refused and nothing leaves
