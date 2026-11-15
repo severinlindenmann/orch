@@ -466,7 +466,7 @@ test('shell: quiet footer, one phone control while on, Ask the helper', () => {
   assert.equal(helpers.footerState({}, false), '');
   const web = f => fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/' + f), 'utf8');
   assert.match(web('style.css'), /\.side-foot:has\(#workspace-mode:empty\)\{display:none\}/);
-  assert.match(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/);
+  assert.doesNotMatch(web('style.css'), /body\.mobile-mode-on \.sidebar>\.mm-toggle\{display:none\}/, 'the sidebar switch stays while on; the chip is in the top bar');
   assert.match(web('index.html'), />Ask the helper<\/button>/); assert.doesNotMatch(web('index.html') + web('app.js'), /Open helper/);
   assert.doesNotMatch(web('app.js'), /tk\?\.key/); // no ticket key in the breadcrumb
 });

@@ -336,8 +336,8 @@ function home() {
   const newest = needs.slice().sort((a,b) => (Date.parse(b.since) || 0) - (Date.parse(a.since) || 0))[0]?.id;
   const banner = backgroundBanner(), changedCard = whatChangedCard(changedList(all));
   const title = needCount ? needCount + (needCount === 1 ? ' thing needs you' : ' things need you') : 'Nothing needs you';
-  const head = heading(title, attentionSummary(groupedNeeds, failed, review.length, changes.length), {
-    eyebrow:now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}),
+  const today = now().toLocaleDateString('en-GB', {weekday:'long', day:'numeric', month:'long'}), summary = attentionSummary(groupedNeeds, failed, review.length, changes.length);
+  const head = heading(title, summary ? today + ' · ' + summary : today, {
     actions:h('a', {className:'btn ghost sm', href:'#tickets', 'data-key':'all-tickets'}, 'All ' + all.length + (all.length === 1 ? ' ticket →' : ' tickets →'))});
   const finishedCard = card('finished-today', 'Finished today', finished.length ? String(finished.length) : '', finished.length ? finished.map(ticketRow) : emptyRow('Nothing finished today yet.'));
   if (!needCount && !results.length && !changes.length && !working.length) {
