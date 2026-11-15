@@ -52,12 +52,17 @@ def _cfg(root: Path) -> dict:
 
 
 scan_outgoing = secretscan.refuse_if_secret_in  # one shared gate (secretscan.py), also used by publish
-scan_blob = secretscan.refuse_if_secret
+
+
+def scan_blob(data: bytes, root: Path | None = None) -> None:
+    secretscan.refuse_if_secret(data, "file", root)
 
 
 def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
-    if method == "POST" and path == "/v1/blobs" and isinstance(body, (bytes, bytearray)):
-        scan_blob(bytes(body))  # every upload to the relay passes the one scanner (R5.2)
+    if method.upper() == "POST" and path.split("?")[0].rstrip("/") == "/v1/blobs":
+        if not isinstance(body, (bytes, bytearray)):
+            raise Refused("A file upload has to be plain bytes, so nothing was sent.")
+        scan_blob(bytes(body), root=root)  # every upload to the relay passes the one scanner (R5.2)
     cfg = _cfg(root)
     return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)
 

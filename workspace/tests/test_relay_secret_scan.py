@@ -7,6 +7,8 @@ import json
 import pytest
 from test_relay_client import PEER, connect
 
+from orch.errors import Refused
+
 TOKEN = "ghp_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0"  # built at run time: no token literal in the repo
 PEM = "-----BEGIN PRIVATE KEY-----\nMIIBVgIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----"
 
@@ -129,3 +131,25 @@ def test_protocol_fields_are_not_content(proj, on):
         {"allow_token": "orn_" + "A" * 24, "blob_id": "b_" + "0" * 16, "sha256": "f" * 64, "text": "hello"},
     )
     json.dumps({})  # (no secret: no refusal)
+
+
+def test_blob_gate_big_file_utf16_and_odd_paths(proj, on):
+    from orch import relay
+
+    big = b"x\n" * 700_000 + f"token={TOKEN}\n".encode()  # secret past the first MB
+    with pytest.raises(Refused) as e:
+        relay._api(proj, "POST", "/v1/blobs", big, 5)
+    assert TOKEN not in str(e.value)
+    with pytest.raises(Refused):
+        relay._api(proj, "post", "/v1/blobs/?x=1", f"token {TOKEN}".encode("utf-16"), 5)
+    with pytest.raises(Refused):
+        relay._api(proj, "POST", "/v1/blobs", memoryview(b"x"), 5)
+    assert not on.blobs
+
+
+def test_nested_token_field_is_scanned_top_level_one_is_not(proj, on):
+    from orch import relay
+
+    relay.scan_outgoing(proj, {"text": "hi", "token": TOKEN})  # the protocol's own field
+    with pytest.raises(Refused):
+        relay.scan_outgoing(proj, {"text": "hi", "meta": {"token": TOKEN}})
