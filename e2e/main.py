@@ -302,8 +302,12 @@ def main() -> int:
         if shutil.which("claude", path=e.path) is None:
             # orch links its skills into the folder of every agent it finds on the PATH (W1, A12, A13): a CI runner
             # has none, so a stand-in that only exists keeps those checks the same everywhere
-            (e.bin / "claude").write_text("#!/bin/sh\nexit 0\n")
-            (e.bin / "claude").chmod(0o755)
+            stub = e.tmp / "stubs"  # on this harness's PATH only: the v2 scenarios build their own PATH without any agent
+            stub.mkdir(exist_ok=True)
+            (stub / "claude").write_text("#!/bin/sh\nexit 0\n")
+            (stub / "claude").chmod(0o755)
+            e.path = os.pathsep.join([str(stub), e.path])
+            e.env["PATH"] = e.path
         needs_servers = any(s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))) for s in ids)
         if needs_servers:
             if a.mode == "local":

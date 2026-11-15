@@ -342,7 +342,12 @@ def a5(e):
     rc, out, err = _sched(e, ws, "start")
     check(rc == 0, f"automation start: {err or out}")
     try:
-        ok = _wait(lambda: log.read_text().count("start") >= 2 and log.read_text().count("end") >= 2, 170, 2)
+        def finished():  # the prompt spans lines and may hold the words: count only the fake agent's own lines
+            ls = log.read_text().split("\n")
+            return (sum(1 for l in ls if l.startswith("start ")) >= 2
+                    and sum(1 for l in ls if l.startswith("end ") and l[4:].isdigit()) >= 2)
+
+        ok = _wait(finished, 170, 2)
         check(ok, f"fewer than 2 finished runs in 170 s: {log.read_text()!r}")
         time.sleep(5)  # let the automation reap the finished runs (log footer)
     finally:
@@ -354,7 +359,7 @@ def a5(e):
     kinds = [l.split()[0] for l in lines if l.startswith("start ") or (l.startswith("end ") and l[4:].isdigit())]  # the prompt spans lines
     check(all(kinds[i] != kinds[i + 1] for i in range(len(kinds) - 1)), f"runs overlapped: {kinds}")
     logs = sorted((ws / ".orch/run/logs").glob(f"{t}-*.log"))
-    ends = [l for l in lines if l.startswith("end ")]  # the fake agent writes one end line per finished run
+    ends = [l for l in lines if l.startswith("end ") and l[4:].isdigit()]  # the fake agent writes one end line per finished run
     check(len(logs) >= 2 and len(ends) >= 2, f"run logs missing or unfinished: {len(logs)} logs, {len(ends)} ends")
     st = json.loads((ws / ".orch/addons/automation/state.json").read_text())
     check(st[t].get("next_run"), "state.json has no next_run")
