@@ -493,10 +493,8 @@ h1,h2,h3,.ticket-title a,.result-link{overflow-wrap:break-word;word-break:normal
 .compact-li+.compact-li{border-top:1px solid var(--border)}
 .compact-row{display:grid;grid-template-columns:minmax(170px,1fr) 150px 180px auto;align-items:center;gap:16px;padding:12px 16px;min-height:60px}
 .compact-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text);text-decoration:none}
-.compact-actions{display:flex;gap:4px;opacity:0;transition:opacity 100ms var(--ease-move,ease)}
-.compact-row:hover .compact-actions,.compact-row:focus-within .compact-actions{opacity:1}
-@media(hover:none){.compact-actions{opacity:1}}
-@media(max-width:1150px){.compact-row{grid-template-columns:minmax(150px,1fr) 140px 170px;gap:12px}.compact-actions{grid-column:1/-1;justify-content:flex-end;opacity:1}}
+.compact-actions{display:flex;gap:4px}
+@media(max-width:1150px){.compact-row{grid-template-columns:minmax(150px,1fr) 140px 170px;gap:12px}.compact-actions{grid-column:1/-1;justify-content:flex-end}}
 @media(max-width:600px){.compact-row{grid-template-columns:1fr}.compact-actions{grid-column:1;justify-content:flex-start;flex-wrap:wrap}}
 .blk-footnote{display:flex;gap:12px;flex-wrap:wrap;align-items:baseline;padding:0 4px;margin:0;font-size:12px;line-height:16px;color:var(--text-faint)}
 .blk-footnote a{color:var(--text-muted);text-decoration:underline}
@@ -511,7 +509,7 @@ h1,h2,h3,.ticket-title a,.result-link{overflow-wrap:break-word;word-break:normal
 .sync-options label:hover{background:var(--surface-2)}
 @media(max-width:1000px){.blk-pair{grid-template-columns:1fr}.blk-settings .setting-row{grid-template-columns:112px minmax(0,1fr)}.setting-row .row-action{grid-column:2;justify-content:flex-start}}
 @media(max-width:600px){.blk-settings .setting-row{grid-template-columns:1fr}.setting-row .row-action{grid-column:1}}
-@media(prefers-reduced-motion:reduce){.compact-actions{transition:none}}
+
 /* Page not found (errors/not-found.html). */
 .error-hero{min-height:320px;display:grid;align-content:center;justify-items:start;gap:16px;padding:40px}
 .error-number{font-size:48px;line-height:1;color:var(--text-faint);font-weight:600}
