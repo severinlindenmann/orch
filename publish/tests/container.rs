@@ -130,3 +130,48 @@ async fn container_python_and_docker_apps_deploy_redeploy_stop() {
     );
     std::env::remove_var("ORCH_PUBLISH_SANDBOX");
 }
+
+/// A build step that plants links where the server later cleans up must not make it touch the target.
+#[tokio::test]
+#[ignore]
+async fn container_build_cannot_aim_the_cleanup_at_another_folder() {
+    if std::env::var("ORCH_PUBLISH_TEST_ENGINE").is_err() {
+        return;
+    }
+    std::env::set_var("ORCH_PUBLISH_SANDBOX", "container");
+    let t = setup_with(|c| {
+        c.health_secs = 60;
+        c.build_secs = 600;
+    });
+    let ws = t.workspace("A", basic_rights()).await;
+    let victim = t.dir.path().join("victim");
+    std::fs::create_dir_all(&victim).unwrap();
+    std::fs::write(victim.join("keep.txt"), "x").unwrap();
+    let setup_py = format!(
+        "import os\nfrom setuptools import setup\nfor l in ('/app/.test-data', '/app/.step-x', '/app/data'):\n    try:\n        os.symlink({:?}, l)\n    except OSError:\n        pass\nsetup(name='pkg', version='1', py_modules=[])\n",
+        victim.display().to_string()
+    );
+    let toml =
+        "name = \"cpl\"\nstack = \"python\"\nstart = \"python main.py\"\nhealth = \"/health\"\n";
+    let r = t
+        .api(
+            &ws,
+            "PUT",
+            "/v1/apps/cpl",
+            bundle(&[
+                ("app.toml", toml),
+                ("main.py", PY),
+                ("requirements.txt", "./pkg\n"),
+                ("pkg/setup.py", &setup_py),
+            ]),
+        )
+        .await;
+    eprintln!("deploy: {} {}", r.status, r.text());
+    assert!(victim.join("keep.txt").is_file(), "victim folder survived");
+    let _ = t.api(&ws, "DELETE", "/v1/apps/cpl", vec![]).await;
+    assert!(
+        victim.join("keep.txt").is_file(),
+        "victim survived the delete too"
+    );
+    std::env::remove_var("ORCH_PUBLISH_SANDBOX");
+}

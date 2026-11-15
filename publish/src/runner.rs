@@ -120,18 +120,60 @@ fn app_user() -> String {
 }
 
 /// Creates the folder (if needed) with mode 2770: the server's group owns it, so the container can write.
+/// A link planted at the path is removed first; the mode is only set on a real folder under the
+/// server's own folders (`set_permissions` follows links).
 pub fn group_writable_dir(p: &Path) {
     use std::os::unix::fs::PermissionsExt;
+    if std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
+        let _ = std::fs::remove_file(p);
+    }
     let _ = std::fs::create_dir_all(p);
-    let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o2770));
+    if guard_dir(p) {
+        let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o2770));
+    }
+}
+
+static ROOTS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Adds the folders the server may chmod / delete in: data dir and apps dir (canonical, must exist).
+pub fn set_roots(dirs: &[&Path]) {
+    let mut g = ROOTS.lock().unwrap();
+    for d in dirs {
+        if let Ok(c) = std::fs::canonicalize(d) {
+            if !g.contains(&c) {
+                g.push(c);
+            }
+        }
+    }
+}
+
+/// `p` is a real folder (not a link), and its real path lies below one of `roots`.
+fn guard_dir_in(p: &Path, roots: &[PathBuf]) -> bool {
+    let real_dir = std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+    real_dir
+        && std::fs::canonicalize(p).is_ok_and(|c| roots.iter().any(|r| c.starts_with(r) && c != *r))
+}
+
+/// See [`guard_dir_in`], with the server's own roots (none set = refuse).
+pub fn guard_dir(p: &Path) -> bool {
+    guard_dir_in(p, &ROOTS.lock().unwrap())
 }
 
 static INSTANCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-/// Remembers which publish instance (data folder) this server is; the first call wins.
+/// sha256 of the canonical data folder path, first 12 hex.
+fn instance_hash(data_dir: &Path) -> String {
+    let c = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+    crate::util::sha256_hex(&c.display().to_string())[..12].to_string()
+}
+
+/// Remembers which publish instance (data folder) this server is; the first call wins. A later call
+/// (or an earlier `instance()` fallback) with a different value is logged.
 pub fn set_instance(data_dir: &Path) {
-    let _ =
-        INSTANCE.set(crate::util::sha256_hex(&data_dir.display().to_string())[..12].to_string());
+    let h = instance_hash(data_dir);
+    if INSTANCE.set(h.clone()).is_err() && INSTANCE.get() != Some(&h) {
+        tracing::warn!("orch-publish: instance already set to another data folder; keeping it");
+    }
 }
 
 /// First 12 hex of sha256(data dir): scopes labels, networks and images to this server, so a second
@@ -141,7 +183,7 @@ fn instance() -> String {
         .get_or_init(|| {
             let d =
                 crate::config::var("DATA_DIR").unwrap_or_else(|| "/var/lib/orch-publish".into());
-            crate::util::sha256_hex(&d)[..12].to_string()
+            instance_hash(Path::new(&d))
         })
         .clone()
 }
@@ -199,8 +241,8 @@ fn pool_use_high(pool: &str, count: usize) -> bool {
 }
 
 /// (network name, subnet) of every existing per-app network (all instances).
-fn app_networks() -> Vec<(String, String)> {
-    let names = docker_std()
+fn app_networks() -> Result<Vec<(String, String)>, String> {
+    let ls = docker_std()
         .args([
             "network",
             "ls",
@@ -210,11 +252,14 @@ fn app_networks() -> Vec<(String, String)> {
             "name=orch-net-",
         ])
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default();
+        .map_err(|e| format!("cannot list app networks: {e}"))?;
+    if !ls.status.success() {
+        return Err("cannot list app networks".into());
+    }
+    let names = String::from_utf8_lossy(&ls.stdout).to_string();
     let mut v = Vec::new();
     for n in names.lines().filter(|n| n.starts_with("orch-net-")) {
-        let Ok(o) = docker_std()
+        let o = docker_std()
             .args([
                 "network",
                 "inspect",
@@ -223,14 +268,15 @@ fn app_networks() -> Vec<(String, String)> {
                 n,
             ])
             .output()
-        else {
-            continue;
-        };
+            .map_err(|e| format!("cannot inspect app network: {e}"))?;
+        if !o.status.success() {
+            return Err("cannot inspect an app network".into());
+        }
         for sub in String::from_utf8_lossy(&o.stdout).split_whitespace() {
             v.push((n.to_string(), sub.to_string()));
         }
     }
-    v
+    Ok(v)
 }
 
 /// True when another network than `me` overlaps one of `me`'s subnets.
@@ -279,7 +325,7 @@ fn ensure_network(app: &str) -> Result<(), String> {
         .is_ok_and(|o| o.status.success());
     if !exists {
         let pool = crate::config::var("APP_SUBNETS").unwrap_or_else(|| "10.213.0.0/16".into());
-        let nets = app_networks();
+        let nets = app_networks()?;
         if pool_use_high(&pool, nets.len()) {
             tracing::warn!(
                 "orch-publish: more than 80% of the app network pool {pool} is used ({} networks); \
@@ -297,7 +343,7 @@ fn ensure_network(app: &str) -> Result<(), String> {
             return Err("could not create the app network".into());
         }
     }
-    if subnet_clash(&net, &app_networks()) {
+    if subnet_clash(&net, &app_networks()?) {
         return Err("the app network overlaps another one".into());
     }
     known_networks().lock().unwrap().insert(net);
@@ -546,7 +592,7 @@ pub fn check_dockerfile(text: &str) -> Result<(), &'static str> {
         .lines()
         .filter(|l| !l.trim_start().starts_with('#'))
         .flat_map(str::chars)
-        .filter(|c| !c.is_ascii_whitespace() && *c != '\\' && *c != '`')
+        .filter(|c| !c.is_ascii_whitespace() && !matches!(*c, '\\' | '`' | '\'' | '"'))
         .collect();
     // BuildKit flags always carry `=` (so `yarn --network-timeout 600000` is fine)
     for flag in ["--mount=", "--network=", "--security=", "--device="] {
@@ -687,29 +733,65 @@ pub async fn ensure_image(app: &str, vdir: &str, dir: &Path, secs: u64) -> Optio
 /// Container mode: the app owns files as uid 61000 (it may have chmod-ed them away), so the server
 /// could not delete them. Gives that uid back full rights first (best effort).
 pub async fn make_deletable(dir: &Path) {
-    if !dir.exists() {
+    // only a real folder under the server's own roots (never a planted link), and a path that
+    // survives the `--mount` syntax
+    if !guard_dir(dir) || dir.to_string_lossy().contains(',') {
         return;
     }
-    let _ = Command::from(docker_std())
-        .args([
-            "run",
-            "--rm",
-            "--user",
-            &app_user(),
-            "--network",
-            "none",
-            "-v",
-        ])
-        .arg(format!("{}:/x", dir.display()))
-        .args([
-            stack_image("python"),
-            "sh",
-            "-c",
-            // give the server's group its rights back, then delete the contents inside
-            "chmod -R ug+rwX /x; rm -rf /x/* /x/.[!.]* /x/..?*",
-        ])
-        .output()
-        .await;
+    let name = format!("orch-step-{}-{}", instance(), crate::util::rand_id(8));
+    let mut c = Command::from(docker_std());
+    c.args(helper_args(&name, dir))
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    let mut guard = RmOnDrop {
+        name: name.clone(),
+        armed: true,
+    };
+    if tokio::time::timeout(Duration::from_secs(120), c.output())
+        .await
+        .is_err()
+    {
+        rm_container(&name).await;
+    }
+    guard.armed = false;
+}
+
+/// `docker run` arguments of the helper that frees a tree: no network, no capabilities, read-only
+/// root, small limits, step labels (so the startup sweep finds it).
+fn helper_args(name: &str, dir: &Path) -> Vec<String> {
+    let mut a: Vec<String> = [
+        "run",
+        "--rm",
+        "--name",
+        name,
+        "--label",
+        "orch.publish.step=1",
+        "--label",
+    ]
+    .map(String::from)
+    .into();
+    a.push(format!("orch.publish.instance={}", instance()));
+    for (k, v) in [
+        ("--user", app_user()),
+        ("--network", "none".into()),
+        ("--cap-drop", "ALL".into()),
+        ("--security-opt", "no-new-privileges".into()),
+        ("--pids-limit", "64".into()),
+        ("--memory", "256m".into()),
+        ("--mount", format!("type=bind,src={},dst=/x", dir.display())),
+    ] {
+        a.push(k.into());
+        a.push(v);
+    }
+    a.push("--read-only".into());
+    a.extend([
+        stack_image("python").to_string(),
+        "sh".into(),
+        "-c".into(),
+        // give the server's group its rights back, then delete the contents inside
+        "chmod -R ug+rwX /x; rm -rf /x/* /x/.[!.]* /x/..?*".into(),
+    ]);
+    a
 }
 
 /// Removes the images of an app: one version (`vdir`) or all of them (best effort).
@@ -852,7 +934,11 @@ impl Runner {
         std::fs::create_dir_all(&s.data_dir)?;
         let log = std::fs::File::create(&s.log)?;
         let log2 = log.try_clone()?;
-        let unit = unit_name(name, s.port);
+        let mut unit = unit_name(name, s.port);
+        if container_mode() {
+            // container names are engine-global: carry the instance
+            unit = format!("orch-{}-{unit}", instance());
+        }
         if sandboxed() {
             // leftover units of this app (after a crash/restart of the server) must go first,
             // but never the units of versions this server is running
@@ -1025,7 +1111,11 @@ pub async fn run_step(cmd: &str, dir: &Path, ctx: &StepCtx<'_>) -> (bool, String
     let (port, base_path, data_dir, store, secs) =
         (ctx.port, ctx.base_path, ctx.data_dir, ctx.store, ctx.secs);
     let _ = std::fs::create_dir_all(data_dir);
-    let unit = format!("orch-step-{}", crate::util::rand_id(8));
+    let unit = if container_mode() {
+        format!("orch-step-{}-{}", instance(), crate::util::rand_id(8))
+    } else {
+        format!("orch-step-{}", crate::util::rand_id(8))
+    };
     let container = container_mode();
     let mut c = if container {
         let app = ctx.app.to_string();
@@ -1515,6 +1605,7 @@ mod tests {
         if std::env::var("ORCH_PUBLISH_TEST_ENGINE").is_err() {
             return;
         }
+        set_roots(&[&std::env::temp_dir()]);
         let d = tempfile::tempdir().unwrap();
         group_writable_dir(d.path());
         let ok = Command::from(docker_std())
@@ -1534,5 +1625,65 @@ mod tests {
         assert!(ok);
         make_deletable(d.path()).await;
         std::fs::remove_dir_all(d.path()).unwrap();
+    }
+
+    #[test]
+    fn path_guard_refuses_links_and_outside_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let roots = vec![std::fs::canonicalize(root.path()).unwrap()];
+        let real = root.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        assert!(guard_dir_in(&real, &roots));
+        // a link to a folder outside (or inside) the root is not a real folder
+        let link = root.path().join("link");
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+        assert!(!guard_dir_in(&link, &roots));
+        // a link in the middle of the path leads outside
+        let sub = link.join("sub");
+        std::fs::create_dir(outside.path().join("sub")).unwrap();
+        assert!(!guard_dir_in(&sub, &roots));
+        // the root itself and unrelated folders are refused
+        assert!(!guard_dir_in(root.path(), &roots));
+        assert!(!guard_dir_in(outside.path(), &roots));
+        assert!(!guard_dir_in(&root.path().join("missing"), &roots));
+    }
+
+    #[test]
+    fn dockerfile_quotes_do_not_hide_flags() {
+        for l in [
+            "RUN --mou\"n\"t=type=cache,id=x,target=/c true",
+            "RUN --network'='host true",
+            "RUN --\"security\"=insecure true",
+        ] {
+            assert!(check_dockerfile(&format!("FROM x\n{l}\n")).is_err(), "{l}");
+        }
+    }
+
+    #[test]
+    fn helper_is_locked_down() {
+        let a = helper_args("orch-step-x", Path::new("/srv/d"));
+        for (k, v) in [
+            ("--network", "none"),
+            ("--cap-drop", "ALL"),
+            ("--security-opt", "no-new-privileges"),
+            ("--pids-limit", "64"),
+            ("--memory", "256m"),
+            ("--label", "orch.publish.step=1"),
+            ("--mount", "type=bind,src=/srv/d,dst=/x"),
+        ] {
+            assert!(pair(&a, k, v), "{k} {v}");
+        }
+        assert!(a.contains(&"--read-only".to_string()));
+        assert!(!a.contains(&"-v".to_string()));
+    }
+
+    #[test]
+    fn instance_hash_follows_links() {
+        let d = tempfile::tempdir().unwrap();
+        let l = d.path().join("l");
+        std::os::unix::fs::symlink(d.path(), &l).unwrap();
+        assert_eq!(instance_hash(&l), instance_hash(d.path()));
+        assert_eq!(instance_hash(&d.path().join("./")), instance_hash(d.path()));
     }
 }

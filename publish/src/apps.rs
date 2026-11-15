@@ -84,8 +84,26 @@ fn check_manifest(m: &Manifest, dir: &FsPath, docker_ok: bool) -> ApiResult<()> 
     Ok(())
 }
 
+/// Scratch data folder of the build/test steps of one deploy: next to the version folders, made by the
+/// server, never inside the code the build can write to.
+fn step_dir(st: &State, name: &str, vroot: &FsPath) -> PathBuf {
+    let v = vroot
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    st.cfg.app_root(name).join(format!(".step-{v}"))
+}
+
 /// Deletes a folder; in container mode the app's uid gets its rights back first.
 async fn rm_tree(p: &FsPath) {
+    // a link planted by app code is only unlinked, never followed; folders outside our roots are skipped
+    if std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
+        let _ = std::fs::remove_file(p);
+        return;
+    }
+    if !p.exists() || !crate::runner::guard_dir(p) {
+        return;
+    }
     if container_mode() {
         crate::runner::make_deletable(p).await;
     }
@@ -250,6 +268,7 @@ pub async fn deploy(
             }
         }
         st.runner.stop(&format!("{name}~new")).await;
+        rm_tree(&step_dir(st, name, &vroot)).await;
         rm_tree(&vroot).await;
     }
     r
@@ -311,7 +330,7 @@ async fn deploy_inner(
         }
     }
     if let Some(b) = build {
-        let bd = dir.join(".test-data");
+        let bd = step_dir(st, name, vroot);
         let (ok, out) = run_step(
             b,
             &dir,
@@ -328,9 +347,7 @@ async fn deploy_inner(
             },
         )
         .await;
-        if m.test.is_none() {
-            rm_tree(&bd).await;
-        }
+
         if !ok {
             return Err(ApiError::new(
                 422,
@@ -342,7 +359,7 @@ async fn deploy_inner(
     }
     // test
     if let Some(t) = &m.test {
-        let td = dir.join(".test-data");
+        let td = step_dir(st, name, vroot);
         let ctx = StepCtx {
             app: name,
             stack: &m.stack,
@@ -355,7 +372,6 @@ async fn deploy_inner(
             secs: st.cfg.test_secs,
         };
         let (ok, out) = run_step(t, &dir, &ctx).await;
-        rm_tree(&td).await;
         if !ok {
             return Err(ApiError::new(
                 422,
@@ -365,6 +381,7 @@ async fn deploy_inner(
             .with_output(util::tail(&out, 4000)));
         }
     }
+    rm_tree(&step_dir(st, name, vroot)).await;
     // start the new version next to the old one
     let mut port = 0;
     if m.stack != "static" {
@@ -509,6 +526,14 @@ pub async fn stop(st: &State, name: &str) -> ApiResult<Value> {
 
 /// Stops and deletes an app with its code and data. Caller holds app_lock.
 pub async fn remove(st: &State, name: &str) {
+    // the name feeds a path: only the plain charset (routes also look the app up first)
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return;
+    }
     st.runner.stop(name).await;
     if container_mode() {
         crate::runner::remove_images(name, None).await;

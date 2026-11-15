@@ -40,6 +40,7 @@ pub fn new_state(cfg: Config) -> std::io::Result<State> {
         std::fs::create_dir_all(cfg.data_dir.join(d))?;
     }
     std::fs::create_dir_all(&cfg.apps_dir)?;
+    runner::set_roots(&[&cfg.data_dir, &cfg.apps_dir]);
     let conn = db::open(&cfg.data_dir.join("publish.db")).map_err(std::io::Error::other)?;
     let http = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
         .build_http();
