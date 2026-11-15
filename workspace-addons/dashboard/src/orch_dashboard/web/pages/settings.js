@@ -526,6 +526,7 @@ function addonDetailPage(addon) {
     heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
     h('div', {className:'card'}, settingsRows),
     where,
+    snapshot || addon.name === 'dashboard' ? null : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove from this computer')),
     h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
       settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
 }
