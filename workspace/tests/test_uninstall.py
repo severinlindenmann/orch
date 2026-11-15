@@ -61,12 +61,12 @@ def test_uninstall_leaves_the_folder_as_it_was(proj, run):
     extra = sorted(set(after) - set(before))
     assert extra and all(
         x.startswith((".orch/tickets/", ".orch/diag/"))
-        or x in (".orch/config.toml", ".orch/ticket-counter.json")
+        or x in (".orch/config.toml", ".orch/ticket-counter.json", ".orch/.gitignore")
         for x in extra
     ), extra
     assert not (proj / ".agents").exists()
     assert not (proj / ".orch/harness").exists() and not (proj / ".orch/run").exists()
-    assert not (proj / ".orch/.gitignore").exists()
+    assert (proj / ".orch/.gitignore").is_file()  # kept tickets keep their ignore rules (R5.2)
     now = _git(proj, "status", "--porcelain", "--untracked-files=all").splitlines()
     assert [x for x in now if not x[3:].startswith(".orch/")] == status.splitlines()
     code, out, _ = run("uninstall")
@@ -94,6 +94,23 @@ def test_uninstall_keeps_secrets_out_of_git(proj, run):
     assert run("uninstall")[0] == 0
     assert (proj / ".orch/secrets/k").is_file()
     assert (proj / ".orch/.gitignore").is_file()
+
+
+def test_uninstall_keeps_ignore_rules_while_data_stays(proj, run):
+    """R5.2: no secrets folder, but tickets and config stay: .orch/.gitignore stays, so a later `git add -A`
+    still leaves the kept tickets and orch's private files (here a message in .orch/inbox/) out of git."""
+    _git(proj, "init", "-q")
+    assert run("init")[0] == 0
+    rules = (proj / ".orch/.gitignore").read_text(encoding="utf-8")
+    assert run("ticket", "new", "Private plan")[0] == 0
+    assert not (proj / ".orch/secrets").exists()
+    assert run("uninstall")[0] == 0
+    assert (proj / ".orch/.gitignore").read_text(encoding="utf-8") == rules
+    (proj / ".orch/inbox").mkdir(exist_ok=True)
+    (proj / ".orch/inbox/m_1.json").write_text("{}", encoding="utf-8")
+    _git(proj, "add", "-A")
+    staged = _git(proj, "diff", "--cached", "--name-only").splitlines()
+    assert not [x for x in staged if x.startswith(".orch/")], staged  # nothing of .orch goes in
 
 
 def test_uninstall_json(proj, run):

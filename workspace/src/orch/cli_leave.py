@@ -298,13 +298,16 @@ def uninstall(root: Path) -> dict:
         if p.is_dir() and not harness.is_link(p):
             shutil.rmtree(p)
             removed.append(f".orch/{rel}/")
-    secrets = (orch / "secrets").exists()
     gi = orch / ".gitignore"
-    # kept secrets stay out of git: the .gitignore stays while they exist (and when the team owns it)
+    # R5.2: whatever stays in .orch (tickets, chat, local files, config, secrets) keeps its ignore rules, so a
+    # later `git add -A` commits nothing private; the file goes only when nothing else is left (or never when
+    # the team owns it)
+    left = list(orch.iterdir()) if orch.is_dir() else []
+    kept_data = any(p.name not in (".gitignore", "addons.json") for p in left)
     if (
         gi.is_file()
         and not harness.is_link(gi)
-        and not secrets
+        and not kept_data
         and not harness._tracked(root, ".orch/.gitignore")
     ):
         gi.unlink()
