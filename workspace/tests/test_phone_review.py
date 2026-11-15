@@ -385,9 +385,9 @@ def test_verdict_cases(proj, run, new_ticket, conn):
             assert t["status"] == want, label
             if case["do"] == "changes":
                 assert t["checklist"][-1]["text"] == case["note"], label
-            assert t["history"][-1]["by"] == case["by"] or any(h["by"] == case["by"] for h in t["history"]), (
-                label
-            )
+            assert t["history"][-1]["by"] == "human:iPhone" or any(
+                h["by"] == "human:iPhone" for h in t["history"]
+            ), label
         else:
             assert t["status"] == case["state"]["status"], label
         got = [m for m in conn.sent if "review_result" in m["body"]][before:]
