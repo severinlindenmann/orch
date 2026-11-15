@@ -22,8 +22,8 @@ from pathlib import Path
 from orch import record
 from orch.errors import Refused
 
-SUBCOMMANDS = ("tail", "query", "counts", "settings", "delete-detail", "hook")
-_BUILT = ("tail", "query", "counts", "settings", "delete-detail", "hook")
+SUBCOMMANDS = ("tail", "query", "counts", "settings", "delete-detail", "hook", "propose")
+_BUILT = ("tail", "query", "counts", "settings", "delete-detail", "hook", "propose")
 _RUN = re.compile(r"^r_[a-z0-9_]{6,32}$")
 _TICKET = re.compile(r"^t_[a-z0-9]{6,16}$")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
@@ -97,6 +97,7 @@ def add_parsers(sub, common) -> None:
     r.add_parser("settings", parents=[common], help=argparse.SUPPRESS)
     d = r.add_parser("delete-detail", parents=[common], help=argparse.SUPPRESS)
     d.add_argument("ticket")
+    r.add_parser("propose", parents=[common], help=argparse.SUPPRESS)  # a check-up run's suggestion, on stdin
     for name in SUBCOMMANDS:
         if name not in _BUILT:
             r.add_parser(name, parents=[common], help=argparse.SUPPRESS).add_argument("rest", nargs="*")
@@ -179,6 +180,8 @@ def dispatch(args, root: Path) -> bool:
             _emit(settings(root))
         elif args.sub == "delete-detail":
             _emit(delete_detail(root, args))
+        elif args.sub == "propose":
+            _emit(propose(root))
         else:
             _emit(counts(root, args))
     except record.RecordRefused as e:
@@ -772,6 +775,23 @@ def delete_detail(root: Path, args) -> dict:
     }
 
 
+def propose(root: Path) -> dict:
+    """`orch record propose --json`: one draft (contracts/proposal.schema.json $defs/draft) on stdin from a
+    check-up run. Refused (`not_checkup`) when the caller is not one. The core builds the proposal."""
+    from orch import checkup
+
+    if not checkup.in_checkup_run(root):
+        raise RecordError(checkup.NOT_CHECKUP, "not_checkup")
+    try:
+        draft = json.loads(sys.stdin.read(1_000_000))
+    except ValueError:
+        raise RecordError("The suggestion is not valid JSON.") from None
+    try:
+        return checkup.propose(root, draft)
+    except checkup.CheckupError as e:
+        raise RecordError(str(e), e.code) from None
+
+
 def prune(root: Path, fold, now: str | None = None) -> dict:
     """Apply retention (record.apply_retention) with the EFFECTIVE values: config.record_keep_days /
     record_max_mb, the lower of the file and the person's record, never a file value alone. A lowered value
@@ -989,13 +1009,16 @@ def counts(root: Path, args) -> dict:
     day_from, day_to = _window(args)
     models = []
     by_run, unavailable = _events(root, _known(root), args.ticket)
+    from orch import checkup
+
+    checkups = checkup.listed_ids(root)  # a check-up run is never counted (profile checkup, proposal.md)
     unchecked = {p["run"] for p in unavailable if p.legacy}
     flagged = {p["run"] for p in unavailable}
     for run, events in by_run.items():
         if run in unchecked:  # a run made before orch checked it is never counted
             continue
         events = [e for e in events if record.is_sealed(e)]  # nor its lines from before protection
-        if not events:
+        if not events or events[0].get("ticket") in checkups:
             continue
         model = run_model(run, events, root=root, problem=run in flagged)
         model["first"] = events[0]["at"]

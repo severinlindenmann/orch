@@ -14,6 +14,7 @@ from orch import (
     addons,
     cli_addons,
     cli_chat,
+    cli_checkup,
     cli_clients,
     cli_config,
     cli_conn,
@@ -414,6 +415,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
     cli_diag.add_parsers(sub, common)
+    cli_checkup.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -849,7 +851,12 @@ def run(args: argparse.Namespace) -> None:
         elif args.project_only and (args.json or not report):
             data = {"ok": True, "refreshed": done, **({"notes": notes} if args.json and notes else {})}
             _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
-    elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root) or cli_diag.dispatch(args, root):
+    elif (
+        cli_status.dispatch(args, root)
+        or cli_addons.dispatch(args, root)
+        or cli_diag.dispatch(args, root)
+        or cli_checkup.dispatch(args, root)
+    ):
         pass
     elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
         pass

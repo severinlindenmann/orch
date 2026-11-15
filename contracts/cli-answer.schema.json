@@ -16,7 +16,7 @@
       "type": "object", "required": ["error"], "additionalProperties": false,
       "properties": {
         "error": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "Plain words for people, key values hidden." },
-        "code": { "enum": ["refused", "invalid", "not_found", "not_allowed", "switched_off", "locked_by_admin", "conflict", "gone", "too_large", "busy", "not_available", "tampered", "needs_person", "changed"], "description": "Optional, for programs. Old commands answer without it. needs_person = a person's own decision (human-proof.md): an agent caller, or no valid proof. changed = the value is no longer the one the caller showed (`--if-current`): nothing was written." }
+        "code": { "enum": ["refused", "invalid", "not_found", "not_allowed", "switched_off", "locked_by_admin", "conflict", "gone", "too_large", "busy", "not_available", "tampered", "needs_person", "changed", "not_checkup", "not_tested", "stale", "admin_only", "not_supported"], "description": "Optional, for programs. Old commands answer without it. needs_person = a person's own decision (human-proof.md): an agent caller, or no valid proof. changed = the value is no longer the one the caller showed (`--if-current`): nothing was written. Check-up (proposal.md): not_checkup = the caller is not a check-up run (or that ticket is not one), not_tested = accept before a passed test, stale = the skill changed since, admin_only = an admin's skill, not_supported = the agent cannot run a check-up." }
       }
     },
     "stream_line": {

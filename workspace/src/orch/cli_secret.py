@@ -162,6 +162,10 @@ def _change_profile(root, args, who):
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "secret":
         return False
+    from orch import checkup
+
+    if checkup.in_checkup_run(root):  # a check-up run never reaches a key (proposal.md, layer 2)
+        raise Refused("A check-up run cannot use keys.")
     action = args.sub
     if action in ("env", "file", "exec"):
         rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest

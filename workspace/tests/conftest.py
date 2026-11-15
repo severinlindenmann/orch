@@ -287,6 +287,7 @@ REAL_PROOF_MODULES = (
     "test_verdict_mac",
     "test_cli_secret",
     "test_insights_settings",
+    "test_checkup",
 )
 
 

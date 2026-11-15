@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, diag, history, procs, runhooks, services, tickets
+from orch import adapters, addons, checkup, diag, history, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -704,6 +704,10 @@ def claim(
             # dead pid, or maybe-stale with --take-over: the old claim is replaced
         _drop_start_prompts_locked(root, tid)
         rec = _new_record(tid, by, agent, mode, ticket, reason, Path(folder) if folder else root)
+        if checkup.is_checkup_ticket(
+            root, tid
+        ):  # the core's own list (orch home), never a flag or a variable
+            rec["profile"] = checkup.PROFILE
         if pid:
             rec["pid"], rec["pid_started"] = pid, pid_started(pid)
         if any(not i.get("delivered_at") for i in _pending_read(root, tid)):
@@ -1233,6 +1237,12 @@ def plan(
         chat.cut_session(root, tid)  # 04:00: a session of an earlier Chat day is not resumed
         ticket = tickets.load(root, tid)
     name = agent or adapters.chosen(root)
+    is_checkup = checkup.is_checkup_ticket(root, tid)
+    if is_checkup:  # a check-up run: always fresh, read-only tools (adapters.readonly_argv), no extra allows
+        if adapters.readonly(name, root) is None:
+            raise Refused(checkup.NEEDS_AGENT)
+        fresh, allow, mode = True, None, "oneshot"
+        prompt = prompt if prompt is not None else checkup.prompt(root, tid)
     a = adapters.load(name, root)
     person = adapters.person_for(name, root)  # the person's own tool config, read once for this start
     adapters.check_start_folder(name, root)
@@ -1290,6 +1300,8 @@ def plan(
         if argv is None:
             raise Refused(f"'{name}' cannot run in {mode} mode here.")
     argv = store_access(argv, name, root, workdir_for(root, read(root, tid), tid))
+    if is_checkup:
+        argv = adapters.readonly_argv(name, argv, tid, root)
     return {
         "agent": name,
         "adapter": a["adapter"],
@@ -1365,6 +1377,8 @@ def start(
     adapters.load(name, root)  # refuses a name nobody knows
     a = adapters.load(name, root)
     adapters.check_start_folder(name, root)  # live or oneshot, any agent: before anything is claimed
+    if checkup.is_checkup_ticket(root, tid):  # a check-up is never a live session (it must run read-only)
+        mode = "oneshot"
     notes = []
     live_ok = runs_live.available(a)
     if mode is None and any(i.get("live_retry") for i in undelivered(root, tid)):
