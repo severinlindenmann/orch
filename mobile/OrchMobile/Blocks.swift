@@ -34,7 +34,7 @@ struct BlocksDoc: Sendable {
     let from: String
     let title: String?
     let rows: [BlockRow]
-    var fromLabel: String { from == "job" ? "Reported by the job" : from == "agent" ? "Proof" : "From orch" }
+    var fromLabel: String { from == "job" ? "Reported by the job" : from == "agent" ? "Evidence" : "From orch" }
     var texts: [String] { [fromLabel] + (title.map { [$0] } ?? []) + rows.flatMap(\.texts) }
     var fallbackCount: Int { rows.filter { if case .unsupported = $0 { return true }; return false }.count }
 }

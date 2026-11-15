@@ -1,0 +1,173 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_gkplxn",
+  "key": "FIX-1",
+  "title": "Export invoices as CSV",
+  "status": "active",
+  "created_at": "2026-11-15T16:27:27Z",
+  "updated_at": "2026-11-15T16:27:30Z",
+  "checklist": [
+    {
+      "id": "c1",
+      "text": "Write the exporter",
+      "done": true,
+      "evidence": [
+        {
+          "type": "note",
+          "ref": "exporter written",
+          "by": "agent:fixture",
+          "at": "2026-11-15T16:27:29Z"
+        },
+        {
+          "type": "pr",
+          "ref": "#12",
+          "by": "agent:fixture",
+          "at": "2026-11-15T16:27:29Z"
+        },
+        {
+          "type": "commit",
+          "ref": "abc1234",
+          "by": "agent:fixture",
+          "at": "2026-11-15T16:27:29Z"
+        },
+        {
+          "type": "url",
+          "ref": "https://example.com/pr/1",
+          "by": "agent:fixture",
+          "at": "2026-11-15T16:27:29Z"
+        },
+        {
+          "type": "file",
+          "ref": ".orch/tickets/t_gkplxn/evidence/export.py",
+          "text": "11 B",
+          "summary": "exporter done",
+          "by": "agent:fixture",
+          "at": "2026-11-15T16:27:29Z"
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "text": "Add a test",
+      "done": true,
+      "evidence": [
+        {
+          "type": "command",
+          "ref": "pytest tests/test_export.py",
+          "by": "agent:fixture",
+          "at": "2026-11-15T16:27:29Z"
+        },
+        {
+          "type": "note",
+          "ref": "passes",
+          "by": "agent:fixture",
+          "at": "2026-11-15T16:27:29Z"
+        }
+      ]
+    },
+    {
+      "id": "c3",
+      "text": "Document it",
+      "done": false,
+      "evidence": []
+    },
+    {
+      "id": "c4",
+      "text": "Ask about the date format",
+      "done": false,
+      "evidence": []
+    }
+  ],
+  "refs": [],
+  "questions": [
+    {
+      "id": "q1",
+      "text": "Which date format?",
+      "options": [
+        "ISO 8601",
+        "dd.mm.yyyy"
+      ],
+      "recommended": "ISO 8601",
+      "answer": null,
+      "answered_by": null,
+      "via": null,
+      "check": "c4"
+    }
+  ],
+  "history": [
+    {
+      "at": "2026-11-15T16:27:27Z",
+      "by": "human:tester",
+      "via": "cli",
+      "text": "Created",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-15T16:27:28Z",
+      "by": "human:tester",
+      "via": "cli",
+      "text": "Added check c1",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-15T16:27:28Z",
+      "by": "human:tester",
+      "via": "cli",
+      "text": "Added check c2",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-15T16:27:28Z",
+      "by": "human:tester",
+      "via": "cli",
+      "text": "Added check c3",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-15T16:27:28Z",
+      "by": "human:tester",
+      "via": "cli",
+      "text": "Added check c4",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-15T16:27:29Z",
+      "by": "agent:fixture",
+      "via": "cli",
+      "text": "Check c1 done",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-15T16:27:29Z",
+      "by": "agent:fixture",
+      "via": "cli",
+      "text": "Check c2 done",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-15T16:27:30Z",
+      "by": "agent:fixture",
+      "via": "cli",
+      "text": "Asked q1, waiting",
+      "chat_message": false
+    },
+    {
+      "at": "2026-11-15T16:27:30Z",
+      "by": "agent:fixture",
+      "via": "cli",
+      "text": "Status waiting -> active",
+      "chat_message": false
+    }
+  ],
+  "owner": "tester",
+  "due": "2026-12-01",
+  "note": "fixture ticket",
+  "done_when": "CSV export works and is documented",
+  "revision": 11,
+  "summary": "Exporter done, tests pass, docs open.",
+  "outcome": {
+    "changed": "Added a CSV exporter.",
+    "why": "Finance needs it."
+  },
+  "waiting_on": null
+}

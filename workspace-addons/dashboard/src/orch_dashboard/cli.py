@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from . import service
@@ -13,6 +15,21 @@ from .actions import SELF
 from .data import find_workspace
 from .server import DEFAULT_PORT, make_server
 from .snapshot import publish_snapshot, write_snapshot
+
+
+def _bind_again(root: Path, port: int, wait: float = 15.0):
+    """A fixed port that is busy right after a self-update restart: the old process is the same pid and has
+    closed its listener at exec, but a short-lived client socket of the machine may hold the number (the
+    port came from the OS, so a busy host can use it as a source port). It frees within moments: retry until
+    `wait`, then fail with the original error."""
+    end = time.monotonic() + wait
+    while True:
+        try:
+            return make_server(root, port, orch_bin=_orch_bin())
+        except OSError as e:
+            if e.errno != errno.EADDRINUSE or time.monotonic() >= end:
+                raise
+        time.sleep(0.1)
 
 
 def _orch_bin() -> str | None:
@@ -64,10 +81,13 @@ def main(argv: list[str] | None = None) -> int:
     port = getattr(args, "port", DEFAULT_PORT)
     try:
         srv = make_server(root, port, orch_bin=_orch_bin())
-    except OSError:
-        if not getattr(args, "auto_port", False):
+    except OSError as e:
+        if getattr(args, "auto_port", False):
+            srv = make_server(root, 0, orch_bin=_orch_bin())  # another workspace has 8420
+        elif e.errno == errno.EADDRINUSE:
+            srv = _bind_again(root, port)  # a self-update restart keeps its port (see _bind_again)
+        else:
             raise
-        srv = make_server(root, 0, orch_bin=_orch_bin())  # another workspace has 8420
     if getattr(args, "ready_file", None):
         service.write_ready(Path(args.ready_file), srv.server_address[1])
     print(f"orch dashboard for {root.name}: http://127.0.0.1:{srv.server_address[1]}  (Ctrl+C to stop)")

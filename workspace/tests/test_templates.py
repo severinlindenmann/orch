@@ -26,7 +26,8 @@ def test_manifest_valid(tmp_path, stack, store):
     folder = tmp_path / "my-app"
     templates.create(stack, store, folder)
     m = publish.read_manifest(folder)
-    assert m["name"] == "my-app" and m["stack"] == stack and m["store"] == store and m["public"] is False
+    assert m["name"] == "my-app" and m["stack"] == stack and m["store"] == store
+    assert m["reach"] == "public" and m["auth"] is True and "public" not in m
     publish.pack(folder, None)
     assert "{{" not in "".join(p.read_text() for p in folder.rglob("*") if p.is_file())
 

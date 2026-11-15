@@ -303,7 +303,7 @@ async function webhooks(v){
 }
 
 // ---------- subscribers ----------
-const subscriberKinds=[['updates','Updates','Started, working, notes — can be a lot'],['questions','Questions','Asked by agents'],['results','Results','Done, failed, stopped'],['files','Files','Proof files attached to results']];
+const subscriberKinds=[['updates','Updates','Started, working, notes — can be a lot'],['questions','Questions','Asked by agents'],['results','Results','Done, failed, stopped'],['files','Files','Evidence files attached to results']];
 const subscriberPath=s=>'/subscribers/'+enc(s.id);
 const subscriberMembers=s=>[...new Set([...(s.workspaces||[]),...groupList.filter(g=>(s.groups||[]).includes(g.id)).flatMap(g=>g.members||[])])];
 function subscriberKindsText(s){const kinds=['updates','results','questions','files'].filter(k=>s.kinds?.[k]);return (kinds.length===4?'All kinds':kinds.map(k=>subscriberKinds.find(x=>x[0]===k)[1]).join(' · ')||'No kinds')+(s.can_answer?' · Answers':'')}
