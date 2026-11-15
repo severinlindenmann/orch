@@ -177,3 +177,27 @@ def test_broken_json_is_refused_and_not_overwritten(one_ticket, proj, run):
             assert "Traceback" not in err + out
         assert p.read_text(encoding="utf-8") == garbage
         assert run("ticket", "list")[0] == 0
+
+
+@pytest.mark.parametrize("folder", FOLDERS, ids=lambda p: p.name)
+def test_due_day_only_and_with_time_both_load_show_and_save(folder, proj, run):
+    """G1: a day-only `due` (what every older version wrote) keeps working, and a `due` with a time
+    (YYYY-MM-DDTHH:MM) loads, lists, shows and survives an edit."""
+    before = _install(proj, folder)
+    dated = [tid for tid, raw in before.items() if raw.get("due")]
+    assert dated and all(len(before[t]["due"]) == 10 for t in dated), "fixtures keep a day-only due"
+    other = next(t for t in before if t not in dated)
+    p = proj / ".orch" / "tickets" / f"{other}.json"
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    raw["due"] = "2020-01-01T09:00"  # as `orch ticket edit --due "2020-01-01 09:00"` writes it
+    p.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    code, out, err = run("ticket", "list", "--all")
+    assert code == 0, err
+    code, shown, err = run("ticket", "show", other)
+    assert code == 0 and ("Late since" in shown or "Due" in shown), err
+    code, shown, _ = run("ticket", "show", dated[0])
+    assert code == 0 and f"Due: {before[dated[0]]['due']}" in shown
+    for tid in (other, dated[0]):
+        assert run("ticket", "edit", tid, "--note", "x", "--by", "human:tester")[0] == 0
+    after = _files(proj)
+    assert after[other]["due"] == "2020-01-01T09:00" and after[dated[0]]["due"] == before[dated[0]]["due"]

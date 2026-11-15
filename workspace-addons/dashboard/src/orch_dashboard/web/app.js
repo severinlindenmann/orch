@@ -88,7 +88,8 @@ const ticketOf = id => tickets().find(t => String(t.id) === String(id) || (typeo
 const href = id => '#ticket/' + encodeURIComponent(id);
 const questions = t => array(t.questions).filter(q => q.answer == null);
 const activeTicket = t => !['done', 'dropped'].includes(t.status);
-const overdue = t => activeTicket(t) && t.due && t.due < today();
+const overdue = t => window.DashHelpers.dueLate(t.due, t.status, now());
+const dueText = t => window.DashHelpers.dueWords(t.due, t.status, now()) || (t.due ? date(t.due) : '');  // "Due 18:30" / "Late since 18:30", else the day
 const newer = (a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
 const sorted = list => list.slice().sort((a, b) => Number(!!overdue(b)) - Number(!!overdue(a)) || Number(questions(b).length > 0) - Number(questions(a).length > 0) || newer(a, b));
 const statusWord = t => window.DashHelpers.statusWord(t.status, t.started);

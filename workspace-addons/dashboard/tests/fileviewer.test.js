@@ -42,3 +42,9 @@ test('only web pages and PDFs get a thumbnail; the box has a stable key so a red
   vm.runInNewContext(source, {window: w3, document: {createElement: el}, navigator: {pdfViewerEnabled: false}, requestAnimationFrame() {}});
   assert.equal(w3.FileViewer.thumb(f('a.pdf')), null);  // no built-in PDF viewer: the icon stays
 });
+
+test('b4: the viewer copy button says it is local and says where it works', () => {
+  assert.match(source, /btn\('Copy local link'/);
+  assert.doesNotMatch(source, /btn\('Copy link'/);
+  assert.match(source, /Works only on this computer/);
+});
