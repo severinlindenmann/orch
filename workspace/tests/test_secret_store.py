@@ -838,35 +838,13 @@ def test_an_unknown_file_check_refuses_the_call_and_sets_nothing_aside(tws, monk
     assert winacl.Unknown  # the exception type the refusal carries
 
 
-def test_write_profiles_signs_only_the_names_it_is_told_to(tws):
-    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}}, sign=frozenset({"p"}))
-    assert list(keystore.read_verified_profiles(tws)) == ["p"]
-    # a profile that is new in the file but not in `sign` stays unsigned
-    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}, "q": {"env": {"A": "k"}}})
-    with pytest.raises(Refused, match="changed outside orch"):
-        keystore.read_verified_profiles(tws)
-    assert hp._ledger_load(tws, hp.PROFILE_LEDGER).get("q") is None
-    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}}, tombstone=frozenset({"q"}))
-    # a body edited in the file: refused; rewriting a switch does not re-sign it
-    f = hp.key_dir(tws) / "profiles.toml"
-    f.write_text(f.read_text().replace('A = "k"', 'B = "k"'))
-    prof = keystore.read_profiles(tws)
-    prof["p"]["allow_get"] = True
-    keystore.write_profiles(tws, prof)
-    with pytest.raises(Refused, match="changed outside orch"):
-        keystore.read_verified_profiles(tws)
-    # a person setting it again signs the new body; removing tombstones
-    keystore.write_profiles(tws, {"p": {"env": {"B": "k"}}}, sign=frozenset({"p"}))
-    assert list(keystore.read_verified_profiles(tws)) == ["p"]
-    keystore.write_profiles(tws, {}, tombstone=frozenset({"p"}))
-    assert hp._ledger_load(tws, hp.PROFILE_LEDGER)["p"] is None
 
 
 def test_an_unreadable_profiles_file_refuses_the_save(tws):
-    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}}, sign=frozenset({"p"}))
+    keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
     (hp.key_dir(tws) / "profiles.toml").write_text("not [ toml")
     with pytest.raises(Refused):
-        keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}}, sign=frozenset({"p"}))
+        keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
 
 
 @pytest.mark.parametrize(

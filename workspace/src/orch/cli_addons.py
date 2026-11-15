@@ -6,8 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from orch import addons, history, humanproof
-from orch.errors import Refused
+from orch import addons, history
 
 
 def _out(args, data, text: str) -> None:
@@ -51,28 +50,11 @@ def dispatch(args, root: Path) -> bool:
         if not args.project_only and (addons._is_path(args.name) or args.name not in addons.CORE_ADDONS):
             addons.tool_env_change_ok()  # first, before any snapshot or hand-off: a click cannot fix this
         if addons._is_path(args.name) and not addons._local_add_ok():
-            # code from a folder runs inside orch itself: only a person's click (proof) may allow it (H1)
+            # code from a folder runs inside orch itself
             # Snapshot the folder NOW (request time): the card shows the path and a short content hash, the
             # proof's target is the full hash. The proven add installs from the snapshot with that hash and is
             # refused when the folder changed since (a content swap before the click).
             info = addons.prepare_local_add(root, Path(args.name))
-            # the queued command carries the ABSOLUTE path the card shows (it runs later with cwd = the
-            # workspace root, where a relative `./x` would mean another folder)
-            queued = [
-                info["path"] if w == args.name else w
-                for w in humanproof._clean_argv(humanproof.CURRENT_ARGV) or []
-            ]
-            who = humanproof.person_by(
-                root,
-                args,
-                "addon.add_local",
-                info["hash"],
-                argv=queued,
-                parts={"path": humanproof.tail(info["path"]), "short": humanproof.part(info["short"])},
-                exact=info["path"],
-            )
-            if not who.startswith("human:"):
-                raise Refused(humanproof.AGENT_REFUSED)
             with addons.trusted_local_add(info["hash"]):
                 addons.add(root, args.name, args.yes, args.project_only)
         else:

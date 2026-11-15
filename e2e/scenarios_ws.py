@@ -40,7 +40,7 @@ def w0(e):
     home = e.tmp / "w0home"
     home.mkdir(parents=True)
     # like lane C's test network: a TEST install, and the workspace + tool home under <real home>/.orch-test
-    # (never the real ~/.orch-tool); the harness marks the demo workspace dev, then the test human proves updates
+    # (never the real ~/.orch-tool); update runs as a plain person command
     real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
     base = real / ".orch-test" / f"e2e-w0-{os.getpid()}"
     ohome = base / "home"
@@ -66,16 +66,9 @@ def w0(e):
     proj = base / "proj"
     rc, out, err = run(["orch", "init"], cwd=proj)
     check(rc == 0 and (proj / ".orch/tickets").is_dir(), f"orch init: {err[-200:]}")
-    rc, out, err = run(["orch", "dev-mark"], cwd=proj)  # the harness marks the demo workspace dev (before any key)
-    check(rc == 0, f"orch dev-mark: {(err or out)[-200:]}")
     skill = proj / ".agents/skills/orch/SKILL.md"
     skill.write_text("tampered\n")
     rc, out, err = run(["orch", "update"], cwd=proj)
-    if rc != 0 and ("dashboard on this computer" in out + err or "Waiting for your click" in out + err):
-        # a person's action (H1): the scripted test human proves it in a dev demo workspace
-        prc, proof, perr = run(["orch", "dev-proof", "update", "orch"], cwd=proj)
-        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof for orch update: {(perr or proof)[-200:]}")
-        rc, out, err = run(["orch", "update", "--proof-stdin"], cwd=proj, input=proof.strip() + "\n")
     check(rc == 0 and skill.read_text() != "tampered\n", f"orch update did not refresh the skill: rc={rc} {err[-200:]}")
     return f"one-liner ({ref}) -> uv fetched, version, init, update ok"
 

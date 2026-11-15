@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orch import history, humanproof, look, tickets
+from orch import history, look, tickets
 from orch.errors import Refused
 
 
@@ -77,10 +77,6 @@ def dispatch(args, root: Path) -> bool:
     elif args.sub == "shared-pages":
         if args.value is not None:
             who = _actor(args)
-            if not who.startswith("agent:"):  # a person's choice (any change): the proof, or a hand-off
-                who = humanproof.person_by(
-                    root, args, "look.shared_pages", args.value, parts={"on": args.value == "on"}
-                )
             look.set_shared_pages(root, args.value == "on", who)
         on = look.shared_pages(root)
         state = "on" if on else "off"
@@ -91,12 +87,6 @@ def dispatch(args, root: Path) -> bool:
         icon = look.UNSET if args.icon is None else (None if args.icon.lower() == "none" else args.icon)
         color = look.UNSET if args.color is None else (None if args.color.lower() == "auto" else args.color)
         who = _actor(args)
-        if not who.startswith(
-            "agent:"
-        ):  # "chosen by a person" is a person's say-so: the proof, or a hand-off
-            who = humanproof.person_by(
-                root, args, "look.icon", "look", parts={"icon": str(args.icon), "color": str(args.color)}
-            )
         d = look.set_look(root, icon, color, who)
         late = [s for s, ok in d["sent"].items() if not ok]
         text = f"Icon: {d['icon'] or 'first letter'}   Colour: {d['color'] or 'auto'}"

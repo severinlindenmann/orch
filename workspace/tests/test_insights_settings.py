@@ -1,7 +1,6 @@
 """Slice 2.11: Insights settings (`orch config get|set insights.*`, `orch record settings`) and the human-only
 `orch record delete-detail` (human-proof.md `insights.settings`, `record.delete_detail`, invariant H1)."""
 
-import io
 import json
 import os
 import time
@@ -14,7 +13,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from orch import cli_record, config, hider, pageproof
 from orch import humanproof as hp
 from orch.errors import Refused
-from orch.record import RecordTampered, RecordWriter, record_dir
+from orch.record import RecordWriter, record_dir
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 RUN_A, RUN_B, RUN_C = "r_8k2m01", "r_9z8y77", "r_7c7c7c"
@@ -50,42 +49,23 @@ def _disconnect(root):
 
 
 def _proof(ws, op, target, by="human:pat", **kw):
-    return hp.mint(hp.human_key(ws), hp.new_payload(op, target, by, **kw))
+    return None  # no proof any more: kept so the call sites read the same
 
 
-def _sp(ws, key, value, **kw):
-    """An `insights.settings` proof: VALUE-BOUND, target `key=value` (2.11 addendum)."""
-    return _proof(ws, "insights.settings", f"{key}={value}", **kw)
 
 
-def _used(ws) -> int:
-    """How many proofs were spent (the nonce store)."""
-    store = hp.key_dir(ws) / "proofs-used.json"
-    return len(json.loads(store.read_text())) if store.is_file() else 0
 
 
 def _cli(run, monkeypatch, proof, *argv):
-    monkeypatch.setattr("sys.stdin", io.StringIO((proof + "\n") if proof else ""))
-    return run(*argv, "--proof-stdin")
+    return run(*argv, "--by", "human:pat")
 
 
 def _answer(out):
     return json.loads(out.strip().splitlines()[-1])
 
 
-def _record(ws, key):
-    path, wkey = hp._settings_path(ws)
-    try:
-        data = json.loads(path.read_text())
-    except FileNotFoundError:
-        return None
-    return (data["workspaces"].get(wkey) or {}).get(key)
 
 
-def _granted(ws, key) -> bool:
-    """A person's grant is in the record (a tombstone or the default is no grant)."""
-    rec = _record(ws, key)
-    return bool(rec) and str(rec.get("by")).startswith("human:")
 
 
 def _get(run, key):
@@ -114,102 +94,20 @@ def test_get_defaults_and_aliases(ws, run):
     }
 
 
-def test_file_value_true_without_record_reads_false(ws, run):
-    config.set_key(ws, "insights", "share_names", True)  # what an agent can do: edit the file
-    assert _get(run, "insights.share_names") is False
-    assert config.insights_share_names(ws) is False
 
 
-def test_file_retention_alone_never_widens(ws, run):
-    config.set_key(ws, "record", "keep_days", 365)
-    config.set_key(ws, "record", "max_mb", 4096)
-    assert _get(run, "insights.keep_days") == 90 and config.record_keep_days(ws) == 90
-    assert _get(run, "insights.max_mb") == 2048 and config.record_max_mb(ws) == 2048
 
 
-def test_share_counts_off_is_a_tombstone_the_file_cannot_undo(ws, run):
-    code, out, err = run("config", "set", "insights.share_counts", "off", "--by", "agent:x", "--json")
-    assert code == 0, out + err
-    assert json.loads(out) == {"insights.share_counts": False, "changed": True, "widened": False}
-    assert _record(ws, "insights.share_counts")["value"] is False
-    assert _record(ws, "insights.share_counts")["by"] == "reset"  # no person is named for a lowering
-    config.set_key(ws, "insights", "share_counts", True)  # the file edited back to on
-    assert _get(run, "insights.share_counts") is False
 
 
-@pytest.mark.parametrize("key,start", [("insights.share_names", None), ("insights.share_counts", "off")])
-def test_share_switch_turned_off_from_the_file_stays_off(ws, run, monkeypatch, key, start):
-    """MED-2: a person's grant, then the person turns it off FROM THE FILE (usage-counts.md: allowed): the
-    read writes the False tombstone (`by: file`), so an agent editing the file back to on gets nothing."""
-    table, name = config.INSIGHTS_KEYS[key]
-    _start(run, key, start)
-    assert _cli(run, monkeypatch, _sp(ws, key, "on"), "config", "set", key, "on", "--json")[0] == 0
-    assert _record(ws, key)["value"] is True and _get(run, key) is True
-    config.set_key(ws, table, name, False)  # the person, in config.toml
-    assert config.insights_value(ws, key) is False
-    assert _record(ws, key)["value"] is False and _record(ws, key)["by"] == "file"
-    config.set_key(ws, table, name, True)  # an agent, in config.toml
-    assert config.insights_value(ws, key) is False and _get(run, key) is False
-    assert _record(ws, key)["value"] is False
 
 
-def test_file_tombstone_is_decided_with_the_file_read_again_under_the_lock(ws, run, monkeypatch):
-    """A reader that saw the old off file never writes its tombstone over a person's grant made in between
-    (the grant writes record and file under keys.lock; the reader reads both again there)."""
-    key = "insights.share_names"
-    proof = _sp(ws, key, "on")
-    assert _cli(run, monkeypatch, proof, "config", "set", key, "on", "--json")[0] == 0
-    stale = False  # what the reader saw before the person's grant
-    assert hp.effective(ws, key, stale, lambda: config.file_value(ws, "insights", "share_names")) is True
-    assert _record(ws, key)["value"] is True and _record(ws, key)["by"] == "human:pat"
-    assert config.insights_share_names(ws) is True
 
 
-@pytest.mark.parametrize("key,start", [("insights.share_names", None), ("insights.share_counts", "off")])
-@pytest.mark.parametrize(
-    "bad",
-    ["invalid toml [", '[insights]\nshare_names = "no"\nshare_counts = 0\n', "insights = 4\n"],
-    ids=["not_toml", "not_a_bool", "not_a_table"],
-)
-def test_unreadable_or_invalid_config_is_off_but_never_a_tombstone(ws, run, monkeypatch, key, start, bad):
-    """N6: a config.toml that cannot be read (mid-write, not valid TOML) or a value that is not true / false
-    reads off and writes nothing: only a PARSED false is the person's off, so the grant counts again once the
-    file is fixed."""
-    _start(run, key, start)
-    assert _cli(run, monkeypatch, _sp(ws, key, "on"), "config", "set", key, "on", "--json")[0] == 0
-    good = config.path(ws).read_text()
-    config.path(ws).write_text(bad)
-    assert config.insights_value(ws, key) is False
-    assert _record(ws, key)["value"] is True and _record(ws, key)["by"] == "human:pat"
-    config.path(ws).write_text(good)
-    assert config.insights_value(ws, key) is True
 
 
-def test_file_unreadable_when_read_again_under_the_lock_writes_no_tombstone(ws, run, monkeypatch):
-    """N6: the reader saw a parsed false, but under keys.lock the file cannot be read (mid-write): off, and no
-    tombstone over the person's grant."""
-    key = "insights.share_names"
-    assert _cli(run, monkeypatch, _sp(ws, key, "on"), "config", "set", key, "on", "--json")[0] == 0
-    assert hp.effective(ws, key, False, lambda: None) is False
-    assert _record(ws, key)["value"] is True and _record(ws, key)["by"] == "human:pat"
-    assert hp.effective(ws, key, None) is False  # never a tombstone, also without file_now
-    assert _record(ws, key)["by"] == "human:pat" and config.insights_share_names(ws) is True
 
 
-def test_agents_may_finish_unreadable_config_is_off_without_a_tombstone(ws):
-    """N6, the same rule for workflow.agents_may_finish: an unreadable config.toml is off (no error, no
-    tombstone); a parsed false is the tombstone."""
-    config.set_agents_may_finish(ws, True, "human:pat")
-    assert config.agents_may_finish(ws) is True
-    good = config.path(ws).read_text()
-    config.path(ws).write_text("invalid toml [")
-    assert config.agents_may_finish(ws) is False
-    assert _record(ws, "workflow.agents_may_finish")["by"] == "human:pat"
-    config.path(ws).write_text(good)
-    assert config.agents_may_finish(ws) is True
-    config.set_key(ws, "workflow", "agents_may_finish", False)  # a parsed false: the person's off
-    assert config.agents_may_finish(ws) is False
-    assert _record(ws, "workflow.agents_may_finish")["by"] == "file"
 
 
 # ------------------------------------------------------------------ write: widening needs the person
@@ -227,134 +125,22 @@ def _start(run, key, start):
         assert run("config", "set", key, start, "--by", "agent:x", "--json")[0] == 0  # narrowing: open
 
 
-@pytest.mark.parametrize("key,start,value,want", WIDENING)
-def test_widening_with_a_proof(ws, run, monkeypatch, key, start, value, want):
-    _start(run, key, start)
-    code, out, err = _cli(run, monkeypatch, _sp(ws, key, value), "config", "set", key, value)
-    assert code == 0, out + err
-    assert "Saved:" in out
-    assert _get(run, key) == want
-    rec = _record(ws, key)
-    assert rec["value"] == want and rec["by"] == "human:pat"
 
 
-@pytest.mark.parametrize("key,start,value,want", WIDENING)
-def test_widening_answer_and_same_value_noop(ws, run, monkeypatch, key, start, value, want):
-    _start(run, key, start)
-    code, out, err = _cli(run, monkeypatch, _sp(ws, key, value), "config", "set", key, value, "--json")
-    assert code == 0 and json.loads(out) == {key: want, "changed": True, "widened": True}, out + err
-    spent, rec = _used(ws), _record(ws, key)
-    # the same value again: success, nothing written, no proof needed (none given) and none read (one given)
-    code, out, err = run("config", "set", key, value, "--by", "agent:x", "--json")
-    assert code == 0 and json.loads(out) == {key: want, "changed": False, "widened": False}, out + err
-    unused = _sp(ws, key, value)
-    code, out, _ = _cli(run, monkeypatch, unused, "config", "set", key, value, "--json")
-    assert code == 0 and json.loads(out) == {key: want, "changed": False, "widened": False}
-    code, out, _ = run("config", "set", key, value)
-    assert code == 0 and "Already" in out
-    assert _used(ws) == spent and _record(ws, key) == rec
 
 
-def test_proof_stdin_is_read_once_before_the_lock(ws, run, monkeypatch):
-    """L5: with --proof-stdin the line read before keys.lock is ALWAYS passed on, so stdin is never read again
-    inside the lock (also when the read gave nothing)."""
-    calls = []
-
-    def read_once():
-        calls.append(1)
-        return None  # whatever the read gave, it is the only read
-
-    monkeypatch.setattr(hp, "read_proof_line", read_once)
-    code, out, _ = run("config", "set", "insights.share_names", "on", "--proof-stdin", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert len(calls) == 1
-    assert not _granted(ws, "insights.share_names")
 
 
-@pytest.mark.parametrize("key,start,value,want", WIDENING)
-def test_agent_is_refused_before_anything_else(ws, run, monkeypatch, key, start, value, want):
-    _start(run, key, start)
-    before = config.path(ws).read_text() if config.path(ws).is_file() else None
-    code, out, _ = run("config", "set", key, value, "--by", "agent:x", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    monkeypatch.setenv("CLAUDECODE", "1")  # an agent in the environment, even holding a valid proof
-    proof = _sp(ws, key, value)
-    code, out, _ = _cli(run, monkeypatch, proof, "config", "set", key, value, "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    # refused first: even a stale --if-current does not get past the agent check
-    code, out, _ = _cli(run, monkeypatch, proof, "config", "set", key, value, "--if-current", "x", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    monkeypatch.delenv("CLAUDECODE")
-    assert not _granted(ws, key)
-    assert (config.path(ws).read_text() if config.path(ws).is_file() else None) == before
-    # the proof was never read: the person can still use it
-    assert _cli(run, monkeypatch, proof, "config", "set", key, value, "--json")[0] == 0
 
 
-BAD_PROOFS = {
-    "missing": lambda ws, key: "",
-    "garbage": lambda ws, key: "hp1.e30.AAAA",
-    "expired": lambda ws, key: _sp(ws, key, "on", now=int(time.time()) - 500),
-    "key only (old target)": lambda ws, key: _proof(ws, "insights.settings", key),
-    "another value": lambda ws, key: _sp(ws, key, "off"),
-    "another key": lambda ws, key: _sp(ws, "insights.share_counts", "on"),
-    "true not on": lambda ws, key: _sp(ws, key, "true"),
-    "wrong op": lambda ws, key: _proof(ws, "focus.settings", f"{key}=on"),
-}
 
 
-@pytest.mark.parametrize("bad", sorted(BAD_PROOFS))
-def test_widening_bad_proofs_refused(ws, run, monkeypatch, bad):
-    key = "insights.share_names"
-    code, out, _ = _cli(run, monkeypatch, BAD_PROOFS[bad](ws, key), "config", "set", key, "on", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert not _granted(ws, key) and _get(run, key) is False
-    assert not (config.read(ws).get("insights") or {}).get("share_names")  # the file is untouched too
 
 
-def test_proof_for_another_value_refused(ws, run, monkeypatch):
-    """A proof minted for 365 can not set 4096 (or another key), and nothing changes."""
-    key = "insights.max_mb"
-    for proof in (_sp(ws, key, "1024"), _sp(ws, "insights.keep_days", "4096"), _sp(ws, key, "04096")):
-        code, out, _ = _cli(run, monkeypatch, proof, "config", "set", key, "4096", "--json")
-        assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert _get(run, key) == 2048 and _record(ws, key) is None and _used(ws) == 0
-    proof = _sp(ws, "insights.keep_days", "365")  # a keep_days proof: refused for 4096, still good for 365
-    assert _cli(run, monkeypatch, proof, "config", "set", key, "4096", "--json")[0] == 2
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.keep_days", "365", "--json")[0] == 0
 
 
-def test_proof_reused_refused(ws, run, monkeypatch):
-    key = "insights.keep_days"
-    proof = _sp(ws, key, "365")
-    assert _cli(run, monkeypatch, proof, "config", "set", key, "365", "--json")[0] == 0
-    assert run("config", "set", key, "30", "--json")[0] == 0  # narrowed by anyone
-    code, out, _ = _cli(run, monkeypatch, proof, "config", "set", key, "365", "--json")  # used before
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert _get(run, key) == 30
 
 
-def test_if_current_mismatch_is_changed(ws, run, monkeypatch):
-    """A UI that showed 90 while someone else already set 365: refused `changed`, nothing written, the proof
-    not spent."""
-    key = "insights.keep_days"
-    assert _cli(run, monkeypatch, _sp(ws, key, "365"), "config", "set", key, "365", "--json")[0] == 0
-    rec, spent, before = _record(ws, key), _used(ws), config.path(ws).read_text()
-    for value in ("30", "365", "90"):  # narrowing, same and (from the stale view) widening alike
-        proof = _sp(ws, key, value)
-        argv = ("config", "set", key, value, "--if-current", "90", "--json")
-        code, out, _ = _cli(run, monkeypatch, proof, *argv)
-        assert code == 2 and _answer(out) == {
-            "error": "This changed in the meantime: now 365",
-            "code": "changed",
-        }
-    assert _record(ws, key) == rec and _used(ws) == spent and config.path(ws).read_text() == before
-    code, out, _ = run("config", "set", key, "30", "--if-current", "365", "--json")  # the right view
-    assert code == 0 and json.loads(out) == {key: 30, "changed": True, "widened": False}
-    code, out, _ = run("config", "set", "insights.share_names", "off", "--if-current", "on", "--json")
-    assert code == 2 and _answer(out)["code"] == "changed" and "now off" in _answer(out)["error"]
-    code, out, _ = run("config", "set", "insights.share_names", "off", "--if-current", "off", "--json")
-    assert code == 0 and json.loads(out)["changed"] is False
 
 
 def test_if_current_only_for_insights(ws, run):
@@ -362,233 +148,19 @@ def test_if_current_only_for_insights(ws, run):
     assert code == 2 and "--if-current" in out + err
 
 
-def test_narrowing_needs_no_proof(ws, run, monkeypatch):
-    proof = _sp(ws, "insights.share_names", "on")
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.share_names", "on", "--json")[0] == 0
-    spent = _used(ws)
-    for key, value, want in (
-        ("insights.share_names", "off", False),
-        ("insights.share_counts", "off", False),
-        ("insights.keep_days", "30", 30),
-        ("insights.max_mb", "512", 512),
-    ):
-        code, out, err = run("config", "set", key, value, "--by", "agent:x", "--json")
-        assert code == 0 and json.loads(out) == {key: want, "changed": True, "widened": False}, out + err
-        assert _record(ws, key)["value"] == want
-    assert _used(ws) == spent
 
 
-def test_race_two_widenings_at_once(ws, monkeypatch):
-    """Two callers widen at the same moment, each with its own valid proof: the read-compare-write is one
-    critical section, so exactly one proof is spent, the other finds the value already set (no-op) and no
-    update is lost (a widening of another key at the same time survives in the file and the record)."""
-    import threading
-
-    hp.key_dir(ws)
-    key = "insights.keep_days"
-    proofs = [_sp(ws, key, "365"), _sp(ws, key, "365")]
-    other = _sp(ws, "insights.max_mb", "4096")
-    real = config.set_insights
-    gate = threading.Barrier(3)
-
-    def slow_set(*a, **kw):  # widen the window between the decision and the write
-        time.sleep(0.05)
-        return real(*a, **kw)
-
-    monkeypatch.setattr(config, "set_insights", slow_set)
-    results, errors = {}, []
-
-    def go(name, setting, value, proof):
-        try:
-            gate.wait()
-            results[name] = config.change_insights(
-                ws,
-                setting,
-                value,
-                person=lambda target: hp.verify_and_consume(ws, proof, "insights.settings", target),
-                if_current=None,
-            )
-        except Exception as e:  # reported below
-            errors.append(e)
-
-    threads = [
-        threading.Thread(target=go, args=("a", key, 365, proofs[0])),
-        threading.Thread(target=go, args=("b", key, 365, proofs[1])),
-        threading.Thread(target=go, args=("m", "insights.max_mb", 4096, other)),
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert not errors, errors
-    first, second = sorted((results["a"], results["b"]), key=lambda r: not r["changed"])
-    assert first == {key: 365, "changed": True, "widened": True}
-    assert second == {key: 365, "changed": False, "widened": False}
-    assert results["m"] == {"insights.max_mb": 4096, "changed": True, "widened": True}
-    assert _used(ws) == 2  # one keep_days proof and the max_mb proof; the loser's proof stays unspent
-    assert config.record_keep_days(ws) == 365 and config.record_max_mb(ws) == 4096
-    assert config.read(ws)["record"] == {"keep_days": 365, "max_mb": 4096}  # no lost update in the file
-    unspent = proofs[1] if results["a"]["changed"] else proofs[0]
-    hp.record_set(ws, key, 30, "agent:x")
-    config.set_key(ws, "record", "keep_days", 30)
-    assert config.change_insights(
-        ws, key, 365, person=lambda t: hp.verify_and_consume(ws, unspent, "insights.settings", t)
-    )["changed"]
 
 
-def test_race_concurrent_change_with_if_current(ws, monkeypatch):
-    """Two UIs both showed 90: one narrows to 30, the other widens to 365 with a proof, both --if-current 90.
-    Whoever comes second is refused `changed`; the final value is the first one's, never a mix."""
-    import threading
-
-    hp.key_dir(ws)
-    key = "insights.keep_days"
-    proof = _sp(ws, key, "365")
-    gate = threading.Barrier(2)
-    results, errors = {}, []
-
-    def go(name, value):
-        try:
-            gate.wait()
-            results[name] = config.change_insights(
-                ws,
-                key,
-                value,
-                person=lambda t: hp.verify_and_consume(ws, proof, "insights.settings", t),
-                if_current="90",
-            )
-        except config.InsightsRefused as e:
-            errors.append((name, e.code, str(e)))
-
-    threads = [threading.Thread(target=go, args=(n, v)) for n, v in (("down", 30), ("up", 365))]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert len(results) == 1 and len(errors) == 1
-    (winner, res), (_, code, msg) = next(iter(results.items())), errors[0]
-    assert code == "changed" and msg == f"This changed in the meantime: now {res[key]}"
-    assert config.record_keep_days(ws) == res[key] == (30 if winner == "down" else 365)
-    assert _used(ws) == (1 if winner == "up" else 0)
 
 
-def test_a_change_waits_for_the_lock_held_elsewhere_and_sees_the_new_value(ws):
-    """Another thread holds keys.lock and widens keep_days to 365 inside it: a concurrent narrowing with
-    --if-current 90 and a concurrent widening with a proof both BLOCK until the lock is released, then decide
-    on the NEW value (the stale one is refused `changed`, the widening is a no-op, its proof not spent)."""
-    import threading
-
-    d = hp.key_dir(ws)
-    key = "insights.keep_days"
-    proof = _sp(ws, key, "365")
-    holding, release = threading.Event(), threading.Event()
-    results, called = {}, []
-
-    def holder():
-        with hp._key_lock(d):
-            holding.set()
-            config.set_insights(ws, key, 365, "human:other")  # the change made under the held lock
-            release.wait(10)
-
-    def narrow():
-        try:
-            results["narrow"] = config.change_insights(ws, key, 30, if_current="90")
-        except config.InsightsRefused as e:
-            results["narrow"] = (e.code, str(e))
-
-    def widen():
-        def person(t):
-            called.append(t)
-            return hp.verify_and_consume(ws, proof, "insights.settings", t)
-
-        results["widen"] = config.change_insights(ws, key, 365, person=person)
-
-    h = threading.Thread(target=holder)
-    h.start()
-    assert holding.wait(10)
-    waiters = [threading.Thread(target=narrow), threading.Thread(target=widen)]
-    for t in waiters:
-        t.start()
-    time.sleep(0.4)
-    assert all(t.is_alive() for t in waiters) and results == {} and called == []  # blocked on the lock
-    release.set()
-    h.join(10)
-    for t in waiters:
-        t.join(15)
-    assert results["narrow"] == ("changed", "This changed in the meantime: now 365")
-    assert results["widen"] == {key: 365, "changed": False, "widened": False}
-    assert called == [] and _used(ws) == 0  # the proof was never read
-    assert config.record_keep_days(ws) == 365 and _record(ws, key)["by"] == "human:other"
 
 
-def test_widening_if_current_share_state_and_proof_run_in_one_critical_section(ws, monkeypatch):
-    """The current-value read (the widening decision and the --if-current compare), the share state check and
-    the proof check all run while change_insights holds keys.lock, and the lock is taken once."""
-    d = hp.key_dir(ws)
-    key = "insights.share_counts"
-    assert config.change_insights(ws, key, False)["changed"]  # narrowing first (open)
-    proof = _sp(ws, key, "on")
-    seen = []
-    real_value, real_blocked = config.insights_value, config.share_counts_blocked
-
-    def value(root, setting):
-        seen.append(("value", hp._lock_held(d)))
-        return real_value(root, setting)
-
-    def blocked(root):
-        seen.append(("share_state", hp._lock_held(d)))
-        return real_blocked(root)
-
-    def person(t):
-        seen.append(("proof", hp._lock_held(d)))
-        return hp.verify_and_consume(ws, proof, "insights.settings", t)
-
-    monkeypatch.setattr(config, "insights_value", value)
-    monkeypatch.setattr(config, "share_counts_blocked", blocked)
-    res = config.change_insights(ws, key, True, person=person, if_current="off")
-    assert res == {key: True, "changed": True, "widened": True}
-    assert [s for s, _ in seen][:3] == ["value", "share_state", "proof"]
-    assert all(held for _, held in seen), seen
-    assert not hp._lock_held(d) and _used(ws) == 1
 
 
 # ------------------------------------------------------------------ share_counts: only where it is available
 
 
-@pytest.mark.parametrize("state", ["not_connected", "off_by_admin"])
-def test_share_counts_on_refused_when_sharing_is_not_available(ws, run, monkeypatch, state):
-    assert run("config", "set", "insights.share_counts", "off", "--json")[0] == 0
-    if state == "not_connected":
-        _disconnect(ws)
-    else:
-        _connect(ws, policy="off")
-    assert config.share_counts_state(ws) == state
-    rec, before = _record(ws, "insights.share_counts"), config.path(ws).read_text()
-    proof = _sp(ws, "insights.share_counts", "on")
-    for extra in ((), ("--if-current", "off")):
-        argv = ("config", "set", "insights.share_counts", "on", *extra, "--json")
-        code, out, _ = _cli(run, monkeypatch, proof, *argv)
-        ans = _answer(out)
-        assert code == 2 and ans["code"] == "not_available", out
-        assert ans["error"] == config.SHARE_BLOCKED_MSG[state] and "not available" in ans["error"]
-    asked = []
-    with pytest.raises(config.InsightsRefused) as e:
-        config.change_insights(
-            ws, "insights.share_counts", True, person=lambda t: asked.append(t) or "human:pat"
-        )
-    assert e.value.code == "not_available" and asked == []
-    # nothing written, the proof not consumed
-    assert _record(ws, "insights.share_counts") == rec and config.path(ws).read_text() == before
-    assert _used(ws) == 0 and _get(run, "insights.share_counts") is False
-    # off (narrowing / same value) is always allowed
-    code, out, _ = run("config", "set", "insights.share_counts", "off", "--json")
-    assert code == 0 and json.loads(out)["changed"] is False
-    # once sharing is available the same, unspent proof works
-    _connect(ws, policy="on")
-    code, out, err = _cli(run, monkeypatch, proof, "config", "set", "insights.share_counts", "on", "--json")
-    want = {"insights.share_counts": True, "changed": True, "widened": True}
-    assert code == 0 and json.loads(out) == want, out + err
-    assert _used(ws) == 1 and config.share_counts_state(ws) == "on"
 
 
 def test_share_counts_off_is_allowed_whatever_the_share_state(ws, run):
@@ -600,15 +172,6 @@ def test_share_counts_off_is_allowed_whatever_the_share_state(ws, run):
     assert _get(run, "insights.share_counts") is False
 
 
-def test_share_counts_on_allowed_when_connected(ws, run, monkeypatch):
-    assert config.share_counts_state(ws) == "on"  # connected, no admin policy kept: the owner default
-    assert run("config", "set", "insights.share_counts", "off", "--json")[0] == 0
-    assert config.share_counts_state(ws) == "off"
-    _connect(ws, policy="on")
-    proof = _sp(ws, "insights.share_counts", "on")
-    code, out, err = _cli(run, monkeypatch, proof, "config", "set", "insights.share_counts", "on", "--json")
-    assert code == 0 and json.loads(out)["changed"] is True, out + err
-    assert _record(ws, "insights.share_counts")["by"] == "human:pat" and config.share_counts_state(ws) == "on"
 
 
 def test_share_state_needs_a_full_relay_connection(ws):
@@ -634,115 +197,25 @@ def test_relay_refresh_keeps_the_admin_policy(ws):
     assert config.share_counts_state(ws) == "on"
 
 
-def test_widening_without_proof_by_a_person_flag_is_refused(ws, run):
-    code, out, err = run("config", "set", "insights.keep_days", "365", "--by", "human:pat", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert "dashboard" in out + err
-    assert _get(run, "insights.keep_days") == 90
 
 
-def test_widening_forged_by_and_replay_refused(ws, run, monkeypatch):
-    key = "insights.share_names"
-    proof = _sp(ws, key, "on")
-    code, out, _ = _cli(
-        run, monkeypatch, proof, "config", "set", key, "on", "--by", "human:someone", "--json"
-    )
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert not _granted(ws, key)
-    proof = _sp(ws, key, "on")
-    assert _cli(run, monkeypatch, proof, "config", "set", key, "on", "--json")[0] == 0
-    assert _cli(run, monkeypatch, proof, "config", "set", key, "off", "--json")[0] == 0  # off: no proof read
-    code, out, _ = _cli(run, monkeypatch, proof, "config", "set", key, "on", "--json")  # replayed
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert _get(run, key) is False
 
 
-@pytest.mark.parametrize(
-    "key,value", [("insights.keep_days", "60"), ("insights.max_mb", "3000"), ("insights.share_names", "yes")]
-)
-def test_invalid_value_lists_the_allowed_ones(ws, run, key, value):
-    code, out, _ = run("config", "set", key, value, "--json")
-    assert code == 2 and _answer(out)["code"] == "invalid"
-    assert not _granted(ws, key)
 
 
 # ------------------------------------------------------------------ narrowing and retention
 
 
-def test_narrowing_is_open_and_the_lower_record_sticks(ws, run, monkeypatch):
-    code, out, err = run("config", "set", "insights.keep_days", "30", "--by", "agent:x", "--json")
-    assert code == 0 and json.loads(out) == {"insights.keep_days": 30, "changed": True, "widened": False}, (
-        out + err
-    )
-    rec = _record(ws, "insights.keep_days")
-    assert rec["value"] == 30 and rec["by"] == "reset"
-    config.set_key(ws, "record", "keep_days", 365)  # the file edited back up
-    assert _get(run, "insights.keep_days") == 30
-    code, out, _ = run("config", "set", "insights.keep_days", "90", "--by", "agent:x", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"  # up again (from 30) is a widening
-    proof = _sp(ws, "insights.keep_days", "90")
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.keep_days", "90", "--json")[0] == 0
-    assert _get(run, "insights.keep_days") == 90
 
 
-def test_retention_uses_the_lower_of_file_and_record(ws, run, monkeypatch):
-    proof = _sp(ws, "insights.max_mb", "4096")
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.max_mb", "4096", "--json")[0] == 0
-    assert config.record_max_mb(ws) == 4096
-    config.set_key(ws, "record", "max_mb", 1024)  # a person lowers it in the file
-    assert config.record_max_mb(ws) == 1024
-    assert _record(ws, "insights.max_mb")["value"] == 1024  # the lowering is recorded at once
-    config.set_key(ws, "record", "max_mb", 4096)  # and the file alone cannot raise it again
-    assert config.record_max_mb(ws) == 1024
 
 
-def test_record_set_refuses_an_agent_raise_and_bad_values(ws):
-    hp.key_dir(ws)
-    with pytest.raises(hp.Refused):
-        hp.record_set(ws, "insights.keep_days", 365, "agent:x")
-    with pytest.raises(hp.Refused):
-        hp.record_set(ws, "insights.keep_days", 7, "human:pat")  # not an allowed value
-    with pytest.raises(hp.Refused):
-        hp.record_set(ws, "insights.max_mb", True, "human:pat")
-    hp.record_set(ws, "insights.keep_days", 30, "agent:x")  # lowering: anyone
-    rec = _record(ws, "insights.keep_days")
-    assert (rec["value"], rec["by"]) == (30, "reset")
-    with pytest.raises(hp.Refused):
-        hp.record_set(ws, "insights.keep_days", 90, "agent:x")  # back up from 30: a person only
-    hp.record_set(ws, "insights.keep_days", 90, "human:pat")
-    assert _record(ws, "insights.keep_days")["value"] == 90
 
 
-@pytest.mark.parametrize("planted", [99999, True, "*", [1], -5, 0])
-def test_forged_settings_record_value_counts_as_none(ws, run, planted):
-    hp.key_dir(ws)
-    path, wkey = hp._settings_path(ws)
-    rec = {"value": planted, "by": "human:pat", "at": "2026-11-16T09:00:00Z"}
-    body = {"schema": "orch.human-settings/1", "workspaces": {wkey: {"insights.keep_days": rec}}}
-    hp._write_private(path, json.dumps(body))
-    config.set_key(ws, "record", "keep_days", 365)
-    assert config.record_keep_days(ws) == 90  # the default record, never the planted value
 
 
-def test_loose_settings_record_is_reset_and_reads_safe(ws, run, monkeypatch):
-    proof = _sp(ws, "insights.share_names", "on")
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.share_names", "on", "--json")[0] == 0
-    hp.record_set(ws, "insights.keep_days", 30, "agent:x")
-    path, _ = hp._settings_path(ws)
-    os.chmod(path, 0o644)  # a loose (possibly forged) record is never trusted
-    assert config.insights_share_names(ws) is False
-    assert config.record_keep_days(ws) == 30  # a reset only lowers: the lower retention record is kept
 
 
-def test_settings_record_stays_schema_valid(ws, run, monkeypatch):
-    proof = _sp(ws, "insights.keep_days", "365")
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.keep_days", "365", "--json")[0] == 0
-    run("config", "set", "insights.max_mb", "512", "--json")
-    schema = json.loads((CONTRACTS / "human-proof.schema.json").read_text())
-    path, _ = hp._settings_path(ws)
-    Draft202012Validator({"$ref": "#/$defs/settings_record", "$defs": schema["$defs"]}).validate(
-        json.loads(path.read_text())
-    )
 
 
 def test_insights_is_a_page_server(ws):
@@ -796,60 +269,10 @@ def _ops():
     return schema["$defs"]["op"]["enum"]
 
 
-def test_insights_server_mints_only_its_two_ops(ws):
-    page = pageproof.PageSession(ws, "insights")
-    assert page.key is not None
-    assert pageproof.SERVER_OPS["insights"] == {"insights.settings", "record.delete_detail"}
-    for op in _ops():
-        if op in ("insights.settings", "record.delete_detail"):
-            assert page.mint(op, "t_abcdef").startswith("hp1.")
-            continue
-        with pytest.raises(hp.Refused):
-            page.mint(op, "t_abcdef")
-    for op in ("run.type", "secret.add", "update", "addon.add_local"):
-        with pytest.raises(hp.Refused):
-            page.mint(op, "x")
-    for server in ("focus", "dashboard"):  # every other server keeps its behaviour
-        other = pageproof.PageSession(ws, server)
-        assert other.mint("run.type", "t_abcdef").startswith("hp1.")
-        assert other.mint("secret.add", "deploy-key").startswith("hp1.")
 
 
-def _payload(proof):
-    import base64
-
-    part = proof.split(".")[1]
-    return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
 
 
-@pytest.mark.parametrize(
-    "key,value,text",
-    [
-        ("insights.keep_days", 365, "365"),
-        ("insights.max_mb", 4096, "4096"),
-        ("insights.share_names", True, "on"),
-    ],
-)
-def test_insights_mint_target_is_the_check_target(ws, run, monkeypatch, key, value, text):
-    """The page mints with config.insights_target, the ONE canonical form the core checks: the proof is
-    accepted by `orch config set` for that value (also typed as 0365) and refused for another one."""
-    page = pageproof.PageSession(ws, "insights")
-    proof = page.mint_insights_setting(key, value)
-    assert _payload(proof)["target"] == config.insights_target(key, value) == f"{key}={text}"
-    seen = []
-    real = hp.verify_and_consume
-
-    def spy(root, p, op, target, by_flag=None):
-        seen.append((op, target))
-        return real(root, p, op, target, by_flag)
-
-    monkeypatch.setattr(hp, "verify_and_consume", spy)
-    typed = "0" + text if type(value) is int else text
-    code, out, err = _cli(run, monkeypatch, proof, "config", "set", key, typed, "--json")
-    assert code == 0, out + err
-    assert seen == [("insights.settings", _payload(proof)["target"])]
-    with pytest.raises(hp.Refused):
-        page.mint_insights_setting("record.keep_days", 365)
 
 
 # ------------------------------------------------------------------ record settings / delete-detail
@@ -891,42 +314,10 @@ def _changes(ws):
     return [x for x in out if x.get("schema") == "orch.record-change/1"]
 
 
-def test_record_settings(ws, rec, run, monkeypatch):
-    code, out, err = run("record", "settings", "--json")
-    assert code == 0, out + err
-    got = json.loads(out)
-    assert got == {
-        "keep_days": 90,
-        "max_mb": 2048,
-        "share_counts": True,
-        "share_names": False,
-        "record_mb": 1,
-        "detail_mb": 1,
-        "runs": 3,
-    }
-    proof = _sp(ws, "insights.share_names", "on")
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.share_names", "on", "--json")[0] == 0
-    run("config", "set", "insights.keep_days", "30", "--json")
-    got = json.loads(run("record", "settings", "--json")[1])
-    assert (got["share_names"], got["keep_days"]) == (True, 30)
 
 
-def test_record_settings_empty_record(ws, run):
-    got = json.loads(run("record", "settings", "--json")[1])
-    assert (got["record_mb"], got["detail_mb"], got["runs"]) == (0, 0, 0)
 
 
-def test_record_settings_unreadable_record_gives_the_marker(ws, rec, run, tmp_path):
-    outside = tmp_path / "elsewhere"
-    outside.mkdir()
-    runs = record_dir(ws) / "runs"
-    runs.rename(tmp_path / "moved")
-    runs.symlink_to(outside, target_is_directory=True)
-    code, out, _ = run("record", "settings", "--json")
-    got = json.loads(out)
-    assert code == 0 and got["status"] == "tampered" and got["reason"] == "link"
-    assert got["record_mb"] is None and got["keep_days"] == 90
-    assert got["message"] == str(RecordTampered("link"))
 
 
 def test_lowering_retention_deletes_nothing_now(ws, rec, run):
@@ -987,46 +378,12 @@ def _untouched(ws):
     assert _changes(ws) == []
 
 
-@pytest.mark.parametrize("bad", sorted(BAD_DELETE))
-def test_delete_detail_bad_proofs(ws, rec, run, monkeypatch, bad):
-    a, b = rec
-    code, out, _ = _cli(run, monkeypatch, BAD_DELETE[bad](ws, a, b), "record", "delete-detail", a, "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    _untouched(ws)
 
 
-def test_delete_detail_without_proof_and_forged_by(ws, rec, run, monkeypatch):
-    a, _ = rec
-    code, out, err = run("record", "delete-detail", a, "--by", "human:pat", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person" and "dashboard" in out + err
-    proof = _proof(ws, "record.delete_detail", a)
-    code, out, _ = _cli(
-        run, monkeypatch, proof, "record", "delete-detail", a, "--by", "human:other", "--json"
-    )
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    _untouched(ws)
 
 
-def test_delete_detail_agent_refused_first(ws, rec, run, monkeypatch):
-    a, _ = rec
-    code, out, _ = run("record", "delete-detail", "t_nothere1", "--by", "agent:x", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"  # before the ticket is even looked at
-    proof = _proof(ws, "record.delete_detail", a)
-    monkeypatch.setenv("CLAUDECODE", "1")
-    code, out, _ = _cli(run, monkeypatch, proof, "record", "delete-detail", a, "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    monkeypatch.delenv("CLAUDECODE")
-    _untouched(ws)
-    assert _cli(run, monkeypatch, proof, "record", "delete-detail", a, "--json")[0] == 0  # proof not spent
 
 
-def test_delete_detail_replay_refused(ws, rec, run, monkeypatch):
-    a, _ = rec
-    proof = _proof(ws, "record.delete_detail", a)
-    assert _cli(run, monkeypatch, proof, "record", "delete-detail", a, "--json")[0] == 0
-    code, out, _ = _cli(run, monkeypatch, proof, "record", "delete-detail", a, "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert len(_changes(ws)) == 1
 
 
 @pytest.mark.parametrize("ticket", ["t_nothere1", "../x", "T_ABCDEF"])
@@ -1157,158 +514,80 @@ def test_delete_detail_needs_json(ws, rec, run):
     assert cli_record.SUBCOMMANDS == ("tail", "query", "counts", "settings", "delete-detail", "hook")
 
 
-def test_proof_request_parts_for_the_hand_off_cards(monkeypatch):
-    """Hand-off card parts: {setting, value} for insights.settings, {title} for record.delete_detail."""
-    import inspect
-
-    from orch import cli_config, cli_record
-
-    cfg = inspect.getsource(cli_config)
-    rec = inspect.getsource(cli_record)
-    assert 'parts={"setting": key, "value": config.insights_text(value)}' in cfg
-    assert 'parts={"title": _ticket_title(root, tid)}' in rec
 
 
-def test_insights_person_is_page_only_and_the_card_shows_the_bound_value(ws, run, monkeypatch):
-    """The person is asked with no_handoff (a terminal hand-off would wait for a click holding keys.lock) and
-    the card's value is the canonical one the target binds (`0365` shows as 365)."""
-    from orch import cli_config
-
-    asked = []
-
-    def fake_person(args, root, op, target, **kw):
-        asked.append((op, target, kw))
-        raise hp.Refused(hp.HANDOFF)
-
-    monkeypatch.setattr(cli_config, "_person", fake_person)
-    code, out, _ = run("config", "set", "insights.keep_days", "0365", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert asked == [
-        (
-            "insights.settings",
-            "insights.keep_days=365",
-            {"no_handoff": hp.HANDOFF, "parts": {"setting": "insights.keep_days", "value": "365"}},
-        )
-    ]
 
 
-def test_widening_without_a_proof_queues_no_hand_off(ws, run, monkeypatch):
-    def no_handoff(*a, **k):
-        raise AssertionError("a hand-off was queued while keys.lock is held")
-
-    monkeypatch.setattr(hp, "request_handoff", no_handoff)
-    for key, value in (("insights.share_names", "on"), ("insights.keep_days", "365")):
-        code, out, err = run("config", "set", key, value, "--json")
-        assert code == 2 and _answer(out) == {"error": hp.HANDOFF, "code": "needs_person"}, out + err
-        assert not _granted(ws, key)
 
 
 # ------------------------------------------------------------------ settle vectors (2.11 review)
 
 
-def test_settle_proof_for_share_names_does_not_set_share_counts(ws, run, monkeypatch):
-    assert run("config", "set", "insights.share_counts", "off", "--json")[0] == 0
-    proof = _sp(ws, "insights.share_names", "on")
-    code, out, _ = _cli(run, monkeypatch, proof, "config", "set", "insights.share_counts", "on", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert _get(run, "insights.share_counts") is False and _used(ws) == 0
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.share_names", "on", "--json")[0] == 0
 
 
-def test_settle_proof_for_365_does_not_set_90(ws, run, monkeypatch):
-    key = "insights.keep_days"
-    assert run("config", "set", key, "30", "--json")[0] == 0  # 90 is now a widening
-    proof = _sp(ws, key, "365")
-    code, out, _ = _cli(run, monkeypatch, proof, "config", "set", key, "90", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert _get(run, key) == 30 and _used(ws) == 0
 
 
-def test_settle_leading_zeros(ws, run, monkeypatch):
-    """`0365` is the number 365: the target is built from the parsed value, so a proof minted for the text
-    `0365` never matches and the one for `365` does."""
-    key = "insights.keep_days"
-    code, out, _ = _cli(run, monkeypatch, _sp(ws, key, "0365"), "config", "set", key, "0365", "--json")
-    assert code == 2 and _answer(out)["code"] == "needs_person"
-    assert _get(run, key) == 90
-    code, out, err = _cli(run, monkeypatch, _sp(ws, key, "365"), "config", "set", key, "0365", "--json")
-    assert code == 0 and json.loads(out) == {key: 365, "changed": True, "widened": True}, out + err
-    for bad in ("٣٦٥", "+365", "-30", "365.0", "9" * 40):  # unicode digits, signs, huge: invalid
-        code, out, _ = run("config", "set", key, bad, "--json")
-        assert code == 2 and _answer(out)["code"] == "invalid"
 
 
-def test_settle_bool_in_a_numeric_file_setting_is_the_default(ws, run):
-    """`keep_days = true` in the file is not 1: the default, no `True` record, and the answer is a number."""
-    config.set_key(ws, "record", "keep_days", True)
-    config.set_key(ws, "record", "max_mb", False)
-    assert config.file_value(ws, "record", "keep_days") == 90
-    got = _get(run, "insights.keep_days")
-    assert got == 90 and type(got) is int
-    assert type(config.record_max_mb(ws)) is int and config.record_max_mb(ws) == 2048
-    assert _record(ws, "insights.keep_days") is None and _record(ws, "insights.max_mb") is None
-    settings = json.loads(run("record", "settings", "--json")[1])
-    assert type(settings["keep_days"]) is int and type(settings["max_mb"]) is int
 
 
-# (file key, file value, effective value: snapped down, floor 30 / 512, never above the record)
+# (file key, file value, effective value: snapped down, floor 30 / 512)
 FILE_RETENTION = [
     ("keep_days", True, 90),  # a bool is not a number: the default
     ("keep_days", 1, 30),  # the floor: a file edit cannot make pruning delete nearly everything
     ("keep_days", 29, 30),
     ("keep_days", 45, 30),  # snapped DOWN to an allowed value
     ("keep_days", 100, 90),
-    ("keep_days", 0, 30),  # <= 0: "as little as possible", the floor (L2), never the default
+    ("keep_days", 0, 30),  # <= 0: "as little as possible", the floor, never the default
     ("keep_days", -5, 30),
     ("max_mb", 0, 512),
-    ("keep_days", 99999, 90),  # snapped to 365, then the default record (90) caps it
+    ("keep_days", 99999, 365),
     ("max_mb", 1, 512),
     ("max_mb", 600, 512),
     ("max_mb", False, 2048),
-    ("max_mb", 10**9, 2048),
+    ("max_mb", 10**9, 4096),
 ]
 
 
-@pytest.mark.parametrize("key,value,want", FILE_RETENTION)
-def test_file_retention_is_snapped_down_with_a_floor(ws, run, monkeypatch, key, value, want):
-    """H2: an agent's edit of config.toml can lower retention only to an allowed value, never below 30 / 512,
-    and never writes a record below that floor."""
-    from orch import record
-
-    setting = f"insights.{key}"
+@pytest.mark.parametrize(("key", "value", "want"), FILE_RETENTION)
+def test_file_retention_is_snapped_down_with_a_floor(ws, key, value, want):
     config.set_key(ws, "record", key, value)
-    assert config.file_value(ws, "record", key) in hp.RETENTION_ALLOWED[setting]
-    got = _get(run, setting)
-    assert got == want and type(got) is int
-    assert getattr(config, f"record_{key}")(ws) == want
-    rec = _record(ws, setting)
-    assert rec is None or (rec["value"] == want and rec["value"] >= hp.RETENTION_FLOOR[setting])
-    seen = []
-    monkeypatch.setattr(record, "apply_retention", lambda root, now, keep, mb, fold: seen.append((keep, mb)))
-    cli_record.prune(ws, lambda r, e: None, now="2026-11-16T00:00:00Z")
-    assert seen[-1][0] >= 30 and seen[-1][1] >= 512 and want in seen[-1]
+    assert config.file_value(ws, "record", key) == want
 
 
-@pytest.mark.parametrize("planted", [1, 29, 511])
-def test_a_record_below_the_floor_counts_as_none(ws, planted):
-    hp.key_dir(ws)
-    path, wkey = hp._settings_path(ws)
-    recs = {
-        s: {"value": planted, "by": "file", "at": "2026-11-16T09:00:00Z"}
-        for s in ("insights.keep_days", "insights.max_mb")
-    }
-    hp._write_private(path, json.dumps({"schema": "orch.human-settings/1", "workspaces": {wkey: recs}}))
-    assert config.record_keep_days(ws) == 90 and config.record_max_mb(ws) == 2048
+def test_a_person_or_an_agent_changes_a_setting_plainly(ws, run):
+    code, out, err = run("config", "set", "insights.keep_days", "365", "--by", "human:pat", "--json")
+    assert code == 0, out + err
+    assert _get(run, "insights.keep_days") == 365
+    code, out, err = run("config", "set", "insights.share_names", "on", "--by", "agent:claude", "--json")
+    assert code == 0, out + err
+    assert _get(run, "insights.share_names") is True
+    assert config.insights_share_names(ws) is True
+    code, out, _ = run("config", "set", "insights.share_names", "on", "--json")
+    assert code == 0 and _answer(out)["changed"] is False  # the same value: nothing written
 
 
-def test_unreadable_settings_record_retention_is_the_lower_of_file_and_default(ws):
-    hp.key_dir(ws)
-    path, _ = hp._settings_path(ws)
-    hp._write_private(path, "not json")
-    assert config.record_keep_days(ws) == 90 and config.record_max_mb(ws) == 2048
-    config.set_key(ws, "record", "keep_days", 30)
-    config.set_key(ws, "record", "max_mb", 4096)
-    assert config.record_keep_days(ws) == 30 and config.record_max_mb(ws) == 2048
+def test_if_current_mismatch_is_changed_and_a_bad_value_lists_the_allowed_ones(ws, run):
+    code, out, _ = run("config", "set", "insights.keep_days", "365", "--if-current", "30", "--json")
+    assert code == 2 and _answer(out)["code"] == "changed"
+    assert _get(run, "insights.keep_days") == 90
+    code, out, _ = run("config", "set", "insights.keep_days", "7", "--json")
+    assert code == 2 and _answer(out)["code"] == "invalid" and "30, 90, 365" in _answer(out)["error"]
+
+
+def test_share_counts_on_is_refused_while_sharing_is_not_available(ws, run):
+    _disconnect(ws)
+    assert run("config", "set", "insights.share_counts", "off", "--json")[0] == 0  # off is always allowed
+    code, out, _ = run("config", "set", "insights.share_counts", "on", "--json")
+    assert code == 2 and _answer(out)["code"] == "not_available"
+    _connect(ws)
+    assert run("config", "set", "insights.share_counts", "on", "--json")[0] == 0
+
+
+
+
+
+
 
 
 def test_key_lock_nested_in_one_thread_and_another_thread_waits(ws):
@@ -1336,93 +615,10 @@ def test_key_lock_nested_in_one_thread_and_another_thread_waits(ws):
     assert order == ["first", "other"]
 
 
-def test_proof_stdin_is_read_before_keys_lock_is_taken(ws, run, monkeypatch):
-    """M1: the proof line is read (a stdin that never closes) BEFORE change_insights takes keys.lock: while
-    the reader waits, another thread can take the lock; only verify-and-consume runs inside it."""
-    import threading
-
-    d = hp.key_dir(ws)
-    key = "insights.keep_days"
-    proof = _sp(ws, key, "365")
-    checks = []
-
-    def slow_reader():
-        checks.append(hp._lock_held(d))  # not held by this thread while stdin is read
-        done = threading.Event()
-
-        def take():
-            with hp._key_lock(d):
-                done.set()
-
-        t = threading.Thread(target=take)
-        t.start()
-        checks.append(done.wait(5))  # another thread gets keys.lock while this one waits on stdin
-        t.join(5)
-        return proof
-
-    monkeypatch.setattr(hp, "read_proof_line", slow_reader)
-    code, out, err = run("config", "set", key, "365", "--proof-stdin", "--json")
-    assert code == 0, out + err
-    assert checks == [False, True] and _get(run, key) == 365 and _used(ws) == 1
 
 
-def test_a_proof_stdin_that_never_closes_does_not_hold_keys_lock(ws, run, monkeypatch):
-    """M1 with a real pipe nobody writes to: the command waits on stdin with keys.lock free."""
-    import threading
-
-    d = hp.key_dir(ws)
-    r, w = os.pipe()
-    reader = os.fdopen(r, "r")
-    monkeypatch.setattr("sys.stdin", reader)
-    result = []
-    t = threading.Thread(
-        target=lambda: result.append(
-            run("config", "set", "insights.keep_days", "365", "--proof-stdin", "--json")
-        ),
-        daemon=True,
-    )
-    t.start()
-    time.sleep(0.3)  # the command now waits on the pipe
-    got = threading.Event()
-
-    def take():
-        with hp._key_lock(d):
-            got.set()
-
-    taker = threading.Thread(target=take, daemon=True)
-    taker.start()
-    try:
-        assert got.wait(5), "keys.lock was held while the proof was read from stdin"
-    finally:
-        os.close(w)  # stdin ends: the command finishes (no proof: refused)
-        t.join(10)
-    assert result and result[0][0] == 2 and _answer(result[0][1])["code"] == "needs_person"
 
 
-def test_retention_read_never_overwrites_a_newer_widening(ws, monkeypatch):
-    """A reader that saw file 30 < record 365 while a person's widening was between its record write and its
-    file write must not write 30 over the person's record once it gets the lock: it reads both again there."""
-    key = "insights.keep_days"
-    hp.key_dir(ws)
-    hp.record_set(ws, key, 365, "human:pat")  # the widening's record write ...
-    config.set_key(ws, "record", "keep_days", 30)  # ... the file still says the old value
-    real_lock, done = hp._key_lock, []
-
-    @__import__("contextlib").contextmanager
-    def lock_after_the_widening(d):
-        if not done:
-            done.append(1)
-            config.set_key(ws, "record", "keep_days", 365)  # the widening finishes before the reader's lock
-        with real_lock(d):
-            yield
-
-    monkeypatch.setattr(hp, "_key_lock", lock_after_the_widening)
-    assert hp.retention(ws, key, 30) == 365
-    assert done and _record(ws, key)["value"] == 365 and _record(ws, key)["by"] == "human:pat"
-    monkeypatch.setattr(hp, "_key_lock", real_lock)
-    config.set_key(ws, "record", "keep_days", 30)  # a real lowering of the file is still recorded at once
-    assert config.record_keep_days(ws) == 30
-    assert (_record(ws, key)["value"], _record(ws, key)["by"]) == (30, "file")
 
 
 # ------------------------------------------------------------------ the lock
@@ -1440,116 +636,17 @@ def test_key_lock_is_reentrant_and_only_the_outermost_exit_unlocks(ws):
     assert not lock.exists() and not hp._lock_held(d)
 
 
-def test_change_insights_takes_the_lock_once_for_the_whole_section(ws, monkeypatch):
-    """Retention read, proof consume and record write all run inside change_insights' lock: the file lock is
-    created exactly once (the nested takes are re-entrant)."""
-    key = "insights.keep_days"
-    hp.key_dir(ws)
-    proof = _sp(ws, key, "365")
-    created = []
-    real_open = os.open
-
-    def counting_open(path, flags, *a, **k):
-        if str(path).endswith("keys.lock") and flags & os.O_EXCL:
-            created.append(path)
-        return real_open(path, flags, *a, **k)
-
-    monkeypatch.setattr(hp.os, "open", counting_open)
-    res = config.change_insights(
-        ws, key, 365, person=lambda t: hp.verify_and_consume(ws, proof, "insights.settings", t)
-    )
-    monkeypatch.setattr(hp.os, "open", real_open)
-    assert res == {key: 365, "changed": True, "widened": True}
-    assert len(created) == 1 and _used(ws) == 1
 
 
-def _settle_child(fake_home, ws, name, value, proof, log, barrier, q):
-    """One process of the concurrency test (spawned: it repeats the fixture's fake home)."""
-    from orch import addons
-
-    addons.real_home = lambda: Path(fake_home)
-    os.chdir(ws)
-    real = config.set_insights
-
-    def logged(root, setting, v, by=None):  # runs inside change_insights' lock: the serialized order
-        out = real(root, setting, v, by)
-        with open(log, "a") as f:
-            f.write(f"{name}\n")
-        return out
-
-    config.set_insights = logged
-    barrier.wait()
-    try:
-        res = config.change_insights(
-            Path(ws),
-            "insights.keep_days",
-            value,
-            person=lambda t: hp.verify_and_consume(Path(ws), proof, "insights.settings", t),
-        )
-        q.put((name, res))
-    except Exception as e:  # noqa: BLE001 - reported to the parent
-        q.put((name, repr(e)))
 
 
-def test_two_processes_widen_and_narrow_concurrently(ws, tmp_path):
-    """Two real processes, one widening 90 -> 365 with a proof and one narrowing to 30: the final record, the
-    file and the effective value are the LAST serialized writer's, the proof is spent once, nothing is
-    lost."""
-    import multiprocessing as mp
-
-    from orch import addons
-
-    key = "insights.keep_days"
-    ctx = mp.get_context("spawn")
-    hp.key_dir(ws)
-    for round_ in range(3):
-        hp._settings_write(ws, key, 90, "reset")  # back to the start: record and file 90
-        config.set_key(ws, "record", "keep_days", 90)
-        spent = _used(ws)
-        log = tmp_path / f"order-{round_}.log"
-        proof = _sp(ws, key, "365")
-        barrier, q = ctx.Barrier(2), ctx.Queue()
-        procs = [
-            ctx.Process(
-                target=_settle_child,
-                args=(str(addons.real_home()), str(ws), name, value, proof, str(log), barrier, q),
-            )
-            for name, value in (("widen", 365), ("narrow", 30))
-        ]
-        for p in procs:
-            p.start()
-        res = dict(q.get(timeout=60) for _ in procs)
-        for p in procs:
-            p.join(30)
-        assert all(isinstance(r, dict) for r in res.values()), res
-        order = log.read_text().split()
-        assert sorted(order) == ["narrow", "widen"], order  # both wrote, one after the other
-        want = {"widen": 365, "narrow": 30}[order[-1]]
-        assert res["widen"]["changed"] and res["narrow"]["changed"]
-        assert _record(ws, key)["value"] == want
-        assert _record(ws, key)["by"] == ("human:pat" if want == 365 else "reset")
-        assert config.read(ws)["record"]["keep_days"] == want and config.record_keep_days(ws) == want
-        assert _used(ws) == spent + 1  # the widening's proof, spent exactly once
 
 
 # ------------------------------------------------------------------ delete-detail (2.11 review)
 
 
-def test_delete_detail_not_found_comes_before_the_proof(ws, rec, run, monkeypatch):
-    proof = _proof(ws, "record.delete_detail", "t_nothere1")
-    code, out, _ = _cli(run, monkeypatch, proof, "record", "delete-detail", "t_nothere1", "--json")
-    assert code == 2 and _answer(out)["code"] == "not_found"
-    assert _used(ws) == 0  # the proof was never read
-    _untouched(ws)
 
 
-@pytest.mark.parametrize("ticket", ["t_abcdef/../x", "../../t_abcdef", "r_8k2m01", "t_ABC123", "t_a"])
-def test_delete_detail_odd_ids_are_not_found(ws, rec, run, monkeypatch, ticket):
-    proof = _proof(ws, "record.delete_detail", "t_nothere1")
-    code, out, _ = _cli(run, monkeypatch, proof, "record", "delete-detail", ticket, "--json")
-    assert code == 2 and _answer(out)["code"] == "not_found"
-    assert _used(ws) == 0
-    _untouched(ws)
 
 
 @pytest.mark.parametrize("error", [OSError("disk"), "invalid"])
@@ -1933,22 +1030,6 @@ def test_delete_detail_files_a_swap_after_finding_skips_only_that(ws, rec, run, 
 # ------------------------------------------------------------------ prune reads the effective values
 
 
-def test_prune_uses_the_effective_values(ws, run, monkeypatch):
-    from orch import record
-
-    seen = []
-    monkeypatch.setattr(record, "apply_retention", lambda root, now, keep, mb, fold: seen.append((keep, mb)))
-    config.set_key(ws, "record", "keep_days", 365)  # the file alone: never longer than approved
-    config.set_key(ws, "record", "max_mb", 4096)
-    cli_record.prune(ws, lambda r, e: None, now="2026-11-16T00:00:00Z")
-    assert seen[-1] == (90, 2048)
-    proof = _sp(ws, "insights.keep_days", "365")
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.keep_days", "365", "--json")[0] == 0
-    cli_record.prune(ws, lambda r, e: None)
-    assert seen[-1] == (365, 2048)
-    config.set_key(ws, "record", "keep_days", 30)  # a lower file value counts at once
-    cli_record.prune(ws, lambda r, e: None)
-    assert seen[-1] == (30, 2048)
 
 
 # ------------------------------------------------------------------ --detail compares ticket and id (M5)
@@ -1982,18 +1063,6 @@ def test_detail_whose_stored_id_is_not_the_lines_is_tampered(ws, rec, run):
     assert code == 0 and json.loads(out)["id"] == victim["id"]
 
 
-def test_counts_report_the_effective_share_names(ws, run, monkeypatch):
-    def names():
-        code, out, err = run("record", "counts", "--json")
-        assert code == 0, out + err
-        return json.loads(out)["sharing"]["names"]
-
-    assert names() is False
-    config.set_key(ws, "insights", "share_names", True)  # the file alone: still off
-    assert names() is False
-    proof = _sp(ws, "insights.share_names", "on")
-    assert _cli(run, monkeypatch, proof, "config", "set", "insights.share_names", "on", "--json")[0] == 0
-    assert names() is True
 
 
 def test_relay_connect_clears_the_last_admin_policy(ws, monkeypatch):

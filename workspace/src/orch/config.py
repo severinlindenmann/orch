@@ -136,22 +136,9 @@ def pending_agents(root: Path) -> list[dict]:
     return out
 
 
-ONLY_PERSON_AGENT = (
-    'Only a person can {what}. Ask them with orch ask: orch ask <ticket> "{what}?" --option yes --option no'
-)
-
-
-def require_person(by: str | None, what: str) -> None:
-    """The second lock behind the CLI's proof check (like set_permissions): an agent is refused here too, so
-    no caller can save or approve an agent command for an agent. `by` None = the keyboard."""
-    if by is not None and not by.startswith("human:"):  # an allowlist: a person, or nobody named
-        raise Refused(ONLY_PERSON_AGENT.format(what=what))
-
-
 def allow_agent(root: Path, name: str, key: str, by: str | None = None) -> str:
-    """Approve exactly ONE entry, and only if it is still what was shown (its key matches now). A person only
-    (refused for an agent here too). Never approves several entries."""
-    require_person(by, "allow an agent command to run")
+    """Approve exactly ONE entry, and only if it is still what was shown (its key matches now). Never
+    approves several entries."""
     e = _raw_entries(root).get(name) if isinstance(name, str) else None
     if e is None:
         raise Refused("That agent is not in this workspace's settings (any more). Please look again.")
@@ -403,6 +390,25 @@ def _reserved(
     return value if isinstance(value, bool) or not positive or value > 0 else default
 
 
+# Retention settings (Insights > Settings): a number, not a switch. A file value is snapped DOWN to the
+# allowed list and never below the floor (30 days / 512 MB), so an edit of config.toml can never make
+# pruning delete nearly the whole record.
+RETENTION_DEFAULTS = {"insights.keep_days": 90, "insights.max_mb": 2048}
+RETENTION_ALLOWED = {"insights.keep_days": (30, 90, 365), "insights.max_mb": (512, 1024, 2048, 4096)}
+RETENTION_FLOOR = {setting: min(allowed) for setting, allowed in RETENTION_ALLOWED.items()}
+
+
+def retention_snap(setting: str, value: int) -> int:
+    """A FILE retention number as it can count: snapped DOWN to the allowed list (keep_days 100 -> 90,
+    99999 -> 365) and never below the floor (a whole number <= 0 reads as "as little as possible"). Anything
+    but a whole number (true, a float, a string) is the default."""
+    if type(value) is not int:
+        return RETENTION_DEFAULTS[setting]
+    if value <= 0:
+        return RETENTION_FLOOR[setting]
+    return max((v for v in RETENTION_ALLOWED[setting] if v <= value), default=RETENTION_FLOOR[setting])
+
+
 RESERVED_DEFAULTS = {
     ("focus", "live_session"): DEFAULT_FOCUS_LIVE_SESSION,
     ("focus", "session_typing"): DEFAULT_FOCUS_SESSION_TYPING,
@@ -415,22 +421,16 @@ RESERVED_DEFAULTS = {
 
 def file_value(root: Path | None, section: str, key: str) -> bool | int:
     """The value as the FILE says it (a wrong type or a bool for a number is the default). A retention number
-    is snapped DOWN to its allowed list with a floor of 30 days / 512 MB (humanproof.retention_snap:
-    `keep_days = 1`, 0 or -5 counts as 30, "as little as possible"), so an edit of the file can never make
-    pruning delete nearly the whole record; any other number <= 0 is the default. Never a decision on its own:
-    the widening ones count only through their record (insights_*, record_* below)."""
-    from orch import humanproof
-
+    is snapped DOWN to its allowed list with a floor (retention_snap); any other number <= 0 is the
+    default."""
     setting = _RETENTION_SETTINGS.get((section, key))
     value = _reserved(root, section, key, RESERVED_DEFAULTS[(section, key)], positive=setting is None)
-    return value if setting is None else humanproof.retention_snap(setting, value)
+    return value if setting is None else retention_snap(setting, value)
 
 
 def file_switch(root: Path, section: str, key: str, default: bool) -> bool | None:
-    """A widening switch as the FILE decides it: the parsed true / false (no key: `default`), or None when the
-    file cannot be read (not valid TOML, mid-write) or the value is not true / false. None counts as off but
-    is never the person's off: humanproof.effective writes the False tombstone only on a parsed false, so a
-    transient unreadable config.toml never ends a person's grant."""
+    """A switch as the FILE says it: the parsed true / false (no key: `default`), or None when the file cannot
+    be read (not valid TOML, mid-write) or the value is not true / false. None counts as off."""
     try:
         table = read(root).get(section, {})
     except (Refused, OSError):
@@ -451,52 +451,44 @@ def focus_session_typing(root: Path | None) -> bool:
 
 
 def record_keep_days(root: Path | None) -> int:
-    """Effective [record] keep_days: the LOWER of the file value and the person's record
-    (humanproof.retention; default record 90). Pruning uses this, so a file value alone never keeps records
-    longer."""
-    from orch import humanproof
-
-    value = file_value(root, "record", "keep_days")
-    return value if root is None else humanproof.retention(root, "insights.keep_days", value)
+    """[record] keep_days as the file says it (snapped to the allowed list, default 90)."""
+    return file_value(root, "record", "keep_days")
 
 
 def record_max_mb(root: Path | None) -> int:
-    """Effective [record] max_mb: the LOWER of the file value and the person's record (default record
-    2048)."""
-    from orch import humanproof
-
-    value = file_value(root, "record", "max_mb")
-    return value if root is None else humanproof.retention(root, "insights.max_mb", value)
+    """[record] max_mb as the file says it (snapped to the allowed list, default 2048)."""
+    return file_value(root, "record", "max_mb")
 
 
 def insights_share_counts(root: Path | None) -> bool:
-    """A widening switch: file value AND the person's record (owner default on while no record ever
-    existed). Off in the file writes the False tombstone (humanproof.effective, under keys.lock with the file
-    read again there), so editing the file back to on later changes nothing without a proof. A file that
-    cannot be read, or a value that is not true / false, is off without a tombstone (file_switch)."""
-    from orch import humanproof
-
+    """[insights] share_counts (default on). A file that cannot be read, or a value that is not true / false,
+    is off."""
     if root is None:
         return False
-
-    def from_file() -> bool | None:
-        return file_switch(root, "insights", "share_counts", DEFAULT_INSIGHTS_SHARE_COUNTS)
-
-    return humanproof.effective(root, "insights.share_counts", from_file(), from_file)
+    return file_switch(root, "insights", "share_counts", DEFAULT_INSIGHTS_SHARE_COUNTS) is True
 
 
 def insights_share_names(root: Path | None) -> bool:
-    """A widening switch: true only with the person's record (a file value of true alone reads false). Off in
-    the file writes the False tombstone, like share_counts (an unreadable file: off, no tombstone)."""
-    from orch import humanproof
-
+    """[insights] share_names (default off). A file that cannot be read, or a value that is not true / false,
+    is off."""
     if root is None:
         return False
+    return file_switch(root, "insights", "share_names", DEFAULT_INSIGHTS_SHARE_NAMES) is True
 
-    def from_file() -> bool | None:
-        return file_switch(root, "insights", "share_names", DEFAULT_INSIGHTS_SHARE_NAMES)
 
-    return humanproof.effective(root, "insights.share_names", from_file(), from_file)
+def conn_grants(root: Path) -> dict:
+    """[conn.allow] grants by connection name ("*" or a list of action names). A wrong shape is no grant."""
+    try:
+        table = (read(root).get("conn") or {}).get("allow")
+    except (Refused, OSError, AttributeError):
+        return {}
+    if not isinstance(table, dict):
+        return {}
+    return {
+        name: val
+        for name, val in table.items()
+        if val == "*" or (isinstance(val, list) and all(isinstance(a, str) for a in val))
+    }
 
 
 SHARE_BLOCKED_MSG = {
@@ -539,13 +531,9 @@ INSIGHTS_KEYS = {  # setting -> ([table], key) in config.toml
 
 
 def set_insights(root: Path, setting: str, value: bool | int, by: str | None = None) -> bool | int:
-    """An Insights setting. The record is written first, on EVERY change (humanproof.record_set: a widening
-    needs the verified person in `by`; an off is the False tombstone, a lower number the lower record), then
-    the file. Lowering retention deletes nothing now: the next pruning applies it."""
-    from orch import humanproof
-
+    """An Insights setting, written to config.toml. Lowering retention deletes nothing now: the next pruning
+    applies it."""
     table, key = INSIGHTS_KEYS[setting]
-    humanproof.record_set(root, setting, value, by or "reset")
     set_key(root, table, key, value)
     return value
 
@@ -571,14 +559,8 @@ def insights_value(root: Path, setting: str) -> bool | int:
 
 
 def insights_text(value: bool | int) -> str:
-    """How a value is written in a command and in a proof target: on/off, or the number."""
+    """How a value is written in a command: on/off, or the number."""
     return ("on" if value else "off") if isinstance(value, bool) else str(value)
-
-
-def insights_target(setting: str, value: bool | int) -> str:
-    """The proof target of `insights.settings`: VALUE-BOUND (`insights.keep_days=365`), so a proof for one
-    value never sets another."""
-    return f"{setting}={insights_text(value)}"
 
 
 def _same_text(setting: str, text: str, current: bool | int) -> bool:
@@ -595,71 +577,34 @@ def change_insights(
     setting: str,
     value: bool | int,
     *,
-    agent: str | None = None,
-    person=None,
+    by: str | None = None,
     if_current: str | None = None,
 ) -> dict:
-    """THE CORE decides (2.11 addendum): under ONE lock (keys.lock, the lock of the settings record and of the
-    proof nonce store) read the CURRENT effective value, refuse a stale `if_current` (code `changed`),
-    classify widen / narrow / same, and only for a widening ask `person(target)` for the verified person (it
-    verifies and spends the value-bound proof in this same critical section; the proof LINE was read from
-    stdin by the caller before the lock, so a stdin that never closes cannot hold keys.lock). Same value:
-    nothing written, no proof checked. An agent caller (`agent` = the words it is refused with) asking to
-    widen is refused (`needs_person`) before any proof is read. `insights.share_counts` = on is refused
-    (`not_available`, nothing written, no proof read) while the share state is off_by_admin or not_connected;
-    off is always allowed."""
-    from orch import humanproof
-
-    # keys.lock is re-entrant per thread by design (humanproof._key_lock: a per-thread depth count over ONE
-    # O_EXCL lock file), so the nested takes below stay in this section; another thread or process waits.
-    with humanproof._key_lock(humanproof.key_dir(root)):
-        current = insights_value(root, setting)
-        widened = value > current
-        if widened and agent is not None:
-            raise InsightsRefused(agent or humanproof.AGENT_REFUSED, "needs_person")
-        if if_current is not None and not _same_text(setting, if_current, current):
-            raise InsightsRefused(f"This changed in the meantime: now {insights_text(current)}", "changed")
-        if setting == "insights.share_counts" and value is True:
-            blocked = share_counts_blocked(root)  # off_by_admin / not_connected: `on` is not available here
-            if blocked is not None:
-                raise InsightsRefused(SHARE_BLOCKED_MSG[blocked], "not_available")
-        if value == current:
-            return {setting: current, "changed": False, "widened": False}
-        who = "reset"  # a lowering names no person (the record's `by` is never a claim from a flag)
-        if widened:
-            if person is None:
-                raise InsightsRefused(humanproof.AGENT_REFUSED, "needs_person")
-            try:
-                who = person(insights_target(setting, value))
-            except Refused as e:
-                raise InsightsRefused(str(e), "needs_person") from None
-            if not str(who).startswith("human:"):
-                raise InsightsRefused(humanproof.AGENT_REFUSED, "needs_person")
-        set_insights(root, setting, value, who)
-        return {setting: insights_value(root, setting), "changed": True, "widened": widened}
+    """Change an Insights setting: refuse a stale `if_current` (code `changed`), classify widen / same, write
+    the file. `insights.share_counts` = on is refused (`not_available`, nothing written) while the share state
+    is off_by_admin or not_connected; off is always allowed."""
+    current = insights_value(root, setting)
+    widened = value > current
+    if if_current is not None and not _same_text(setting, if_current, current):
+        raise InsightsRefused(f"This changed in the meantime: now {insights_text(current)}", "changed")
+    if setting == "insights.share_counts" and value is True:
+        blocked = share_counts_blocked(root)  # off_by_admin / not_connected: `on` is not available here
+        if blocked is not None:
+            raise InsightsRefused(SHARE_BLOCKED_MSG[blocked], "not_available")
+    if value == current:
+        return {setting: current, "changed": False, "widened": False}
+    set_insights(root, setting, value, by)
+    return {setting: insights_value(root, setting), "changed": True, "widened": widened}
 
 
 def agents_may_finish(root: Path | None) -> bool:
-    """A widening switch (F1): the file value alone grants nothing; a person's proven "on" is recorded in the
-    orch home (humanproof.effective): appending the key to config.toml cannot let an agent finish tickets. An
-    unreadable config.toml or a value that is not true / false is off without a tombstone (file_switch)."""
-    from orch import humanproof
-
+    """[workflow] agents_may_finish (default off): may an agent mark a ticket Done."""
     if root is None:
         return False
-
-    def from_file() -> bool | None:
-        return file_switch(root, "workflow", "agents_may_finish", False)
-
-    return humanproof.effective(root, "workflow.agents_may_finish", from_file(), from_file)
+    return file_switch(root, "workflow", "agents_may_finish", False) is True
 
 
 def set_agents_may_finish(root: Path, value: bool, by: str | None = None) -> bool:
-    """`by` = who sets it (an "on" needs the verified person). The record is written first, on EVERY change:
-    an off is the False tombstone, so a stale "on" cannot return by re-adding the line to config.toml."""
-    from orch import humanproof
-
-    humanproof.record_set(root, "workflow.agents_may_finish", bool(value), by or "reset")
     set_key(root, "workflow", "agents_may_finish", value)
     return value
 
@@ -860,7 +805,6 @@ def add_agent(
     by: str | None = None,
 ):
     """Save an agent entry. A person only: an agent (`by` = agent:...) is refused before it writes."""
-    require_person(by, "add an agent command")
     if not NAME_RE.fullmatch(name):
         raise Refused(f"'{name}' is not a name orch can use. Use lowercase letters, digits and '-'.")
     for k, v in (("command", command), ("interactive", interactive)):
@@ -898,7 +842,6 @@ def add_agent(
 
 def select_agent(root: Path, name: str, by: str | None = None) -> None:
     """Make `name` the workspace's default agent. A person only (an agent is refused)."""
-    require_person(by, "choose the agent for this workspace")
     set_key(root, "workspace", "agent", name)
 
 

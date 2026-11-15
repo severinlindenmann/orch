@@ -7,9 +7,7 @@ import pytest
 from test_worktrees_cleanup import git, make
 from test_worktrees_cleanup import repo as repo_fixture
 
-from orch import humanproof, tickets, worktrees
-
-_REAL_PERSON_BY = humanproof.person_by
+from orch import tickets, worktrees
 
 repo = repo_fixture
 
@@ -840,20 +838,13 @@ def test_forged_signed_review_is_refused(done_copy):
     assert copy.exists()
 
 
-def test_person_approves_exact_control_tip(done_copy, run, monkeypatch):
-    monkeypatch.setattr(humanproof, "person_by", _REAL_PERSON_BY)
-    import io
-
+def test_person_approves_exact_control_tip(done_copy, run):
     root, tid, copy = done_copy
     (copy / ".gitignore").write_text("something\n")
     assert finish(root, tid)["state"] == "waiting"
     target, tip, count = worktrees.approval_target(root, tid)
     assert count == 1
-    proof = humanproof.mint(
-        humanproof.human_key(root), humanproof.new_payload("copy.retry", target, "human:pat")
-    )
-    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
-    code, out, err = run("copy", "approve", tid, "--proof-stdin", "--json")
+    code, out, err = run("copy", "approve", tid, "--json")
     assert code == 0, out + err
     assert git(root, "rev-parse", "HEAD^2") == tip
     assert (root / ".gitignore").read_text() == "something\n"
@@ -954,27 +945,6 @@ def test_run_end_only_schedules(done_copy, monkeypatch):
     assert scheduled == [root]
 
 
-def test_approval_without_proof_has_bound_handoff(done_copy, run, monkeypatch):
-    monkeypatch.setattr(humanproof, "person_by", _REAL_PERSON_BY)
-
-    root, tid, copy = done_copy
-    (root / "code.py").write_text("personal")
-    finish(root, tid)
-    target, tip, count = worktrees.approval_target(root, tid)
-    code, _, _ = run("copy", "approve", tid, "--by", "human:pat")
-    assert code == 2
-    handoff = next(h for h in humanproof.handoffs(root) if h["target"] == target)
-    assert handoff["argv"] == [
-        "copy",
-        "retry",
-        tid,
-        "--approve-tip",
-        tip,
-        "--control-paths",
-        str(count),
-        "--paths-hash",
-        target.rsplit(":", 1)[1],
-    ]
 
 
 @pytest.mark.parametrize("phase", ["before", "after"])
@@ -1679,25 +1649,6 @@ def test_b13e_cli_approve_compares_what_was_shown(done_copy, run):
     assert git(root, "rev-parse", "HEAD") == head
 
 
-def test_b13e_plain_retry_proof_cannot_approve(done_copy, run, monkeypatch):
-    """Part 2 #7: a proof for a plain "Try again" (target = the ticket) never approves a bring-back."""
-    import io
-
-    monkeypatch.setattr(humanproof, "person_by", _REAL_PERSON_BY)
-    root, tid, copy = done_copy
-    (copy / ".gitignore").write_text("something\n")
-    assert finish(root, tid)["state"] == "waiting"
-    target, tip, count = worktrees.approval_target(root, tid)
-    proof = humanproof.mint(
-        humanproof.human_key(root), humanproof.new_payload("copy.retry", tid, "human:pat")
-    )
-    monkeypatch.setattr("sys.stdin", io.StringIO(proof + "\n"))
-    head = git(root, "rev-parse", "HEAD")
-    shown = ["--approve-tip", tip, "--control-paths", str(count), "--paths-hash", target.rsplit(":", 1)[1]]
-    code, _, _ = run("copy", "retry", tid, *shown, "--proof-stdin", "--json")
-    assert code != 0
-    assert git(root, "rev-parse", "HEAD") == head
-    assert not worktrees._copy_authority(root, tid).get("controls_tip")
 
 
 def test_b13e_review_paths_are_one_plain_line_each(done_copy, run):

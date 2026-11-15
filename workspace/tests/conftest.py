@@ -281,13 +281,7 @@ REAL_HOME_MODULES = (
     "test_install_kind",
     "test_winacl",
 )  # they test the home pairing itself
-REAL_PROOF_MODULES = (
-    "test_human_proof",
-    "test_humanproof",
-    "test_verdict_mac",
-    "test_cli_secret",
-    "test_insights_settings",
-)
+REAL_PROOF_MODULES = ("test_humanproof",)  # the guarded home itself
 
 
 def ensure_signing(root):
@@ -323,14 +317,13 @@ def _legacy_trust(request, monkeypatch):
     from orch import humanproof, tickets
     from orch.errors import Refused
 
-    def legacy(root, args, op, target, **kw):
-        if tickets.agent_tool():
-            return "agent:" + str(tickets.agent_tool())
-        who = tickets.current_actor(getattr(args, "by", None))
-        if who.startswith("human:"):
-            ensure_signing(
-                root
-            )  # a person's Done is signed: the key and the local id exist, as after a real proof
+    real_by = tickets.acting_by
+
+    def legacy(args):
+        who = real_by(args)
+        root = getattr(args, "orch_root", None)
+        if who.startswith("human:") and root is not None:
+            ensure_signing(root)  # a person's Done is signed: the key and the local id exist
         return who
 
     def test_home(root):
@@ -344,7 +337,7 @@ def _legacy_trust(request, monkeypatch):
         os.chmod(home, 0o700)
         return home
 
-    monkeypatch.setattr(humanproof, "person_by", legacy)
+    monkeypatch.setattr(tickets, "acting_by", legacy)
     monkeypatch.setattr(humanproof, "ENFORCE_PENDING_MAC", False)
     if not request.module.__name__.split(".")[-1].startswith(REAL_HOME_MODULES):
         monkeypatch.setattr(humanproof, "guarded_home", test_home)
@@ -385,26 +378,17 @@ def stray_tmux(under: str) -> list[str]:
 
 
 def seed_profiles(root, profiles):
-    """Test setup only: like a person's `profile set` of every new or body-changed profile (the production
-    write_profiles signs only the names it is told to)."""
+    """Test setup only, like `profile set`: the kind from the real file; "any command" for others."""
     import os
 
-    from orch import humanproof as hp
     from orch import keystore, secretrun
 
-    for p in profiles.values():  # like `profile set`: the kind from the real file; "any command" for others
+    for p in profiles.values():
         if p.get("run") and "kind" not in p and os.path.isabs(p["run"][0]):
             p["kind"] = secretrun.program_kind(os.path.realpath(p["run"][0]))
             if p["kind"] == "other" or p.get("real_home"):
                 p["any_command"] = True
-    try:
-        old = keystore.read_profiles(root)
-    except Exception:  # noqa: BLE001
-        old = {}
-    changed = frozenset(
-        n for n, p in profiles.items() if n not in old or hp.profile_body(old[n]) != hp.profile_body(p)
-    )
-    keystore.write_profiles(root, profiles, sign=changed)
+    keystore.write_profiles(root, profiles)
 
 
 # ---------------------------------------------------------------------------------------------- record MAC

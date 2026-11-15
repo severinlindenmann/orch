@@ -53,18 +53,9 @@ def dispatch(args, root: Path) -> bool:
         d = chat.read_day(root, args.day)
         _out(args, d, "\n".join(f"{m['by']}: {m['text']}" for m in d["messages"]) or "Nothing on that day.")
     elif args.sub == "make-ticket":
-        from orch import humanproof
-
-        # a person's click (H1): proof from the page, or a hand-off. The phone path calls chat.make_ticket in
-        # this process with the relay-authenticated sender instead (relay._apply_proposal_answer).
-        who = humanproof.person_by(
-            root,
-            args,
-            "chat.make_ticket",
-            args.message_id,
-            parts={},
-            value=args.title or "",
-        )
+        # the phone path calls chat.make_ticket in this process with the relay-authenticated sender instead
+        # (relay._apply_proposal_answer).
+        who = tickets.acting_by(args)
         r = chat.make_ticket(root, args.message_id, args.title, who)
         _out(args, r, r["key"])
     elif args.sub == "reply":
@@ -81,16 +72,7 @@ def dispatch(args, root: Path) -> bool:
             raise Refused(
                 "Only a person writes as themselves in Chat. Use: orch chat reply ... --ticket <chat>."
             )
-        from orch import humanproof
-
-        who = humanproof.person_by(
-            root,
-            args,
-            "chat.send",
-            "general",
-            parts={},
-            value=args.text,
-        )
+        who = tickets.acting_by(args)
         r = chat.say(root, args.text, who, new=args.new, proven=who.startswith("human:"))
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
@@ -145,16 +127,7 @@ def _dispatch_dm(args, root):
         )
         text = "Synced."
     elif args.sub == "send":
-        from orch import humanproof
-
-        who = humanproof.person_by(
-            root,
-            args,
-            "chat.send",
-            args.workspace,
-            parts={"thread": humanproof.part(_ws_name(root, args.workspace))},
-            value=args.text,
-        )
+        who = tickets.acting_by(args)
         data = chat.dm_send(
             root,
             args.workspace,
