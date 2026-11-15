@@ -143,10 +143,6 @@ PROOF_OPS = {
     "config.permissions": ("config.permissions", lambda a: a.get("mode")),
     "config.agent.add": ("config.agent_add", lambda a: _agent_add_target(a)),
     "look.set": ("look.icon", lambda a: "look"),
-    "workspace.set": (
-        "config.workspace_info",
-        lambda a: f"{a.get('field')}:{hashlib.sha256(str(a.get('text', '')).strip().encode()).hexdigest()}",
-    ),
 }
 
 
@@ -209,7 +205,8 @@ FREE_OPS = frozenset(
         "check.add",
         "ref.add",
         "ref.rm",
-        "look.description",
+        "look.profile",
+        "workspace.set",
         "config.agent.test",
     }
 )

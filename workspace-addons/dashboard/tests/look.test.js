@@ -59,7 +59,8 @@ test('the icon picker names places in plain words, not relay or publish', () => 
   assert.ok(s.includes("prev(32, 'In the dashboard, on your phone and on shared pages')"));
   assert.ok(s.includes("'Shown in the dashboard, on your phone and on shared pages.'"));
   assert.ok(s.includes("'Saved. Your phone and shared pages show it at their next refresh.'"));
-  for (const m of s.match(/'[^'\n]*'/g)) assert.equal(/\b(relay|publish)\b/i.test(m), false, m);
+  const picker = s.slice(s.indexOf('function picker()'), s.indexOf('// ---- Workspace profile card'));
+  for (const m of picker.match(/'[^'\n]*'/g)) assert.equal(/\b(relay|publish)\b/i.test(m), false, m);
 });
 
 test('look.js and switcher.js never use innerHTML or insertAdjacentHTML', () => {
@@ -91,27 +92,27 @@ test('the icon picker opens behind Change with 12 icons, More icons and one prev
   vm.runInContext(fs.readFileSync(path.join(WEB, 'look.js'), 'utf8'), c);
   stateListener({detail: {look: {icon: 'wallet', color: 'amber', set_by: 'human'}, workspace: 'Finance'}});
   const L = c.window.OrchLook;
-  let tree = all(L.settingsSection());
+  let tree = all(L.profileCard());
   assert.equal(tree.some(x => x.className === 'lk-picker'), false, 'closed at first');
   const change = tree.find(x => x.attrs['data-lk'] === 'open');
   assert.equal(textOf(change), 'Change');
   const click = lk => clicks({target: {closest: () => ({dataset: {lk: lk.lk, v: lk.v}, disabled: false})}});
   click({lk: 'open'});
-  tree = all(L.settingsSection());
+  tree = all(L.profileCard());
   assert.equal(tree.filter(x => x.className === 'lk-tile').length, 13, 'first letter + 12 icons');
   assert.equal(tree.some(x => x.attrs.role === 'tablist'), false, 'groups stay folded');
   assert.equal(textOf(tree.find(x => x.attrs['data-lk'] === 'more')), 'More icons');
   assert.equal(tree.filter(x => x.className === 'lk-pv-row').length, 1, 'a single preview');
   assert.equal(tree.some(x => x.attrs['data-lk'] === 'open'), false);
-  const order = () => all(L.settingsSection()).filter(x => x.className === 'lk-tile').map(x => x.attrs['data-v']);
+  const order = () => all(L.profileCard()).filter(x => x.className === 'lk-tile').map(x => x.attrs['data-v']);
   const before = order();
   click({lk: 'icon', v: before[6]});
   assert.deepEqual(order(), before, 'picking an icon keeps the tiles in place');
   click({lk: 'icon', v: ''});
-  tree = all(L.settingsSection());
+  tree = all(L.profileCard());
   assert.match(textOf(tree.find(x => x.attrs['data-testid'] === 'look-summary')), /^First letter · /);
   click({lk: 'more'});
-  tree = all(L.settingsSection());
+  tree = all(L.profileCard());
   assert.ok(tree.some(x => x.attrs.role === 'tablist'));
   assert.equal(textOf(tree.find(x => x.attrs['data-lk'] === 'more')), 'Fewer icons');
 });
@@ -122,4 +123,61 @@ test('the owner row shows the chosen person, stays local and is plain text', () 
   assert.ok(s.includes("owner || 'Not set'"));
   assert.ok(s.includes('it is not sent to other workspaces'));
   assert.ok(s.includes('ownerRow(),'));
+});
+
+function cardEnv(lookExtra, settings) {
+  let clicks = null, stateListener = null, inputs = null;
+  const acts = [];
+  const c = {TextEncoder, Array, Math, JSON, Object, String, encodeURIComponent, console, Set, CustomEvent: class { constructor(n) { this.type = n; } },
+    localStorage: {getItem: () => null, setItem() {}},
+    document: {querySelector: () => null, addEventListener: (n, f) => { if (n === 'click') clicks = f; if (n === 'input') inputs = f; }, title: ''},
+    window: {addEventListener: (n, f) => { if (n === 'orch:state') stateListener = f; }, dispatchEvent() {},
+      orchAct: async (op, args) => { acts.push([op, args]); return {ok: true}; }}};
+  c.window.window = c.window;
+  fakeDom(c);
+  vm.createContext(c);
+  vm.runInContext(fs.readFileSync(path.join(WEB, 'look-icons.js'), 'utf8'), c);
+  vm.runInContext(fs.readFileSync(path.join(WEB, 'look.js'), 'utf8'), c);
+  stateListener({detail: {look: {icon: 'wallet', color: 'amber', set_by: 'human', service: null, tags: [], ...lookExtra}, workspace: 'Finance', settings}});
+  const click = (lk, v) => clicks({target: {closest: () => ({dataset: {lk, v}, disabled: false})}});
+  const type = (k, value) => inputs({target: {dataset: {lkInput: k}, value}});
+  return {L: c.window.OrchLook, click, type, acts};
+}
+
+test('the profile card shows name, one description, icon and colour; no relay words without a relay', () => {
+  const {L} = cardEnv({description: 'From the relay'}, {ws_name: 'Finance HQ', ws_description: 'Bills and taxes'});
+  const tree = all(L.profileCard());
+  assert.equal(textOf(tree.find(x => x.attrs['data-key'] === 'pf-name-value')), 'Finance HQ');
+  assert.equal(textOf(tree.find(x => x.attrs['data-key'] === 'pf-description-value')), 'Bills and taxes');
+  assert.ok(tree.some(x => x.attrs['data-lk'] === 'open'), 'icon and colour live in the card');
+  assert.equal(tree.some(x => x.attrs['data-key'] === 'pf-tags-row'), false);
+  assert.equal(/relay|publish/i.test(textOf(L.profileCard())), false);
+});
+
+test('Save sends the local fields, then proposes description and tags to the relay', async () => {
+  const {L, click, type, acts} = cardEnv({service: 'relay', tags: ['a'], relay_name: 'Finance on relay', waiting: false}, {ws_name: 'Finance', ws_description: 'Old'});
+  let text = textOf(L.profileCard());
+  assert.match(text, /Name on relay: Finance on relay — set by the relay owner/);
+  assert.match(text, /Live on relay/);
+  click('pf-edit');
+  type('name', 'Finance 2'); type('description', 'New line'); type('tag', 'Money Stuff');
+  click('tag-add');
+  await click('pf-save');
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(acts)), [
+    ['workspace.set', {field: 'name', text: 'Finance 2'}],
+    ['workspace.set', {field: 'description', text: 'New line'}],
+    ['look.profile', {service: 'relay', description: 'New line', tags: ['a', 'money-stuff']}],
+  ]);
+  text = textOf(L.profileCard());
+  assert.match(text, /Waiting for relay approval/);
+  assert.match(text, /Proposed: “New line”/);
+});
+
+test('without a relay Save changes only the local description', async () => {
+  const {L, click, type, acts} = cardEnv({}, {ws_name: 'Finance', ws_description: 'Old'});
+  click('pf-edit'); type('description', 'New');
+  await click('pf-save');
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['workspace.set', {field: 'description', text: 'New'}]]);
 });

@@ -681,14 +681,6 @@ main.addEventListener('click', async event => {
     (async () => { for (const s of array(state.settings?.copies_disk?.stuck)) await settingsSend('copies.retry', {ticket:s.ticket}, 'copies-clean'); })();
     return;
   }
-  if (action === 'ws-edit') { wsEditing = control.dataset.field; render(); document.querySelector('[data-key="settings-ws-' + wsEditing + '"]')?.focus(); return; }
-  if (action === 'ws-cancel') { wsEditing = null; render(); return; }
-  if (action === 'ws-save') {
-    const field = control.dataset.field;
-    const result = await settingsSend('workspace.set', {field, text:document.querySelector('[data-key="settings-ws-' + field + '"]')?.value || ''}, 'ws-' + field);
-    if (result.ok) { wsEditing = null; render(); }
-    return;
-  }
   if (action === 'copies-setup-edit') { copySetupEditing = true; render(); document.querySelector('[data-key="settings-copy-setup"]')?.focus(); return; }
   if (action === 'copies-setup-cancel') { copySetupEditing = false; render(); return; }
   if (action === 'copies-setup') {
