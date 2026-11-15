@@ -214,7 +214,7 @@ test('an accepted send shows Delivered at once and refreshes in the background',
   finishReload();
 });
 
-// #865 (b): Other workspaces keep their place above the groups, also while the contacts load; newest group first.
+// Issue 865 (b): Other workspaces keep their place above the groups, also while the contacts load; newest group first.
 test('chat list: Other workspaces above Groups (placeholder while loading), newest group first', () => {
   const c = context();
   vm.runInContext(`chatUi.open = 'chat'; chatDm.contacts = []; chatDm.loaded = false;
