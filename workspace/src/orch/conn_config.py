@@ -1,6 +1,6 @@
 """Effective connection recipes, projected only from the names-only inventory."""
 
-from orch import humanproof, inventory
+from orch import config, inventory
 
 
 def no_grants(root, orch_home) -> dict:
@@ -10,7 +10,7 @@ def no_grants(root, orch_home) -> dict:
 
 def proof_grants(root, orch_home=None) -> dict:
     """Proof-made conn.allow grants from the guarded record (fail closed); orch_home is unused."""
-    return humanproof.conn_grants(root)
+    return config.conn_grants(root)
 
 
 def resolve(items: list[dict]) -> tuple[list[dict], list[dict]]:

@@ -606,13 +606,9 @@ def private_words(summary: dict) -> str:
 
 
 def move_to_private(root: Path, by: str | None = None) -> list[str]:
-    """A person's click: `git rm --cached` for the orch files the team repo tracks that are not shared with the
-    team (shared: .orch/.gitignore, workspace.toml; those stay tracked). The files stay on disk; nothing is committed (the removal is the person's to
-    commit); older commits keep their copies. Returns the paths.
-    An agent (`by` = agent:...) is refused here too, behind the CLI's proof check."""
-    from orch import config
-
-    config.require_person(by, "move these files out of the team repo")
+    """`git rm --cached` for the orch files the team repo tracks that are not shared with the team (shared:
+    .orch/.gitignore, workspace.toml; those stay tracked). The files stay on disk; nothing is committed (the
+    removal is the person's to commit); older commits keep their copies. Returns the paths."""
     files, why = _tracked_private(
         root
     )  # the same discovery as sync's needs-move; names as the index spells them

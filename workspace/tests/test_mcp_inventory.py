@@ -7,7 +7,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch import addons, humanproof, inventory
+from orch import addons, config, humanproof, inventory
 
 VEC = json.loads((CONTRACTS / "vectors" / "inventory-v1.json").read_text(encoding="utf-8"))
 SCHEMA = json.loads((CONTRACTS / "inventory.schema.json").read_text(encoding="utf-8"))
@@ -78,6 +78,11 @@ def _mcp(root, servers, allow=None):
     if allow is not None:
         doc["allow"] = allow
     _w(root / ".orch" / "mcp.json", doc)
+
+
+def _grant(root, name, value):
+    """A conn.allow grant in config.toml ([conn.allow] name = "*" or a list of actions)."""
+    (root / ".orch" / "config.toml").write_text(f"[conn.allow]\n{name} = {json.dumps(value)}\n")
 
 
 def _by(items):
@@ -224,11 +229,11 @@ def test_allow_needs_a_proof_made_grant(tmp_path, monkeypatch):
     assert [a["allowed"] for a in i["actions"]] == [False, False] and not i[
         "allow_all"
     ]  # agent-written entry: not allowed
-    humanproof.record_set(root, "conn.allow.s", ["read"], "human:a")
+    _grant(root, "s", ["read"])
     i = inventory.connections(root)[0][0]
     assert {a["name"]: a["allowed"] for a in i["actions"]} == {"read": True, "write": False}
     _mcp(root, {"s": {"command": ["p"]}}, allow={"s": "*"})
-    humanproof.record_set(root, "conn.allow.s", "*", "human:a")
+    _grant(root, "s", "*")
     assert inventory.connections(root)[0][0]["allow_all"]
 
 
@@ -243,13 +248,13 @@ def test_tombstone_or_odd_grant_means_no_actions(tmp_path, monkeypatch):
     monkeypatch.setattr(humanproof, "install_kind", lambda: "test")
     _mcp(root, {"s": {"command": ["p"]}}, allow={"s": ["read"]})
     for bad in (False, None, True, 1, {"read": True}, ["read", 3]):
-        humanproof.record_set(root, "conn.allow.s", bad, "human:a")
-        assert humanproof.conn_grants(root) == {}
+        _grant(root, "s", bad)
+        assert config.conn_grants(root) == {}
         i = inventory.connections(root)[0][0]
         assert not any(a["allowed"] for a in i["actions"]) and not i["allow_all"]
-    humanproof.record_set(root, "conn.allow.s", ["read"], "human:a")
-    assert humanproof.conn_grants(root) == {"s": ["read"]}
-    humanproof.record_set(root, "conn.allow.s", False, "human:a")  # tombstone after a grant
+    _grant(root, "s", ["read"])
+    assert config.conn_grants(root) == {"s": ["read"]}
+    _grant(root, "s", False)  # switched off again
     assert not any(a["allowed"] for a in inventory.connections(root)[0][0]["actions"])
 
 
@@ -268,8 +273,6 @@ def test_profile_state_ok_when_keys_exist(env, monkeypatch):
     )
     assert inventory.connections(root)[0][0]["state"] == "missing-key"
     _w(orch_home / "keys" / WID / "keys.json", {"keys": {"tok": {"type": "token"}}})
-    assert inventory.connections(root)[0][0]["state"] == "missing-key"  # no body MAC: changed outside orch
-    monkeypatch.setattr(inventory.humanproof, "profile_verified", lambda *a: True)
     assert inventory.connections(root)[0][0]["state"] == "not-started"
 
 

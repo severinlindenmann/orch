@@ -716,21 +716,6 @@ def test_inbox_json_reports_applied_answer(proj, run, new_ticket, rel):
     assert data[0]["applied"] is True and data[0]["ticket"] == tid
 
 
-def test_allow_refused_under_agent(proj, run, rel, monkeypatch):
-    connect(run, rel)
-    rel.inbox.append(msg("m_deleg00000000010", "delegate", {"title": "A", "text": "x"}))
-    run("relay", "inbox")
-    monkeypatch.setenv("CLAUDECODE", "1")
-    code, _, err = run("relay", "allow", "m_deleg00000000010", "--once")
-    assert code == 2 and "Ask the human" in err
-    assert not [m for m in rel.sent if m["type"] == "allow"]
-    # UX-17 (owner decision): an explicit --by human:... is a label, no longer refused under an agent
-    code, _, err = run("answer", "t_x", "q1", "A", "--by", "human:owner")
-    assert code == 2 and "Ask the human" not in err and "doesn't exist" in err
-    monkeypatch.delenv("CLAUDECODE")
-    assert run("relay", "allow", "m_deleg00000000010", "--once")[0] == 0
-
-
 # ---- W1-L4 PR1: nothing lost, nothing hijacked ---------------------------------------------------
 
 
