@@ -4,7 +4,7 @@
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
 .section-head h2{font-size:14px;line-height:20px}
 .section-head:has(>[role=tablist]){margin-bottom:8px}
-.metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.metric-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .metric{padding:20px;display:grid;gap:8px}
 .metric strong{font-size:28px;line-height:36px;font-variant-numeric:tabular-nums}
 .metric small{font-size:12px;color:var(--text-faint);line-height:16px}
