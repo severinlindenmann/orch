@@ -147,7 +147,8 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
   deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onChange:()=>{if(deck)waitCount(deck.items.length-Object.keys(deck.answers).length)}});
-  waitCount(items.length-Object.keys(deck.answers).length)};
+  waitCount(items.length-Object.keys(deck.answers).length);
+  const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus()};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
   if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.'}));waitCount(0);return}
   if(!items.length)return;/* everything answered here: keep the summary */

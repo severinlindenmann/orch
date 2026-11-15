@@ -127,14 +127,15 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* order: waiting cards first (Later ones at the end), then answered */
  const waiting=()=>{const w=items.map((_,i)=>i).filter(i=>!ans[items[i].id]);return w.filter(i=>!later.has(items[i].id)).concat(w.filter(i=>later.has(items[i].id)))};
  const nextIdx=from=>{const w=waiting();const pos=w.indexOf(from);return w.length?(pos>=0?w[pos]:w.find(i=>i>from&&!later.has(items[i].id))??w[0]):items.length};
+ let ready=false;const change=()=>{if(ready&&o.onChange)o.onChange()};/* the first onChange comes after the constructor returns, so a handler may use the deck */
  const render=()=>{stage.replaceChildren();cur=null;const n=items.length,k=Object.keys(ans).length;
   count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';undoBtn.disabled=!done.length;
-  if(idx>=n){acts.hidden=laterRow.hidden=true;stage.append(summary());o.onChange&&o.onChange();return}acts.hidden=laterRow.hidden=false;
+  if(idx>=n){acts.hidden=laterRow.hidden=true;stage.append(summary());change();return}acts.hidden=laterRow.hidden=false;
   const behind=waiting().filter(i=>i!==idx);
   if(behind[1]!=null)stage.append(card(items[behind[1]],'under2'));if(behind[0]!=null)stage.append(card(items[behind[0]],'under'));
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');cur.querySelector('.swipe-foot').prepend(t)}
-  stage.append(cur);syncWords();wire(cur);o.onChange&&o.onChange()};
+  stage.append(cur);syncWords();wire(cur);change()};
  const summary=()=>{const d=el('div','swipe-done');d.append(UI.statusIcon('done'),el('h3','',"You've answered everything in this review."));
   const t=el('div','tally'),c=v=>Object.values(ans).filter(x=>x.verdict===v).length;[['ok','check','approved'],['no','x','not done'],['talk','mic','sent back for changes']].forEach(([v,i,l])=>{const s=el('span');s.append(ic(i,16),c(v)+' '+l);t.append(s)});
   d.append(t,el('p','',"Each ticket shows what happens next. Answers are on the ticket under Decisions."));return d};
@@ -270,6 +271,6 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   else if(k===' '){e.preventDefault();cur&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
- render();
+ render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
  return {jump,openOverview,answers:ans,items,fly,undo,pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx}}};
 })();
