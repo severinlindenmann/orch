@@ -205,7 +205,7 @@
       window.parent.postMessage({...message, id}, location.origin);
     });
   }
-  // Ask another workspace at a stop (#816 A): one click; the dashboard runs the add-on's ask act as the person.
+  // Ask another workspace at a stop (816 A): one click; the dashboard runs the add-on's ask act as the person.
   const askWorkspace = target => askDashboard({type: 'orch.ask', target}, 120000);
   const fileIdea = textValue => askDashboard({type: 'orch.idea', text: textValue});
   // Plan the run / Ask for changes on a draft: the dashboard sends the words to the agent on the order as YOUR message
