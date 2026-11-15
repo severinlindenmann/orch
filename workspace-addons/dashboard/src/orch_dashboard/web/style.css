@@ -365,9 +365,6 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .task-wont{text-decoration:line-through;color:var(--text-muted)}
 .task-check.on{background:var(--brand);border-color:var(--brand)}
 .question-banner{align-items:center;gap:12px}.question-banner .banner-q{font-weight:600;overflow-wrap:anywhere}
-.ticket-details .ed{border-color:var(--border);padding-right:44px}
-.ticket-details .ed:after{content:"Edit";position:absolute;right:8px;top:6px;font-size:12px;color:var(--text-muted)}
-.ticket-details .ed:hover,.ticket-details .ed:focus-visible{border-color:var(--brand)}
 .status-menu>.status-sum{gap:4px}
 .board .activity .chip{white-space:normal}
 .acc-li>.send-msg{margin:6px 12px 10px 36px;flex:none;white-space:nowrap}
