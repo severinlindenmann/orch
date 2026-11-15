@@ -2655,8 +2655,8 @@ def answer(
 
 
 def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
-    """Record when a question went to the person's phones (questions[].sent_at, once). One quiet write under the
-    ticket lock; a question that is gone or already marked changes nothing."""
+    """Record when a question went to the person's phones (questions[].sent_at, once): one quiet write under
+    the ticket lock; a question that is gone or already marked changes nothing."""
 
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)

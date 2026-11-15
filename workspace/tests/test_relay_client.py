@@ -2219,11 +2219,10 @@ def test_view_names_the_real_sender_of_phone_messages(proj, run, rel):
 
 def test_question_times_sent_at_and_answered_at(proj, monkeypatch):
     """#692.5: a question sent to the phones carries sent_at once; any answer carries answered_at."""
-    from conftest import ensure_signing
+    from orch import addons, humanproof, relay, tickets
 
-    from orch import relay, tickets
-
-    ensure_signing(proj)
+    addons.workspace_id(proj, create=True)
+    humanproof.human_key(proj, create=True)
     _stub_send(monkeypatch, "m_q60000000000007")
     tid = tickets.create(proj, "Deploy", "human:tester")["id"]
     tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
