@@ -9,7 +9,7 @@ import re
 import time
 from pathlib import Path
 
-from orch import history, review, review_server, runs, runs_live, safefile, tickets
+from orch import history, nextstep, review, review_server, runs, runs_live, safefile, tickets
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link")
@@ -77,6 +77,7 @@ def _guard(fn, *a, **kw):
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
