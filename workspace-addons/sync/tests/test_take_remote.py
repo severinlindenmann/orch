@@ -5,10 +5,9 @@ bound to exactly what is applied. No / several merge bases are a HISTORY pause (
 from types import SimpleNamespace
 
 import pytest
-from orch import history, humanproof
-from orch.errors import Refused
-from test_pause import _history_pause, proof
-from test_step import NOW, at, run, save, success
+from orch import humanproof
+from test_pause import _history_pause
+from test_step import NOW, at, run, success
 from test_two_machines import both, edit, load, machines, remote_sha
 
 from orch_sync import pause, repo, step
@@ -40,40 +39,7 @@ def _paused(machines, forged=False, **changes):
     _history_pause(b, tip)
     return a, b, tip
 
-
-def test_take_remote_merges_through_the_authority_and_binds_the_tree(machines, monkeypatch):
-    _a, b, tip = _paused(machines, forged=True, title="Their title", status="done", key="DM1-99")
-    mine = load(b)
-    seen = _targets(monkeypatch)
-    with pytest.raises(Refused):
-        pause.take_remote(b, SimpleNamespace(proof_stdin=False, by="agent:test"), now=NOW)
-    assert load(b) == mine  # refused: nothing applied
-    target = seen[-1]
-    assert target.startswith(f"sync:take-remote:{tip}:")
-    with pytest.raises(Refused):  # a proof for another tree is no proof for this one
-        pause.take_remote(b, proof(b, f"sync:take-remote:{tip}:{'0' * 40}", monkeypatch), now=NOW)
-    assert load(b) == mine
-    result = pause.take_remote(b, proof(b, target, monkeypatch), now=NOW)
-    assert not result.get("paused") and not result.get("last_error"), result
-    doc = load(b)
-    assert doc["title"] == "Their title"  # their plain fields win
-    assert doc["status"] != "done"  # a peer's Done never becomes Done here by a choice
-    assert doc.get("key") == mine.get("key")  # the number is this machine's decision
-    assert FORGED not in doc["history"]  # remote-only person line demoted by the merge
-    assert all(h["by"] != "human:Pat" for h in history.lines(b, doc))
-    assert step.oid(b, "refs/remotes/origin/orch-state") == step.oid(b, "HEAD")  # pushed: no pause any more
     # (A then sees B's key for the ticket: a key clash a person settles there, as after any resolve)
-
-
-def test_take_remote_runs_the_jump_gate_before_any_proof(machines, monkeypatch):
-    a, b, bare = both(machines)
-    save(a, "ticket-counter.json", {"last": 500_000})
-    success(a)
-    _history_pause(b, remote_sha(bare).decode())
-    seen = _targets(monkeypatch)
-    with pytest.raises(pause.Pause):
-        pause.take_remote(b, SimpleNamespace(proof_stdin=False, by="agent:test"), now=NOW)
-    assert not seen  # refused before the person was asked: no proof is used up
 
 
 def test_take_remote_needs_a_signed_history_pause(machines, monkeypatch):

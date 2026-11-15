@@ -180,7 +180,7 @@ function ticketForm(t) {
     const dueToggle = el('button', 'btn outline new-ticket-date-toggle', '▦ No date'); dueToggle.type = 'button'; dueToggle.id = 'field-' + serial + '-due';
     const dueLabel = el('label', '', 'Due date (optional)'); dueLabel.htmlFor = dueToggle.id;
     const dueBox = el('div', 'new-ticket-due'); dueBox.append(dueLabel, dueToggle, dueInput);
-    if (window.UI?.date) window.UI.date(dueInput, dueToggle);
+    if (window.UI?.date) window.UI.date(dueInput, dueToggle, null, {time:true});
     const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow ? [] : [helperBox]), dueBox); fields.append(options);
     const doneLabel = el('label', '', 'Done when (optional)');
     const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
@@ -198,11 +198,11 @@ function ticketForm(t) {
     }
     if (field === 'due') {
       input.readOnly = true; input.placeholder = 'Pick a day';
-      input.addEventListener('click', () => pickDate(input, input.value, v => { if (v !== null) input.value = v; }));
+      input.addEventListener('click', () => pickDate(input, input.value.replace(' ', 'T'), v => { if (v !== null) input.value = v.replace('T', ' '); }, true));  // shown as "2026-11-15 18:30", saved the same way (the core takes both)
       input.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); input.click(); } });
     }
     if (field === 'title') { input.required = true; input.maxLength = 200; }
-    input.value = t?.[field] || '';
+    input.value = field === 'due' ? String(t?.[field] || '').replace('T', ' ') : t?.[field] || '';
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs[field] = input;
   }
   const error = el('p', 'bad'); error.setAttribute('role', 'alert');
@@ -237,6 +237,10 @@ function ticketForm(t) {
     if (!t && inputs.text.required) error.textContent = EMPTY_TICKET;
     if (!form.reportValidity() || submit.disabled || creationUnresolved) return;
     submit.disabled = true; error.textContent = ''; reload.hidden = true;
+    // At once: the button that was pressed says what is happening (the helper start can take a while).
+    const busy = t || startAfter || !plain ? submit : plain, busyText = busy.textContent;
+    busy.textContent = t || !startAfter ? 'Saving…' : 'Starting…'; busy.setAttribute('aria-busy', 'true'); if (plain) plain.disabled = true;
+    const idle = () => { busy.textContent = busyText; busy.removeAttribute?.('aria-busy'); busy.ariaBusy = null; if (plain) plain.disabled = false; };
     const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, key === 'done_when' ? input.value : input.value.trim()]));
     // A helper other than the default is kept as the ticket's owner. FOLLOW-UP: run.start takes no helper yet.
     if (!t) values.owner = helperSelect && helperSelect.value !== helpers[0].name ? 'agent:' + helperSelect.value : '';
@@ -246,7 +250,7 @@ function ticketForm(t) {
       const fullText = inputs.text.value;
       if (fullText.length > 1500) {
         const combined = pastedText ? pastedText + '\n\n' + fullText : fullText;
-        if (combined.length > 500000) { error.textContent = 'Text is over 500000 characters'; submit.disabled = false; return; }
+        if (combined.length > 500000) { error.textContent = 'Text is over 500000 characters'; submit.disabled = false; idle(); return; }
         pastedText = combined; inputs.text.value = ''; grow(); updateAttachments();
       }
       const longText = pastedText, shortText = inputs.text.value;
@@ -261,7 +265,7 @@ function ticketForm(t) {
         const args = {title:values.title, ...(planFirst ? {plan_first:true} : {}), title_auto:titleAuto, ...Object.fromEntries(['owner', 'due', 'note', 'done_when'].filter(k => values[k]).map(k => [k, values[k]])), ...(longText ? {long_text:longText} : {}), ...(files.length ? {files:files.map(({name, text, data}) => text !== undefined ? {name, text} : {name, data})} : {})};
         if (new Blob([JSON.stringify({op:'ticket.new', args})]).size > 4900000) {  // the server takes 5 MB per request
           error.textContent = 'This is too big to send at once (over 4.9 MB). Remove a file or shorten the text.' + (longText ? ' The long text is kept as the note.md chip.' : '');
-          submit.disabled = false; return;
+          submit.disabled = false; idle(); return;
         }
         result = await act('ticket.new', args);  // one write, one history line
         if (result.ok) {
@@ -274,14 +278,14 @@ function ticketForm(t) {
         }
       } else result = {ok:true};
       if (result.ok && created) {
-        window.orch.toast('Ticket created', 'ok');
+        window.orch.toast(startAfter ? 'Ticket created' : 'Saved. The ticket is open; start it when you are ready.', 'ok');
         window.orch.close(d);
         await startNow();
-        if (startAfter && typeof href === 'function') location.hash = href(created.id);  // Start opens the new ticket
+        if (typeof href === 'function') location.hash = href(created.id);  // Start and Save without starting both open the new ticket
         return;
       }
     }
-    submit.disabled = creationUnresolved;
+    submit.disabled = creationUnresolved; idle();
     if (!result.ok) {
       error.textContent = window.DashHelpers.scrubText(result.text);
       reload.hidden = !(t && result.status === 409);

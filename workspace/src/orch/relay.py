@@ -26,6 +26,7 @@ from orch import (
     net,
     review,
     runs,
+    secretscan,
     skillrender,
     skills,
     tickets,
@@ -50,7 +51,18 @@ def _cfg(root: Path) -> dict:
     return net.load_service(root, "relay")
 
 
+scan_outgoing = secretscan.refuse_if_secret_in  # one shared check (secretscan.py), also used by publish
+
+
+def scan_blob(data: bytes, root: Path | None = None) -> None:
+    secretscan.refuse_if_secret(data, "file", root)
+
+
 def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
+    if method.upper() == "POST" and path.split("?")[0].rstrip("/") == "/v1/blobs":
+        if not isinstance(body, (bytes, bytearray)):
+            raise Refused("A file upload has to be plain bytes, so nothing was sent.")
+        scan_blob(bytes(body), root=root)  # every upload to the relay passes the one scanner (R5.2)
     cfg = _cfg(root)
     return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)
 
@@ -477,6 +489,7 @@ def _message(
             msg["key"] = key  # display key next to the id (relay-api.md): phones show it
     if reply_to:
         msg["reply_to"] = reply_to
+    scan_outgoing(root, body)  # before the outbox: a secret is never even kept on disk for a retry
     raw = json.dumps(msg).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
     from orch import relay_view
@@ -575,8 +588,10 @@ def outbox_list(root: Path) -> list[dict]:
 
 def resend_outbox(root: Path) -> dict:
     """Post what is left in .orch/outbox/, byte for byte (same id: the relay never makes a second message).
-    Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}]}. Stops at the first unreachable."""
-    res: dict = {"sent": [], "waiting": [], "dropped": []}
+    Returns {"sent": [ids], "waiting": [ids], "dropped": [{id, reason}], "failed": [{id, reason}]}.
+    Stops at the first unreachable. R5.2: an entry written before the send-time scan is scanned here too;
+    a hit is not sent, is removed from disk and reported as failed (one sentence, never the value)."""
+    res: dict = {"sent": [], "waiting": [], "dropped": [], "failed": []}
     with contextlib.suppress(Refused):
         apply_allow_answers(root)  # the next orch relay command applies an answered allow question
     items = outbox_list(root)
@@ -585,6 +600,19 @@ def resend_outbox(root: Path) -> dict:
         try:
             raw = p.read_bytes()
         except OSError:
+            continue
+        try:
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                msg = None
+            if isinstance(msg, dict):
+                scan_outgoing(root, msg)  # the whole message, every field, as decoded (escapes resolved)
+            else:
+                secretscan.refuse_if_secret(raw, "message", root)  # not a message we know: scan the bytes
+        except Refused as e:
+            res["failed"].append({"id": m["id"], "reason": str(e)})
+            p.unlink(missing_ok=True)  # a secret is not kept on disk for another try
             continue
         try:
             _post_message(root, raw)
@@ -715,6 +743,7 @@ def send_text(
     from orch import chat, phone_view
 
     body: dict = {"text": text}
+    scan_outgoing(root, {"text": text})  # also for the paths that only record locally first (proposal)
     to = resolve(root, target)
     if not ticket and not general and reply_to and not update:
         ticket = _topic_of_message(root, reply_to)  # answers a text that started a topic: stays in that topic
@@ -1029,6 +1058,10 @@ def send_question(
     }
     sign_asked(root, msg["id"], rec)
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
+    with contextlib.suppress(
+        Refused, OSError
+    ):  # a page says "Sent to your phone 12:31"; never blocks the send
+        tickets.mark_question_sent(root, ticket["id"], q["id"])
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
         send_text(root, "phones", "Waiting for your answer", ticket["id"], "note", view=True)
@@ -1303,6 +1336,64 @@ def _send_review_result(root: Path, qmid: str, ticket: str, saved: dict) -> None
             log_send_failure(root, f"review result {saved['id']} failed", "not sent")
     except (Refused, OSError) as exc:
         log_send_failure(root, f"review result {saved['id']} failed", exc)
+
+
+TAKEN_BACK_REASON_MAX = 200  # relay-api.md "Question taken back"
+
+
+def _taken_back_asked(root: Path, tid: str, qid: str) -> tuple[str, dict] | None:
+    """(message id, record) of the question we sent to the phones, else None."""
+    for mid, rec in net.read_json(_asked_path(root), {}).items():
+        if (
+            isinstance(rec, dict)
+            and rec.get("ticket") == tid
+            and rec.get("question_id") == qid
+            and rec.get("to") == "phones"
+        ):
+            return mid, rec
+    return None
+
+
+def send_taken_back(root: Path, tid: str, q: dict) -> str | None:
+    """Tell the phones one of our questions was taken back (relay-api.md "Question taken back"): ONE text to
+    `phones`, only when the question was sent there, only while the relay add-on is on. The message id and
+    time are fixed in the asked record first, so a retry (the outbox, or a new try after a crash) sends the
+    same bytes. The relay refusing it (answered first, not ours, already taken back) is only logged. Called
+    by the take-back command alone, when it changed something; never from anything that arrives over the
+    relay. Returns the message id, or None when nothing is sent."""
+    from orch import addons  # addons imports relay
+
+    if "relay" not in addons.active(root) or not isinstance(q.get("taken_back"), dict):
+        return None
+    found = _taken_back_asked(root, tid, q["id"])
+    reason = _one_line(q["taken_back"].get("reason"), TAKEN_BACK_REASON_MAX)
+    if found is None or reason is None:
+        return None
+    qmid = found[0]
+
+    def claim(asked):
+        rec = asked[qmid]
+        if not isinstance(rec.get("taken_back_msg"), dict):
+            rec["taken_back_msg"] = {"id": new_id(), "created_at": tickets.now()}
+        return rec["taken_back_msg"]
+
+    fixed = _asked_edit(root, claim)
+    try:
+        sent = _message(
+            root,
+            "phones",
+            "text",
+            {"text": f"Taken back: {reason}", "taken_back": {"reason": reason}},
+            tid,
+            reply_to=qmid,
+            mid=fixed["id"],
+            created_at=fixed["created_at"],
+        )
+        if not sent.get("sent"):
+            log_send_failure(root, f"taken back {fixed['id']} not sent yet", "kept for the next try")
+    except (Refused, OSError) as exc:
+        log_send_failure(root, f"taken back {fixed['id']} failed", exc)
+    return fixed["id"]
 
 
 def _phone_by(phone: dict, frm: str) -> str:

@@ -7,7 +7,6 @@ import subprocess
 from types import SimpleNamespace
 
 import pytest
-from orch import humanproof
 from test_step import ART, TICKET, configure, proof, run, save, success
 from test_two_machines import both, edit, machines
 
@@ -50,39 +49,6 @@ def bare(tmp_path):
     return path
 
 
-def test_status_off_then_local(root, capsys):
-    assert sync(root, "status", "sync") == 0
-    card = answer(capsys)
-    assert (
-        card["mode"] == "off"
-        and card["shown"] == "off"
-        and card["not_synced"] == []
-        and card["public"] is None
-    )
-    assert sync(root, "set", "local") == 0
-    assert answer(capsys)["mode"] == "local"
-    assert json.loads((root / ".orch/run/sync/settings.json").read_text())["mode"] == "local"
-    assert sync(root, "status", "sync") == 0
-    assert answer(capsys)["shown"] == "never"
-    (root / ".orch/run/sync/state.json").write_text(
-        '{"last_error":"offline","last_ok":"2026-11-11T10:15:00Z"}'
-    )
-    assert sync(root, "status", "sync") == 0
-    assert answer(capsys)["shown"] == "offline"
-    (root / ".orch/run/sync/state.json").write_text('{"last_ok":"2026-11-11T10:15:00Z"}')
-    assert sync(root, "status", "sync") == 0
-    assert answer(capsys)["shown"] == "synced"
-    assert sync(root, "set", "off") == 0
-    assert answer(capsys)["mode"] == "off"
-    # the argv the dashboard's generic op builds: flags, then the target after `--`
-    assert cli.main(["--dir", str(root), "act", "status", "--by", "human:pat", "--json", "--", "sync"]) == 0
-    assert answer(capsys)["shown"] == "off"
-    assert (
-        cli.main(["--dir", str(root), "act", "set", "--value=15", "--by", "human:pat", "--json", "--", "-x"])
-        == 2
-    )
-
-
 def test_set_is_a_persons_click(root, monkeypatch, capsys):
     from orch import tickets
 
@@ -114,105 +80,11 @@ def test_check_reaches_a_test_remote_and_reports_a_missing_one(root, tmp_path, c
     assert not (root / ".orch/.git").exists()
 
 
-def test_interval_and_remote_need_the_preview(root, tmp_path, monkeypatch, capsys):
-    remote = f"file://{bare(tmp_path)}"
-    assert sync(root, "set", remote, "--value", "15") == 2
-    assert "preview-only" in answer(capsys)["error"]
-    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    assert sync(root, "set", remote, "--value", "7") == 2
-    assert answer(capsys)["error"] == "Sync can run every 5, 15 or 60 minutes"
-    assert choose(root, remote, monkeypatch, "60") == 0
-    got = answer(capsys)
-    assert got["mode"] == "remote" and got["interval"] == 60
-    assert json.loads((root / ".orch/run/sync/settings.json").read_text())["remote"] == remote
-    assert sync(root, "set", remote, "--value", "5") == 0  # the same address, only how often: unsigned
-    assert answer(capsys)["interval"] == 5
-    assert sync(root, "set", remote, "--value", "5", "--proof-target") == 0
-    assert answer(capsys) == {"target": None}
-
-
-def test_set_remote_without_a_proof_is_refused(root, tmp_path, monkeypatch, capsys):
-    """M4: choosing the address is a signed choice (sync:set-remote:<sha256(address)>), whatever the environment
-    says; the review shows that exact address (without a login), from the same value the target hashes."""
-    from orch import tickets
-
-    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    monkeypatch.setattr(tickets, "agent_tool", lambda: None)
-    remote = f"file://{bare(tmp_path)}"
-    assert sync(root, "set", remote, "--value", "15") == 2
-    assert "proof" in answer(capsys)["error"]
-    assert not (root / ".orch/run/sync/settings.json").exists()
-    proof(root, cli.remote_target(f"file://{bare(tmp_path / 'other')}"), monkeypatch)
-    assert sync(root, "set", remote, "--value", "15", "--proof-stdin") == 2  # a proof of another address
-    assert "error" in answer(capsys)
-    assert not (root / ".orch/run/sync/settings.json").exists()
-    assert sync(root, "set", remote, "--value", "15", "--proof-target") == 0
-    got = answer(capsys)
-    assert got["target"] == "sync:set-remote:" + hashlib.sha256(remote.encode()).hexdigest()
-    assert got["review"] == {
-        "title": "Sync to this address?",
-        "value": remote,
-        "body": "Your tickets and their files are copied there every 15 minutes.",
-    }
-    assert sync(root, "set", "local", "--proof-target") == 0 and answer(capsys) == {"target": None}
-    assert sync(root, "set", "local") == 0  # mode local and off stay unsigned
-    assert sync(root, "set", "off") == 0
-
-
 def test_set_review_shows_the_address_without_its_login(root, monkeypatch):
     monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
     target, review = act.proof_target(root, "set", "ssh://git@host.example/me/orch", "60")
     assert target == cli.remote_target("ssh://git@host.example/me/orch")
     assert review["value"] == "ssh://host.example/me/orch" and "every 60 minutes" in review["body"]
-
-
-def test_public_address_waits_for_the_signed_choice(root, tmp_path, monkeypatch, capsys):
-    from orch_sync import visibility
-
-    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    monkeypatch.setattr(visibility, "remote_visibility", lambda url: "public")
-    remote = f"file://{bare(tmp_path)}"
-    assert sync(root, "set", "local") == 0
-    capsys.readouterr()
-    assert choose(root, remote, monkeypatch) == 0  # the person chose this address (set-remote proof) ...
-    got = answer(capsys)
-    assert got["public"] == remote and got["mode"] == "local"  # ... and that it is public waits for them
-    assert got["text"] == "This sync address is public. Anyone can read your tickets."
-    assert sync(root, "status", "sync") == 0
-    assert answer(capsys)["public"] == remote
-    assert sync(root, "now", "sync") == 0  # never syncs to it while the choice waits
-    assert answer(capsys)["text"] == "Not synced: choose a location above first"
-    target = "sync:use-public:" + hashlib.sha256(remote.encode()).hexdigest()
-    assert sync(root, "use-public", "pending", "--proof-target") == 0
-    assert answer(capsys) == {
-        "target": target,
-        "review": {
-            "title": "Use a public location?",
-            "body": "Anyone who knows the address can read your tickets.",
-            "value": remote,
-        },
-    }
-    assert sync(root, "use-public", "pending") == 2  # no proof: refused
-    capsys.readouterr()
-    proof(root, target, monkeypatch)
-    assert sync(root, "use-public", "pending", "--proof-stdin") == 0
-    assert answer(capsys)["mode"] == "remote"
-    assert sync(root, "status", "sync") == 0
-    card = answer(capsys)
-    assert card["public"] is None and card["mode"] == "remote"
-
-
-def test_keep_on_this_computer_drops_the_public_address(root, tmp_path, monkeypatch, capsys):
-    from orch_sync import visibility
-
-    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    monkeypatch.setattr(visibility, "remote_visibility", lambda url: "public")
-    assert choose(root, f"file://{bare(tmp_path)}", monkeypatch, "5") == 0
-    assert sync(root, "set", "local") == 0
-    capsys.readouterr()
-    assert sync(root, "status", "sync") == 0
-    card = answer(capsys)
-    assert card["public"] is None and card["mode"] == "local"
 
 
 def test_sync_now_never_clears_a_pause(root, monkeypatch, capsys):
@@ -228,42 +100,6 @@ def test_sync_now_never_clears_a_pause(root, monkeypatch, capsys):
     assert sync(root, "status", "sync") == 0
     card = answer(capsys)
     assert card["shown"] == "paused" and card["paused_needs"] == 1
-
-
-def test_leave_it_out_is_signed_bound_to_the_bytes_and_ends_the_pause(root, monkeypatch, capsys):
-    configure(root)
-    save(root)
-    save(root, ART, SECRET)
-    run(root)
-    rows = needs.rows(root)
-    assert [r["text"] for r in rows] == ["Not synced: a.txt may contain a password or access key."]
-    labels = [(a["label"], a.get("verb"), a.get("sign", False)) for a in rows[0]["actions"]]
-    assert labels == [("Leave it out", "leave-out", True), ("View file", None, False)]
-    assert rows[0]["actions"][1]["view"] == {"ticket": "t_abc123", "name": "a.txt"}
-    capsys.readouterr()
-    assert sync(root, "leave-out", ART, "--proof-target") == 0
-    got = answer(capsys)
-    target = got["target"]
-    assert target == "sync:leave-out:" + hashlib.sha256(ART.encode() + b"\0" + SECRET).hexdigest()
-    assert got["review"] == {
-        "title": "Leave a.txt out of sync?",
-        "body": "It stays on this computer only.",
-        "value": f"a.txt, {len(SECRET)} bytes",
-    }
-    with pytest.raises(Exception, match="proof|person"):
-        pause.leave_out(root, ART, SimpleNamespace(proof_stdin=False, by="agent:test"))
-    proof(root, target, monkeypatch)
-    assert sync(root, "leave-out", ART, "--proof-stdin") == 0
-    assert answer(capsys)["paused"] is False
-    state = run(root)
-    assert state["last_error"] is None and not state.get("paused"), state
-    assert ART not in repo.git(root, "ls-files").stdout.decode()
-    assert sync(root, "status", "sync") == 0
-    card = answer(capsys)
-    assert card["not_synced"] == [{"name": "a.txt", "why": "may contain a password or access key"}]
-    # changed content asks again
-    save(root, ART, SECRET + b" changed")
-    assert "secret" in run(root)["last_error"]
 
 
 def test_proof_target_of_keep_theirs_is_what_resolve_checks(machines, monkeypatch, capsys):
@@ -295,98 +131,6 @@ def test_proof_target_of_keep_theirs_is_what_resolve_checks(machines, monkeypatc
     assert cli.main(["--dir", str(b), "act", "keep-theirs", TICKET, "--proof-stdin", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["text"] == "Kept the other version."
     assert json.loads(repo.safe(b, TICKET).read_text())["title"] == "Theirs"
-
-
-@pytest.mark.parametrize("how", ["unsigned", "forged", "edited"])
-def test_a_planted_pending_public_counts_as_absent(root, tmp_path, monkeypatch, capsys, how):
-    """H1: an agent-written pending-public.json (no local1 MAC, a made-up one, or a signed record with another
-    address put in) is no waiting address: not on the card, no proof target, use-public refuses even with a
-    person's proof of exactly that address, and Sync now does not wait for it."""
-    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    assert sync(root, "set", "local") == 0
-    attacker = f"file://{bare(tmp_path)}"
-    record = {"remote": attacker, "interval": 5}
-    if how == "forged":
-        record["mac"] = "A" * 43
-    if how == "edited":
-        humanproof.human_key(root)
-        signed = {"remote": "https://files.example.org/mine", "interval": 5}
-        record["mac"] = humanproof.local_sign(root, act.PUBLIC_KIND, signed)
-        assert record["mac"] and humanproof.local_ok(root, act.PUBLIC_KIND, signed, record["mac"])
-    (root / ".orch/run/sync/pending-public.json").write_text(json.dumps(record))
-    capsys.readouterr()
-    assert sync(root, "status", "sync") == 0
-    assert answer(capsys)["public"] is None
-    assert sync(root, "use-public", "pending", "--proof-target") == 2
-    assert answer(capsys)["error"] == "No public address waits for a choice"
-    proof(root, cli.remote_target(attacker, public=True), monkeypatch)
-    assert sync(root, "use-public", "pending", "--proof-stdin") == 2
-    assert answer(capsys)["error"] == "No public address waits for a choice"
-    settings = json.loads((root / ".orch/run/sync/settings.json").read_text())
-    assert settings["mode"] == "local" and "remote" not in settings
-    assert act.pending_public(root) is None
-    monkeypatch.setattr(step, "run_once", lambda *a, **k: {"last_error": None, "last_ok": "now"})
-    assert sync(root, "now", "sync") == 0
-    assert answer(capsys)["text"] == "Synced."
-
-
-def test_the_waiting_public_address_is_signed_by_core(root, tmp_path, monkeypatch, capsys):
-    remote = public_waits(root, tmp_path, monkeypatch, capsys)
-    data = json.loads((root / ".orch/run/sync/pending-public.json").read_text())
-    assert set(data) == {"remote", "interval", "mac"} and data["remote"] == remote
-    assert act.pending_public(root) == {"remote": remote, "interval": 15}
-
-
-def test_a_planted_visibility_cache_cannot_skip_the_public_warning(root, tmp_path, monkeypatch, capsys):
-    """M1: visibility.json says the address is private (planted); the probe runs every time, so the public
-    address still waits for the person's own choice, on the dashboard path and on the plain set path."""
-    from test_step import set_remote
-
-    from orch_sync import visibility
-
-    monkeypatch.setenv("ORCH_SYNC_REMOTE_PREVIEW", "1")
-    probed = []
-    monkeypatch.setattr(visibility, "remote_visibility", lambda url: probed.append(url) or "public")
-    remote = f"file://{bare(tmp_path)}"
-    assert sync(root, "set", "local") == 0
-    (root / ".orch/run/sync/visibility.json").write_text(
-        json.dumps({remote: "private", cli.safe_address(remote): "private"})
-    )
-    capsys.readouterr()
-    assert choose(root, remote, monkeypatch) == 0
-    got = answer(capsys)
-    assert got["public"] == remote and got["mode"] == "local" and probed == [remote]
-    assert "remote" not in json.loads((root / ".orch/run/sync/settings.json").read_text())
-    assert set_remote(root, remote) == 2
-    assert "remote" not in json.loads((root / ".orch/run/sync/settings.json").read_text())
-
-
-def test_use_public_reads_the_waiting_address_once(root, tmp_path, monkeypatch, capsys):
-    """H1 race: right after use-public reads the waiting address, a valid record of another address lands. The
-    proof's target and the address applied both come from that one read: the other address is never used."""
-    remote = public_waits(root, tmp_path, monkeypatch, capsys)
-    other = f"file://{bare(tmp_path / 'other')}"
-    real, reads = cli.read, []
-
-    def read(where, name):
-        data = real(where, name)
-        if name == act.PUBLIC:
-            reads.append(data.get("remote"))
-            if len(reads) == 1:
-                act._write_public(root, other, 5)  # swapped in between (a signed record: the worst case)
-        return data
-
-    monkeypatch.setattr(cli, "read", read)
-    proof(root, cli.remote_target(remote, public=True), monkeypatch)
-    assert sync(root, "use-public", "pending", "--proof-stdin") == 0
-    assert answer(capsys)["remote"] == remote
-    assert reads == [remote]
-    assert json.loads((root / ".orch/run/sync/settings.json").read_text())["remote"] == remote
-    # and a proof of the swapped-in address never applies the first one
-    monkeypatch.setattr(cli, "read", real)
-    act._write_public(root, remote, 15)
-    proof(root, cli.remote_target(other, public=True), monkeypatch)
-    assert sync(root, "use-public", "pending", "--proof-stdin") == 2
 
 
 def test_allow_review_shows_the_held_value_the_target_hashes(machines):

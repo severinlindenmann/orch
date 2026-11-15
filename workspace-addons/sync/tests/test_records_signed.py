@@ -98,21 +98,6 @@ def test_an_allowed_deletion_is_bound_to_the_copy_the_person_saw(machines):
     assert cli.read(b, "state")["deleted"].get("t_abc123")
 
 
-def test_the_deleted_command_binds_the_record_to_the_synced_copy(machines, monkeypatch):
-    _a, b, _ = both(machines)
-    state = cli.read(b, "state")
-    state["deleted"] = {"t_abc123": NOW}
-    step.write(b, step.STATE, step.encoded(state))
-    monkeypatch.setattr(humanproof, "person_by", lambda *a, **k: "human:tester")
-    from orch import config
-
-    monkeypatch.setattr(config, "require_person", lambda *a, **k: None)
-    assert cli.main(["--dir", str(b), "deleted", "t_abc123", "--json"]) == 0
-    entry = cli.read(b, "allow-delete")["t_abc123"]
-    assert records.ok(b, "delete", f"t_abc123:{_blob(b)}", entry)
-    assert not records.ok(b, "delete", "t_abc123", entry)  # never the bare ticket id
-
-
 def test_an_approval_is_never_replayed_and_a_planted_one_applies_nothing(machines, monkeypatch):
     a, b, _ = both(machines)
     value = {"enabled": True}

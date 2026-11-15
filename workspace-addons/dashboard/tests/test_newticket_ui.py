@@ -77,5 +77,5 @@ def test_paste_styles_are_scoped_to_new_ticket():
 def test_window_closes_through_the_shared_overlay_and_uses_the_shared_date_picker():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "'Close new ticket'" not in js  # the Close button, Esc and backdrop come from kit/overlay.js
-    assert "window.UI.date(dueInput, dueToggle)" in js
+    assert "window.UI.date(dueInput, dueToggle, null, {time:true})" in js
     assert "ticketDatePicker" not in js
