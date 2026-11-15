@@ -167,7 +167,7 @@ TYPING_OFF = "Typing into the helper's screen is off. Turn on 'Let me type' in S
 
 
 def _typing_allowed(root) -> bool:
-    """[focus] session_typing, a plain setting (off unless the workspace turned it on)."""
+    """The session_typing setting, a plain one (off unless the workspace turned it on)."""
     from orch import config
 
     return bool(config.focus_session_typing(root))  # an unreadable config file counts as off (the default)
