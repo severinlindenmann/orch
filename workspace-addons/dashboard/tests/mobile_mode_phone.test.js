@@ -66,16 +66,12 @@ test('off: no chip, label is just Phone', () => {
   assert.equal(c.chip.hidden, true);
   assert.equal(c.label.textContent, 'Phone');
 });
-test('the banner shows for the first-click ask and the ended notice, and for the last 5 minutes only', () => {
+test('the banner shows for the first-click ask, and for the last 5 minutes only', () => {
   const ask = load();
   ask.state({...base, phones:1});
   ask.clicks[0]({target:{closest:() => ({id:'mm-toggle', dataset:{}})}});
   assert.equal(ask.bar.hidden, false);
   assert.equal(ask.bar.attrs['data-testid'], 'mobile-mode-ask');
-  const ended = load();
-  ended.state({...base, phones:1, ended:{text:'Phone mode ended.'}});
-  assert.equal(ended.bar.hidden, false);
-  assert.equal(ended.bar.attrs['data-testid'], 'mobile-mode-ended');
   const last = load();
   last.state({...base, phones:1, on:true, ends_at:soon(2 * 60000)});
   assert.equal(last.bar.hidden, false);
@@ -89,4 +85,16 @@ test('New ticket in the top bar is the quiet (outlined) button, not the filled o
   assert.match(tag, /class="btn outline sm"/);
   assert.doesNotMatch(tag, /primary/);
   assert.match(html, /id="mm-chip"/);
+});
+test('the ended notice is one toast, marked seen, never a banner that stays', () => {
+  const toasts = [], acts = [];
+  const c = load();
+  c.win.orch = {toast:(text, kind) => toasts.push([text, kind])};
+  c.win.orchAct = async (op) => { acts.push(op); return {ok:true}; };
+  const ended = {...base, phones:1, ended:{text:'Mobile mode ended after its time ran out.'}};
+  c.state(ended);
+  c.state(ended);
+  assert.equal(c.bar.hidden, true);
+  assert.deepEqual(toasts, [['Mobile mode ended after its time ran out.', 'ok']]);
+  assert.deepEqual(acts, ['mobile.ack']);
 });
