@@ -82,7 +82,9 @@ def parse(text: str, tz: str, now: datetime | None = None) -> Plan:
         if at <= local:
             raise Plain(f"{m[0]} is already past. Try tomorrow {m[2]}:{m[3]}.")
         return Plan(until=at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
-    raise Plain(f'I don\'t understand "{text}". Say it like: {EXAMPLES}. Monthly days go from 1 to 31 (in shorter months it runs on the last day).')
+    raise Plain(
+        f'I don\'t understand "{text}". Say it like: {EXAMPLES}. Monthly days go from 1 to 31 (in shorter months it runs on the last day).'
+    )
 
 
 def daily_or_slower(cron: str) -> bool:
