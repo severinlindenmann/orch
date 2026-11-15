@@ -1042,6 +1042,8 @@ def _items_text(items: list[dict]) -> str:
 
 def _description_plan(ticket: dict) -> list[str]:
     """A description longer than a title needs a plan before work starts."""
+    if ticket.get("ext"):  # an add-on runs this ticket's flow with its own start text
+        return []
     if not ticket.get("checklist") and len((ticket.get("note") or "").strip()) > 200:
         return ["Read the description, write a plan, split it into tasks with orch check add, then start."]
     return []

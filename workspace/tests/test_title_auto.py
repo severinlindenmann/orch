@@ -168,3 +168,12 @@ def test_tidy_leaves_a_title_a_person_edited_after_creation(proj):
     t = tickets.tidy(proj, t["id"], "Fix the login page", "agent:claude", {"due": "2026-12-01"})
     assert t["title"] == "My own wording" and t["due"] == "2026-12-01"
     assert not any(h["text"].startswith("Title tidied from") for h in t["history"])
+
+
+def test_long_note_on_an_add_on_ticket_gets_no_plan_line(proj):
+    """An add-on ticket (ext) carries its own start text; core adds no 'write a plan, split it' line (#894)."""
+    t = tickets.create(proj, "Idea", "human:t", fields={"note": "word " * 100})
+    assert "write a plan, split it into tasks" in runs.fresh_prompt(t, [], proj)
+    t["ext"] = {"factory": {"role": "order"}}
+    prompt = runs.fresh_prompt(t, [], proj)
+    assert "write a plan, split it into tasks" not in prompt and "word word word" in prompt
