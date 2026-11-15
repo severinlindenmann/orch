@@ -176,9 +176,9 @@ def _ticket_name(root, tid):
     return title or key or None
 
 
-def _deleted_rows(root, state):
-    """Missing-ticket notices: one row each, or one grouped row when there are several. A notice for a
-    ticket that is no longer in the synced copy nor on disk has nothing left to say and is dropped."""
+def _deleted_items(root, state):
+    """Missing-ticket notices still worth showing, oldest first. A notice for a ticket that is no longer in
+    the synced copy nor on disk has nothing left to say and is dropped."""
     from . import repo, step
 
     entries = {}
@@ -197,38 +197,11 @@ def _deleted_rows(root, state):
             gone = False
         if not gone:
             items.append((tid, since))
-    if not items:
-        return []
-    if len(items) == 1:
-        tid, since = items[0]
-        name = _ticket_name(root, tid)
-        return [
-            row(
-                "deleted",
-                tid,
-                f"A ticket file was missing: {name}. Restored it."
-                if name
-                else "A ticket file was missing. Restored it.",
-                since,
-                f"orch sync deleted {shlex.quote(tid)} --keep",
-                ["Leave deleted", "OK"],
-                ticket=tid,
-                actions=[
-                    action(
-                        "Leave deleted",
-                        "leave-deleted",
-                        tid,
-                        sign=True,
-                        review={
-                            "title": "Leave this ticket deleted?",
-                            "body": "It is removed on every computer that syncs.",
-                            "done": "Left deleted.",
-                        },
-                    ),
-                    action("OK", "restored", tid),
-                ],
-            )
-        ]
+    return items
+
+
+def _deleted_group(root, items):
+    """One grouped row for several missing-ticket notices."""
     ids = ",".join(tid for tid, _ in items)
     names = [n for n in (_ticket_name(root, tid) for tid, _ in items[:3]) if n]
     text = f"{len(items)} ticket files were missing and are restored."
@@ -482,7 +455,39 @@ def rows(root):
                 tone="warn",
             )
         )
-    out.extend(_deleted_rows(root, state))
+    items = _deleted_items(root, state)
+    if len(items) > 1:  # several: one grouped card with "OK, all"
+        out.extend(_deleted_group(root, items))
+    for tid, since in items if len(items) == 1 else []:
+        # the ticket's title and code, never only its id (the dashboard hides ids, which left the name blank)
+        name = _ticket_name(root, tid)
+        out.append(
+            row(
+                "deleted",
+                tid,
+                f"A ticket file was missing: {name}. Restored it."
+                if name
+                else "A ticket file was missing. Restored it.",
+                since,
+                f"orch sync deleted {shlex.quote(tid)} --keep",
+                ["Leave deleted", "OK"],
+                ticket=tid,
+                actions=[
+                    action(
+                        "Leave deleted",
+                        "leave-deleted",
+                        tid,
+                        sign=True,
+                        review={
+                            "title": "Leave this ticket deleted?",
+                            "body": "It is removed on every computer that syncs.",
+                            "done": "Left deleted.",
+                        },
+                    ),
+                    action("OK", "restored", tid),
+                ],
+            )
+        )
     if _unconfirmed(root):
         out.append(
             row(
