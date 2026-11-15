@@ -34,7 +34,7 @@ def test_take_back_take_back_removes_it_everywhere(tk, run):
     assert any(r["ticket"] == tid for r in json.loads(run("needs", "--json")[1]))
     code, out, err = run("ask", tid, "--take-back", q["id"], "not needed", "--by", "agent:x")
     assert code == 0, out + err
-    assert out.strip() == f"Taken back {q['id']}. Next: keep working on the ticket."
+    assert out.strip() == f"Taken back {q['id']}.\nNext: keep working on the ticket."
     t = tickets.load(root, tid)
     got = t["questions"][0]
     assert got["taken_back"]["reason"] == "not needed" and got["taken_back"]["by"] == "agent:x"
