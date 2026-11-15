@@ -326,7 +326,9 @@ def _wait(args, root: Path) -> None:
         raise ReviewError("not_found", f"{t.get('key') or tid} has no such card to wait for.")
     end = time.monotonic() + max(args.timeout, 0)
     while True:
-        q = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == q0["id"])
+        q = next(
+            x for x in history.shown_ticket(root, tickets.load(root, tid))["questions"] if x["id"] == q0["id"]
+        )
         if q.get("answer") is not None:
             break
         if time.monotonic() >= end:
