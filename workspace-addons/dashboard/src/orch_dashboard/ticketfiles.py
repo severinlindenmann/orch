@@ -127,10 +127,54 @@ def preview_kind(name: str) -> str:
     return "text" if ext in TEXT else "image" if ext in IMAGES else "none"
 
 
+# A reviewed copy of a card (.orch/tickets/<tid>/reviewed/<sha12>/<name>, written by `orch review add`): the
+# name is "<sha12>/<name>", exactly two plain parts. Only what a card may show; a page runs sandboxed and inert.
+REVIEWED_SHA = re.compile(r"[0-9a-f]{12}")
+REVIEWED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,119}")
+REVIEWED_TYPES = {
+    **IMAGES,
+    "html": "text/html; charset=utf-8",
+    "htm": "text/html; charset=utf-8",
+    "md": "text/plain; charset=utf-8",
+    "txt": "text/plain; charset=utf-8",
+    "csv": "text/csv; charset=utf-8",
+}
+REVIEWED_CSP = (
+    "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src data:; "
+    "frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox"
+)
+
+
+def read_reviewed(root: Path, tid: str, name) -> tuple[int, bytes, str, dict]:
+    """One file of a reviewed copy. Anything outside the shape is a plain 404; the read is the one hardened reader."""
+    nope = (404, b"not found", "text/plain", {})
+    try:
+        from orch import safefile
+    except ImportError:
+        return nope
+    if not (isinstance(tid, str) and TID.fullmatch(tid) and isinstance(name, str)):
+        return nope
+    sha, _, fname = name.partition("/")
+    if not (REVIEWED_SHA.fullmatch(sha) and REVIEWED_NAME.fullmatch(fname) and ".." not in fname):
+        return nope
+    ctype = REVIEWED_TYPES.get(fname.rsplit(".", 1)[-1].lower() if "." in fname else "")
+    if ctype is None:
+        return nope
+    try:
+        data = safefile._read_parts(root, [".orch", "tickets", tid, "reviewed", sha], [fname], MAX_BYTES * 5)
+    except safefile.TooLarge:
+        return 413, b"That file is too large to show.", "text/plain", {}
+    if data is None:
+        return nope
+    return 200, data, ctype, {}
+
+
 def read_file(root: Path, tid: str, kind: str, name, download: bool = False) -> tuple[int, bytes, str, dict]:
     """(status, body, content type, extra headers). Anything outside the rules is a plain 404. The read itself is
     orch's one hardened reader (orch.safefile: no links, no hard links, no FIFOs, folders opened one by one)."""
     nope = (404, b"not found", "text/plain", {})
+    if kind == "reviewed":
+        return nope if download else read_reviewed(root, tid, name)
     try:
         from orch import safefile
     except ImportError:  # no orch to read with: refuse, never read by hand

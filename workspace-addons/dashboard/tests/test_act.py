@@ -46,6 +46,7 @@ def acts(act_orch):
             ["ticket", "list"],
             ["config", "get"],
             ["look", "show"],
+            ["review", "list"],
             ["chat", "status"],
         )
         and c[:2] != ["private", "--json"]
@@ -490,7 +491,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 for c in calls(act_orch)
                 if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
                 and c[0] not in ("needs", "status", "agents")
-                and c[:2] not in (["config", "get"], ["chat", "status"])
+                and c[:2] not in (["config", "get"], ["chat", "status"], ["review", "list"])
                 and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
                 and c[0] != "look"
                 and c[:2] != ["private", "--json"]
@@ -1294,6 +1295,106 @@ def test_attach_files_to_an_existing_ticket():
         actions.attachments(
             "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]}
         )
+
+
+# --- Review page: review.answer ----------------------------------------------------------------------------
+D64 = "a" * 64
+
+
+def test_review_answer_argv_and_via(act_server, act_orch):
+    args = {
+        "ticket": "t_abcdef",
+        "key": "q3",
+        "verdict": "talk",
+        "picked": "C",
+        "note": {"text": "darker", "pins": [{"n": 1, "on": "after", "x": 0.2, "y": 0.4, "text": "here"}]},
+        "digest": D64,
+    }
+    code, text, _ = post(act_server, {"op": "review.answer", "args": args})
+    assert code == 200, text
+    a = acts(act_orch)[-1]
+    assert a[:4] == ["review", "answer", "t_abcdef", "q3"]
+    assert a[a.index("--verdict") + 1] == "talk" and a[a.index("--picked") + 1] == "C"
+    note = json.loads(a[a.index("--note") + 1])  # the core reads words.text, not text
+    assert note["words"] == {"text": "darker"} and "text" not in note and note["pins"][0]["n"] == 1
+    assert a[a.index("--digest") + 1] == D64 and a[a.index("--via") + 1] == "dashboard"
+    assert "--by" not in a and "--proof-stdin" not in a
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok"},  # no digest
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": "x"},
+        {"ticket": "t_abcdef", "key": "q1; ls", "verdict": "ok", "digest": D64},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "yes", "digest": D64},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "picked": "C; rm"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "note": "text"},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "note": {"text": "x" * 9000}},
+        {"ticket": "../x", "key": "q1", "verdict": "ok", "digest": D64},
+        {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64, "by": "human:x"},
+    ],
+)
+def test_review_answer_is_checked(act_server, act_orch, args):
+    assert post(act_server, {"op": "review.answer", "args": args})[0] == 400
+    assert acts(act_orch) == []
+
+
+def test_review_answer_has_no_proof_and_no_by():
+    q = {"ticket": "t_abcdef", "key": "q3", "verdict": "ok", "digest": D64}
+    assert actions.proof_for("review.answer", q) is None
+    assert actions.proof_for("review.answer", {**q, "key": "review"}) is None
+    argv = actions.build_argv("review.answer", q)
+    assert "--by" not in argv and "--proof-stdin" not in argv and argv[-1] == "--json"
+    assert argv[:4] == ["review", "answer", "t_abcdef", "q3"] and argv[argv.index("--via") + 1] == "dashboard"
+    assert "review" in actions.RESERVED
+
+
+def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
+    from orch.pageproof import SELF
+
+    seen = {}
+
+    class R:
+        returncode, stdout, stderr = 0, "{}", ""
+
+    monkeypatch.setattr(actions, "_run", lambda argv, **k: seen.update(argv=argv) or R())
+    args = {"ticket": "t_abcdef", "key": "review", "verdict": "ok", "digest": D64}
+    with pytest.raises(actions.NeedsPerson):  # watch-only: no page session, nothing runs
+        actions.run_op(ws, SELF, "review.answer", args, mint=None)
+    assert seen == {}
+    code, _, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: pytest.fail("no proof"))
+    assert code == 200 and "review" in seen["argv"] and "--by" not in seen["argv"]
+
+
+def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):
+    from orch.pageproof import SELF
+
+    for code_in, code_out in (("changed", "changed"), ("needs_person", "needs_person"), ("weird", "refused")):
+
+        class R:
+            returncode = 2
+            stdout = json.dumps({"error": "It changed.", "code": code_in})
+            stderr = "Refused: It changed.\n"
+
+        monkeypatch.setattr(actions, "_run", lambda argv, **k: R())
+        args = {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64}
+        status, text, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: "hp1.x")
+        assert status == 422
+        assert json.loads(text) == {"ok": False, "error": {"code": code_out, "message": "It changed."}}
+
+
+def test_review_agent_is_refused(act_server, act_orch):
+    # an agent's request has no page session: the real server is watch-only (see test_proof_session); here the
+    # core refuses an agent as a person, and the page gets needs_person
+    out = json.loads(
+        actions.review_error({"error": "Only a person can decide.", "code": "needs_person"}, "", 2)
+    )
+    assert out["error"]["code"] == "needs_person"
+
+
+def test_workspace_set_builds_one_config_set_argv_and_signs_the_text():
+    pass
 
 
 def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():

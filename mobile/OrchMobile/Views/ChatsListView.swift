@@ -52,6 +52,7 @@ struct ChatsListView: View {
                         ConversationInfoView(conversation: ticket.map { .topic(workspace: ws, ticket: $0) } ?? .general(workspace: ws))
                     case .group(let host, let id): GroupRoomView(key: GroupKey(host: host, id: id))
                     case .groupHistory: GroupHistoryView()
+                    case .review(let ws): ReviewStackView(workspaceId: ws)
                     case .newChat: NewTopicScreen(workspaceId: nil)
                     case .newTopic(let ws): NewTopicScreen(workspaceId: ws)
                     }
@@ -130,6 +131,7 @@ struct ChatsListView: View {
                 Button("Add a workspace") { sheet = .addWorkspace }.buttonStyle(PrimaryButtonStyle())
             }.frame(maxWidth: .infinity).padding(.vertical, 50).accessibilityIdentifier("chats-empty")
         } else {
+            ReviewStackRows()
             attentionCards
             let shown = model.workspaceSummaries.filter { ChatsRowRules.matches(filter, unread: $0.unread, needsYou: $0.openQuestions > 0) }
             let groupsShown = GroupsSection.shown(model, filter: filter)
@@ -166,7 +168,7 @@ struct ChatsListView: View {
     }
 
     @ViewBuilder private var attentionCards: some View {
-        let all = ChatsRowRules.needsYou(model.questions, answers: model.answers)
+        let all = ChatsRowRules.needsYou(ReviewStackRules.withoutStackQuestions(model.questions), answers: model.answers)
         let activity = HiddenQuestions.newestActivity(for: all, messages: model.messages, allQuestions: model.questions)
         let isHidden: (Question) -> Bool = { hidden.isHidden($0.id, newestActivity: activity[HiddenQuestions.key($0)]) }
         let questions = all.filter { !isHidden($0) }

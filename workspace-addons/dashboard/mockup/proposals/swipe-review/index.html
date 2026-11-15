@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Swipe review · orch (draft)</title>
+<link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/gallery.css"></head>
+<body><main class="page" aria-label="Swipe review draft" style="max-width:1000px">
+<div class="page-heading"><div><p class="eyebrow">Draft 15 Nov · owner idea</p><h1>Swipe review</h1>
+<p>Everything that waits on you, one card at a time. Right = <strong>Looks good</strong>, left = <strong>Don't do</strong>, down = <strong>Comment</strong> (voice or text). The middle of the card is the thing itself: a screen, a draft, a file, a link. Tap it to make it bigger, open it, or comment on one spot.</p></div></div>
+
+<div class="row" style="gap:var(--s3);flex-wrap:wrap">
+ <a class="btn primary" href="phone.html">Phone app (6 states, one live)</a>
+ <a class="btn" href="desktop.html">Workspace dashboard (live, keys work)</a>
+ <a class="btn" href="ticket.html">Ticket page: Decisions tab</a>
+ <a class="btn" href="standalone.html">Without the dashboard (orch review)</a>
+</div>
+
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">How it works</h2>
+<table class="mini-table" style="font-size:14px;line-height:20px;width:100%"><thead><tr><th>Move</th><th>Phone</th><th>Workspace</th><th>What happens</th></tr></thead><tbody>
+<tr><td>Right</td><td>swipe right or ✓</td><td>→ or drag or click</td><td>Approve. The button and the stamp name the action (“Build it”, “Publish”, “Start reminders”, “Use C”), and the card says what happens (“If you approve: goes live for everyone at cafe.example”). Things that publish or send still ask for Face ID / the one-click sign.</td></tr>
+<tr><td>Left</td><td>swipe left or ✕</td><td>←</td><td>Don't do (on a Check result: Send back). The helper stops this.</td></tr>
+<tr><td>Down</td><td>swipe down or mic</td><td>↓</td><td>Comment sheet: hold or tap to talk (gsw / de / en, written out) or type. The button says the outcome: “Send back for changes” (never approves); on options also “Use C with these changes”. Pull down to close, words kept.</td></tr>
+<tr><td>Up</td><td>swipe up or Later</td><td>↑</td><td>Later: stays unanswered, goes to the end of the stack.</td></tr>
+<tr><td>Tap the middle</td><td>tap, pinch</td><td>Space, click, Ctrl+wheel</td><td>Bigger view: zoom, Open, “Comment on a spot” (pin + words). Pins go with whatever you swipe next.</td></tr>
+<tr><td>Before / after</td><td>Before · After · Both on the card; drag the line in the big view</td><td>B switches</td><td>Shown for anything that changed something: a redesigned screen, round 2 of a result, an edited text. Pins work on both sides.</td></tr>
+<tr><td>Options A / B / C</td><td>tap one (ring + Picked), swipe right</td><td>click one, →</td><td>Right = take the picked one (button says “Take C”; without a pick the card shakes: pick first). Left = none of these. Down = comment on the picked one (A · B · C · All): Send = take C with your changes, All = send all back. “Suggested” = the helper's pick, never pre-selected.</td></tr>
+<tr><td>All cards</td><td>“All” at the top</td><td>side list, O</td><td>Every card with its answer (waiting first). Tap one to jump there; an answered one shows “You said … · swipe to change”.</td></tr>
+<tr><td>Oops</td><td>Undo (toast, 5 s)</td><td>Z</td><td>The last card comes back.</td></tr>
+</tbody></table>
+<p class="meta" style="margin:0">Same stack on phone and workspace: what you answer on one is gone on the other. Entry: a yellow “6 things to review” row on top of Chats (and the push); on the workspace a “Review all” button in Home's “Needs you” block, which opens the Review page.</p>
+</section>
+
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">Research: what others do, what we take</h2>
+<table class="mini-table" style="font-size:14px;line-height:20px;width:100%;table-layout:auto"><thead><tr><th>Where</th><th>What they learned</th><th>We take</th></tr></thead><tbody>
+<tr><td>Tinder, Bumble (card stacks)</td><td>One decision at a time is fast and calm. A stamp while dragging tells you what will happen; let go early and it springs back. Buttons under the card for people who don't swipe.</td><td>One card, the stamp, three buttons, the card behind peeks out.</td></tr>
+<tr><td>Apple Mail, Gmail swipe actions</td><td>Swipes fire by accident. Fix: a clear distance (about a third of the width) or a fast flick, and Undo right after.</td><td>30 % width or a flick; Undo toast 5 s; Z on the desk.</td></tr>
+<tr><td>Superhuman, Linear Triage</td><td>On a computer, triage is a keyboard job: one key per answer, preview with Space.</td><td>← ↓ → and Space; drag still works with the mouse.</td></tr>
+<tr><td>Before/after sliders (photo apps, Percy / Chromatic visual tests, GitHub image diff)</td><td>A change is judged fastest next to what was there: a slider for screens, side by side for text.</td><td>Slide line in the big view, Before · After · Both on the card (no slider on the card, it would fight the swipe).</td></tr>
+<tr><td>Polls, A/B design reviews (Figma voting, Lyssna preference tests)</td><td>Choosing is easier with all options side by side and one clear pick; comments are about one option.</td><td>Options card: side by side on the desk, stacked on the phone; comment “about C”.</td></tr>
+<tr><td>Photo grids, Tinder “rewind”, mail inbox list</td><td>A stack hides what is left; people want to see the whole pile and go back.</td><td>“All cards” overview + jump; answers can be changed.</td></tr>
+<tr><td>Figma, Markup, GitHub review</td><td>“Change this” is much clearer on the spot than in a sentence.</td><td>“Comment on a spot” in the big view.</td></tr>
+<tr><td>WhatsApp voice notes (and our messenger)</td><td>Hold to talk is the quickest way to say a long thing on the phone.</td><td>Hold to talk in the comment sheet, written out like the chat does.</td></tr>
+<tr><td>Accessibility (WCAG 2.2: 2.5.1, 2.5.7; iOS VoiceOver)</td><td>Every swipe needs a one tap way, a drag is never the only way; screen readers need named actions.</td><td>Buttons always there; VoiceOver actions “Looks good / Don't do / Comment”; Reduce Motion = no fly-out.</td></tr>
+<tr><td>Known risk: “rubber stamping”</td><td>Fast stacks tempt you to approve without looking.</td><td>Each card says what happens when you approve; risky ones still need the signature; the stack stays short (what waits now).</td></tr>
+</tbody></table>
+</section>
+
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">Built into orch: works without the dashboard</h2>
+<p style="margin:0">Review is part of orch itself, not an add-on: nothing to install or turn on. orch serves its own small Review page from the same design system, so it works with the CLI only, on a server, or with the dashboard. <a href="standalone.html">See the page orch opens by itself →</a></p>
+<table class="mini-table" style="font-size:14px;line-height:20px;width:100%;table-layout:auto"><thead><tr><th>You use</th><th>You get the review</th></tr></thead><tbody>
+<tr><td>Only the CLI / terminal</td><td><code>orch review</code> opens the page in your browser and prints the link (helpers can also print or send the link).</td></tr>
+<tr><td>A server without a screen</td><td>The same link plus one copyable line to reach it from your laptop (<code>ssh -L …</code>), or over the private network when that is on.</td></tr>
+<tr><td>The dashboard</td><td>The same page as “Review” (Home → Review all), with the sidebar.</td></tr>
+<tr><td>The phone</td><td>The same stack in the app (yellow row on Chats, push).</td></tr>
+</tbody></table>
+<p style="margin:0">Whichever door you use, the answer lands in the same place on the ticket.</p>
+<pre style="white-space:pre-wrap;font:13px/20px var(--font-mono);background:var(--bg);padding:12px;border-radius:8px;border:1px solid var(--border);margin:0">$ orch review
+8 things wait on you (2 needed before Friday).
+Open: http://127.0.0.1:47211/review?k=4f9c2e…   works on this computer until 18:30
+On a server? From your laptop: ssh -L 47211:127.0.0.1:47211 you@server   then open the link.
+
+# a helper puts a card in the stack and waits for the answer
+$ orch review add DT-45 --choose "Home: which layout?" \
+    --option "A=As today:files/home-a.png" --option "B=Recent changes first:files/home-b.png" --suggest B \
+    --option "C=Questions first:files/home-c.png" --then "I build the one you pick. You check it before it goes live."
+$ orch review add DT-41 --draft "What changed today" --before files/home-old.png --after files/home-new.png --ok "Build it"
+$ orch review link            # the link to send you (chat, phone, terminal)
+$ orch review wait DT-45      # prints the answer when it comes:
+Use C with 2 changes: questions on top; month in the heading. (Severin, phone, 10:42)</pre>
+<ul style="margin:0;padding-left:20px;display:grid;gap:6px">
+<li>The link has a random key, works only on this computer by default, and runs out (default: end of day). Answers through it count as you (the person chosen in orch), like the dashboard.</li>
+<li>Helpers learn it from orch's own helper instructions: “to ask the owner to decide, use <code>orch review add</code>; never decide for them”.</li>
+<li>Without the dashboard there is no ticket page, so the Review page has an <strong>Answered</strong> list, and <code>orch ticket show DT-45</code> prints the same Decisions block helpers read.</li>
+</ul>
+</section>
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">Where the answer is kept</h2>
+<p style="margin:0">Every swipe is kept on its ticket, so you can come back later, and helpers read it without guessing. <a href="ticket.html">See the ticket page draft →</a></p>
+<ul style="margin:0;padding-left:20px;display:grid;gap:6px">
+<li><strong>Ticket → Decisions tab</strong> (new, fixed place after Tasks): one card per answer, newest first, showing what you saw then (options with the taken one marked, before/after, pins in place), your answer, your words (voice with its text, typed text, the spots you marked), who, when, phone or dashboard. “Open as you saw it” opens the same big view, read-only.</li>
+<li><strong>What you saw stays as it was</strong>: orch keeps a copy of exactly what the card showed (screens, text, options) next to the answer, plus its fingerprint. A later file change can't move the answer onto something else, and “View reviewed version” always shows the old one.</li>
+<li><strong>On top: “What applies now”</strong>: the current instruction in plain words (which option, which changes, what happens next). Older answers stay below with what came of them (“Done: led to the 3 layouts”, “Replaced by the answer above”). Changing an answer never deletes the old one.</li>
+<li><strong>Activity</strong>: the same answer as one plain line (“Severin took C on …: put the questions on top; on C: show the month here. (phone)”).</li>
+<li><strong>For helpers</strong>: the answer lives in the ticket's existing question list (no new store), plus a ready-made one-sentence summary written by orch from the parts, so a helper reads one line and finds the details (voice file, transcript, pins) next to it. The ticket's own command prints a “Decisions” block in the same words.</li>
+</ul>
+<h3 style="margin:8px 0 0;font-size:16px;line-height:24px">What a helper reads (example)</h3>
+<pre style="white-space:pre-wrap;font:13px/20px var(--font-mono);background:var(--bg);padding:12px;border-radius:8px;border:1px solid var(--border);margin:8px 0 0">DT-45 — WHAT APPLIES NOW
+Use option C (Questions first) WITH 2 CHANGES. Build it; owner checks before it goes live.
+  1. Put the questions on top of the list.
+  2. Heading on C (pin 1): show the month here.
+Not allowed by this answer: publishing, sending, anything outside DT-45.
+
+History (newest first)
+- q4 Home: which layout? -> USE C WITH CHANGES (Severin, phone, 2026-11-15 10:42) [reviewed copy: reviewed/q4/]
+- q3 "What changed today" block -> SENT BACK FOR CHANGES (Severin, dashboard, 09:30) -> done: led to q4
+- q1 Start the work -> APPROVED: start (Severin, phone, Face ID, Thu 16:05) -> done: started 16:06
+
+Stored in the ticket file, questions[] (one entry per card, never overwritten; a changed answer adds a new
+entry with "replaces"):
+{"id":"q4","kind":"choice","text":"Home: which layout?","options":["A","B","C"],
+ "answer":"C","answered_by":"Severin","via":"phone","at":"2026-11-15T10:42:00+01:00",
+ "decision":{
+   "action":"use_with_changes",          // one of: approve | use | use_with_changes | send_back | dont | none_of_these | later
+   "picked":"C",
+   "allows":"build",                     // what this answer authorizes (shown on the card as the button word)
+   "changes":["Put the questions on top of the list.","Show the month in the heading (pin 1)."],
+   "words":{"text":"","voice":[{"file":"reviewed/q4/voice-1.m4a","seconds":6,"lang":"gsw",
+                                "transcript":"Take C, but put the questions on top of the list."}]},
+   "pins":[{"n":1,"on":"option C","x":0.30,"y":0.62,"text":"Show the month here."}],
+   "summary":"Use C with 2 changes: questions on top; month in the heading.",   // reading aid; changes[] and words win
+   "replaces":null,"replaced_by":null,
+   "after":{"state":"helper building","at":"2026-11-15T10:43:00+01:00"}},
+ "shown":{"suggested":"B","digest":"sha256:3f9a…","copy":"reviewed/q4/"}}   // immutable copy of exactly what was shown</pre>
+</section>
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">My recommendation</h2>
+<ul style="margin:0;padding-left:20px;display:grid;gap:6px">
+<li>Put in the stack: drafts, Check results, helper plans that need a yes, links before they go public. Questions with several choices stay normal question cards (a swipe can't pick option B).</li>
+<li>Left word: “Don't do”, but “Send back” on Check results (that is the word the ticket already uses).</li>
+<li>Swipe up = Later (added after the challenge: an honest “not now”).</li>
+<li>A comment never approves. To approve with changes on options, the sheet has its own button “Use C with these changes”.</li>
+<li>Build: built into orch (no add-on): one widget in the master design system (<code>UI.swipeDeck</code>, used by every page here), the Review page orch serves itself, the same page inside the dashboard, one SwiftUI screen in the app. Answers use the same paths as today's Looks good / Send back and the question answers, so nothing new on the wire.</li>
+</ul></section>
+<p class="meta">Files: workspace-addons/dashboard/mockup/proposals/swipe-review/ · widget in workspace/src/orch_ui/static/widgets.css + widgets.js (branch draft/swipe-review).</p>
+</main></body></html>

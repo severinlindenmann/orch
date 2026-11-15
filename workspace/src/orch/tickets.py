@@ -2361,7 +2361,10 @@ def ask(
     kind: str | None = None,
     action: str | None = None,
     check: str | None = None,
+    card: dict | None = None,
+    shown: dict | None = None,
 ) -> tuple[dict, dict]:
+    """card/shown: a Review stack card (orch/review.py validates and copies it before it gets here)."""
     if not text.strip():
         raise Refused("A question needs text.")
     if recommended is not None and options and recommended not in options:
@@ -2414,6 +2417,9 @@ def ask(
             q["action"] = act
         if check is not None:
             q["check"] = check
+        if card is not None:  # RULE A: only a card question carries these (old digests stay the same)
+            q["card"] = card
+            q["shown"] = shown
         ticket["questions"].append(q)
         ticket["status"] = "waiting"
         ticket["waiting_on"] = {"kind": "question", "ref": q["id"]}
@@ -2432,6 +2438,9 @@ def question_digest(q) -> str:
     if not isinstance(q, dict):
         return QUESTION_UNENCODABLE
     shown = {k: q.get(k) for k in ("id", "text", "options", "kind", "action", "recommended")}
+    for k in ("card", "shown"):  # RULE A: only when present, so a question without a card keeps its digest
+        if q.get(k) is not None:
+            shown[k] = q[k]
     try:
         canon = json.dumps(shown, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
         return hashlib.sha256(canon.encode("utf-8")).hexdigest()
@@ -2448,8 +2457,10 @@ def answer(
     via: str,
     *,
     expected_question_digest: str | None = None,
+    decision: dict | None = None,
 ) -> tuple[dict, dict]:
-    """expected_question_digest: question_digest of the question as the person was shown it; the answer is
+    """decision: the Review stack's structured answer (orch/review.py); `answer` is then its plain summary.
+    expected_question_digest: question_digest of the question as the person was shown it; the answer is
     refused when the question is no longer that one, or could not be encoded. None: not checked (a caller that
     kept no digest, e.g. a relay record from before digests)."""
     if not VIA_RE.fullmatch(via):
@@ -2465,6 +2476,10 @@ def answer(
             raise Refused(f"Ticket {tid} has no question {qid}.")
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
+        if isinstance(q.get("card"), dict) and not str(by).startswith("human:"):
+            raise Refused(
+                "This card waits for the owner. Ask with orch review add and wait with orch review wait."
+            )
         if expected_question_digest is not None and (
             expected_question_digest == QUESTION_UNENCODABLE or question_digest(q) != expected_question_digest
         ):
@@ -2475,6 +2490,8 @@ def answer(
                 ans = opt
                 break
         q["answer"], q["answered_by"], q["via"] = ans, by, via
+        if decision is not None:
+            q["decision"], q["at"] = dict(decision), now()
         w = ticket.get("waiting_on")
         if w and w.get("kind") == "question" and w.get("ref") == qid:
             still = _open_questions(ticket)
@@ -2490,6 +2507,48 @@ def answer(
         return q
 
     return apply_op(root, tid, op, by=by)
+
+
+def record_answered(
+    root: Path, tid: str, entry: dict, by: str, via: str, *, replaces: str | None = None
+) -> dict:
+    """Append one already-answered questions[] entry (a Review stack decision that was not an open question:
+    a Check result, or a changed answer). Nothing is overwritten: with `replaces` the old entry only gets
+    decision.replaced_by. One apply_op, one history line "Answered <qid>: <summary>"."""
+    if not VIA_RE.fullmatch(via):
+        raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
+    if not isinstance(entry.get("answer"), str) or not entry["answer"].strip():
+        raise Refused("An answer needs text.")
+    if isinstance(entry.get("card"), dict) and not str(by).startswith("human:"):
+        raise Refused(
+            "This card waits for the owner. Ask with orch review add and wait with orch review wait."
+        )
+
+    def op(ticket):
+        old = None
+        if replaces is not None:
+            old = next((x for x in ticket["questions"] if x["id"] == replaces), None)
+            if old is None or old.get("answer") is None:
+                raise Refused(f"Ticket {tid} has no answered question {replaces}.")
+            if (old.get("decision") or {}).get("replaced_by"):
+                raise Refused(f"{replaces} was already replaced by a newer answer.")
+        q = {
+            "answer": None,
+            "answered_by": None,
+            "via": None,  # fixed key order, like ask()
+            **{k: v for k, v in entry.items() if k not in ("id", "answered_by", "via", "at")},
+        }
+        q = {"id": _next_id(ticket["questions"], "q"), **q}
+        q["answer"], q["answered_by"], q["via"], q["at"] = entry["answer"], by, via, now()
+        if replaces is not None:
+            q["decision"] = {**(q.get("decision") or {}), "replaces": replaces, "replaced_by": None}
+            old["decision"] = {**(old.get("decision") or {}), "replaced_by": q["id"]}
+        ticket["questions"].append(q)
+        add_history(ticket, by, f"Answered {q['id']}: {q['answer']}", via)
+        history.created("answers", q)
+        return q
+
+    return apply_op(root, tid, op, by=by)[1]
 
 
 def waiting_value(kind: str, ref: str | None = None, until: str | None = None) -> dict:

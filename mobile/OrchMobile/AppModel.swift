@@ -568,9 +568,47 @@ final class AppModel {
         if events.contains(where: { if case .answered = $0 { true } else { false } }) { await refresh() }
     }
 
+    // MARK: Review stack (P4)
+
+    /// The Outbox item of a swiped review card, if any.
+    func verdictItem(for questionId: String) -> OutboxItem? { outbox.items.first { $0.kind == .answer && $0.questionMessageId == questionId && $0.verdict != nil } }
+
+    /// Swipe result: queue (or, while still on this phone, change) the verdict, then try to send. Throws `Outbox.VerdictProblem`.
+    func submitVerdict(_ item: ReviewItem, _ verdict: ReviewVerdict) async throws {
+        let summary = ReviewStackRules.summary(item, verdict: verdict)
+        if verdictItem(for: item.id) != nil { try outbox.changeVerdict(question: item.question, answer: summary, verdict: verdict) }
+        else { try outbox.enqueueAnswer(question: item.question, answer: summary, verdict: verdict) }
+        await flushAnswers()
+    }
+
+    /// A card file of the stack (size and sha256 are checked by the client); nil = open it on the computer.
+    func cardFile(_ file: CardFile) async -> Data? {
+        // Only bytes that passed the size + sha256 check for exactly this card file; never the raw blobCache (filled without hashes).
+        let key = "\(file.blobId)|\(file.sha256)|\(file.size)"
+        if let d = verifiedCardFiles[key] { return d }
+        guard let d = try? await client.cardFile(file) else { return nil }
+        verifiedCardFiles[key] = d; return d
+    }
+    private var verifiedCardFiles: [String: Data] = [:]
+
+    /// Take a swipe back (only while it is still on this phone, M4).
+    func undoVerdict(_ questionId: String) {
+        guard let i = verdictItem(for: questionId), i.canChangeVerdict else { return }
+        outbox.discard(i.clientId)
+    }
+
+    func flushAnswers() async {
+        let me = credentials?.phoneId
+        let events = await outbox.flush(using: client)
+        guard credentials?.phoneId == me, me != nil || useMock else { return }
+        if events.contains(.offline) { transportDown = true; announcement = "No connection. Your answer waits on this phone." }
+        await handle(events)
+        if events.contains(where: { if case .answered = $0 { true } else { false } }) { await refresh() }
+    }
+
     /// Answers waiting on this phone (question id -> option), shown as "sending" until the relay has them.
     var queuedAnswers: [String: String] {
-        Dictionary(outbox.items.compactMap { i in i.kind == .answer ? i.questionMessageId.map { ($0, i.answer ?? "") } : nil }, uniquingKeysWith: { a, _ in a })
+        Dictionary(outbox.items.compactMap { i in i.kind == .answer && i.sentMessageId == nil ? i.questionMessageId.map { ($0, i.answer ?? "") } : nil }, uniquingKeysWith: { a, _ in a })
     }
 
     func answerTime(for questionId: String) -> Date? {
@@ -855,6 +893,7 @@ final class AppModel {
             path = [.workspace(ws), .general(ws)]
             return
         }
+        if q.message.body.digest != nil, ReviewStackRules.isStackQuestion(q) { path = [.review(workspace: nil)]; return }   // opens the stack (all workspaces) at that card
         path = q.message.ticket.map { [.workspace(ws), .ticket(workspace: ws, ticket: $0)] } ?? [.workspace(ws)]
     }
 
@@ -879,7 +918,7 @@ final class AppModel {
         undoTimers = [:]; pendingAnswers = [:]; pendingAnswerAt = [:]; sendingAnswers = []
         outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil; olderFailed = false
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
-        readState = ReadState(); blobCache = [:]
+        readState = ReadState(); blobCache = [:]; verifiedCardFiles = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         UserDefaults.standard.removeObject(forKey: HiddenQuestions.defaultsKey); NotificationCenter.default.post(name: .orchPhoneReset, object: nil)
         credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false
@@ -926,6 +965,7 @@ final class AppModel {
             case "topic" where p.count == 3: path = [.workspace(p[1]), .ticket(workspace: p[1], ticket: p[2])]
             case "group" where p.count == 3: path = [.group(host: p[1], id: p[2])]   // `group:<host>:<id>`: UI tests skip the list swipes
             case "workspace" where p.count == 2: path = [.workspace(p[1])]
+            case "review" where p.count == 2: path = [.review(workspace: p[1])]
             case "settings": tab = .settings
             default: break
             }
