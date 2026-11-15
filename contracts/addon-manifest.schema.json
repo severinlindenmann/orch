@@ -34,7 +34,8 @@
         "order": { "type": "integer", "minimum": 0, "maximum": 99, "default": 50, "description": "Position in the nav after the built-in tabs." },
         "title": { "$ref": "#/$defs/text", "maxLength": 40, "description": "Optional page heading when it differs from the nav label (nav 'Phone & workspaces', heading 'Messages')." },
         "subtitle": { "$ref": "#/$defs/text", "maxLength": 120, "description": "Optional one plain sentence under the page heading." },
-        "panel": { "enum": ["repeats", "links", "phone"], "description": "Optional extra card the dashboard draws on this tab (a fixed set; the page code never matches add-on names)." }
+        "panel": { "enum": ["repeats", "links", "phone"], "description": "Optional extra card the dashboard draws on this tab (a fixed set; the page code never matches add-on names)." },
+        "place": { "enum": ["nav", "settings"], "default": "nav", "description": "nav = an entry in the dashboard nav (default); settings = no nav entry, the page opens from the add-on's row in Settings > Add-ons." }
       },
       "description": "The add-on has a dashboard tab, filled by `orch <name> view --json` (addon-view.schema.json)."
     },
@@ -111,7 +112,8 @@
       "additionalProperties": false,
       "properties": {
         "path": { "type": "string", "pattern": "^/[A-Za-z0-9_./-]{0,200}$", "not": { "pattern": "\\.\\.|^//" }, "description": "Path on the add-on's own local page; the base url is the checked url of `orch <name> status --json` (http://127.0.0.1:<port>)." },
-        "label": { "$ref": "#/$defs/text", "maxLength": 24, "description": "Button text, default 'Open'." }
+        "label": { "$ref": "#/$defs/text", "maxLength": 24, "description": "Button text, default 'Open'." },
+        "live_session": { "type": "boolean", "description": "true: this page shows one ticket's live session. The dashboard's Watch live opens the page of the add-on that says so, never just the first add-on with a page." }
       },
       "description": "The add-on serves its own local page (needs background = true). The dashboard shows a button that opens it in a new tab."
     }

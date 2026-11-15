@@ -52,6 +52,9 @@ if args[:2] == ["ticket", "new"]:
     if "--ext" in args:
         addon, _, raw = args[args.index("--ext") + 1].partition("=")
         t["ext"][addon] = json.loads(raw)
+    note = next((a.split("=", 1)[1] for a in args if a.startswith("--note=")), None)
+    if note:
+        t["note"] = note
     gate = next((a.split("=", 1)[1] for a in args if a.startswith("--start-requires=")), None)
     if gate:  # core's start gate: "<ticket>:<question>=<answer>"
         g_ticket, rest = gate.split(":", 1)

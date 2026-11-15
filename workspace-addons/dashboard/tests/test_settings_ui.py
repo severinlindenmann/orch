@@ -192,6 +192,20 @@ def test_load_addons_passes_only_known_panels():
     assert {r["name"]: r["dashboard"]["panel"] for r in rows} == {"aaa": "links", "bbb": None, "ccc": None}
 
 
+def test_load_addons_passes_place_settings_and_defaults_to_nav():
+    from orch_dashboard.data import load_addons
+
+    def row(name, **extra):
+        return {"name": name, "active": True, "dashboard": {"label": "X", "icon": "link", **extra}}
+
+    rows = load_addons(None, None, [row("aaa", place="settings"), row("bbb"), row("ccc", place="<x>")])
+    assert {r["name"]: r["dashboard"]["place"] for r in rows} == {
+        "aaa": "settings",
+        "bbb": "nav",
+        "ccc": "nav",
+    }
+
+
 def test_settings_git_private(ws, monkeypatch):
     from orch_dashboard import data
 
