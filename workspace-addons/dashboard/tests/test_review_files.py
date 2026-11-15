@@ -87,3 +87,19 @@ def test_a_swapped_sha_folder_link_is_refused(rv):
     t = rv / ".orch" / "tickets" / "t_other000x" / "reviewed"
     (t / "ffffffffffff").symlink_to(rv / ".orch" / "tickets" / "t_other000x" / "artifacts")
     assert ticketfiles.read_reviewed(rv, "t_other000x", "ffffffffffff/a.txt")[0] == 404
+
+
+def test_the_page_and_the_kit_module_are_served(ws):
+    srv = make_server(ws, 0, orch_bin="")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        port = srv.server_address[1]
+        for path in ("/pages/review.js", "/kit/review.js"):
+            c = http.client.HTTPConnection("127.0.0.1", port)
+            c.request("GET", path, headers={"Host": f"127.0.0.1:{port}"})
+            r = c.getresponse()
+            assert r.status == 200 and "javascript" in r.getheader("Content-Type"), path
+            assert b"reviewPage" in r.read()
+    finally:
+        srv.shutdown()
+        srv.server_close()

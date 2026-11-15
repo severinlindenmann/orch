@@ -53,7 +53,7 @@ function reviewDrawSide(queue, deck) {
   queue.replaceChildren(...deck.items.map((it, i) => {
     const a = deck.answers[it.id], row = el('button', 'btn ghost sm review-queue-row' + (i === deck.index && !a ? ' is-now' : '') + (a ? ' is-done' : ''));
     row.type = 'button'; row.setAttribute('role', 'listitem');
-    const icon = el('span'); icon.append(window.icon ? window.icon(it.icon, 16) : '');
+    const icon = iconEl(it.icon);
     row.append(icon, el('span', 'review-queue-title', it.title));
     const word = a ? reviewWord(a) : i === deck.index ? 'Now' : '';
     if (word) row.append(el('span', 'swipe-ov-state ' + (a ? a.verdict : 'wait'), word));

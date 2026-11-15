@@ -59,7 +59,7 @@ test('refusals become the codes the page understands', async () => {
   assert.equal((await reply({ok:false, status:0, text:'Could not reach orch.'})).error.code, 'error');
 });
 test('the All cards list: the card on screen in bold, answered ones quiet with their word', () => {
-  const c = ctx({}, {window:{DashHelpers:helpers, UI:kit.UI, icon:(n) => 'ic-' + n}});
+  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
   const rows = []; const queue = {replaceChildren(...r) { rows.push(...r); }};
   const item = (id, title) => ({id, title, icon:'page', kind:'draft', okLabel:'Build it', preview:{type:'page'}});
   const deck = {items:[item('a', 'First'), item('b', 'Second'), item('c', 'Third')], index:1, answers:{a:{verdict:'ok', item:item('a', 'First'), note:null}, c:{verdict:'no', item:item('c', 'Third')}}, jump(i) { deck.index = i; }};

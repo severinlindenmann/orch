@@ -1,0 +1,3 @@
+/* Review page (#review): the deck and the "All cards" list are the kit's (widgets.css); only the page frame is here. */
+.review-main{min-width:0}
+.review-layout .review-side:has(.review-queue:empty){display:none}

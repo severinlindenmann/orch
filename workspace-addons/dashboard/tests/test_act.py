@@ -1305,7 +1305,8 @@ def test_review_answer_argv_and_via(act_server, act_orch):
     a = acts(act_orch)[-1]
     assert a[:4] == ["review", "answer", "t_abcdef", "q3"]
     assert a[a.index("--verdict") + 1] == "talk" and a[a.index("--picked") + 1] == "C"
-    assert json.loads(a[a.index("--note") + 1])["text"] == "darker"
+    note = json.loads(a[a.index("--note") + 1])  # the core reads words.text, not text
+    assert note["words"] == {"text": "darker"} and "text" not in note and note["pins"][0]["n"] == 1
     assert a[a.index("--digest") + 1] == D64 and a[a.index("--via") + 1] == "dashboard"
     assert a[a.index("--by") + 1] == me and "--proof-stdin" not in a
 

@@ -329,6 +329,10 @@ def _review_answer(a):
     if note is not None:
         if not isinstance(note, dict):
             raise BadRequest("The note must be an object.")
+        if (
+            "text" in note and "words" not in note
+        ):  # the page's {text, pins} is the core's {words: {text}, pins}
+            note = {**{k: v for k, v in note.items() if k != "text"}, "words": {"text": note["text"]}}
         text = json.dumps(note, ensure_ascii=False, separators=(",", ":"))
         if len(text.encode("utf-8")) > MAX_REVIEW_NOTE:
             raise BadRequest("A note is at most 8 KB.")

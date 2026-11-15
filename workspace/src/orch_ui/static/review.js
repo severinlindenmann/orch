@@ -82,7 +82,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
 UI.decisionRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('article','decision');c.dataset.id=e.id||'';
  const h=el('div','decision-h'),v=el('span','decision-verdict '+verdictClass(e),verdictWord(e));
  h.append(el('h3','',k.title||'Answered'),v);
- const by=[e.by,e.via,fmtTime(e.at,o.now)].filter(Boolean).join(' · ');
+ const by=[String(e.by||'').replace(/^(human|agent):/,''),e.via,fmtTime(e.at,o.now)].filter(Boolean).join(' · ');
  c.append(h,el('div','decision-by',by));
  const th=thumbs(e,o);if(th.length){const g=el('div','decision-shown');th.forEach(x=>g.append(x));c.append(g)}
  const w=d.words||{},lines=[];if(w.text)lines.push(w.text);(w.voice||[]).forEach(x=>x&&x.text&&lines.push('Voice: '+x.text));
@@ -129,7 +129,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  let deck=null,view='deck',timer=null,alive=true,dirty=false,loading=false;const gone=new Set();/* id@digest answered here */
  const sig=it=>it.id+'@'+it.digest;
  const waitCount=n=>{bWait.lastChild.textContent=n?String(n):'';bWait.setAttribute('aria-pressed',String(view==='deck'))};
- const setView=v=>{view=v;bWait.setAttribute('aria-pressed',String(v==='deck'));bAns.setAttribute('aria-pressed',String(v==='answered'));deckEl.hidden=v!=='deck';ansEl.hidden=v!=='answered';if(v==='answered')drawAnswered();else if(deck)deckEl.focus()};
+ const setView=v=>{view=v;bWait.setAttribute('aria-pressed',String(v==='deck'));bAns.setAttribute('aria-pressed',String(v==='answered'));deckEl.hidden=v!=='deck';ansEl.hidden=v!=='answered';if(v==='answered')drawAnswered();else if(deck)deckEl.focus({preventScroll:true})};
  const signIn=()=>{deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Sign in',text:'Run orch review in your terminal. It opens this page signed in.'}));waitCount(0)};
  const isAuth=e=>e&&(e.code==='needs_person'||e.status===401||e.status===403);
  const err=e=>{if(isAuth(e))return signIn();deck=null;deckEl.replaceChildren(UI.state({kind:'error',title:"Can't reach orch",text:'Is the review page still running in your terminal?',action:{label:'Try again',onClick:()=>load(true)}}));waitCount(0)};
@@ -149,7 +149,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
   deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
   waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
-  const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus()};
+  const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus({preventScroll:true})};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
   if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.'}));waitCount(0);return}
   if(!items.length)return;/* everything answered here: keep the summary */
