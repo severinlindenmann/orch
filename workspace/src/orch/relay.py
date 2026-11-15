@@ -603,13 +603,13 @@ def resend_outbox(root: Path) -> dict:
             continue
         try:
             try:
-                body = json.loads(raw).get("body")
-            except (ValueError, AttributeError):
-                body = None
-            if body is None:
-                secretscan.refuse_if_secret(raw, "message", root)  # not a message we know: scan the bytes
+                msg = json.loads(raw)
+            except ValueError:
+                msg = None
+            if isinstance(msg, dict):
+                scan_outgoing(root, msg)  # the whole message, every field, as decoded (escapes resolved)
             else:
-                scan_outgoing(root, body)
+                secretscan.refuse_if_secret(raw, "message", root)  # not a message we know: scan the bytes
         except Refused as e:
             res["failed"].append({"id": m["id"], "reason": str(e)})
             p.unlink(missing_ok=True)  # a secret is not kept on disk for another try
