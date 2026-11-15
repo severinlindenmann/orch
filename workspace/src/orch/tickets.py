@@ -2143,6 +2143,62 @@ def ref_remove(root: Path, tid: str, target: str, by: str) -> tuple[dict, dict]:
     return t, result
 
 
+def ref_set(root: Path, tid: str, target: str, status: str, by: str) -> tuple[dict, dict, bool]:
+    """Record the state of a web reference as the helper last saw it: `status` and `seen_at`; `at` and `by`
+    keep who added it. `status` is a lower-case word (refs.STATUS_RE) or "" to clear it. Returns
+    (ticket, reference, changed); nothing is written when the state is already that."""
+    from orch import refs
+
+    status = status.strip()
+    if status and not refs.STATUS_RE.fullmatch(status):
+        raise Refused("A state is a short lower-case word such as open, closed, merged or in review.")
+    t = load(root, tid)
+    key = t.get("key") or t["id"]
+    wanted = None
+    if not target.isdigit():
+        try:
+            wanted = refs.detect(root, t["id"], target, check_exists=False)
+        except Refused:
+            wanted = None
+    result, changed = None, False
+
+    def op(ticket):
+        nonlocal result, changed
+        values = refs.numbered({"refs": ticket["refs"] + refs.local_refs(root, ticket["id"])})
+        result = next(
+            (
+                r
+                for n, r in values
+                if isinstance(r, dict)
+                and (
+                    n == int(target)
+                    if target.isdigit()
+                    else wanted is not None and all(r.get(k) == v for k, v in wanted.items() if k != "kind")
+                )
+            ),
+            None,
+        )
+        if result is None:
+            raise Refused(f"{key} has no reference {target}. See them: orch ref list {key}")
+        if "url" not in result or result.get("local"):
+            raise Refused("That reference is not a web address. Only web references have a state.")
+        old = result.get("status") or ""
+        if old == status:
+            return NO_WRITE
+        changed = True
+        if status:
+            result["status"] = status
+        else:
+            result.pop("status", None)
+        result["seen_at"] = now()
+        name = refs.ref_name(result, root)
+        add_history(ticket, by, f"Reference {name}: status {old or 'none'} -> {status or 'none'}")
+        return result
+
+    t, _ = apply_op(root, t["id"], op, by=by)
+    return t, result, changed
+
+
 def merge_refresh(
     root: Path, tid: str, addon: str, out: dict, by: str, schema: dict | None
 ) -> tuple[dict, list]:

@@ -613,6 +613,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = lk.add_parser("rm", parents=[common], help="remove a reference")
     x.add_argument("id")
     x.add_argument("target")
+    x = lk.add_parser(
+        "set", parents=[common], help="record the state of a web reference (open, closed, merged)"
+    )
+    x.add_argument("id")
+    x.add_argument("target", help="the number from `orch ref list`, or the address")
+    x.add_argument("--status", required=True, metavar="WORD", help='a short lower-case word; "" clears it')
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
@@ -1225,7 +1231,22 @@ def _ref(args, root: Path, by) -> None:
                 d = refs.describe(ref, kinds, root)
                 value = refs.one_line(d["title"], 300)
                 suffix = " (On this computer only)" if ref.get("local") else ""
-                print(f"  {n}  {d['type']}  {value}{suffix}" + (f"  {d['status']}" if d["status"] else ""))
+                print(
+                    f"  {n}  {d['type']}  {value}{suffix}"
+                    + (f"  {d['status'].capitalize()}" if d["status"] else "")
+                )
+    elif args.sub == "set":
+        t, ref, changed = tickets.ref_set(root, args.id, args.target, args.status, by())
+        d = refs.describe(ref, kinds, root)
+        n = next(i for i, r in refs.all_refs(root, t) if r is ref or r == ref)
+        shown = {"n": n, **history.shown_item(root, t, "refs", ref), "view": d}
+        _out(
+            args,
+            shown,
+            f"Shown on the ticket as: {d['label']}" + (f" · {ref['status']}" if ref.get("status") else "")
+            if changed
+            else "Nothing to change.",
+        )
     else:
         t, ref = tickets.ref_remove(root, args.id, args.target, by())
         _out(

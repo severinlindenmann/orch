@@ -24,7 +24,7 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
-from orch import history, net, phone_results, refs, runs, safefile, tickets
+from orch import history, net, phone_results, refs, runs, safefile, secretscan, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -39,31 +39,7 @@ ATTACHMENTS = 50
 ARTIFACT_BYTES = 20 * 1024 * 1024
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic"}
 
-_SECRET_PATTERNS = [
-    re.compile(
-        r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*?(-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|\Z)",
-        re.S,
-    ),  # PEM and PGP (PRIVATE KEY BLOCK)
-    re.compile(r"\b(?:orn|orp|ora|whk|opk|apv)_[A-Za-z0-9_-]{16,}"),
-    re.compile(r"\b(?:sk|pk|rk)[-_](?:live|test|proj|ant)?[-_]?[A-Za-z0-9_-]{16,}"),
-    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}"),
-    re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}|\bxox[abprs]-[A-Za-z0-9-]{10,}"),
-    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-    # JWT: one start per run of its characters (`-` is one of them but no word character: a \b start after
-    # every `-` made "eyJ-eyJ-..." quadratic), the parts possessive
-    re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{10,}+\.[A-Za-z0-9_-]{5,}"),
-    re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"),
-    # Google API key, Hugging Face, npm, PyPI, SendGrid, DigitalOcean
-    re.compile(r"\bAIza[0-9A-Za-z_-]{35}|\bhf_[A-Za-z0-9]{30,}|\bnpm_[A-Za-z0-9]{36}"),
-    re.compile(r"\bpypi-AgE[A-Za-z0-9_-]{50,}|\bSG\.[\w-]{22}\.[\w-]{43}|\bdop_v1_[a-f0-9]{64}"),
-    # user:password@ in any URL (postgres://u:p@db, https://bob:pw@git...): one start per scheme run, the user
-    # part possessive and without `:`, the password part stops at the last `@` before the path (linear)
-    re.compile(r"(?i)(?<![\w+.-])[a-z][a-z0-9+.-]*+://[^\s/?#@:]*+:[^\s/?#]*@"),
-    # webhook path tokens: Slack /services/T../B../x, Discord /api/webhooks/<id>/<token>, Telegram /bot<id>:x
-    re.compile(
-        r"(?<=/services/)T\w++/B\w++/\w++|(?<=/api/webhooks/)\d++/[\w-]++|(?<![\w-])bot\d++:[\w-]{20,}"
-    ),
-]
+_SECRET_PATTERNS = [rx for _, rx in secretscan.PATTERNS]  # the one list lives in secretscan.py
 # The ONE list of secret-name words: the key=value pattern of redact/_has_secret and secret_name() (labels of
 # phone results) are both built from it, so a word added here reaches both (tests/test_phone_results.py).
 SECRET_NAME_WORDS = (
