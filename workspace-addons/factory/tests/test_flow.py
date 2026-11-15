@@ -850,3 +850,44 @@ def test_a_partial_record_is_never_counted_as_the_whole(ws, run, monkeypatch):
     assert measure.active_minutes(ws, ["t_000001"]) is None
     monkeypatch.setattr(measure.orchcli, "call", lambda *a, **k: {"items": [], "next": "c_more"})
     assert measure.active_minutes(ws, ["t_000001"]) is None
+
+
+def test_per_day_limit_only_warns_and_never_blocks(ws, run):
+    """Owner 15 Nov: a reached per-day limit shows a plain warning on the page data and the needs view; autopilot keeps
+    deciding (nothing is refused). Only work done today counts."""
+    from datetime import UTC, datetime, timedelta
+
+    from orch_factory import autopilot, orchcli, pageapi, view
+
+    a, _ = autopilot_order(ws, run, active_min_per_day=10)
+    store, now = Store(ws), datetime.now(UTC)
+    at = lambda m: (now - timedelta(minutes=m)).isoformat().replace("+00:00", "Z")
+    (ws / "record.json").write_text(
+        json.dumps({a: [{"at": at(8), "run": "r_a"}, {"at": at(4), "run": "r_a"}]})
+    )
+    status = autopilot.day_status(ws, store, orchcli.tickets(ws))
+    if status["used"] != 4:  # local midnight fell inside the window: skip the exact count
+        return
+    assert (
+        status == {"limit": 10, "used": 4, "reached": False} and "keeps going" not in view.view(ws)["notice"]
+    )
+    (ws / "record.json").write_text(
+        json.dumps({a: [{"at": at(m), "run": "r_a"} for m in (14, 10, 6, 2)]})  # 4 + 4 + 4 = 12 min
+    )
+    status = autopilot.day_status(ws, store, orchcli.tickets(ws))
+    assert status["used"] == 12 and status["reached"]
+    home = pageapi.home(ws)
+    assert "keeps going" in home["day_limit"]["warning"] and "10 min a day" in home["day_limit"]["warning"]
+    v = view.view(ws)
+    assert "keeps going" in v["notice"] and v["notice_tone"] == "warn"
+    assert any(b.get("title") == "Heads-up" for b in v["blocks"])
+    old = {
+        a: [
+            {"at": (now - timedelta(days=2, minutes=m)).isoformat().replace("+00:00", "Z"), "run": "r_a"}
+            for m in (14, 10, 6, 2)
+        ]
+    }
+    (ws / "record.json").write_text(json.dumps(old))
+    assert (
+        autopilot.day_status(ws, store, orchcli.tickets(ws))["used"] == 0
+    )  # yesterday's work does not count

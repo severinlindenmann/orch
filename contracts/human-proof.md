@@ -264,6 +264,7 @@ rows add a named case.
 | `config.permissions` | `orch config set workspace.permissions <mode>`, raising only (lowering is free for anyone) | the new `mode` | page, terminal | – |
 | `look.icon` | `orch look set` (icon and colour of the workspace, shown to peers and on shared pages) | `look` | page, terminal | – |
 | `config.diag_enabled` | `orch config set diag.enabled off` (the debug log, diag.md; switching it on needs no proof) | the setting `diag.enabled` | page, terminal | – |
+| `config.workspace_info` | `orch config set workspace.name <text>` / `workspace.description <text>` (the name and one-line description shown for this workspace) | `<key>:` + sha256 of the new text (the card shows it in full) | page, terminal | – |
 | `config.copy_setup` | `orch config set workflow.copy_setup <command>`: a command orch runs in every new separate copy (clearing it needs no proof; an agent is refused) | sha256 of the command (the card shows it in full) | page, terminal | – |
 | `copy.remove_orphaned` | `orch copy remove-orphaned <ws8>`: remove copies of a project that is gone (an agent is refused) | ws8; `<ws8>:discard` with `--discard` | page, terminal | – |
 | `copy.retry` | `orch copy retry <ticket>`: retry interrupted copy cleanup (an agent is refused) | ticket id | page, terminal | – |

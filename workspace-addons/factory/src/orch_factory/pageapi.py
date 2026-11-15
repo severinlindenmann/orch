@@ -242,6 +242,13 @@ def _all(root):
     return summaries, ok, store, tickets, journal
 
 
+def _day_limit(root, store, tickets, journal):
+    status = autopilot.day_status(root, store, tickets, journal)
+    if status is None:
+        return None
+    return {**status, "warning": autopilot.day_warning(status)}
+
+
 def home(root):
     summaries, ok, store, tickets, journal = _all(root)
     grants = _grants(store, tickets, journal)
@@ -259,6 +266,7 @@ def home(root):
         "generated_at": _iso(clock()),
         "orders": summaries,
         "autopilot": auto,
+        "day_limit": _day_limit(root, store, tickets, journal),
         "watcher": service.running_pid(root, clean=False) is not None,
     }
 

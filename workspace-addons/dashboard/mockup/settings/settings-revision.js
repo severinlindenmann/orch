@@ -29,30 +29,19 @@
     }
   });
   function enablePairing(){
-    document.querySelectorAll('#panel-phone [data-dialog="pair"]').forEach(b=>b.disabled=false);
     document.querySelectorAll('[data-relay-hint]').forEach(n=>n.hidden=true);
   }
-  document.getElementById('dialog-pair').addEventListener('close',()=>{
-    const pill=document.querySelector('#dialog-pair .shared-preview');
-    if(pill)document.body.append(pill);
-  });
   const params=new URLSearchParams(location.search);
   if(params.get('relay')==='disconnected'){
     document.querySelectorAll('[data-relay-status]').forEach(n=>{n.textContent='Not connected';n.className='muted'});
-    document.querySelectorAll('#panel-phone [data-dialog="pair"]').forEach(b=>{
-      b.disabled=true;
-      const value=b.closest('.setting-row').querySelector('.row-value');
-      if(!value.querySelector('[data-relay-hint]'))value.insertAdjacentHTML('beforeend','<p class="meta" data-relay-hint>Connect to your relay first</p>');
-    });
   }
   document.getElementById('relay-form').onsubmit=e=>{
     e.preventDefault(); const address=new FormData(e.target).get('address');
     if(!/^https?:\/\//.test(address)){e.target.elements.address.setCustomValidity('Use an address starting with https://');e.target.reportValidity();return}
     document.querySelectorAll('[data-relay-status]').forEach(n=>{n.textContent='Connected';n.className='good'});
     document.querySelectorAll('[data-relay-address]').forEach(n=>n.textContent=address);
-    document.querySelector('[data-pair-relay]').textContent=address;
+    document.querySelectorAll('[data-relay-admin]').forEach(n=>n.href=address.replace(/\/+$/,'')+'/admin');
     enablePairing();document.getElementById('dialog-relay').close();announce('Relay connected in this preview');
   };
   document.querySelector('#relay-form input').oninput=e=>e.target.setCustomValidity('');
-  if(location.pathname.endsWith('settings-phone-pair.html')&&!['empty','loading'].includes(params.get('state'))&&params.get('relay')!=='disconnected')document.getElementById('dialog-pair').showModal();
 })();

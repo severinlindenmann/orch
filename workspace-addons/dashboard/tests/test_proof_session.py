@@ -548,6 +548,7 @@ ACT_ARGS = {
     "share.set": {"on": True},
     "workflow.set": {"on": True},
     "copies.set": {"mode": "off"},
+    "workspace.set": {"field": "name", "text": "Demo"},
     "copies.clean": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},
