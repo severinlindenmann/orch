@@ -187,7 +187,6 @@
       if (els.menu.contains(e.target) && e.target.closest('button')) { closePopovers(); els.moreBtn.focus(); }
       if (a === 'mode') setMode(!root.classList.contains('fx-terminal'));
       else if (a === 'jump') S.views.live.jumpToNew();
-      else if (a === 'phone') { els.phoneNote.hidden = !els.phoneNote.hidden; els.phoneBtn.setAttribute('aria-expanded', String(!els.phoneNote.hidden)); }
       else if (a === 'copy') copyLink();
       else if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
       else if (a === 'interrupt') S.views.compose.interruptNow();

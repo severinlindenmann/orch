@@ -8,7 +8,7 @@ const path = require('node:path');
 const { start, playwright, settle } = require('./focus_insights_shots.cjs');
 
 const OUT = path.resolve((process.argv[2] || path.join(os.homedir(), 'orch-dev/state/e2e-shots')).replace(/^~/, os.homedir()));
-const SCREENS = [{ name: 'phone-sent', url: '/t/t_pil1aaaa', wait: '.handoff:not([hidden])' }, { name: 'phone-answered', url: '/t/t_pil2bbbb', wait: '.handoff.answered:not([hidden])' }];
+const SCREENS = [{ name: 'phone-answered', url: '/t/t_pil2bbbb', wait: '.qcard', setup: p => p.waitForSelector('.handoff.answered', { timeout: 30000 }) }, { name: 'phone-sent', url: '/t/t_pil1aaaa', wait: '.handoff:not([hidden])' }];
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });

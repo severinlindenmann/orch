@@ -230,11 +230,32 @@
     if (at >= 0) pick()[at]?.focus();
   }
 
+  /* A question answered on the phone while its card is open: with nothing typed the card closes into "Answered on
+     your phone 12:34: <answer>"; with typed text the card stays, the words are kept, and the line says what was
+     answered and offers Change (the words go to the message box as a correction). Anything else just goes. */
+  const phoneClosed = new Set();
+  function closedElsewhere(card, q) {
+    if (!q || q.answer == null || q.via !== 'phone') { card.node.remove(); return; }
+    const typed = (card.node.querySelector('textarea') || {}).value || '';
+    const line = h('p', {class: 'handoff answered', role: 'status'});
+    phoneClosed.add(card.node);
+    const done = () => { phoneClosed.delete(card.node); card.node.remove(); els.next.hidden = !phoneClosed.size && !S.state.view.ticket.questions.some(x => x.answer == null); };
+    if (typed.trim()) {
+      line.append('Answered on your phone: ' + String(q.answer).slice(0, 200) + ' · ');
+      line.append(h('button', {class: 'btn ghost sm', type: 'button', text: 'Change', onclick: () => { els.msg.value = typed; els.msg.focus(); done(); }}));
+      card.node.append(line);
+    } else {
+      line.textContent = 'Answered on your phone ' + hhmm(q.answered_at || q.at) + ': ' + String(q.answer).slice(0, 200);
+      card.node.replaceChildren(line);
+      setTimeout(done, 60000);
+    }
+  }
+
   function renderQuestions(v) {
     const open = v.ticket.questions.filter(q => q.answer == null);
     if (S.state.prevQuestionLabel !== v.run.label) { for (const card of S.state.shownQs.values()) card.node.remove(); S.state.shownQs.clear(); S.state.prevQuestionLabel = v.run.label; }
     const ids = new Set(open.map(q => q.id));
-    for (const [id, card] of S.state.shownQs) if (!ids.has(id)) { card.node.remove(); S.state.shownQs.delete(id); }
+    for (const [id, card] of S.state.shownQs) if (!ids.has(id)) { closedElsewhere(card, v.ticket.questions.find(x => x.id === id)); S.state.shownQs.delete(id); }
     for (const q of open) {
       // m1-api question fields: sent_to_phone or delivered, strict booleans only.
       const delivered = q.sent_to_phone === true;
@@ -281,11 +302,8 @@
   }
   function renderNext(v) {
     const open = v.ticket.questions.filter(q => q.answer == null);
-    els.next.hidden = !open.length;
-    els.qCount.textContent = open.length === 1 ? '1 open question' : open.length + ' open questions';
-    const phone = !!(v.capabilities && v.capabilities.phone_mode && v.phone_mode);
-    els.phoneBtn.hidden = !open.length || !phone;
-    if (els.phoneBtn.hidden) els.phoneNote.hidden = true;
+    els.next.hidden = !open.length && !phoneClosed.size;
+    els.qCount.textContent = !open.length ? '' : open.length === 1 ? '1 open question' : open.length + ' open questions';
   }
   const scroller = () => els.paneLive;
   const atBottom = () => { const p = scroller(); return p.scrollHeight - p.scrollTop - p.clientHeight < 48; };

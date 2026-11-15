@@ -25,15 +25,7 @@ test('a question never sent to a phone shows no line', () => {
   assert.equal(load()(view([{id: 'q1', answer: null}])), null);
 });
 
-test('answered on the phone a moment ago shows who, when and what', () => {
+test('an answer given on the phone is not a line of this helper: live.js closes the card', () => {
   const now = Date.parse('2026-11-15T12:40:00Z');
-  const l = load()(view([{id: 'q1', answer: 'Blue', via: 'phone', answered_at: '2026-11-15T12:34:00Z'}]), now);
-  assert.equal(l.text, 'Answered on your phone 12:34: Blue');
-  assert.equal(l.answered, true);
-});
-
-test('an old phone answer, or one given here, shows no line', () => {
-  const now = Date.parse('2026-11-15T15:00:00Z');
   assert.equal(load()(view([{id: 'q1', answer: 'Blue', via: 'phone', answered_at: '2026-11-15T12:34:00Z'}]), now), null);
-  assert.equal(load()(view([{id: 'q1', answer: 'Blue', via: 'focus', answered_at: '2026-11-15T14:59:00Z'}]), now), null);
 });

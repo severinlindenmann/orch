@@ -52,7 +52,7 @@ STATUS = {}
 Q = {"text": "Should the boat trip be on day 1 or day 2?", "options": ["Day 2", "Day 1"], "recommended": "Day 2"}
 TICKETS = [
     ticket("t_pil1aaaa", "PIL-1", "Plan the offsite agenda", questions=[{"id": "q1", "answer": None, "answered_by": None, "via": None, "sent_at": iso(4), **Q}]),
-    ticket("t_pil2bbbb", "PIL-2", "Book the boat trip", questions=[{"id": "q1", "answer": "Day 2", "answered_by": "human:anna", "via": "phone", "sent_at": iso(6), "answered_at": iso(2), **Q}]),
+    ticket("t_pil2bbbb", "PIL-2", "Book the boat trip", questions=[{"id": "q1", "answer": None, "answered_by": None, "via": None, "sent_at": iso(6), **Q}]),
 ]
 for _t in TICKETS:
     STATUS[_t["id"]] = {"running": True, "claim": {"run": "r_" + _t["id"][2:10], "agent": "claude", "mode": "oneshot", "started_at": iso(18)}}
@@ -60,14 +60,21 @@ for t in TICKETS:
     (ws / ".orch" / "tickets" / f"{t['id']}.json").write_text(json.dumps(t))
 (fake / "status.json").write_text(json.dumps(STATUS))
 (fake / "orch").write_text(f'''#!{sys.executable}
-import json, pathlib, sys
+import json, pathlib, sys, time
 d = pathlib.Path(__file__).parent
 a = sys.argv[1:]
 ws = pathlib.Path.cwd() / ".orch" / "tickets"
 if a[:2] == ["ticket", "list"]:
     print(json.dumps([json.loads(x.read_text()) for x in sorted(ws.glob("t_*.json"))]))
 elif a[:2] == ["ticket", "show"]:
-    print((ws / (a[2] + ".json")).read_text())
+    t = json.loads((ws / (a[2] + ".json")).read_text())
+    f = d / "first_show"
+    if a[2] == "t_pil2bbbb":
+        if not f.exists():
+            f.write_text(str(time.time()))
+        if time.time() - float(f.read_text()) > 8:
+            t["questions"][0].update(answer="Day 2", answered_by="human:anna", via="phone", answered_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    print(json.dumps(t))
 elif a[:2] == ["run", "status"]:
     print(json.dumps(json.loads((d / "status.json").read_text()).get(a[2], {{"running": False}})))
 elif a[:1] == ["agents"]:
