@@ -106,9 +106,7 @@ def test_calendar_repeat_shows_every_and_title_as_one_band(tmp_path):
 @node
 def test_calendar_repeat_over_days_is_one_band_across_them_not_a_card_per_day(tmp_path):
     days = [_repeat(f"2026-11-0{n}") for n in (5, 6, 7)]
-    days.append(
-        {"date": "2026-11-08", "items": [{"time": "09:00", "title": "Once", "link": "t_once0001"}]}
-    )
+    days.append({"date": "2026-11-08", "items": [{"time": "09:00", "title": "Once", "link": "t_once0001"}]})
     days.append(_repeat("2026-11-09", link="t_other001", every="Every 2 hours"))
     tree = run(tmp_path, {"blocks": [{"type": "calendar", "days": days}]})
     runs = [x for x in walk(tree) if "run" in x["cls"].split()]
