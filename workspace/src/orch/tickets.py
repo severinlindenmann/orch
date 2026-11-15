@@ -1376,6 +1376,47 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
 PROTECTED_FIELDS = ("title_auto", "plan_first", "description", "description_by")  # orch writes these itself
 
 
+DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
+_DUE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?|(\d{1,2}:\d{2})")
+
+
+def clean_due(text: str, today: str | None = None) -> str:
+    """One spelling in the `due` field: `YYYY-MM-DD` (a day) or `YYYY-MM-DDTHH:MM` (local wall time, no
+    zone). Input also takes `YYYY-MM-DD HH:MM` and `HH:MM` (= today, local). Anything else is refused."""
+    m = _DUE_TIME.fullmatch(text.strip())
+    if not m:
+        raise Refused(DUE_MSG)
+    day, hm, only = m.groups()
+    if only:
+        day, hm = today or datetime.now().strftime("%Y-%m-%d"), only
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+        if hm:
+            datetime.strptime(hm, "%H:%M")
+    except ValueError:
+        raise Refused(DUE_MSG) from None
+    return f"{day}T{int(hm[:-3]):02d}:{hm[-2:]}" if hm else day
+
+
+def due_label(due: str | None, status: str = "open", now: datetime | None = None) -> str | None:
+    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 18:30" (another day), "Late since
+    18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day wording).
+    Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
+    if not due or "T" not in str(due):
+        return None
+    try:
+        at = datetime.strptime(str(due), "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+    now = now or datetime.now()
+    hm = at.strftime("%H:%M")
+    if at < now and status not in ("done", "dropped"):
+        return f"Late since {hm}" if at.date() == now.date() else f"Late since {at.strftime('%a')} {hm}"
+    if at.date() == now.date():
+        return f"Due {hm}"
+    return f"Due {at.strftime('%a')} {hm}"
+
+
 def clean_field(key: str, value):
     """Validate a plain field (None or empty clears it); returns the value to store."""
     if key in PROTECTED_FIELDS:
@@ -1394,12 +1435,7 @@ def clean_field(key: str, value):
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
-        try:
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
-                raise ValueError
-            datetime.strptime(v, "%Y-%m-%d")
-        except ValueError:
-            raise Refused("due must be a date like 2026-11-10.") from None
+        v = clean_due(v)
     return v
 
 

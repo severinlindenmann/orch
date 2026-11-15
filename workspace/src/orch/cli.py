@@ -122,6 +122,8 @@ def _progress(t: dict) -> str:
 
 def _line(t: dict) -> str:
     bits = [tickets.STATUS_WORDS[t["status"]]] + ([_progress(t)] if _progress(t) else [])
+    if due := tickets.due_label(t.get("due"), t["status"]):
+        bits.append(due)  # only a due with a time shows in the list; a day-only due stays as it was
     return (f"{t['key']}  " if t.get("key") else "") + f"{t['title']}  ({', '.join(bits)})  [{t['id']}]"
 
 
@@ -212,7 +214,9 @@ def _show(t: dict, root: Path) -> str:
             else f"✓ All resolved · {_progress(t)}"
         )
     out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
-    extra = [f"{k.capitalize()}: {t[k]}" for k in ("owner", "due") if t.get(k)]
+    extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
+    if t.get("due"):
+        extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -421,7 +425,9 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("title")
     x.add_argument("--parent", metavar="ID", help="make it a sub-ticket of this ticket")
     x.add_argument("--owner", help="who owns it (a name)")
-    x.add_argument("--due", metavar="YYYY-MM-DD", help="due day")
+    x.add_argument(
+        "--due", metavar="DAY[ HH:MM]|HH:MM", help="due day, with an optional time (18:30 = today)"
+    )
     x.add_argument("--note", help="a free note")
     x.add_argument("--done-when", help="what should be true when it is done")
     x.add_argument(
@@ -457,7 +463,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("--title")
     x.add_argument("--owner", help="who owns it (a name; empty clears)")
-    x.add_argument("--due", metavar="YYYY-MM-DD", help="due day (empty clears)")
+    x.add_argument(
+        "--due",
+        metavar="DAY[ HH:MM]|HH:MM",
+        help="due day, with an optional time (18:30 = today; empty clears)",
+    )
     x.add_argument("--note", help="a free note (empty clears)")
     x.add_argument("--done-when", help="what should be true when it is done (empty clears)")
     x.add_argument("--if-revision", type=int, metavar="N", help="refused when the ticket changed meanwhile")
@@ -492,7 +502,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("title")
     x.add_argument("--owner")
-    x.add_argument("--due", metavar="YYYY-MM-DD")
+    x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
