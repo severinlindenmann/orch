@@ -52,6 +52,8 @@ def clean_text(text: str) -> str:
         raise Refused("A lesson is one plain line, with no line breaks. Shorten it and try again.")
     if not text:
         raise Refused('Say what the lesson is: orch lessons add "<one line>"')
+    if "<" in text or ">" in text:  # the dashboard shows only plain text (addon-view.schema.json)
+        raise Refused("Leave out < and > in a lesson. Rephrase it and try again.")
     if len(text) > MAX_TEXT:
         raise Refused(
             f"A lesson is at most {MAX_TEXT} characters (this one has {len(text)}). Shorten it and try again."
@@ -247,6 +249,9 @@ def get(root: Path, lid: str) -> dict:
 def edit(root: Path, lid: str, text: str, by: str) -> dict:
     text = clean_text(text)
     row = get(root, lid)
+    for r in load(root)["lessons"]:
+        if r["id"] != lid and same_text(r["text"], text):
+            raise Refused(f"Already saved as {r['id']}. Remove one of them: orch lessons rm {lid}")
     row["text"] = text
     row["_meta"]["changed_by"] = by
     row["_meta"]["changed_at"] = now()

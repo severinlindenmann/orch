@@ -15,7 +15,7 @@ no `needs`, no `background`, `gitignore = [".orch/addons/lessons/"]`,
 row in Settings › Add-ons).
 
 ## A lesson
-- One plain line, 1–200 characters after trimming; no line breaks or control characters; never a secret (the core
+- One plain line, 1–200 characters after trimming; no line breaks, control characters, `<` or `>` (the dashboard shows plain text only); never a secret (the core
   secret scan runs on every add and edit; a hit refuses and says what was found, R5.2).
 - Id `l_` + 6 lowercase letters or digits, random, never reused in this workspace.
 - File `.orch/addons/lessons/<id>.md` (UTF-8, LF or CRLF read the same), front matter of plain `key: value` lines between
@@ -40,7 +40,7 @@ Run the web tests with npm run test:web; plain npm test skips them.
 |---|---|
 | `orch lessons add "<text>" [--ticket <id or key>] [--by <actor>]` | Stores a new lesson. `by` defaults to `agent:<ORCH_AGENT or "helper">` inside a run, else `human:<user>`. The same text (case and spaces ignored) already stored → no new file, answer `{"lesson": …, "added": false}`. Else `{"lesson": …, "added": true}` |
 | `orch lessons list` | `list.schema.json`: `{"lessons": [...], "bytes", "cap", "shown", "unreadable"}`, newest first |
-| `orch lessons edit <id> "<text>" [--by <actor>]` | Replaces the text, sets `changed_by`/`changed_at`. `{"lesson": …}` |
+| `orch lessons edit <id> "<text>" [--by <actor>]` | Replaces the text, sets `changed_by`/`changed_at`; refused when another lesson already has that text. `{"lesson": …}` |
 | `orch lessons rm <id>` | Deletes that one file. `{"removed": "<id>"}` |
 | `orch lessons act edit\|rm --by <actor> [--value "<text>"] --json -- <id>` | The dashboard's buttons (`addon.act`); same as `edit` / `rm`, recorded as `--by` |
 | `orch lessons view` | Dashboard page blocks (`addon-view.schema.json`), read only |

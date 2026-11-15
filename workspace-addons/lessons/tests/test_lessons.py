@@ -61,7 +61,12 @@ def test_edit_rm_and_act(cli, ws):
 
 
 def test_text_rules(cli):
-    for bad, word in (("", "Say what"), ("a\nb", "one plain line"), ("x" * 201, "200")):
+    for bad, word in (
+        ("", "Say what"),
+        ("a\nb", "one plain line"),
+        ("x" * 201, "200"),
+        ("Run pytest <file>", "< and >"),
+    ):
         code, out = jrun(cli, "add", bad)
         assert code == 2 and word in out["error"]
     code, out = jrun(cli, "add", "ok", "--ticket", "t_nonexist1")
@@ -173,3 +178,10 @@ def test_add_from_a_copy_writes_to_the_home(cli, ws, tmp_path, monkeypatch):
     assert main(["--dir", os.environ["ORCH_ROOT"], "add", "From the copy.", "--json"]) == 0
     assert any((ws / ".orch" / "addons" / "lessons").glob("l_*.md"))
     assert not (copy / ".orch").exists()
+
+
+def test_edit_to_another_lessons_text_is_refused(cli, ws):
+    _, a = jrun(cli, "add", "Lesson one.")
+    _, b = jrun(cli, "add", "Lesson two.")
+    code, err = jrun(cli, "edit", b["lesson"]["id"], "lesson ONE.")
+    assert code == 2 and a["lesson"]["id"] in err["error"]

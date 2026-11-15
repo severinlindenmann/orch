@@ -20,7 +20,7 @@
       "required": ["id", "text", "by", "at"],
       "properties": {
         "id": { "type": "string", "pattern": "^l_[a-z0-9]{6}$" },
-        "text": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f]+$" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$" },
         "by": { "$ref": "#/$defs/actor" },
         "at": { "$ref": "#/$defs/time" },
         "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
