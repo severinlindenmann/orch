@@ -16,13 +16,15 @@ import threading
 import unicodedata
 from pathlib import Path
 
-from . import actions, events
+from . import actions, cmdout, events
 
 RESTART_SECONDS = 2.0
 MAX_LINE = 64 * 1024
 MAX_QUEUE = 500
+DETAIL_SECONDS = 5.0
 RUN = re.compile(r"r_[a-z0-9_]{6,32}")  # contracts/activity.schema.json $defs/run
 _popen = subprocess.Popen  # tests may patch this name, never the global
+_run = subprocess.run  # same for the detail read
 
 
 def _used(e: dict) -> dict:
@@ -88,9 +90,10 @@ TRUSTED_DENIAL = (
 )  # a hook line can be written by anything the agent runs: it never drives a prompt
 
 
-def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
+def to_events(e: dict, ticket: str, want_run: str, detail: dict | None = None, root=None) -> list[dict]:
     """One activity event -> zero or more Focus run events. Unknown kinds, odd shapes, another run or ticket give
-    nothing; a denial counts only from a collector or the core (via log/core), never from a hook."""
+    nothing; a denial counts only from a collector or the core (via log/core), never from a hook. `detail` is the
+    step's detail file (only fetched for a finished shell step): its command and last lines go on tool.end."""
     try:
         kind, run, agent = e["kind"], e["run"], e.get("agent") or "main"
         if run != want_run or e.get("ticket") != ticket:
@@ -106,14 +109,16 @@ def to_events(e: dict, ticket: str, want_run: str) -> list[dict]:
         old = True if not checked and e.get("before_protection") else None  # made before orch checked records
 
         def make(k, **data):
-            return events.make(run, ticket, agent, k, text, source, at=at, **data)
+            return events.make(run, ticket, agent, k, text, source, at=at, limits=cmdout.LIMITS, **data)
 
         if kind == "step":
             used, files = _label(e), clean_files(e.get("files")) or None
             if done is None:
                 return [make("tool.start", id=eid, used=used, files=files, before=old)]
             ok = done.get("ok") is not False if checked else done.get("ok")  # a hook's "ok" is only its word
-            return [make("tool.end", id=eid, ok=ok, used=used, files=files, confirmed=checked, before=old)]
+            cmd, shown = cmdout.from_detail(detail, root) if detail is not None else (None, None)
+            return [make("tool.end", id=eid, ok=ok, used=used, files=files, confirmed=checked, before=old,
+                         command=cmd, output=shown)]  # fmt: skip
         if kind.startswith("helper.") and not checked:
             return []  # the agent's word: never opens or closes a helper
         if kind == "helper.start":
@@ -222,11 +227,39 @@ class RecordFeed:
                     k: doc.get(k) for k in ("status", "reason", "message", "changed", "removed")
                 }
         if doc.get("type") == "event" and isinstance(doc.get("event"), dict):
-            got = to_events(doc["event"], self.ticket, self.run)
+            got = to_events(doc["event"], self.ticket, self.run, self._detail(doc["event"]), self.root)
             with self.lock:
                 self.queue = (self.queue + got)[-MAX_QUEUE:]
         if doc.get("type") in ("event", "ping", "unavailable") and isinstance(cur, str) and cur:
             self.cursor = cur
+
+    def _detail(self, e: dict) -> dict | None:
+        """The detail file of a FINISHED shell step (`orch record query --detail`, the core's own checked read), or
+        None: another tool, no detail, a read that fails or takes too long. The page then shows the plain step."""
+        u, step_id = _used(e), e.get("id")
+        if not (e.get("kind") == "step" and isinstance(e.get("outcome"), dict) and e.get("detail")):
+            return None
+        if u.get("name") != "Bash" or not isinstance(step_id, str) or not self.orch_bin:
+            return None
+        argv = [
+            *actions.argv0(self.orch_bin),
+            "record",
+            "query",
+            "--run",
+            self.run,
+            "--detail",
+            step_id,
+            "--json",
+        ]
+        try:
+            r = _run(
+                argv, check=False, cwd=self.root, stdin=subprocess.DEVNULL, capture_output=True, timeout=DETAIL_SECONDS,
+                env=actions.human_env(self.root, self.orch_bin),
+            )  # fmt: skip
+            doc = json.loads(r.stdout[: 2 * 1024 * 1024]) if r.returncode == 0 else None
+        except (OSError, ValueError, RecursionError, subprocess.SubprocessError):
+            return None
+        return doc if isinstance(doc, dict) else None
 
     @staticmethod
     def _end(p) -> None:
