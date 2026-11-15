@@ -741,7 +741,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
             root,
             tid,
             f"{label} did not take the new input in its live session, so the session was closed. "
-            "The input is kept and goes in with the next start, one step at a time.",
+            "The input is kept; orch starts the agent again now, one step at a time.",
             f"agent:{rec['agent']}",
         )
     _log_submit(root, tid, run, "gave up: the agent did not take the notice; input queued for a one-step run")
@@ -779,12 +779,35 @@ def _give_up_locked(root: Path, rec: dict) -> None:
         runs._pending_write(root, tid, items)
     rec.pop("submit", None)
     rec["live_retry"] = True
+    rec["restart"] = True  # our own end: the wrapper starts the run again once, one step at a time
     rec["pending"] = True
     rec["stop_requested"] = tickets.now()  # our own end, set before the agent is ended
     runs._write(root, rec)
 
 
 DELIVER_GIVE_UP_SECONDS = 180.0  # input kept back this long (a dialog, a start that never came up): one-step
+
+
+def _prompt_reached(root: Path, rec: dict, stop=None) -> bool:
+    """After orch answered the tool's first-run screens: when the pane shows the tool's own empty prompt
+    (no dialog, nothing typed), the tool is up even if its start hook has not said so: the state becomes idle,
+    so the waiting input goes in. Anything else (a dialog, a login, an unreadable pane) changes nothing."""
+    tid, run = rec["ticket"], rec["run"]
+    if (stop is not None and stop.is_set()) or not session_exists(root, tid):
+        return False
+    if _hold_reason(root, tid, _dialog_rule(rec["agent"], root), _prompt_box(rec["agent"], root)) is not None:
+        return False
+    if adapters.screen(rec["agent"], root, _pane_text(root, tid), ref(root, tid)):
+        return False  # a screen the adapter knows (login ...) still waits for a person
+    if _set_state(root, tid, run, "idle"):
+        tickets.resume_after_start_wait(root, tid, f"agent:{rec['agent']}")
+        return True
+    return False
+
+
+def _pane_text(root: Path, tid: str) -> str:
+    r = tmux(root, "capture-pane", "-p", "-t", target(tid))
+    return r.stdout if r.returncode == 0 else ""
 
 
 def retry_deliver(root: Path, tid: str, run: str, memo: dict, now: float | None = None, end=None, stop=None):
@@ -802,10 +825,17 @@ def retry_deliver(root: Path, tid: str, run: str, memo: dict, now: float | None 
     if not (state in ("idle", "starting") or (state == "attention" and not rec.get("up"))):
         memo.pop("blocked", None)
         return None
+    if state != "idle" and not rec.get("up") and rec.get("screens_at"):
+        _prompt_reached(root, rec, stop)  # orch answered first-run screens: is the tool at its prompt now?
+        rec = runs.read(root, tid) or rec
+        state = (rec.get("live") or {}).get("state", "starting")
     if state == "idle" and deliver(root, tid, stop=stop):
         memo.pop("blocked", None)
         return "sent"
     since = memo.setdefault("blocked", t)
+    if not rec.get("up") and rec.get("screens_at"):
+        with contextlib.suppress(KeyError, ValueError):
+            since = max(since, runs._parse(rec["screens_at"]))  # screen time is not input-window time
     if t - since < DELIVER_GIVE_UP_SECONDS or (stop is not None and stop.is_set()):
         return None
     with runs.locked(root, tid):
@@ -819,7 +849,7 @@ def retry_deliver(root: Path, tid: str, run: str, memo: dict, now: float | None 
             root,
             tid,
             f"{label}'s live session could not take the new input for 3 minutes, so it was closed. "
-            "The input is kept and goes in with the next start, one step at a time.",
+            "The input is kept; orch starts the agent again now, one step at a time.",
             f"agent:{rec['agent']}",
         )
     _log_submit(root, tid, run, "gave up: the notice was kept back (dialog or no start) for 3 minutes")
@@ -1317,6 +1347,7 @@ def check_starting(
                     time.sleep(PASTE_DELAY)
                 tmux(root, "send-keys", "-t", target(tid), k)
             answered.append(scr["what"])
+            _note_screen(root, tid, run)
             return None
     note = scr["say"] if scr else None
     if note is None and age >= STARTUP_SECONDS and (rec.get("live") or {}).get("state") == "starting":
@@ -1342,6 +1373,16 @@ def check_starting(
             runs._write(root, cur)
             tickets.wait_for_start(root, tid, note, f"agent:{rec['agent']}")
     return note
+
+
+def _note_screen(root: Path, tid: str, run: str) -> None:
+    """orch just answered a first-run screen: the time it takes the tool to come up after that is not counted
+    against the input window (retry_deliver measures from this moment)."""
+    with contextlib.suppress(Exception), runs.locked(root, tid):
+        cur = runs.read(root, tid)
+        if cur and cur["run"] == run:
+            cur["screens_at"] = tickets.now()
+            runs._write(root, cur)
 
 
 def _names_own_folder(root: Path, text: str, work: Path | None = None) -> bool:
@@ -1377,6 +1418,22 @@ def watch_start(root: Path, tid: str, run: str, name: str, proc: subprocess.Pope
                 root, tid, f"Answered {label}'s first-run screens ({', '.join(answered)}).", f"agent:{name}"
             )
     return answered
+
+
+def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
+    """The live session gave up on its input (retry_deliver / check_submit): start the agent once more, now
+    one step at a time (the kept input has live_retry, so the start is oneshot: it cannot give up again). Only
+    for a run orch ended itself (rec["restart"]), never after a person's Stop. Returns the start result."""
+    try:
+        result = runs.start(root, tid, AUTOMATION_BY)
+    except Exception as e:  # the ticket then says so; the input stays queued
+        with contextlib.suppress(Exception):
+            tickets.log(
+                root, tid, f"The agent could not be started again by itself: {e}. Press Continue.",
+                f"agent:{name}",
+            )  # fmt: skip
+        return None
+    return result
 
 
 def start_waiting(root: Path) -> None:
