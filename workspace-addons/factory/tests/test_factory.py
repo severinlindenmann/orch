@@ -337,7 +337,13 @@ def test_act_idea_files_the_order_as_the_person_and_starts_the_agent(ws):
     assert code == 0 and r["started"] is True and r["text"].startswith("Idea saved.")
     t = json.loads((ws / "fake-tickets" / f"{r['order']}.json").read_text())
     assert t["title"] == "A page with our opening hours and a map"
-    assert t["ext"]["factory"] == {"role": "order", "kind": "run", "stage": "draft", "draft": 1}
+    assert t["ext"]["factory"] == {
+        "role": "order",
+        "kind": "run",
+        "stage": "draft",
+        "draft": 1,
+        "idea_box": True,
+    }
     assert (
         Store(ws).path(f"drafts/{r['order']}/v1.md").read_text()
         == "A page with our opening hours and a map\n"

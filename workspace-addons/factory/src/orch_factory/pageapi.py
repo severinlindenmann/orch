@@ -128,6 +128,7 @@ def _summary(ticket, d, root=None):
         "open": open_,
         "owner_min": ((proposal or {}).get("time") or {}).get("owner_min"),
         "working": _working(root, ticket, phase),
+        "agent_draft": _agent_draft(ticket),
         "draft_v": _draft_v(ticket),
     }
 
@@ -154,6 +155,14 @@ def _working(root, ticket, phase):
     return not (claim.get("mode") == "live" and (claim.get("live") or {}).get("state") in IDLE)
 
 
+def _agent_draft(ticket):
+    """The newest draft is the agent's: an idea-box order starts with the person's own words as v1, so only v2 and later
+    count (an order an agent filed with `orch factory idea` has the agent's v1). Until then Plan the run is not offered."""
+    x = (ticket.get("ext") or {}).get("factory") or {}
+    v = _draft_v(ticket) or 0
+    return v >= (2 if x.get("idea_box") is True else 1)
+
+
 def _draft_v(ticket):
     """The newest draft version (from the ext cache; only used for a link, the draft itself is read from its file)."""
     v = ((ticket.get("ext") or {}).get("factory") or {}).get("draft")
@@ -174,6 +183,7 @@ def _broken(ticket, error):
         "open": None,
         "owner_min": None,
         "working": False,
+        "agent_draft": False,
         "draft_v": None,
         "problem": _text(str(error), 200),
     }

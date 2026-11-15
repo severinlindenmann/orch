@@ -203,6 +203,7 @@ def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, ru
     run("draft", order, "--file", "-", data=b"v2")
     o = get(srv, f"/api/order/{order}")[1]
     assert o["phase"] == "draft" and o["working"] is False and o["draft_v"] == 2
+    assert o["agent_draft"] is True  # filed by an agent with `orch factory idea`: its v1 already counts
     path = ws / "fake-tickets" / f"{order}.json"
     t = json.loads(path.read_text())
     t["status"] = "active"
@@ -246,8 +247,18 @@ def test_one_click_order_waits_for_you_as_soon_as_the_helpers_turn_ends(ws, srv)
         timeout=30,
     )
     order = json.loads(r.stdout)["order"]
-    _set_status(ws, order, "active")  # the run the click started
+    _set_status(
+        ws, order, "active"
+    )  # the run the click started: no claim yet (starting up), then idle at the prompt
+    row = _home_row(srv, order)
+    assert (
+        row["agent_draft"] is False and row["draft_v"] == 1
+    )  # v1 = the person's words: never "waiting" (release-21)
     (ws / "live-runs").write_text(order)
+    (ws / "live-state").write_text(json.dumps({order: "idle"}))
+    assert (
+        _home_row(srv, order)["agent_draft"] is False
+    )  # an idle session before any agent draft: still not waiting
     (ws / "live-state").write_text(json.dumps({order: "working"}))
     assert _home_row(srv, order)["working"] is True  # the helper is writing
     subprocess.run(
@@ -263,6 +274,7 @@ def test_one_click_order_waits_for_you_as_soon_as_the_helpers_turn_ends(ws, srv)
         (ws / "live-state").write_text(json.dumps({order: state}))
         row = _home_row(srv, order)
         assert row["phase"] == "draft" and row["working"] is False and row["draft_v"] == 2, state
+        assert row["agent_draft"] is True, state
         o = get(srv, f"/api/order/{order}")[1]
         assert o["working"] is False and o["draft_v"] == 2
     (ws / "live-state").write_text(json.dumps({order: "starting"}))
@@ -286,6 +298,10 @@ def test_draft_page_and_home_offer_plan_and_changes_inside_the_dashboard_only(sr
     assert "section(primary, 'Drafts waiting for you', orders.filter(draftWaiting)" in js
     assert "'Plan the run'" in js and "'Ask for changes'" in js
     assert "...(draftWaiting(order) ? [draftActions(order)]" in js  # the draft page
+    assert (
+        "o.phase === 'draft' && o.agent_draft === true && !o.working" in js
+    )  # one rule: the agent's draft, turn ended
+    assert "d.delivered === true || d.queued === true" in js  # "Sent" only when orch confirmed it
     assert "card('Your draft is ready'" in js and "if (order.phase === 'draft') {" in js  # the order page
     assert (
         "if (!embedded()) { box.append(" in js

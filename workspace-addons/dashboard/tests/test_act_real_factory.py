@@ -79,3 +79,39 @@ def test_idea_box_files_the_order_as_the_person_through_the_real_factory_cli(ws,
 def test_idea_act_is_never_free():
     """Only a page with the person's session may run it (an agent's scripted request is watch-only)."""
     assert actions.needs_session("addon.act")
+
+
+SEND_FAKE = """#!{py}
+import json, sys
+a = sys.argv[1:]
+if a[:2] == ["run", "send"]:
+    print(json.dumps({reply})); sys.exit(0)
+print("{{}}")
+"""
+
+
+@pytest.mark.parametrize(
+    ("reply", "want"),
+    [
+        ({"id": "i_abc", "delivered": 1, "state": "idle"}, {"id": "i_abc", "delivered": 1, "state": "idle"}),
+        ({"id": "i_abc", "delivered": 0, "state": "none"}, {"id": "i_abc", "delivered": 0, "state": "none"}),
+        ({}, {"id": None, "delivered": 0, "state": None}),
+    ],
+)
+def test_run_send_reply_says_what_orch_did_with_the_message(ws, tmp_path, reply, want):
+    """The Factory page says "Sent" only when orch delivered or queued the words: the reply carries orch's answer."""
+    orch = tmp_path / "orch"
+    orch.write_text(SEND_FAKE.format(py=sys.executable, reply=json.dumps(reply)))
+    orch.chmod(orch.stat().st_mode | stat.S_IXUSR)
+    srv = make_server(ws, 0, orch_bin=str(orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        code, text, _ = post(
+            base, {"op": "run.send", "args": {"ticket": "t_weekly01", "text": "Now plan the run."}}
+        )
+        assert code == 200, text
+        assert json.loads(text)["send_result"] == want
+    finally:
+        srv.shutdown()
+        srv.server_close()
