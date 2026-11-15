@@ -144,7 +144,7 @@ def test_old_ticket_files_without_the_field_keep_working(tk, run):
     assert tickets.answer(root, tid, q["id"], "CSV", "human:pat", "cli")[1]["answer"] == "CSV"
 
 
-# ---- nothing that arrives over the relay takes a question back (supervisor rule) ----------------------------
+# ---- nothing that arrives over the relay takes a question back ----
 
 
 def _asked_question(proj):
