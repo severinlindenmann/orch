@@ -75,7 +75,11 @@ async fn portal(St(st): St<State>) -> Response {
 async fn css() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../web/admin.css"),
+        concat!(
+            include_str!("../../workspace/src/orch_ui/static/tokens.css"),
+            "\n",
+            include_str!("../web/admin.css")
+        ),
     )
 }
 async fn kit_js() -> impl IntoResponse {

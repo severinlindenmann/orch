@@ -108,11 +108,7 @@
   "style": 0
  },
  "publish/web/admin.css": {
-  "hex": 33,
-  "style": 0
- },
- "publish/web/file.html": {
-  "hex": 4,
+  "hex": 0,
   "style": 0
  },
  "publish/web/look-bundle.js": {
@@ -128,7 +124,7 @@
   "style": 0
  },
  "publish/web/portal.html": {
-  "hex": 3,
+  "hex": 1,
   "style": 0
  },
  "publish/web/portal.js": {
@@ -136,7 +132,7 @@
   "style": 0
  },
  "publish/web/style.css": {
-  "hex": 73,
+  "hex": 0,
   "style": 0
  },
  "relay/web/look-bundle.js": {
@@ -152,15 +148,15 @@
   "style": 0
  },
  "relay/web/not-available.html": {
-  "hex": 11,
+  "hex": 0,
   "style": 1
  },
  "relay/web/portal.html": {
-  "hex": 8,
+  "hex": 4,
   "style": 0
  },
  "relay/web/style.css": {
-  "hex": 41,
+  "hex": 0,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/automation/automation.css": {
