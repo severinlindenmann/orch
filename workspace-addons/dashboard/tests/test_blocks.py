@@ -364,6 +364,7 @@ def test_compact_list_has_row_actions_for_shared_links(tmp_path):
     tree = run(tmp_path, _page("valid-links-page.json"), links=True)
     btns = [x for x in walk(tree) if x["data"].get("native")]
     assert [(x["data"]["native"], x["data"]["linkId"]) for x in btns] == [
+        ("link-open", "f_abc123"),
         ("link-copy", "f_abc123"),
         ("link-extend", "f_abc123"),
         ("link-stop", "f_abc123"),
@@ -439,6 +440,7 @@ def test_link_ops_only_exist_on_the_links_page_with_fixed_labels(tmp_path):
     page["blocks"][0]["items"][0]["actions"][0]["label"] = "Free money"
     tree = run(tmp_path, page, links=True)
     assert [x["text"] for x in walk(tree) if x["data"].get("native")] == [
+        "Open",
         "Copy link",
         "Extend",
         "Stop sharing",

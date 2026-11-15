@@ -125,6 +125,7 @@ class PageSession:
         if self.key is not None:  # a restart the person asked for (update) keeps the open tab's session
             why: list = []
             resumed = humanproof.take_resume_session(root, server, why)
+            humanproof.disarm_restart(root)  # the add-on restart this start belongs to is over (#705)
             for line in why:  # a restart that had a session to adopt and did not: say why (no secrets)
                 _say(f"orch {server}: did not keep the open page's session: {line}.")
             if resumed:

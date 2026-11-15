@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime
 
-from . import authority, autopilot, commands, orchcli
+from . import authority, autopilot, commands, irreversible, measure, orchcli
 from .render import clean
 from .store import Refused, Store, clock, digest, validate
 
@@ -197,12 +197,13 @@ def derive(root, store, ticket, tickets=None):
         for e in ents
         if e["row"]["kind"] == "factory:change" and authority.human(e["q"]) and e["q"]["answer"] == "Accept"
     ]
-    tasks = {t["slug"]: dict(t) for t in p["tasks"]}
+    # each task remembers the person's answer that approved it: core's start gate on its crew ticket (#681)
+    tasks = {t["slug"]: {**t, "approved_by": f"{tid}:{start['q']['id']}=Start"} for t in p["tasks"]}
     cap = p["budget"]["active_min_cap"]
     for e in accepted:
         cap += e["data"]["adds_min"]
         for t in e["data"].get("adds_tasks", []):
-            tasks.setdefault(t["slug"], dict(t))
+            tasks.setdefault(t["slug"], {**t, "approved_by": f"{tid}:{e['q']['id']}=Accept"})
     d.update(proposal=p, tasks=tasks, cap=cap)
     agents = {c["role"]: c["agent"] for c in p["crew"]}
     for t in tasks.values():
@@ -215,6 +216,8 @@ def derive(root, store, ticket, tickets=None):
             and x.get("order") == tid
             and t.get("parent") == tid
             and x.get("task") in tasks
+            and _gate(t)
+            == tasks[x["task"]]["approved_by"]  # only a ticket core itself holds to the person's answer
         ):
             crew[x["task"]] = t
     d["crew"] = crew
@@ -270,6 +273,16 @@ def derive(root, store, ticket, tickets=None):
     return d
 
 
+def _measure(root, d):
+    """A started run order's used time, measured from core's record over the order and its crew tickets. When the record
+    can't be read the cached value stays (and nothing is claimed as measured)."""
+    if d.get("phase") != "started" or d.get("kind") != "run":
+        return
+    minutes = measure.active_minutes(root, [d["tid"], *(t["id"] for t in d.get("crew", {}).values())])
+    if minutes is not None:
+        d["used"], d["measured"] = minutes, True
+
+
 def refresh(root, store, order, d):
     """Rewrite the ext cache from the derived state (it is only a cache for the dashboard)."""
     for _ in range(2):
@@ -291,7 +304,11 @@ def refresh(root, store, order, d):
                 "stage": "shipped" if d["shipped"] else "waiting" if d["open"] else "running",
                 "line": d["line"],
                 "crew": [t["id"] for t in d["crew"].values()],
-                "budget": {**ext.get("budget", {}), "active_min_cap": d["cap"]},
+                "budget": {
+                    **ext.get("budget", {}),
+                    "active_min_cap": d["cap"],
+                    **({"active_min_used": d["used"]} if d.get("measured") else {}),
+                },
                 "tiny": {"count": len(tiny), "minutes": sum(_minutes(r) for r in tiny)},
             }
         if all(ext.get(k) == v for k, v in want.items()):
@@ -390,6 +407,7 @@ def next_step(root, order):
         order = ticket["id"]
         tickets = orchcli.tickets(root)
         d = derive(root, store, ticket, tickets)
+        _measure(root, d)
         _log_ignored(root, store, order, d)
         for e in d["pending"]:
             kind, q = e["row"]["kind"], e["q"]
@@ -445,6 +463,12 @@ def started_state(root, store, ticket, tickets=None):
     return d
 
 
+def _gate(ticket):
+    """A crew ticket's core start gate as "<ticket>:<question>=<answer>" (a sub-ticket made without one is no crew)."""
+    g = ticket.get("start_requires")
+    return f"{g.get('ticket')}:{g.get('question')}={g.get('answer')}" if isinstance(g, dict) else None
+
+
 def crew_add(root, order, task):
     store = Store(root)
     with store.locked():
@@ -458,7 +482,17 @@ def crew_add(root, order, task):
             raise Refused("That task needs a crew role the proposal does not have.", "not_allowed")
         if task in d["crew"]:
             return {"order": d["tid"], "task": task, "ticket": d["crew"][task]["id"], "created": False}
-        new = orchcli.call(root, "ticket", "new", t["title"], "--parent", d["tid"], write=True)
+        # core refuses any run on it (also a direct `orch run start`) until the person's Start / Accept is there
+        new = orchcli.call(
+            root,
+            "ticket",
+            "new",
+            t["title"],
+            "--parent",
+            d["tid"],
+            f"--start-requires={t['approved_by']}",
+            write=True,
+        )
         orchcli.set_ext(
             root, new, role="crew", order=d["tid"], task=task, crew_role=t["role"], agent=t["agent"]
         )
@@ -483,6 +517,12 @@ def crew_start(root, order, task):
         crew = d["crew"].get(task)
         if crew is None:
             raise Refused("Add the crew ticket first (orch factory crew add).", "invalid")
+        _measure(root, d)  # the budget check uses measured time, never the (synced, settable) cache (#681)
+        if d["cap"] and not d.get("measured"):
+            raise Refused(
+                "The activity record can't be read, so the time used is unknown. Try again.", "not_available"
+            )
+        refresh(root, store, d["tid"], d)
         if d["cap"] and d["used"] >= d["cap"]:
             raise Refused(
                 "The time budget is used up. Ask the owner for more time (a change proposal).", "refused"
@@ -551,6 +591,13 @@ def stop(root, order, data):
             raise Refused("The proposal you approved has no stop at this stage.", "not_allowed")
         if any(i.get("recommend") and i["tag"] != "routine" for i in value["items"]):
             raise Refused("Only routine items can carry a recommended answer.", "not_allowed")
+        low = irreversible.under_tagged(value)
+        if (
+            low
+        ):  # Factory derives cant-undo from a fixed action list; the agent's tag can only match or raise it
+            raise Refused(
+                "These cannot be undone, so tag them cant-undo: " + "; ".join(low[:3]) + ".", "not_allowed"
+            )
         if d["open"] and d["open"]["row"]["kind"] == "factory:stop":
             same = digest(data) == d["open"]["row"]["hash"]
             if not same:

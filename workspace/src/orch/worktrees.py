@@ -590,6 +590,8 @@ def _move_legacy(root: Path, ticket: str) -> str | None:
             e["path"] = str(want)
         _save_registry(root, reg)
         _log(root, f"{ticket}: copy moved out of orch's folder")
+        if config.copy_setup(root):  # paths the setup wrote (a .venv's shebangs) still name the old place
+            _log(root, f"{ticket}: the copy moved; run the setup again in it (paths made by it may be old)")
         with contextlib.suppress(OSError):  # the old <ws8> folder, once nothing else is in it
             if not any(n != ".owner" for n in os.listdir(old.parent)):
                 (old.parent / ".owner").unlink()
@@ -707,7 +709,14 @@ def _create_inner(root: Path, ticket: str) -> tuple[dict | None, str]:
                 return None, "Another workspace uses the same copy folder."
         else:
             _write_copies_owner(folder, str(root.resolve()))
-    except (OSError, Refused) as e:
+    except OSError as e:
+        # the copies folder is a sibling of the orch folder: when that parent is not writable (the folder is a
+        # mount point, or ORCH_HOME=/x) there is nowhere to put copies; say so in plain words
+        return None, (
+            f"orch cannot make its copies folder next to {addons.home(root).parent} "
+            f"({e.strerror or type(e).__name__}). Put orch's folder in a place you can write beside."
+        )
+    except Refused as e:
         return None, f"orch cannot make the copy folder: {e}"
     if dest.exists() or dest.is_symlink():
         _git(

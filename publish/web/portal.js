@@ -443,7 +443,8 @@
     const soon = items.filter(a => a.expires_at != null && new Date(a.expires_at).getTime() - Date.now() < 3 * 86400000).length;
     const summary = [`${n('running')} running`, `${stopped.length} stopped`, n('failed') ? `${n('failed')} not responding` : '', soon ? `${soon} expire within 3 days` : ''].filter(Boolean).join(' · ');
     const card = i => { const app = items[i];
-        const [, label] = STATUS[app.status] || ['muted', app.status];
+        const [, label0] = STATUS[app.status] || ['muted', app.status];
+        const label = app.status === 'running' && app.awake === false ? 'Sleeping' : label0;
         const url = safeUrl(app.url);
         const main = app.status === 'running'
           ? (url ? `<a class="button small" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>` : '')

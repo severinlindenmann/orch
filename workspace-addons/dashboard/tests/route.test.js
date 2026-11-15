@@ -52,6 +52,10 @@ test('skeletonFor draws the page shape, busy, with one status text and hidden sh
     assert.equal(all(s).filter(x => x.attrs?.role === 'status').length, 1);
     assert.ok(all(s).filter(x => (x.attrs?.className || '').split(' ').includes('skeleton')).every(x => x.attrs['aria-hidden'] === 'true'));
   }
+  ctx.localStorage = {getItem: () => 'board'};
+  assert.equal(count(ctx.skeletonFor('tickets'), 'sk-board'), 1);  // the board is columns while loading (#694)
+  assert.equal(count(ctx.skeletonFor('tickets'), 'sk-row'), 0);
+  delete ctx.localStorage;
   assert.equal(count(ctx.skeletonFor('tickets'), 'sk-row'), 5);
   assert.equal(count(ctx.skeletonFor('tickets'), 'sk-toolbar'), 1);
   assert.equal(count(ctx.skeletonFor('home'), 'sk-columns'), 1);

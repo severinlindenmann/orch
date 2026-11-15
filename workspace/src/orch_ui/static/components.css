@@ -104,6 +104,16 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .workspace .menu{position:absolute;top:calc(100% + 8px);left:0;width:256px;z-index:60}
 .phone-toggle{display:flex;align-items:center;gap:8px;padding:8px;font-size:12px;line-height:16px;color:var(--text-muted)}
 .phone-toggle span{flex:1}
+.phone-toggle .switch{flex:none}
+/* Sidebar foot = ONE unit (owner 15 Nov, fb1): person, Phone and Settings sit in one quiet box, no separate bordered pieces */
+.side-foot{gap:2px;padding:4px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+.side-foot>*{margin:0}
+.side-foot details.menu{padding:0;border:0;background:none;box-shadow:none;min-width:0}
+.side-foot .nav-item{width:100%}
+.side-foot .phone-toggle,.side-foot .mm-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:36px;margin:0;padding:8px 12px;border:0;border-radius:6px;background:none;font-size:14px;line-height:20px;text-align:left}
+.side-foot .phone-toggle:hover,.side-foot .mm-toggle:hover{background:var(--surface-2)}
+.side-foot .side-settings{margin:0}
+.side-foot>.person-switch:not([hidden])+*,.side-foot>details.menu+*{margin-top:0}
 .topbar{position:sticky;top:0;z-index:20;min-height:var(--topbar-height);padding:8px var(--page-gutter);border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .topbar-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
 .topbar>.btn.primary{margin-left:auto}
@@ -275,6 +285,8 @@ progress::-moz-progress-bar{background:var(--brand)}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--text-faint);border-top-color:var(--brand);border-radius:50%}
 /* Overlays. details.menu is the trigger wrapper; .menu-pop (or a non-details .menu) is the raised panel. */
 details.menu,.dropdown{position:relative}
+/* The trigger wrapper is not a panel: no box, so a small icon summary stays small (owner fb3: the card menu was a huge empty box) */
+details.menu{padding:0;border:0;background:none;box-shadow:none;min-width:0}
 details.menu>summary,.dropdown summary{list-style:none}
 details.menu>summary::-webkit-details-marker,.dropdown summary::-webkit-details-marker{display:none}
 .menu:not(details),.menu-pop{padding:4px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface-2);box-shadow:var(--lift-shadow);min-width:192px}

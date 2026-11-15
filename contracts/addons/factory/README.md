@@ -66,19 +66,41 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 - A grant exists only from a person's `Start` on a `factory:autopilot` question; it lasts `limits.days` from that answer's
   time and covers only `may_decide`. The agent can never create, extend or widen a grant (a new grant = a new proposal + a
   new answer).
-- Known limit (phase 1): the agent tags stop items itself. `decide` is refused on the ship stop, on `cant-undo` items and
-  on tags the grant does not list; a mislabelled item stays small, undoable, inside the grant's limits and in the daily
-  report. Add-on-derived irreversibility (fixed action list) is a hardening item.
+- **Irreversibility is derived by the add-on** (`irreversible.py`, #681): an item whose words name a final action from a
+  fixed list (send/e-mail, publish/post to, deploy/go live/launch, delete/erase/wipe/purge/overwrite, pay/charge/refund/
+  purchase, merge/push to main or production, force-push, revoke, rotate a key or secret, cancel a subscription or
+  contract, sign a contract) is `cant-undo` whatever the agent tagged: `orch factory stop` refuses it until it is tagged
+  `cant-undo`, and `decide` treats it (and every ship-stage item) as `cant-undo` even in an older frozen file. The list
+  only raises a tag, never lowers it, and is a floor: a paraphrase it does not know is still the agent's tag. `decide` is also refused on tags the grant does not list.
 - Always asks the owner (fixed in the add-on, not configurable): the ship stop, scope changes, budget beyond the limits, crew
   outside an approved proposal, `cant-undo` items, new connections or credentials, other workspaces, `factory:start`,
   `factory:autopilot`, budget questions.
 - Each `decide` writes a journal line `decided` (who, why) and a ticket log entry "Decided by agent:factory · <why>"; the
   daily report lists them.
 
-## Budget (phase 1)
-Measured active time (agent run time on the order and its crew; waiting for the owner never counts) against
-`active_min_cap`; `api_usd_target` is shown as a target, not a cap. At 80 % the manager asks with a change proposal ("+1 h"
-/ narrow / stop); at 100 % `crew start` refuses until the owner answers.
+## Journal
+`journal.jsonl` stays unauthenticated bookkeeping (#681 decision): `.orch/addons/` is never synced (sync's
+NEVER_SYNCED), and any key Factory could hold is readable by a same-user agent, so a MAC would add no protection;
+authority never takes a person from the journal, only from core's answers and frozen file hashes.
+
+## Budget
+Measured active time against `active_min_cap` (#681): `measure.py` reads core's activity record (`orch record query
+--ticket <t> --json`, paged) for the order and its crew tickets and adds, per run, the gaps between events, each at most
+5 minutes, so a session waiting at its prompt (for the owner or for nothing) adds at most 5 minutes. `orch factory next`
+and `crew start` measure; the result is cached in `ext.factory.budget.active_min_used` for the page. When the record
+can't be read the cache stays for the page, but `crew start` refuses (time used unknown). `crew start` refuses at 100 % of the measured time until the owner answers a change
+proposal. `api_usd_target` stays a target, not a cap (no usage-event contract for money yet), and the autopilot's
+per-day limits stay targets too.
+
+## Start gate (core `start_requires`, #681)
+`crew add` makes each crew ticket with `orch ticket new … --start-requires <order>:<question>=<answer>`: the order's
+`factory:start` question with `Start`, or, for a task an accepted change added, that `factory:change` question with
+`Accept`. Core then refuses `orch run start` and `orch run claim` on the crew ticket (any caller, an agent's own direct
+call too) until that question carries that answer from a person (`answered_by: human:…`). The field is set at creation
+only (not patchable); core knows nothing about Factory. Factory counts a sub-ticket as crew only when its gate is exactly the
+one its task needs (a sub-ticket an agent made with Factory's crew data but no gate is ignored). Known limit (light,
+inside the workspace): tickets are synced, and core trusts a synced ticket's `answered_by` and fields like any other
+reader (core-wide H1 note, not Factory's).
 
 ## Page (phase 2a, read only)
 The watcher process also serves the Factory page on `127.0.0.1:<port>` (`orch factory status --json` gives `url`;

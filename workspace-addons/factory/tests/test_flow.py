@@ -180,13 +180,35 @@ def test_crew_add_is_idempotent_and_limited(ws, run):
     assert run("crew", "add", order, "not-approved", code=2)["code"] == "not_allowed"
 
 
+def record(ws, tid, minutes, gap=4, run_id="r_000001"):
+    """Core's activity record for a ticket: one event every `gap` minutes for about `minutes` minutes of work."""
+    from datetime import UTC, datetime, timedelta
+
+    path = ws / "record.json"
+    data = json.loads(path.read_text()) if path.exists() else {}
+    start = datetime(2026, 11, 15, 8, 0, tzinfo=UTC)
+    data[tid] = [
+        {
+            "at": (start + timedelta(minutes=i * gap)).isoformat().replace("+00:00", "Z"),
+            "run": run_id,
+            "ticket": tid,
+        }
+        for i in range(minutes // gap + 1)
+    ]
+    path.write_text(json.dumps(data))
+
+
 def test_crew_start_refusals(ws, run):
     order, _ = started(ws, run)
     run("next", order)
     run("crew", "add", order, "booking-form")
     run("crew", "add", order, "release")
     assert run("crew", "start", order, "release", code=2)["code"] == "not_allowed"  # not the current stage
-    edit(ws, order, lambda t: t["ext"]["factory"]["budget"].update(active_min_used=150))
+    edit(
+        ws, order, lambda t: t["ext"]["factory"]["budget"].update(active_min_used=0)
+    )  # the cache never decides
+    cap = core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_cap"]
+    record(ws, order, minutes=cap + 4)  # measured agent work on the order: over the cap
     refused = run("crew", "start", order, "booking-form", code=2)
     assert refused["code"] == "refused" and "more time" in refused["error"]
     assert not (ws / "runs.jsonl").exists()
@@ -714,3 +736,158 @@ def test_decided_row_before_the_grant_never_counts(ws, run):
     core(ws, "log", order, "Decided by agent:factory · x", "--by", "agent:factory")
     autopilot_order(ws, run)
     assert run("next", order)["step"] == "wait"
+
+
+def test_cant_undo_is_derived_from_a_fixed_action_list_not_only_the_agents_tag(ws, run):
+    """#681: an item whose words name a final action (send, publish, delete, pay, deploy …) is cant-undo whatever the
+    agent tagged: the stop is refused until it says so, and autopilot never decides it (an old frozen file too)."""
+    from orch_factory import autopilot, irreversible
+
+    assert (
+        irreversible.derived_tag({"title": "Send the newsletter to 400 customers", "tag": "taste"}, "build")
+        == "cant-undo"
+    )
+    assert (
+        irreversible.derived_tag({"title": "Remove the extra margin", "tag": "routine"}, "build") == "routine"
+    )
+    assert irreversible.derived_tag({"title": "Typo", "tag": "routine"}, "ship") == "cant-undo"
+    order, _ = started(ws, run)
+    run("next", order)
+    finish_crew(ws, run, order, "booking-form")
+    refused = run(
+        "stop",
+        order,
+        "--file",
+        "-",
+        data=stop_file("build", {"title": "Publish the page", "tag": "taste"}),
+        code=2,
+    )
+    assert refused["code"] == "not_allowed" and "Publish the page" in refused["error"]
+    q = ask_stop(ws, run, order, "build", {"title": "Publish the page", "tag": "cant-undo"})
+    assert q
+    entry = {
+        "data": {"stage": "build", "items": [{"title": "Delete the old export", "tag": "taste"}]},
+        "n": 1,
+    }
+    with pytest.raises(Refused, match="cannot be undone"):
+        autopilot.check(entry, "Continue", [], None)
+
+
+def test_crew_tickets_carry_cores_start_gate_on_the_persons_start(ws, run):
+    """#681: every crew ticket is made with --start-requires <order>:<start question>=Start, so core itself refuses a
+    direct `orch run start` on it until the person's Start is there (not only Factory's own crew start)."""
+    order, q = started(ws, run)
+    run("crew", "add", order, "booking-form")
+    calls = [json.loads(x) for x in (ws / "calls.jsonl").read_text().splitlines()]
+    new = [c["args"] for c in calls if c["args"][:2] == ["ticket", "new"] and "--parent" in c["args"]]
+    assert new and f"--start-requires={order}:{q}=Start" in new[-1]
+
+
+def test_used_time_is_measured_from_cores_record_and_waiting_never_counts(ws, run):
+    """#681: `next` measures the order's agent time from core's record (gaps between events, each at most 5 min, so a
+    session idle for hours counts 5 min) and caches it for the page; an unreadable record keeps the cache."""
+    from datetime import UTC, datetime, timedelta
+
+    from orch_factory import measure
+
+    order, _ = started(ws, run)
+    t0 = datetime(2026, 11, 15, 8, 0, tzinfo=UTC)
+    at = lambda m: (t0 + timedelta(minutes=m)).isoformat().replace("+00:00", "Z")
+    (ws / "record.json").write_text(
+        json.dumps(
+            {
+                order: [
+                    {"at": at(0), "run": "r_a"},
+                    {"at": at(3), "run": "r_a"},
+                    {"at": at(183), "run": "r_a"},  # 3 + 5 (idle 3 h)
+                    {"at": at(10), "run": "r_b"},
+                    {"at": at(12), "run": "r_b"},  # another run: 2
+                ]
+            }
+        )
+    )
+    assert measure.active_minutes(ws, [order]) == 10
+    run("next", order)
+    assert core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_used"] == 10
+    (ws / "fail-record").write_text("")
+    assert measure.active_minutes(ws, [order]) is None
+    run("next", order)
+    assert core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_used"] == 10  # kept
+
+
+def test_a_sub_ticket_without_cores_gate_is_no_crew_and_unmeasured_budget_refuses(ws, run):
+    """#681 review: a sub-ticket an agent made with Factory's crew data but no core start gate is ignored (no crew);
+    crew start refuses when the record can't be measured (the synced cache never decides)."""
+    order, _ = started(ws, run)
+    run("next", order)
+    rogue = core(ws, "ticket", "new", "Booking form", "--parent", order)
+    core(
+        ws,
+        "ext",
+        "set",
+        rogue["id"],
+        "factory",
+        json.dumps({"role": "crew", "order": order, "task": "booking-form"}),
+        "--if-revision",
+        "1",
+    )
+    assert (
+        run("crew", "start", order, "booking-form", code=2)["code"] == "invalid"
+    )  # "add the crew ticket first"
+    run("crew", "add", order, "booking-form")
+    (ws / "fail-record").write_text("")
+    refused = run("crew", "start", order, "booking-form", code=2)
+    assert refused["code"] == "not_available" and "record" in refused["error"]
+    assert not (ws / "runs.jsonl").exists()
+
+
+def test_a_partial_record_is_never_counted_as_the_whole(ws, run, monkeypatch):
+    """Security review: a page with `unavailable` runs, or more pages than measure reads, gives None (unknown)."""
+    from orch_factory import measure
+
+    pages = iter([{"items": [], "next": None, "unavailable": [{"run": "r_x", "status": "tampered"}]}])
+    monkeypatch.setattr(measure.orchcli, "call", lambda *a, **k: next(pages))
+    assert measure.active_minutes(ws, ["t_000001"]) is None
+    monkeypatch.setattr(measure.orchcli, "call", lambda *a, **k: {"items": [], "next": "c_more"})
+    assert measure.active_minutes(ws, ["t_000001"]) is None
+
+
+def test_per_day_limit_only_warns_and_never_blocks(ws, run):
+    """Owner 15 Nov: a reached per-day limit shows a plain warning on the page data and the needs view; autopilot keeps
+    deciding (nothing is refused). Only work done today counts."""
+    from datetime import UTC, datetime, timedelta
+
+    from orch_factory import autopilot, orchcli, pageapi, view
+
+    a, _ = autopilot_order(ws, run, active_min_per_day=10)
+    store, now = Store(ws), datetime.now(UTC)
+    at = lambda m: (now - timedelta(minutes=m)).isoformat().replace("+00:00", "Z")
+    (ws / "record.json").write_text(
+        json.dumps({a: [{"at": at(8), "run": "r_a"}, {"at": at(4), "run": "r_a"}]})
+    )
+    status = autopilot.day_status(ws, store, orchcli.tickets(ws))
+    if status["used"] != 4:  # local midnight fell inside the window: skip the exact count
+        return
+    assert (
+        status == {"limit": 10, "used": 4, "reached": False} and "keeps going" not in view.view(ws)["notice"]
+    )
+    (ws / "record.json").write_text(
+        json.dumps({a: [{"at": at(m), "run": "r_a"} for m in (14, 10, 6, 2)]})  # 4 + 4 + 4 = 12 min
+    )
+    status = autopilot.day_status(ws, store, orchcli.tickets(ws))
+    assert status["used"] == 12 and status["reached"]
+    home = pageapi.home(ws)
+    assert "keeps going" in home["day_limit"]["warning"] and "10 min a day" in home["day_limit"]["warning"]
+    v = view.view(ws)
+    assert "keeps going" in v["notice"] and v["notice_tone"] == "warn"
+    assert any(b.get("title") == "Heads-up" for b in v["blocks"])
+    old = {
+        a: [
+            {"at": (now - timedelta(days=2, minutes=m)).isoformat().replace("+00:00", "Z"), "run": "r_a"}
+            for m in (14, 10, 6, 2)
+        ]
+    }
+    (ws / "record.json").write_text(json.dumps(old))
+    assert (
+        autopilot.day_status(ws, store, orchcli.tickets(ws))["used"] == 0
+    )  # yesterday's work does not count

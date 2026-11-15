@@ -257,6 +257,46 @@ def _plain(text, cap: int = 120) -> str:
     return t[:cap] + "\u2026" if len(t) > cap else t
 
 
+_REVIEW_CACHE: dict = {}  # (root, ticket, project HEAD, copy tip) -> `copy review` result
+_REVIEW_CACHE_MAX = 64
+
+
+def _review_key(root: Path, tid: str):
+    """(root, ticket, HEAD sha, copy tip sha) from one `git rev-parse`, or None when either cannot be read."""
+    try:
+        r = _run(
+            ["git", "-C", str(root), "rev-parse", "HEAD", f"refs/heads/orch/{tid}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    shas = r.stdout.split()
+    if r.returncode != 0 or len(shas) != 2 or not all(re.fullmatch(r"[0-9a-f]{40,64}", x) for x in shas):
+        return None
+    return (str(Path(root).resolve()), tid, shas[0], shas[1])
+
+
+def _copy_review(orch_bin, root: Path, tid: str):
+    """`orch copy review <tid> --json`, run again only when the project HEAD or the copy's tip moved (the
+    subprocess ran on every state load). The result is only ever shown with the tip it was made for; the core
+    still re-checks on approve. No cache when HEAD or the tip cannot be read."""
+    args = ["copy", "review", tid, "--json"]
+    key = _review_key(root, tid)
+    if key is None:
+        return run_orch(orch_bin, args, root)
+    if key in _REVIEW_CACHE:
+        return json.loads(json.dumps(_REVIEW_CACHE[key]))
+    out = run_orch(orch_bin, args, root)
+    if isinstance(out, dict) and out.get("tip") == key[3]:  # never keep a result for another tip than its key
+        while len(_REVIEW_CACHE) >= _REVIEW_CACHE_MAX:
+            _REVIEW_CACHE.pop(next(iter(_REVIEW_CACHE)))
+        _REVIEW_CACHE[key] = json.loads(json.dumps(out))
+    return out
+
+
 def _bring_back_view(back: dict, review) -> dict:
     """The waiting state for the ticket page: what the core's `copy review` says, checked and made plain
     HERE (server side), so the approval dialog shows exactly the tip, the count and the paths it binds."""
@@ -359,9 +399,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
                 t["review_tip"] = tip
         back = (t.get("work") or {}).get("bring_back") or {}
         if back.get("state") == "waiting":
-            t["bring_back"] = _bring_back_view(
-                back, run_orch(orch_bin, ["copy", "review", t["id"], "--json"], root)
-            )
+            t["bring_back"] = _bring_back_view(back, _copy_review(orch_bin, root, t["id"]))
         _mark_missing_proofs(root, t)
         mobile.mark_chat_history(t)
         tickets.append(t)
@@ -795,7 +833,15 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
-    from orch.config import agents_may_finish, copies_max, copies_mode, copy_setup, diag_enabled
+    from orch.config import (
+        agents_may_finish,
+        copies_max,
+        copies_mode,
+        copy_setup,
+        diag_enabled,
+        workspace_description,
+        workspace_name,
+    )
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
@@ -811,6 +857,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "copy_setup": copy_setup(root) or "",
+        "ws_name": workspace_name(root) or "",
+        "ws_description": workspace_description(root) or "",
         "diag_enabled": diag_enabled(root),  # the debug log switch (read-only here; its card comes with D3)
         "copies_disk": copies_disk(root),
         "folder": str(root),

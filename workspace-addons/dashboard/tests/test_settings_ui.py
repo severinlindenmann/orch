@@ -13,7 +13,6 @@ def test_settings_navigation_and_cards():
         "panel('phone', phonePanel(phoneAddon, settings))",
         "OrchMobileMode?.settingsSection(h)",
         "'1. Relay connection'",
-        "'First connect your relay (step 1 above). Then you can pair a phone here.'",
         "function addonDetailPage(addon)",
         "'About this add-on'",
         "OrchLook?.settingsSection()",
@@ -30,10 +29,10 @@ def test_settings_navigation_and_cards():
     assert "className:'settings-details'" not in src
     # the phone tab is a real tab that stays in Settings (no link away to the add-on page)
     assert "href:'#addon/' + phoneAddon.name" not in src
-    # the add-on detail page has no Details toggle; "Pair a phone" stays disabled until the relay is connected
+    # the add-on detail page has no Details toggle; phones are paired on the relay admin page, not here
     detail = src[src.index("function addonDetailPage(addon)") :][:3500]
     assert "h('summary'" not in detail and "'Details'" not in detail
-    assert "connected ? btn('Pair a phone', 'primary', 'phone-pair') : null" in src
+    assert "Pair a phone" not in src and "phonePairDialog" not in src
     assert "history.replaceState(null, '', '#settings/' + tab)" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
     # folder: plain name + Copy path + quiet full path, no Details toggle
@@ -80,7 +79,7 @@ def test_shared_links_are_optional_and_use_plain_actions():
         "Array.isArray(data.links)",
         "catch (_) { sharedLinks = null; sharedLinksDown = false; }",
         "if (!link.copy) return;",
-        "navigator.clipboard.writeText(link.link)",
+        "window.UI.copyText(link.link)",
         "act('link.extend', {id:link.id, days:7})",
         "act('link.stop', {id:link.id})",
         "'The link stops working.'",

@@ -73,7 +73,7 @@ OPS = frozenset(
     "update run.stop relay.allow group.remove_member group.write_as_person group.share_file "
     "group.readd_member config.share config.agents_may_finish look.shared_pages ticket.finish "
     "run.human_input addon.act addon.add_local config.permissions look.icon config.copy_setup "
-    "copy.remove_orphaned copy.retry config.diag_enabled".split()
+    "copy.remove_orphaned copy.retry config.diag_enabled config.workspace_info".split()
 )
 SETTING_DEFAULTS = {
     "focus.live_session": True,
@@ -2765,6 +2765,7 @@ HANDOFF_HEADS = {
     "config.agents_may_finish": (("config", "set"),),
     "config.copy_setup": (("config", "set"),),
     "config.diag_enabled": (("config", "set"),),
+    "config.workspace_info": (("config", "set"),),
     "copy.remove_orphaned": (("copy", "remove-orphaned"),),
     "copy.retry": (("copy", "retry"),),
     "config.permissions": (("config", "set"),),
@@ -3348,6 +3349,41 @@ def write_resume_cookie(root: Path, server: str, cookie: str, secret: str) -> bo
         return True
     except (Refused, OSError):
         return False
+
+
+RESTART_ARM_LIFE = 600  # seconds an add-on change keeps the other open page servers ready to hand over
+
+
+def arm_restart(root: Path) -> bool:
+    """Called by the dashboard after a person's click that restarts the services (an add-on add/remove):
+    for a few minutes the other page server (Focus) may write its own resume cookie (write_resume_cookie), so
+    its open tabs keep their session too. The marker is in the private key folder, which an agent can not
+    write. It grants nothing by itself: no cookie is stored unless a page server with an authenticated tab
+    sees it."""
+    try:
+        _write_private(key_dir(root) / "restart-armed", f"{int(time.time()) + RESTART_ARM_LIFE}\n")
+        return True
+    except (Refused, OSError):
+        return False
+
+
+def disarm_restart(root: Path) -> None:
+    """A page server that has just (re)started ends the arm window: a later restart (one an agent causes)
+    must not find it still armed and get a session handed over without a click."""
+    with contextlib.suppress(Refused, OSError):
+        (key_dir(root, create=False) / "restart-armed").unlink(missing_ok=True)
+
+
+def restart_armed(root: Path) -> int | None:
+    """The expiry (epoch seconds) of a live arm_restart marker, else None. Any error: not armed."""
+    try:
+        d = key_dir(root, create=False)
+        raw = _read_guarded(d / "restart-armed").decode("ascii").strip()
+    except (Refused, OSError, ValueError, winacl.Unknown):
+        return None
+    if raw.isdigit() and time.time() < int(raw) <= time.time() + RESTART_ARM_LIFE:
+        return int(raw)
+    return None
 
 
 def take_resume_session(root: Path, server: str, why: list | None = None) -> tuple[str, str] | None:

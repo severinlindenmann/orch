@@ -1,8 +1,13 @@
+import sys
 from pathlib import Path
 
 import pytest
 
 from orch_sync import repo, service
+
+# No test may touch the real ~/.orch-tool: autouse private HOME/ORCH_HOME + a session guard (shared helper).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
 
 REAL_ENSURE_RUNNING = service.ensure_running  # tests of the auto-start put it back
 
@@ -23,6 +28,7 @@ def isolated_git(tmp_path, monkeypatch):
     monkeypatch.setattr(addons, "discover", dict)
     for key, value in [
         ("HOME", home),
+        ("ORCH_HOME", home / "toolhome"),  # under the faked real home = trusted (ORCH_HOME_STRICT is on)
         ("XDG_CONFIG_HOME", home / "xdg"),
         ("GIT_CONFIG_GLOBAL", home / "gitconfig"),
     ]:
@@ -53,3 +59,7 @@ def ready(root):
     repo.git(root, "config", "user.email", "test@example.invalid")
     repo.git(root, "commit", "--allow-empty", "-m", "base")
     return root
+
+
+def pytest_sessionfinish(session, exitstatus):
+    check_real_home(session)

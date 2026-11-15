@@ -553,6 +553,9 @@ def log_send_failure(root: Path, what: str, why: object) -> None:
         "relay.send_failed", "warn", root=root, what=" ".join(str(what).split()), reason=reason,
         why=" ".join(str(why).split()),
     )  # fmt: skip
+    from orch import diag_incident
+
+    diag_incident.note_failure(root, f"{what}:{reason}")  # the same failure a third time freezes an incident
 
 
 def outbox_list(root: Path) -> list[dict]:
@@ -1637,6 +1640,10 @@ def _asked_signed_fields(mid: str, rec: dict) -> list:
 def sign_asked(root: Path, mid: str, rec: dict) -> dict:
     """Adds question_mac to the record of an answerable question sent as `mid` (when it can be signed)."""
     mac = humanproof.local_sign(root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec))
+    if not mac:  # no key yet: made now (first use), else the answer to this question could never count
+        with contextlib.suppress(Refused, OSError, ValueError):
+            humanproof.human_key(root, create=True)
+        mac = humanproof.local_sign(root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec))
     if mac:
         rec["question_mac"] = mac
     else:
@@ -1650,12 +1657,25 @@ def asked_mac_ok(root: Path, mid: str, rec: dict) -> bool:
     )
 
 
+def _note_group_refusal(root: Path, msg: dict, why: str, asked: dict | None = None) -> None:
+    """A refused answer to a group question we asked is never silent: one line in the ticket's history. Only
+    the member we asked, for a still unanswered question of that ticket (nobody else can write into it)."""
+    if asked is None:
+        asked = net.read_json(_asked_path(root), {}).get(str(msg.get("reply_to")))
+    if not (isinstance(asked, dict) and asked.get("group") and str(msg.get("from")) == asked.get("to")):
+        return
+    from orch import chat_groups
+
+    chat_groups.note_answer_refused(root, asked, msg, why)
+
+
 def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
     asked, why = _answer_asked(root, msg)
     if not asked:
         return why, None
     if not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # first: kind, round, digest provably ours
+        _note_group_refusal(root, msg, f"not applied: {QUESTION_UNCHECKABLE}", asked)
         return f"not applied: {QUESTION_UNCHECKABLE}", None
     if asked.get("review") is True:
         return _apply_review_answer(root, msg, asked)
@@ -2760,8 +2780,12 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                 typ in ("answer", "allow") or typ == "text" and str(m.get("from", "")).startswith("ph_")
             ):
                 continue  # another reader handled it meanwhile
-        except (KeyError, TypeError) as e:
-            note = f"could not read this message: {e}"
+        except (KeyError, TypeError, StopIteration, ValueError) as e:
+            # one bad message never blocks the queue: it is marked seen with a note, not handled again
+            note, auto = f"could not read this message: {clean_untrusted(str(e), 200)}", True
+            with contextlib.suppress(Refused, OSError, KeyError, TypeError):
+                with locked(root):
+                    _mark_seen(root, m["id"])
         out.append(
             {
                 "message": m,

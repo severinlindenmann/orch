@@ -17,6 +17,7 @@ from orch import (
     cli_clients,
     cli_config,
     cli_conn,
+    cli_diag,
     cli_job,
     cli_look,
     cli_needs,
@@ -27,6 +28,7 @@ from orch import (
     cli_secret,
     cli_status,
     diag,
+    diag_incident,
     fields,
     history,
     humanproof,
@@ -416,6 +418,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
 
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
+    cli_diag.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -430,6 +433,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     )
     x.add_argument(
         "--plan-first", action="store_true", help="the agent plans first and waits for you to start"
+    )
+    x.add_argument(
+        "--start-requires",
+        metavar="TICKET:QUESTION=ANSWER",
+        help="no run starts on it until a person gave this answer to that question (set once, here)",
     )
     x.add_argument(
         "--ext",
@@ -847,7 +855,7 @@ def run(args: argparse.Namespace) -> None:
         elif args.project_only and (args.json or not report):
             data = {"ok": True, "refreshed": done, **({"notes": notes} if args.json and notes else {})}
             _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
-    elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
+    elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root) or cli_diag.dispatch(args, root):
         pass
     elif (
         cli_run.dispatch(args, root)
@@ -875,6 +883,7 @@ def run(args: argparse.Namespace) -> None:
             {k: getattr(args, k) for k in ("owner", "due", "note", "done_when") if getattr(args, k)},
             title_auto=args.title_auto,
             plan_first=args.plan_first,
+            start_requires=args.start_requires,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -1359,4 +1368,7 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
             print(text, file=sys.stderr)
     except Refused as e:
         return refuse(e)
+    except Exception as e:  # an unexpected crash: freeze what is there before the traceback ends the program
+        diag_incident.on_crash(diag._state.get("root"), e, argv)
+        raise
     return 0

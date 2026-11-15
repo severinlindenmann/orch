@@ -2041,3 +2041,37 @@ def test_shown_is_fast_on_a_long_run():
     # line (its finished hook line comes after a log line of the call), and both log lines are marked
     assert len(kept) == 2 * 2500 + len(range(0, 2500, 3))
     assert sum(bool(e.get("conflict")) for e in kept) == 2 * len(range(0, 2500, 3))
+
+
+def test_hooks_disabled_reads_the_config_dir_the_run_names(tmp_path, monkeypatch):
+    """#548: with the config-dir variable set, its settings.json counts and ~/.claude does not."""
+    from orch import collect_claude
+
+    home, work, prof = tmp_path / "home", tmp_path / "work", tmp_path / "prof"
+    for d in (home / ".claude", work, prof):
+        d.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    off, on = json.dumps({"disableAllHooks": True}), json.dumps({})
+    f = ".claude/settings.local.json"
+    (home / ".claude" / "settings.json").write_text(off)
+    assert collect_claude.hooks_disabled(work, f) is True  # unset: ~/.claude, as before
+    (prof / "settings.json").write_text(on)
+    assert collect_claude.hooks_disabled(work, f, str(prof)) is False  # set: ~/.claude is ignored
+    (prof / "settings.json").write_text(off)
+    (home / ".claude" / "settings.json").write_text(on)
+    assert collect_claude.hooks_disabled(work, f, str(prof)) is True
+    assert collect_claude.hooks_disabled(work, f) is False
+
+
+def test_the_run_environment_picks_the_config_dir_for_hooks_off(tool_run, tmp_path):
+    from orch import run_record
+
+    root, run, tid = tool_run
+    work, prof = tmp_path / "copy", tmp_path / "prof"
+    work.mkdir()
+    prof.mkdir()
+    (prof / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    run_record.collect_turn(
+        root, run, tid, "claude", work, [use_line(), result_line()], {"CLAUDE_CONFIG_DIR": str(prof)}
+    )
+    assert [json.loads(x)["reason"] for x in lost_notes(root).splitlines()] == ["hooks_off"]

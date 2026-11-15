@@ -678,6 +678,9 @@ def claim(
     folder: where the agent works when that is not the workspace root (a separate copy); it goes in the
     record."""
     ticket = tickets.load(root, tid)
+    blocked = tickets.start_blocked(root, ticket)  # also a direct `orch run claim`, not only `run start`
+    if blocked:
+        raise Refused(blocked)
     from orch import humanproof
 
     humanproof.ensure_record_key(root)  # the record is sealed with a key made here (activity.md); idempotent
@@ -833,6 +836,11 @@ def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
             return False
         if at - _parse(t["updated_at"]) < ORPHAN_GRACE_SECONDS:
             return False
+        from orch import diag_incident
+
+        diag_incident.capture(
+            root, "orphan_ticket", ticket=tid, fingerprint=tid, now=at
+        )  # the evidence, BEFORE recovery
         return settle(root, tid, "orch", ignore_input=True)
     except Exception as e:  # noqa: BLE001 - never fails `orch run status`, but is never silent either
         why = f"{e.__class__.__name__}: {e}"
@@ -967,6 +975,11 @@ def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | 
             cur = read(root, tid)
             if not cur or cur["run"] != rec["run"] or not _stuck(cur, at):
                 return None
+            from orch import diag_incident
+
+            diag_incident.capture(
+                root, "start_failed", ticket=tid, run=rec["run"], fingerprint=text
+            )  # before the claim goes
             _release_locked(root, tid, cur)
         runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])
         _stop_leftovers(root, tid, rec)  # only after the claim is really gone
@@ -1342,6 +1355,9 @@ def start(
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
     from orch import runs_live, worktrees
 
+    blocked = tickets.start_blocked(root, tickets.load(root, tid))  # before anything is planned or spawned
+    if blocked:
+        raise Refused(blocked)
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)
     worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run; never waits, never raises
@@ -1527,7 +1543,9 @@ def _run_turn(
         return rc, f.read().decode("utf-8", "replace")
 
 
-def _record_turn(root: Path, run: str, tid: str, name: str, work: Path, out: str) -> None:
+def _record_turn(
+    root: Path, run: str, tid: str, name: str, work: Path, out: str, env: dict | None = None
+) -> None:
     """One turn's stdout lines (this turn's only, stderr mixed in: the collector skips what is not its
     format) to the run's record (run_record.collect_turn). Recording never stops a run: a refused record
     (tampered, unavailable) has already left its integrity alert (record._report); anything else (a collector
@@ -1536,7 +1554,7 @@ def _record_turn(root: Path, run: str, tid: str, name: str, work: Path, out: str
     try:
         from orch import run_record
 
-        run_record.collect_turn(root, run, tid, name, work, out.splitlines())
+        run_record.collect_turn(root, run, tid, name, work, out.splitlines(), env)
     except Refused:
         pass
     except Exception as e:
@@ -1642,7 +1660,7 @@ def wrap(
 
     def collected(result):  # a streamed turn's stdout lines go to the record (run_record), never stop the run
         if streams:
-            _record_turn(root, run, tid, name, work, result[1])
+            _record_turn(root, run, tid, name, work, result[1], env)
         return result
 
     turns = 0

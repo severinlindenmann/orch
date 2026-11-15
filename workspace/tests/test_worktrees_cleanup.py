@@ -1723,3 +1723,20 @@ def test_a_reclaim_right_after_release_goes_back_into_the_tickets_copy(repo, mon
     assert t in worktrees.registry(repo) and copy.is_dir()  # not done: the copy stays
     rec2, _ = runs.claim_routed(repo, t, "human:t", "claude", "oneshot", pid=os.getpid())
     assert Path(rec2["folder"]).resolve() == copy.resolve()
+
+
+def test_unwritable_parent_of_the_orch_folder_gives_a_plain_message(repo, monkeypatch):
+    """#740: the copies folder is a sibling of the orch folder; when that parent can not be written (a mount
+    point, ORCH_HOME=/x) the person gets one plain sentence, not an errno dump."""
+    real = os.mkdir
+
+    def deny(path, *a, **k):
+        if str(path).startswith(str(addons.copies_base(addons.home(repo)))):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(os, "mkdir", deny)
+    entry, note = worktrees._create_inner(repo, repo.tids[0])
+    assert entry is None
+    assert "cannot make its copies folder next to" in note and "Permission denied" in note
+    assert "Errno" not in note and "Traceback" not in note

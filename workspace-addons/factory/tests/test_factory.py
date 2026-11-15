@@ -385,3 +385,39 @@ def test_act_idea_refuses_without_a_person_or_text(ws):
     code, r = _act(ws, "nope", "--by", "human:alex", "--json", "--", "An idea")
     assert code == 2
     assert not (ws / "fake-tickets").exists() or not list((ws / "fake-tickets").iterdir())
+
+
+def test_store_opens_every_step_below_the_store_without_following_links(ws, tmp_path):
+    """#681: read and write walk the folders with directory fds (O_NOFOLLOW at each step), so a link put in place of a
+    folder or a file is refused; a missing file stays FileNotFoundError (callers rely on it)."""
+    store = Store(ws)
+    store.write("drafts/t_000001/v1.md", b"one")
+    assert store.read("drafts/t_000001/v1.md") == b"one"
+    with pytest.raises(FileNotFoundError):
+        store.read("drafts/t_000001/v9.md")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "v1.md").write_bytes(b"not factory")
+    (store.base / "drafts" / "t_000002").symlink_to(outside, target_is_directory=True)
+    for call in (
+        lambda: store.read("drafts/t_000002/v1.md"),
+        lambda: store.write("drafts/t_000002/v2.md", b"x"),
+    ):
+        with pytest.raises(Refused):
+            call()
+    assert not (outside / "v2.md").exists()
+    (store.base / "drafts" / "t_000001" / "v2.md").symlink_to(outside / "v1.md")
+    with pytest.raises(Refused):
+        store.read("drafts/t_000001/v2.md")
+    store.write("drafts/t_000001/v1.md", b"one", frozen=True)  # the same bytes: fine
+    with pytest.raises(Refused):
+        store.write("drafts/t_000001/v1.md", b"two", frozen=True)
+    assert not [p for p in (store.base / "drafts" / "t_000001").iterdir() if p.name.startswith(".new-")]
+
+
+def test_store_read_of_a_fifo_is_refused_without_hanging(ws):
+    store = Store(ws)
+    store.write("drafts/t_000001/v1.md", b"one")
+    os.mkfifo(store.base / "drafts" / "t_000001" / "v2.md")
+    with pytest.raises(Refused, match="not a regular file"):
+        store.read("drafts/t_000001/v2.md")

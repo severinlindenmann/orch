@@ -144,9 +144,13 @@ const heading = (title, sub = '', {eyebrow = '', actions = null} = {}) => h('hea
 // Loading shapes that match the page they stand in for; `section` is a part of a page (add-on body, chat history ...).
 function skeletonFor(kind) {
   const bar = cls => h('div', {className:'skeleton ' + cls, 'aria-hidden':'true'});
+  // The person last looked at tickets as a board: the loading shape is then columns, not rows.
+  const boardChosen = () => { try { return localStorage.getItem('orch.tickets.view') === 'board'; } catch (_) { return false; } };
   const stack = (n, cls = 'sk-card') => h('div', {className:'sk-stack', 'aria-hidden':'true'}, Array.from({length:n}, () => bar(cls)));
   const shape = kind === 'home' ? [bar('sk-title'), h('div', {className:'sk-columns', 'aria-hidden':'true'}, stack(3), stack(1))]
-    : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), stack(5, 'sk-row')]
+    : kind === 'tickets' ? [bar('sk-title'), bar('sk-toolbar'), boardChosen()
+      ? h('div', {className:'sk-board', 'aria-hidden':'true'}, [3, 2, 1, 2].map(n => stack(n)))  // columns, like the board
+      : stack(5, 'sk-row')]
     : kind === 'ticket' ? [bar('sk-title'), h('div', {className:'sk-columns sk-ticket', 'aria-hidden':'true'}, h('div', {className:'sk-stack'}, bar('sk-card sk-story'), bar('sk-card')), h('div', {className:'sk-stack sk-side'}, bar('sk-card')))]
     : kind === 'section' ? [stack(3, 'sk-row')]
     : kind === 'settings' ? [bar('sk-title'), h('div', {className:'sk-columns sk-settings', 'aria-hidden':'true'}, h('div', {className:'sk-stack sk-side'}, stack(4, 'sk-tab')), h('div', {className:'sk-stack'}, bar('sk-card sk-short'), bar('sk-card'), bar('sk-card sk-short')))]
@@ -289,7 +293,7 @@ function render(arrived = new Set()) {
   const active = document.activeElement;
   const activeKey = nodeKey(active);
   const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? 'Page not found' : 'Home';
-  document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
+  document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
   let title = pageName;
@@ -640,7 +644,6 @@ main.addEventListener('click', async event => {
     return;
   }
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
-  if (action === 'phone-pair') { phonePairDialog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
@@ -682,6 +685,14 @@ main.addEventListener('click', async event => {
   }
   if (action === 'copies-retry') {
     (async () => { for (const s of array(state.settings?.copies_disk?.stuck)) await settingsSend('copies.retry', {ticket:s.ticket}, 'copies-clean'); })();
+    return;
+  }
+  if (action === 'ws-edit') { wsEditing = control.dataset.field; render(); document.querySelector('[data-key="settings-ws-' + wsEditing + '"]')?.focus(); return; }
+  if (action === 'ws-cancel') { wsEditing = null; render(); return; }
+  if (action === 'ws-save') {
+    const field = control.dataset.field;
+    const result = await settingsSend('workspace.set', {field, text:document.querySelector('[data-key="settings-ws-' + field + '"]')?.value || ''}, 'ws-' + field);
+    if (result.ok) { wsEditing = null; render(); }
     return;
   }
   if (action === 'copies-setup-edit') { copySetupEditing = true; render(); document.querySelector('[data-key="settings-copy-setup"]')?.focus(); return; }
