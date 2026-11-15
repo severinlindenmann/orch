@@ -163,6 +163,9 @@ def test_hidden_value_is_exempt_but_a_real_one_on_the_same_line_is_not(proj, on)
     for text in (
         "note=[hidden] api_key=" + "R3alSecretValue99",
         "password=[hidden], password=hunter2hunter2",
+        "api_key=[hidden]R3alSecretValue99",
+        "api_key=R3alSecretValue99=[hidden]",
+        "api_key: R3alSecretValue99 : [hidden]",
     ):
         with pytest.raises(Refused) as e:
             relay.scan_outgoing(proj, {"text": text})

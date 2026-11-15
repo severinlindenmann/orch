@@ -170,22 +170,34 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
         # (also url-encoded). A flagged line is checked again without those pairs, so any other key=value
         # on the same line still hits. Token patterns and stored keys never take part in this.
         rows = joined.split("\n")
-        hidden = re.compile(
-            r"[\w.-]+\s*[=:]\s*(?:"
+        mark = (
+            "(?:"
             + re.escape(phone_view.HIDDEN)
             + "|"
             + re.escape(urllib.parse.quote(phone_view.HIDDEN, safe=""))
             + ")"
         )
-        found = [
-            f
-            for f in found
-            if not (
-                f["kind"] == "secret-value"
-                and not any(g["kind"] == "secret-value" for g in find(hidden.sub("", rows[f["line"] - 1])))
-                and f["line"] - 1 < len(rows)
-            )
-        ]
+        hidden = re.compile(r"(?<![\w.=:%-])[\w.-]+\s*[=:]\s*" + mark + r"(?![\w.=:%-])")
+
+        def exempt(f: dict) -> bool:
+            """Only a flagged secret-value line that holds a name=[hidden] pair, and still flags nothing once
+            those pairs are replaced by a space, is let through."""
+            if f["kind"] != "secret-value" or not 0 < f["line"] <= len(rows):
+                return False
+            row = rows[f["line"] - 1]
+            if not hidden.search(row):
+                return False
+            rest, last = [], 0
+            for m in hidden.finditer(row):
+                before = row[last : m.start()]
+                if before.rstrip()[-1:] in ("=", ":"):  # "key: value : [hidden]": the name here is a value
+                    continue
+                rest.append(before)
+                last = m.end()
+            rest.append(row[last:])
+            return not any(g["kind"] == "secret-value" for g in find(" ".join(rest)))
+
+        found = [f for f in found if not exempt(f)]
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
             f"orch could not check the {what} for secrets, so nothing was sent. Try again."
