@@ -16,6 +16,8 @@ const OrchBlocks = (() => {
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
   const VERB = /^[a-z][a-z-]{0,20}$/;
+  const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
+  const ITEM = /^[a-z]_[a-z0-9]{6,16}$/;   // the id of one thing an add-on keeps (a ticket t_…, a lesson l_…)
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -96,7 +98,12 @@ const OrchBlocks = (() => {
     if (nat && opts.links === true && FILE.test(String(args.id))) { node.dataset.native = 'link-' + nat[1]; node.dataset.linkId = String(args.id); node.textContent = LINK_LABEL[a.op]; node.setAttribute('aria-label', LINK_LABEL[a.op]); return true; }   // always orch's words
     // A schedule that came by sync: "Allow on this computer" (the page signs it with the sync add-on; DOM = ticket id only)
     if (a && a.op === 'addon.allow' && TICKET.test(String(args.target))) { node.dataset.syncAllow = String(args.target); node.textContent = 'Allow on this computer'; node.setAttribute('aria-label', 'Allow on this computer'); return true; }   // always orch's words
-    const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
+    // One text line in a small window (addon.prompt): the dialog is the page's; here only checked plain text goes into the DOM.
+    if (a && a.op === 'addon.prompt' && VERB.test(String(args.verb)) && ITEM.test(String(args.target)) && typeof args.value === 'string' && args.value.length <= 200 && !HIDDEN.test(args.value) && typeof args.label === 'string' && args.label.length >= 1 && args.label.length <= 40 && !HIDDEN.test(args.label)) {
+      node.dataset.addonPrompt = String(args.target); node.dataset.verb = String(args.verb); node.dataset.value = args.value; node.dataset.promptLabel = args.label;
+      return true;
+    }
+    const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && ITEM.test(String(args.target));
     if (!ok) return false;
     node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
     if (label) node.dataset.label = label;
@@ -104,7 +111,7 @@ const OrchBlocks = (() => {
   }
   const LINK_LABEL = {'link.copy': 'Copy link', 'link.extend': 'Extend', 'link.stop': 'Stop sharing'};
   const rowButton = (a, cls) => {
-    const ghost = a.action && (a.action.op === 'addon.edit' || a.action.op === 'link.extend' || a.action.op === 'link.stop');
+    const ghost = a.action && (a.action.op === 'addon.edit' || a.action.op === 'addon.prompt' || a.action.op === 'link.extend' || a.action.op === 'link.stop');
     const fixed = a.action && LINK_LABEL[a.action.op];   // a link op always says what it does, in orch's own words
     const b = el('button', 'btn ' + (ghost && a.tone !== 'bad' ? 'ghost' : 'outline') + ' sm' + (a.tone === 'bad' ? ' danger' : '') + (cls ? ' ' + cls : ''), fixed || a.label); b.type = 'button';
     if (a.confirm) b.dataset.confirm = String(a.confirm);

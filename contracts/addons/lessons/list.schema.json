@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/addons/lessons/list.schema.json",
+  "title": "orch lessons list v1 (stdout of `orch lessons list --json`)",
+  "description": "The lessons of this workspace, newest first. See addons/lessons/README.md.",
+  "type": "object",
+  "required": ["lessons", "bytes", "cap", "shown", "unreadable"],
+  "properties": {
+    "lessons": { "type": "array", "items": { "$ref": "#/$defs/lesson" } },
+    "bytes": { "type": "integer", "minimum": 0, "description": "UTF-8 size of the AGENTS text if every lesson were in it." },
+    "cap": { "const": 3072 },
+    "shown": { "type": "integer", "minimum": 0, "description": "How many lessons fit into the AGENTS text (newest first)." },
+    "unreadable": { "type": "integer", "minimum": 0, "description": "Files in the lessons folder that were skipped." }
+  },
+  "$defs": {
+    "time": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "actor": { "type": "string", "pattern": "^(human|agent):[^\\s<>]{1,64}$" },
+    "lesson": {
+      "type": "object",
+      "required": ["id", "text", "by", "at"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^l_[a-z0-9]{6}$" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f<>]+$" },
+        "by": { "$ref": "#/$defs/actor" },
+        "at": { "$ref": "#/$defs/time" },
+        "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" },
+        "changed_by": { "$ref": "#/$defs/actor" },
+        "changed_at": { "$ref": "#/$defs/time" },
+        "shown": { "type": "boolean", "description": "false = left out of the AGENTS text (over the cap)." }
+      }
+    }
+  }
+}

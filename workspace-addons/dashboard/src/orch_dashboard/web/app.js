@@ -329,7 +329,7 @@ function render(arrived = new Set()) {
   reconcile(nav, fragment(navLink('#home', 'Home', 'home', needCount ? h('span', {className:'count', title:needsWords, 'aria-label':needsWords}, String(needCount)) : null), navLink('#tickets', 'Tickets', 'tickets'), state.chat || state.general ? navLink('#chat', 'Chat', 'chat', chatBadge()) : null,
     // Contacts (the phone and workspaces add-on) is a top-level entry, not inside the Add-ons fold-out
     contactsAddon ? navLink('#addon/' + encodeURIComponent(contactsAddon.name), addonLabel(contactsAddon), contactsAddon.dashboard.icon || contactsAddon.icon) : null));
-  const pages = addons().filter(a => a.dashboard && a !== contactsAddon);
+  const pages = addons().filter(a => a.dashboard && a.dashboard.place !== 'settings' && a !== contactsAddon);  // place=settings: no nav entry, the page opens from Settings › Add-ons
   const sideAddons = document.getElementById('side-addons');
   if (sideAddons) reconcile(sideAddons, fragment(pages.length ? h('details', {className:'nav-group', 'data-key':'nav-addons', open:addonsOpen() ? '' : null},
     h('summary', {className:'nav-item', 'aria-label':'Add-ons'}, navIcon('addons'), h('span', {className:'nav-label'}, 'Add-ons')),
@@ -618,6 +618,8 @@ main.addEventListener('click', async event => {
   if (allow) { if (!snapshot) syncAllow(allow.dataset.syncAllow); return; }
   const edit = event.target.closest('[data-addon-edit]');
   if (edit) { if (!snapshot) repeatsDialog(edit.dataset.addonEdit, shownAddon()); return; }
+  const prompt = event.target.closest('[data-addon-prompt]');
+  if (prompt) { promptDialog(prompt); return; }
   const copy = event.target.closest('[data-copy]');
   if (copy) { copyText(copy); return; }
   const control = event.target.closest('[data-action]');

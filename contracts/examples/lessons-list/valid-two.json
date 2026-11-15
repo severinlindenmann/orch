@@ -1,0 +1,10 @@
+{
+  "lessons": [
+    {"id": "l_k2m9q4", "text": "Run the web tests with npm run test:web; plain npm test skips them.", "by": "agent:claude", "at": "2026-11-15T18:02:11Z", "ticket": "t_k3m9q2", "changed_by": "human:severin", "changed_at": "2026-11-16T08:40:00Z", "shown": true},
+    {"id": "l_a1b2c3", "text": "The customer list lives in Sales/2026/customers.xlsx, not in the shared drive root.", "by": "agent:codex", "at": "2026-11-14T09:00:00Z", "shown": true}
+  ],
+  "bytes": 236,
+  "cap": 3072,
+  "shown": 2,
+  "unreadable": 0
+}
