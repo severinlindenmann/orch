@@ -1328,7 +1328,7 @@ function detail(t) {
     working ? agentBar(t) : null, working ? sharedFolderLine(t) : null, working ? liveSessionStrip(t) : null,
     t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, clean(t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ' + clean(t.summary)) : null,
-    note ? h('section', {className:'card asked-brief', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note) : null,
+    note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note) : null,
     t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
