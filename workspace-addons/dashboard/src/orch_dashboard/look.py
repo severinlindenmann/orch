@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from pathlib import Path
 
 ID = re.compile(r"[a-z0-9-]{1,32}")
@@ -52,19 +53,45 @@ def _look_shared(a):
     return ["look", "shared-pages", "on" if a["on"] else "off"], [], []
 
 
-def _look_description(a):
-    """Propose a new description: `orch <service> profile --description=...`. It stays a proposal until the owner
-    approves it in the service's admin page."""
-    _actions()._only(a, ("service", "text"))
+TAG = re.compile(r"[a-z0-9-]{1,24}")
+MAX_TAGS = 4
+
+
+def _line(t):
+    if (
+        not isinstance(t, str)
+        or len(t.strip()) > MAX_DESCRIPTION
+        or any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in t)
+    ):
+        raise _bad(f"Write one line of at most {MAX_DESCRIPTION} characters.")
+    return t.strip()
+
+
+def _look_profile(a):
+    """Propose the description and/or tags: `orch <service> profile --description=... --tags=a,b`. It stays a
+    proposal until the owner approves it in the service's admin page. The description itself is saved
+    by `workspace.set`; this op only sends it on."""
+    _actions()._only(a, ("service", "description", "tags"))
     if a.get("service") not in SERVICES:
         raise _bad("Connect this workspace first.")
-    t = a.get("text")
-    if not isinstance(t, str) or len(t.strip()) > MAX_DESCRIPTION or "\x00" in t or "\n" in t or "\r" in t:
-        raise _bad(f"Write one line of at most {MAX_DESCRIPTION} characters.")
-    return [a["service"], "profile"], [f"--description={t.strip()}"], []
+    args = []
+    if "description" in a:
+        args.append(f"--description={_line(a['description'])}")
+    if "tags" in a:
+        tags = a["tags"]
+        if (
+            not isinstance(tags, list)
+            or len(tags) > MAX_TAGS
+            or not all(isinstance(t, str) and TAG.fullmatch(t) for t in tags)
+        ):
+            raise _bad(f"Use up to {MAX_TAGS} tags: lowercase letters, digits and hyphens.")
+        args.append("--tags=" + ",".join(tags))
+    if not args:
+        raise _bad("Say what to send.")
+    return [a["service"], "profile"], args, []
 
 
-LOOK_OPS = {"look.set": _look_set, "look.shared": _look_shared, "look.description": _look_description}
+LOOK_OPS = {"look.set": _look_set, "look.shared": _look_shared, "look.profile": _look_profile}
 
 
 def forget(root: Path) -> None:
@@ -74,6 +101,12 @@ def forget(root: Path) -> None:
 
 def _s(v, n):
     return v[:n] if isinstance(v, str) else None
+
+
+def _tags(v):
+    if not isinstance(v, list):
+        return None
+    return [t for t in v if isinstance(t, str) and TAG.fullmatch(t)][:MAX_TAGS]
 
 
 def _workspaces(root: Path, orch_bin: str | None) -> list[dict]:
@@ -140,6 +173,7 @@ def load_look(root: Path, orch_bin: str | None, fresh: bool = False) -> dict | N
     shared = run_orch(orch_bin, ["look", "shared-pages", "--json"], root)
     services = show.get("services") if isinstance(show.get("services"), dict) else {}
     service, description, pending = None, None, None
+    relay_name, tags, pending_tags = None, [], None
     for name in SERVICES:
         if name in services and "error" not in (services[name] or {}):
             prof = run_orch(orch_bin, [name, "profile", "--json"], root, timeout=10.0)
@@ -148,6 +182,9 @@ def load_look(root: Path, orch_bin: str | None, fresh: bool = False) -> dict | N
                 description = _s(prof.get("description"), MAX_DESCRIPTION)
                 p = prof.get("pending")
                 pending = _s(p.get("description"), MAX_DESCRIPTION) if isinstance(p, dict) else None
+                relay_name = _s(prof.get("name"), 60)
+                tags = _tags(prof.get("tags")) or []
+                pending_tags = _tags(p.get("tags")) if isinstance(p, dict) else None
                 break
     out = {
         "icon": _s(show.get("icon"), 32),
@@ -159,6 +196,10 @@ def load_look(root: Path, orch_bin: str | None, fresh: bool = False) -> dict | N
         "service": service,
         "description": description,
         "pending": pending,
+        "relay_name": relay_name,
+        "tags": tags,
+        "pending_tags": pending_tags,
+        "waiting": pending is not None or pending_tags is not None,
         "workspaces": _workspaces(root, orch_bin),
     }
     _CACHE[key] = (time.monotonic(), out)

@@ -486,7 +486,12 @@ async fn sleep_private_app_not_woken_without_access() {
     // the valid token wakes it
     a.expires_at = None;
     orch_publish::db::put_app(&t.st.db.lock().unwrap(), &a, &a.updated_at).unwrap();
+    // (#614: the cookie only redirects to the private address /a/priv/~<cap>/, which serves the app)
     let g = call(&t.public, "GET", "/a/priv/", &[("cookie", &c)], vec![]).await;
+    assert_eq!(g.status, 302, "{}", g.text());
+    let loc = g.headers["location"].to_str().unwrap().to_string();
+    assert!(loc.starts_with("/a/priv/~"), "{loc}");
+    let g = call(&t.public, "GET", &loc, &[], vec![]).await;
     assert_eq!(g.status, 200, "{}", g.text());
     assert_eq!(starts(&t, "priv"), 2);
 }

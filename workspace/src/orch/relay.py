@@ -2041,7 +2041,7 @@ def _describe(root: Path, tid: str, mid: str, who: str, body: dict, final: bool 
     from orch import phone_results, phone_view
 
     lines = []
-    limit = tickets.ATTACH_MAX // 4  # characters: at most 2 MB in the file
+    limit = (2 * 1024 * 1024) // 4  # characters of one long text: at most 2 MB in its note file
     raw_text = clean_untrusted(str(body.get("text") or ""), limit + 1).strip()
     if len(raw_text) > tickets.LONG_TEXT:
         try:

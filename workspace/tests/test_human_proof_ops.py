@@ -2162,27 +2162,12 @@ def test_copy_setup_is_a_command_orch_runs_so_it_needs_the_proof(ws, run, monkey
     assert run("config", "set", "workflow.copies", "off", "--by", "human:pat", "--json")[0] == 0
 
 
-def test_workspace_name_and_description_need_the_proof(ws, run, monkeypatch):
-    """`config set workspace.name|description` is a person's signed click bound to the field and the text."""
-    import hashlib
-
-    sha = hashlib.sha256(b"Newsletter").hexdigest()
-    code, out, err = run("config", "set", "workspace.name", "Newsletter", "--by", "human:pat", "--json")
-    assert code == 2
-    card = [h for h in hp.handoffs(ws) if h["op"] == "config.workspace_info"][0]
-    assert card["target"] == "name:" + sha
-    assert run("config", "set", "workspace.name", "Evil", "--by", "agent:x", "--json")[0] != 0
-    assert run("config", "get", "workspace.name", "--json")[1].count("null") == 1
-    wrong = _proof(ws, "config.workspace_info", "description:" + sha)  # another field's proof
-    assert _cli(run, monkeypatch, wrong, "config", "set", "workspace.name", "Newsletter", "--json")[0] == 2
-    proof = _proof(ws, "config.workspace_info", "name:" + sha)
-    assert _cli(run, monkeypatch, proof, "config", "set", "workspace.name", "Newsletter", "--json")[0] == 0
+def test_workspace_name_and_description_are_plain_actions(ws, run):
+    """R4.1: no proof for the name and description; an agent is still refused."""
+    assert run("config", "set", "workspace.name", "Newsletter", "--by", "human:pat", "--json")[0] == 0
     assert run("config", "get", "workspace.name", "--json")[1].count("Newsletter") == 1
-    other = _proof(ws, "config.workspace_info", "name:" + sha)  # a proof for one text never saves another
-    assert _cli(run, monkeypatch, other, "config", "set", "workspace.name", "Other", "--json")[0] == 2
-    long = "x" * 61
-    lp = _proof(ws, "config.workspace_info", "name:" + hashlib.sha256(long.encode()).hexdigest())
-    assert _cli(run, monkeypatch, lp, "config", "set", "workspace.name", long, "--json")[0] != 0
+    assert run("config", "set", "workspace.name", "Evil", "--by", "agent:x", "--json")[0] != 0
+    assert run("config", "set", "workspace.name", "x" * 61, "--by", "human:pat", "--json")[0] != 0
 
 
 def test_the_proof_op_tables_agree():

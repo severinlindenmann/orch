@@ -1,6 +1,6 @@
 'use strict';
 // Workspace look: the badge (icon or letter on a colour), the Settings > General picker (categories + recent),
-// the description row (a proposal the owner approves), the "shared pages" switch and the favicon.
+// the Workspace profile card (name, one description, tags, icon and colour, relay state), the "shared pages" switch and the favicon.
 // Data: state.look from the server (orch look show / status / profile); the 100 icons and 12 colours in look-icons.js.
 // Everything is built with createElement and textContent: a workspace name is never put into markup.
 (() => {
@@ -13,7 +13,7 @@
 
   let look = null, name = 'Workspace', owner = null;
   let open = false, more = false, short = [], draft = {icon: null, color: null}, cat = null, light = false;
-  let editing = false, descDraft = '', busy = false, status = '', statusTone = 'ok';
+  let editing = false, pd = {name: '', description: '', tags: [], tag: ''}, ws = {name: '', description: ''}, busy = false, status = '', statusTone = 'ok';
 
   const clean = v => String(v == null ? '' : v).normalize('NFC').trim();
   function hash(text) {
@@ -149,20 +149,94 @@
         n('button', {type: 'button', className: 'btn primary sm', 'data-lk': 'save', 'data-key': 'lk-save', disabled: !changed || busy}, 'Save')));
   }
 
-  function descriptionRow() {
+  // ---- Workspace profile card: name, one description, tags, icon and colour, and (relay on) its state there.
+  const TAGMAX = 4;
+  const tagClean = t => clean(t).toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '').slice(0, 24);
+  const shownDescription = () => ws.description || (look && look.description) || '';
+  function addTag() {
+    const t = tagClean(pd.tag);
+    pd.tag = '';
+    if (t && !pd.tags.includes(t) && pd.tags.length < TAGMAX) pd.tags = [...pd.tags, t];
+  }
+  function profileRow(label, view, edit, key) {
+    return n('div', {className: 'card-row name-row', 'data-key': 'pf-' + key + '-row'}, n('span', {className: 'set-label'}, label), editing && edit ? n('div', {className: 'grow set-ctl lk-desc-edit'}, edit) : n('div', {className: 'grow set-ctl'}, view));
+  }
+  function chips(tags, removable) {
+    return n('div', {className: 'lk-tags', 'data-key': 'pf-tags'}, tags.map(t => n('span', {className: 'chip'}, t, removable ? n('button', {type: 'button', className: 'lk-tag-x', 'data-lk': 'tag-del', 'data-v': t, 'aria-label': 'Remove ' + t}, '×') : null)));
+  }
+  function relayRow() {
     const svc = look.service;
-    const body = editing
-      ? n('div', {className: 'grow lk-desc-edit'},
-          n('input', {className: 'input', type: 'text', maxlength: 280, 'data-key': 'lk-desc-input', 'data-lk-input': 'desc', 'aria-label': 'Description', value: descDraft}),
-          n('div', {className: 'lk-desc-actions'},
-            n('button', {type: 'button', className: 'btn primary sm', 'data-lk': 'desc-save', 'data-key': 'lk-desc-save', disabled: busy}, 'Send for approval'),
-            n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'desc-cancel', 'data-key': 'lk-desc-cancel'}, 'Cancel')))
-      : n('div', {className: 'grow'},
-          n('p', {className: 'set-ctl'}, look.description || (svc ? 'Not set' : '')),
-          look.pending != null ? n('p', {className: 'meta lk-pending', 'data-testid': 'look-pending'}, 'Waiting for approval: “' + look.pending + '”') : null,
-          !svc ? n('p', {className: 'meta'}, 'A short line about this workspace, shown on your phone and on pages you share. You can write one once your phone or page sharing is turned on under Add-ons.') : null);
-    return n('div', {className: 'card-row', 'data-key': 'lk-desc-row'}, n('span', {className: 'set-label'}, 'Description'), body,
-      !editing && svc ? n('button', {type: 'button', className: 'btn sm', 'data-lk': 'desc-edit', 'data-key': 'lk-desc-edit'}, 'Edit') : null);
+    if (!svc) return null;
+    const where = svc === 'publish' ? 'publish' : 'relay';
+    const pend = look.waiting;
+    return n('div', {className: 'card-row', 'data-key': 'pf-relay-row'}, n('span', {className: 'set-label'}, 'On the ' + where),
+      n('div', {className: 'grow'},
+        look.relay_name ? n('p', {className: 'set-ctl', 'data-testid': 'profile-relay-name'}, 'Name on ' + where + ': ' + look.relay_name + ' — set by the ' + where + ' owner') : null,
+        n('p', {className: 'meta lk-pending', 'data-testid': 'profile-relay-state'}, pend ? 'Waiting for ' + where + ' approval' : 'Live on ' + where),
+        pend && look.pending != null ? n('p', {className: 'meta'}, 'Proposed: “' + look.pending + '”') : null,
+        pend && look.pending_tags ? n('p', {className: 'meta'}, 'Proposed tags: ' + look.pending_tags.join(', ')) : null));
+  }
+  function profileCard() {
+    if (!look) return null;
+    const svc = look.service;
+    const tagsNow = look.tags || [];
+    const foot = editing ? n('div', {className: 'card-row'}, n('div', {className: 'grow'}), n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'pf-cancel', 'data-key': 'pf-cancel'}, 'Cancel'),
+      n('button', {type: 'button', className: 'btn primary sm', 'data-lk': 'pf-save', 'data-key': 'pf-save', disabled: busy}, svc ? 'Save and send' : 'Save')) : null;
+    return n('div', {className: 'stack', 'data-key': 'settings-profile', 'data-testid': 'settings-profile'},
+      n('h2', {className: 'set-sub'}, 'Workspace profile'),
+      n('div', {className: 'card'},
+        profileRow('Name', n('div', {className: 'row'}, n('p', {className: 'grow', 'data-key': 'pf-name-value'}, ws.name || name),
+          n('button', {type: 'button', className: 'btn sm', 'data-lk': 'pf-edit', 'data-key': 'pf-edit'}, 'Edit')),
+        [n('input', {className: 'input', type: 'text', maxlength: 60, 'data-key': 'pf-name', 'data-lk-input': 'name', 'aria-label': 'Name', value: pd.name, placeholder: name}),
+          n('p', {className: 'meta'}, 'The name shown for this workspace. Your folder keeps its own name.')], 'name'),
+        profileRow('Description', n('p', {className: shownDescription() ? '' : 'meta', 'data-key': 'pf-description-value'}, shownDescription() || 'Not set'),
+          [n('input', {className: 'input', type: 'text', maxlength: 280, 'data-key': 'pf-description', 'data-lk-input': 'description', 'aria-label': 'Description', value: pd.description, placeholder: 'For example: our website and newsletter'}),
+            n('p', {className: 'meta'}, 'One short line about what this workspace is for.' + (svc ? ' It is sent to the ' + (svc === 'publish' ? 'publish' : 'relay') + ' too, for your phone and shared pages.' : ''))], 'description'),
+        svc ? profileRow('Tags', tagsNow.length ? chips(tagsNow, false) : n('p', {className: 'meta'}, 'None'),
+          [chips(pd.tags, true), pd.tags.length < TAGMAX ? n('div', {className: 'row'}, n('input', {className: 'input', type: 'text', maxlength: 24, 'data-key': 'pf-tag', 'data-lk-input': 'tag', 'aria-label': 'New tag', value: pd.tag, placeholder: 'tag'}),
+            n('button', {type: 'button', className: 'btn sm', 'data-lk': 'tag-add', 'data-key': 'pf-tag-add'}, 'Add')) : null,
+            n('p', {className: 'meta'}, 'Two to four short words, so others find this workspace. Lowercase letters, digits and hyphens.')], 'tags') : null,
+        foot,
+        n('div', {className: 'card-row', 'data-key': 'lk-look-row'}, n('span', {className: 'set-label'}, 'Icon and colour'),
+          n('div', {className: 'grow lk-current'}, badge(open ? draft : look, name, 32), n('span', {className: 'meta', 'data-testid': 'look-summary'}, lookText(open ? draft : look))),
+          open ? null : n('button', {type: 'button', className: 'btn sm', 'data-lk': 'open', 'data-key': 'lk-open', 'data-testid': 'look-change'}, 'Change')),
+        open ? picker() : null,
+        relayRow()),
+      status ? n('p', {className: 'meta lk-status ' + statusTone, role: 'status', 'data-key': 'lk-status'}, status) : null,
+      !open && !(look.icon || look.color) && look.set_by == null ? n('p', {className: 'meta'}, 'Nobody has picked an icon yet. A helper can pick one for you, or press Change.') : null);
+  }
+
+  async function saveProfile() {
+    const svc = look.service, sent = [];
+    const name2 = clean(pd.name), desc2 = clean(pd.description);
+    if (name2 !== clean(ws.name) && (name2 || ws.name)) {
+      const r = await run('workspace.set', {field: 'name', text: name2});
+      if (!r || !r.ok) return;
+      ws.name = name2;
+    }
+    const descChanged = desc2 !== clean(look.pending != null ? look.pending : look.description);
+    if (desc2 !== clean(ws.description)) {
+      const r = await run('workspace.set', {field: 'description', text: desc2});
+      if (!r || !r.ok) return;
+      ws.description = desc2;
+    }
+    if (svc) {
+      const body = {service: svc};
+      if (descChanged) body.description = desc2;
+      if (pd.tags.join(',') !== (look.tags || []).join(',')) body.tags = pd.tags;
+      if (body.description != null || body.tags) {
+        const r = await run('look.profile', body);
+        if (!r || !r.ok) return;
+        if (body.description != null) look.pending = desc2;
+        if (body.tags) look.pending_tags = body.tags;
+        look.waiting = true;
+        sent.push(svc === 'publish' ? 'publish' : 'relay');
+      }
+    }
+    editing = false;
+    status = sent.length ? 'Saved. Sent to the ' + sent[0] + ' for approval; it goes live when the owner approves.' : 'Saved.';
+    statusTone = 'ok';
+    repaint();
   }
 
   // Who owns this workspace: the person chosen in "You: ..." (switch person). Shown here only; it is not sent to other workspaces.
@@ -176,35 +250,30 @@
   function section() {
     if (!look) return null;
     const on = look.shared_pages !== false;
-    const set = look.icon || look.color;
     return n('div', {className: 'stack', 'data-key': 'settings-look', 'data-testid': 'settings-look'},
-      n('h2', {className: 'set-sub'}, 'Appearance'),
+      n('h2', {className: 'set-sub'}, 'Shared pages'),
       n('div', {className: 'card'},
-        n('div', {className: 'card-row', 'data-key': 'lk-look-row'}, n('span', {className: 'set-label'}, 'Icon and colour'),
-          n('div', {className: 'grow lk-current'}, badge(open ? draft : look, name, 32), n('span', {className: 'meta', 'data-testid': 'look-summary'}, lookText(open ? draft : look))),
-          open ? null : n('button', {type: 'button', className: 'btn sm', 'data-lk': 'open', 'data-key': 'lk-open', 'data-testid': 'look-change'}, 'Change')),
-        open ? picker() : null,
-        descriptionRow(),
         ownerRow(),
         // Like every other switch row: the words left, the switch right, one row at any width.
         n('div', {className: 'card-row lk-shared-row', 'data-key': 'lk-shared-row'},
           n('div', {className: 'grow'}, n('h3', {}, 'Shared pages: show workspace name and icon'),
             n('p', {className: 'meta'}, 'On files you share with a link. Turn off to show nothing.')),
           n('button', {type: 'button', className: 'switch', role: 'switch', 'aria-checked': String(on), 'aria-label': 'Show workspace name and icon on shared pages', 'data-lk': 'shared', 'data-key': 'lk-shared', 'data-testid': 'look-shared-pages', disabled: busy}))),
-      status ? n('p', {className: 'meta lk-status ' + statusTone, role: 'status', 'data-key': 'lk-status'}, status) : null,
-      !open && !set && look.set_by == null ? n('p', {className: 'meta'}, 'Nobody has picked an icon yet. A helper can pick one for you, or press Change.') : null);
+      null);
   }
 
   function repaint() {
-    const host = document.querySelector('[data-key="settings-look"]');
-    if (!host) return;
-    const a = document.activeElement, key = a && a.dataset ? a.dataset.key : null;
-    const keep = host.contains(a) && a.matches('input') ? [a.selectionStart, a.selectionEnd] : null;
-    const next = section();
-    host.replaceChildren(...(next ? [...next.childNodes] : []));
-    if (key) {
-      const again = [...host.querySelectorAll('[data-key]')].find(x => x.dataset.key === key);
-      if (again && !again.disabled) { again.focus({preventScroll: true}); if (keep && again.setSelectionRange) again.setSelectionRange(...keep); }
+    for (const [sel, make] of [['settings-look', section], ['settings-profile', profileCard]]) {
+      const host = document.querySelector('[data-key="' + sel + '"]');
+      if (!host) continue;
+      const a = document.activeElement, key = a && a.dataset ? a.dataset.key : null;
+      const keep = host.contains(a) && a.matches('input') ? [a.selectionStart, a.selectionEnd] : null;
+      const next = make();
+      host.replaceChildren(...(next ? [...next.childNodes] : []));
+      if (key) {
+        const again = [...host.querySelectorAll('[data-key]')].find(x => x.dataset.key === key);
+        if (again && !again.disabled) { again.focus({preventScroll: true}); if (keep && again.setSelectionRange) again.setSelectionRange(...keep); }
+      }
     }
     window.dispatchEvent(new CustomEvent('orch:look-painted'));
   }
@@ -220,11 +289,14 @@
   }
 
   document.addEventListener('input', e => {
-    if (e.target.matches('[data-lk-input="desc"]')) descDraft = e.target.value;
+    const k = e.target.dataset && e.target.dataset.lkInput;
+    if (k) pd[k] = e.target.value;
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && editing && e.target.matches('[data-lk-input="desc"]')) { editing = false; repaint(); }
-    if (e.key === 'Enter' && e.target.matches('[data-lk-input="desc"]')) { e.preventDefault(); document.querySelector('[data-lk="desc-save"]')?.click(); }
+    const k = e.target.dataset && e.target.dataset.lkInput;
+    if (!k) return;
+    if (e.key === 'Escape' && editing) { editing = false; repaint(); }
+    if (e.key === 'Enter') { e.preventDefault(); if (k === 'tag') { addTag(); repaint(); document.querySelector('[data-key="pf-tag"]')?.focus(); } else document.querySelector('[data-lk="pf-save"]')?.click(); }
   });
   document.addEventListener('click', async e => {
     const t = e.target.closest('[data-lk]');
@@ -243,13 +315,11 @@
         if (r && r.ok) { remember(draft.icon); Object.assign(look, {icon: draft.icon, color: draft.color, set_by: 'human'}); open = false; status = 'Saved. Your phone and shared pages show it at their next refresh.'; statusTone = 'ok'; paintFavicon(); repaint(); window.dispatchEvent(new CustomEvent('orch:look-saved')); }
         break;
       }
-      case 'desc-edit': editing = true; descDraft = look.description || ''; status = ''; repaint(); document.querySelector('[data-key="lk-desc-input"]')?.focus(); break;
-      case 'desc-cancel': editing = false; repaint(); break;
-      case 'desc-save': {
-        const r = await run('look.description', {service: look.service, text: descDraft});
-        if (r && r.ok) { editing = false; look.pending = descDraft.trim(); status = 'Sent. It changes when you approve it in the ' + look.service + ' admin page.'; statusTone = 'ok'; repaint(); }
-        break;
-      }
+      case 'pf-edit': editing = true; pd = {name: ws.name, description: shownDescription(), tags: [...(look.tags || [])], tag: ''}; status = ''; repaint(); document.querySelector('[data-key="pf-name"]')?.focus(); break;
+      case 'pf-cancel': editing = false; repaint(); break;
+      case 'tag-add': addTag(); repaint(); document.querySelector('[data-key="pf-tag"]')?.focus(); break;
+      case 'tag-del': pd.tags = pd.tags.filter(x => x !== v); repaint(); break;
+      case 'pf-save': await saveProfile(); break;
       case 'shared': {
         const want = look.shared_pages === false;
         const r = await run('look.shared', {on: want});
@@ -262,6 +332,7 @@
   window.addEventListener('orch:state', e => {
     look = e.detail && e.detail.look ? e.detail.look : null;
     name = clean(e.detail && e.detail.workspace) || 'Workspace';
+    if (!editing) ws = {name: clean(e.detail && e.detail.settings && e.detail.settings.ws_name), description: clean(e.detail && e.detail.settings && e.detail.settings.ws_description)};
     owner = clean(e.detail && e.detail.people && e.detail.people.me) || null;
     if (look) {
       if (!open) draft = {icon: look.icon || null, color: look.color || null};
@@ -273,6 +344,6 @@
   window.OrchLook = {
     badge, resolve, defaultColor, letter, faviconHref,
     current: () => look, name: () => name,
-    settingsSection: () => section(),
+    settingsSection: () => section(), profileCard: () => profileCard(),
   };
 })();

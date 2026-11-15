@@ -5,7 +5,7 @@ A docker app: the host builds the `Dockerfile` in this folder and runs the image
 Rules for the app:
 - Listen on `$HOST:$PORT` (the host sets both).
 - Write only to `$DATA_DIR` (the root is read-only).
-- Pages and links live under `$BASE_PATH`.
+- Use relative links (`style.css`), not `$BASE_PATH`; use `$BASE_PATH` only where an absolute path is unavoidable.
 - Answer `GET /health` with 200.
 
 To change the language, replace `main.py` and the `Dockerfile`, for example `FROM golang:1.23` with a build step,

@@ -5,9 +5,9 @@
   const S = window.FocusStore;
   const {h, TID, toast, els, act} = S;
 
-  /* what the core takes (orch.tickets ATTACH_*): text and pictures, 2 MB each, five at a time */
+  /* what the core takes (orch.tickets ATTACH_*): text and pictures, 25 MB each, five at a time */
   const EXT = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'toml', 'ini', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
-  const MAX = 2 * 1024 * 1024, MAX_FILES = 5;
+  const MAX = 25 * 1024 * 1024, MAX_FILES = 5;
   const TYPES = 'PNG, JPG, GIF, WebP, TXT, MD, CSV, JSON or LOG';
   const staged = [];  // {file, id, url|null}
   let chips, error, hint, drop, input, send, interrupt;
@@ -34,7 +34,7 @@
     for (const file of files) {
       if (staged.length >= MAX_FILES) { say('You can add up to ' + MAX_FILES + ' files at a time.'); break; }
       if (!EXT.includes(ext(file.name))) { say('This kind of file can’t be added: ' + file.name.slice(0, 60) + '. Choose ' + TYPES + '.'); continue; }
-      if (file.size > MAX) { say(file.name.slice(0, 60) + ' is over 2 MB. Choose a smaller file.'); continue; }
+      if (file.size > MAX) { say(file.name.slice(0, 60) + ' is over 25 MB. Choose a smaller file.'); continue; }
       const item = {file, url: null, state: 'ready'};
       staged.push(item);
       if (file.type.startsWith('image/')) { const r = new FileReader(); r.onload = () => { item.url = String(r.result); render(); }; r.readAsDataURL(file); }  /* a data: address: the page's own rules allow it */
@@ -70,7 +70,7 @@
     input = h('input', {type: 'file', multiple: true, hidden: true, 'aria-label': 'Choose files'});
     chips = h('ul', {class: 'fx-chips', hidden: true, 'aria-label': 'Files to add'});
     error = h('p', {class: 'fx-file-error', role: 'alert', hidden: true});
-    hint = h('p', {class: 'meta fx-compose-hint', text: 'Paste a screenshot or drop files · up to 2 MB each'});
+    hint = h('p', {class: 'meta fx-compose-hint', text: 'Paste a screenshot or drop files · up to 25 MB each'});
     interrupt = h('button', {type: 'button', class: 'btn sm', 'data-act': 'interrupt', hidden: true, title: 'Stop what the helper is doing and read this now', text: 'Interrupt now'});
     send = els.form.querySelector('button');
     send.textContent = 'Send';

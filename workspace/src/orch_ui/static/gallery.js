@@ -1,6 +1,6 @@
 /* gallery.html page code: new widgets, then the component and motion demos moved from mockup/system/components.html and motion.html. */
 {const q=s=>document.querySelector(s);document.querySelectorAll('[data-st]').forEach(n=>n.replaceWith(UI.statusIcon(n.dataset.st)));
-const ws=q('#w-status');['todo','working','needs','check','done'].forEach(k=>{const s=document.createElement('span');s.className='row';s.append(UI.statusIcon(k),document.createTextNode(' '+k));ws.append(s)});
+document.querySelectorAll('[data-icon]').forEach(n=>{n.className='row';n.innerHTML=window.icon(n.dataset.icon,16)});const wi=q('#w-icons');['phone','pencil'].forEach(k=>{const s=document.createElement('span');s.className='row';s.innerHTML=window.icon(k,20)+'<span class="meta">'+k+'</span>';wi.append(s)});const ws=q('#w-status');['todo','working','needs','check','done'].forEach(k=>{const s=document.createElement('span');s.className='row';s.append(UI.statusIcon(k),document.createTextNode(' '+k));ws.append(s)});
 const st=q('#w-stat');st.append(UI.stat('Done this week','12',{delta:'+3 vs last week',dir:'up'}),UI.stat('Needs you','2'),UI.stat('Working now','4'));
 q('#w-progress').append(UI.progress(3,5,'steps'),UI.progress(0,4,'steps'));
 q('#w-table').append(UI.table([{key:'t',label:'Ticket',sort:true},{key:'o',label:'Owner',sort:true},{key:'s',label:'Status'}],[{t:'Newsletter logo',o:'Anna',s:'Working'},{t:'Customer survey',o:'Ben',s:'Done'},{t:'Opening hours',o:'Anna',s:'Needs you'}]));

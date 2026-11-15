@@ -6,8 +6,8 @@ function ticketFileType(name) {
 }
 function ticketFileError(file, files) {
   if (!ticketFileType(file.name)) return file.name + ': only text files and pictures';
-  if (file.size > 2 * 1024 * 1024) return file.name + ' is over 2 MB';
-  if (files.reduce((sum, item) => sum + item.size, file.size) > 3.5 * 1024 * 1024) return 'Files are over 3.5 MB';
+  if (file.size > 25 * 1024 * 1024) return file.name + ' is over 25 MB';
+  if (files.reduce((sum, item) => sum + item.size, file.size) > 100 * 1024 * 1024) return 'Files are over 100 MB';
   return '';
 }
 function ticketTextTitle(text, limit) {
@@ -68,7 +68,7 @@ function ticketForm(t) {
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
     const zone = el('div', 'new-ticket-drop');
     const attach = button('＋ Add files or drop them here', 'new-ticket-attach', () => picker.click());
-    zone.append(attach, el('p', 'meta new-ticket-file-hint', 'Add as many files as you need · text files and pictures, up to 2 MB each'));
+    zone.append(attach, el('p', 'meta new-ticket-file-hint', 'Add as many files as you need · text files and pictures, up to 25 MB each'));
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
     picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
     const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
