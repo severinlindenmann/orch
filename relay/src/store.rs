@@ -192,7 +192,15 @@ pub fn insert_message(
     let nested = !c.is_autocommit(); // inside a caller's transaction: never end it here
     c.execute_batch("SAVEPOINT insert_message")?;
     match insert_message_rows(c, key, msg, digest) {
-        Ok(()) => c.execute_batch("RELEASE insert_message"),
+        Ok(()) => {
+            // When this savepoint is the outermost one, RELEASE is the commit: if it fails without SQLite rolling
+            // back, end the transaction so the next write does not silently nest inside it.
+            let done = c.execute_batch("RELEASE insert_message");
+            if done.is_err() && !nested && !c.is_autocommit() {
+                let _ = c.execute_batch("ROLLBACK");
+            }
+            done
+        }
         Err(e) => {
             // ROLLBACK TO and RELEASE run one by one: when either fails and this savepoint opened the transaction,
             // end it, so the shared connection never stays inside an open transaction holding the write lock.
