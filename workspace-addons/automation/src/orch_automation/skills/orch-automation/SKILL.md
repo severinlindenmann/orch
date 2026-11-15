@@ -31,7 +31,7 @@ At that time the wait is cleared and a run starts.
     orch automation repeat <id> "daily 07:30" --tz Europe/Zurich --each-run sub-ticket
     orch automation repeat <id> --off
 
-The phrases: `every <day> HH:MM`, `daily HH:MM`, `every N minutes|hours`, `monthly D HH:MM` (day 1-28),
+The phrases: `every <day> HH:MM`, `daily HH:MM`, `every N minutes|hours`, `monthly D HH:MM` (day 1-31; 29-31 run on the last day of a shorter month),
 `today|tomorrow HH:MM` (once; this is a plain wait). Times are read in this computer's time zone; `--tz` changes it.
 `--agent <name>` makes this repeat use another agent (a name from `orch agents`). `--each-run sub-ticket` (daily or
 slower) gives every run its own sub-ticket. If the computer was off, one catch-up run happens, not several.
