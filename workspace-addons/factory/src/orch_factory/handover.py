@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import authority, orchcli
 from .render import clean
-from .store import Refused, handover_file_ok, now, read_bytes
+from .store import Refused, handover_file_ok, now
 
 FILE = "handover.json"
 DIRECTORY = (".agents", "skills", "orch-relay", "workspaces.json")
@@ -26,7 +26,9 @@ NO_LONGER = "No longer needed: {title}. Please do not start it."
 def _entries(root):
     path = Path(root).absolute().joinpath(*DIRECTORY)
     try:
-        data = json.loads(read_bytes(path))
+        # core's own list; its folder may be a link into the shared skills (installs link .agents/skills), so no link check
+        with path.open("rb") as stream:
+            data = json.loads(stream.read(1024 * 1024))
     except (OSError, ValueError, UnicodeError):
         return []
     items = data.get("workspaces") if isinstance(data, dict) else None

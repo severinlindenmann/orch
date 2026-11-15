@@ -526,10 +526,13 @@ def a23(e):
     who = ids[member]
     root = e.ws(host)
     (root / "brief").mkdir(exist_ok=True)
-    (root / "brief" / "header.md").write_text("Make a spring header, two sizes.\n")
+    (root / "brief" / "header.md").write_text("Spring header artwork brief for the landing page\n")
+
+    e.cleanup.append(lambda: e.sh(["orch", "stop"], cwd=root))  # the add-on servers started by addon add
 
     def fac(*args, data=None, ok=True):
-        rc, out, err = e.sh(["orch", "factory", *args, "--json"], cwd=root, input=data)
+        rc, out, err = e.sh(["orch", "factory", *args, *(["--file", "-"] if data is not None else []), "--json"],
+                            cwd=root, input=data)
         if ok:
             check(rc == 0, f"orch factory {' '.join(map(str, args))[:70]} exit {rc}: {(err or out).strip()[-300:]}")
             return json.loads(out)
