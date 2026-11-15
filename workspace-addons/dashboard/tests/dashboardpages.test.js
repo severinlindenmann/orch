@@ -55,8 +55,8 @@ test('home renders one need card per ticket with question count and yellow chip'
   const needs = t.questions.map(q => ({id:q.id,ticket:t.id,title:q.text,answer:{question:q.id}}));
   const c = context([t], {needsList:() => needs});
   const home = c.home(), text = JSON.stringify(home);
-  assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
-  assert.match(text, /2 questions/); assert.match(text, /1 thing needs you/); assert.match(text, /! Question · 1/); assert.doesNotMatch(text, /questions? for you/);
+  assert.equal(nodes(home, n => n.attrs?.['data-need-row']).length, 1);
+  assert.match(text, /2 questions/); assert.match(text, /1 thing needs you/); assert.match(text, /Needs you · 1/); assert.doesNotMatch(text, /questions? for you/);
   assert.match(text, /First\?/); assert.doesNotMatch(text, /Second\?/);
   assert.equal(nodes(home, n => /chip/.test(n.attrs?.className || '')).length, 0); // the section heading already says it
   needs.shift();
@@ -357,39 +357,30 @@ test('home rows: no key or chip, no empty Working now, See all tickets (N), fini
   assert.match(text, /Finished 9:05/);
   const left = nodes(home, n => n.attrs?.['data-key'] === 'left')[0];
   assert.ok(left); assert.match(text, /All 2 tickets →/); assert.match(text, /1 result to check/);
-  assert.match(text, /Check · 1/); assert.doesNotMatch(text, /Details|Technical details/);
+  assert.match(text, /Needs you · 1/); assert.match(text, /Check result/); assert.doesNotMatch(text, /Details|Technical details/);
 });
-// Dash 03/04/14: results fold to 3 one-link rows; same-name results stack with "Mark older as done".
-test('home results: one link per row, same-name stacked, newest first, 3 shown and Show all (N)', async () => {
+// One list: a result to check is one row with ONE button; same-name results are one row ("3 versions"), newest first.
+test('home results: one row and one button each, same-name stacked, newest first', () => {
   const r = (id, title, at) => ({id, title, status:'review', updated_at:'2026-11-0' + at + 'T10:00:00Z'});
   const items = [r('v1', 'Report', 1), r('v2', 'Report', 2), r('v3', 'report', 9), r('x', 'Logo', 4), r('y', 'Menu', 5), r('z', 'Flyer', 6)];
-  const moved = [];
   const c = context(items, {snapshot:false, locks:new Set(), button:(label, cls, click) => ({tag:'button', attrs:{}, children:[label], click})});
-  let running = 0;
-  c.moveTicket = async (id, s) => { assert.equal(running++, 0); moved.push([id, s]); await null; running--; };
-  const home = c.home(), section = nodes(home, n => n.attrs?.['data-key'] === 'check-result')[0], text = JSON.stringify(section);
-  const rows = nodes(section, n => n.attrs?.className === 'card-row home-result');
-  assert.equal(rows.length, 3);
-  assert.doesNotMatch(text, /Open result|"Mark done"|Send back/);
-  assert.equal(nodes(rows[0], n => n.tag === 'a').length, 1);
-  assert.equal(nodes(rows[0], n => n.tag === 'a')[0].attrs.href, '#ticket/v3');
-  assert.match(text, /3 versions/); assert.match(text, /Show all \(6\)/);
-  // newest group first; Logo (the stalest) is folded away
-  assert.deepEqual(rows.map(r => nodes(r, n => n.tag === 'a')[0].attrs.href), ['#ticket/v3', '#ticket/z', '#ticket/y']);
-  const control = {disabled:false}, older = nodes(rows[0], n => n.tag === 'button')[0];
-  const done = older.click({currentTarget:control});
-  assert.equal(control.disabled, true);
-  older.click({currentTarget:control}); // a second click while running does nothing
-  await done;
-  assert.equal(control.disabled, false);
-  assert.deepEqual(moved, [['v1', 'done'], ['v2', 'done']]);
+  const home = c.home(), section = nodes(home, n => n.attrs?.['data-key'] === 'needs-you')[0], text = JSON.stringify(section);
+  const rows = nodes(section, n => /^check-/.test(n.attrs?.['data-key'] || ''));
+  assert.equal(rows.length, 4, 'every result is in the one list, none folded away');
+  for (const row of rows) {
+    assert.equal(nodes(row, n => n.tag === 'a' || n.tag === 'button').length, 1, 'ONE button per row');
+    assert.match(JSON.stringify(row), /Check result/);
+  }
+  assert.doesNotMatch(text, /Show all|Mark older as done|Open result|Send back/);
+  assert.match(text, /3 versions/); assert.match(text, /Needs you · 6/); // six results, one row stacks three
+  assert.deepEqual(rows.map(r => nodes(r, n => n.tag === 'a')[0].attrs.href), ['#ticket/v3', '#ticket/z', '#ticket/y', '#ticket/x']);
 });
 test('home results: untitled results do not stack', () => {
   const items = [{id:'u1', title:'', status:'review'}, {id:'u2', title:'[E2E]', status:'review'}, {id:'u3', status:'review'}];
   const c = context(items, {snapshot:false, locks:new Set()});
   c.clean = v => String(v || '').replace(/^\[E2E\]$/, '');
-  const section = nodes(c.home(), n => n.attrs?.['data-key'] === 'check-result')[0];
-  assert.equal(nodes(section, n => n.attrs?.className === 'card-row home-result').length, 3);
+  const section = nodes(c.home(), n => n.attrs?.['data-key'] === 'needs-you')[0];
+  assert.equal(nodes(section, n => /^check-/.test(n.attrs?.['data-key'] || '')).length, 3);
   assert.doesNotMatch(JSON.stringify(section), /versions/);
 });
 // Dash 12/14: the fold shows the oldest question with its answers, then "N more questions"; identical questions stack.
@@ -402,7 +393,11 @@ test('home needs: fold shows the oldest card with answers; identical questions a
   c.window.orch = {toast:t => toasts.push(t)}; c.setTimeout = setTimeout; c.clearTimeout = clearTimeout; vm.runInContext('ANSWER_UNDO_MS = 5', c);
   const home = c.home(), text = JSON.stringify(home);
   assert.match(text, /Asked on 3 tickets – answer once/);
-  assert.match(text, /2 more questions"/); // 3 rows: the stacked one, d and e
+  assert.doesNotMatch(text, /more question/); // no fold: the first question is the full card, d and e are one row each
+  for (const id of ['d1', 'e1']) {
+    const row = nodes(home, n => n.attrs?.['data-key'] === 'need-' + id)[0];
+    assert.equal(nodes(row, n => n.tag === 'button').length, 1); assert.match(JSON.stringify(row), /Answer/);
+  }
   const cards = nodes(home, n => n.attrs?.className === 'card-row home-need');
   assert.equal(cards.length, 1);
   const host = {querySelectorAll:() => [], classList:{add(){}}};
@@ -425,6 +420,36 @@ test('home needs: three identical questions are one row, not folded', () => {
   assert.match(text, /Asked on 3 tickets – answer once/);
   assert.doesNotMatch(text, /more question/); assert.doesNotMatch(text, /needs-hide/);
   assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
+});
+test('needs count: questions + results + changes + failed starts; notices and bring-back rows are not counted', () => {
+  const q = id => ({id, source:'core', kind:'question', ticket:'t' + id, answer:{question:'q1', options:['A']}});
+  const sync = id => ({id:'sync:deleted:' + id, source:'sync', kind:'sync:deleted', ticket:'s' + id, tone:'needs-you', answer:{question:'q9', options:['Leave deleted', 'OK']}, actions:[{label:'Leave deleted', verb:'x', sign:true}, {label:'OK', verb:'restored'}]});
+  const warn = {id:'sync:unapplied:z', source:'sync', kind:'sync:unapplied', ticket:null, tone:'warn'};
+  const back = {id:'core:bring-back:t1', source:'copies', kind:'copies:bring-back', ticket:'t1', tone:'needs-you'};
+  const rows = [q('a'), q('b'), q('c'), sync('1'), sync('2'), warn, back];
+  assert.equal(helpers.isNotice(sync('1')), true); assert.equal(helpers.isNotice(warn), true);
+  assert.equal(helpers.isNotice(q('a')), false); assert.equal(helpers.isBringBack(back), true);
+  assert.equal(helpers.needsYouCount(rows, [], 0, 0), 3);
+  assert.equal(helpers.needsYouCount(rows, [['f']], 2, 1), 7);
+  assert.equal(helpers.needsYouCount(rows, [], [1, 2], [1]), 6, 'lists count by length');
+});
+test('home: notices fold into one quiet line, are not counted, and Show lists them', () => {
+  const items = [{id:'a', title:'T a', status:'waiting', questions:[{id:'q1', text:'Which?'}]}];
+  const needs = [{id:'a1', source:'core', kind:'question', ticket:'a', since:'2026-11-01T00:00:00Z', answer:{question:'q1', digest:'x', options:['One', 'Two']}},
+    ...[1, 2, 3].map(n => ({id:'sync:deleted:' + n, source:'sync', kind:'sync:deleted', ticket:null, tone:'needs-you', text:'A ticket file is missing. Restored it.', answer:{question:'q9', options:['OK']}, actions:[{label:'OK', verb:'restored'}]}))];
+  const c = context(items, {needsList:() => needs, snapshot:false, button:(label, cls, click) => ({tag:'button', attrs:{className:cls}, children:[label], click}), addons:() => [{name:'sync', dashboard:{label:'Sync'}}], addonLabel:a => a.dashboard.label});
+  const text = JSON.stringify(c.home());
+  assert.equal(c.needsToday().count, 1);
+  assert.match(text, /1 thing needs you/); assert.match(text, /3 sync notes, nothing to do/); assert.doesNotMatch(text, /Restored it/);
+});
+test('home: Working now and Finished are side cards; an empty Finished says what was last', () => {
+  const t = new Date(); t.setDate(t.getDate() - 1);
+  const items = [{id:'w', title:'Plan', status:'active', checklist:[{id:'c1', text:'Send a test mail'}]}, {id:'d', title:'Old sign', status:'done', done_at:t.toISOString()}];
+  const home = context(items, {parse:v => v ? new Date(v) : null, state:{runs:{}, settings:{}}}).home(), text = JSON.stringify(home);
+  const right = nodes(home, n => n.attrs?.['data-key'] === 'right')[0];
+  assert.match(JSON.stringify(right), /Working now/); assert.match(JSON.stringify(right), /Send a test mail/);
+  assert.doesNotMatch(JSON.stringify(right), /steps|segments|progressbar/);
+  assert.match(text, /Nothing finished today\. Last: “Old sign”/);
 });
 test('home needs: a failed answer on stacked questions says how many were answered', async () => {
   let n = 0;
@@ -507,7 +532,7 @@ test('home: an add-on row without a ticket carries the add-on display name, not 
   const c = context([], {needsList:() => needs, button:label => ({tag:'button', children:[label]}), addons:() => [{name:'sync', dashboard:{label:'Sync'}}], addonLabel:a => a.dashboard.label});
   const text = JSON.stringify(c.home());
   assert.doesNotMatch(text, /"sync"/);
-  assert.match(text, /Sync asked/);
+  assert.match(text, /Sync/);
   assert.doesNotMatch(text, /(Helper|Claude) asked/);
 });
 test('Watch live and Stop exist only while a helper is at work (not on a ticket waiting for its check)', () => {
