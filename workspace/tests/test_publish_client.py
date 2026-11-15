@@ -633,3 +633,134 @@ def test_net_keeps_pythons_tls_default_elsewhere(monkeypatch):
         assert net._tls() is None
     finally:
         net._tls.cache_clear()
+
+
+# ---- secret scan before every upload (#861) --------------------------------------------------------------
+
+PLANT = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"  # a made-up GitHub token shape
+
+
+def _no_echo(*texts):
+    assert all(PLANT not in t and PLANT[4:] not in t for t in texts)
+
+
+def test_file_with_a_secret_is_refused_and_nothing_is_uploaded(proj, run, pub):
+    connect(run, pub)
+    (proj / "settings.env").write_text(f"A=1\nTOKEN={PLANT}\n")
+    n = len(pub.calls)
+    code, out, err = run("publish", "file", "settings.env")
+    assert code != 0 and "settings.env" in err and "line" in err and "Nothing was shared" in err
+    _no_echo(out, err)
+    assert not pub.files and len(pub.calls) == n
+    code, out, err = run("publish", "file", "settings.env", "--json")
+    assert code != 0
+    _no_echo(out, err)
+
+
+def test_folder_with_a_secret_is_refused_and_a_clean_binary_passes(proj, run, pub):
+    connect(run, pub)
+    site = proj / "site"
+    (site / "js").mkdir(parents=True)
+    (site / "index.html").write_text("<h1>hi</h1>")
+    (site / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" + bytes(range(256)) * 20)  # clean binary
+    code, out, _ = run("publish", "file", "site")
+    assert code == 0, out
+    (site / "js" / "app.js").write_text(f"x = 1;\nconst k = '{PLANT}';\n")
+    pub.files.clear()
+    code, out, err = run("publish", "file", "site")
+    assert code != 0 and "js/app.js" in err and "line 2" in err
+    _no_echo(out, err)
+    assert not pub.files
+
+
+def test_app_deploy_with_a_secret_is_refused_before_upload(proj, run, pub):
+    connect(run, pub)
+    app = make_app(proj)
+    (app / "config.py").write_text(f"X = 1\nKEY = '{PLANT}'\n")
+    n = len(pub.calls)
+    code, out, err = run("publish", "app", str(app))
+    assert code != 0 and "config.py" in err and "line 2" in err
+    _no_echo(out, err)
+    assert len(pub.calls) == n
+
+
+def test_replace_with_a_secret_is_refused(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("fine")
+    res = json.loads(run("publish", "file", "a.txt", "--json")[1])
+    (proj / "a.txt").write_text(f"token {PLANT}")
+    code, out, err = run("publish", "file", "a.txt", "--replace", res["id"])
+    assert code != 0 and "a.txt" in err
+    _no_echo(out, err)
+
+
+def test_large_text_file_is_scanned_past_the_first_megabyte(tmp_path):
+    big = b"x" * 99 + b"\n"
+    data = big * 11000 + f"TOKEN={PLANT}\n".encode()  # > 1 MB, secret at the end
+    with pytest.raises(Refused) as e:
+        publish.scan_files(None, [("big.log", data)])
+    assert "line 11001" in str(e.value) and PLANT not in str(e.value)
+
+
+def test_utf16_file_with_a_secret_is_scanned_not_skipped():
+    for text in (f"A=1\nTOKEN={PLANT}\n",):
+        for codec in ("utf-16", "utf-16-le", "utf-16-be", "utf-32"):
+            with pytest.raises(Refused) as e:
+                publish.scan_files(None, [("w.env", text.encode(codec))])
+            assert "line 2" in str(e.value) and PLANT not in str(e.value)
+
+
+def test_token_on_a_chunk_boundary_is_found():
+    line = ("y" * 99 + "\n") * 5000  # 500 KB per chunk of text
+    pad = "z" * (publish.CHUNK - 10)  # one long line: the token straddles the first cut
+    data = (pad + f" {PLANT}\n" + line).encode()
+    with pytest.raises(Refused):
+        publish.scan_files(None, [("min.js", data)])
+
+
+def test_fake_bom_before_a_utf8_token_does_not_hide_it():
+    for bom in (b"\xff\xfe", b"\xfe\xff", b"\xff\xfe\0\0", b"\0\0\xfe\xff"):
+        with pytest.raises(Refused) as e:
+            publish.scan_files(None, [("x.env", bom + f"A=1\nTOKEN={PLANT}\n".encode())])
+        assert PLANT not in str(e.value)
+
+
+def test_misaligned_bom_nul_padded_and_binary_files_do_not_hide_a_token():
+    tok = f"TOKEN={PLANT}\n"
+    cases = {
+        "shifted-bom": b"\xff\xfeX" + tok.encode("utf-16-le"),
+        "utf32-bom-utf16-body": b"\xff\xfe\0\0" + tok.encode("utf-16-le"),
+        "wrong-endian-bom": b"\xfe\xff" + tok.encode("utf-16-le"),
+        "one-nul": b"\0" + tok.encode(),
+        "tar-like": b"a.env" + b"\0" * 100 + tok.encode() + b"\0" * 400,
+        "utf32-no-bom": tok.encode("utf-32-le"),
+    }
+    for name, data in cases.items():
+        with pytest.raises(Refused) as e:
+            publish.scan_files(None, [(name, data)])
+        assert PLANT not in str(e.value), name
+
+
+def test_generated_app_templates_pass_the_scan(tmp_path):
+    from orch import templates
+
+    for stack in ("static", "python", "node", "docker"):
+        d = tmp_path / stack
+        templates.create(stack, "none", d)
+        publish.pack(d, None, None, None)
+
+
+def test_a_token_after_a_manifest_comment_or_flag_is_refused(tmp_path):
+    d = tmp_path / "app"
+    d.mkdir()
+    for tail in (
+        "# auth: true " + PLANT,
+        "# auth: true = needs the app's private link, false = open to everyone who can reach it " + PLANT,
+        "auth = true # " + PLANT,
+        "# reach: public " + f"TOKEN={PLANT}",
+    ):
+        (d / "app.toml").write_text(f'name = "x"\n{tail}\n')
+        (d / "index.html").write_text("hi")
+        with pytest.raises(Refused) as e:
+            publish.pack(d, None, None, None)
+        assert PLANT not in str(e.value), tail
