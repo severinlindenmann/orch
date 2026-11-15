@@ -121,9 +121,12 @@ struct OutboxItem: Codable, Sendable, Equatable, Identifiable {
     /// 408 / 429 / 503: the relay is busy. The item stays queued and is not tried again before this time (ISO).
     var retryAfter: String? = nil
     var throttleCount: Int? = nil
+    /// An extra voice take of a new topic whose workspace has not acked the first message yet: client_id of that first message.
+    /// Kept (not sent) until `resolveJoins` finds its ticket, then sent as a plain topic message.
+    var joinAfter: String? = nil
 
     var id: String { clientId }
-    var isNewTopic: Bool { kind == .send && ticket == nil && !general }
+    var isNewTopic: Bool { kind == .send && ticket == nil && !general && joinAfter == nil }
     var isWaiting: Bool { sentMessageId == nil && failure == nil }
     /// Waiting and past its backoff.
     func isDue(now: Date = Date()) -> Bool {
@@ -230,18 +233,22 @@ final class Outbox {
     }
     @ObservationIgnored private lazy var writer = IndexWriter(url: indexURL)
     /// Waits until every queued index write has reached the disk (restore, wipe and tests that read the file).
-    func flushWrites() { IndexWriter.queue.sync {} }
+    /// Writes the queue as it is now (the app is going to the background); `flushWrites` then waits for it.
+    func submitCurrentIndex() { save() }
+    func flushWrites() { Self.flushAllWrites() }
+    nonisolated static func flushAllWrites() { IndexWriter.queue.sync {} }
 
     // MARK: Enqueue
 
     /// Queue a message. Files are copied into the item's folder. Throws `SendRequest.Problem` for an empty or invalid message.
     @discardableResult
-    func enqueue(_ draft: MessageDraft, to target: SendTarget, now: Date = Date()) throws -> OutboxItem {
+    func enqueue(_ draft: MessageDraft, to target: SendTarget, joinAfter: String? = nil, now: Date = Date()) throws -> OutboxItem {
         let clientId = UUID().uuidString.lowercased()
         var item = OutboxItem(clientId: clientId, phone: phone, kind: .send, workspace: target.workspace,
                               createdAt: ISO8601DateFormatter().string(from: now), ticket: target.ticket, general: target.isGeneral, replyTo: draft.replyTo)
         let text = draft.text?.trimmingCharacters(in: .whitespacesAndNewlines)
         item.text = (text?.isEmpty ?? true) ? nil : text
+        item.joinAfter = joinAfter
         item.location = draft.location
         try fm.createDirectory(at: folder(clientId), withIntermediateDirectories: true, attributes: [.protectionKey: Self.protection])
         do {
@@ -346,7 +353,7 @@ final class Outbox {
         repeat {
             flushAgain = false
             for id in items.filter(\.isWaiting).map(\.clientId) {
-                guard let item = self.item(clientId: id), item.isWaiting else { continue }
+                guard let item = self.item(clientId: id), item.isWaiting, item.joinAfter == nil else { continue }   // waits for its topic's ack
                 if !item.isDue(now: now()) { return events }      // backing off: later items wait too (order is kept)
                 do { events.append(try await deliver(item, client)) }
                 catch let e as RelayError {
@@ -371,6 +378,18 @@ final class Outbox {
             }
         } while flushAgain
         return events
+    }
+
+    /// Gives every waiting extra take its topic once `ticketFor(firstClientId)` knows it; returns true when something changed.
+    @discardableResult
+    func resolveJoins(ticketFor: (String) -> String?) -> Bool {
+        var changed = false
+        for i in items.indices {
+            guard let first = items[i].joinAfter, let t = ticketFor(first) else { continue }
+            items[i].ticket = t; items[i].joinAfter = nil; changed = true
+        }
+        if changed { save() }
+        return changed
     }
 
     /// The answer value inside a 409 "already answered" message ("This question was already answered: Blue." -> "Blue").
