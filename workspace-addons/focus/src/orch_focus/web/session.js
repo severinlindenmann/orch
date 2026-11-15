@@ -1,4 +1,4 @@
-// Owns worked time, session details, and terminal attachment.
+// Owns worked time, run details, and the terminal hint for the helper's screen.
 (function () {
   'use strict';
   const S = window.FocusStore;
@@ -12,8 +12,9 @@
     S.state.clockWorking = v.state === 'working';
   }
   function tickTimer() {
-    const s = Math.floor(workedNow());
-    els.time.textContent = s ? Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') : '';
+    /* "since 12:26" (local), not a running minute count; a short "12 min" only when no start time is known */
+    const v = S.state.view, first = v && v.run && v.run.first, s = Math.floor(workedNow());
+    els.time.textContent = first && !isNaN(Date.parse(first)) ? 'since ' + hhmm(first) : s && s < 3600 ? Math.max(1, Math.floor(s / 60)) + ' min' : '';
   }
   const duration = seconds => {
     const minutes = Math.floor(Math.max(0, Number(seconds) || 0) / 60);
@@ -39,7 +40,7 @@
     const ok = !!(S.state.view && S.state.view.attention), key = (els.key && els.key.textContent) || TID;
     const cmd = 'orch run attach ' + key + (ok ? '' : ' --watch');
     els.attachBox.hidden = !els.attachBox.hidden;
-    els.attachBox.replaceChildren(h('span', {class: 'meta', text: ok ? 'Answer it in a terminal (Ctrl-b d to leave):' : 'Watch the live session in a terminal:'}), h('code', {class: 'mono', text: cmd}),
+    els.attachBox.replaceChildren(h('span', {class: 'meta', text: ok ? 'Answer it in a terminal (Ctrl-b d to leave):' : 'Watch the helper’s screen in a terminal:'}), h('code', {class: 'mono', text: cmd}),
       h('button', {class: 'btn ghost xs', text: 'Copy', onclick: () => { try { navigator.clipboard.writeText(cmd); toast('Copied.', 'ok'); } catch (e) { /* select by hand */ } }}));
   }
 
