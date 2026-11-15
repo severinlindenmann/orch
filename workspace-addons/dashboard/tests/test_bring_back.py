@@ -249,3 +249,18 @@ def test_copy_review_cache_is_bounded(tmp_path, monkeypatch):
     for _ in range(100):
         data._copy_review("orch", tmp_path, "t_abcdef")
     assert len(data._REVIEW_CACHE) == data._REVIEW_CACHE_MAX
+
+
+def test_review_key_reads_head_and_tip_with_real_git(tmp_path):
+    """The real git (no mock): one rev-parse gives both shas; a missing branch gives no key."""
+    import subprocess
+
+    def git(*a):
+        subprocess.run(["git", "-C", str(tmp_path), *a], check=True, capture_output=True)
+
+    git("init", "-q")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x")
+    assert data._review_key(tmp_path, "t_abcdef") is None
+    git("branch", "orch/t_abcdef")
+    key = data._review_key(tmp_path, "t_abcdef")
+    assert key is not None and key[1] == "t_abcdef" and key[2] == key[3] and len(key[2]) >= 40

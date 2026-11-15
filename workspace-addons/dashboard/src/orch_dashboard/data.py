@@ -265,7 +265,7 @@ def _review_key(root: Path, tid: str):
     """(root, ticket, HEAD sha, copy tip sha) from one `git rev-parse`, or None when either cannot be read."""
     try:
         r = _run(
-            ["git", "-C", str(root), "rev-parse", "--verify", "-q", "HEAD", f"refs/heads/orch/{tid}"],
+            ["git", "-C", str(root), "rev-parse", "HEAD", f"refs/heads/orch/{tid}"],
             check=False,
             capture_output=True,
             text=True,
