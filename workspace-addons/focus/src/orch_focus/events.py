@@ -172,15 +172,22 @@ NOISE = re.compile(
 
 
 def for_display(events: list[dict]) -> list[dict]:
-    """What the page's feed shows (the log itself stays whole): no raw tool output (a step that worked shows
-    only its start line; a failed one shows its first words), no orch's own "New on t_x since you looked"
-    lines, and no line twice in a row."""
+    """What the page's feed shows (the log itself stays whole): no raw tool output in the step line (a step that
+    worked shows only its start line; a failed one shows its first words; a shell step's last lines stay in
+    data.output for its block), no orch's own "New on t_x since you looked" lines, and no line twice in a row."""
     out: list[dict] = []
     last = None
     for e in events:
         kind, text = e.get("kind"), str(e.get("text") or "")
         if kind == "tool.end":
-            if (e.get("data") or {}).get("ok") is not False or NOISE.match(text):
+            d = e.get("data") or {}
+            if (d.get("output") or d.get("command")) and not NOISE.match(
+                text
+            ):  # the page folds it into its command's block
+                out.append(e)
+                last = None
+                continue
+            if d.get("ok") is not False or NOISE.match(text):
                 continue
             e = {**e, "text": "Failed: " + text[:100]}
         elif NOISE.match(text):
