@@ -26,6 +26,12 @@ actor MockRelay: RelayAPI {
     func queueUploadFailures(_ s: [Int]) { uploadFailures = s }
     func queueSendFailures(_ s: [Int]) { sendFailures = s }
     private(set) var uploadCalls = 0
+    /// Review stack: every verdict the relay accepted (question message id, verdict, plain answer), for tests.
+    private(set) var verdicts: [(question: String, verdict: ReviewVerdict, answer: String)] = []
+    /// The workspace's result for a verdict: `-mockReviewResult changed|applied` (nothing when unset: the card stays "Sent").
+    private let reviewResult = UserDefaults.standard.string(forKey: "mockReviewResult")
+    private var reviewResultOverride: String?
+    func setReviewResult(_ r: String?) { reviewResultOverride = r }
     func setAutoDeliver(_ v: Bool) { autoDeliver = v }
     func setOffline(_ v: Bool) { offline = v }
     func setSpeechMode(_ m: SpeechMode) { speechMode = m }
@@ -88,6 +94,7 @@ actor MockRelay: RelayAPI {
                     options: ["accept", "changes"], recommended: nil, review: true)), workspaceName: "Pilatus Workspace"))
         }
         #endif
+        if UserDefaults.standard.bool(forKey: "mockReviewStack") { all.append(contentsOf: MockReviewStack.questions) }
         if UserDefaults.standard.bool(forKey: "mockAllow") { all.append(Self.allowQuestion) }
         if UserDefaults.standard.bool(forKey: "mockGroups") {
             for (id, name) in GroupMock.names where names[id] == nil { names[id] = name }
@@ -343,6 +350,13 @@ actor MockRelay: RelayAPI {
         if let a = answered[r.questionMessageId] {
             throw RelayError.api(status: 409, code: "already_answered", message: "This question was already answered: \(a).")
         }
+        if let v = r.verdict {
+            // Same checks as the relay: a verdict needs the question's digest.
+            guard let q = all.first(where: { $0.id == r.questionMessageId }), q.message.body.digest == v.digest, v.isValid else {
+                throw Self.invalid("This answer does not fit the question.")
+            }
+            verdicts.append((r.questionMessageId, v, r.answer))
+        }
         answered[r.questionMessageId] = r.answer
         counter += 1
         let id = String(format: "m_an5wer%010d", counter)
@@ -354,7 +368,26 @@ actor MockRelay: RelayAPI {
                 self.deliverMakeTicketResult(refused: refused)
             }
         }
+        if let v = r.verdict, let q = all.first(where: { $0.id == r.questionMessageId }) {
+            // The workspace refuses an ok on a signs card whatever the flag says (M1).
+            let signs = v.verdict == .ok && q.message.body.card?.requiresSignature == true
+            let mode = reviewResultOverride ?? reviewResult
+            if signs || mode != nil { deliverReviewResult(q, mode: signs ? "refused" : mode ?? "applied", summary: r.answer) }
+        }
         return SendReceipt(id: id, clientId: r.clientId)
+    }
+    /// A workspace result text for a phone verdict (never pushed; the phone's "Received").
+    private func deliverReviewResult(_ q: Question, mode: String, summary: String) {
+        let result: ReviewResult, text: String
+        switch mode {
+        case "changed": result = ReviewResult(result: "changed"); text = "This changed. Look at it again"
+        case "refused": result = ReviewResult(result: "refused", reason: "needs_signature"); text = "Needs your signature on the computer"
+        default: result = ReviewResult(result: "applied", summary: summary); text = "Got it"
+        }
+        counter += 1
+        received.append(PhoneMessage(message: TextMessage(id: String(format: "m_rvres%011d", counter), from: q.message.from, to: "ph_iphone0001", type: "text",
+            createdAt: Self.now(), ticket: q.message.ticket, body: TextBody(text: text, reviewResult: result), key: q.message.key, replyTo: q.id),
+            workspaceName: q.workspaceName))
     }
     private func deliverMakeTicketResult(refused: Bool) {
         let result = refused ? ProposalResult(result: "refused", reason: "unavailable") : ProposalResult(result: "made", key: "PIL-15")
@@ -510,6 +543,7 @@ actor MockRelay: RelayAPI {
     /// A small bar chart for the fake `b_chart` blob; anything else is not found.
     func blob(id: String) async throws -> Data {
         try await check()
+        if let b = MockReviewStack.blobs[id] { return b.data }
         guard id == "b_chart" || (UserDefaults.standard.bool(forKey: "mockGroups") && id == "b_0123456789abcdef") else { throw RelayError.api(status: 404, code: "not_found", message: "Image not found.") }
         let r = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 140))
         return r.pngData { c in

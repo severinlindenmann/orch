@@ -570,7 +570,7 @@ final class AppModel {
 
     /// Answers waiting on this phone (question id -> option), shown as "sending" until the relay has them.
     var queuedAnswers: [String: String] {
-        Dictionary(outbox.items.compactMap { i in i.kind == .answer ? i.questionMessageId.map { ($0, i.answer ?? "") } : nil }, uniquingKeysWith: { a, _ in a })
+        Dictionary(outbox.items.compactMap { i in i.kind == .answer && i.sentMessageId == nil ? i.questionMessageId.map { ($0, i.answer ?? "") } : nil }, uniquingKeysWith: { a, _ in a })
     }
 
     func answerTime(for questionId: String) -> Date? {

@@ -93,6 +93,34 @@ struct QuestionBody: Codable, Sendable, Equatable {
     var proposal: String? = nil
     var when: String? = nil
     var groupRef: GroupRef? = nil // group_ref via JSONCoding
+    /// Review stack (relay-api.md "Review cards on the phone"). `digest` is echoed in a verdict; `card` / `cardFiles` via JSONCoding.
+    var digest: String? = nil
+    var card: ReviewCard? = nil
+    var cardFiles: [CardFile]? = nil
+}
+
+extension QuestionBody {
+    // Keep this initializer in an extension to preserve the memberwise initializer.
+    // The three review fields are forgiving: a card this phone cannot read leaves a plain question (never a lost one).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        questionId = try c.decode(String.self, forKey: .questionId)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        text = try c.decode(String.self, forKey: .text)
+        options = try c.decode([String].self, forKey: .options)
+        recommended = try c.decodeIfPresent(String.self, forKey: .recommended)
+        previews = try c.decodeIfPresent([String: String].self, forKey: .previews)
+        scope = try c.decodeIfPresent(String.self, forKey: .scope)
+        allowQuestion = try c.decodeIfPresent(Bool.self, forKey: .allowQuestion)
+        review = try c.decodeIfPresent(Bool.self, forKey: .review)
+        proposal = try c.decodeIfPresent(String.self, forKey: .proposal)
+        when = try c.decodeIfPresent(String.self, forKey: .when)
+        groupRef = try c.decodeIfPresent(GroupRef.self, forKey: .groupRef)
+        digest = try? c.decodeIfPresent(String.self, forKey: .digest)
+        card = try? c.decodeIfPresent(ReviewCard.self, forKey: .card)
+        cardFiles = try? c.decodeIfPresent([CardFile].self, forKey: .cardFiles)
+        if card == nil { cardFiles = nil }
+    }
 }
 
 struct QuestionMessage: Codable, Sendable, Equatable {
@@ -195,6 +223,9 @@ struct ProposalResult: Codable, Sendable, Equatable {
 struct TextBody: Codable, Sendable, Equatable {
     var proposalResult: ProposalResult? = nil
     var isProposalResult: Bool { proposalResult != nil }
+    /// The workspace's result for a phone verdict (reply_to = the question): never chat, never unread.
+    var reviewResult: ReviewResult? = nil
+    var isReviewResult: Bool { reviewResult != nil }
     /// Empty when the text only carries attachments, a voice memo, a location or feedback.
     var text: String = ""
     /// Work update about the message's ticket; nil on a plain text.
@@ -226,21 +257,23 @@ struct TextBody: Codable, Sendable, Equatable {
          attachments: [MessageAttachment] = [], voice: VoiceMemo? = nil, location: LocationShare? = nil, feedback: Feedback? = nil,
          ticketView: TicketSnapshot? = nil,
          group: GroupInfo? = nil, groupEvent: GroupEvent? = nil, by: String? = nil, via: String? = nil, phone: String? = nil,
-         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil) {
-        self.proposalResult = proposalResult
+         origin: GroupOrigin? = nil, echoOf: String? = nil, toPerson: Bool? = nil, task: GroupTask? = nil, sharedFiles: [String]? = nil, proposalResult: ProposalResult? = nil, reviewResult: ReviewResult? = nil) {
+        self.proposalResult = proposalResult; self.reviewResult = reviewResult
         self.text = text; self.update = update; self.clientId = clientId; self.general = general; self.speak = speak
         self.attachments = attachments; self.voice = voice; self.location = location; self.feedback = feedback; self.ticketView = ticketView
         self.group = group; self.groupEvent = groupEvent; self.by = by; self.via = via; self.phone = phone
         self.origin = origin; self.echoOf = echoOf; self.toPerson = toPerson; self.task = task; self.sharedFiles = sharedFiles
     }
     private enum CodingKeys: String, CodingKey {
-        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult
+        case text, update, clientId, general, speak, attachments, voice, location, feedback, ticketView, proposalResult, reviewResult
         case group, groupEvent, by, via, phone, day, origin, echoOf, toPerson, task, sharedFiles
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         proposalResult = try? c.decodeIfPresent(ProposalResult.self, forKey: .proposalResult)
         if let result = proposalResult, !["made", "refused", "decided"].contains(result.result) { proposalResult = nil }
+        reviewResult = try? c.decodeIfPresent(ReviewResult.self, forKey: .reviewResult)
+        if let r = reviewResult, !ReviewResult.known.contains(r.result) { reviewResult = nil }
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
         update = try? c.decodeIfPresent(TextUpdate.self, forKey: .update)
         clientId = try? c.decodeIfPresent(String.self, forKey: .clientId)
@@ -266,6 +299,7 @@ struct TextBody: Codable, Sendable, Equatable {
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(proposalResult, forKey: .proposalResult)
+        try c.encodeIfPresent(reviewResult, forKey: .reviewResult)
         if !text.isEmpty { try c.encode(text, forKey: .text) }
         try c.encodeIfPresent(update, forKey: .update); try c.encodeIfPresent(clientId, forKey: .clientId)
         try c.encodeIfPresent(general, forKey: .general); try c.encodeIfPresent(speak, forKey: .speak)
@@ -661,4 +695,8 @@ struct SendRequest: Codable, Sendable, Equatable {
     }
 }
 /// `POST /v1/phone/answer`.
-struct AnswerRequest: Codable, Sendable, Equatable { let questionMessageId: String; let answer: String; let clientId: String }
+struct AnswerRequest: Codable, Sendable, Equatable {
+    let questionMessageId: String; let answer: String; let clientId: String
+    /// Review stack swipe (phone-api.schema.json answer_request.verdict). `answer` stays the plain summary line.
+    var verdict: ReviewVerdict? = nil
+}

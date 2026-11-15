@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ImageIO
 import UIKit
@@ -38,6 +39,15 @@ extension RelayAPI {
     /// A plain text: `ticket` nil = a new topic (see Phone app v3). Fresh client_id; the Outbox is what retries.
     func send(to: String, text: String, ticket: String?) async throws -> String {
         try await send(SendRequest(to: to, clientId: UUID().uuidString.lowercased(), text: text, ticket: ticket)).id
+    }
+    /// A reviewed file of a card (`GET /v1/phone/blobs/<id>`, the existing blob path). The bytes must match the card's `size` and
+    /// `sha256`, else the file is not shown (the person opens it on the computer).
+    func cardFile(_ file: CardFile) async throws -> Data {
+        let d = try await blob(id: file.blobId)
+        guard d.count == file.size, SHA256.hash(data: d).map({ String(format: "%02x", $0) }).joined() == file.sha256 else {
+            throw RelayError.api(status: 422, code: "invalid", message: "This file changed. Open it on the computer.")
+        }
+        return d
     }
     func answer(questionMessageId: String, answer: String) async throws -> String {
         try await self.answer(AnswerRequest(questionMessageId: questionMessageId, answer: answer, clientId: UUID().uuidString.lowercased())).id
