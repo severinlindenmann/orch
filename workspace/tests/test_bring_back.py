@@ -945,8 +945,6 @@ def test_run_end_only_schedules(done_copy, monkeypatch):
     assert scheduled == [root]
 
 
-
-
 @pytest.mark.parametrize("phase", ["before", "after"])
 def test_snapshot_memory_error_keeps_main_safe(done_copy, monkeypatch, phase):
     root, tid, copy = done_copy
@@ -1647,8 +1645,6 @@ def test_b13e_cli_approve_compares_what_was_shown(done_copy, run):
     assert code == 2
     assert "changed after it was shown" in out + err
     assert git(root, "rev-parse", "HEAD") == head
-
-
 
 
 def test_b13e_review_paths_are_one_plain_line_each(done_copy, run):

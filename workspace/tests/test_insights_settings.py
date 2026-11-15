@@ -52,20 +52,12 @@ def _proof(ws, op, target, by="human:pat", **kw):
     return None  # no proof any more: kept so the call sites read the same
 
 
-
-
-
-
 def _cli(run, monkeypatch, proof, *argv):
     return run(*argv, "--by", "human:pat")
 
 
 def _answer(out):
     return json.loads(out.strip().splitlines()[-1])
-
-
-
-
 
 
 def _get(run, key):
@@ -94,22 +86,6 @@ def test_get_defaults_and_aliases(ws, run):
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ------------------------------------------------------------------ write: widening needs the person
 
 WIDENING = [  # (key, from: a narrowing done first, or None, value, effective value after)
@@ -125,42 +101,12 @@ def _start(run, key, start):
         assert run("config", "set", key, start, "--by", "agent:x", "--json")[0] == 0  # narrowing: open
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def test_if_current_only_for_insights(ws, run):
     code, out, err = run("config", "set", "workflow.copies", "off", "--if-current", "on")
     assert code == 2 and "--if-current" in out + err
 
 
-
-
-
-
-
-
-
-
-
-
 # ------------------------------------------------------------------ share_counts: only where it is available
-
-
 
 
 def test_share_counts_off_is_allowed_whatever_the_share_state(ws, run):
@@ -170,8 +116,6 @@ def test_share_counts_off_is_allowed_whatever_the_share_state(ws, run):
     _disconnect(ws)
     assert config.share_counts_state(ws) == "not_connected"
     assert _get(run, "insights.share_counts") is False
-
-
 
 
 def test_share_state_needs_a_full_relay_connection(ws):
@@ -197,25 +141,7 @@ def test_relay_refresh_keeps_the_admin_policy(ws):
     assert config.share_counts_state(ws) == "on"
 
 
-
-
-
-
-
-
 # ------------------------------------------------------------------ narrowing and retention
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_insights_is_a_page_server(ws):
@@ -269,12 +195,6 @@ def _ops():
     return schema["$defs"]["op"]["enum"]
 
 
-
-
-
-
-
-
 # ------------------------------------------------------------------ record settings / delete-detail
 
 
@@ -312,12 +232,6 @@ def _changes(ws):
         return []
     out = [json.loads(x) for p in folder.iterdir() for x in p.read_text().splitlines()]
     return [x for x in out if x.get("schema") == "orch.record-change/1"]
-
-
-
-
-
-
 
 
 def test_lowering_retention_deletes_nothing_now(ws, rec, run):
@@ -376,14 +290,6 @@ BAD_DELETE = {
 def _untouched(ws):
     assert _detail(ws, RUN_A).is_dir() and _detail(ws, RUN_B).is_dir() and _detail(ws, RUN_C).is_dir()
     assert _changes(ws) == []
-
-
-
-
-
-
-
-
 
 
 @pytest.mark.parametrize("ticket", ["t_nothere1", "../x", "T_ABCDEF"])
@@ -514,21 +420,7 @@ def test_delete_detail_needs_json(ws, rec, run):
     assert cli_record.SUBCOMMANDS == ("tail", "query", "counts", "settings", "delete-detail", "hook")
 
 
-
-
-
-
-
-
 # ------------------------------------------------------------------ settle vectors (2.11 review)
-
-
-
-
-
-
-
-
 
 
 # (file key, file value, effective value: snapped down, floor 30 / 512)
@@ -583,12 +475,6 @@ def test_share_counts_on_is_refused_while_sharing_is_not_available(ws, run):
     assert run("config", "set", "insights.share_counts", "on", "--json")[0] == 0
 
 
-
-
-
-
-
-
 def test_key_lock_nested_in_one_thread_and_another_thread_waits(ws):
     """H1: keys.lock is re-entrant per thread by design (a depth count over one O_EXCL file): nested takes in
     one thread go through; a second thread blocks until the first thread's OUTERMOST exit."""
@@ -614,12 +500,6 @@ def test_key_lock_nested_in_one_thread_and_another_thread_waits(ws):
     assert order == ["first", "other"]
 
 
-
-
-
-
-
-
 # ------------------------------------------------------------------ the lock
 
 
@@ -635,17 +515,7 @@ def test_key_lock_is_reentrant_and_only_the_outermost_exit_unlocks(ws):
     assert not lock.exists() and not hp._lock_held(d)
 
 
-
-
-
-
-
-
 # ------------------------------------------------------------------ delete-detail (2.11 review)
-
-
-
-
 
 
 @pytest.mark.parametrize("error", [OSError("disk"), "invalid"])
@@ -1029,8 +899,6 @@ def test_delete_detail_files_a_swap_after_finding_skips_only_that(ws, rec, run, 
 # ------------------------------------------------------------------ prune reads the effective values
 
 
-
-
 # ------------------------------------------------------------------ --detail compares ticket and id (M5)
 
 
@@ -1060,8 +928,6 @@ def test_detail_whose_stored_id_is_not_the_lines_is_tampered(ws, rec, run):
     assert code == 2 and _answer(out)["code"] == "tampered"
     code, out, _ = run("record", "query", "--run", RUN_A, "--detail", victim["id"], "--json")
     assert code == 0 and json.loads(out)["id"] == victim["id"]
-
-
 
 
 def test_relay_connect_clears_the_last_admin_policy(ws, monkeypatch):

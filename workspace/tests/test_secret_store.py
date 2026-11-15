@@ -838,8 +838,6 @@ def test_an_unknown_file_check_refuses_the_call_and_sets_nothing_aside(tws, monk
     assert winacl.Unknown  # the exception type the refusal carries
 
 
-
-
 def test_an_unreadable_profiles_file_refuses_the_save(tws):
     keystore.write_profiles(tws, {"p": {"env": {"A": "k"}}})
     (hp.key_dir(tws) / "profiles.toml").write_text("not [ toml")

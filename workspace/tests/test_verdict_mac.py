@@ -123,8 +123,6 @@ def test_the_persons_looks_good_signs_the_done_and_it_lists_as_done(ws, run, mon
     assert _raw(ws, tid)["status"] == "done" and "verdict_needed" not in _raw(ws, tid)
 
 
-
-
 # 3. who may finish -----------------------------------------------------------------------------------------
 
 
@@ -139,8 +137,6 @@ def test_an_agent_finish_with_the_recorded_grant_is_done_kind_agent(ws, run):
     assert any(h["text"] == tickets.AGENT_FINISH_TEXT for h in t["history"])
 
 
-
-
 def test_revoking_the_grant_does_not_undo_an_earlier_agent_done(ws, run, monkeypatch):
     hp.human_key(ws)
     _grant(ws)
@@ -151,8 +147,6 @@ def test_revoking_the_grant_does_not_undo_an_earlier_agent_done(ws, run, monkeyp
 
 
 # 4. no unsigned Done ---------------------------------------------------------------------------------------
-
-
 
 
 def test_a_direct_write_of_a_new_done_without_a_verifying_entry_is_refused(ws, run):
@@ -169,8 +163,6 @@ def test_a_direct_write_of_a_new_done_without_a_verifying_entry_is_refused(ws, r
             ws, tid, lambda x: x.update(status="done"), by=tickets.SYSTEM
         )  # no op makes a ticket Done unsigned
     assert _raw(ws, tid)["status"] != "done"
-
-
 
 
 # 5. reopen tombstones, replays do not come back ------------------------------------------------------------

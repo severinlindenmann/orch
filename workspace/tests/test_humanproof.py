@@ -106,23 +106,7 @@ def test_human_key_rights_and_reuse(tws):
     assert oct(f.stat().st_mode & 0o777) == "0o600"
 
 
-
-
-
-
-
-
-
-
-
-
 # ---------------------------------------------------------------- settings
-
-
-
-
-
-
 
 
 # ---------------------------------------------------------------- pending read-back
@@ -310,14 +294,6 @@ def test_reset_holds_the_key_lock(tws, monkeypatch):
     with hp._key_lock(d), hp._key_lock(d):  # re-entrant for readers that already hold it
         assert _key_lock_held(d)
     assert not (d / "keys.lock").exists()
-
-
-
-
-
-
-
-
 
 
 # ---------------------------------------------------------------- guarded reads go through saferead
