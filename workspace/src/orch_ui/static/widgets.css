@@ -459,6 +459,44 @@ dialog.report-dialog{display:grid;gap:12px;width:min(520px,calc(100% - 32px))}
 dialog.report-dialog:not([open]){display:none}
 dialog.report-dialog .actions{margin-top:12px}
 
+/* from Insights (#795 B1): metric card, chart, bar rows, notes, loading mask, settings rows. Tokens only. */
+.section-head.roomy{gap:16px}
+.section-head.roomy h2{font-size:14px;line-height:20px}
+.section-head.roomy:has(>[role=tablist]){margin-bottom:8px}
+.metric{padding:20px;display:grid;gap:8px}
+.metric strong{font-size:28px;line-height:36px;font-variant-numeric:tabular-nums}
+.metric small{font-size:12px;color:var(--text-faint);line-height:16px}
+.chart-card{padding:20px}
+.chart-stage{height:180px;position:relative;display:grid;place-content:center;border-bottom:1px solid var(--border);background:repeating-linear-gradient(to top,transparent 0,transparent 44px,var(--border) 45px,transparent 46px)}
+.chart-message{background:var(--surface);padding:16px;max-width:380px;text-align:center;display:grid;gap:8px;justify-items:center}
+.axis{display:flex;justify-content:space-between;padding-top:12px;color:var(--text-faint);font-size:12px}
+.bar-row{display:grid;gap:8px;margin-top:24px}
+.bar-row .progress{height:8px}
+.bar-row .progress span{background:var(--brand)}
+.bar-row.secondary .progress span{background:var(--info)}
+.footnote{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--text-faint);font-size:12px}
+.note{font-size:12px;color:var(--text-muted)}
+.locked{color:var(--text-muted)}
+.confirm-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
+/* Loading mask: the page keeps its shape while data loads. */
+.loading-mask{pointer-events:none;user-select:none}
+.loading-mask :is(h2,h3,p,strong,small,span,a,button,td,th){color:transparent!important;text-shadow:none!important}
+.loading-mask :is(h2,p,strong,small,td){background:var(--surface-3)!important;border-radius:4px}
+.loading-mask .progress,.loading-mask .chart-message{visibility:hidden}
+.loading-mask .chart-stage{background:var(--surface-3)}
+.loading-mask td{border-color:transparent}
+/* Settings rows and side card */
+.settings-row{display:flex;gap:32px;align-items:center;justify-content:space-between;padding:24px;border-bottom:1px solid var(--border)}
+.settings-row:last-child{border-bottom:0}
+.settings-row p{margin-top:8px;max-width:52ch}
+.settings-row .ui-select,.settings-row select{flex-shrink:0}
+.context-card{padding:24px;display:grid;gap:16px}
+.context-card h2{font-size:14px;line-height:20px}
+.context-card hr{width:100%;border:0;border-top:1px solid var(--border);margin:0}
+.set-block{padding:24px;display:grid;gap:12px}
+@media(min-width:1600px){.chart-stage{height:220px}.metric{padding:24px}}
+@media(max-width:600px){.settings-row{flex-direction:column;align-items:flex-start;gap:12px;padding:16px}}
+
 /* Workspace look (from dashboard look.css, #795 A1): workspace badge .wsb (sizes s16..s46), look picker .lk-*, sidebar switcher.
    Colours come from [data-c=token] setting --c (dashboard look-colors.css, generated data); without it the badge is muted. */
 .wsb:where(.s16,.s26,.s32,.s46){display:inline-grid;place-items:center;flex:none;color:var(--c,var(--text-muted));background:color-mix(in srgb,var(--c,var(--text-muted)) 18%,var(--surface));border-radius:28%}
