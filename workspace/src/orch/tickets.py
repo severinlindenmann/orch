@@ -1310,27 +1310,25 @@ def resume_after_start_wait(root: Path, tid: str, by: str) -> None:
 
 
 RECHECK_TEXT = "Please run the checks again and record them with orch check record."  # as the dashboard's
+RECHECK_HINT = "Run the checks again and record them with orch check record."  # next step, never a refusal
 
 
-def _recheck_first(root: Path, tid: str, status: str, by: str) -> None:
-    """An agent sends a ticket to Review while a step's proof is changed or failed: ask it ONCE per
-    transition to run the checks again (the answer is this refusal text); the next try goes through, with
-    the honest proof line as today. Never a loop, never a block."""
+def recheck_hint(root: Path, tid: str, status: str, by: str) -> str | None:
+    """An agent sends a ticket to Review while a step's proof is changed or failed: the move goes through, and
+    the command prints this as its next step. Never a block, never a loop."""
     if status != "review" or not (agent_tool() or by.startswith("agent:")):
-        return
+        return None
     t = load(root, tid)
-    if t.get("status") == "review" or t.get("general") is True or t.get("recheck_asked"):
-        return
+    if t.get("status") == "review" or t.get("general") is True:
+        return None
     if not {"changed", "failed"} & set(proof_state(t, root)["per_item"].values()):
-        return
-    apply_op(root, tid, lambda tk: tk.__setitem__("recheck_asked", True), by=by)
-    raise Refused(f"{RECHECK_TEXT} Then send the ticket to Review again.")
+        return None
+    return RECHECK_HINT
 
 
 def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False) -> dict:
     if status not in STATUSES:
         raise Refused(f"Status must be one of: {', '.join(STATUSES)}.")
-    _recheck_first(root, tid, status, by)
 
     def op(ticket):
         target, actor = _finish_status(root, ticket, status, by)
@@ -1342,8 +1340,6 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
             ticket["waiting_on"].pop("start", None)  # a person's choice: no hook turns it back
         old = ticket["status"]
         ticket["status"] = target
-        if old != target:
-            ticket.pop("recheck_asked", None)  # the next Review transition asks again
         if old != target and target == status:
             add_history(ticket, actor, f"Status {old} -> {target}")
         if target == "done" and old != "done":
@@ -2985,7 +2981,7 @@ ATTACH_IMAGES = {
     "gif": (b"GIF87a", b"GIF89a"),
     "webp": (b"RIFF",),
 }
-ATTACH_MAX = 2 * 1024 * 1024  # one attached file (the dashboard shows at most this much of a file)
+ATTACH_MAX = 25 * 1024 * 1024  # one attached file: the one limit (dashboard and Focus use it too)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
 PASTED_NAME = "note.md"
 

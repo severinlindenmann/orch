@@ -668,3 +668,114 @@ mod name_tests {
         assert!(!valid_app_name("-ab") && !valid_app_name("ab-") && !valid_app_name("a"));
     }
 }
+
+/// HMAC-SHA256 (RFC 2104) with the sha2 crate.
+pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        k[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(k.map(|b| b ^ 0x36));
+    inner.update(msg);
+    let mut outer = Sha256::new();
+    outer.update(k.map(|b| b ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+fn read_key(path: &std::path::Path) -> std::io::Result<Option<[u8; 32]>> {
+    let Ok(t) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(std::io::Error::other(format!(
+                "{} must only be readable by the server (chmod 600)",
+                path.display()
+            )));
+        }
+    }
+    let t = t.trim();
+    if t.len() != 64 || !t.is_ascii() {
+        return Err(std::io::Error::other("bad app-cap.key"));
+    }
+    let mut k = [0u8; 32];
+    for (i, b) in k.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16)
+            .map_err(|_| std::io::Error::other("bad app-cap.key"))?;
+    }
+    Ok(Some(k))
+}
+
+/// The server's private-app capability key: generated at first start, stored 0600 next to the
+/// other server state (the file must stay private to the publish user), never sent in a response.
+/// Two first starts racing end with one key: the file on disk wins.
+pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
+    use std::io::Write;
+    if let Some(k) = read_key(path)? {
+        return Ok(k);
+    }
+    let mut k = [0u8; 32];
+    OsRng.fill_bytes(&mut k);
+    let hex: String = k.iter().map(|b| format!("{b:02x}")).collect();
+    // write a 0600 temp file, flush it to disk, then link it into place (never overwrites an
+    // existing key, never a half-written file) and use whatever ended up on disk
+    let tmp = path.with_extension(format!("key.tmp{}", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    let mut f = o.open(&tmp)?;
+    f.write_all(hex.as_bytes())?;
+    f.sync_all()?;
+    let linked = std::fs::hard_link(&tmp, path);
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
+    }
+    read_key(path)?.ok_or_else(|| std::io::Error::other("app-cap.key missing after write"))
+}
+
+#[cfg(test)]
+mod hmac_tests {
+    use super::hmac_sha256;
+    #[test]
+    fn rfc4231_case_2() {
+        let m = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
+        let h: String = m.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            h,
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod key_tests {
+    use super::load_or_create_key;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn key_is_created_0600_and_reloaded_and_loose_modes_are_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("app-cap.key");
+        let k = load_or_create_key(&p).unwrap();
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
+        assert_eq!(load_or_create_key(&p).unwrap(), k);
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(load_or_create_key(&p).is_err());
+    }
+}

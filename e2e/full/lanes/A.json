@@ -814,7 +814,11 @@
     },
     {
      "do": "expect_text",
-     "text": "Mobile mode"
+     "text": "Phone until"
+    },
+    {
+     "do": "click",
+     "sel": "[data-testid='mobile-mode-chip']"
     },
     {
      "do": "click",

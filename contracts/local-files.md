@@ -32,7 +32,7 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
                                   project file. `orch ticket artifacts-dir <id>` prints and creates the folder, `orch ticket artifacts <id>` lists
                                   it. Ignored with the rest of `tickets/` in a git repo (personal by default); proof (`--file`) may point at them
                                   A person's pasted long text (over 1500 characters) or dropped files also land here: `note.md`, text types
-                                  and pictures only, at most 2 MB each, named by orch (`orch ticket attach`), never a person's path
+                                  and pictures only, at most 25 MB each, named by orch (`orch ticket attach`), never a person's path
   secrets/                        GITIGNORED
     publish.json                  {"url": "https://publish.severin.io", "workspace": "ws_…", "token": "orp_…"}
     relay.json                    {"url": "https://relay.severin.io", "workspace": "ws_…"}: no token; the token lives only in the

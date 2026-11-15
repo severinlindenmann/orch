@@ -18,7 +18,8 @@ test('dash32: a group shows five rows and the rest behind Show all', () => {
   assert.equal(H.limitGroup([1, 2]).more, 0);
   const src = web('ticket.js');
   assert.match(src, /Show all \(/);
-  assert.match(src, /fx-row-chip/);
+  assert.match(src, /class: 'btn outline sm', text: action/); assert.doesNotMatch(src, /fx-row-chip/);
+  assert.match(src, /'Check result'/);
   assert.doesNotMatch(src, /row-action/);
 });
 
@@ -180,4 +181,23 @@ test('dash24: the vendor name is not shown on the helper row or in Results', () 
 
 test('dash33: outside the app the empty state does not link back to the same page', () => {
   assert.match(web('ticket.js'), /INAPP \? h\('div', \{class: 'row'\}, h\('a', \{class: 'btn primary sm', href: '\/#new'/);
+});
+test('UX B: the picker says its list is on Home too, and row actions are 32 px master buttons', () => {
+  const src = web('ticket.js');
+  assert.match(src, /They are on Home too\./);
+  assert.match(src, /\['review', 'Sent back to you', 'Check result'\]/);
+});
+test('UX B2: Focus opens on the next ticket that needs you (oldest question, then oldest result); nothing waiting -> start page', () => {
+  const H = require('../src/orch_focus/web/helpers.js');
+  const rows = [{id:'a', status:'review', updated_at:'2026-11-01T00:00:00Z'}, {id:'b', status:'waiting', updated_at:'2026-11-05T00:00:00Z'},
+    {id:'c', status:'waiting', updated_at:'2026-11-03T00:00:00Z'}, {id:'d', status:'active'}, {id:'e', status:'review', updated_at:'2026-11-02T00:00:00Z'}];
+  assert.deepEqual([H.nextNeeding(rows).ticket.id, H.nextNeeding(rows).hash], ['c', '']);
+  assert.deepEqual([H.nextNeeding(rows.filter(t => t.status !== 'waiting')).ticket.id, H.nextNeeding(rows.filter(t => t.status !== 'waiting')).hash], ['a', '#results']);
+  assert.equal(H.nextNeeding(rows.filter(t => t.status === 'active')), null);
+  assert.equal(H.nextNeeding([]), null);
+  const src = web('ticket.js');
+  assert.match(src, /INAPP \? window\.FocusHelpers\.nextNeeding\(list\) : null/);
+  assert.match(src, /location\.replace\(P \+ '\/t\/'/);
+  assert.match(src, /all=1/); assert.match(src, /See everything on Home/);
+  assert.match(src, /INAPP && \(status === 'waiting' \|\| status === 'review'\)/);
 });

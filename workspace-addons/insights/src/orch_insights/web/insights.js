@@ -29,10 +29,6 @@ async function read(path) {
 }
 
 function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
-function list(names) {
-  if (names.length <= 2) return names.join(' and ');
-  return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
-}
 
 function lastUsed(row) {
   const text = row.last_used || '';
@@ -64,7 +60,7 @@ function showMessage(text) {
 // First day, nothing recorded yet: the same three tiles as the overview, at 0, each saying when it fills.
 function emptyTiles(view) {
   const note = 'Fills after the first helper run';
-  const cards = [['Runs', '0'], ['Skills used', '0'], ['Connected services', String(view.tabs.connections.count)]];
+  const cards = [['Runs', '0'], ['Connected services', String(view.tabs.connections.count)]];
   return cards.map(([label, value]) => {
     const card = node('article', undefined, 'card metric');
     card.append(node('p', label, 'meta'), node('strong', value), node('small', note));
@@ -73,12 +69,9 @@ function emptyTiles(view) {
 }
 
 function fillMetrics() {
-  const skills = (lists.skills && lists.skills.rows) || [];
-  const used = skills.filter(row => row.uses);
   const first = overview.since && (Date.now() - Date.parse(overview.since)) < 31 * 86400000;
   const cards = [
     ['Runs', String(overview.runs), first ? 'First month of data' : 'In the last 30 days'],
-    ['Skills used', String(used.length), used.length ? list(used.map(row => row.name)) : 'None yet'],
     ['Connected services', String(overview.tabs.connections.count),
       overview.tabs.connections.count ? 'Used by your helpers' : 'None connected'],
   ];

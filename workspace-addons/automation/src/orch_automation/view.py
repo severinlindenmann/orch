@@ -40,6 +40,11 @@ def _name(t: dict) -> str:
     return clean(f"{key} · {t['title']}" if isinstance(key, str) and key else t["title"])
 
 
+def _title(t: dict) -> str:
+    """A ticket by its title only (the week strip shows no ticket codes)."""
+    return clean(t["title"])
+
+
 def _dows(field: str) -> set[int] | None:
     out: set[int] = set()
     for part in field.lower().split(","):
@@ -108,7 +113,10 @@ def cron_human(expr: str, tz=None, now: datetime | None = None, local=None) -> s
 def _every(gap: int) -> str:
     if gap <= 60:
         return "Every minute"
-    return f"Every {gap // 3600} h" if gap >= HOUR and gap % HOUR == 0 else f"Every {gap // 60} min"
+    if gap >= HOUR and gap % HOUR == 0:
+        n = gap // HOUR
+        return "Every hour" if n == 1 else f"Every {n} hours"
+    return f"Every {gap // 60} min"
 
 
 def _in(delta: timedelta) -> str:
@@ -173,7 +181,7 @@ def _day_items(
     tickets: list[dict], now: datetime, day_start: datetime, day_end: datetime, today: bool
 ) -> list[dict]:
     """Calendar items for one local day. A repeat more often than hourly is ONE item ("Every 5 min",
-    "next 15:05 · 288 runs/day"); hourly or less shows each time."""
+    "next 15:05 · 288 times a day"); hourly or less shows each time."""
     items: list[tuple[datetime, dict]] = []
     for t in tickets:
         if not scheduled(t):
@@ -184,7 +192,7 @@ def _day_items(
             at = max(until, now)
             if day_start <= at < day_end:
                 items.append(
-                    (at, {"time": at.astimezone().strftime("%H:%M"), "title": _name(t), "link": t["id"]})
+                    (at, {"time": at.astimezone().strftime("%H:%M"), "title": _title(t), "link": t["id"]})
                 )
         cron = _repeats(t)
         if not cron:
@@ -199,14 +207,14 @@ def _day_items(
         ):  # three or more a day: one item with the rhythm, never the same ticket again and again
             first = left[0].astimezone().strftime("%H:%M")
             lead = f"next {first}" if today else (f"from {first}" if first != "00:00" else "")
-            note = " · ".join(x for x in (lead, f"{len(whole)} runs/day") if x)
+            note = " · ".join(x for x in (lead, f"{len(whole)} times a day") if x)
             items.append(
                 (
                     left[0],
                     {
                         "time": first,
                         "every": _every(int(min(gaps))),
-                        "title": _name(t),
+                        "title": _title(t),
                         "note": note,
                         "link": t["id"],
                     },
@@ -214,7 +222,7 @@ def _day_items(
             )
         else:
             items += [
-                (x, {"time": x.astimezone().strftime("%H:%M"), "title": _name(t), "link": t["id"]})
+                (x, {"time": x.astimezone().strftime("%H:%M"), "title": _title(t), "link": t["id"]})
                 for x in left
             ]
     return [i for _, i in sorted(items, key=lambda e: e[0])][:20]
@@ -236,7 +244,7 @@ def _arrival(a: dict) -> dict:
     when = (parse(a.get("at")) or datetime.now(UTC)).astimezone().strftime("%a %H:%M")
     if a.get("type") in ("start", "delegate"):
         chip = (
-            {"label": "Started a run", "tone": "good"}
+            {"label": "Started", "tone": "good"}
             if a.get("allowed")
             else {"label": "Waiting for you", "tone": "warn"}
         )
@@ -305,7 +313,7 @@ def _schedules(
 ) -> list[dict]:
     """`running` False (background work stopped): nothing will start, so a schedule shows Paused, not a countdown.
     `waiting`: ids of schedules that arrived by sync and are not allowed on this computer yet: they offer
-    "Allow on this computer" (the person signs it) instead of Run now."""
+    "Allow on this computer" (the person signs it) instead of Start now."""
     rows = []
     for t in tickets:
         if not scheduled(t) or not (cron := _repeats(t, True)):
@@ -331,7 +339,7 @@ def _schedules(
                         or (f"Started \u00b7 {last.astimezone():%a %H:%M}" if last else "Not yet"),
                     },
                     "link": t["id"],
-                    "subtitle": clean(sched.get("agent") or "The workspace agent", 60),
+                    "subtitle": clean(sched.get("agent") or "Your helper", 60),
                     "toggle": {
                         "on": not paused,
                         "label": clean(t["title"], 40) + " on or off",
@@ -343,7 +351,7 @@ def _schedules(
                             "action": {"op": "addon.allow", "args": {"target": t["id"]}},
                         }
                         if t["id"] in waiting
-                        else {"label": "Run now", "action": _act("run", t["id"])},
+                        else {"label": "Start now", "action": _act("run", t["id"])},
                         {"label": "Edit", "action": {"op": "addon.edit", "args": {"target": t["id"]}}},
                     ],
                 },
@@ -430,8 +438,8 @@ def build(root: Path, now: datetime | None = None) -> dict:
             "columns": [
                 {"key": "schedule", "label": "Schedule", "type": "text"},
                 {"key": "repeats", "label": "Repeats", "type": "text"},
-                {"key": "next", "label": "Next run", "type": "text"},
-                {"key": "last", "label": "Last result", "type": "text"},
+                {"key": "next", "label": "Next time", "type": "text"},
+                {"key": "last", "label": "Last time", "type": "text"},
             ],
             "rows": sched_rows[:20],
             "more": max(0, len(sched_rows) - 20),
@@ -455,7 +463,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
         week = {
             "type": "calendar",
             "title": "Coming up",
-            "meta": f"{span} \u00b7 Workspace time",
+            "meta": span,
             "days": days,
         }
         # the week strip sits above the stable table, and only with two or more schedules (one needs no calendar)
@@ -585,7 +593,10 @@ def build(root: Path, now: datetime | None = None) -> dict:
     if pid:
         nxt = events[0][0] if events else None
         if nxt:  # nothing planned: no row at all (owner sweep 14 Nov)
-            line = f"On. Next: {nxt.astimezone():%A} at {nxt.astimezone():%H:%M}"
+            local = nxt.astimezone()
+            days = (local.date() - now.astimezone().date()).days
+            day = "today" if days == 0 else "tomorrow" if days == 1 else f"{local:%A}"
+            line = f"On. Next: {day} at {local:%H:%M}"
             if ran >= 5:
                 line += f". Ran {ran} times today"
             view.update(notice=line, notice_tone="good")

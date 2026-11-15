@@ -309,7 +309,7 @@ def test_settings_general_panel_holds_look_name_folder_and_share_together():
     end = src.index("panel('agent', ", start)
     part = src[start:end]
     assert part.startswith("panel('general', [") and part.rstrip().endswith("]),")
-    for want in ("OrchLook?.settingsSection()", "'Name'", "'Folder'", "shareCard(settings)"):
+    for want in ("OrchLook?.settingsSection()", "OrchLook?.profileCard()", "'Folder'", "shareCard(settings)"):
         assert want in part, want
     assert (
         "const panel = (id, body) =>" in src[: src.index("function settingsPage")]

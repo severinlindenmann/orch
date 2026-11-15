@@ -68,6 +68,14 @@ def test_attach_checks_content_and_size(proj, run):
     assert ok["name"] == "p.png"
 
 
+def test_attach_takes_20_mb_and_refuses_26_mb_plainly(proj, run):
+    tid = _new(run)
+    r = tickets.attach(proj, tid, "big.txt", b"x" * (20 * 1024 * 1024), "human:t")
+    assert r["size"] == 20 * 1024 * 1024
+    with pytest.raises(Refused, match="at most 25 MB"):
+        tickets.attach(proj, tid, "huge.txt", b"x" * (26 * 1024 * 1024), "human:t")
+
+
 def test_attach_refuses_a_linked_artifacts_folder(proj, run, tmp_path):
     tid = _new(run)
     outside = tmp_path / "outside"

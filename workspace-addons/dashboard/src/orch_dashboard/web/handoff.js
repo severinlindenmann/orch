@@ -75,7 +75,6 @@
     "config.agents_may_finish": function () { return ["Let agents mark tickets Done?"]; },
     "config.permissions": function (p) { return ["Let helpers do more without asking (mode ", plain(p.mode), ")?"]; },
     "config.copy_setup": function () { return ["Run a command whenever a separate copy is made?"]; },
-    "config.workspace_info": function (p) { return ["Change the workspace ", plain(p.setting), "?"]; },
     "config.agent_add": function (p) { return ["Add the helper ", plain(p.name), "? orch will run this command for every task."]; },
     "config.share": function () { return ["Share the orch entry with your team (AGENTS.md)?"]; },
     "look.shared_pages": function (p) { return [p.on ? "Show the workspace name and icon on shared file pages?" : "Stop showing the workspace name and icon on shared file pages?"]; },
@@ -102,7 +101,7 @@
     var f = TEMPLATES[i.op];
     return say(f ? f(p, i) : ["Do something on this computer?"]);
   }
-  var EXACT_LABEL = {"config.agent_add": "Exact values:", "private.allow": "Exact values:", "relay.connect": "Exact address:", "update": "Exact source:", "addon.add_local": "Exact folder:", "group.share_file": "Exact file:", "config.copy_setup": "Exact command:", "config.workspace_info": "Exact text:"};
+  var EXACT_LABEL = {"config.agent_add": "Exact values:", "private.allow": "Exact values:", "relay.connect": "Exact address:", "update": "Exact source:", "addon.add_local": "Exact folder:", "group.share_file": "Exact file:", "config.copy_setup": "Exact command:"};
   function block(label, text) {
     var d = el("div"); d.className = "ho-exact"; d.style.cssText = "flex-basis:100%;margin-top:4px";
     var l = el("div", label, "meta"); l.style.cssText = "font-size:12px;opacity:.75";

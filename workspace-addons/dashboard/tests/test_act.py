@@ -1019,7 +1019,7 @@ def test_big_body_is_allowed_only_for_a_new_ticket(act_server, act_orch):
 def test_body_over_the_hard_cap_is_refused(act_server):
     try:
         status = _post_raw(
-            act_server, {"op": "ticket.new", "args": {"title": "T", "long_text": "y" * (5 * 1024 * 1024)}}
+            act_server, {"op": "ticket.new", "args": {"title": "T", "long_text": "y" * (141 * 1024 * 1024)}}
         )[0]
     except (BrokenPipeError, ConnectionResetError):  # answered before the whole body was sent
         return
@@ -1121,10 +1121,21 @@ def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
         {"title": "T\ud800"},
         {"title": "T", "files": [{"name": "a.md", "text": "x\udc00"}]},
         {"title": "T", "files": [{"name": "tool.exe", "text": "x"}]},
-        {"title": "T", "files": [{"name": "big.txt", "text": "x" * (2 * 1024 * 1024 + 1)}]},
+        {"title": "T", "files": [{"name": "big.txt", "text": "x" * (25 * 1024 * 1024 + 1)}]},
     ):
         assert _post_raw(act_server, {"op": "ticket.new", "args": args})[0] == 400, args
     assert acts(act_orch) == []  # nothing was created
+
+
+def test_a_20_mb_file_is_accepted_and_26_mb_refused_plainly():
+    ok = actions.attachments(
+        "ticket.new", {"title": "T", "files": [{"name": "big.txt", "text": "x" * (20 * 1024 * 1024)}]}
+    )
+    assert len(ok[0][1]) == 20 * 1024 * 1024
+    with pytest.raises(actions.BadRequest, match="over 25 MB. Choose a smaller file"):
+        actions.attachments(
+            "ticket.new", {"title": "T", "files": [{"name": "big.txt", "text": "x" * (26 * 1024 * 1024)}]}
+        )
 
 
 def test_approval_ops_sit_behind_the_origin_fence(act_server, act_orch):
@@ -1285,17 +1296,14 @@ def test_attach_files_to_an_existing_ticket():
         )
 
 
-def test_workspace_set_builds_one_config_set_argv_and_signs_the_text():
-    import hashlib
-
+def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
     argv = actions.build_argv("workspace.set", {"field": "name", "text": " Newsletter "})
     assert argv[:3] == ["config", "set", "workspace.name"] and argv[-2:] == ["--", "Newsletter"]
     assert actions.build_argv("workspace.set", {"field": "description", "text": ""})[-2:] == ["--", ""]
-    sha = hashlib.sha256(b"Newsletter").hexdigest()
-    assert actions.proof_for("workspace.set", {"field": "name", "text": " Newsletter "}) == (
-        "config.workspace_info",
-        "name:" + sha,
-    )
+    assert actions.proof_for("workspace.set", {"field": "name", "text": "x"}) is None
+    assert actions.needs_session("workspace.set") and actions.needs_session(
+        "look.profile"
+    )  # a login, no proof
     for bad in (
         {"field": "other", "text": "x"},
         {"field": "name", "text": "a\nb"},
