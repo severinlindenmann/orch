@@ -93,3 +93,30 @@ def test_refresh_says_the_skill_change_on_stderr(busy, run, capsys):
     skillrender.refresh_skills(busy)
     cap = capsys.readouterr()
     assert cap.out == "" and skillrender.MESSAGE in cap.err
+
+
+# The dashboard reads exactly these (`orch run status <id> --json` for every open ticket, the `run stop` and
+# `run send` answers): the walk skips `run …` (it would start agents); here they run with a fake run record.
+@pytest.mark.parametrize("live", [False, True], ids=["no-run", "run-record"])
+def test_run_status_json_is_json_only(busy, run, new_ticket, live):
+    import os
+
+    from orch import runs
+
+    tid = new_ticket()
+    if live:
+        runs.claim(busy, tid, "agent:scheduler", "claude", pid=os.getpid())
+    code, out, err = run("run", "status", tid, "--json")
+    assert code == 0, err
+    data = json.loads(out)  # nothing but the answer on stdout, even with a skill change waiting
+    assert data["ticket"] == tid and data["running"] is live
+    assert skillrender.MESSAGE not in out
+
+
+def test_run_send_and_stop_json_are_json_only(busy, run, new_ticket):
+    tid = new_ticket()
+    for args in (("run", "send", tid, "hello", "--json"), ("run", "stop", tid, "--json")):
+        code, out, err = run(*args)
+        assert _single_json(out), (args, out[:120])
+        if code == 2 and out.strip():
+            assert "error" in json.loads(out), args
