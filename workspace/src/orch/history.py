@@ -116,7 +116,15 @@ def _digest(kind: str, obj) -> str | None:
         if kind == "steps" and isinstance(obj, dict):
             obj = {k: obj.get(k) for k in _STEP_MARK}
         if kind == "answers" and isinstance(obj, dict):
-            obj = {k: obj.get(k) for k in _ANSWER_MARK}
+            orig, obj = obj, {k: obj.get(k) for k in _ANSWER_MARK}
+            # Review stack (RULE A): bound only when present, so an answer without them keeps its digest;
+            # decision.replaced_by changes later (a newer answer) and is never part of the binding
+            for k in ("decision", "card", "shown"):
+                v = orig.get(k)
+                if k == "decision" and isinstance(v, dict):
+                    v = {a: b for a, b in v.items() if a != "replaced_by"} or None
+                if v is not None:
+                    obj[k] = v
         return hashlib.sha256(_canon([kind, obj]).encode("utf-8")).hexdigest()
     except (TypeError, ValueError, RecursionError):
         return None

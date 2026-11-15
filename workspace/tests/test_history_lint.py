@@ -80,6 +80,10 @@ SHOWN = {
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
     (
+        "workspace/src/orch/review.py",
+        "decisions_block",
+    ): "history.shown_ticket(root, ticket) when root is given",
+    (
         "workspace/src/orch/relay.py",
         "apply_allow_answers",
     ): "t = history.shown_ticket(...); `raw` only for the proof (history.answer_proven)",
