@@ -1,0 +1,4 @@
+[
+  { "v": 1, "at": "2026-11-05T09:12:05Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "tool.start", "text": "Run invoice tests", "data": { "id": "toolu_01U1QBwX", "tool": "Bash", "command": "uv run pytest -q tests/invoices", "source": "adapter" } },
+  { "v": 1, "at": "2026-11-05T09:12:08Z", "run": "r_8k2m", "ticket": "t_inv7c2", "agent": "main", "kind": "tool.end", "text": "48 passed in 3.12s", "data": { "id": "toolu_01U1QBwX", "ok": true, "ms": 3129, "output": "........\n48 passed in 3.12s\n[hidden: a password or secret value]", "source": "adapter" } }
+]
