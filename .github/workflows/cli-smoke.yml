@@ -25,7 +25,7 @@ jobs:
           "ORCH_HOME_STRICT=1" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           $real = Join-Path $h ".orch-tool"
           $snap = if (Test-Path $real) { Get-ChildItem -Recurse -Force $real | ForEach-Object { "$($_.FullName) $($_.Length) $($_.LastWriteTimeUtc.Ticks)" } | Sort-Object } else { @() }
-          $snap | Set-Content "$env:RUNNER_TEMP/orch-tool.before"
+          "" | Set-Content "$env:RUNNER_TEMP/orch-tool.before"; $snap | Add-Content "$env:RUNNER_TEMP/orch-tool.before"
       # ORCH_REPO = this checkout (a local source is honoured on a test install); the installer is the one users run.
       - name: Install with install.ps1
         if: runner.os == 'Windows'
@@ -55,6 +55,6 @@ jobs:
           $h = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
           $real = Join-Path $h ".orch-tool"
           $now = if (Test-Path $real) { Get-ChildItem -Recurse -Force $real | ForEach-Object { "$($_.FullName) $($_.Length) $($_.LastWriteTimeUtc.Ticks)" } | Sort-Object } else { @() }
-          $diff = Compare-Object @(Get-Content "$env:RUNNER_TEMP/orch-tool.before") @($now)
+          $diff = Compare-Object @(Get-Content "$env:RUNNER_TEMP/orch-tool.before" | Where-Object { $_ }) @($now)
           if ($diff) { $diff | Out-String | Write-Host; throw "the smoke changed the real $real" }
           Write-Host "real $real unchanged"
