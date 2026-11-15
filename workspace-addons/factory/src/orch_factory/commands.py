@@ -58,7 +58,7 @@ def idea_act(root, text, by):
     with store.locked():
         ticket = orchcli.call(root, "ticket", "new", _idea_title(text), write=True, by=by)
         store.write(f"drafts/{ticket['id']}/v1.md", text.encode() + b"\n", frozen=True)
-        orchcli.set_ext(root, ticket, by=by, role="order", kind="run", stage="draft", draft=1)
+        orchcli.set_ext(root, ticket, by=by, role="order", kind="run", stage="draft", draft=1, idea_box=True)
     try:  # the agent writes the first real draft; when no agent can start, the idea is still saved
         orchcli.call(root, "run", "start", ticket["id"], write=True, by=by)
         started = True

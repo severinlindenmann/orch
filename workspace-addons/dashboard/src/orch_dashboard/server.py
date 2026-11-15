@@ -814,6 +814,15 @@ class Handler(BaseHTTPRequestHandler):
                     "addon": str((body.get("args") or {}).get("addon"))[:32],
                     "answer": extra,
                 }
+        if body.get("op") == "run.send" and isinstance(extra, dict):
+            # what orch did with the person's message: delivered to the agent now, or queued for it (an id). The
+            # embedded Factory page says "Sent" only on one of these, never on a bare 200.
+            sid, dlv, st = extra.get("id"), extra.get("delivered"), extra.get("state")
+            state["send_result"] = {
+                "id": sid[:64] if isinstance(sid, str) and sid else None,
+                "delivered": dlv if type(dlv) is int and dlv > 0 else 0,
+                "state": st[:20] if isinstance(st, str) else None,
+            }
         if body.get("op") in BIG_OPS and isinstance(extra, dict) and isinstance(extra.get("attached"), dict):
             att = extra["attached"]  # which files were kept with the new ticket (names are orch's own)
             state["attached"] = {

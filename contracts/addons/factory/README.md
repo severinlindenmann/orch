@@ -103,14 +103,18 @@ the page keeps the text and offers *Send it to your helper in Chat instead* (`or
 
 **Plan the run / Ask for changes (drafts).** A draft no agent works on (`phase: "draft"`, `working: false`; order summaries
 also carry `draft_v`, the newest version) shows *Plan the run* and *Ask for changes* on the draft page, on the order page and
-under *Drafts waiting for you* on Factory home. `working` is core's Working status, except for a draft: there it is false
+under *Drafts waiting for you* on Factory home. A draft waits only when `agent_draft` is true: the newest version is the agent's (an idea-box order, `ext.factory.idea_box`,
+starts with the person's words as v1, so it needs v2 or later; an order an agent filed counts from v1). `working` is core's
+Working status, except for a draft: there it is false
 when no run is on the ticket, or when its LIVE session's turn ended (`orch run status` claim `live.state` `idle` or
 `attention`), so the draft waits for you right after the helper's turn; the message then goes into that same session. Inside the dashboard they post `{type: "orch.send", id, ticket, text}` (text: `Now plan
 the run: …` or `Change the draft: <the person's words>`, at most 1000 characters typed). The dashboard accepts it only from the
 embedded shipped add-on iframe of its own origin and only for a ticket that carries that add-on's data (`ext.<add-on>`),
 keeps line breaks but drops control, bidi and zero-width characters (at most 2000 characters), sends the text with its own
 op `run.send` (the person's message, proven like writing to the agent on the ticket page) and, when no agent works on the
-ticket, `run.start`. It answers `{type: "orch.send.done", id, ticket, started}` or `{type: "orch.send.failed", id, error}`;
+ticket, `run.start`. The dashboard's `/api/act` reply to `run.send` carries `send_result: {id, delivered, state}` (what orch did); the
+dashboard answers done only when orch delivered the words (`delivered` > 0) or queued them (an `id`), else failed. It
+answers `{type: "orch.send.done", id, ticket, delivered, queued, started}` (the page says *Sent* or *Saved*) or `{type: "orch.send.failed", id, error}`;
 one at a time. Outside the dashboard the page shows a link to the ticket instead.
 
 | GET | Answer (JSON) |

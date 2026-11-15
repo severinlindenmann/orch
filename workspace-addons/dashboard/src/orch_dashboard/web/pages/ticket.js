@@ -1658,9 +1658,14 @@ async function sendEmbedMessage(req) {
   try {
     const sent = await act('run.send', {ticket:req.ticket, text:req.text});
     if (!sent.ok) return reply({type:'orch.send.failed', error:String(sent.text || '').slice(0, 300)});
+    // orch says what it did: delivered to the agent now, or queued for it (an id). Anything else was not saved.
+    const r = sent.state?.send_result;
+    const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
+    const queued = !!r && typeof r.id === 'string' && r.id !== '';
+    if (!delivered && !queued) return reply({type:'orch.send.failed', error:'orch did not confirm that your message was saved. Nothing was sent.'});
     const working = ticketOf(req.ticket)?.status === 'active';
     const started = working ? null : await act('run.start', {ticket:req.ticket});
-    reply({type:'orch.send.done', ticket:req.ticket, started:!!started?.ok});
+    reply({type:'orch.send.done', ticket:req.ticket, delivered, queued, started:!!started?.ok});
   } finally { embedSendBusy = false; }
 }
 addEventListener('message', e => { const req = embedSendRequest(e); if (req) sendEmbedMessage(req); });
