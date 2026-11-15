@@ -100,6 +100,7 @@ def update_info() -> dict:
 
         data = dict(updateinfo.info())
         data["source"] = f"{addons.repo()} ({addons.ref()})"[:200]
+        data["ref"] = addons.ref()[:100]
         return data
     except Exception:  # noqa: BLE001 - never an error page for a version line
         return {}
