@@ -541,6 +541,9 @@ def log_send_failure(root: Path, what: str, why: object) -> None:
         "relay.send_failed", "warn", root=root, what=" ".join(str(what).split()), reason=reason,
         why=" ".join(str(why).split()),
     )  # fmt: skip
+    from orch import diag_incident
+
+    diag_incident.note_failure(root, f"{what}:{reason}")  # the same failure a third time freezes an incident
 
 
 def outbox_list(root: Path) -> list[dict]:

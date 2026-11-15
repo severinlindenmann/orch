@@ -833,6 +833,11 @@ def settle_orphan(root: Path, tid: str, at: float | None = None) -> bool:
             return False
         if at - _parse(t["updated_at"]) < ORPHAN_GRACE_SECONDS:
             return False
+        from orch import diag_incident
+
+        diag_incident.capture(
+            root, "orphan_ticket", ticket=tid, fingerprint=tid, now=at
+        )  # the evidence, BEFORE recovery
         return settle(root, tid, "orch", ignore_input=True)
     except Exception as e:  # noqa: BLE001 - never fails `orch run status`, but is never silent either
         why = f"{e.__class__.__name__}: {e}"
@@ -967,6 +972,11 @@ def check_start_timeout(root: Path, tid: str, at: float | None = None) -> str | 
             cur = read(root, tid)
             if not cur or cur["run"] != rec["run"] or not _stuck(cur, at):
                 return None
+            from orch import diag_incident
+
+            diag_incident.capture(
+                root, "start_failed", ticket=tid, run=rec["run"], fingerprint=text
+            )  # before the claim goes
             _release_locked(root, tid, cur)
         runhooks.fire("run_end", root=root, tid=tid, run=rec["run"], by=rec["by"])
         _stop_leftovers(root, tid, rec)  # only after the claim is really gone
