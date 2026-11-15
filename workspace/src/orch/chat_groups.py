@@ -2363,16 +2363,34 @@ def note_answer_kept(root: Path, asked: dict, m: dict) -> None:
 
 
 def note_answer_refused(root: Path, asked: dict, m: dict, why: str) -> None:
-    """A member's answer to our question was refused: say so in the ticket's history (no silent drop). Only
-    while the question is open; text is cut and cleaned."""
+    """A member's answer to our question was refused. A real, current member within its rate limit, for a
+    still open question: one line in the ticket's history (once per question and sender). Anybody else (not a
+    member, closed group, over the rate limit, unknown question): the debug log only, never the ticket."""
+    from orch import diag
+
+    frm = str(m.get("from"))
+    short = clean_untrusted(why, 200)
     with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
-        t = tickets.load(root, asked["ticket"])
-        q = next(x for x in t["questions"] if x["id"] == asked["question_id"])
-        if q.get("answer") is not None:
+        g = _load(root)["hosted"].get(asked.get("group"))
+        ok = g is not None and not g["closed"] and frm in _active(g)
+        if ok:  # the member rate limit comes before any ticket write
+            ok = _host_ctx(g)["host_state"]["last_minute"].get(frm, {}).get("msgs", 0) < RATE["msgs_per_min"]
+        q = next(
+            (x for x in tickets.load(root, asked["ticket"])["questions"] if x["id"] == asked["question_id"]),
+            None,
+        )
+        if not ok or q is None or q.get("answer") is not None:
+            diag.log("relay.group_answer_refused", "warn", root=root, frm=frm, why=short)
             return
-        who = f"agent:{_line(m['from'], 60)}"
-        line = f"Answer to {asked['question_id']} not applied: {clean_untrusted(why, 200)}"
-        tickets.apply_op(root, asked["ticket"], lambda t: tickets.add_history(t, who, line, "relay"), by=who)
+        who = "agent:relay"
+        line = f"Answer from {_line(frm, 60)} to {_line(str(asked['question_id']), 20)} not applied: {short}"
+
+        def add(t):
+            if any(h.get("text") == line for h in t.get("history", [])):  # once per question and sender
+                return
+            tickets.add_history(t, who, line, "relay")
+
+        tickets.apply_op(root, asked["ticket"], add, by=who)
 
 
 def on_allow(root: Path, m: dict) -> None:

@@ -1421,7 +1421,6 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
     asked, why = _answer_asked(root, msg)
     if not asked:
-        _note_group_refusal(root, msg, why)
         return why, None
     if not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # first: kind, round, digest provably ours
         _note_group_refusal(root, msg, f"not applied: {QUESTION_UNCHECKABLE}", asked)
@@ -2458,8 +2457,12 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
                 typ in ("answer", "allow") or typ == "text" and str(m.get("from", "")).startswith("ph_")
             ):
                 continue  # another reader handled it meanwhile
-        except (KeyError, TypeError) as e:
-            note = f"could not read this message: {e}"
+        except (KeyError, TypeError, StopIteration, ValueError) as e:
+            # one bad message never blocks the queue: it is marked seen with a note, not handled again
+            note, auto = f"could not read this message: {clean_untrusted(str(e), 200)}", True
+            with contextlib.suppress(Refused, OSError, KeyError, TypeError):
+                with locked(root):
+                    _mark_seen(root, m["id"])
         out.append(
             {
                 "message": m,

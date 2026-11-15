@@ -2927,4 +2927,44 @@ def test_refused_group_answer_is_visible_in_the_ticket(proj, run, rel, host, mon
     assert "not applied" in out[0]["note"]
     t = tickets.load(proj, host)
     assert t["questions"][0]["answer"] is None
-    assert any("not applied" in h["text"] and "Answer to q1" in h["text"] for h in t["history"])
+    assert any("not applied" in h["text"] and " to q1 not applied" in h["text"] for h in t["history"])
+
+
+def test_refused_answer_for_a_vanished_question_is_not_a_poison_message(proj, run, rel, host, monkeypatch):
+    import json
+
+    from orch import relay
+
+    monkeypatch.setattr(relay, "asked_mac_ok", lambda *a, **k: False)
+    tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
+    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
+    qm = sent(rel, type="question")[0]
+    path = tickets.ticket_path(proj, host)
+    raw = json.loads(path.read_text())
+    raw["questions"] = []
+    path.write_text(json.dumps(raw))
+    ans = _answer_msg(qm, "anspo")
+    inbox(run, rel, ans)  # must not raise
+    assert ans["id"] in relay.seen(proj)  # handled once, never again
+
+
+def test_refused_answer_history_note_only_for_a_member_and_only_once(proj, run, rel, host, monkeypatch):
+    from orch import relay
+
+    monkeypatch.setattr(relay, "asked_mac_ok", lambda *a, **k: False)
+    tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
+    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
+    qm = sent(rel, type="question")[0]
+    inbox(run, rel, _answer_msg(qm, "ansn1"))
+    inbox(run, rel, _answer_msg(qm, "ansn2"))  # the same refusal again: no second line
+    lines = [h for h in tickets.load(proj, host)["history"] if "not applied" in h["text"]]
+    assert len(lines) == 1
+    # a removed member: debug log only, nothing in the ticket
+    monkeypatch.setattr(tickets, "require_human", lambda *a, **k: None)
+    run("relay", "group", "remove", host, "Home")
+    before = len(tickets.load(proj, host)["history"])
+    inbox(run, rel, _answer_msg(qm, "ansn3"))
+    assert not any(
+        "ansn3" in h["text"] or "not applied" in h["text"]
+        for h in tickets.load(proj, host)["history"][before:]
+    )
