@@ -192,3 +192,60 @@ def test_load_state_with_100_tickets_in_review_makes_at_most_two_git_calls(tmp_p
         assert len(rows) == 100
         git_calls = [a for a in calls if "git" in str(a[0])]
         assert len(git_calls) == most, (mode, len(git_calls))
+
+
+def test_copy_review_runs_again_only_when_head_or_the_tip_moved(tmp_path, monkeypatch):
+    """#561: every state load ran `copy review` per waiting ticket; now once per (HEAD, copy tip)."""
+    import subprocess
+
+    data._REVIEW_CACHE.clear()
+    shas = {"head": "1" * 40, "tip": "a" * 40}
+    runs = []
+
+    def fake_git(argv, **kw):
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{shas['head']}\n{shas['tip']}\n", stderr="")
+
+    def core(binary, args, root):
+        runs.append(args)
+        return {"tip": shas["tip"], "control_paths": 1, "paths_hash": "12345678"}
+
+    monkeypatch.setattr(data, "_run", fake_git)
+    monkeypatch.setattr(data, "run_orch", core)
+    first = data._copy_review("orch", tmp_path, "t_abcdef")
+    first["control_paths"] = 99  # a caller changing its copy never poisons the cache
+    again = data._copy_review("orch", tmp_path, "t_abcdef")
+    assert again["control_paths"] == 1 and len(runs) == 1
+    shas["tip"] = "b" * 40  # the copy's tip moved
+    assert data._copy_review("orch", tmp_path, "t_abcdef")["tip"] == "b" * 40 and len(runs) == 2
+    shas["head"] = "2" * 40  # the project moved
+    data._copy_review("orch", tmp_path, "t_abcdef")
+    assert len(runs) == 3
+    # a result for another tip than the key is never cached
+    shas["tip"] = "c" * 40
+    monkeypatch.setattr(data, "run_orch", lambda *a: runs.append(a) or {"tip": "d" * 40})
+    data._copy_review("orch", tmp_path, "t_abcdef")
+    data._copy_review("orch", tmp_path, "t_abcdef")
+    assert len(runs) == 5
+    # HEAD or tip unreadable: no cache at all
+    monkeypatch.setattr(data, "_run", lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", ""))
+    data._copy_review("orch", tmp_path, "t_abcdef")
+    data._copy_review("orch", tmp_path, "t_abcdef")
+    assert len(runs) == 7
+
+
+def test_copy_review_cache_is_bounded(tmp_path, monkeypatch):
+    import subprocess
+
+    data._REVIEW_CACHE.clear()
+    n = iter(range(1000))
+    cur = {}
+
+    def fake_git(argv, **kw):
+        cur["tip"] = f"{next(n):040x}"
+        return subprocess.CompletedProcess(argv, 0, stdout="1" * 40 + "\n" + cur["tip"] + "\n", stderr="")
+
+    monkeypatch.setattr(data, "_run", fake_git)
+    monkeypatch.setattr(data, "run_orch", lambda *a: {"tip": cur["tip"]})
+    for _ in range(100):
+        data._copy_review("orch", tmp_path, "t_abcdef")
+    assert len(data._REVIEW_CACHE) == data._REVIEW_CACHE_MAX
