@@ -1,6 +1,6 @@
 """The command and the last lines of a shell step's output, for the Earlier steps block (#692.1).
 
-One helper for every reader (the record feed, the Claude transcript reader): line breaks kept, at most 40 lines and
+One helper for every reader (the record feed and the transcript reader): line breaks kept, at most 40 lines and
 4000 characters, every line the shared secret scanner (`orch.secretscan`, the one `orch secret scan`, relay and
 publish use) flags replaced by `[hidden: <kind>]`, then the event log's own redaction. Never a second pattern list.
 """
