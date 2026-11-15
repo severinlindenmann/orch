@@ -367,7 +367,7 @@ function copyLine(t) {
 const surface = via => clean(via === 'cli' ? 'terminal' : via);
 function proofLabel(ev) {
   const kind = ev.type || ev.kind;
-  let label = ev.title || ev.text || String(ev.ref || '').split(/[\\/]/).pop() || 'Proof';
+  let label = ev.title || ev.text || String(ev.ref || '').split(/[\\/]/).pop() || 'Evidence';
   if (kind === 'pr') {
     const number = ev.number || /(?:pull\/|#|^)(\d+)\b/.exec(String(ev.ref || ev.text || ''))?.[1];
     label = number ? 'PR #' + number : 'PR';
