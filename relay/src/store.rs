@@ -189,11 +189,18 @@ pub fn insert_message(
     msg: &Value,
     digest: &str,
 ) -> rusqlite::Result<()> {
+    let nested = !c.is_autocommit(); // inside a caller's transaction: never end it here
     c.execute_batch("SAVEPOINT insert_message")?;
     match insert_message_rows(c, key, msg, digest) {
         Ok(()) => c.execute_batch("RELEASE insert_message"),
         Err(e) => {
-            let _ = c.execute_batch("ROLLBACK TO insert_message; RELEASE insert_message");
+            // ROLLBACK TO and RELEASE run one by one: when either fails and this savepoint opened the transaction,
+            // end it, so the shared connection never stays inside an open transaction holding the write lock.
+            let undone = c.execute_batch("ROLLBACK TO insert_message").is_ok()
+                && c.execute_batch("RELEASE insert_message").is_ok();
+            if !undone && !nested && !c.is_autocommit() {
+                let _ = c.execute_batch("ROLLBACK");
+            }
             Err(e)
         }
     }

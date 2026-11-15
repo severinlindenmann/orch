@@ -456,12 +456,6 @@ fn check_review_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -> 
     let q = get_msg(c, rid)?
         .filter(|q| q.from == sender && q.typ == "question")
         .ok_or_else(|| not_found("The message you reply to does not exist."))?;
-    // Only a question sent to `phones` can be taken back (the sender owns it, so no id is probed here).
-    if q.to != "phones" {
-        return Err(not_allowed(
-            "Only a question sent to the phones can be taken back.",
-        ));
-    }
     let (qbody, qextra) = open_payload(key, &q);
     if qbody.get("digest").is_none() {
         return Err(not_allowed("That is not one of your review questions."));
