@@ -72,8 +72,8 @@ test('DM refresh reads contacts and only the open thread (the server imports fir
   for (let i = 0; i < 20; i++) c.chatDmRoute();
   assert.equal(calls.length, 2);
   assert.equal(timers.length, 1);
-  assert.equal(timers[0].delay, 5000);
-  now += 5000;
+  assert.equal(timers[0].delay, 2000);
+  now += 2000;
   timers[0].fn();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.length, 4);
