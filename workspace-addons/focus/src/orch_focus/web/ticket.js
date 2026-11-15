@@ -112,7 +112,9 @@
     /* a fixed list: what does not apply now is greyed out, never removed; desktop-only rows hide on a phone */
     const menuRow = (action, icon, label, cls) => h('button', {type: 'button', 'data-act': action, class: cls || null}, h('span', {icon}), h('span', {text: label}));
     els.fresh = menuRow('fresh', 'plus', 'Start fresh instead', 'fx-risky');
-    els.attachBtn = menuRow('attach', 'external', 'Open live session');
+    els.attachBtn = menuRow('attach', 'external', 'Helper’s screen in a terminal');
+    els.interruptBtn = menuRow('interrupt', 'pause', 'Interrupt now');
+    els.interruptBtn.title = 'Stop what the helper is doing and read the message in the box now';
     els.full = menuRow('full', 'expand', 'Full screen', 'fx-desktop');
     els.full.setAttribute('aria-pressed', 'false');
     els.helpBtn = menuRow('help', 'text', 'Keyboard shortcuts', 'fx-desktop');
@@ -121,7 +123,7 @@
     els.copyBtn = h('button', {class: 'btn ghost sm fx-desktop', type: 'button', 'data-act': 'copy', text: 'Copy link'});
     els.moreBtn = h('button', {class: 'btn ghost icon sm', type: 'button', icon: 'more', 'aria-label': 'More actions', 'aria-expanded': 'false', 'aria-controls': 'fx-action-menu'});
     els.menu = h('div', {class: 'fx-popover fx-action-menu', id: 'fx-action-menu', hidden: true}, INAPP ? null : els.full, els.helpBtn,
-      els.attachBtn, h('hr', {class: 'fx-menu-divider'}), els.fresh);
+      els.attachBtn, els.interruptBtn, h('hr', {class: 'fx-menu-divider'}), els.fresh);
     els.more = h('div', {class: 'fx-more'}, els.moreBtn, els.menu);
     els.session = h('section', {class: 'fx-popover fx-session', id: 'fx-session', role: 'dialog', 'aria-labelledby': 'fx-session-title', tabindex: '-1', hidden: true});
     els.liveWrap = h('div', {class: 'fx-live-wrap'}, els.live, els.session);
@@ -175,7 +177,7 @@
     els.review = h('div', {class: 'fx-review', hidden: true}, h('div', {}, h('p', {text: 'Finished. Looks good?'}), h('p', {class: 'meta', text: 'Next step · Check result'})),
       h('button', {class: 'btn', 'data-act': 'changes', text: 'Send back'}), h('button', {class: 'btn primary', 'data-act': 'done', text: 'Looks good'}));
     els.complete = h('div', {class: 'fx-review', hidden: true}, h('p', {text: 'You’re all set here.'}));
-    const stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, els.paneFiles, els.paneUsed, compose, els.review, els.complete, els.help);
+    const stage = els.stage = h('section', {class: 'fx-stage', 'aria-label': 'Ticket activity'}, h('div', {class: 'fx-stage-h', role: 'tablist', 'aria-label': 'Focus views'}, els.tabs, h('span', {class: 'grow'}), els.sub), h('div', {class: 'fx-scan', 'aria-hidden': 'true'}), els.attachBox, els.paneLive, els.paneProof, els.paneFiles, els.paneUsed, compose, els.review, els.complete, els.help);
     if (INAPP) { buildShell(top, stepbar, rail, stage); return; }
     root.replaceChildren(top, stepbar, els.trace, h('div', {class: 'fx-body'}, rail, stage, els.human));
     els.stopIc.innerHTML = ic('pause');

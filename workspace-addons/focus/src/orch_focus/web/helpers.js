@@ -78,7 +78,7 @@
   function sessionState(v) {
     const t = v.ticket || {}, run = v.run || {};
     if (v.state === 'done') return {key: 'finished', pill: 'Done', headline: 'Work completed', active: false};
-    if ((t.questions || []).some(q => q.answer == null)) return {key: 'waiting-for-you', pill: 'Needs you', headline: 'Before the question', active: false};
+    if ((t.questions || []).some(q => q.answer == null)) return {key: 'waiting-for-you', pill: 'Needs you', headline: '', active: false};
     if (v.state === 'needs') return {key: 'waiting-for-you', pill: 'Needs you', headline: run.running === true ? 'The work is taking shape' : 'Work so far', active: run.running === true};
     if (v.state === 'working') return {key: 'running', pill: 'Working', headline: 'The work is taking shape', active: true};
     if (v.state === 'waiting') return {key: 'paused', pill: 'Paused', headline: 'Paused', active: false};
