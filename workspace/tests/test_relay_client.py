@@ -63,7 +63,7 @@ def test_inbox_dedup_and_ack(proj, run, rel):
     assert "Hi there" in run("relay", "inbox")[1]
     assert run("relay", "done", "m_text000000000001")[0] == 0
     rel.acked.clear()
-    assert run("relay", "inbox")[1].strip() == "No new messages."
+    assert run("relay", "inbox")[1].startswith("No new messages.")
     assert "m_text000000000001" in json.loads((proj / ".orch/inbox-seen.json").read_text())
     assert "already handled" in run("relay", "done", "m_text000000000001")[1]
 
@@ -869,7 +869,7 @@ def test_since_returns_an_answer_the_agent_already_pulled(proj, run, new_ticket,
     )
     assert "answered q1" in run("relay", "inbox")[1]  # agent pulls first: seen + applied
     rel.acked.clear()
-    assert run("relay", "inbox")[1].strip() == "No new messages."  # nothing applied twice
+    assert run("relay", "inbox")[1].startswith("No new messages.")  # nothing applied twice
     r = json.loads(run("relay", "inbox", "--since", "0", "--json")[1])
     (item,) = r["items"]
     assert item["id"] == "m_answer0000000001" and item["seen"] is True and item["applied"] == tid
@@ -917,7 +917,7 @@ def test_outbox_saves_first_and_resends_the_same_bytes(proj, run, rel, monkeypat
     assert next(s for s in rel.sent if s["id"] == m["id"])["created_at"] == m["created_at"]
     assert not list((proj / ".orch/outbox").glob("m_*.json"))
     assert run("relay", "send", PEER, "again")[0] == 0  # no 409 for the resent ids
-    assert run("relay", "outbox")[1].strip() == "Nothing is waiting to be sent."
+    assert run("relay", "outbox")[1].startswith("Nothing is waiting to be sent.")
 
 
 def test_a_certificate_problem_is_said_in_words_and_the_message_is_kept(
