@@ -94,8 +94,9 @@
       "type": "object", "required": ["question_message_id", "answer"],
       "properties": {
         "question_message_id": { "$ref": "#/$defs/msg_id" },
-        "answer": { "type": "string", "minLength": 1 },
-        "client_id": { "$ref": "#/$defs/client_id" }
+        "answer": { "type": "string", "minLength": 1, "description": "The answer text. With verdict: the phone's own one plain line for the swipe (Use C, Send back for changes: ...), shown to old readers only; the workspace decides from verdict alone." },
+        "client_id": { "$ref": "#/$defs/client_id" },
+        "verdict": { "$ref": "https://orch.severin.io/contracts/message.schema.json#/$defs/verdict", "description": "Optional (Review stack, relay-api.md Review cards on the phone): the swipe on a question whose body has digest (a card or a review question). The relay refuses it (422) on any other question, when verdict.digest differs from the question's digest, over 8192 bytes as compact JSON, or when a voice blob_id is not an upload of this phone (404); else it copies it as is to the answer body." }
       }
     },
     "answer_response": { "$ref": "#/$defs/send_response" },

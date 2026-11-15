@@ -5,7 +5,7 @@ phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (ve
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
 Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
-With kinds (activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal, diag) only those draft-02 checks run.
+With kinds (review-card, activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal, diag) only those draft-02 checks run.
 """
 import base64
 import hashlib
@@ -1811,8 +1811,153 @@ def kind_diag():
         _expect(f"diag event name {c['ev']!r}", bool(name.fullmatch(c["ev"])), c["valid"])
 
 
+# --- review cards on the phone (relay-api.md "Review cards on the phone") --------------------------------------------
+RC_CARD_MAX, RC_VERDICT_MAX, RC_FILES_MAX = 65536, 8192, 20 * 1024 * 1024
+RC_RESULT_TEXT = {"applied": "Got it", "changed": "This changed. Look at it again", "decided": "Already decided",
+                  ("refused", "needs_signature"): "Needs your signature on the computer"}
+
+
+def _rc_bytes(o):
+    return len(json.dumps(o, separators=(",", ":"), ensure_ascii=False).encode())
+
+
+def _rc_srcs(pv):
+    """Every card_src in a wire preview (leaf src, compare sides, option previews)."""
+    if not isinstance(pv, dict):
+        return []
+    out = [pv["src"]] if isinstance(pv.get("src"), dict) else []
+    for side in ("before", "after"):
+        out += _rc_srcs(pv.get(side))
+    for o in pv.get("options") or []:
+        out += _rc_srcs(o.get("preview"))
+    return out
+
+
+def _rc_tables(pv):
+    if not isinstance(pv, dict):
+        return []
+    out = [pv] if pv.get("type") == "table" else []
+    for side in ("before", "after"):
+        out += _rc_tables(pv.get(side))
+    for o in pv.get("options") or []:
+        out += _rc_tables(o.get("preview"))
+    return out
+
+
+def rc_relay_question(msg, blobs, vmsg):
+    """Reference intake of a question with a card: (status, error)."""
+    if _msgs(vmsg, msg):
+        return 422, "invalid"
+    b = msg["body"]
+    card, files = b.get("card"), b.get("card_files") or []
+    if card is None:
+        return 201, None
+    if _rc_bytes(card) > RC_CARD_MAX:
+        return 422, "invalid"
+    pv = card.get("preview") or {}
+    ids = [o["id"] for o in pv.get("options") or []]
+    if len(ids) != len(set(ids)):
+        return 422, "invalid"
+    if any(len(r) != len(t["cols"]) for t in _rc_tables(pv) for r in t["rows"]):
+        return 422, "invalid"
+    if any(s.get("file") is not None and s["file"] >= len(files) for s in _rc_srcs(pv)):
+        return 422, "invalid"
+    for f in files:
+        st = blobs.get(f["blob_id"])
+        if st is None or st["uploader"] != msg["from"]:
+            return 404, "not_found"
+        if st["size"] != f["size"] or st["sha256"] != f["sha256"]:
+            return 422, "invalid"
+    if sum(f["size"] for f in files) > RC_FILES_MAX:
+        return 422, "invalid"
+    return 201, None
+
+
+def rc_relay_answer(req, phone, paired, questions, answered, blobs, vreq):
+    """Reference POST /v1/phone/answer for the verdict rules: (status, error)."""
+    if _msgs(vreq, req):
+        return 422, "invalid"
+    q = questions.get(req["question_message_id"])
+    if q is None or q["from"] not in paired.get(phone, {}).get("workspaces", []) or q["to"] not in ("phones", phone):
+        return 404, "not_found"
+    if q["id"] in answered:
+        return 409, "already_answered"
+    v = req.get("verdict")
+    if v is not None:
+        if "digest" not in q["body"] or v["digest"] != q["body"]["digest"] or _rc_bytes(v) > RC_VERDICT_MAX:
+            return 422, "invalid"
+        for vo in ((v.get("note") or {}).get("words") or {}).get("voice") or []:
+            st = blobs.get(vo["blob_id"])
+            if st is None or st["uploader"] != phone:
+                return 404, "not_found"
+    return 201, None
+
+
+def kind_review_card():
+    vm, vreq, vverdict = _w("message"), _w("phone-api", "answer_request"), _w("message", "verdict")
+    vec = _vec("review-card-v1.json")
+    for s in vec["question_shapes"] + vec["review_result_shapes"]:
+        _expect(f"review-card shape {s['name']}", not _msgs(vm, s["message"]), s["schema"])
+    for s in vec["answer_requests"]:
+        _expect(f"review-card answer_request {s['name']}", not _msgs(vreq, s["request"]), s["schema"])
+    ra = vec["relay_answer"]
+    _expect("review-card relay_answer valid", _msgs(vm, ra["message"]), [])
+    _expect("review-card relay_answer verdict copied", ra["message"]["body"]["verdict"], ra["request"]["verdict"])
+    for q in vec["stored_questions"]:
+        hit = next(s["message"] for s in vec["question_shapes"] if s["message"]["body"].get("question_id") == q["id"])
+        sent = {k: q.get(k) for k in ("id", "text", "options", "kind", "action", "recommended")}
+        sent.update({k: q[k] for k in ("card", "shown") if q.get(k) is not None})
+        dg = hashlib.sha256(json.dumps(sent, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        _expect(f"review-card digest {q['id']}", (hit["body"]["digest"], vec["digests"][q["id"]]), (dg, dg))
+    rl = vec["relay"]
+    questions = {m["id"]: m for m in [s["message"] for s in vec["question_shapes"][:3]] + [rl["plain_question"]]}
+    answered = set()
+    for c in rl["cases"]:
+        if c["call"] == "POST /v1/messages" and c["body"].get("type") == "question":
+            got = rc_relay_question(c["body"], rl["blobs"], vm)
+            if c["name"] == "question-files-over-20mb":  # the vector's note: blobs of these ids are 8 MB each
+                big = {**rl["blobs"], **{f["blob_id"]: {**rl["blobs"][f["blob_id"]], "size": f["size"]} for f in c["body"]["body"]["card_files"]}}
+                got = rc_relay_question(c["body"], big, vm)
+            _expect(f"review-card relay {c['name']}", list(got), [c["status"], c.get("error")])
+        elif c["call"] == "POST /v1/phone/answer":
+            got = rc_relay_answer(c["body"], c["as"], rl["paired"], questions, answered, rl["blobs"], vreq)
+            _expect(f"review-card relay {c['name']}", list(got), [c["status"], c.get("error")])
+            if got[0] == 201:
+                answered.add(c["body"]["question_message_id"])
+        elif c["call"] == "POST /v1/messages":  # a review_result: the schema part of the relay rules
+            schema_ok = not _msgs(vm, c["body"])
+            _expect(f"review-card relay {c['name']} schema", schema_ok, c["status"] != 422 or c["name"] == "result-ticket-differs")
+    for c in vec["workspace"]:
+        r = c["expect"].get("review_result")
+        if r is not None:
+            key = (r["result"], r.get("reason")) if r["result"] == "refused" else r["result"]
+            text = RC_RESULT_TEXT.get(key, "Couldn't use your answer")
+            m = {"schema": "orch.msg/1", "id": "m_wsres00000000001", "from": vec["workspace_id"], "to": c["from"], "type": "text",
+                 "created_at": "2026-11-15T09:02:00Z", "ticket": vec["ticket"], "reply_to": "m_card000000000004", "body": {"text": text, "review_result": r}}
+            for e in _msgs(vm, m):
+                fails.append(f"review-card workspace {c['name']}: review_result not valid: {e}")
+        if "verdict" in c["body"]:
+            for e in _msgs(vverdict, c["body"]["verdict"]):
+                fails.append(f"review-card workspace {c['name']}: verdict not valid: {e}")
+    rq = _vec("review-question-v1.json")
+    _expect("review-question question (old)", _msgs(vm, rq["question"]), [])
+    _expect("review-question question_with_digest", _msgs(vm, rq["question_with_digest"]), [])
+    for c in rq["verdict_cases"]:
+        for e in _msgs(vverdict, c["verdict"]):
+            fails.append(f"review-question verdict_cases {c['name']}: {e}")
+        if c["result"] is not None:
+            r = c["result"]
+            key = (r["result"], r.get("reason")) if r["result"] == "refused" else r["result"]
+            m = {"schema": "orch.msg/1", "id": "m_wsres00000000002", "from": rq["question"]["from"], "to": "ph_iphone0001", "type": "text",
+                 "created_at": "2026-11-15T09:02:00Z", "ticket": rq["question"]["ticket"], "reply_to": rq["question_with_digest"]["id"],
+                 "body": {"text": RC_RESULT_TEXT.get(key, "Couldn't use your answer"), "review_result": r}}
+            for e in _msgs(vm, m):
+                fails.append(f"review-question verdict_cases {c['name']}: result not valid: {e}")
+
+
 # --- dispatch (keep last in this block) ------------------------------------------------------------------------------
 KINDS = {
+    "review-card": kind_review_card,
     "activity": kind_activity,
     "secrets": kind_secrets,
     "jobs": kind_jobs,
