@@ -564,7 +564,7 @@ function settingsPage() {
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       wsField('name', 'Name', settings.ws_name || state.workspace, settings, 'The name shown for this workspace. Your folder keeps its own name.'),
-      wsField('description', 'Description', settings.ws_description, settings, 'One short line about what this workspace is for.'),
+      wsField('description', 'About', settings.ws_description, settings, 'One short line about what this workspace is for. Shown here only; the Description under Appearance goes to your phone and shared pages.'),
       // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),
