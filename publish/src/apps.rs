@@ -789,12 +789,14 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
     } else {
         app
     };
-    if !st.runner.is_alive(&app.name) {
+    // route to the port of THIS app's live process, not the port in a row read before (stale after a
+    // redeploy or a wake): a request can never reach another app's process
+    let Some(port) = st.runner.live_port(&app.name) else {
         return offline_page();
-    }
+    };
     let uri = format!(
         "http://127.0.0.1:{}/{}{}",
-        app.port,
+        port,
         rest,
         if query.is_empty() {
             String::new()

@@ -1091,6 +1091,14 @@ impl Runner {
         }
     }
 
+    /// The port of the app's own running process, if it runs: the proxy routes by this, never by a row it
+    /// read earlier (a redeploy or wake may have moved the app meanwhile).
+    pub fn live_port(&self, name: &str) -> Option<u16> {
+        let mut g = self.procs.lock().unwrap();
+        let p = g.get_mut(name)?;
+        matches!(p.child.try_wait(), Ok(None)).then_some(p.port)
+    }
+
     pub fn used_ports(&self) -> HashSet<u16> {
         self.procs
             .lock()
