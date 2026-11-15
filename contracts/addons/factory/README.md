@@ -56,9 +56,13 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
   crew start. No add-on path checker instead of `orch run start`. The crew ticket is the owner.
 - State comes from the relay task status (`ext.factory.handover.state` is a cache): on `done` the result is evidence on
   the crew task and the crew ticket is done (watcher rule b). Watcher rule (d): a hand-over `denied` or `failed` wakes
-  the manager once per task and reason; it then files a `factory:change` "Do it here instead · +N min". On Accept, an
-  undelivered delegate is dropped from the outbox, a delivered one gets a group text "No longer needed"; never a second
-  copy without the person's Accept.
+  the manager once per task and reason; it then files a `factory:change` with `takes_back: <hand-over task slug>`
+  (the Start text of the change reads "Do it here instead: <title> · +N min"; freeze refuses a slug that is not a
+  hand-over of the started proposal). On Accept the other workspace gets a group text "No longer needed" (core has no
+  way to drop an undelivered delegate from the outbox yet) and the task runs here; never a second copy without the
+  person's Accept.
+- Before the delegate goes out, every `sends.files` file is scanned with `orch secret scan`; a hit refuses the crew
+  start and nothing is sent. The core's group share scans again at share time.
 
 ## Question kinds (rows in `../question-kinds.md`)
 | kind | options | `action` |

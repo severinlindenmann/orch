@@ -20,7 +20,6 @@ DIRECTORY = (".agents", "skills", "orch-relay", "workspaces.json")
 TERMINAL = ("done", "failed", "denied", "not_needed")
 KNOWN = ("waiting_start", "waiting_allow", "queued", "working", "review", "done", "failed", "denied")
 NOT_NEEDED = "not_needed"
-TAKE_BACK_SUFFIX = "-here"  # "Do it here instead": an accepted change that adds the task <handover task>-here
 NO_LONGER = "No longer needed: {title}. Please do not start it."
 
 
@@ -97,19 +96,16 @@ def of(d, task):
 
 
 def taken_back(d):
-    """Hand-over tasks the person took back: an accepted change that adds `<task>-here` ("Do it here instead")."""
+    """Hand-over tasks the person took back: a person-accepted change with `takes_back` ("Do it here instead")."""
     names = {h["task"] for h in d.get("proposal", {}).get("handovers", [])}
-    out = set()
-    for e in d.get("ents", []):
-        if e["row"]["kind"] != "factory:change" or e["q"].get("answer") != "Accept":
-            continue
-        if not e["q"].get("answered_by", "").startswith("human:"):
-            continue
-        for t in e["data"].get("adds_tasks", []):
-            base = t["slug"].removesuffix(TAKE_BACK_SUFFIX)
-            if t["slug"].endswith(TAKE_BACK_SUFFIX) and base in names:
-                out.add(base)
-    return out
+    return {
+        e["data"]["takes_back"]
+        for e in d.get("ents", [])
+        if e["row"]["kind"] == "factory:change"
+        and e["q"].get("answer") == "Accept"
+        and str(e["q"].get("answered_by", "")).startswith("human:")
+        and e["data"].get("takes_back") in names
+    }
 
 
 def cached(ticket):

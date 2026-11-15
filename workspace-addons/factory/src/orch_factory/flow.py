@@ -559,6 +559,15 @@ def change(root, order, data):
                 raise Refused("A new task needs a stage of the line and a new name.", "invalid")
             if t["role"] not in roles:
                 raise Refused("A new task cannot use a crew role the proposal does not have.", "not_allowed")
+        task = value.get("takes_back")
+        if task is not None:
+            if task not in {h["task"] for h in d["proposal"].get("handovers", [])}:
+                raise Refused(
+                    "That task was not handed to another workspace, so there is nothing to take back.",
+                    "invalid",
+                )
+            if task in handover.taken_back(d):
+                raise Refused("That task was already taken back.", "invalid")
         info = freeze_ask(root, store, ticket, "factory:change", data, value, ext={"stage": "waiting"})
         d = derive(root, store, commands.order_ticket(root, d["tid"]))
         refresh(root, store, d["tid"], d)

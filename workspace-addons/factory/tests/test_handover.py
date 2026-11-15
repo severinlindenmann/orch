@@ -245,18 +245,11 @@ def take_back(ws, run, order, accept=True):
     change = {
         "schema": "orch.factory.proposal/1",
         "kind": "change",
-        "title": "Do it here instead",
+        "title": "Header picture for the price list",
         "what": "Design said no, so the header is made here.",
         "adds_min": 40,
         "lands_in": "build",
-        "adds_tasks": [
-            {
-                "slug": "header-picture-here",
-                "title": "Header picture here",
-                "role": "builder",
-                "stage": "build",
-            }
-        ],
+        "takes_back": "header-picture",
     }
     q = run("change", order, "--file", "-", data=json.dumps(change).encode())["question"]
     if accept:
@@ -322,3 +315,25 @@ def test_secret_in_a_file_stops_before_the_delegate(ws, run, directory):
     assert "looks like a secret" in out["error"] and "brief/header.md" in out["error"]
     assert calls(ws, "relay", "delegate") == [] and shares(ws) == [] and cache(ws, tid) is None
     assert len(calls(ws, "secret", "scan")) == 1
+
+
+def test_takes_back_must_name_a_handover_task(ws, run, directory):
+    order, _tid = handed(ws, run)
+    change = {
+        "schema": "orch.factory.proposal/1",
+        "kind": "change",
+        "title": "x",
+        "what": "y",
+        "adds_min": 5,
+        "lands_in": "build",
+        "takes_back": "review",
+    }
+    out = run("change", order, "--file", "-", data=json.dumps(change).encode(), code=2)
+    assert "nothing to take back" in out["error"]
+
+
+def test_take_back_text_reads_do_it_here_instead(ws, run, directory):
+    order, _tid = handed(ws, run)
+    take_back(ws, run, order, accept=False)
+    text = core(ws, "ticket", "show", order)["questions"][-1]["text"]
+    assert text.startswith("Do it here instead: Header picture for the price list · +40 min")

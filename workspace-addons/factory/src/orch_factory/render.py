@@ -87,7 +87,10 @@ question_text = start_text
 
 
 def change_text(c, n):
-    head = [f"Add '{clean(c['title'])}'? +{c['adds_min']} min"]
+    if c.get("takes_back"):
+        head = [f"Do it here instead: {clean(c['title'])} · +{c['adds_min']} min"]
+    else:
+        head = [f"Add '{clean(c['title'])}'? +{c['adds_min']} min"]
     if "adds_usd" in c:
         head.append(f"+${c['adds_usd']:g}")
     if "new_eta" in c:
