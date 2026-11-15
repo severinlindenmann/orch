@@ -33,7 +33,7 @@ def act(root: Path, verb: str, target: str, by: str | None = None, value: str | 
         from .cli import Refused, repeat
 
         try:
-            return {**repeat(root, target, value, False, by=by), "text": "Schedule saved."}
+            return {**repeat(root, target, value, False, by=by), "text": "Repeat saved."}
         except Refused as e:
             raise Bad(str(e)) from None
     t = next((x for x in orchcli.tickets(root) if x["id"] == target), None)
