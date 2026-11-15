@@ -447,6 +447,29 @@ iframe.loading{opacity:0}
 .about-label{padding:0 8px 0 6px}
 .decision.replaced{opacity:.75}
 
+/* from dashboard style.css (#795 A2b) */
+.ic-wrap{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.ic-wrap>svg{display:block}
+.nav-item>.ic-wrap>svg{width:18px;height:18px}
+/* Link tile: a small square with a site or link-type monogram; the brand colours are data per link type. */
+.li{flex:none;display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;font:700 12px/1 var(--font-ui);letter-spacing:-.02em;color:#fff;background:var(--surface-3)}
+.li.sm{width:16px;height:16px;border-radius:4px;font-size:8px}
+.li .ic-wrap{width:14px;height:14px;display:grid;place-items:center}.li.sm .ic-wrap{width:10px;height:10px}
+.li .ic-wrap svg{width:100%;height:100%}
+.h-github,.h-gitlab{background:#2b3137}.h-confluence{background:#1868db}.h-notion{background:#e8eaed;color:#111}.h-figma{background:#a259ff}
+.h-youtube{background:#e5302a}.h-gdocs,.h-gdrive{background:#2f7cf6}.h-jira{background:#2684ff}.h-linear{background:#5e6ad2}.h-gslides{background:#f4b400;color:#111}
+.h-slack{background:#4a154b}.h-miro{background:#ffd02f;color:#111}.h-gsheets{background:#1e8e3e}.h-loom{background:#625df5}.h-teams{background:#5b5fc7}
+.h-sharepoint{background:#038387}.h-trello{background:#0c66e4}.h-dropbox{background:#0061fe}
+.h-link{background:var(--surface-3);color:var(--text-muted)}
+/* WCAG sRGB relative luminance, (Llighter + .05)/(Ldarker + .05):
+   Dark banner #e8eaed on #164b43 = 8.21:1.
+   Dark page #e8eaed / muted #9aa3ad on brightest stop #102925 = 12.76:1 / 6.02:1.
+   Light banner #123b35 on #bce9dc = 9.30:1.
+   Light page #123b35 / muted #365e56 on darkest stop #e3f5ef = 10.91:1 / 6.42:1.
+   Opaque banner/button colours preserve these ratios on hover and in the awake warning. */
+body.mobile-mode-on{--mm-page-start:#102925;--mm-page-end:var(--bg);--mm-banner:#164b43;--mm-ink:#e8eaed}
+:root[data-theme=light] body.mobile-mode-on,body.mobile-mode-on[data-theme=light],body.mobile-mode-on.light{--mm-page-start:#e3f5ef;--mm-page-end:#f5fbf8;--mm-banner:#bce9dc;--mm-ink:#123b35}
+
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
 
