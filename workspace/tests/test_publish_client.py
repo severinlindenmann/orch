@@ -700,3 +700,19 @@ def test_large_text_file_is_scanned_past_the_first_megabyte(tmp_path):
     with pytest.raises(Refused) as e:
         publish.scan_files(None, [("big.log", data)])
     assert "line 11001" in str(e.value) and PLANT not in str(e.value)
+
+
+def test_utf16_file_with_a_secret_is_scanned_not_skipped():
+    for text in (f"A=1\nTOKEN={PLANT}\n",):
+        for codec in ("utf-16", "utf-16-le", "utf-16-be", "utf-32"):
+            with pytest.raises(Refused) as e:
+                publish.scan_files(None, [("w.env", text.encode(codec))])
+            assert "line 2" in str(e.value) and PLANT not in str(e.value)
+
+
+def test_token_on_a_chunk_boundary_is_found():
+    line = ("y" * 99 + "\n") * 5000  # 500 KB per chunk of text
+    pad = "z" * (publish.CHUNK - 10)  # one long line: the token straddles the first cut
+    data = (pad + f" {PLANT}\n" + line).encode()
+    with pytest.raises(Refused):
+        publish.scan_files(None, [("min.js", data)])

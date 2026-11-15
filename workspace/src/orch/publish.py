@@ -157,37 +157,57 @@ def _bundle_path(rel: str) -> str:
     return rel
 
 
-def _is_text(data: bytes) -> bool:
-    """Binary files (images, archives, fonts) are not scanned as text; a NUL byte early on marks one."""
-    return b"\0" not in data[:8192]
+def _text_of(data: bytes) -> str | None:
+    """The text of a file, or None for a binary one (images, archives, fonts: a NUL byte early on). UTF-16 and
+    UTF-32 text (Windows editors, PowerShell redirects) is NUL-heavy too, so it is decoded, never skipped."""
+    for bom, codec in (
+        (b"\xff\xfe\0\0", "utf-32"),
+        (b"\0\0\xfe\xff", "utf-32"),
+        (b"\xff\xfe", "utf-16"),
+        (b"\xfe\xff", "utf-16"),
+        (b"\xef\xbb\xbf", "utf-8-sig"),
+    ):
+        if data.startswith(bom):
+            return data.decode(codec, "replace")
+    head = data[:8192]
+    if b"\0" not in head:
+        return data.decode("utf-8", "replace")
+    n = len(head) // 2
+    if n >= 8:  # BOM-less UTF-16: NULs sit at one parity only (ASCII text)
+        even, odd = head[0 : 2 * n : 2].count(0), head[1 : 2 * n : 2].count(0)
+        if max(even, odd) >= 0.4 * n and min(even, odd) <= 0.02 * n:
+            return data.decode("utf-16-le" if odd > even else "utf-16-be", "replace")
+    return None
+
+
+CHUNK = secretscan.MAX_BYTES // 2
+OVERLAP = 16384  # longer than any token pattern; a PEM block over this is still caught by its header line
 
 
 def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
     """Refuse the upload when any text file holds a secret (secretscan, the one scanner). Runs on the plain
     bytes that are about to be encrypted and sent. Names the kind, the file and the line, never the value."""
-    hits: list[tuple[str, dict]] = []
+    hits: dict[tuple[str, int, str], None] = {}
     for name, data in items:
-        if not _is_text(data):
+        text = _text_of(data)
+        if text is None:
             continue
-        # chunks of at most MAX_BYTES, cut at line ends, so a big file is scanned in full
-        pos, line0 = 0, 0
-        while pos < len(data):
-            end = min(pos + secretscan.MAX_BYTES, len(data))
-            if end < len(data):
-                cut = data.rfind(b"\n", pos, end)
-                end = cut + 1 if cut > pos else end
-            chunk = data[pos:end]
-            for f in secretscan.find(chunk.decode("utf-8", "replace"), root):
-                hits.append((name, {"kind": f["kind"], "line": f["line"] + line0}))
-            line0 += chunk.count(b"\n")
-            pos = end
+        # chunks with an overlap, so a big file is scanned in full and no token is cut in two
+        pos = 0
+        while True:
+            end = min(pos + CHUNK, len(text))
+            line0 = text.count("\n", 0, pos)
+            for f in secretscan.find(text[pos:end], root):
+                hits[(name, f["line"] + line0, f["kind"])] = None
+            if end >= len(text):
+                break
+            pos = end - OVERLAP
     if not hits:
         return
-    name, f = hits[0]
+    name, line, kind = sorted(hits, key=lambda h: (h[0], h[1]))[0]
     more = f" (and {len(hits) - 1} more)" if len(hits) > 1 else ""
-    what = secretscan.WORDS.get(f["kind"], "a secret")
     raise Refused(
-        f"Nothing was shared: {name!r} has {what} on line {f['line']}{more}. "
+        f"Nothing was shared: {name!r} has {secretscan.WORDS.get(kind, 'a secret')} on line {line}{more}. "
         "Remove it from the file and share again."
     )
 
