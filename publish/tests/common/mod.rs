@@ -2,7 +2,7 @@
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::Router;
-use orch_publish::{admin_router, new_state, public_router, Config, State};
+use orch_publish::{admin_router, new_state, private_router, public_router, Config, State};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU16, Ordering};
 use tower::ServiceExt;
@@ -14,6 +14,7 @@ pub struct T {
     pub st: State,
     pub public: Router,
     pub admin: Router,
+    pub private: Router,
     pub dir: tempfile::TempDir,
 }
 
@@ -30,9 +31,18 @@ pub fn setup_with(f: impl FnOnce(&mut Config)) -> T {
     T {
         public: public_router(st.clone()),
         admin: admin_router(st.clone()),
+        private: private_router(st.clone()),
         st,
         dir,
     }
+}
+
+/// A server with a private-network address (http, as on an internal name).
+pub fn setup_private() -> T {
+    setup_with(|c| {
+        c.private_listen = Some("127.0.0.1:0".into());
+        c.private_url = Some("http://publish.internal".into());
+    })
 }
 
 pub fn setup() -> T {
