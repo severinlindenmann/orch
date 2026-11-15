@@ -413,6 +413,10 @@ def test_serve_prints_lines_never_the_token_and_keeps_a_run_file(ws, run, card, 
     assert lines[1] == f"Open: http://127.0.0.1:{port}/   works on this computer until 23:59"
     assert lines[2].startswith(f"On a server? From your laptop: ssh -L {port}:127.0.0.1:{port} ")
     assert lines[2].endswith("   then open the link.")
+    for _ in range(100):  # the run file is written before the browser opens (CI race)
+        if opened:
+            break
+        time.sleep(0.05)
     assert len(opened) == 1 and opened[0].startswith(f"http://127.0.0.1:{port}/#k=")
     token = opened[0].split("#k=")[1]
     assert token and token not in out and token not in err  # never printed

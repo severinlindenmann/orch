@@ -47,7 +47,7 @@ jobs:
             publish: ['publish/**', 'contracts/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', '.github/workflows/relay.yml']
             mobile: ['mobile/**', 'contracts/**', '.github/workflows/mobile.yml']
-            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/ci.yml']
+            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/ci.yml', 'scripts/check_style.py']
   contracts:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
@@ -90,6 +90,7 @@ jobs:
           python-version: "3.12"
       - run: pip install pytest
       - run: python -m pytest -q brand/tests
+      - run: python scripts/check_style.py
   gate:
     if: always()
     needs: [changes, contracts, workspace, addons, publish, relay, mobile, brand]
