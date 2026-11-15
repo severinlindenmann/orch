@@ -739,3 +739,12 @@ def test_misaligned_bom_nul_padded_and_binary_files_do_not_hide_a_token():
         with pytest.raises(Refused) as e:
             publish.scan_files(None, [(name, data)])
         assert PLANT not in str(e.value), name
+
+
+def test_generated_app_templates_pass_the_scan(tmp_path):
+    from orch import templates
+
+    for stack in ("static", "python", "node", "docker"):
+        d = tmp_path / stack
+        templates.create(stack, "none", d)
+        publish.pack(d, None, None, None)

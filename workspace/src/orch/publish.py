@@ -539,7 +539,8 @@ def _override(text: str, reach: str | None, auth: bool | None) -> str:
 
 # the manifest's own switches (`auth = true`) are settings, not secrets: blanked before the scan
 _MANIFEST_FLAGS = re.compile(
-    rb'(?m)^[ \t]*(?:auth|public|reach)[ \t]*=[ \t]*(?:true|false|"public"|"private")[ \t]*(?=\r?$)'
+    rb'(?m)^[ \t]*(?:(?:auth|public|reach)[ \t]*=[ \t]*(?:true|false|"public"|"private")'
+    rb"|#[ \t]*(?:auth|reach):[ \t]+(?:true|public)\b[^\r\n]*)[ \t]*(?=\r?$)"
 )
 
 
