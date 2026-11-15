@@ -99,6 +99,12 @@ _KV_VAL = re.compile(
 _TO_EOL = re.compile(r"(?i)cookie")
 
 
+# A value that is exactly the placeholder (also quoted, or url-encoded as safe_url writes it, and ending at
+# a delimiter) is already hidden, not a secret: the ONE place that says so. Anything else next to it, or glued
+# to it, is a value like any other and goes through the detector unchanged.
+_PLACEHOLDER = re.compile(r"[\"'`]?(?:\[hidden\]|%5[Bb]hidden%5[Dd])[\"'`]?(?=$|[\s&,;])")
+
+
 class _Hit:
     """What callers use of a regex match: group(0..3), start(), end() (1 name, 2 separator, 3 value)."""
 
@@ -129,9 +135,15 @@ class _KV:
                 continue
             if head.group("sep") == ":" or _TO_EOL.search(head.group(1)):
                 end = _line_end(text, pos)  # the rest of the line, scanned once: the scan goes on after it
+                if _PLACEHOLDER.fullmatch(text, pos, end):  # the value IS the placeholder: nothing to hide
+                    pos = end
+                    continue
             else:
                 val = _KV_VAL.match(text, pos)
                 end = val.end() if val is not None else pos
+                if (ph := _PLACEHOLDER.match(text, pos, end)) is not None:
+                    pos = ph.end()  # only the placeholder is the value; the scan goes on right after it
+                    continue
             if end > pos:
                 yield _Hit(text, head, end)
                 pos = end

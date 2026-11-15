@@ -155,18 +155,31 @@ def test_nested_token_field_is_scanned_top_level_one_is_not(proj, on):
         relay.scan_outgoing(proj, {"text": "hi", "meta": {"token": TOKEN}})
 
 
-def test_hidden_value_is_exempt_but_a_real_one_on_the_same_line_is_not(proj, on):
+def test_a_value_that_is_the_placeholder_passes_everything_else_is_scanned(proj, on):
     from orch import relay
 
-    relay.scan_outgoing(proj, {"text": "password=[hidden] on the box"})  # a scrubbed pair: fine
-    relay.scan_outgoing(proj, {"text": "https://ci.example.ch/run/7?token=%5Bhidden%5D"})
-    for text in (
-        "note=[hidden] api_key=" + "R3alSecretValue99",
-        "password=[hidden], password=hunter2hunter2",
-        "api_key=[hidden]R3alSecretValue99",
-        "api_key=R3alSecretValue99=[hidden]",
-        "api_key: R3alSecretValue99 : [hidden]",
+    for ok in (
+        "password=[hidden]",
+        "password: [hidden]",
+        "https://ci.example.ch/run/7?token=%5Bhidden%5D&a=1",
+        "password=[hidden] on the box",
+    ):
+        relay.scan_outgoing(proj, {"text": ok})
+    real = "R3alSecretValue99"
+    zw = TOKEN[:2] + "\u200b" + TOKEN[2:]
+    fw = "".join(chr(ord(c) + 0xFEE0) if c.isalnum() else c for c in TOKEN)
+    for bad in (
+        f"note=[hidden] api_key={real}",
+        f"password=[hidden], password={real}",
+        f"token=[hidden]&api_key={real}",
+        f"api_key=[hidden]{real}",
+        f"--password {real}=[hidden]",
+        f"mysql -p {real}=[hidden]",
+        f"password {real}=[hidden]",
+        f"password=[hidden] {zw}",
+        f"password=[hidden] {fw}",
+        f"password=[hidden] {TOKEN}",
     ):
         with pytest.raises(Refused) as e:
-            relay.scan_outgoing(proj, {"text": text})
-        assert "R3alSecretValue99" not in str(e.value) and "hunter2" not in str(e.value)
+            relay.scan_outgoing(proj, {"text": bad})
+        assert real not in str(e.value) and TOKEN not in str(e.value), bad
