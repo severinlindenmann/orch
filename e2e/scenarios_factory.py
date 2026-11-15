@@ -399,39 +399,54 @@ def _png(extra: bytes = b"") -> bytes:
 
 @scenario("A22")
 def a22(e):
-    try:
-        return _a22(e)
-    finally:  # the Factory watcher/page server of the host must not outlive the run
-        e.sh(["orch", "factory", "stop", "--json"], cwd=e.ws("Pilatus"))
-
-
-def _a22(e):
     """Ask another workspace at a Factory stop (#816 A): two workspaces on the relay, the scripted fake agent.
     Test 6 first: a password in a picture sends nothing. Test 1: the ask sends only the ticked item, its picture and one
     question; the other side answers; the answer shows on the ask and never decides the stop. Test 2: an agent answer with the
     stop's question id is ignored. Answering the stop closes the ask."""
+    with _factory(e, "A22h") as H, _factory(e, "A22m") as M:  # F: dev-marked workspaces of a test install (own keystore)
+        return _a22_body(e, H, M)
+
+
+def _json_of(out: str):
+    """The JSON a command printed, after any notice line ("Skills updated; ...") before it."""
+    lines = out.splitlines()
+    for i in range(len(lines)):
+        try:
+            return json.loads("\n".join(lines[i:]))
+        except ValueError:
+            continue
+    raise Fail(f"no JSON in the output: {out[:150]!r}")
+
+
+def _a22_body(e, H, M):
     from lib import Skip
 
-    host, member = "Pilatus", "Reports"
-    try:
-        ids = e.relay_all()
-    except Fail as error:  # core still asks for a person's proof to connect a workspace to the relay
-        if "dashboard on this computer" in str(error):
-            raise Skip(f"waiting on #799 P1 (relay connect needs no proof): {str(error)[-90:]}") from None
-        raise
-    old = e.rel.admin.call("GET", "/admin/api/rules").json()["rules"]  # the answer must be able to come back
-    back = {"from": ids[member], "to": ids[host], "text": True, "files": False, "delegate": False, "start": False}
-    if not any(r["from"] == back["from"] and r["to"] == back["to"] for r in old):
-        r = e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old + [back]})
-        check(r.status == 200, f"rule {member} -> {host}: {r}")
-        e.cleanup.append(lambda: e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old}))
-    rc, out, err = e.addon_add(e.ws(host), "factory")
-    check(rc == 0, f"addon add factory: {(err or out)[-300:]}")
-    e.orch(host, "relay", "refresh")
+    from lib import Skip
+
+    ids, toks = {}, {}
+    for name in ("Pilatus", "Reports"):
+        r = e.rel.admin.call("POST", "/admin/api/workspaces", {"name": e.label(name), "description": f"{name} workspace", "tags": [name.lower()]})
+        check(r.status == 201, f"relay admin add {name}: {r}")
+        j = r.json()
+        ids[name], toks[name] = j["id"], j["token"]
+        e.cleanup.append(lambda i=j["id"]: e.rel.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
+    old = e.rel.admin.call("GET", "/admin/api/rules").json()["rules"]
+    both = [{"from": ids[a], "to": ids[b], "text": True, "files": True, "delegate": False, "start": False}
+            for a, b in (("Pilatus", "Reports"), ("Reports", "Pilatus"))]
+    r = e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old + both})
+    check(r.status == 200, f"rules: {r}")
+    e.cleanup.append(lambda: e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old}))
+    for name, f in (("Pilatus", H), ("Reports", M)):  # connecting refreshes the workspace list, after the rules are set
+        for a in (["addon", "add", "relay", "--yes"], ["relay", "connect", e.rel.url, "--workspace", ids[name], "--token", toks[name]]):
+            rc, out, err = f.w.sh(["orch", *a], timeout=600)
+            if rc != 0 and "dashboard on this computer" in (err + out):
+                raise Skip(f"waiting on #799 P1 (relay connect needs no proof): {(err or out).strip()[-90:]}")
+            check(rc == 0, f"{name}: orch {' '.join(a[:2])}: {(err or out).strip()[-200:]}")
+    host, member = H, M
+    hroot = H.w.root
 
     def fac(*args, data=None, ok=True):
-        rc, out, err = e.sh(["orch", "factory", *args, *(["--file", "-"] if data is not None else []), "--json"],
-                            cwd=e.ws(host), input=data)
+        rc, out, err = H.w.sh(["orch", "factory", *args, *(["--file", "-"] if data is not None else []), "--json"], input=data)
         if ok:
             check(rc == 0, f"orch factory {' '.join(map(str, args))[:70]} exit {rc}: {(err or out).strip()[-300:]}")
             return json.loads(out)
@@ -439,11 +454,11 @@ def _a22(e):
         return (err + out)
 
     def person(order, qid, answer):  # a person's plain answer; with the proof check still in core this waits for #799 P1
-        rc, out, err = e.orch(host, "answer", order, qid, answer, ok=False, by="human:tester")
+        rc, out, err = H.o("answer", order, qid, answer, ok=False, by="human:tester")
         if rc != 0:
             raise Skip(f"waiting on #799 P1 (a person's answer needs no proof): {(err or out).strip()[:120]}")
 
-    rc, out, err = e.sh(["orch", "factory", "idea", "Online booking page", "--file", "-", "--json"], cwd=e.ws(host),
+    rc, out, err = H.w.sh(["orch", "factory", "idea", "Online booking page", "--file", "-", "--json"],
                         input="# Idea\nCustomers book a time online.\n")
     check(rc == 0, f"idea: {(err or out)[-300:]}")
     order = json.loads(out)["order"]
@@ -454,28 +469,25 @@ def _a22(e):
              {"title": "Window poster", "tag": "taste"},
              {"title": "Leaflet", "tag": "taste", "before": "leak.png"}]
     stop = fac("stop", order, data=json.dumps({"schema": "orch.factory.proposal/1", "kind": "stop", "stage": "build", "items": items}))
-    folder = e.ws(host) / ".orch" / "addons" / "factory" / "stops" / order
+    folder = hroot / ".orch" / "addons" / "factory" / "stops" / order
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "before.png").write_bytes(_png())
     (folder / "leak.png").write_bytes(_png(b"ghp_" + b"a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"))
-    e.orch(host, "relay", "refresh")
-    who = ids[member]
-    listing = (e.ws(host) / ".agents/skills/orch-relay/workspaces.json").read_text()
+    who = ids["Reports"]
+    listing = (hroot / ".agents/skills/orch-relay/workspaces.json").read_text()
     entry = next((w for w in json.loads(listing)["workspaces"] if w["id"] == who), None)
-    check(entry and entry["can_send"].get("text") and entry["accepts_from"].get("text"), f"{member} is not connected both ways for text: {entry}")
+    check(entry and entry["can_send"].get("text") and entry["accepts_from"].get("text"), f"Reports is not connected both ways for text: {entry}")
 
     def inbox():
-        rc, out, err = e.orch(member, "relay", "inbox", "--json")
-        rows = [x for x in out.splitlines() if x.startswith("[")]  # an update notice may come first
-        check(rows, f"relay inbox printed no JSON list: {out[:150]}")
-        return json.loads(rows[-1])
+        rc, out, err = M.w.o("relay", "inbox", "--json", by=None)
+        return _json_of(out)
 
     before = len(inbox())
     # test 6: a password in a picture: the whole ask is refused and nothing leaves
     text = fac("ask", order, "1", who, "--item", "2", "--by", "human:tester", ok=False)
     check("password" in text.lower() or "key" in text.lower(), f"the refusal does not say what was found: {text[:200]}")
     check(len(inbox()) == before, "something reached the other workspace although a picture held a secret")
-    asks = [t for t in e.orchj(host, "ticket", "list", "--all") if (t.get("ext") or {}).get("factory", {}).get("role") == "ask"]
+    asks = [t for t in _json_of(H.o("ticket", "list", "--all", "--json", by=None)[1]) if (t.get("ext") or {}).get("factory", {}).get("role") == "ask"]
     check(not asks, "an ask ticket was made although nothing could be sent")
     # test 1: ask with the first item only
     res = fac("ask", order, "1", who, "--item", "0", "--by", "human:tester")
@@ -491,17 +503,21 @@ def _a22(e):
     question = next((m for m in msgs if m["type"] == "question"), None)
     check(question is not None, "no question arrived")
     # the other side answers; the answer lands on the ask, never on the stop
-    e.orch(member, "relay", "group", "answer", question["id"], "Keep the date visible")
-    e.orch(host, "relay", "inbox")
-    sub = next(t for t in e.orchj(host, "ticket", "list", "--all") if (t.get("ext") or {}).get("factory", {}).get("role") == "ask")
+    M.w.o("relay", "group", "answer", question["id"], "Keep the date visible", by=None)
+    H.w.o("relay", "inbox", by=None)
+    sub = next(t for t in _json_of(H.o("ticket", "list", "--all", "--json", by=None)[1]) if (t.get("ext") or {}).get("factory", {}).get("role") == "ask")
     got = next(q for q in sub["questions"] if q.get("kind") is None)
     check(got.get("answer") == "Keep the date visible" and str(got.get("answered_by", "")).startswith("agent:"), f"answer on the ask: {got}")
-    # test 2: a planted answer with the stop's question id is ignored
-    e.orch(host, "answer", order, stop["question"], "Send back", by="agent:Reports")
-    check(fac("next", order)["step"] == "wait", "an agent's answer to the stop counted")
     # a person decides: the ask is closed
     person(order, stop["question"], "Continue")
     fac("next", order)
-    sub = e.orchj(host, "ticket", "show", sub["id"])
+    sub = _json_of(H.o("ticket", "show", sub["id"], "--json", by=None)[1])
     check(sub["status"] == "dropped", f"the ask is not closed after the stop was answered: {sub['status']}")
+    # test 2: the other workspace's answer, planted on the ship stop's own question, never counts
+    ship = fac("stop", order, data=json.dumps({"schema": "orch.factory.proposal/1", "kind": "stop", "stage": "ship",
+                                               "items": [{"title": "Booking page, final version", "tag": "cant-undo"}]}))
+    H.o("answer", order, ship["question"], "Ship it", by="agent:Reports")
+    refused = fac("ship", order, ok=False)
+    check("person" in refused.lower() or "ship it" in refused.lower(), f"ship was not refused for an agent's answer: {refused[:160]}")
+    check(fac("next", order)["step"] != "ship", "an agent's answer to the stop counted as Ship it")
     return "secret picture sent nothing; the ask sent 1 item + 1 picture + 1 question; the answer stayed on the ask; a planted stop answer was ignored; answering closed the ask"
