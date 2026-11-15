@@ -216,13 +216,14 @@ function chatPlainTitle(title, key = '', due = false) {
   if (due) text = text.replace(CHAT_DAY, '');
   return text.replace(/^[\s,;:·–—-]+|[\s,;:·–—.-]+$/g, '') || clean(title);
 }
-function chatDue(due) {
+function chatDue(due, status = '') {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(due || ''))) return window.DashHelpers.dueWords(due, status, new Date(state?.now || Date.now()));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(due || ''))) return '';
   const shift = n => { const d = new Date(state?.now || Date.now()); d.setDate(d.getDate() + n); return chatLocalDay(d); };
   return due === shift(0) ? 'today' : due === shift(1) ? 'tomorrow' : due === shift(-1) ? 'yesterday' : date(due);
 }
 function chatTicketCard(ref, key, readOnly) {
-  const ticket = ticketOf(ref.id), due = chatDue(ticket?.due), title = chatPlainTitle(ref.title || ticket?.title, ref.key || ticket?.key, !!due);
+  const ticket = ticketOf(ref.id), due = chatDue(ticket?.due, ticket?.status), title = chatPlainTitle(ref.title || ticket?.title, ref.key || ticket?.key, !!due);
   const open = chatObjects(ticket?.questions).filter(q => q.answer == null), q = open[0];
   // A person's OK is the one status that gets the accent colour.
   const word = open.length ? 'Needs your OK' : ticket?.status ? window.DashHelpers.statusWord(ticket.status) : '';

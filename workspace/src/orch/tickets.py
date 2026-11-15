@@ -1390,6 +1390,51 @@ def set_status(root: Path, tid: str, status: str, by: str, proven: bool = False)
 PROTECTED_FIELDS = ("title_auto", "plan_first", "description", "description_by")  # orch writes these itself
 
 
+DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
+_DUE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?|(\d{1,2}:\d{2})")
+
+
+def clean_due(text: str, today: str | None = None) -> str:
+    """One spelling in the `due` field: `YYYY-MM-DD` (a day) or `YYYY-MM-DDTHH:MM` (local wall time, no
+    zone). Input also takes `YYYY-MM-DD HH:MM` and `HH:MM` (= today, local). Anything else is refused."""
+    m = _DUE_TIME.fullmatch(text.strip())
+    if not m:
+        raise Refused(DUE_MSG)
+    day, hm, only = m.groups()
+    if only:
+        day, hm = today or datetime.now().strftime("%Y-%m-%d"), only
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+        if hm:
+            datetime.strptime(hm, "%H:%M")
+    except ValueError:
+        raise Refused(DUE_MSG) from None
+    return f"{day}T{int(hm[:-3]):02d}:{hm[-2:]}" if hm else day
+
+
+def due_label(due: str | None, status: str = "open", now: datetime | None = None) -> str | None:
+    """The plain words for a due WITH a time: "Due 18:30" (today), "Due Mon 18:30" (another day), "Late since
+    18:30" (past, ticket still active). None for no due or a date-only due (callers keep their day wording).
+    Same wording as the dashboard helper `dueWords` (web/helpers.js)."""
+    if not due or "T" not in str(due):
+        return None
+    try:
+        at = datetime.strptime(str(due), "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+    now = now or datetime.now()
+    gap = (at.date() - now.date()).days
+    hm = at.strftime("%H:%M")
+    if gap == 0:
+        when = hm
+    elif abs(gap) < 7:
+        when = f"{at.strftime('%a')} {hm}"
+    else:
+        when = f"{at.day} {at.strftime('%b %Y')}, {hm}"
+    late = at < now and status not in ("done", "dropped")
+    return f"{'Late since' if late else 'Due'} {when}"
+
+
 def clean_field(key: str, value):
     """Validate a plain field (None or empty clears it); returns the value to store."""
     if key in PROTECTED_FIELDS:
@@ -1408,12 +1453,7 @@ def clean_field(key: str, value):
     if key == "summary" and len(v) > 200:
         raise Refused("A summary is at most 200 characters.")
     if key == "due":
-        try:
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
-                raise ValueError
-            datetime.strptime(v, "%Y-%m-%d")
-        except ValueError:
-            raise Refused("due must be a date like 2026-11-10.") from None
+        v = clean_due(v)
     return v
 
 
@@ -2652,6 +2692,7 @@ def answer(
                 ans = opt
                 break
         q["answer"], q["answered_by"], q["via"] = ans, by, via
+        q["answered_at"] = now()  # when, whatever `via` says (a page shows "Answered on your phone 12:34")
         if decision is not None:
             q["decision"], q["at"] = dict(decision), now()
         _release_wait(root, tid, ticket, qid)
@@ -2660,6 +2701,20 @@ def answer(
         return q
 
     return apply_op(root, tid, op, by=by)
+
+
+def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
+    """Record when a question went to the person's phones (questions[].sent_at, once): one quiet write under
+    the ticket lock; a question that is gone or already marked changes nothing."""
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None or q.get("sent_at"):
+            return NO_WRITE
+        q["sent_at"] = now()
+        return q
+
+    apply_op(root, tid, op, by=by)
 
 
 def record_answered(
@@ -2693,6 +2748,7 @@ def record_answered(
         }
         q = {"id": _next_id(ticket["questions"], "q"), **q}
         q["answer"], q["answered_by"], q["via"], q["at"] = entry["answer"], by, via, now()
+        q["answered_at"] = q["at"]
         if replaces is not None:
             q["decision"] = {**(q.get("decision") or {}), "replaces": replaces, "replaced_by": None}
             old["decision"] = {**(old.get("decision") or {}), "replaced_by": q["id"]}
