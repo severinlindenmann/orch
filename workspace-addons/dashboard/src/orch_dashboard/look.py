@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from pathlib import Path
 
 ID = re.compile(r"[a-z0-9-]{1,32}")
@@ -57,14 +58,18 @@ MAX_TAGS = 4
 
 
 def _line(t):
-    if not isinstance(t, str) or len(t.strip()) > MAX_DESCRIPTION or "\x00" in t or "\n" in t or "\r" in t:
+    if (
+        not isinstance(t, str)
+        or len(t.strip()) > MAX_DESCRIPTION
+        or any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in t)
+    ):
         raise _bad(f"Write one line of at most {MAX_DESCRIPTION} characters.")
     return t.strip()
 
 
 def _look_profile(a):
     """Propose the description and/or tags: `orch <service> profile --description=... --tags=a,b`. It stays a
-    proposal until the owner approves it in the service's admin page. The description itself is saved (signed)
+    proposal until the owner approves it in the service's admin page. The description itself is saved
     by `workspace.set`; this op only sends it on."""
     _actions()._only(a, ("service", "description", "tags"))
     if a.get("service") not in SERVICES:
@@ -101,7 +106,7 @@ def _s(v, n):
 def _tags(v):
     if not isinstance(v, list):
         return None
-    return [t for t in v if isinstance(t, str) and TAG.fullmatch(t)][:8]
+    return [t for t in v if isinstance(t, str) and TAG.fullmatch(t)][:MAX_TAGS]
 
 
 def _workspaces(root: Path, orch_bin: str | None) -> list[dict]:

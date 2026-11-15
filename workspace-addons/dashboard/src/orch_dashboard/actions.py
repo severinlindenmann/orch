@@ -205,8 +205,6 @@ FREE_OPS = frozenset(
         "check.add",
         "ref.add",
         "ref.rm",
-        "look.profile",
-        "workspace.set",
         "config.agent.test",
     }
 )

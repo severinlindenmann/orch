@@ -214,7 +214,7 @@
       if (!r || !r.ok) return;
       ws.name = name2;
     }
-    const descChanged = desc2 !== clean(shownDescription());
+    const descChanged = desc2 !== clean(look.pending != null ? look.pending : look.description);
     if (desc2 !== clean(ws.description)) {
       const r = await run('workspace.set', {field: 'description', text: desc2});
       if (!r || !r.ok) return;
@@ -315,7 +315,7 @@
         if (r && r.ok) { remember(draft.icon); Object.assign(look, {icon: draft.icon, color: draft.color, set_by: 'human'}); open = false; status = 'Saved. Your phone and shared pages show it at their next refresh.'; statusTone = 'ok'; paintFavicon(); repaint(); window.dispatchEvent(new CustomEvent('orch:look-saved')); }
         break;
       }
-      case 'pf-edit': editing = true; pd = {name: ws.name || name, description: shownDescription(), tags: [...(look.tags || [])], tag: ''}; status = ''; repaint(); document.querySelector('[data-key="pf-name"]')?.focus(); break;
+      case 'pf-edit': editing = true; pd = {name: ws.name, description: shownDescription(), tags: [...(look.tags || [])], tag: ''}; status = ''; repaint(); document.querySelector('[data-key="pf-name"]')?.focus(); break;
       case 'pf-cancel': editing = false; repaint(); break;
       case 'tag-add': addTag(); repaint(); document.querySelector('[data-key="pf-tag"]')?.focus(); break;
       case 'tag-del': pd.tags = pd.tags.filter(x => x !== v); repaint(); break;

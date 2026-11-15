@@ -1290,6 +1290,9 @@ def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
     assert argv[:3] == ["config", "set", "workspace.name"] and argv[-2:] == ["--", "Newsletter"]
     assert actions.build_argv("workspace.set", {"field": "description", "text": ""})[-2:] == ["--", ""]
     assert actions.proof_for("workspace.set", {"field": "name", "text": "x"}) is None
+    assert actions.needs_session("workspace.set") and actions.needs_session(
+        "look.profile"
+    )  # a login, no proof
     for bad in (
         {"field": "other", "text": "x"},
         {"field": "name", "text": "a\nb"},

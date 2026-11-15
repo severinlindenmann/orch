@@ -70,8 +70,8 @@ App pages (`/a/<name>`) are the workspace's own and are not changed.
 ## Workspace profile card (dashboard)
 
 Settings → General → *Workspace profile* holds the name, ONE description, tags, icon and colour. The description is
-saved locally (`config set workspace.description`, a plain action, no proof) and, when the relay is turned on, the same
-text and the tags are sent through the **same proposal path** as `orch relay|publish profile`: `PATCH /v1/me
+saved locally (`config set workspace.description`, a plain action, no proof) and, when a relay (or publish) is turned on, the same
+text and the tags are sent to the first one that is connected, through the **same proposal path** as `orch relay|publish profile`: `PATCH /v1/me
 {description, tags}` → pending → the owner approves it in the admin portal → `description_by = workspace`. The card
 shows "Waiting for relay approval" while `whoami.pending` is set and "Live on relay" after; the name on the relay is
 shown read only. Icon and colour apply at once (`look set`). Relay rows appear only when the relay is on (AGENTS.md R1.1).
