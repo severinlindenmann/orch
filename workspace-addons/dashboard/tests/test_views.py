@@ -507,7 +507,7 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "['All', 'People', 'Helper']",
         "'Helper is working'",
         "plainWhy(question, 'The helper')",
-        "A short line about this workspace, shown on your phone and on pages you share.",
+        "One short line about what this workspace is for.",
     ):
         assert text in js, text
     for gone in (

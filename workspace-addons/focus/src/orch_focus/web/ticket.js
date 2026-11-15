@@ -13,20 +13,20 @@
     fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); }).then(payload => {
       const list = payload.tickets;
       const crumb = root.querySelector('.fx-workspace'); if (crumb) crumb.textContent = payload.workspace + ' / Focus';
-      S.state.pickAttention = window.FocusHelpers.attentionText(list);
+      S.state.pickAttention = window.FocusHelpers.attentionText(list) + (INAPP && list.some(window.FocusHelpers.needsYou) ? ' They are on Home too.' : '');
       pickerSub();
       const box = root.querySelector('.fx-pick');
       box.querySelector('.fx-skel')?.remove();
       if (!list.some(t => t.status !== 'done')) box.append(emptyState());
-      const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Sent back to you', 'Check'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
-      /* one line: key, title, the actual next step only when it says more, and a real action chip */
+      const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Sent back to you', 'Check result'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
+      /* one line: key, title, the actual next step only when it says more, and a real action button */
       const rowFor = (t, status, action) => {
         const next = window.FocusHelpers.nextStepText(t, action);
         const finished = status === 'done' && t.closed_at ? stamp(t.closed_at) : '';
         return h('a', {class: 'fx-pick-row', href: P + '/t/' + t.id + (status === 'review' ? '#results' : '')},
           /^t_/.test(t.key || t.id) ? null : h('span', {class: 'mono key', text: t.key}), h('strong', {class: 'grow', text: t.title}),
           next ? h('small', {text: next}) : null, finished ? h('small', {text: 'Finished ' + finished}) : null,
-          h('span', {class: 'chip fx-row-chip', text: action}));
+          h('span', {class: 'btn outline sm', text: action}));  /* a real 32 px button from the master, not a chip */
       };
       for (const [status, label, action] of groups) {
         const needsYou = window.FocusHelpers.needsYou;

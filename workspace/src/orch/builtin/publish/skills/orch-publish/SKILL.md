@@ -59,7 +59,11 @@ It prints the full link on its own line (it ends in `#k=...`). Give the user tha
 Static apps take store none or markdown. The folder name is the app name.
 
 A `docker` app brings its own `Dockerfile` (any language) and runs only on a server with the container engine. Every
-server app listens on `$HOST:$PORT`, writes only to `$DATA_DIR` and keeps its links under `$BASE_PATH`.
+server app listens on `$HOST:$PORT`, writes only to `$DATA_DIR` and uses relative links (`$BASE_PATH` only where an absolute path is unavoidable, e.g. server-side redirects).
+
+Apps run sandboxed in the browser: no `localStorage`, `sessionStorage`, IndexedDB or cookies (they throw or stay empty).
+Keep state on the app's backend and identify people by a link token or a typed name. `fetch()` to the app's own paths works
+for public apps. In private apps use relative links (`style.css`, not `/a/<name>/style.css`). The app cannot turn this off.
 {{/apps}}
 
 **Look after what you shared**

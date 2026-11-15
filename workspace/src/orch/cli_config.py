@@ -373,11 +373,6 @@ def _config(args, root: Path) -> None:
             raise Refused(f"Only a person can change this. Ask them to run: orch config set {args.key} ...")
         what = args.key.split(".")[1]
         setter = config.set_workspace_name if what == "name" else config.set_workspace_description
-        text = args.value.strip()
-        _person(
-            args, root, "config.workspace_info", f"{what}:{hashlib.sha256(text.encode()).hexdigest()}",
-            parts={"setting": what}, value=args.value, exact=text,
-        )  # fmt: skip
         v = setter(root, args.value)
         _out(args, {args.key: v}, f"Saved: the workspace {what} is {v!r}." if v else f"Saved: no {what}.")
     elif args.sub == "set" and args.key == "workspace.code":

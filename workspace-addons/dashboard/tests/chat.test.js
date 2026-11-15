@@ -6,7 +6,7 @@ function context() {
   const h = (tag, attrs, ...children) => ({tag, attrs, style:{}, children:children.flat(Infinity).filter(c => c != null),
     append(...nodes){this.children.push(...nodes);}, prepend(...nodes){this.children.unshift(...nodes);},
     addEventListener(){}, get textContent(){return this.children.map(c => typeof c === 'object' ? c.textContent : c).join('');}});
-  const c = vm.createContext({h, fragment:(...children) => h('fragment', {}, children),
+  const c = vm.createContext({h, heading:(title, sub = '') => h('header', {className:'page-heading'}, h('div', {}, h('h1', {}, title), sub ? h('p', {className:'muted'}, sub) : null)), fragment:(...children) => h('fragment', {}, children),
     array:v => Array.isArray(v) ? v : [], clean:v => String(v || ''), snapshot:false,
     state:{workspace:'Fish', chat:{messages:[]}}, ticketOf:() => null, time:() => '', date:v => v,
     MutationObserver:class {observe(){}}, document:{documentElement:{}}, CSS:{supports:() => false},
@@ -81,8 +81,8 @@ test('"Your helper" is the thread title, the Chat row title, the bubble, the com
   assert.match(thread, /A new conversation starts each day at 04:00/);
   assert.doesNotMatch(thread, /Context cleared/);
   const head = JSON.stringify(c.chatHeader(null, false));
-  const title = nodes(c.chatHeader(null, false), n => n.attrs?.['data-key'] === 'chat-title')[0].textContent;
-  assert.equal(title, 'Your helper'); assert.match(head, /Pilatus workspace/); assert.doesNotMatch(head, /[Pp]ilatus helper|Chat · /);
+  const frame = JSON.stringify(c.chatHeading());
+  assert.match(frame, /"Chat"/); assert.match(frame, /Your helper/); assert.doesNotMatch(head, /chat-title|[Pp]ilatus helper|Chat · /, 'no second title row in the helper conversation');
   const row = nodes(c.chatListRow(null), n => n.tag === 'strong')[0].textContent;
   assert.equal(row, 'Your helper');
   assert.match(JSON.stringify(c.chatThinking('Your helper', true)), /Your helper is thinking/);
@@ -99,7 +99,7 @@ test('the chip row is gone: no From my phone checkbox (the New chat picker has Y
   assert.doesNotMatch(page, /From my phone/); assert.match(page, /Contacts/);
   assert.doesNotMatch(page, /chat-list"/, 'relay off: no conversation list');
   c.state.chat.activity.running = 2;
-  assert.match(JSON.stringify(c.chatHeader(null, false)), /Working on 2 tickets/);
+  assert.match(JSON.stringify(c.chatHeading()), /working on 2 tickets/);
   vm.runInContext("chatUi.filter = 'phone'", c);
   const ids = nodes(c.chatThread(null, null), n => n.attrs?.['data-message-id']).map(n => n.attrs['data-message-id']);
   assert.deepEqual(ids, ['p1', 'r1']);
@@ -186,15 +186,15 @@ test('a finished group is only under Earlier, a live one only under Groups', () 
   }
 });
 
-test('thread header: helper title with workspace and "Working on N tickets", then the workspace link (no checkbox)', () => {
+test('thread header: no title row for the helper (the page heading says it); New chat, Contacts and Earlier in one row', () => {
   const c = context();
   c.state.chat = {day:'2026-11-11', activity:{running:2}, messages:[]};
   const head = c.chatHeader(null, false);
-  const top = nodes(head, n => n.attrs?.className === 'chat-head-top')[0];
-  assert.deepEqual(top.children.map(n => n.textContent), ['✧', 'Your helperFish workspace · Working on 2 tickets', 'Earlier']);
+  assert.equal(nodes(head, n => n.attrs?.className === 'chat-head-top').length, 0);
   const row = nodes(head, n => n.attrs?.className === 'chat-head-row')[0];
-  assert.equal(row.textContent, 'New chatContacts');
-  assert.equal(head.children.length, 2, 'the title row and the filter row');
+  assert.equal(row.textContent, 'New chatContactsEarlier');
+  assert.equal(head.children.length, 1, 'only the button row');
+  assert.match(JSON.stringify(c.chatHeading()), /Your helper · working on 2 tickets/);
 });
 
 test('New chat picker offers your helper, workspaces and your phone; Your phone shows the phone messages', async () => {
@@ -284,7 +284,7 @@ test('with groups or workspace chats: grouped list (This workspace, Other worksp
   c.ticketOf = () => ({id:'t_live', status:'active'});
   c.state.groups = {hosted:[{id:'g_live', ticket:'t_live', title:'Live group', members:[{ws:'ws_a', name:'Home office'}], tasks:[]}], joined:[]};
   assert.match(JSON.stringify(c.chatThread(null, null)), /Talk it through with your helper/);
-  const page = c.chatPage().children[0];
+  const page = c.chatPage().children[1].children[0];
   assert.doesNotMatch(page.attrs.className, /chat-simple/);
   const list = page.children[0].textContent;
   assert.ok(list.indexOf('This workspace') < list.indexOf('Your helper') && list.indexOf('Groups') < list.indexOf('Live group'));
@@ -292,7 +292,7 @@ test('with groups or workspace chats: grouped list (This workspace, Other worksp
   vm.runInContext("chatUi.search = 'live'", c);
   assert.equal(nodes(c.chatList(), n => n.attrs?.['data-id'] === 'chat')[0].hidden, true);
   c.state.groups = {hosted:[], joined:[]};
-  assert.match(c.chatPage().children[0].attrs.className, /chat-simple/, 'only the helper chat');
+  assert.match(c.chatPage().children[1].children[0].attrs.className, /chat-simple/, 'only the helper chat');
 });
 // Owner feedback 14 Nov, F21: header says "Your helper" once today's thread has a message; Send stays usable while the helper is thinking.
 test('header reads Your helper once a message exists, and Send works while the helper is thinking', () => {

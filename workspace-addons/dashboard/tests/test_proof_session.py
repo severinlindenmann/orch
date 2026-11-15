@@ -549,6 +549,7 @@ ACT_ARGS = {
     "workflow.set": {"on": True},
     "copies.set": {"mode": "off"},
     "workspace.set": {"field": "name", "text": "Demo"},
+    "look.profile": {"service": "relay", "description": "Demo", "tags": ["a"]},
     "copies.clean": {},
     "diag.set": {"on": False},
     "diag.delete_reports": {},
