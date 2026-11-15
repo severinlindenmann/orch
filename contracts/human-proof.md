@@ -60,8 +60,7 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    file itself is protected only by Level 1, below.) The dashboard is a named proof server for the Focus page it embeds,
    and for the Insights page it embeds (v1: Insights runs embedded under the dashboard); a standalone Insights page server
    keeps its own session and mints `insights.settings` and `record.delete_detail` proofs from it, and ONLY those
-   (`pageproof.SERVER_OPS`, checked at mint time; Focus and dashboard are not limited by it).
-   The `insights.settings`
+   (`pageproof.SERVER_OPS`, checked at mint time; Focus and dashboard are not limited by it). Its `insights.settings`
    target is built by `config.insights_target`, the one form the core checks. Until this orch ships the Insights add-on
    (`addons.SHIPPED_ADDONS`), no launch token is written or accepted for `insights`.
 4. **Mint.** For a human-only click the server builds `payload = {op, target, by, iat, exp, nonce}` (`$defs/payload`):
@@ -163,13 +162,6 @@ phone), and (3) when `reply_to` names a question this workspace sent (relay.py `
 `by` is `human:<phone>` from that channel, never from the body's own label. Any process may run the fetch (`orch relay
 inbox`); what it can apply is decided by the relay, not by the caller. Device-key-signed phone verdicts are a later step
 (Level 2 later).
-
-**Review cards from the phone** (relay-api.md "Review cards on the phone", vectors/review-card-v1.json). A swipe on a card
-(`answer.verdict`) is proven exactly like the answers above: rules (1)-(3), plus the digest the phone echoes must equal the
-digest of the question as the workspace stores it now (else `changed`, nothing applied). The workspace takes the ticket, the
-question and the card only from its own MAC'd asked record and its own ticket, never from the answer.
-Face ID on the phone is a phone-side confirm only. A phone verdict never changes an answer that
-already exists (`decided`); changing a decision is a computer action.
 
 ## Dev mode: the test human persona (demo workspaces only)
 
