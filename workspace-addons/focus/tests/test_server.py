@@ -566,3 +566,68 @@ def test_list_carries_the_newest_result_only_for_tickets_in_review(server, ws):
         "preview": f"/api/file?t={TID}&n=report.md&m=view",
     }  # fmt: skip
     assert "result" not in rows[other]
+
+
+# --- files added from the composer (ticket.attach) ---------------------------------------------------
+def _files(*named):
+    import base64
+
+    return [{"name": n, "data": base64.b64encode(b).decode()} for n, b in named]
+
+
+def _attach(server, files, headers=None):
+    return req(
+        server, "POST", "/api/act", {"op": "ticket.attach", "args": {"ticket": TID, "files": files}}, headers
+    )
+
+
+def test_attach_ok_uploads_through_orch_ticket_attach(server, fake_orch):
+    st, body, _ = _attach(server, _files(("notes.txt", b"hello"), ("pic.png", b"\x89PNG")))
+    assert st == 200, body
+    cs = calls(fake_orch)
+    assert ["log", TID] == cs[0][:2] and ["Added files to the ticket"] == cs[0][-1:]
+    got = [c for c in cs if c[:2] == ["ticket", "attach"]]
+    assert [c[3] for c in got] == ["--name=notes.txt", "--name=pic.png"] and "--json" in got[0]
+    assert (fake_orch.parent / "attached.log").read_text().split() == ["notes.txt:5", "pic.png:4"]
+
+
+def test_attach_big_body_is_read_but_only_for_attach(server, fake_orch):
+    big = _files(("big.txt", b"x" * (2 * 1024 * 1024)))
+    assert _attach(server, big)[0] == 200
+    st, body, _ = req(
+        server, "POST", "/api/act", {"op": "run.send", "args": {"ticket": TID, "text": "x" * 40000}}
+    )
+    assert st == 400 and b"could not be read" in body
+
+
+def test_attach_too_large_names_the_file(server, fake_orch):
+    st, body, _ = _attach(server, _files(("huge.txt", b"x" * (25 * 1024 * 1024 + 1))))
+    assert st == 400 and body.decode() == "huge.txt is over 25 MB. Choose a smaller file."
+    assert not [c for c in calls(fake_orch) if c[:1] == ["log"]]
+
+
+@pytest.mark.parametrize(
+    "files,text",
+    [([], "Choose a file to add."), ("x", "Choose a file to add."),
+     ([{"name": "a.exe", "data": "AA=="}], "a.exe: only text files and pictures can be added."),
+     ([{"name": "a.txt", "data": "!!"}], "a.txt could not be read. Choose it again."),
+     ([{"name": "a.txt", "data": "AA==", "x": 1}], "That file could not be read. Choose it again."),
+     ([{"name": "a\x00.txt", "data": "AA=="}], "That file name is not allowed. Rename the file and choose it again.")],
+)  # fmt: skip
+def test_attach_bad_body_is_one_sentence(server, fake_orch, files, text):
+    st, body, _ = _attach(server, files)
+    assert st == 400 and body.decode() == text and calls(fake_orch) == []
+
+
+def test_attach_orch_refusal_names_the_file(server, fake_orch):
+    st, body, _ = _attach(server, _files(("refuse.txt", b"a")))
+    assert st == 422 and body.decode().startswith("refuse.txt could not be added. Choose a text file")
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{"Host": "evil.example:80"}, {"Origin": "http://evil.example"}, {"Sec-Fetch-Site": "cross-site"}],
+)
+def test_attach_wrong_origin_refused(server, fake_orch, headers):
+    st, _, _ = _attach(server, _files(("a.txt", b"x")), headers)
+    assert st == 403 and calls(fake_orch) == []

@@ -68,7 +68,7 @@ identify people by a link token or a typed name. `fetch()` to the app's own path
 check for apps with `auth = false`, and for apps with `auth = true` only under their own secret address. An app with `auth = true` is served under a secret
 `/a/<name>/~<key>/` address (the server redirects there after the view link or cookie check). That private link, and the address
 it opens, is the key to the app, as before; both change when the link is reset. The server keeps its key for these addresses in `app-cap.key` in the data folder; it must stay private to the publish user. Use relative links (`style.css`, `data.json`),
-not root-absolute ones (`/a/<name>/style.css`), or they get no access. An app cannot switch the sandbox off.
+not root-absolute ones (`/a/<name>/style.css`), or they get no access. Apps with `reach = "private"` are served under a secret `~` address too, also with `auth = false` (a plain request is redirected there), so use relative links in all private-network apps. An app cannot switch the sandbox off.
 
 ## Sandbox
 
