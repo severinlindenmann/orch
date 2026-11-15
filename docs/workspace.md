@@ -150,8 +150,16 @@ questions and answers, history. Relay and publish ship in the same package as bu
 | `orch doctor` | Shows what is wrong with orch here (read-only): PATH, git, uv, this folder's skill link, instruction file and reminder, plus the run checks of `orch diag inspect`. Each problem names the next step; ends with "Nothing wrong." or "N things to fix." |
 | `orch uninstall` | Takes orch out of this folder: add-ons, background processes, skills and links, orch's lines in `CLAUDE.local.md` / `.claude/settings.local.json` / `.git/info/exclude`, this folder's entries in the orch home, `.orch/harness`, `.orch/run`. Keeps `.orch/tickets`, `.orch/config.toml`, `.orch/secrets`. Safe to run twice; removing orch itself: `uv tool uninstall orch-workspace` |
 | `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
+| `orch pause` / `orch resume` | The runaway brake: pause stops all automation in this workspace (nothing starts on its own), resume turns it back on |
 
 All commands accept `--json` for agents. Exit code 0 = ok, 2 = refused (stderr `Refused: <reason>`; a confirmation that needs `--yes` without a terminal prints just its question; with `--json` stdout `{"error": "<reason>"}`), 1 = bug.
+
+## Pause and run cap
+`orch pause` writes `.orch/run/paused.json`. While it is there, every start that is not a person's is refused with
+one sentence ("Automation is paused in this workspace. Turn it back on with: orch resume."), extra turns of a
+running one-step agent are not continued, and `orch status` says so. A person's own start always works. On top of that,
+automatic starts are capped at 20 per ticket in a rolling 24 hours (counted in `.orch/run/starts.json`); the first refusal
+of the day adds one history line to the ticket. Person starts are never counted.
 
 ## Data storage
 `.orch/` in the workspace (contracts/local-files.md). Tickets may be committed; secrets and inbox are gitignored.

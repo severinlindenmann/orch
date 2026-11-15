@@ -39,6 +39,8 @@ HUMAN_ONLY = {
     "start",
     "stop",
     "status",
+    "pause",  # a person's runaway brake
+    "resume",
     "addon",
     "agents",
     "config",
