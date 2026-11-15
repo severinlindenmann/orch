@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timedelta
 
-from . import authority, commands, orchcli
+from . import authority, commands, irreversible, orchcli
 from .render import clean
 from .store import Refused, Store, clock, validate
 
@@ -73,7 +73,7 @@ def check(entry, answer, granted, at, order=None, decided_rows=None):
         raise Refused("The ship decision is always yours.", "not_allowed")
     if answer not in options:
         raise Refused("That is not one of the answers offered.", "not_allowed")
-    if any(i["tag"] == "cant-undo" for i in data["items"]):
+    if any(irreversible.derived_tag(i, data["stage"]) == "cant-undo" for i in data["items"]):
         raise Refused("Something here cannot be undone, so it is always yours to decide.", "not_allowed")
     live = [g for g in granted if g["from"] <= at < g["until"]]
     if not live:

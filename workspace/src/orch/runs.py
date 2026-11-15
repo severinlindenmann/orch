@@ -678,6 +678,9 @@ def claim(
     folder: where the agent works when that is not the workspace root (a separate copy); it goes in the
     record."""
     ticket = tickets.load(root, tid)
+    blocked = tickets.start_blocked(root, ticket)  # also a direct `orch run claim`, not only `run start`
+    if blocked:
+        raise Refused(blocked)
     from orch import humanproof
 
     humanproof.ensure_record_key(root)  # the record is sealed with a key made here (activity.md); idempotent
@@ -1342,6 +1345,9 @@ def start(
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
     from orch import runs_live, worktrees
 
+    blocked = tickets.start_blocked(root, tickets.load(root, tid))  # before anything is planned or spawned
+    if blocked:
+        raise Refused(blocked)
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)
     worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run; never waits, never raises

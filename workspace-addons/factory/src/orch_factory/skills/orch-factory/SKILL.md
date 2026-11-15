@@ -72,7 +72,8 @@ Each time you are woken, ask Factory what to do next and follow it:
 - `start-crew`: `orch factory crew add <order> <task>` then `orch factory crew start <order> <task>` for the tasks of this
   stage (one sub-ticket per task; never `orch run start` on crew tickets yourself).
 - Check the crew's results against the done-means points (evidence on the checks), then move on.
-- At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo`; a recommended
+- At a stop: `orch factory stop <order> --file stop.json` — items tagged `routine` / `taste` / `cant-undo` (anything that
+  sends, publishes, deploys, deletes, pays or touches main/production is `cant-undo`: Factory refuses it otherwise); a recommended
   answer only on routine items; list what was checked AND what was not checked, and every small change made during the run.
 - `wait`: end your turn; you are woken when the owner answers.
 - `resume` (autopilot order, the owner's grant is still live): look at the open stops of the orders you work on and

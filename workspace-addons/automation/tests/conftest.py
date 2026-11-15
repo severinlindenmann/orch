@@ -9,6 +9,10 @@ import pytest
 # The shared process helper lives in core; expose it in this add-on's standalone test env.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "workspace" / "src"))
 
+# No test may touch the real ~/.orch-tool: autouse private HOME/ORCH_HOME + a session guard (shared helper).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
+
 FAKE_ORCH = """#!{py}
 import json, sys, os
 from pathlib import Path
@@ -204,6 +208,7 @@ def _reap_started_servers(monkeypatch):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    check_real_home(session)
     alive = [p.pid for p in _STARTED if p.poll() is None]
     if alive:
         print(f"\nLEAK: orch_automation servers started by the tests are still alive: {alive}")
