@@ -326,8 +326,9 @@ unread; the phone shows it as the card's Received state, an old phone the plain 
 (`orch ask <ticket> --take-back q3 "<reason>"`). When that question was sent to the phones, the workspace sends ONE `text`
 (message.schema.json `taken_back`; vectors/taken-back-v1.json) to `phones` with `reply_to` = the message id of the question it sent to the
 phones, `ticket` (and `key`, when the question had one) = that question's, and a body that is only
-`{text, taken_back: {reason}}`. `reason` is 1-200 characters, one line, no control characters (the workspace cuts a longer
-reason); `text` is exactly `Taken back: <reason>` (no trailing period), so an old phone shows it as one plain line.
+`{text, taken_back: {reason}}`. `reason` is 1-200 characters, one plain line: no control characters, no line or paragraph separator (U+2028/2029), no zero-width or
+bidi format character (U+200B-200F, 202A-202E, 2060-2064, 2066-2069, 061C, FEFF); the workspace strips them and cuts a longer
+reason; `text` is exactly `Taken back: <reason>` (no trailing period), so an old phone shows it as one plain line.
 The workspace sends it only when the take-back changed something (never for a repeat, never because a message arrived from
 the relay) and only for a question it sent to phones; it uses the normal outbox with a stable message id, so a retry sends
 the same bytes (R3.1). No relay add-on: nothing is sent and nothing else changes. Relay answers `409 already_answered`: nothing
@@ -340,7 +341,8 @@ relay itself): the schema shape and the canonical `text` hold (body is only `tex
 is exactly `phones` (a `ph_…` or a workspace is refused); `reply_to` is a question THIS sender sent (`404` for any other id,
 unknown included, so no id is confirmed; a phone cannot send the field at all, `POST /v1/phone/send` has no such field, it is
 ignored, and the stored text never carries it); the question is a `q<n>` question (a `review-<n>` or `proposal-…` question, or
-any other id → `403 not_allowed`); `ticket` equals the question's `ticket` and `key`, when given, its `key`; a phone answer
+any other id → `403 not_allowed`); that question was itself sent to `phones` (one sent to a single `ph_…` or a
+workspace → `403 not_allowed`); `ticket` equals the question's `ticket` and `key`, when given, its `key`; a phone answer
 for that question is already stored → `409 already_answered`; at most one `taken_back` per `reply_to` (another message id
 `409 conflict`; the same id again is the normal `200 duplicate`). The relay keeps the take-back with the question: a later
 `POST /v1/phone/answer` for it is `409 taken_back` (nothing stored) and `open_questions` of `/v1/phone/workspaces`,

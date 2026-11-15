@@ -611,7 +611,7 @@ async fn answer(
             )));
         }
         // The workspace took this question back: closed, nothing stored (relay-api.md "Question taken back").
-        if let Some(reason) = store::taken_back_reason(&c, &app.key, qid) {
+        if let Some(reason) = store::taken_back_reason(&c, &app.key, qid)? {
             return Err(taken_back(format!(
                 "This question was taken back: {reason}"
             )));

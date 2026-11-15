@@ -456,6 +456,12 @@ fn check_review_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -> 
     let q = get_msg(c, rid)?
         .filter(|q| q.from == sender && q.typ == "question")
         .ok_or_else(|| not_found("The message you reply to does not exist."))?;
+    // Only a question sent to `phones` can be taken back (the sender owns it, so no id is probed here).
+    if q.to != "phones" {
+        return Err(not_allowed(
+            "Only a question sent to the phones can be taken back.",
+        ));
+    }
     let (qbody, qextra) = open_payload(key, &q);
     if qbody.get("digest").is_none() {
         return Err(not_allowed("That is not one of your review questions."));
@@ -496,9 +502,15 @@ fn check_review_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -> 
 /// Longest `taken_back.reason` (characters).
 const MAX_TAKEN_BACK_REASON: usize = 200;
 
-/// A character a one-line reason may not contain: controls (C0, DEL, C1) and bidi embedding/override/isolate marks.
+/// A character a one-line reason may not contain: controls (C0, DEL, C1), line/paragraph separators, zero-width and
+/// bidi format characters (U+200B-200F, 202A-202E, 2060-2064, 2066-2069, 061C, FEFF).
 fn bad_reason_char(ch: char) -> bool {
-    ch.is_control() || matches!(ch, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    ch.is_control()
+        || matches!(
+            ch,
+            '\u{2028}' | '\u{2029}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{061c}' | '\u{feff}'
+        )
 }
 
 /// A workspace's `body.taken_back` text (relay-api.md "Question taken back"): body only {text, taken_back:{reason}},
@@ -543,6 +555,12 @@ fn check_taken_back(c: &Connection, key: &Key, sender: &str, msg: &Value) -> Res
     let q = get_msg(c, rid)?
         .filter(|q| q.from == sender && q.typ == "question")
         .ok_or_else(|| not_found("The message you reply to does not exist."))?;
+    // Only a question sent to `phones` can be taken back (the sender owns it, so no id is probed here).
+    if q.to != "phones" {
+        return Err(not_allowed(
+            "Only a question sent to the phones can be taken back.",
+        ));
+    }
     let (qbody, qextra) = open_payload(key, &q);
     let plain = qbody["question_id"].as_str().is_some_and(|id| {
         id.strip_prefix('q')
@@ -571,7 +589,7 @@ fn check_taken_back(c: &Connection, key: &Key, sender: &str, msg: &Value) -> Res
         return Err(already_answered("This question was already answered."));
     }
     // The same message id again is caught before this (a duplicate); another id for the same question is a conflict.
-    if store::taken_back_reason(c, key, rid).is_some() {
+    if store::taken_back_reason(c, key, rid)?.is_some() {
         return Err(conflict("This question was already taken back."));
     }
     Ok(())

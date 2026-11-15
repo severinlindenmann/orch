@@ -181,7 +181,25 @@ const KNOWN: [&str; 9] = [
 ];
 
 /// Store a full message (already validated). `digest` identifies the submitted content for duplicate checks.
+/// One savepoint (safe inside a caller's transaction): the message row and the rows kept next to it (blob links,
+/// the taken-back marker) are all stored or none is.
 pub fn insert_message(
+    c: &Connection,
+    key: &Key,
+    msg: &Value,
+    digest: &str,
+) -> rusqlite::Result<()> {
+    c.execute_batch("SAVEPOINT insert_message")?;
+    match insert_message_rows(c, key, msg, digest) {
+        Ok(()) => c.execute_batch("RELEASE insert_message"),
+        Err(e) => {
+            let _ = c.execute_batch("ROLLBACK TO insert_message; RELEASE insert_message");
+            Err(e)
+        }
+    }
+}
+
+fn insert_message_rows(
     c: &Connection,
     key: &Key,
     msg: &Value,
@@ -234,16 +252,6 @@ pub fn insert_message(
             }
         }
     }
-    // The workspace took this question back (relay-api.md "Question taken back"): kept next to the question, so the
-    // phone answer check and the open-question list see it without opening any payload.
-    if msg["type"] == "text" && msg["body"].get("taken_back").is_some() {
-        if let Some(q) = msg["reply_to"].as_str() {
-            c.execute(
-                "INSERT OR IGNORE INTO question_taken_back(question_id,msg_id) VALUES(?1,?2)",
-                params![q, id],
-            )?;
-        }
-    }
     c.execute(
         "INSERT INTO messages(id,from_addr,to_addr,type,created_at,ticket,reply_to,blob_id,digest,payload,stored_at)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -261,21 +269,33 @@ pub fn insert_message(
             now()
         ],
     )?;
+    // Written after the message row, so a failed message insert leaves no marker. The workspace took this question back (relay-api.md "Question taken back"): kept next to the question, so the
+    // phone answer check and the open-question list see it without opening any payload.
+    if msg["type"] == "text" && msg["body"].get("taken_back").is_some() {
+        if let Some(q) = msg["reply_to"].as_str() {
+            c.execute(
+                "INSERT OR IGNORE INTO question_taken_back(question_id,msg_id) VALUES(?1,?2)",
+                params![q, id],
+            )?;
+        }
+    }
     Ok(())
 }
 
 /// The reason a question was taken back (None = it was not): read from the stored take-back text.
-pub fn taken_back_reason(c: &Connection, key: &Key, qid: &str) -> Option<String> {
-    let mid: String = c
+/// A database error is returned, never read as "not taken back" (callers answer 500).
+pub fn taken_back_reason(c: &Connection, key: &Key, qid: &str) -> rusqlite::Result<Option<String>> {
+    let Some(mid): Option<String> = c
         .query_row(
             "SELECT msg_id FROM question_taken_back WHERE question_id=?1",
             [qid],
             |r| r.get(0),
         )
-        .optional()
-        .ok()
-        .flatten()?;
-    // The marker row decides; an unreadable text only loses the reason (fail closed: still taken back).
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    // The marker row decides; an unreadable text only loses the reason (still taken back).
     let reason = get_msg(c, &mid)
         .ok()
         .flatten()
@@ -286,7 +306,7 @@ pub fn taken_back_reason(c: &Connection, key: &Key, qid: &str) -> Option<String>
                 .to_string()
         })
         .unwrap_or_default();
-    Some(reason)
+    Ok(Some(reason))
 }
 
 #[allow(clippy::too_many_arguments)]

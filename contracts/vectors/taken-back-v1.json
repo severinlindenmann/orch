@@ -519,6 +519,166 @@
           }
         }
       }
+    },
+    {
+      "name": "reason-line-separator",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000060",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one two",
+          "taken_back": {
+            "reason": "one two"
+          }
+        },
+        "key": "DM1-12"
+      }
+    },
+    {
+      "name": "reason-paragraph-separator",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000061",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one two",
+          "taken_back": {
+            "reason": "one two"
+          }
+        },
+        "key": "DM1-12"
+      }
+    },
+    {
+      "name": "reason-zero-width-space",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000062",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one​two",
+          "taken_back": {
+            "reason": "one​two"
+          }
+        },
+        "key": "DM1-12"
+      }
+    },
+    {
+      "name": "reason-bidi-mark",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000063",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one‏two",
+          "taken_back": {
+            "reason": "one‏two"
+          }
+        },
+        "key": "DM1-12"
+      }
+    },
+    {
+      "name": "reason-arabic-letter-mark",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000064",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one؜two",
+          "taken_back": {
+            "reason": "one؜two"
+          }
+        },
+        "key": "DM1-12"
+      }
+    },
+    {
+      "name": "reason-word-joiner",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000065",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one⁠two",
+          "taken_back": {
+            "reason": "one⁠two"
+          }
+        },
+        "key": "DM1-12"
+      }
+    },
+    {
+      "name": "reason-bom",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000066",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one﻿two",
+          "taken_back": {
+            "reason": "one﻿two"
+          }
+        },
+        "key": "DM1-12"
+      }
+    },
+    {
+      "name": "reason-trailing-newline",
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000067",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: plans changed\n",
+          "taken_back": {
+            "reason": "plans changed\n"
+          }
+        },
+        "key": "DM1-12"
+      }
     }
   ],
   "relay": [
@@ -1417,6 +1577,218 @@
         }
       },
       "expect": 403
+    },
+    {
+      "name": "reason-line-separator",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000060",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one two",
+          "taken_back": {
+            "reason": "one two"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 422
+    },
+    {
+      "name": "reason-paragraph-separator",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000061",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one two",
+          "taken_back": {
+            "reason": "one two"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 422
+    },
+    {
+      "name": "reason-zero-width-space",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000062",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one​two",
+          "taken_back": {
+            "reason": "one​two"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 422
+    },
+    {
+      "name": "reason-bidi-mark",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000063",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one‏two",
+          "taken_back": {
+            "reason": "one‏two"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 422
+    },
+    {
+      "name": "reason-arabic-letter-mark",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000064",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one؜two",
+          "taken_back": {
+            "reason": "one؜two"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 422
+    },
+    {
+      "name": "reason-word-joiner",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000065",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one⁠two",
+          "taken_back": {
+            "reason": "one⁠two"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 422
+    },
+    {
+      "name": "reason-bom",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000066",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: one﻿two",
+          "taken_back": {
+            "reason": "one﻿two"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 422
+    },
+    {
+      "name": "reason-trailing-newline",
+      "state": {},
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000067",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000001",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: plans changed\n",
+          "taken_back": {
+            "reason": "plans changed\n"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 422
+    },
+    {
+      "name": "question-sent-to-one-phone",
+      "state": {
+        "questions_extra": [
+          {
+            "id": "m_tq00000000000007",
+            "from": "ws_pilatus001",
+            "to": "ph_iphone0001",
+            "question_id": "q7",
+            "ticket": "t_7k3f9q",
+            "key": "DM1-12",
+            "kind": "plain"
+          }
+        ]
+      },
+      "message": {
+        "schema": "orch.msg/1",
+        "id": "m_tb00000000000070",
+        "from": "ws_pilatus001",
+        "to": "phones",
+        "type": "text",
+        "reply_to": "m_tq00000000000007",
+        "ticket": "t_7k3f9q",
+        "created_at": "2026-11-15T10:00:00Z",
+        "body": {
+          "text": "Taken back: plans changed",
+          "taken_back": {
+            "reason": "plans changed"
+          }
+        },
+        "key": "DM1-12"
+      },
+      "expect": 403,
+      "error": "not_allowed",
+      "why": "only a question sent to `phones` can be taken back; one sent to a single phone (or a workspace) is refused so the reason never reaches phones that never saw it."
     }
   ],
   "cases": [
@@ -1505,6 +1877,21 @@
       "to": "phones",
       "reply_to": "<the asked message id>",
       "same_id_on_retry": true
+    },
+    {
+      "name": "separators-and-format-characters-are-stripped",
+      "asked_on_phones": true,
+      "relay_on": true,
+      "changed": true,
+      "reason_in": "plans changed ​‏؜⁠‮﻿ now",
+      "send": {
+        "text": "Taken back: plans changed now",
+        "taken_back": {
+          "reason": "plans changed now"
+        }
+      },
+      "to": "phones",
+      "reply_to": "<the asked message id>"
     }
   ],
   "inbound": [

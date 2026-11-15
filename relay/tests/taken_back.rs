@@ -61,7 +61,16 @@ impl Fixture {
             other,
             phone,
         };
-        for q in data["questions"].as_array().unwrap() {
+        let extra = state["questions_extra"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for q in data["questions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(extra.iter())
+        {
             let ws = if q["from"] == "ws_other00001" {
                 &f.other
             } else {
@@ -80,7 +89,7 @@ impl Fixture {
                 }
                 _ => {}
             }
-            let mut msg = json!({"schema":"orch.msg/1", "id":q["id"], "from":ws.id, "to":"phones", "type":"question",
+            let mut msg = json!({"schema":"orch.msg/1", "id":q["id"], "from":ws.id, "to":f.substitute(&q["to"]).as_str().unwrap_or("phones"), "type":"question",
                 "created_at":"2026-11-15T09:00:00Z", "body":body});
             if let Some(tk) = q["ticket"].as_str() {
                 msg["ticket"] = json!(tk);
@@ -367,4 +376,78 @@ async fn a_subscriber_cannot_answer_a_taken_back_question() {
     let v: Value = r.json().await.unwrap();
     assert_eq!(v["error"], "taken_back", "{v}");
     assert_eq!(v["message"], "This question was taken back: plans changed");
+    // The events view no longer offers the taken-back question as answerable.
+    let r = t
+        .http
+        .get(format!("{}/v1/sub/{token}/events", t.base))
+        .send()
+        .await
+        .unwrap();
+    let v: Value = r.json().await.unwrap();
+    let q = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"] == "question")
+        .expect("the question stays in the history");
+    assert_eq!(q["answerable"], false, "{v}");
+}
+
+/// Phone lists: the take-back text is no work update, so `/v1/phone/updates` never carries it, and a taken-back
+/// question is on no open list (the relay has no unread count for phones; the phone treats `taken_back` as never unread).
+#[tokio::test]
+async fn taken_back_is_not_an_update_and_not_open_anywhere() {
+    let f = Fixture::new(&json!({})).await;
+    let ok = vectors()["valid"][0]["message"].clone();
+    assert_eq!(f.post(&ok).await.0, 201);
+    let (s, v) = f.t.phone(&f.phone, "GET", "/v1/phone/updates", None).await;
+    assert_eq!(s, 200, "{v}");
+    assert!(
+        !v.to_string().contains("taken_back") && !v.to_string().contains("Taken back"),
+        "{v}"
+    );
+    let (s, v) =
+        f.t.phone(&f.phone, "GET", "/v1/phone/questions", None)
+            .await;
+    assert_eq!(s, 200, "{v}");
+    assert!(!v.to_string().contains(OK_QUESTION), "{v}");
+}
+
+/// A database error is never read as "not taken back": the answer ends in 500, nothing is stored.
+#[tokio::test]
+async fn a_database_error_fails_closed() {
+    let f = Fixture::new(&json!({})).await;
+    {
+        let c = f.t.app.db.lock().unwrap();
+        c.execute_batch("ALTER TABLE question_taken_back RENAME TO question_taken_back_x")
+            .unwrap();
+        assert!(store::taken_back_reason(&c, &f.t.app.key, OK_QUESTION).is_err());
+    }
+    let (s, _) =
+        f.t.phone(
+            &f.phone,
+            "POST",
+            "/v1/phone/answer",
+            Some(json!({"question_message_id": OK_QUESTION, "answer": "yes"})),
+        )
+        .await;
+    assert_eq!(s, 500);
+}
+
+/// The marker and the message row are one step: a failing marker insert leaves no message behind.
+#[tokio::test]
+async fn a_failed_marker_leaves_no_message() {
+    let f = Fixture::new(&json!({})).await;
+    let ok = f.substitute(&vectors()["valid"][0]["message"]);
+    let c = f.t.app.db.lock().unwrap();
+    c.execute_batch("DROP TABLE question_taken_back").unwrap();
+    assert!(store::insert_message(&c, &f.t.app.key, &ok, "d").is_err());
+    let n: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE id='m_tb00000000000001'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0);
 }
