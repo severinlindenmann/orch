@@ -38,7 +38,10 @@ pub fn ct_eq(a: &str, b: &str) -> bool {
 }
 
 pub fn valid_app_name(n: &str) -> bool {
+    let edge = |c: Option<char>| c.is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
     (2..=40).contains(&n.len())
+        && edge(n.chars().next())
+        && edge(n.chars().last())
         && n.chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }

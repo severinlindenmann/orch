@@ -52,8 +52,11 @@ fn check_manifest(m: &Manifest, dir: &FsPath, container: bool) -> ApiResult<()> 
         if !container {
             return bad("This server can't run docker apps.");
         }
-        if !dir.join("Dockerfile").is_file() {
+        let Ok(text) = std::fs::read_to_string(dir.join("Dockerfile")) else {
             return bad("docker apps need a Dockerfile at the top of the bundle.");
+        };
+        if let Err(e) = crate::runner::check_dockerfile(&text) {
+            return bad(e);
         }
     }
     if !["none", "json", "markdown", "sqlite"].contains(&m.store.as_str()) {
@@ -80,13 +83,10 @@ fn check_manifest(m: &Manifest, dir: &FsPath, container: bool) -> ApiResult<()> 
     Ok(())
 }
 
-/// Image tag of the docker-stack version in `code_dir`: `orch-app-<name>:<version folder>`.
-fn image_tag(st: &State, name: &str, code_dir: &FsPath) -> Option<String> {
+/// Version folder name of the code in `code_dir` (images are tagged `orch-app-<name>:<vdir>-<random>`).
+fn vdir_of(st: &State, name: &str, code_dir: &FsPath) -> Option<String> {
     let v = version_root(&st.cfg.app_root(name), code_dir)?;
-    Some(format!(
-        "orch-app-{name}:{}",
-        v.file_name()?.to_string_lossy()
-    ))
+    Some(v.file_name()?.to_string_lossy().into_owned())
 }
 
 /// Unpacks the .tar.gz into `dir`; returns the folder that holds app.toml.
@@ -111,7 +111,7 @@ fn extract(bytes: &[u8], dir: &FsPath) -> ApiResult<PathBuf> {
             return Err(ApiError::invalid("The bundle has an unsafe path."));
         }
     }
-    if std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "systemd") {
+    if std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "systemd" || v == "container") {
         crate::runner::prep_perms(dir);
     }
     if dir.join("app.toml").is_file() {
@@ -165,11 +165,12 @@ async fn start_and_check(
     port: u16,
 ) -> Result<(), String> {
     let image = if m.stack == "docker" {
-        let tag = image_tag(st, name, dir).ok_or("no image tag")?;
-        if !crate::runner::ensure_image(&tag, dir, st.cfg.build_secs).await {
-            return Err("The app's image could not be built.".into());
-        }
-        Some(tag)
+        let v = vdir_of(st, name, dir).ok_or("no version folder")?;
+        Some(
+            crate::runner::ensure_image(name, &v, dir, st.cfg.build_secs)
+                .await
+                .ok_or("The app's image could not be built.")?,
+        )
     } else {
         None
     };
@@ -232,8 +233,8 @@ pub async fn deploy(
     .await;
     if r.is_err() {
         if container_mode() {
-            if let Some(t) = image_tag(st, name, &vroot) {
-                crate::runner::remove_image(&t).await;
+            if let Some(v) = vdir_of(st, name, &vroot) {
+                crate::runner::remove_images(name, Some(&v)).await;
             }
         }
         let _ = std::fs::remove_dir_all(&vroot);
@@ -284,7 +285,8 @@ async fn deploy_inner(
     };
     let mut image = None;
     if m.stack == "docker" {
-        let tag = image_tag(st, name, &dir).ok_or_else(|| ApiError::internal("no image tag"))?;
+        let v = vdir_of(st, name, &dir).ok_or_else(|| ApiError::internal("no version folder"))?;
+        let tag = crate::runner::new_image_tag(name, &v);
         let (ok, out) = crate::runner::build_image(&tag, &dir, st.cfg.build_secs).await;
         image = Some(tag);
         if !ok {
@@ -306,6 +308,7 @@ async fn deploy_inner(
             &m.store,
             st.cfg.build_secs,
             &StepCtx {
+                app: name,
                 stack: &m.stack,
                 image: None,
                 writable: true,
@@ -325,6 +328,7 @@ async fn deploy_inner(
     if let Some(t) = &m.test {
         let td = dir.join(".test-data");
         let ctx = StepCtx {
+            app: name,
             stack: &m.stack,
             image: image.as_deref(),
             writable: false,
@@ -398,8 +402,8 @@ async fn deploy_inner(
         if let Some(v) = version_root(&root, FsPath::new(&old.code_dir)) {
             if v != vroot {
                 if container_mode() && old.stack == "docker" {
-                    if let Some(t) = image_tag(st, name, FsPath::new(&old.code_dir)) {
-                        crate::runner::remove_image(&t).await;
+                    if let Some(v) = vdir_of(st, name, FsPath::new(&old.code_dir)) {
+                        crate::runner::remove_images(name, Some(&v)).await;
                     }
                 }
                 let _ = std::fs::remove_dir_all(v);
@@ -480,6 +484,10 @@ pub async fn stop(st: &State, name: &str) -> ApiResult<Value> {
 /// Stops and deletes an app with its code and data. Caller holds app_lock.
 pub async fn remove(st: &State, name: &str) {
     st.runner.stop(name).await;
+    if container_mode() {
+        crate::runner::remove_images(name, None).await;
+        crate::runner::remove_network(name).await;
+    }
     let _ = std::fs::remove_dir_all(st.cfg.app_root(name));
     let _ = std::fs::remove_file(st.cfg.log_path(name));
     let _ = db::delete_app(&st.db.lock().unwrap(), name);
@@ -487,6 +495,10 @@ pub async fn remove(st: &State, name: &str) {
 
 pub async fn resume_all(st: &State) {
     let apps = db::all_apps(&st.db.lock().unwrap()).unwrap_or_default();
+    if container_mode() {
+        let known = apps.iter().map(|a| a.name.clone()).collect();
+        crate::runner::sweep_containers(&known).await;
+    }
     for a in apps
         .into_iter()
         .filter(|a| a.status == "running" && a.stack != "static")
@@ -825,5 +837,18 @@ mod tests {
         assert!(check_manifest(&no_health, d.path(), true).is_err());
         // python/node still need start
         assert!(check_manifest(&manifest("python"), d.path(), false).is_err());
+    }
+
+    #[test]
+    fn dockerfile_with_syntax_directive_is_refused_and_names_need_alnum_edges() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("Dockerfile"),
+            "# syntax=evil/x\nFROM scratch\n",
+        )
+        .unwrap();
+        assert!(check_manifest(&manifest("docker"), d.path(), true).is_err());
+        assert!(util::valid_app_name("a-b"));
+        assert!(!util::valid_app_name("-ab") && !util::valid_app_name("ab-"));
     }
 }
