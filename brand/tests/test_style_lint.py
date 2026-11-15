@@ -22,6 +22,11 @@ def test_false_positives_not_counted():
     assert cs.count('href="#main" &#123; url(a#b) #abcde x#fff') == {"hex": 0, "style": 0}
 
 
+def test_issue_refs_in_comments_not_counted():
+    assert cs.count("// flake (#825)\n/* #795 A1 */ <!-- #123 -->") == {"hex": 0, "style": 0}
+    assert cs.count("a{color:#fff} // was #000\nlet u = 'https://x/#abc'; c = '#123'") == {"hex": 2, "style": 0}
+
+
 def test_more_hex_fails_fewer_passes():
     allowed = {"a.html": {"hex": 2, "style": 0}}
     assert cs.violations({"a.html": {"hex": 3, "style": 0}}, allowed)

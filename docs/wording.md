@@ -13,6 +13,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | list of things for the person | Needs you | `orch needs` | Over to you, Inbox |
 | question with options | Question / Your answer | `question`, `q1` | Approval, Sign-off |
 | a question the helper withdrew | Taken back: <reason> | `--take-back`, `taken_back` | Cancelled, Deleted, Withdrawn |
+| the task a question belongs to, on its card | About: <task text> | `--check c1` | Regarding, Subject |
 | the suggested option | Suggested | `recommended` | Recommended |
 | evidence on a task | Evidence | `evidence` | Proof, Artifact |
 | repeating work | Repeats | `ext.scheduler` | Scheduler, Cron, Schedule |
@@ -20,6 +21,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | the person | You / first name | `human:<name>` | Human |
 | where it was done | dashboard, phone, terminal | `via` | CLI |
 | another workspace | its name (landing-site) | `ws_...` | Peer, Node |
+| stop all automation | Pause automation / Paused | `orch pause`, `orch resume` | Stop all, Kill switch, Disable |
 | outside item | its tool's name + its own word ("GitHub issue", "Jira issue") | web reference | "Issue" alone |
 | something a helper learned here | Lesson (list: Lessons) | `orch lessons`, `l_...` | Memory, Tip |
 | private network | private network (VPN) | - | NetBird (any product name) |

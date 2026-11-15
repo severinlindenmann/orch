@@ -1186,12 +1186,17 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
 
 # Workspace DM reads use the same CLI boundary as Chat History.
 def load_chat_contacts(root: Path, orch_bin: str | None) -> list | None:
-    data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
+    # `chat sync` imports new workspace texts first and prints the contacts; if that cannot run (busy lock), read as is.
+    data = run_orch(orch_bin, ["chat", "sync", "--json"], root)
+    if not isinstance(data, list):
+        data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
     return data if isinstance(data, list) else None
 
 
 def load_chat_thread(root: Path, orch_bin: str | None, ws: str) -> dict | None:
     if not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
         return None
-    data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
+    data = run_orch(orch_bin, ["chat", "thread", ws, "--sync", "--json"], root)
+    if not isinstance(data, dict):
+        data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
     return data if isinstance(data, dict) else None
