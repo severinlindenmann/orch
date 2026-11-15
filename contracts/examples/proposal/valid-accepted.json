@@ -45,9 +45,8 @@
  },
  "status": "accepted",
  "decided": {
-  "by": "human:severin",
   "at": "2026-11-16T08:00:00Z",
-  "op": "checkup.accept"
+  "op": "accept"
  },
  "applied": {
   "version_before": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

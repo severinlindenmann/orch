@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/proposal.schema.json",
-  "title": "orch check-up proposal v1 (orch.proposal/1, .orch/record/proposals/<id>.json)",
-  "description": "A change the check-up suggests (fix a skill, a new skill, ask the admin about a key or connection). See proposal.md. Nothing changes until a person accepts with a proof (human-proof.md).",
+  "title": "orch check-up proposal v1 (orch.proposal/1, .orch/insights/proposals/<id>.json)",
+  "description": "A change the check-up proposes (fix a skill, a new skill, ask the admin about a key or connection). See proposal.md. Nothing changes until a person clicks Accept.",
   "type": "object",
   "required": [
     "schema",
@@ -258,6 +258,10 @@
                   "worse",
                   "error"
                 ]
+              },
+              "plain": {
+                "type": "string",
+                "maxLength": 200
               }
             }
           }
@@ -271,6 +275,22 @@
               "$ref": "#/$defs/time"
             }
           ]
+        },
+        "hash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/version"
+            }
+          ],
+          "description": "proposal_hash of the proposal when it was tested; Accept refuses when the file no longer hashes to it."
+        },
+        "plain": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Why a test could not run."
         }
       }
     },
@@ -280,7 +300,6 @@
         "tested",
         "accepted",
         "rejected",
-        "sent_to_admin",
         "rolled_back",
         "stale"
       ]
@@ -293,25 +312,19 @@
         {
           "type": "object",
           "required": [
-            "by",
             "at",
             "op"
           ],
           "additionalProperties": false,
           "properties": {
-            "by": {
-              "type": "string",
-              "pattern": "^human:[^\\u0000-\\u001f]{1,58}$"
-            },
             "at": {
               "$ref": "#/$defs/time"
             },
             "op": {
               "enum": [
-                "checkup.accept",
-                "checkup.rollback",
-                "checkup.send_to_admin",
-                "checkup.reject"
+                "accept",
+                "rollback",
+                "reject"
               ]
             }
           }
@@ -351,6 +364,20 @@
           }
         }
       ]
+    },
+    "before": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/$defs/version"
+          }
+        ]
+      },
+      "description": "Set by Accept: sha256 of each file it replaced (null = it did not exist); the files are kept in .orch/insights/proposals/<id>/before/ for a roll back."
     }
   },
   "allOf": [
@@ -466,7 +493,7 @@
         "change"
       ],
       "additionalProperties": false,
-      "description": "What a check-up agent may send to `orch record propose`. Everything else (id, checkup, created_at, status, tests, decided, applied, target.source, target.version, before hashes, change_sha256) is set by the core; a draft that carries any of them is refused.",
+      "description": "What a check-up agent may send to `orch insights propose`. Everything else (id, checkup, created_at, status, tests, decided, applied, target.source, target.version, before hashes, change_sha256) is set by `orch insights propose`; a draft that carries any of them is refused.",
       "properties": {
         "kind": {
           "enum": [

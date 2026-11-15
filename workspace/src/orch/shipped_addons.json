@@ -163,7 +163,7 @@
   "description": "See what your helpers used in the last 30 days.",
   "gitignore": [],
   "name": "insights",
-  "needs": false,
+  "needs": true,
   "orch_api": 1,
   "page": {
    "label": "Open Insights",
