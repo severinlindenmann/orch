@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import orchcli
 from .render import clean
-from .store import Refused, read_bytes
+from .store import Refused, handover_file_ok, read_bytes
 
 FILE = "handover.json"
 DIRECTORY = (".agents", "skills", "orch-relay", "workspaces.json")
@@ -45,6 +45,8 @@ def workspace(root, ws):
 
 def _plain_file(root, rel):
     """A regular file inside the workspace, reached without a symbolic link (core's group share checks the rest)."""
+    if not handover_file_ok(rel):
+        return False
     path = Path(root).absolute()
     info = None
     for part in Path(rel).parts:
@@ -64,7 +66,10 @@ def check_freeze(root, p):
     for h in p.get("handovers", []):
         task = clean(h["task"], 48)
         if h["task"] not in slugs:
-            raise Refused(f"The hand-over names '{task}', which is not one of the tasks. Name a task of the plan.", "invalid")
+            raise Refused(
+                f"The hand-over names '{task}', which is not one of the tasks. Name a task of the plan.",
+                "invalid",
+            )
         if not h["workspace"].startswith("ws_") or workspace(root, h["workspace"]) is None:
             raise Refused(
                 f"'{task}' goes to a workspace you cannot hand tasks to. "
@@ -188,7 +193,9 @@ def start(root, store, d, t, crew, h):
     files = (h.get("sends") or {}).get("files", [])
     for f in files:
         if not _plain_file(root, f):
-            raise Refused(f"{clean(f, None)} is not a file in this workspace any more. Nothing was sent.", "refused")
+            raise Refused(
+                f"{clean(f, None)} is not a file in this workspace any more. Nothing was sent.", "refused"
+            )
     book = _load(store)
     mine = book.get(crew["id"]) or {}
     first = not mine.get("sent")
@@ -258,7 +265,9 @@ def settle(root, store, d):
                     # the same text and is told in the same order (reported as a follow-up)
                     mine["undelivered"] = _undelivered(root, mine["sent"])
                     title = clean(crew.get("title") or h["task"], 120)
-                    orchcli.call(root, "relay", "group", "say", crew["id"], NO_LONGER.format(title=title), write=True)
+                    orchcli.call(
+                        root, "relay", "group", "say", crew["id"], NO_LONGER.format(title=title), write=True
+                    )
                 mine["told"] = True
                 _save(store, book)
                 _set_cache(root, crew["id"], state=NOT_NEEDED)
@@ -274,7 +283,13 @@ def settle(root, store, d):
             changed = True
         if state == "done" and crew.get("status") != "done":
             who = clean(shown.get("name") or h["workspace"], 60)
-            orchcli.call(root, "log", crew["id"], f"Result from {who}: {clean(crew['title'], 120)} is done.", write=True)
+            orchcli.call(
+                root,
+                "log",
+                crew["id"],
+                f"Result from {who}: {clean(crew['title'], 120)} is done.",
+                write=True,
+            )
             try:
                 orchcli.call(root, "ticket", "status", crew["id"], "done", write=True)
             except Refused:

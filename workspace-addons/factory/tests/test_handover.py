@@ -45,7 +45,9 @@ def directory(ws):
     folder = ws / ".agents" / "skills" / "orch-relay"
     folder.mkdir(parents=True)
     (folder / "workspaces.json").write_text(
-        json.dumps({"workspaces": [{"id": WS, "name": "Design", "can_send": {"text": True, "delegate": True}}]})
+        json.dumps(
+            {"workspaces": [{"id": WS, "name": "Design", "can_send": {"text": True, "delegate": True}}]}
+        )
     )
     (ws / "brief").mkdir()
     (ws / "brief" / "header.md").write_text("Make a header.")
@@ -88,7 +90,9 @@ def test_invalid_handover_unknown_workspace(ws, run, directory):
 
 
 def test_freeze_refuses_without_delegate_permission(ws, run, directory):
-    directory.write_text(json.dumps({"workspaces": [{"id": WS, "name": "Design", "can_send": {"text": True}}]}))
+    directory.write_text(
+        json.dumps({"workspaces": [{"id": WS, "name": "Design", "can_send": {"text": True}}]})
+    )
     order = run("idea", "Price list")["order"]
     run("propose", order, "--file", "-", data=hand_proposal(), code=2)
 
@@ -97,9 +101,15 @@ def test_freeze_refuses_unknown_task_and_missing_file(ws, run, directory):
     order = run("idea", "Price list")["order"]
     p = json.loads(hand_proposal())
     p["handovers"][0]["task"] = "no-such-task"
-    assert "not one of the tasks" in run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)["error"]
+    assert (
+        "not one of the tasks"
+        in run("propose", order, "--file", "-", data=json.dumps(p).encode(), code=2)["error"]
+    )
     (ws / "brief" / "header.md").unlink()
-    assert "not a file in this workspace" in run("propose", order, "--file", "-", data=hand_proposal(), code=2)["error"]
+    assert (
+        "not a file in this workspace"
+        in run("propose", order, "--file", "-", data=hand_proposal(), code=2)["error"]
+    )
 
 
 def test_freeze_refuses_a_symlinked_file(ws, run, directory):
@@ -148,7 +158,7 @@ def test_delegate_refusal_sends_nothing(ws, run, directory):
     assert shares(ws) == [] and cache(ws, tid) is None
     (ws / "fail-delegate").unlink()
     run("crew", "start", order, "header-picture")
-    assert len(calls(ws, "relay", "delegate")) == 1
+    assert len(list(ws.glob("delegate-*.json"))) == 1
 
 
 def test_file_gone_after_start_refuses_before_sending(ws, run, directory):
@@ -235,7 +245,12 @@ def take_back(ws, run, order, accept=True):
         "adds_min": 40,
         "lands_in": "build",
         "adds_tasks": [
-            {"slug": "header-picture-here", "title": "Header picture here", "role": "builder", "stage": "build"}
+            {
+                "slug": "header-picture-here",
+                "title": "Header picture here",
+                "role": "builder",
+                "stage": "build",
+            }
         ],
     }
     q = run("change", order, "--file", "-", data=json.dumps(change).encode())["question"]
@@ -247,7 +262,9 @@ def take_back(ws, run, order, accept=True):
 def test_do_it_here_undelivered_and_delivered(ws, run, directory):
     order, tid = handed(ws, run)
     run("crew", "start", order, "header-picture")
-    (ws / "outbox.json").write_text(json.dumps([{"id": json.loads(next(ws.glob("delegate-*.json")).read_text())["id"]}]))
+    (ws / "outbox.json").write_text(
+        json.dumps([{"id": json.loads(next(ws.glob("delegate-*.json")).read_text())["id"]}])
+    )
     take_back(ws, run, order, accept=False)
     assert says(ws) == []  # nothing without the person's Accept
     take_back(ws, run, order)

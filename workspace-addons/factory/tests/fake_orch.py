@@ -153,7 +153,11 @@ elif args[:2] == ["relay", "delegate"]:
     }
     (root / f"delegate-{mid}.json").write_text(json.dumps(record))
     if "--group" in args and not (root / "no-group").exists():
-        groups = json.loads((root / "groups.json").read_text()) if (root / "groups.json").exists() else {"hosted": []}
+        groups = (
+            json.loads((root / "groups.json").read_text())
+            if (root / "groups.json").exists()
+            else {"hosted": []}
+        )
         g = next((x for x in groups["hosted"] if x["ticket"] == ticket), None)
         if g is None:
             g = {"id": "grp_" + ticket, "ticket": ticket, "tasks": []}
@@ -165,7 +169,9 @@ elif args[:3] == ["relay", "group", "share"]:
     name = Path(args[4]).name
     refused = (root / "refuse-share").read_text().split() if (root / "refuse-share").exists() else []
     if name.startswith(".") or name in refused:
-        print(json.dumps({"error": f"{args[4]} can't be shared (it looks like a secret).", "code": "refused"}))
+        print(
+            json.dumps({"error": f"{args[4]} can't be shared (it looks like a secret).", "code": "refused"})
+        )
         sys.exit(2)
     with (root / "shares.jsonl").open("a") as stream:
         stream.write(json.dumps({"ticket": args[3], "file": args[4], "click": "--click" in args}) + "\n")
@@ -175,10 +181,14 @@ elif args[:3] == ["relay", "group", "say"]:
         stream.write(json.dumps({"ticket": args[3], "text": args[4]}) + "\n")
     result = {}
 elif args[:3] == ["relay", "group", "list"]:
-    result = json.loads((root / "groups.json").read_text()) if (root / "groups.json").exists() else {"hosted": []}
+    result = (
+        json.loads((root / "groups.json").read_text()) if (root / "groups.json").exists() else {"hosted": []}
+    )
     result.setdefault("joined", [])
 elif args[:2] == ["relay", "outbox"]:
-    result = {"waiting": json.loads((root / "outbox.json").read_text()) if (root / "outbox.json").exists() else []}
+    result = {
+        "waiting": json.loads((root / "outbox.json").read_text()) if (root / "outbox.json").exists() else []
+    }
 elif args[:2] == ["ticket", "status"]:
     t = load(args[2])
     t["status"] = args[3]

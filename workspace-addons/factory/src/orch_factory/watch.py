@@ -63,7 +63,10 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
                 first = status in FINISHED and seen.get(task) != status
             if first:
                 why.append(f"crew task {task} is {status}")
-        for task, state in states.items():  # d) a hand-over was said no to or failed: once per task and reason
+        for (
+            task,
+            state,
+        ) in states.items():  # d) a hand-over was said no to or failed: once per task and reason
             if state in ("denied", "failed") and f"handover:{task}:{state}" not in woken:
                 why.append(f"handover task {task} is {state}")
                 ids.append(f"handover:{task}:{state}")
