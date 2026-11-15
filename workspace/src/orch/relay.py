@@ -726,7 +726,7 @@ def send_text(
         if not update:
             actor = tickets.current_actor()
             body["by"] = "you" if sender == "you" else _cfg(root)["workspace"]
-            body["via"] = via or ("helper" if actor.startswith("agent:") else "dashboard")
+            body["via"] = via or ("helper" if actor.startswith("agent:") else tickets.PERSON_VIA)
     if speak:
         body["speak"] = speak
     if update:

@@ -807,6 +807,11 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     return t
 
 
+# The `via` / origin word for "the person, through a UI" (contracts/chat-groups.md). The wire and the stored
+# files keep this value, so old tickets, messages and peers stay readable; the only place core spells it.
+PERSON_VIA = "dashboard"
+
+
 def _env_via() -> str:
     """Where a change comes from: ORCH_VIA (a page that runs orch sets it, e.g. dashboard), else cli."""
     v = os.environ.get("ORCH_VIA", "")
