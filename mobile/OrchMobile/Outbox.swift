@@ -358,10 +358,11 @@ final class Outbox {
     func reconcile(with messages: [PhoneMessage]) {
         let known = Set(messages.compactMap { $0.clientId ?? $0.message.body.clientId })
         // A stored review answer is done once the workspace's result for its question is listed (the result text itself stays in the list).
-        let resulted = Set(messages.compactMap { $0.message.body.isReviewResult ? $0.message.replyTo : nil })
+        // Matched as (workspace, question) pairs: a result from another workspace never closes this answer.
+        let resulted = Set(messages.compactMap { m in m.message.body.isReviewResult ? m.message.replyTo.map { "\(m.message.from)|\($0)" } : nil })
         let done = items.filter {
             ($0.kind == .send && known.contains($0.clientId))
-                || ($0.kind == .answer && $0.verdict != nil && $0.sentMessageId != nil && $0.questionMessageId.map(resulted.contains) == true)
+                || ($0.kind == .answer && $0.verdict != nil && $0.sentMessageId != nil && resulted.contains("\($0.workspace)|\($0.questionMessageId ?? "")"))
         }
         guard !done.isEmpty else { return }
         for d in done { removeFolder(d.clientId) }

@@ -240,7 +240,12 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         // the result text arrives in /messages: the item leaves the outbox
         let msg = PhoneMessage(message: TextMessage(id: "m_res1", from: "ws_pilatus001", to: "ph_iphone0001", type: "text", createdAt: "2026-11-15T09:02:00Z", ticket: nil,
                                                     body: TextBody(text: "Got it", reviewResult: result), replyTo: qid), workspaceName: "P")
-        XCTAssertEqual(ReviewStackRules.result(for: qid, in: [msg])?.result, "applied")
+        XCTAssertEqual(ReviewStackRules.result(for: qid, workspace: "ws_pilatus001", in: [msg])?.result, "applied")
+        // a result from another workspace with the same replyTo is ignored by both
+        let other = PhoneMessage(message: TextMessage(id: "m_res2", from: "ws_other0001", to: "ph_iphone0001", type: "text", createdAt: "2026-11-15T09:03:00Z", ticket: nil,
+                                                      body: TextBody(text: "x", reviewResult: result), replyTo: qid), workspaceName: "O")
+        XCTAssertNil(ReviewStackRules.result(for: qid, workspace: "ws_pilatus001", in: [other]))
+        box.reconcile(with: [other]); XCTAssertEqual(box.items.count, 1)
         box.reconcile(with: [msg]); XCTAssertTrue(box.items.isEmpty)
         let verdicts = await relay.verdicts
         XCTAssertEqual(verdicts.count, 1); XCTAssertEqual(verdicts[0].verdict, ok(q))

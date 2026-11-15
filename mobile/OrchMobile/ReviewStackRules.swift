@@ -182,8 +182,9 @@ enum ReviewStackRules {
     // MARK: States (M4)
 
     /// The newest review_result for a question, from the workspace's texts.
-    static func result(for questionId: String, in messages: [PhoneMessage]) -> ReviewResult? {
-        messages.filter { $0.message.replyTo == questionId && $0.message.body.isReviewResult }
+    /// Only a result from the question's own workspace counts (`workspace` = the question's sender).
+    static func result(for questionId: String, workspace: String, in messages: [PhoneMessage]) -> ReviewResult? {
+        messages.filter { $0.message.replyTo == questionId && $0.message.from == workspace && $0.message.body.isReviewResult }
             .max { $0.message.createdAt < $1.message.createdAt }?.message.body.reviewResult
     }
 
