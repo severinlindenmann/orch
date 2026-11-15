@@ -1170,3 +1170,24 @@ def test_a_failed_delivery_restarts_once_with_the_kept_input_and_never_loops(pro
     (back,) = runs.undelivered(proj, tid)
     assert back["live_retry"] is True and back["text"] == "one more"
     assert _start_modes(proj, tid, monkeypatch) == ["oneshot"]  # one step at a time: no live loop
+
+
+def test_send_into_a_session_still_starting_is_queued_and_never_typed(proj, run, monkeypatch):
+    tid, rn, sent, screen = _after_first_run_screens(proj, run, monkeypatch)
+    n = len(sent)
+    res = runs_live.send(proj, tid, "human:t", "Please add the rain plan.")
+    assert res["delivered"] == 0 and res["queued"] is True
+    assert runs_live.send_text(res, tid).startswith("Queued.")
+    assert len(sent) == n and "rain" not in "".join(sent)  # nothing typed at all
+    assert any(
+        "rain plan" in i["text"] for i in runs.undelivered(proj, tid)
+    )  # kept in the order's pending file
+
+
+def test_send_into_an_idle_session_types_only_the_notice_and_says_sent(proj, run, monkeypatch):
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane=_screen(""))
+    n = len(sent)
+    res = runs_live.send(proj, tid, "human:t", "Please add the rain plan.")
+    assert res["delivered"] >= 1 and res["queued"] is False and runs_live.send_text(res, tid) == "Sent."
+    assert sent[n:] == [runs_live.notice_line(tid, False), "Enter"]
+    assert "rain" not in "".join(sent)

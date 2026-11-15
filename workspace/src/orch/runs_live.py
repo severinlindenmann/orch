@@ -1011,26 +1011,31 @@ def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
 
 
 def send(root: Path, tid: str, by: str, text: str, kind: str = "message", proven: bool = False) -> dict:
+    """Queue a message for the agent. The words are always put into the ticket's pending input first and never
+    typed into the session: only the fixed notice line is, and only when the tool is up and idle at its prompt
+    (deliver). Starting up, first-run screens, a busy or waiting session: it stays queued and goes in at
+    the next turn end or start. The answer says which: delivered (n > 0, queued False) or queued."""
     tickets.load(root, tid)
     item = runs.pending_add(root, tid, by, kind, text, proven=proven)
     rec = runs.read(root, tid)
     if not rec or runs.state(rec) != "alive":
-        return {"id": item["id"], "delivered": 0, "state": "none"}
+        return {"id": item["id"], "delivered": 0, "queued": True, "state": "none"}
     n = deliver(root, tid) if rec.get("mode") == "live" else 0
     rec = runs.read(root, tid) or rec
     if not n and rec.get("mode") == "live" and rec.get("submit"):
         # the wrapper's watcher typed the notice between our queueing and our deliver(): a notice is out and
         # not yet taken, and the agent reads everything waiting when it takes it, so this input is sent too
         n = 1
-    return {"id": item["id"], "delivered": n, "state": (rec.get("live") or {}).get("state", rec["mode"])}
+    state = (rec.get("live") or {}).get("state", rec["mode"])
+    return {"id": item["id"], "delivered": n, "queued": not n, "state": state}
 
 
 def send_text(result: dict, tid: str) -> str:
     if result["delivered"]:
         return "Sent."
     if result["state"] == "none":
-        return f"Saved. Nothing is working on {tid} now; it goes in when you start it: orch run start {tid}"
-    return "Saved. It goes in when the agent is done with this step."
+        return f"Queued. Nothing is working on {tid} now; it goes in when you start it: orch run start {tid}"
+    return "Queued. It goes in when the agent is ready for it (after this step)."
 
 
 # ---------------------------------------------------------------- attach, stop, cleanup
