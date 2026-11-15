@@ -115,6 +115,7 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
 
     orch ask <id> "<question>" --option A --option B --recommend A
     orch ask <id> "<question>" --check <c>        # tie it to a step
+    orch ask <id> --take-back <q> "<why>"          # the question no longer matters: take it back (it leaves the person's list)
 
 Write the question for a person who has not seen your work, in plain words:
 - Say what you need to know and why it matters. Use names (the task, the document), never internal ids like `c1` or `q1`, and never folder or file paths such as `docs/` or `.orch/...` (a path is fine only inside a quoted error message).

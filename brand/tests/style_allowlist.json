@@ -1,0 +1,442 @@
+{
+ "mobile/OrchMobile/ArtifactItem.swift": {
+  "hex": 3,
+  "style": 0
+ },
+ "mobile/OrchMobile/MockRelay.swift": {
+  "hex": 2,
+  "style": 0
+ },
+ "mobile/OrchMobile/Views/ChatScreens.swift": {
+  "hex": 1,
+  "style": 0
+ },
+ "mobile/OrchMobile/Views/M3DemoHost.swift": {
+  "hex": 6,
+  "style": 0
+ },
+ "mobile/OrchMobile/Views/MobileModeBanner.swift": {
+  "hex": 1,
+  "style": 0
+ },
+ "mobile/OrchMobileTests/DoneReviewTests.swift": {
+  "hex": 1,
+  "style": 0
+ },
+ "mobile/OrchMobileTests/ExtraTakesTests.swift": {
+  "hex": 1,
+  "style": 0
+ },
+ "mobile/OrchMobileTests/M0Tests.swift": {
+  "hex": 1,
+  "style": 0
+ },
+ "mobile/OrchMobileTests/TicketTests.swift": {
+  "hex": 2,
+  "style": 0
+ },
+ "mobile/OrchMobileUITests/ComposerVisibleUITests.swift": {
+  "hex": 1,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/app.css": {
+  "hex": 92,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/app.js": {
+  "hex": 25,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/archive.css": {
+  "hex": 43,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/draft-1114.css": {
+  "hex": 38,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/draft-1114.js": {
+  "hex": 2,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/flows.css": {
+  "hex": 26,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/flows.js": {
+  "hex": 11,
+  "style": 1
+ },
+ "mobile/docs/mockup-v3/index.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/look.css": {
+  "hex": 1,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/look.js": {
+  "hex": 3,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/notes.html": {
+  "hex": 0,
+  "style": 1
+ },
+ "mobile/docs/mockup-v3/round3b.css": {
+  "hex": 8,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/round4.css": {
+  "hex": 2,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/round4b.css": {
+  "hex": 4,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/statuses-references.html": {
+  "hex": 10,
+  "style": 1
+ },
+ "mobile/docs/mockup-v3/visual-challenge.css": {
+  "hex": 11,
+  "style": 0
+ },
+ "mobile/docs/mockup-v3/visual-challenge.js": {
+  "hex": 5,
+  "style": 0
+ },
+ "publish/web/admin.css": {
+  "hex": 33,
+  "style": 0
+ },
+ "publish/web/file.html": {
+  "hex": 4,
+  "style": 0
+ },
+ "publish/web/look-bundle.js": {
+  "hex": 26,
+  "style": 0
+ },
+ "publish/web/look-data.js": {
+  "hex": 26,
+  "style": 0
+ },
+ "publish/web/look.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "publish/web/portal.html": {
+  "hex": 3,
+  "style": 0
+ },
+ "publish/web/portal.js": {
+  "hex": 1,
+  "style": 0
+ },
+ "publish/web/style.css": {
+  "hex": 73,
+  "style": 0
+ },
+ "relay/web/look-bundle.js": {
+  "hex": 26,
+  "style": 0
+ },
+ "relay/web/look-data.js": {
+  "hex": 26,
+  "style": 0
+ },
+ "relay/web/look.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "relay/web/not-available.html": {
+  "hex": 11,
+  "style": 1
+ },
+ "relay/web/portal.html": {
+  "hex": 8,
+  "style": 0
+ },
+ "relay/web/style.css": {
+  "hex": 41,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/automation/automation.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/board/board.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/board/board.html": {
+  "hex": 11,
+  "style": 1
+ },
+ "workspace-addons/dashboard/mockup/board/new.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/chat/chat.css": {
+  "hex": 8,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/errors/errors.css": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/errors/not-found.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/errors/offline.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/factory/factory.css": {
+  "hex": 23,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/focus-help.html": {
+  "hex": 4,
+  "style": 1
+ },
+ "workspace-addons/dashboard/mockup/focus/focus-work.css": {
+  "hex": 6,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/focus.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/focus.html": {
+  "hex": 6,
+  "style": 2
+ },
+ "workspace-addons/dashboard/mockup/home/home.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/home/states.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/insights/insights.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/notes/notes.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/previews/assets/catalogue-page.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/previews/assets/site/style.css": {
+  "hex": 19,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/previews/previews.css": {
+  "hex": 10,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/previews/viewer-error.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/previews/viewer-html.html": {
+  "hex": 19,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/previews/viewer-loading.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/previews/viewer-pdf.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/proposals/fb11-settings-phone.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/publish/publish.css": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/publish/publish.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/relay/relay.css": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/relay/relay.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/settings/addon-detail.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/settings/settings-about.html": {
+  "hex": 12,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/settings/settings-addons.html": {
+  "hex": 12,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/settings/settings-helper.html": {
+  "hex": 12,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/settings/settings-phone.html": {
+  "hex": 12,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/settings/settings-revision.js": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/settings/settings.css": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/settings/settings.html": {
+  "hex": 12,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/sweep/d-board.html": {
+  "hex": 13,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/sweep/d-dialogs.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/sweep/d-home-answer.html": {
+  "hex": 2,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/sweep/d-kit-v2.html": {
+  "hex": 3,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/sweep/d-shell.html": {
+  "hex": 2,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/sweep/d-ticket-states.html": {
+  "hex": 3,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/sync/sync.css": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/sync/sync.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/ticket/assets/survey-results.html": {
+  "hex": 5,
+  "style": 1
+ },
+ "workspace-addons/dashboard/mockup/ticket/ticket-report.html": {
+  "hex": 0,
+  "style": 1
+ },
+ "workspace-addons/dashboard/mockup/ticket/ticket-sections.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/ticket/ticket.css": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/look-icons.js": {
+  "hex": 24,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/look.css": {
+  "hex": 19,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/chat.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/desktop.css": {
+  "hex": 3,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/home.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/newticket.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/settings.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/ticket.css": {
+  "hex": 2,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/pages/tickets.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/web/style.css": {
+  "hex": 44,
+  "style": 0
+ },
+ "workspace-addons/dashboard/tests/blocks/blocks-demo.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/dashboard/tests/csp_styles.test.js": {
+  "hex": 0,
+  "style": 1
+ },
+ "workspace-addons/dashboard/tests/look.test.js": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/tests/route.test.js": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/factory/src/orch_factory/web/factory.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace-addons/focus/src/orch_focus/web/focus.css": {
+  "hex": 12,
+  "style": 0
+ },
+ "workspace-addons/focus/src/orch_focus/web/helpers.js": {
+  "hex": 6,
+  "style": 0
+ },
+ "workspace-addons/insights/src/orch_insights/web/insights.css": {
+  "hex": 0,
+  "style": 0
+ },
+ "workspace/src/orch/templates/node/server.js": {
+  "hex": 4,
+  "style": 0
+ },
+ "workspace/src/orch/templates/static/style.css": {
+  "hex": 4,
+  "style": 0
+ }
+}
