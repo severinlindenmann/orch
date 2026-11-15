@@ -138,6 +138,12 @@ class Person:
         return self.can_mint(headers, port)
 
 
+def typing_on(tmp_path, on=True):
+    """[focus] session_typing in the workspace's config file (a plain setting; off by default)."""
+    (tmp_path / ".orch").mkdir(exist_ok=True)
+    (tmp_path / ".orch" / "config.toml").write_text(f"[focus]\nsession_typing = {str(on).lower()}\n")
+
+
 def serve(tmp_path, orch, session):
     srv = make_server(tmp_path, 0, orch_bin=orch)
     srv.RequestHandlerClass = functools.partial(srv.RequestHandlerClass, session=session)
@@ -164,10 +170,12 @@ def post(base, items, secret="secret"):
 def test_the_screen_is_served_read_only_and_typing_needs_the_persons_session(helper, tmp_path):
     orch, _ = helper
     (tmp_path / ".orch" / "tickets").mkdir(parents=True)
+    typing_on(tmp_path)
     srv, base = serve(tmp_path, orch, Person(True))
     try:
         code, body = call(base + "/api/term?ticket=" + TID)
         assert code == 200 and "hello-from-helper" in json.loads(body)["screen"]
+        assert json.loads(body)["typing_allowed"] is True
         assert post(base, [{"t": "ok"}, {"k": "Enter"}])[0] == 200
         assert post(base, [{"t": "no"}], secret="wrong")[0] == 403  # a script without the page secret
         code, _ = call(
@@ -233,6 +241,29 @@ def test_the_screen_route_is_same_origin_and_not_cached(helper, tmp_path):
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(req)
         assert e.value.code == 403
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_typing_is_refused_server_side_when_the_setting_is_off(helper, tmp_path):
+    orch, _ = helper
+    (tmp_path / ".orch" / "tickets").mkdir(parents=True)
+    srv, base = serve(tmp_path, orch, Person(True))  # no config: session_typing is off
+    try:
+        code, body = call(base + "/api/term?ticket=" + TID)
+        assert code == 200 and json.loads(body)["typing_allowed"] is False
+        code, text = post(base, [{"t": "nope"}, {"k": "Enter"}])
+        assert code == 403
+        assert (
+            text.decode()
+            == "Typing into the helper's screen is off. Turn on 'Let me type' in Settings to allow it."
+        )
+        typing_on(tmp_path, False)
+        assert post(base, [{"k": "Enter"}])[0] == 403
+        typing_on(tmp_path)  # turned on: the same call goes through, and the answer says so
+        assert json.loads(call(base + "/api/term?ticket=" + TID)[1])["typing_allowed"] is True
+        assert post(base, [{"k": "Enter"}])[0] == 200
     finally:
         srv.shutdown()
         srv.server_close()

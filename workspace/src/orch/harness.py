@@ -150,7 +150,40 @@ def combined(root: Path) -> str:
         return ""
     files = sorted(p for p in d.glob("*.md") if p.is_file() and not is_link(p))
     files.sort(key=lambda p: (p.name.startswith("addon-"), p.name))  # core first, then add-ons by name
-    return "\n".join(p.read_text(encoding="utf-8").rstrip("\n") + "\n" for p in files)
+    parts = []
+    for p in files:
+        text = p.read_text(encoding="utf-8").rstrip("\n") + "\n"
+        if p.name.startswith("addon-"):
+            text += _addon_extra(root, p.name[len("addon-") : -len(".md")])
+        parts.append(text)
+    return "\n".join(parts)
+
+
+EXTRA_CAP = 3072  # bytes of live text one add-on may add under its block
+
+
+def _addon_extra(root: Path, name: str) -> str:
+    """Live text of an active add-on (.orch/addons/<name>/AGENTS-extra.md), data written between starts: a link or a
+    non-file is ignored, HTML comments are stripped, at most EXTRA_CAP bytes, cut at the last whole line."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name):
+        return ""
+    d = root / ".orch" / "addons" / name
+    f = d / "AGENTS-extra.md"
+    try:
+        if is_link(d) or is_link(f) or not f.is_file():
+            return ""
+        raw = f.read_bytes().decode("utf-8", "replace").replace("\r\n", "\n")
+    except OSError:
+        return ""
+    text = strip_comments(raw).strip("\n")
+    kept, used = [], 0
+    for line in text.split("\n"):
+        n = len(line.encode("utf-8")) + 1
+        if used + n > EXTRA_CAP:
+            break
+        kept.append(line)
+        used += n
+    return "\n".join(kept).strip("\n") + "\n" if any(x.strip() for x in kept) else ""
 
 
 def rebuild(root: Path) -> None:

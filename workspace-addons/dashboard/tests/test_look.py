@@ -223,12 +223,12 @@ def test_web_files_are_served_and_hooked(server):
         ("look.js", "OrchLook"),
         ("switcher.js", "ws-switch"),
         ("look-icons.js", "OrchLookData"),
-        ("look.css", ".wsb"),
+        ("kit/widgets.css", ".wsb:where"),
         ("look-colors.css", "data-c=teal"),
     ):
         assert marker in urllib.request.urlopen(f"{server}/{name}").read().decode(), name
     page = urllib.request.urlopen(f"{server}/").read().decode()
-    for tag in ("look-icons.js", "look.js", "switcher.js", "look.css", "look-colors.css"):
+    for tag in ("look-icons.js", "look.js", "switcher.js", "kit/widgets.css", "look-colors.css"):
         assert tag in page
     assert page.index("look.js") < page.index("app.js")
 

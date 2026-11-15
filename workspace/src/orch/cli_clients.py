@@ -456,8 +456,7 @@ def run_publish(args, root: Path, out) -> None:
         out(
             args,
             who,
-            f"Connected to {_host(args.url)} as {who['name']}.\n"
-            'Next: describe this workspace: orch publish profile --description "..." --tags a,b',
+            f"Connected to {_host(args.url)} as {who['name']}.",
         )
     elif sub == "whoami":
         w = publish.whoami(root)
@@ -517,7 +516,7 @@ def run_publish(args, root: Path, out) -> None:
         out(
             args,
             r,
-            f"Created a {r['stack']} app in {args.folder}.\nNext: orch publish app {args.folder}",
+            f"Created a {r['stack']} app in {args.folder}.",
         )
     elif sub == "list":
         r = publish.list_all(root)
@@ -613,8 +612,7 @@ def run_relay(args, root: Path, out) -> None:
         out(
             args,
             who,
-            f"Connected to {_host(args.url)} as {who['name']}.\n{line}\n"
-            'Next: describe this workspace: orch relay profile --description "..." --tags a,b',
+            f"Connected to {_host(args.url)} as {who['name']}.\n{line}",
         )
     elif sub == "status":
         try:

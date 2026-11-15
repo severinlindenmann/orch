@@ -199,9 +199,9 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
 
 def test_all_packaged_skills_have_front_matter():
     root = skills.packaged_skills_dir()
-    assert sorted(p.name for p in root.iterdir() if p.is_dir()) == ["orch", "orch-diagnose"]
+    assert sorted(p.name for p in root.iterdir() if p.is_dir()) == ["orch", "orch-diagnose", "orch-github"]
     builtin = Path(skills.__file__).parent / "builtin"  # publish and relay: built-in add-ons
-    dirs = {"orch": root / "orch", "orch-diagnose": root / "orch-diagnose"} | {
+    dirs = {n: root / n for n in ("orch", "orch-diagnose", "orch-github")} | {
         f"orch-{n}": builtin / n / "skills" / f"orch-{n}" for n in ("publish", "relay")
     }
     for n, d in dirs.items():
@@ -396,7 +396,7 @@ def test_shipped_recommended_reads_the_local_source_manifests(monkeypatch):
     repo = Path(__file__).resolve().parents[2]
     monkeypatch.setenv("ORCH_REPO", str(repo))
     monkeypatch.setattr(addons, "discover", lambda: {})
-    assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus"]
+    assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus", "lessons"]
 
 
 def test_secrets_stay_ignored_even_when_linking_is_refused(proj, run, tmp_path_factory):
@@ -1324,3 +1324,98 @@ def test_init_preserves_legacy_adoption_eligibility(proj, run):
     (proj / ".orch").mkdir()
     assert run("init")[0] == 0
     assert not (proj / ".orch" / "run" / "own-sessions.adopted").exists()
+
+
+# ---- orch-github: on by a local fact (a github.com remote and `gh` on PATH) -------------------
+
+
+@pytest.fixture
+def fake_gh(tmp_path_factory, monkeypatch):
+    """`gh` on PATH (a plain file is enough: only its presence is asked), and a PATH with no `gh`."""
+    bin_dir = tmp_path_factory.mktemp("ghbin")
+    name = "gh.cmd" if os.name == "nt" else "gh"
+    exe = bin_dir / name
+    exe.write_text("@echo off\r\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n", encoding="utf-8")
+    exe.chmod(0o755)
+    import shutil
+
+    real_which = shutil.which
+    base = os.environ.get("PATH", "")
+
+    def on(present: bool):
+        monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + base)
+        # absent: this machine may have a real gh, so only the lookup of `gh` is made to fail
+        monkeypatch.setattr(
+            shutil, "which", lambda cmd, *a, **k: real_which(cmd, *a, **k) if present or cmd != "gh" else None
+        )
+
+    on(True)
+    return on
+
+
+def _github_skill_is_on(proj) -> bool:
+    return (proj / ".orch/harness/skills/orch-github/SKILL.md").is_file()
+
+
+def test_github_skill_is_installed_with_a_github_remote_and_gh(proj, run, fake_gh):
+    _git_repo(proj)
+    _git(proj, "remote", "add", "origin", "git@github.com:acme/billing.git")
+    (proj / "AGENTS.md").write_text("# Team rules\n", encoding="utf-8")
+    _git(proj, "add", "-A")
+    _git(proj, "commit", "-qm", "base")
+    assert run("init")[0] == 0
+    assert _github_skill_is_on(proj)
+    assert "name: orch-github" in (proj / ".agents/skills/orch-github/SKILL.md").read_text(encoding="utf-8")
+    block = (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+    assert "orch secret scan" in block and "orch ref set" in block
+    status = _git(proj, "status", "--porcelain", "--untracked-files=all").splitlines()
+    assert not any(x[3:].startswith((".agents", ".claude", ".orch/harness")) for x in status)
+    assert "/.agents/skills/orch-github\n" in (proj / ".git/info/exclude").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "remote", [None, "https://gitlab.com/acme/billing.git", "https://example.com/github.com.git"]
+)
+def test_github_skill_is_not_installed_without_a_github_remote(proj, run, fake_gh, remote):
+    _git_repo(proj)
+    if remote:
+        _git(proj, "remote", "add", "origin", remote)
+    assert run("init")[0] == 0
+    assert not _github_skill_is_on(proj) and not (proj / ".agents/skills/orch-github").exists()
+    assert "orch GitHub" not in (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+
+
+def test_github_skill_is_not_installed_without_gh(proj, run, fake_gh):
+    _git_repo(proj)
+    _git(proj, "remote", "add", "origin", "https://github.com/acme/billing.git")
+    fake_gh(False)
+    assert run("init")[0] == 0
+    assert not _github_skill_is_on(proj) and not (proj / ".agents/skills/orch-github").exists()
+    assert "orch GitHub" not in (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+
+
+def test_github_skill_follows_the_fact_on_every_render(proj, run, fake_gh):
+    from orch import skillrender
+
+    _git_repo(proj)
+    assert run("init")[0] == 0 and not _github_skill_is_on(proj)
+    _git(proj, "remote", "add", "origin", "https://github.com/acme/billing.git")
+    assert skillrender.refresh_skills(proj, say=False) == ["orch-github"]  # a remote added later shows up
+    assert _github_skill_is_on(proj) and (proj / ".agents/skills/orch-github/SKILL.md").is_file()
+    assert skillrender.refresh_skills(proj, say=False) == []  # writes only on change
+    fake_gh(False)
+    assert skillrender.refresh_skills(proj, say=False) == ["orch-github"]  # gh gone: the skill goes
+    assert not _github_skill_is_on(proj) and not (proj / ".agents/skills/orch-github").exists()
+    assert "orch GitHub" not in (proj / ".orch/harness/AGENTS.orch.md").read_text(encoding="utf-8")
+    fake_gh(True)
+    assert run("init")[0] == 0 and _github_skill_is_on(proj)  # `orch update` runs init
+
+
+def test_github_skill_in_a_folder_with_spaces_and_umlauts(proj, run, fake_gh, monkeypatch):
+    folder = proj / "Büro Rechnungen"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
+    _git_repo(folder)
+    _git(folder, "remote", "add", "origin", "ssh://git@github.com/acme/billing.git")
+    assert run("init")[0] == 0
+    assert _github_skill_is_on(folder)

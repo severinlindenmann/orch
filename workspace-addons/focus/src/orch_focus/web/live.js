@@ -3,6 +3,8 @@
   'use strict';
   const S = window.FocusStore;
   const {h, TID, toast, els, act, STATUS_WORD, plainNames, keyOf, hhmm, evText} = S;
+  /* the core's "The agent stopped … Continue goes on where it left off" line repeats at every stop: not shown here */
+  const NOISE = /Continue goes on where it left off|^(?:The )?helper started\b|^Updated .+ settings$/i;
 
   // The ticket lines orch writes itself, in the same plain words as the CLI and the dashboard.
   function plainLine(text, checklist) {
@@ -22,7 +24,7 @@
   // agent: only the steps of that agent ('main' or a helper); the ticket's own lines belong to no agent.
   function feedItems(v, agent) {
     const items = [];
-    if (!agent) for (const e of v.ticket.history || []) items.push({at: e.at, icon: /Asked|waiting/.test(e.text) ? 'note' : (/done/.test(e.text) ? 'check' : 'text'), ok: /done/.test(e.text), text: plainLine(String(e.text || ''), v.ticket.checklist), who: e.by, you: /^human:/.test(e.by || '') && e.via !== 'cli'});
+    if (!agent) for (const e of (v.ticket.history || []).filter(e => !NOISE.test(String(e.text || '')))) items.push({at: e.at, icon: /Asked|waiting/.test(e.text) ? 'note' : (/done/.test(e.text) ? 'check' : 'text'), ok: /done/.test(e.text), text: plainLine(String(e.text || ''), v.ticket.checklist), who: e.by, you: /^human:/.test(e.by || '') && e.via !== 'cli'});
     for (const e of v.events) {
       if (agent && (e.agent || 'main') !== agent) continue;
       const used = (e.data && e.data.used) || null, by = e.agent || 'main';
@@ -118,7 +120,7 @@
     }
     const story = checks.filter(c => !c.wont_do && (c.done || c.state === 'doing'));
     const st = window.FocusHelpers.sessionState(v), active = st.active;
-    const nodes = [h('h2', {text: st.headline}), ...recordNotes(v)];
+    const nodes = [st.headline ? h('h2', {text: st.headline}) : null, ...recordNotes(v)].filter(Boolean);
     if (!asking) nodes.push(h('p', {class: 'meta', text: v.done + ' of ' + v.total + ' tasks finished.'}));
     let now = null;
     const perTask = stepsByTask(v), runs = taskRuns(v);
@@ -193,7 +195,7 @@
     return items;
   }
   function renderWith(v) {
-    const msgs = (v.ticket.history || []).filter(e => e.text && !/^(Created|Added check|Check c\d+ done|Marked c\d+|Asked q|Set ext\.|Patched status|Status )/.test(String(e.text)));
+    const msgs = (v.ticket.history || []).filter(e => e.text && !NOISE.test(String(e.text)) && !/^(Created|Added check|Check c\d+ done|Marked c\d+|Asked q|Set ext\.|Patched status|Status )/.test(String(e.text)));
     const key = keyOf(msgs);
     if (key === els.withList.dataset.k) return;
     els.withList.dataset.k = key;
@@ -240,7 +242,7 @@
     const u = v.board.usage, d = v.board.denials;
     const lines = [];
     if (u) lines.push(h('p', {class: 'fx-line ' + (u.status === 'limited' ? 'bad' : 'warn'), text: u.text}));
-    if (v.attention) lines.push(h('p', {class: 'fx-line warn'}, (v.why || 'Waiting for your OK in the live session.') + ' ', h('button', {class: 'btn ghost xs', 'data-act': 'attach', text: 'Open live session'})));
+    if (v.attention) lines.push(h('p', {class: 'fx-line warn'}, (v.why || 'Waiting for your OK on the helper’s screen.') + ' ', h('button', {class: 'btn ghost xs', 'data-act': 'attach', text: 'Show it in a terminal'})));
     if (v.retry_error) lines.push(h('p', {class: 'fx-line bad', text: 'Could not run it again: ' + v.retry_error}));
     if (d.length) lines.push(h('p', {class: 'fx-line warn', text: d[d.length - 1].text + '. It waits for your OK.'}));
     els.line.replaceChildren(...lines);
