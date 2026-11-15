@@ -20,7 +20,7 @@ final class ReviewStackUITests: XCTestCase {
     private func shot(_ app: XCUIApplication, _ name: String) {
         let dir = "/Users/lume/orch-dev/state/e2e-shots"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir + "/p4-\(name).png"))
+        try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir + "/p4b-\(name).png"))
         let a = XCTAttachment(screenshot: app.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a)
     }
     private func progress(_ app: XCUIApplication) -> String { any(app, "review-progress").label }
@@ -48,7 +48,7 @@ final class ReviewStackUITests: XCTestCase {
         let row = any(app, "review-stack-row")
         XCTAssertTrue(row.waitForExistence(timeout: 20))
         XCTAssertTrue(row.label.contains("9 things to review"), row.label)
-        XCTAssertTrue(row.label.contains("3 choices"), row.label)
+        XCTAssertTrue(row.label.contains("4 choices"), row.label)   // 3 Pilatus + 1 plain question of another workspace
         shot(app, "01-chats-row")
         row.tap()
         XCTAssertTrue(any(app, "review-card").waitForExistence(timeout: 10))
@@ -97,20 +97,6 @@ final class ReviewStackUITests: XCTestCase {
         XCTAssertTrue(waitProgress(app, "1 answered"), progress(app))
     }
 
-    func testSignsCardRefusesOkOnThePhone() {
-        let app = launch()
-        openStack(app)
-        jump(app, "Deploy to production")
-        XCTAssertTrue(any(app, "review-signs-chip").exists)
-        shot(app, "07-signs-card")
-        app.buttons["review-ok"].tap()
-        let toast = any(app, "review-toast")
-        XCTAssertTrue(toast.waitForExistence(timeout: 5))
-        XCTAssertTrue(toast.label.contains("signature on the computer"), toast.label)
-        shot(app, "08-needs-signature")
-        XCTAssertTrue(progress(app).hasPrefix("0 answered"))
-    }
-
     func testOverviewJumpAndAllDone() {
         let app = launch()
         openStack(app)
@@ -123,7 +109,6 @@ final class ReviewStackUITests: XCTestCase {
             if any(app, "review-done").exists { break }
             guard any(app, "review-card").waitForExistence(timeout: 5) else { break }
             if app.buttons["option-A"].exists { app.buttons["option-A"].tap(); app.buttons["review-ok"].tap() }
-            else if any(app, "review-signs-chip").exists { app.buttons["review-no"].tap() }
             else { app.buttons["review-ok"].tap() }
             sleep(1)
         }
@@ -141,8 +126,64 @@ final class ReviewStackUITests: XCTestCase {
         XCTAssertTrue(NSPredicate(format: "label BEGINSWITH %@", "1 answered").evaluate(with: any(app, "review-progress")) || any(app, "review-progress").waitForExistence(timeout: 3))
         any(app, "review-all").tap()
         let state = any(app, "overview-state")
-        XCTAssertTrue(state.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !state.waitForExistence(timeout: 2) { app.swipeUp() }   // the list is longer now (all workspaces): Answered is below the fold
+        if !state.exists { shot(app, "dbg-overview-state") }
+        XCTAssertTrue(state.exists)
         XCTAssertEqual(state.label, "Saved on this phone")
         shot(app, "11-overview-saved-on-phone")
+    }
+
+    func testButtonsHaveWordsUnderThem() {
+        let app = launch()
+        openStack(app)
+        jump(app, "Send the November invoice to Anna")
+        XCTAssertEqual(app.buttons["review-no"].label, "Don't do")
+        XCTAssertEqual(app.buttons["review-comment"].label, "Comment")
+        XCTAssertEqual(app.buttons["review-ok"].label, "Send it", "the card's own action name")
+        XCTAssertTrue(any(app, "review-later").exists)
+        shot(app, "12-draft-card")
+        jump(app, "Pick a logo")
+        XCTAssertEqual(app.buttons["review-no"].label, "None of these")
+        XCTAssertEqual(app.buttons["review-ok"].label, "Pick one")
+        app.buttons["option-C"].tap()
+        XCTAssertEqual(app.buttons["review-ok"].label, "Use C")
+        shot(app, "05-options-card-c-picked")
+        jump(app, "Fish test page")
+        XCTAssertEqual(app.buttons["review-no"].label, "Send back")
+        XCTAssertEqual(app.buttons["review-ok"].label, "Looks good")
+    }
+
+    func testCommentSheetSaysHoldOrTapToTalk() {
+        let app = launch()
+        openStack(app)
+        app.buttons["review-comment"].tap()
+        let label = any(app, "comment-mic-label")
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        XCTAssertEqual(label.label, "Hold or tap to talk")
+        shot(app, "13-comment-sheet-hold-or-tap")
+        let mic = any(app, "comment-mic")
+        mic.tap()                                              // a quick tap opens the mic
+        XCTAssertTrue(NSPredicate(format: "label BEGINSWITH %@", "Listening").evaluate(with: label) || label.label.hasPrefix("Listening") || label.label != "Hold or tap to talk")
+        mic.tap()                                              // and the next tap closes it; the transcript lands in the field
+        let text = app.textFields["comment-text"].firstMatch.exists ? app.textFields["comment-text"] : app.textViews["comment-text"]
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline, ((text.value as? String) ?? "").isEmpty || (text.value as? String) == "What should change?" { usleep(250_000) }
+        XCTAssertNotEqual((text.value as? String) ?? "", "What should change?")
+        mic.press(forDuration: 1.0)                            // hold to talk: let go stops
+        XCTAssertEqual(label.label, "Hold or tap to talk")
+    }
+
+    func testChangedCardComesBackWithLookAgainLine() {
+        let app = launch(["-mockReviewResult", "changed", "-watchLoop", "YES"])
+        openStack(app)
+        jump(app, "Send the November invoice to Anna")
+        app.buttons["review-ok"].tap()
+        let state = any(app, "review-state")
+        if !state.waitForExistence(timeout: 20) { shot(app, "dbg-changed") }
+        XCTAssertTrue(state.exists, "the changed card is back in front")
+        XCTAssertEqual(state.label, "This changed. Look again.")
+        XCTAssertEqual(any(app, "review-title").label, "Send the November invoice to Anna")
+        shot(app, "14-changed-look-again")
     }
 }

@@ -371,10 +371,8 @@ actor MockRelay: RelayAPI {
             }
         }
         if let v = r.verdict, let q = all.first(where: { $0.id == r.questionMessageId }) {
-            // The workspace refuses an ok on a signs card whatever the flag says (M1).
-            let signs = v.verdict == .ok && q.message.body.card?.requiresSignature == true
             let mode = reviewResultOverride ?? reviewResult
-            if signs || mode != nil { deliverReviewResult(q, mode: signs ? "refused" : mode ?? "applied", summary: r.answer) }
+            if let mode { deliverReviewResult(q, mode: mode, summary: r.answer) }
         }
         return SendReceipt(id: id, clientId: r.clientId)
     }

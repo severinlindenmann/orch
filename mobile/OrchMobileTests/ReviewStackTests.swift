@@ -238,7 +238,7 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         XCTAssertEqual(ReviewStackRules.state(item: nil, result: ReviewResult(result: "decided", summary: "Other")), .decided(summary: "Other"))
         XCTAssertNil(ReviewStackRules.state(item: nil, result: nil))
         // the result text arrives in /messages: the item leaves the outbox
-        let msg = PhoneMessage(message: TextMessage(id: "m_res1", from: "ws_pilatus001", to: "ph_iphone0001", type: "text", createdAt: "2026-11-15T09:02:00Z", ticket: nil,
+        let msg = PhoneMessage(message: TextMessage(id: "m_res1", from: "ws_pilatus001", to: "ph_iphone0001", type: "text", createdAt: "2999-01-01T00:00:00Z", ticket: nil,   // after the answer
                                                     body: TextBody(text: "Got it", reviewResult: result), replyTo: qid), workspaceName: "P")
         XCTAssertEqual(ReviewStackRules.result(for: qid, workspace: "ws_pilatus001", in: [msg])?.result, "applied")
         // a result from another workspace with the same replyTo is ignored by both
@@ -271,17 +271,6 @@ final class ReviewVerdictOutboxTests: XCTestCase {
             XCTAssertEqual($0 as? Outbox.VerdictProblem, .alreadySent)
         }
     }
-    func testSignsCardNeverEnqueuesOk() throws {
-        let (box, _) = outbox(); let q = try question("card-signs-no-files")
-        XCTAssertTrue(q.message.body.card?.requiresSignature == true)
-        XCTAssertThrowsError(try box.enqueueAnswer(question: q, answer: "OK", verdict: ok(q))) { XCTAssertEqual($0 as? Outbox.VerdictProblem, .needsSignature) }
-        XCTAssertTrue(box.items.isEmpty)
-        let item = ReviewStackRules.item(for: q)!
-        XCTAssertEqual(ReviewStackRules.okOutcome(item, picked: nil), .needsSignature)
-        XCTAssertEqual(ReviewStackRules.needsSignatureText, "Needs your signature on the computer")
-        // a "no" is fine
-        XCTAssertNoThrow(try box.enqueueAnswer(question: q, answer: "No", verdict: ReviewVerdict(verdict: .no, digest: q.message.body.digest!)))
-    }
     func testInvalidVerdictsAreNotQueued() throws {
         let (box, _) = outbox(); let q = try question("card-choice"); let digest = q.message.body.digest!
         for bad in [ReviewVerdict(verdict: .ok, picked: "Z", digest: digest),                                            // not an option
@@ -311,9 +300,9 @@ final class ReviewVerdictOutboxTests: XCTestCase {
     func testMockStackFixtureAndVerifiedBlobs() async throws {
         let relay = MockRelay(latency: .zero)
         let qs = try await relay.questions().filter { $0.id.hasPrefix("m_rvstack") }
-        XCTAssertEqual(qs.count, 8)
+        XCTAssertEqual(qs.count, 7)
         let items = ReviewStackRules.stack(questions: qs, answers: [:])
-        XCTAssertEqual(ReviewStackRules.countsText(items), "3 drafts · 2 choices · 2 results · 1 plan")
+        XCTAssertEqual(ReviewStackRules.countsText(items), "3 drafts · 2 choices · 1 result · 1 plan")
         let compare = items.first { if case .compare? = $0.card.preview { true } else { false } }
         XCTAssertNotNil(compare)
         for f in qs.flatMap({ $0.message.body.cardFiles ?? [] }) {

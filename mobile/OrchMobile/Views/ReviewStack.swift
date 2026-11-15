@@ -3,37 +3,36 @@ import UIKit
 
 // The Review stack screens (P4): the row on Chats, the stack of cards, the swipe. Rules live in ReviewStackRules (P3).
 
-/// The "N things to review" rows at the top of Chats, one per workspace that has cards waiting.
+/// The one yellow "N things to review" row at the top of Chats, across all workspaces.
 struct ReviewStackRows: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let _ = model.revision
         let pending = Set(model.outbox.items.compactMap { $0.verdict != nil ? $0.questionMessageId : nil })
-        let spaces = model.workspaceSummaries
-        ForEach(spaces) { summary in
-            let items = ReviewStackRules.stack(questions: model.questions, answers: model.answers, pending: pending,
-                                               later: LaterStore().ids(workspace: summary.id), workspace: summary.id)
-            if !items.isEmpty {
-                NavigationLink(value: ChatRoute.review(workspace: summary.id)) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "rectangle.stack").themeFont(20).foregroundStyle(Theme.warn).frame(width: 28).accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("\(items.count) \(items.count == 1 ? "thing" : "things") to review").themeFont(17, .semibold).foregroundStyle(Theme.warn)
-                            Text(ReviewStackRules.countsText(items)).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
-                                .accessibilityIdentifier("review-row-counts")
-                        }
-                        Spacer(minLength: 8)
-                        Text("Review").themeFont(14, .semibold).foregroundStyle(Theme.onBrand)
-                            .padding(.horizontal, 14).frame(minHeight: 32)
-                            .background(Theme.warn, in: Capsule())
-                    }.padding(.horizontal, 16).padding(.vertical, 14).frame(minHeight: 44).contentShape(Rectangle())
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.warn.opacity(0.5)))
-                }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
-                    .accessibilityIdentifier("review-stack-row")
-                    .accessibilityLabel("\(items.count) \(items.count == 1 ? "thing" : "things") to review. \(ReviewStackRules.countsText(items))")
-            }
+        let changed = ReviewStackRules.changedIds(questions: Array(model.questionLog.values), messages: model.messages, pending: pending)
+        let items = ReviewStackRules.stack(questions: model.questions + model.questionLog.values.filter { changed.contains($0.id) }, answers: model.answers, pending: pending,
+                                           later: LaterStore().ids(workspace: ReviewStackView.allKey), changed: changed)
+        if !items.isEmpty {
+            let title = "\(items.count) \(items.count == 1 ? "thing" : "things") to review"
+            NavigationLink(value: ChatRoute.review(workspace: nil)) {
+                HStack(spacing: 12) {
+                    Image(systemName: "rectangle.stack").themeFont(20).foregroundStyle(Theme.warn).frame(width: 28).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).themeFont(17, .semibold).foregroundStyle(Theme.warn)
+                        Text(ReviewStackRules.countsText(items)).themeFont(13).foregroundStyle(Theme.muted).lineLimit(2)
+                            .accessibilityIdentifier("review-row-counts")
+                    }
+                    Spacer(minLength: 8)
+                    Text("Review").themeFont(14, .semibold).foregroundStyle(Theme.onBrand)
+                        .padding(.horizontal, 14).frame(minHeight: 32)
+                        .background(Theme.warn, in: Capsule())
+                }.padding(.horizontal, 16).padding(.vertical, 14).frame(minHeight: 44).contentShape(Rectangle())
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous).stroke(Theme.warn.opacity(0.5)))
+            }.buttonStyle(PressStyle()).foregroundStyle(Theme.text)
+                .accessibilityIdentifier("review-stack-row")
+                .accessibilityLabel("\(title). \(ReviewStackRules.countsText(items))")
         }
     }
 }
@@ -47,7 +46,10 @@ private struct SwipeAction {
 
 @MainActor
 struct ReviewStackView: View {
-    let workspaceId: String
+    /// Nil = the cards of all workspaces.
+    let workspaceId: String?
+    static let allKey = "all"
+    private var storeKey: String { workspaceId ?? Self.allKey }
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -76,12 +78,14 @@ struct ReviewStackView: View {
         Set(model.outbox.items.compactMap { $0.verdict != nil ? $0.questionMessageId : nil })
     }
     private var items: [ReviewItem] {
-        ReviewStackRules.stack(questions: model.questions, answers: model.answers, pending: pendingIds.subtracting(reopened), later: later, workspace: workspaceId)
+        ReviewStackRules.stack(questions: model.questions + model.questionLog.values.filter { changedIds.contains($0.id) }, answers: model.answers, pending: pendingIds.subtracting(reopened), later: later, workspace: workspaceId, changed: changedIds)
     }
+    private var changedIds: Set<String> { ReviewStackRules.changedIds(questions: Array(model.questionLog.values), messages: model.messages, pending: pendingIds.subtracting(reopened)) }
+    private var showWorkspace: Bool { model.workspaceSummaries.count > 1 }
     /// Answered on this phone (or on the computer): everything that is a stack card and not waiting.
     private var answered: [ReviewItem] {
         let waiting = Set(items.map(\.id))
-        return model.questionLog.values.filter { $0.message.from == workspaceId && !waiting.contains($0.id) && (model.answers[$0.id] != nil || pendingIds.contains($0.id)) }
+        return model.questionLog.values.filter { (workspaceId == nil || $0.message.from == workspaceId) && !waiting.contains($0.id) && (model.answers[$0.id] != nil || pendingIds.contains($0.id)) }
             .sorted { $0.message.createdAt < $1.message.createdAt }.compactMap(ReviewStackRules.item(for:))
     }
     private var current: ReviewItem? { items.first { $0.id == focus } ?? items.first }
@@ -119,7 +123,7 @@ struct ReviewStackView: View {
             }
         }
         .sheet(isPresented: $showOverview) {
-            ReviewOverview(waiting: items, answered: answered, later: Set(later), workspace: workspaceId,
+            ReviewOverview(waiting: items, answered: answered, later: Set(later),
                            onJump: { id in focus = id; showOverview = false },
                            onChange: { id in reopened.insert(id); focus = id; showOverview = false })
         }
@@ -127,10 +131,10 @@ struct ReviewStackView: View {
             ReviewViewer(item: item, pins: store(for: item.id), picked: picked[item.id])
         }
         .onAppear {
-            later = store.ids(workspace: workspaceId)
+            later = store.ids(workspace: storeKey)
             if let f = model.focusedQuestion, items.contains(where: { $0.id == f }) { focus = f; model.focusedQuestion = nil }
         }
-        .task(id: model.revision) { store.prune(keeping: Set(model.questionLog.keys), workspace: workspaceId); later = store.ids(workspace: workspaceId) }
+        .task(id: model.revision) { store.prune(keeping: Set(model.questionLog.keys), workspace: storeKey); later = store.ids(workspace: storeKey) }
     }
 
     // MARK: Top bar
@@ -154,26 +158,30 @@ struct ReviewStackView: View {
 
     private func undo() {
         guard let last = history.popLast() else { return }
-        if last.later { store.remove(last.id, workspace: workspaceId); later = store.ids(workspace: workspaceId) }
+        if last.later { store.remove(last.id, workspace: storeKey); later = store.ids(workspace: storeKey) }
         else { model.undoVerdict(last.id) }
         focus = last.id
     }
 
     // MARK: Card
 
+    /// The words under the buttons (and on the swipe stamps): left = no, right = the action's name.
+    private func noLabel(_ item: ReviewItem) -> String {
+        item.kind == .draft || item.kind == .plan ? "Don't do" : (item.isChoice ? "None of these" : "Send back")
+    }
+    private func okLabel(_ item: ReviewItem) -> String {
+        if item.isChoice { return picked[item.id].map { "Use \($0)" } ?? "Pick one" }
+        let label = (item.card.okLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return label.isEmpty ? "Looks good" : label
+    }
+    private func okActionable(_ item: ReviewItem) -> Bool { ReviewStackRules.okOutcome(item, picked: picked[item.id]) == .allowed }
+
     private func actions(_ item: ReviewItem) -> [SwipeDirection: SwipeAction] {
-        let pick = picked[item.id]
-        let ok: String
-        switch ReviewStackRules.okOutcome(item, picked: pick) {
-        case .allowed: ok = item.isChoice ? "Use \(pick ?? "")" : (item.card.okLabel ?? "OK")
-        case .pickFirst: ok = "Pick one first"
-        case .needsSignature: ok = "Needs your signature"
-        }
-        let no = item.kind == .draft || item.kind == .plan ? "Don't do" : (item.isChoice ? "None of these" : "Send back")
+        let ok = ReviewStackRules.okOutcome(item, picked: picked[item.id]) == .pickFirst ? "Pick one first" : okLabel(item)
         return [.right: SwipeAction(direction: .right, stamp: ok, color: Theme.brand),
-                .left: SwipeAction(direction: .left, stamp: no, color: Theme.danger),
-                .down: SwipeAction(direction: .down, stamp: "Comment", color: Theme.purple),
-                .up: SwipeAction(direction: .up, stamp: "Later", color: Theme.warn)]
+                .left: SwipeAction(direction: .left, stamp: noLabel(item), color: Theme.danger),
+                .down: SwipeAction(direction: .down, stamp: "Comment", color: Theme.warn),
+                .up: SwipeAction(direction: .up, stamp: "Later", color: Theme.muted)]
     }
 
     private func card(_ item: ReviewItem, size: CGSize) -> some View {
@@ -182,7 +190,7 @@ struct ReviewStackView: View {
         let stamp = dist > 24 ? actions(item)[dir] : nil
         let tilt = reduceMotion ? 0 : Double(offset.width / max(size.width, 1)) * 10
         return ReviewCardView(item: item, picked: Binding(get: { picked[item.id] }, set: { picked[item.id] = $0 }),
-                              state: stateText(for: item), onOpen: { viewing = item })
+                              state: stateText(for: item), workspaceName: showWorkspace ? item.question.workspaceName : nil, onOpen: { viewing = item })
             .overlay(alignment: .top) {
                 if let stamp {
                     Text(stamp.stamp).themeFont(22, .heavy).foregroundStyle(stamp.color).padding(.horizontal, 14).padding(.vertical, 6)
@@ -199,8 +207,8 @@ struct ReviewStackView: View {
             .highPriorityGesture(drag(item, size: size))
             .simultaneousGesture(MagnifyGesture().onChanged { _ in cancelled = true })   // a second finger cancels the swipe
             .accessibilityElement(children: .contain)
-            .accessibilityAction(named: "Approve") { commit(item, .right) }
-            .accessibilityAction(named: "Don't do") { commit(item, .left) }
+            .accessibilityAction(named: okLabel(item)) { commit(item, .right) }
+            .accessibilityAction(named: noLabel(item)) { commit(item, .left) }
             .accessibilityAction(named: "Comment") { commit(item, .down) }
             .accessibilityAction(named: "Later") { commit(item, .up) }
             .accessibilityIdentifier("review-card")
@@ -251,7 +259,6 @@ struct ReviewStackView: View {
         switch dir {
         case .right:
             switch ReviewStackRules.okOutcome(item, picked: picked[item.id]) {
-            case .needsSignature: UINotificationFeedbackGenerator().notificationOccurred(.warning); say(ReviewStackRules.needsSignatureText + "."); reset()
             case .pickFirst: UINotificationFeedbackGenerator().notificationOccurred(.warning); say("Pick one first."); reset()
             case .allowed: send(item, .ok, picked: picked[item.id], note: nil)
             }
@@ -261,7 +268,7 @@ struct ReviewStackView: View {
             reset(); commentAbout = picked[item.id]; showComment = true
         case .up:
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            store.push(item.id, workspace: workspaceId); later = store.ids(workspace: workspaceId); history.append((item.id, true)); focus = nil
+            store.push(item.id, workspace: storeKey); later = store.ids(workspace: storeKey); history.append((item.id, true)); focus = nil
             advance()
         }
     }
@@ -281,8 +288,6 @@ struct ReviewStackView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 history.append((item.id, false)); reopened.remove(item.id); focus = nil
                 advance()
-            } catch Outbox.VerdictProblem.needsSignature {
-                say(ReviewStackRules.needsSignatureText + "."); reset()
             } catch Outbox.VerdictProblem.alreadySent {
                 say("Already sent. It can't be changed."); reset()
             } catch { say("Could not use this answer."); reset() }
@@ -301,26 +306,32 @@ struct ReviewStackView: View {
     // MARK: Pieces
 
     private func stateText(for item: ReviewItem) -> String? {
-        guard reopened.contains(item.id) || model.verdictItem(for: item.id) != nil else { return nil }
-        let r = ReviewStackRules.result(for: item.id, workspace: workspaceId, in: model.messages)
+        let r = ReviewStackRules.result(for: item.id, workspace: item.question.message.from, in: model.messages)
+        guard reopened.contains(item.id) || model.verdictItem(for: item.id) != nil || changedIds.contains(item.id) else { return nil }
         return ReviewStateText.text(ReviewStackRules.state(item: model.verdictItem(for: item.id), result: r))
     }
 
     private func buttons(_ item: ReviewItem) -> some View {
-        HStack(spacing: 14) {
-            roundButton("xmark", "Don't do", id: "review-no", color: Theme.danger) { commit(item, .left) }
-            roundButton("mic.fill", "Comment", id: "review-comment", color: Theme.purple) { commit(item, .down) }
-            roundButton("checkmark", "Approve", id: "review-ok", color: Theme.brand) { commit(item, .right) }
-        }.frame(maxWidth: .infinity).padding(.top, 8).overlay(alignment: .trailing) {
-            Button { commit(item, .up) } label: { Text("Later").themeFont(14, .semibold).frame(minWidth: 44, minHeight: 44) }
-                .foregroundStyle(Theme.warn).accessibilityIdentifier("review-later").padding(.trailing, 20)
-        }.padding(.bottom, 10)
+        VStack(spacing: 2) {
+            HStack(alignment: .top, spacing: 8) {
+                roundButton("xmark", noLabel(item), id: "review-no", color: Theme.danger, filled: false) { commit(item, .left) }
+                roundButton("mic.fill", "Comment", id: "review-comment", color: Theme.warn, filled: false) { commit(item, .down) }
+                roundButton("checkmark", okLabel(item), id: "review-ok", color: Theme.brand, filled: okActionable(item), dim: !okActionable(item) && item.isChoice) { commit(item, .right) }
+            }.frame(maxWidth: .infinity)
+            Button { commit(item, .up) } label: { Text("Later").themeFont(14).foregroundStyle(Theme.muted).frame(minWidth: 88, minHeight: 44) }
+                .buttonStyle(PressStyle()).accessibilityIdentifier("review-later").accessibilityLabel("Later")
+        }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
     }
 
-    private func roundButton(_ icon: String, _ label: String, id: String, color: Color, action: @escaping () -> Void) -> some View {
+    /// A circle with its words under it (wrap to two lines at the biggest text size).
+    private func roundButton(_ icon: String, _ label: String, id: String, color: Color, filled: Bool, dim: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).themeFont(22, .bold).foregroundStyle(color).frame(width: 60, height: 60)
-                .background(Theme.surface2, in: Circle()).overlay(Circle().stroke(color.opacity(0.6)))
+            VStack(spacing: 6) {
+                Image(systemName: icon).themeFont(22, .bold).foregroundStyle(filled ? Theme.onBrand : color).frame(width: 60, height: 60)
+                    .background(filled ? color : Theme.surface2, in: Circle()).overlay(Circle().stroke(color.opacity(0.6)))
+                Text(label).themeFont(13, .semibold).foregroundStyle(Theme.text).multilineTextAlignment(.center)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity)
+            }.frame(maxWidth: .infinity, alignment: .top).contentShape(Rectangle()).opacity(dim ? 0.5 : 1)
         }.buttonStyle(PressStyle()).accessibilityLabel(label).accessibilityIdentifier(id)
     }
 
@@ -354,8 +365,8 @@ enum ReviewStateText {
         case .savedOnPhone?: "Saved on this phone"
         case .sent?: "Sent"
         case .received?: "Received"
-        case .changed?: "Changed, look again"
-        case .refused(let reason)?: "Couldn't use it: " + ReviewStackRules.refusedText(reason)
+        case .changed?: ReviewStackRules.changedText
+        case .refused(let reason)?: ReviewStackRules.refusedText(reason)
         case .decided?: "Decided on the computer"
         case .failed?: "Couldn't use it"
         }
