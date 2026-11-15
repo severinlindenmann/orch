@@ -549,3 +549,28 @@ def test_wont_do_counts_as_resolved(server, ws):
 
 def test_s3_view_carries_record_notes(server):
     assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["record_notes"] == []
+
+
+# --- take back a waiting message (#692.2) ------------------------------------------------------------
+def test_take_back_builds_exact_argv_and_bad_ids_run_nothing(server, fake_orch):
+    st, body, _ = req(
+        server, "POST", "/api/act", {"op": "run.take_back", "args": {"ticket": TID, "id": "p_abc12345"}}
+    )
+    assert st == 200, body
+    got = [c for c in calls(fake_orch) if c[:2] == ["run", "take-back"]]
+    assert got and got[0][:4] == ["run", "take-back", TID, "p_abc12345"] and "--json" in got[0]
+    n = len(calls(fake_orch))
+    for bad in ({"ticket": TID, "id": "../x"}, {"ticket": TID}, {"ticket": TID, "id": "p_abc12345", "x": 1}):
+        assert req(server, "POST", "/api/act", {"op": "run.take_back", "args": bad})[0] == 400
+    assert len(calls(fake_orch)) == n
+
+
+def test_view_lists_the_waiting_messages(server, fake_orch, ws):
+    (fake_orch.parent / "status.json").write_text(json.dumps({
+        "running": False, "pending": 2,
+        "waiting_input": [{"id": "p_abc12345", "text": "Use CHF", "at": "2026-11-15T10:00:00Z"}, {"id": 5, "text": "x"}],
+    }))  # fmt: skip
+    v = json.loads(req(server, "GET", f"/api/t/{TID}")[1])
+    assert v["run"]["waiting_input"] == [
+        {"id": "p_abc12345", "text": "Use CHF", "at": "2026-11-15T10:00:00Z"}
+    ]
