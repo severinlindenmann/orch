@@ -657,10 +657,6 @@ input.switch[type=checkbox]{appearance:none;width:36px;height:24px;min-width:36p
 .fx-next .fx-qwrap h3{font-size:18px;margin:4px 0 8px}
 .fx-next .fx-qwrap .qoption{min-height:36px;min-width:0}
 .fx-next .fx-qwrap .qoptions{margin-top:12px;gap:8px}
-.fx-next-f{display:flex;gap:8px}
-.fx-next-f .btn[hidden]{display:none}
-.fx-phone-note{margin:0}
-.fx-phone-note[hidden]{display:none}
 .fx:not(.fx-terminal) .fx-next{max-width:848px;width:calc(100% - 64px);box-sizing:border-box;margin:24px auto 0}
 .fx-with{margin:20px 0 12px}
 .fx-with[hidden]{display:none}

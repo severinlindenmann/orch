@@ -581,6 +581,28 @@ def pending_discard(root: Path, tid: str, item_id: str) -> None:
             _write(root, rec)
 
 
+def unsend_input(root: Path, tid: str, item_id: str) -> dict:
+    """A person takes back ONE message that the agent has not read yet. The item is looked up again inside the
+    ticket's run lock: read meanwhile (or not there) means refuse, never a half-removed message. Returns the
+    removed item (its text goes back into the person's message box)."""
+    with locked(root, tid):
+        items = _pending_read(root, tid)
+        item = next((i for i in items if i["id"] == item_id), None)
+        if item is None:
+            raise Refused("There is no waiting message with that id. It may already be gone.")
+        if item.get("delivered_at"):
+            raise Refused("The helper already read this message; send a correction instead.")
+        if item.get("via") in ("start", "slots"):
+            raise Refused("That is not a message you wrote, so it can't be taken back.")
+        keep = [i for i in items if i["id"] != item_id]
+        _pending_write(root, tid, keep)
+        rec = read(root, tid)
+        if rec is not None and rec.get("pending") and not any(not i.get("delivered_at") for i in keep):
+            rec["pending"] = False
+            _write(root, rec)
+        return item
+
+
 def _consume_human(root: Path, items: list[dict], ids: list[str]) -> None:
     """Spend the ids of MAC'd lines in <guarded home>/keys/<ws>/delivered.json (delivered_at is display
     only)."""

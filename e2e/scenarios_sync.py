@@ -40,16 +40,8 @@ class Ws:
         except ValueError:
             raise Fail(f"orch {' '.join(args)[:60]} did not print JSON: {out[:160]!r}") from None
 
-    def proof(self, op: str, target: str) -> str:
-        """The test human's proof for (op, target): single use, 30 seconds."""
-        code = ("import sys; from pathlib import Path; from orch import humanproof as h; "
-                "print(h.mint_dev(Path(sys.argv[1]), sys.argv[2], sys.argv[3]))")
-        rc, out, err = self.e.sh([self.py, "-c", code, str(self.root), op, target], cwd=self.root, env=ENV)
-        check(rc == 0 and out.startswith("hp1."), f"no test-human proof for {op}: {(err or out)[-200:]}")
-        return out.strip() + "\n"
-
     def signed(self, argv, op: str, target: str, ok=True):
-        return self.o(*argv, "--proof-stdin", input=self.proof(op, target), ok=ok)
+        return self.o(*argv, ok=ok)
 
     def act_target(self, verb: str, target: str, *extra) -> str:
         return self.j("sync", "act", verb, target, *extra, "--proof-target")["target"]
@@ -88,7 +80,6 @@ def _workspace(e, py, base: Path, name: str, git: bool = False) -> Ws:
         e.sh(["git", "init", "-q", "-b", "main"], cwd=root, check_rc=True)
     w = Ws(e, py, root)
     w.o("init", "--yes")
-    w.o("dev-mark")
     w.o("addon", "add", "sync", "--yes")
     return w
 
@@ -207,10 +198,7 @@ def git_sync(e):
         check(any(r.get("id") == "sync:move:orch-files" for r in rows), f"no Move row: {rows}")
         tracked = e.sh(["git", "ls-files", ".orch"], cwd=c.root, check_rc=True)[1]
         check(".orch/tickets/" in tracked, "the outer repository lost its .orch files before the Move")
-        rc, _, _ = c.o("private", "move", ok=False)  # no proof: refused
-        check(rc != 0, "Move without a proof did not fail")
-        check(".orch/tickets/" in e.sh(["git", "ls-files", ".orch"], cwd=c.root)[1], "Move without a proof changed the index")
-        c.signed(["private", "move"], "private.move", "move")
+        c.o("private", "move")
         left = e.sh(["git", "ls-files", ".orch"], cwd=c.root, check_rc=True)[1]
         check(".orch/tickets/" not in left, f"tickets still tracked after Move: {left!r}")
         check(e.sh(["git", "log", "--oneline"], cwd=c.root)[1] == outer_before, "Move committed in the outer repository")

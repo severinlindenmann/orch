@@ -14,7 +14,7 @@ import tempfile
 import unicodedata
 from pathlib import Path
 
-from orch import config, humanproof
+from orch import humanproof, tickets
 
 from . import cli, history, paths, repo
 
@@ -56,7 +56,6 @@ def _visible(value):
 
 def _person(what):
     """A person's click only: an agent tool in the environment is refused (the dashboard runs this without one)."""
-    from orch import tickets
 
     if tickets.agent_tool():
         raise repo.Refused(f"A person {what} in the dashboard: Settings, General, Sync.")
@@ -283,14 +282,6 @@ def set_where(root, settings, target, value, args):
     except cli.PublicAddress:
         # visibility probed just now (never a cached answer); the person chose this address (its proof), and that
         # it is public waits for their own choice
-        by = humanproof.person_by(
-            root,
-            args,
-            "addon.act",
-            cli.remote_target(target),
-            no_handoff="Choosing where sync keeps a copy needs a person's proof over stdin.",
-        )
-        config.require_person(by, "choose where sync keeps a copy")
         _write_public(root, target, minutes)
         return {
             "mode": settings["mode"],

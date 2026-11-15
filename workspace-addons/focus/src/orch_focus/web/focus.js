@@ -12,6 +12,7 @@
     const t = v.ticket;
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
+    S.views.ticket.renderPhoneLine(v);
     els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
     document.getElementById('fx-loading')?.remove();  /* the skeleton goes when the first view is there */
     root.dataset.state = v.state;
@@ -38,6 +39,7 @@
     els.stopL.textContent = running ? 'Pause work' : 'Continue';
     els.stop.setAttribute('aria-label', running ? 'Pause work' : 'Continue');
     els.compose.hidden = v.state === 'done' || S.state.tab >= 2 || (t.status === 'review' && !S.state.changesRequested);  /* a done ticket is a read-only board; Continue starts a run */
+    S.views.compose.renderWaiting(v);
     /* an open question: Answer is the main action; Continue and Start fresh wait until it is answered */
     const asking = v.ticket.questions.some(q => q.answer == null);
     els.answer.hidden = !asking;
@@ -185,7 +187,6 @@
       if (els.menu.contains(e.target) && e.target.closest('button')) { closePopovers(); els.moreBtn.focus(); }
       if (a === 'mode') setMode(!root.classList.contains('fx-terminal'));
       else if (a === 'jump') S.views.live.jumpToNew();
-      else if (a === 'phone') { els.phoneNote.hidden = !els.phoneNote.hidden; els.phoneBtn.setAttribute('aria-expanded', String(!els.phoneNote.hidden)); }
       else if (a === 'copy') copyLink();
       else if (a === 'rail') toggleRail(); else if (a === 'full') setFull(!root.classList.contains('is-full')); else if (a === 'help') toggleHelp();
       else if (a === 'interrupt') S.views.compose.interruptNow();
