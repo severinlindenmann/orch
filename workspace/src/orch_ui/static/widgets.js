@@ -39,23 +39,58 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    verdict = 'ok' (right, Looks good) | 'no' (left, Don't do / Send back) | 'talk' (down, Comment: voice or text).
    Every swipe has a button and a key (→ ← ↓, Space opens the viewer, Z undoes). Overlays stay inside host. */
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
- let idx=o.start||0;const done=[],pins={};let overlay=null;
+ let idx=o.start||0;const done=[],ans={},pins={},picked=Object.assign({},o.picked);let overlay=null;
  host.classList.add('swipe','swipe-'+mode);host.tabIndex=0;host.setAttribute('role','region');host.setAttribute('aria-label','Review, one item at a time');
  const top=el('div','swipe-top'),count=el('span'),bar=el('div','progress'),fill=el('span');bar.append(fill);
  const undoBtn=el('button','btn ghost sm');undoBtn.type='button';undoBtn.append(ic('undo',16),'Undo');undoBtn.onclick=()=>undo();
- top.append(count,bar,undoBtn);
+ const allBtn=el('button','btn ghost sm');allBtn.type='button';allBtn.append(ic('cards',16),'All');allBtn.setAttribute('aria-label','All cards');allBtn.onclick=()=>openOverview();
+ top.append(count,bar,allBtn,undoBtn);
  const stage=el('div','swipe-stage'),live=el('div','sr-only');live.setAttribute('aria-live','polite');
  const acts=el('div','swipe-actions');
  const mk=(cls,icon,label,key,fn)=>{const b=el('button','swipe-act '+cls);b.type='button';const r=el('span','ring');r.append(ic(icon,cls==='ok'?28:24));const l=el('span','',label);if(key){const k=el('kbd','',key);l.append(k)}b.append(r,l);b.onclick=fn;return b};
  const noBtn=mk('no','x',"Don't do",'←',()=>fly('no')),talkBtn=mk('talk','mic','Comment','↓',()=>fly('talk')),okBtn=mk('ok','check','Looks good','→',()=>fly('ok'));
  acts.append(noBtn,talkBtn,okBtn);host.replaceChildren(top,stage,acts,live);
- const noWord=it=>it.noLabel||(it.kind==='check'?'Send back':"Don't do");
+ const isOpt=it=>it&&it.preview&&it.preview.type==='options';
+ const optOf=(it,id)=>isOpt(it)&&(it.preview.options||[]).find(x=>x.id===id);
+ const noWord=it=>it.noLabel||(isOpt(it)?'None of these':it.kind==='check'?'Send back':"Don't do");
+ const okWord=it=>{if(!isOpt(it))return 'Looks good';const p=picked[it.id];return p?'Take '+p:'Pick one'};
  const buildPreview=(it,big)=>{const p=it.preview||{},f=document.createDocumentFragment();
+  if(p.type==='compare'){f.append(buildCompare(it,big));return f}
+  if(p.type==='options'){f.append(buildOptions(it,big));return f}
   if(p.type==='img'){const i=el('img');i.src=p.src;i.alt=p.alt||it.title;i.draggable=false;f.append(i)}
   else if(p.type==='page'){const fr=el('iframe');fr.src=p.src;fr.title=it.title;fr.setAttribute('sandbox','');fr.tabIndex=-1;f.append(fr)}
   else if(p.type==='table'){const t=el('table','mini-table'),h=el('tr');(p.cols||[]).forEach(c=>h.append(el('th','',c)));const th=el('thead');th.append(h);const tb=el('tbody');(p.rows||[]).slice(0,big?50:7).forEach(r=>{const tr=el('tr');r.forEach(c=>tr.append(el('td','',c)));tb.append(tr)});t.append(th,tb);f.append(t)}
   else{const d=el('div','doc');if(p.heading)d.append(el('h4','',p.heading));(p.paras||[]).forEach(x=>d.append(el('p','',x)));if(p.steps){const ol=el('ol');p.steps.forEach(x=>ol.append(el('li','',x)));d.append(ol)}f.append(d)}
   return f};
+ /* Before / after: card = Before | After | Both (phone starts on After), viewer = Slide | Side by side | Before | After.
+    Key B switches on the desk. The control never starts a swipe. */
+ const buildCompare=(it,big)=>{const p=it.preview,w=el('div','swipe-compare');const views=big?[['slide','Slide'],['both','Side by side'],['before','Before'],['after','After']]:[['before','Before'],['after','After'],['both','Both']];
+  const set=v=>{w.dataset.view=v;ctl.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)))};
+  const pane=side=>{const d=el('div','cmp-pane '+side);d.append(buildPreview({title:it.title+(side==='before'?' before':' after'),preview:p[side]},big),el('span','cmp-tag',side==='before'?'Before':'After'));return d};
+  const ctl=el('div','segmented swipe-cmp-ctl');ctl.setAttribute('role','group');ctl.setAttribute('aria-label','Before and after');
+  views.forEach(([v,l])=>{const b=el('button','btn sm',l);b.type='button';b.dataset.v=v;b.onclick=e=>{e.stopPropagation();set(v)};ctl.append(b)});
+  ctl.addEventListener('pointerdown',e=>e.stopPropagation());
+  w.append(pane('before'),pane('after'),ctl);
+  if(big){const line=el('div','cmp-line'),r=el('input','cmp-range');r.type='range';r.min='0';r.max='100';r.value='50';r.setAttribute('aria-label','Move the line between before and after');
+   r.oninput=()=>w.style.setProperty('--cut',r.value+'%');r.addEventListener('pointerdown',e=>e.stopPropagation());w.style.setProperty('--cut','50%');w.append(line,r)}
+  if(p.note){const n=el('span','cmp-note',p.note);w.append(n)}
+  w.cycle=()=>{const i=views.findIndex(([v])=>v===w.dataset.view);set(views[(i+1)%views.length][0])};
+  set(big?'slide':(mode==='phone'?'after':'both'));return w};
+ /* Options A / B / C: tap one to pick it (ring + "Picked"); right = take it, left = none of these, down = comment on the
+    picked one (or all). The helper's suggestion carries a quiet "Suggested" tag, never a fill. */
+ const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':''));w.style.setProperty('--n',String((p.options||[]).length));
+  (p.options||[]).forEach(op=>{const b=el('button','swipe-opt');b.type='button';b.dataset.opt=op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));
+   const h=el('span','opt-h'),l=el('b','opt-letter',op.id);h.append(l,el('span','opt-title',op.title));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
+   const th=el('span','opt-thumb');if(op.preview)th.append(buildPreview({title:op.title,preview:op.preview},big));
+   b.append(h,th);if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
+   b.addEventListener('pointerdown',e=>e.stopPropagation());
+   b.onclick=e=>{e.stopPropagation();pick(it,picked[it.id]===op.id?null:op.id)};w.append(b)});
+  return w};
+ const pick=(it,id)=>{if(id)picked[it.id]=id;else delete picked[it.id];
+  host.querySelectorAll('.swipe-opt').forEach(b=>{if(b.closest('.swipe-card:not(.under):not(.under2),.swipe-viewer'))b.setAttribute('aria-pressed',String(b.dataset.opt===picked[it.id]))});
+  syncWords();live.textContent=id?'Picked '+id:'Nothing picked'};
+ const syncWords=()=>{const it=items[idx];if(!it)return;okBtn.querySelector('span:not(.ring)').firstChild.textContent=okWord(it);noBtn.querySelector('span:not(.ring)').firstChild.textContent=noWord(it);
+  const st=cur&&cur.querySelector('.swipe-stamp.right');if(st)st.textContent=okWord(it)==='Pick one'?'Pick one first':okWord(it)};
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:''));c.setAttribute('aria-label',it.title);
   const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
   h.append(m,el('h3','',it.title));if(it.why)h.append(el('p','',it.why));
@@ -66,16 +101,34 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(it.signs){const s=el('span','swipe-signs');s.append(ic('shield',14),mode==='phone'?'Face ID when you approve':'Signs when you approve');ft.append(s)}
   ft.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' comment':' comments'));ft.append(s)}
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.onpointerdown=e=>e.stopPropagation();ft.append(a)}
-  ['right','left','down'].forEach(d=>{c.append(el('div','swipe-edge '+d));const st=el('div','swipe-stamp '+d,d==='right'?'Looks good':d==='left'?noWord(it):'Comment');c.append(st)});
+  ['right','left','down'].forEach(d=>{c.append(el('div','swipe-edge '+d));const st=el('div','swipe-stamp '+d,d==='right'?(okWord(it)==='Pick one'?'Pick one first':okWord(it)):d==='left'?noWord(it):'Comment');c.append(st)});
   c.append(h,pv,ft);return c};
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
  let cur=null;
- const render=()=>{stage.replaceChildren();cur=null;const n=items.length;count.textContent=Math.min(idx+1,n)+' of '+n;fill.style.width=(idx/n*100)+'%';undoBtn.disabled=!done.length;
-  if(idx>=n){acts.hidden=true;stage.append(summary());return}acts.hidden=false;
-  if(items[idx+2])stage.append(card(items[idx+2],'under2'));if(items[idx+1])stage.append(card(items[idx+1],'under'));
-  cur=card(items[idx]);stage.append(cur);noBtn.querySelector('span:not(.ring)').firstChild.textContent=noWord(items[idx]);wire(cur)};
+ const open_=()=>items.map((x,i)=>i).filter(i=>!ans[items[i].id]);
+ const nextIdx=from=>{const o_=open_();return o_.find(i=>i>=from)??o_[0]??items.length};
+ const ansWord=a=>!a?'':a.verdict==='ok'?(a.note&&a.note.picked?'Took '+a.note.picked:'Looks good'):a.verdict==='no'?noWord(a.item):'Comment';
+ const render=()=>{stage.replaceChildren();cur=null;const n=items.length,k=Object.keys(ans).length;count.textContent=k+' of '+n+' done';fill.style.width=(k/n*100)+'%';undoBtn.disabled=!done.length;
+  if(idx>=n){acts.hidden=true;stage.append(summary());if(o.onChange)o.onChange();return}acts.hidden=false;
+  const behind=open_().filter(i=>i!==idx&&i>idx).concat(open_().filter(i=>i!==idx&&i<idx));
+  if(behind[1]!=null)stage.append(card(items[behind[1]],'under2'));if(behind[0]!=null)stage.append(card(items[behind[0]],'under'));
+  cur=card(items[idx]);const a=ans[items[idx].id];if(a){const f=cur.querySelector('.swipe-foot'),t=el('span','swipe-was');t.append(ic('check',14),'You said: '+ansWord(a)+' · swipe to change');f.prepend(t)}
+  stage.append(cur);syncWords();wire(cur);if(o.onChange)o.onChange()};
+ const jump=i=>{if(i<0||i>=items.length)return;closeOverlay();idx=i;render();host.focus()};
+ /* Overview: every card as a small tile (waiting first), with its answer; tap one to jump there. */
+ const openOverview=()=>{if(overlay)closeOverlay();const v=el('div','swipe-viewer swipe-overview');v.setAttribute('role','dialog');v.setAttribute('aria-label','All cards');
+  const b=el('div','swipe-viewer-bar'),x=el('button','btn ghost icon sm');x.type='button';x.setAttribute('aria-label','Close');x.append(ic('x',18));x.onclick=()=>{closeOverlay();render()};
+  const k=Object.keys(ans).length;b.append(x,el('strong','','All cards · '+(items.length-k)+' waiting'));
+  const g=el('div','swipe-ov-grid');
+  const tile=i=>{const it=items[i],a=ans[it.id],t=el('button','swipe-ov'+(i===idx?' current':'')+(a?' answered':''));t.type='button';
+   const th=el('span','swipe-ov-thumb');const pv=it.preview&&it.preview.type==='compare'?it.preview.after:it.preview&&it.preview.type==='options'?(it.preview.options[0]||{}).preview:it.preview;th.append(buildPreview({title:it.title,preview:pv||{}},false));
+   const m=el('span','swipe-meta'),kd=el('span','swipe-kind');kd.append(ic(it.icon||'file',12),it.kindLabel||it.kind);m.append(kd);
+   const st=el('span','swipe-ov-state '+(a?a.verdict:'wait'),a?ansWord(a):i===idx?'Now':'Waiting');
+   t.append(th,m,el('span','swipe-ov-title',it.title),st);t.onclick=()=>jump(i);return t};
+  const order=open_().concat(items.map((_,i)=>i).filter(i=>ans[items[i].id]));
+  order.forEach(i=>g.append(tile(i)));const body=el('div','swipe-viewer-body');body.append(g);v.append(b,body);overlay=v;host.append(v);(g.querySelector('.current')||x).focus()};
  const summary=()=>{const d=el('div','swipe-done');d.append(UI.statusIcon('done'));d.append(el('h3','',"All done. Nothing else waits on you."));
-  const t=el('div','tally'),c=v=>done.filter(x=>x.verdict===v).length;[['ok','check','Looks good'],['no','x',"Don't do"],['talk','mic','Comment']].forEach(([v,i,l])=>{const s=el('span');s.append(ic(i,16),c(v)+' '+l);t.append(s)});
+  const t=el('div','tally'),c=v=>Object.values(ans).filter(x=>x.verdict===v).length;[['ok','check','Looks good'],['no','x',"Don't do"],['talk','mic','Comment']].forEach(([v,i,l])=>{const s=el('span');s.append(ic(i,16),c(v)+' '+l);t.append(s)});
   d.append(t,el('p','',"The helper picks up each answer now. Undo works for 5 seconds."));return d};
  const show=(c,dx,dy)=>{const w=stage.clientWidth||1,hgt=stage.clientHeight||1;c.style.transform=`translate(${dx}px,${dy}px) rotate(${dx/w*14}deg)`;
   const dir=dirOf(dx,dy),amt=dir==='down'?dy/(hgt*.22):Math.abs(dx)/(w*.3);
@@ -93,12 +146,13 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const reset=c=>{c.style.transform='';c.querySelectorAll('.swipe-stamp,.swipe-edge').forEach(s=>s.style.opacity=0)};
  const fly=(verdict,dx,dy)=>{if(!cur||overlay)return;const c=cur,w=stage.clientWidth,h=stage.clientHeight;
   if(verdict==='talk'){show(c,dx||0,Math.max(dy||0,h*.18));return openComment()}
+  if(verdict==='ok'&&isOpt(items[idx])&&!picked[items[idx].id]){reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent='Tap A, B or C first';if(UI.toast&&!o.quiet)UI.toast('Tap the option you want first, then swipe right.');return}
   const tx=(verdict==='ok'?1:-1)*w*1.4;show(c,dx||tx*.1,dy||0);requestAnimationFrame(()=>{c.classList.add('leaving');show(c,tx,(dy||0)+40)});
-  setTimeout(()=>commit(verdict,null),200)};
- const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx});idx++;
-  const word=verdict==='ok'?'Looks good':verdict==='no'?noWord(it):'Comment sent';live.textContent=word+': '+it.title;
+  setTimeout(()=>commit(verdict,isOpt(items[idx])&&verdict==='ok'?{picked:picked[items[idx].id]}:null),200)};
+ const commit=(verdict,note)=>{const it=items[idx];done.push({item:it,verdict,note,idx,prev:ans[it.id]});ans[it.id]={verdict,note,item:it};idx=nextIdx(idx+1);
+  const word=verdict==='ok'?(note&&note.picked?'Took '+note.picked:'Looks good'):verdict==='no'?noWord(it):'Comment sent';live.textContent=word+': '+it.title;
   if(o.onDecide)o.onDecide(it,verdict,note);render();if(UI.toast&&!o.quiet)UI.toast(word+': '+it.title,()=>undo())};
- const undo=()=>{const last=done.pop();if(!last)return;idx=last.idx;render();live.textContent='Back: '+last.item.title;host.focus()};
+ const undo=()=>{const last=done.pop();if(!last)return;if(last.prev)ans[last.item.id]=last.prev;else delete ans[last.item.id];idx=last.idx;render();live.textContent='Back: '+last.item.title;host.focus()};
  const closeOverlay=()=>{if(overlay){overlay.remove();overlay=null;host.focus()}};
  /* Comment sheet: hold the mic to talk (or tap to start/stop), or type. Send = the card leaves downwards. */
  const openComment=()=>{const it=items[idx];if(!it)return null;const scr=el('div','swipe-scrim'),sh=el('div','swipe-sheet');sh.setAttribute('role','dialog');sh.setAttribute('aria-label','Comment on '+it.title);
@@ -113,17 +167,23 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const foot=el('div','swipe-sheet-foot'),cancel=el('button','btn','Cancel'),send=el('button','btn primary','Send');cancel.type=send.type='button';send.disabled=true;
   ta.addEventListener('input',()=>send.disabled=!ta.value.trim()&&!clip);
   cancel.onclick=()=>{closeOverlay();reset(cur)};
-  send.onclick=()=>{const note={text:ta.value.trim(),voiceClips:clip,pins:(pins[it.id]||[]).length};closeOverlay();const c=cur;c.classList.add('leaving');show(c,0,stage.clientHeight*1.2);setTimeout(()=>commit('talk',note),200)};
+  send.onclick=()=>{const note={text:ta.value.trim(),voiceClips:clip,pins:(pins[it.id]||[]).length,about:about&&about.v};closeOverlay();const c=cur;c.classList.add('leaving');show(c,0,stage.clientHeight*1.2);setTimeout(()=>commit('talk',note),200)};
   foot.append(cancel,send);const ttl=el('h2','','Comment');const sub=el('p','meta',it.title);sub.style.margin='0';
-  sh.append(el('div','grab'),ttl,sub,voice,clips,ta,foot);scr.append(sh);scr.addEventListener('pointerdown',e=>{if(e.target===scr)cancel.onclick()});
+  let about=null;if(isOpt(it)){about=el('div','segmented');about.setAttribute('role','group');about.setAttribute('aria-label','Comment about');
+   const hintP=el('p','meta');hintP.style.margin='0';
+   const setA=v=>{about.v=v;about.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));ttl.textContent=v==='all'?'Comment on all options':'Comment on option '+v;
+    hintP.textContent=v==='all'?'Send = back to the helper with your words, nothing is taken.':'Send = the helper goes on with '+v+' and your changes.'};
+   [...(it.preview.options||[]).map(x=>[x.id,x.id]),['all','All']].forEach(([v,l])=>{const b=el('button','btn sm',l);b.type='button';b.dataset.v=v;b.onclick=()=>setA(v);about.append(b)});
+   setA(picked[it.id]||'all');sh.append(el('div','grab'),ttl,sub,about,hintP,voice,clips,ta,foot)}
+  else sh.append(el('div','grab'),ttl,sub,voice,clips,ta,foot);scr.append(sh);scr.addEventListener('pointerdown',e=>{if(e.target===scr)cancel.onclick()});
   overlay=scr;host.append(scr);if(!o.state)mic.focus();return {mic,start,stop,ta,send}};
  /* Viewer: bigger preview, zoom, open, and pins (tap a spot, say or type what to change there). */
  const openViewer=()=>{const it=items[idx];if(!it)return null;const v=el('div','swipe-viewer');v.setAttribute('role','dialog');v.setAttribute('aria-label',it.title);
   const barEl=el('div','swipe-viewer-bar'),close=el('button','btn ghost icon sm');close.type='button';close.setAttribute('aria-label','Close');close.append(ic('x',18));close.onclick=()=>{closeOverlay();render()};
   let z=1;const zo=el('button','btn icon sm'),zi=el('button','btn icon sm');zo.type=zi.type='button';zo.setAttribute('aria-label','Zoom out');zi.setAttribute('aria-label','Zoom in');zo.append(ic('minus',16));zi.append(ic('plus',16));
-  const pinBtn=el('button','btn sm');pinBtn.type='button';pinBtn.setAttribute('aria-pressed','false');pinBtn.append(ic('pin',16),'Comment on a spot');
+  const pinBtn=el('button','btn sm');pinBtn.type='button';pinBtn.setAttribute('aria-pressed','false');pinBtn.append(ic('pin',16),mode==='phone'?'Spot':'Comment on a spot');pinBtn.setAttribute('aria-label','Comment on a spot');
   barEl.append(close,el('strong','',it.title),zo,zi,pinBtn);
-  if(it.open){const a=el('a','btn sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',16),'Open');barEl.append(a)}
+  if(it.open){const a=el('a','btn sm'+(mode==='phone'?' icon':''));a.href=it.open;a.target='_blank';a.rel='noopener';a.setAttribute('aria-label','Open');a.append(ic('external',16));if(mode!=='phone')a.append('Open');barEl.append(a)}
   const body=el('div','swipe-viewer-body'),zm=el('div','swipe-zoomed');zm.append(buildPreview(it,true));body.append(zm);
   const setZ=n=>{z=Math.max(1,Math.min(4,n));zm.style.transform=`scale(${z})`;zm.style.width=`calc(${100/z}% - 32px)`};zo.onclick=()=>setZ(z-.5);zi.onclick=()=>setZ(z+.5);
   body.addEventListener('wheel',e=>{if(e.ctrlKey){e.preventDefault();setZ(z-e.deltaY*.01)}},{passive:false});
@@ -145,8 +205,8 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   foot.append(hint,list);drawList();v.append(barEl,body,foot);overlay=v;host.append(v);close.focus();return {askPin,pinning,setZ}};
  host.addEventListener('keydown',e=>{if(e.target.closest('textarea,input'))return;
   if(e.key==='Escape'&&overlay){e.preventDefault();overlay.classList.contains('swipe-viewer')?(closeOverlay(),render()):(closeOverlay(),cur&&reset(cur));return}
-  if(overlay)return;if(e.key==='ArrowRight'){e.preventDefault();fly('ok')}else if(e.key==='ArrowLeft'){e.preventDefault();fly('no')}else if(e.key==='ArrowDown'){e.preventDefault();fly('talk')}
-  else if(e.key===' '){e.preventDefault();cur&&openViewer()}else if(e.key==='z'||e.key==='Z'){e.preventDefault();undo()}});
+  if(overlay){if((e.key==='b'||e.key==='B')&&overlay.querySelector('.swipe-compare')){e.preventDefault();overlay.querySelector('.swipe-compare').cycle()}return}if(e.key==='ArrowRight'){e.preventDefault();fly('ok')}else if(e.key==='ArrowLeft'){e.preventDefault();fly('no')}else if(e.key==='ArrowDown'){e.preventDefault();fly('talk')}
+  else if(e.key===' '){e.preventDefault();cur&&openViewer()}else if(e.key==='z'||e.key==='Z'){e.preventDefault();undo()}else if(e.key==='o'||e.key==='O'){e.preventDefault();openOverview()}else if((e.key==='b'||e.key==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
  render();
- return {fly,undo,openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,get index(){return idx}}};
+ return {jump,openOverview,answers:ans,items,fly,undo,pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,get index(){return idx}}};
 })();
