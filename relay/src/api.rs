@@ -172,6 +172,19 @@ async fn patch_me(
 
 const NOT_AVAILABLE: &str = include_str!("../web/not-available.html");
 
+/// The visitor page is served alone (the public listener has no stylesheet route), so the master tokens are
+/// placed into its own `<style>` where the file has the `/*tokens*/` marker.
+pub fn not_available() -> &'static str {
+    static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PAGE.get_or_init(|| {
+        NOT_AVAILABLE.replacen(
+            "/*tokens*/",
+            include_str!("../../workspace/src/orch_ui/static/tokens.css"),
+            1,
+        )
+    })
+}
+
 /// The relay's orch logo (violet: dashboard green, publish blue, relay violet) as tab icon and iOS home-screen icon.
 /// Served on the public and the admin listener.
 pub fn icon_routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
@@ -203,7 +216,7 @@ fn page(status: StatusCode) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        NOT_AVAILABLE,
+        not_available(),
     )
         .into_response()
 }
