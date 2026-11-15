@@ -563,6 +563,11 @@ def insights_text(value: bool | int) -> str:
     return ("on" if value else "off") if isinstance(value, bool) else str(value)
 
 
+def insights_target(setting: str, value: bool | int) -> str:
+    """`key=value`: still named by the Insights page (removed with the page's own clean-up)."""
+    return f"{setting}={insights_text(value)}"
+
+
 def _same_text(setting: str, text: str, current: bool | int) -> bool:
     t = str(text).strip().lower()
     if isinstance(current, bool):
