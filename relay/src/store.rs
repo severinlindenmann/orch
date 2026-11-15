@@ -222,6 +222,17 @@ pub fn insert_message(
             }
         }
     }
+    // Blobs a question's card_files name: phones the question went to may read them too.
+    if msg["type"] == "question" {
+        for f in msg["body"]["card_files"].as_array().into_iter().flatten() {
+            if let Some(b) = f["blob_id"].as_str() {
+                c.execute(
+                    "INSERT OR IGNORE INTO view_blobs(blob_id,msg_id) VALUES(?1,?2)",
+                    params![b, id],
+                )?;
+            }
+        }
+    }
     c.execute(
         "INSERT INTO messages(id,from_addr,to_addr,type,created_at,ticket,reply_to,blob_id,digest,payload,stored_at)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
