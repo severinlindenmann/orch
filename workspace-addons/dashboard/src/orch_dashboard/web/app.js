@@ -214,7 +214,10 @@ function sync(target, source) {
   }
   for (const attr of [...source.attributes]) {
     if (target.classList.contains('ui-native-select') && attr.name === 'class') continue;
-    if (target.getAttribute(attr.name) !== attr.value) target.setAttribute(attr.name, attr.value);
+    if (target.getAttribute(attr.name) === attr.value) continue;
+    // style-src 'self' refuses a style ATTRIBUTE set from script; the same declarations through the style object are allowed
+    if (attr.name === 'style') target.style.cssText = attr.value;
+    else target.setAttribute(attr.name, attr.value);
   }
   reconcile(target, source);
   if (target.matches('[data-settings-agent],[data-settings-permissions],[data-sync-where]')) target.checked = source.checked;

@@ -732,3 +732,20 @@ def test_an_answer_without_a_run_sends_nothing(proj, run):
     qid = json.loads(run("ask", tid, "Use CHF?", "--json", "--by", "agent:fake")[1])["id"]
     assert run("answer", tid, qid, "Yes", "--by", "human:anna")[0] == 0
     assert runs.undelivered(proj, tid) == []
+
+
+@needs_tmux
+def test_stop_closes_a_finished_session_that_has_no_claim(proj, run, lab):
+    """A session whose run ended (claim released) but whose tmux session and idle agent are still there:
+    `orch run stop` closes exactly that ticket's session, never the neighbour's."""
+    tid, other = _ticket(run), _ticket(run)
+    for name in (tid, other):
+        r = runs_live.tmux(proj, "new-session", "-d", "-s", name, "--", "sleep", "300")
+        assert r.returncode == 0, r.stderr
+    assert runs.read(proj, tid) is None
+    code, out, _ = run("run", "stop", tid)
+    assert code == 0 and "Stopped" in out and "Nothing is running" not in out
+    assert not runs_live.session_exists(proj, tid)
+    assert runs_live.session_exists(proj, other)  # only its own, by exact name
+    code, out, _ = run("run", "stop", tid)
+    assert "Nothing is running" in out
