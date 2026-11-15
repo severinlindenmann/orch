@@ -172,3 +172,120 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .mini-table{border-collapse:collapse;font-size:11px;line-height:16px;color:var(--text-muted);width:calc(100% - 24px);table-layout:fixed}
 .mini-table th{text-align:left;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);padding:2px 6px}
 .mini-table td{padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Swipe review deck (draft 15 Nov, owner idea): one card at a time; right = Looks good, left = Don't do / Send back,
+   down = Comment (voice or text). Buttons + keys (← ↓ →) always do the same as the swipe. UI.swipeDeck() builds it. */
+.swipe{position:relative;display:flex;flex-direction:column;gap:var(--s4);min-height:0;outline:none;--swipe-card-h:560px}
+.swipe:focus,.swipe:focus-visible{outline:none;box-shadow:none}
+.swipe-top{display:flex;align-items:center;gap:var(--s3);font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-top .progress{flex:1;height:4px}
+.swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:none}
+.swipe-card{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;cursor:grab;user-select:none;will-change:transform;transition:transform var(--dur-slow) var(--ease-move),opacity var(--dur-slow) var(--ease-move);box-shadow:var(--lift-shadow)}
+.swipe-card.dragging{transition:none;cursor:grabbing}
+.swipe-card.leaving{transition:transform var(--dur-slow) var(--ease-exit),opacity var(--dur-slow) var(--ease-exit);opacity:0}
+.swipe-card.under{transform:scale(.96) translateY(10px);box-shadow:none;pointer-events:none}
+.swipe-card.under2{transform:scale(.92) translateY(20px);opacity:.6;box-shadow:none;pointer-events:none}
+.swipe-head{display:grid;gap:var(--s1);padding:var(--s4) var(--s4) var(--s3)}
+.swipe-meta{display:flex;align-items:center;gap:var(--s2);font-size:12px;line-height:16px;color:var(--text-faint)}
+.swipe-kind{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--text-muted);font-size:12px;line-height:16px}
+.swipe-head h3{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.swipe-head p{margin:0;font-size:14px;line-height:20px;color:var(--text-muted)}
+.swipe-preview{position:relative;flex:1;min-height:0;margin:0 var(--s4);border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);overflow:hidden;cursor:zoom-in}
+.swipe-preview>img,.swipe-preview>iframe{display:block;width:100%;height:100%;object-fit:contain;border:0;pointer-events:none;background:#fff}
+.swipe-preview>iframe{width:200%;height:200%;transform:scale(.5);transform-origin:0 0}
+.swipe-preview .doc{padding:var(--s4);font-size:14px;line-height:20px;color:var(--text)}
+.swipe-preview .doc h4{margin:0 0 8px;font-size:16px;line-height:24px}.swipe-preview .doc p{margin:0 0 8px;color:var(--text-muted)}
+.swipe-preview .doc ol{margin:0;padding-left:20px;display:grid;gap:6px}
+.swipe-preview .mini-table{margin:var(--s3);width:calc(100% - 24px);font-size:12px}
+.swipe-expand{position:absolute;right:8px;bottom:8px;background:var(--surface-2)!important;border-color:var(--border)!important}
+.swipe-foot{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4);font-size:13px;line-height:18px;color:var(--text-muted);min-height:44px}
+.swipe-foot .grow{flex:1}
+.swipe-stamp{position:absolute;z-index:2;padding:6px 14px;border:2px solid currentColor;border-radius:var(--radius);font-weight:600;font-size:16px;line-height:24px;background:var(--bg);opacity:0;pointer-events:none}
+.swipe-stamp.right{top:20px;left:20px;color:var(--brand);transform:rotate(-8deg)}
+.swipe-stamp.left{top:20px;right:20px;color:var(--danger);transform:rotate(8deg)}
+.swipe-stamp.down{left:50%;bottom:64px;transform:translateX(-50%);color:var(--warning)}
+.swipe-edge{position:absolute;inset:0;border-radius:var(--radius-card);pointer-events:none;opacity:0;z-index:1}
+.swipe-edge.right{box-shadow:inset 0 0 0 2px var(--brand)}.swipe-edge.left{box-shadow:inset 0 0 0 2px var(--danger)}.swipe-edge.down{box-shadow:inset 0 0 0 2px var(--warning)}
+.swipe-actions{display:flex;justify-content:center;align-items:flex-start;gap:var(--s6)}
+.swipe-act{display:grid;justify-items:center;gap:6px;background:none;border:0;color:var(--text-muted);font:inherit;font-size:13px;line-height:18px;cursor:pointer;padding:0}
+.swipe-act .ring{display:grid;place-items:center;width:56px;height:56px;border-radius:999px;border:1px solid var(--border-strong);background:var(--surface);transition:transform var(--dur-fast) var(--ease-out),background var(--dur-fast)}
+.swipe-act:hover .ring{background:var(--surface-2)}.swipe-act:active .ring{transform:scale(.94)}
+.swipe-act:focus-visible{outline:none}.swipe-act:focus-visible .ring{box-shadow:var(--focus-ring)}
+.swipe-act.no .ring{color:var(--danger);border-color:var(--danger)}
+.swipe-act.ok .ring{width:64px;height:64px;background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.swipe-act.ok:hover .ring{background:var(--brand-strong)}
+.swipe-act.talk .ring{color:var(--warning);border-color:var(--warning)}
+.swipe-act kbd{font:12px/16px var(--font-ui);color:var(--text-faint);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:4px}
+.swipe-hide-keys .swipe-act kbd{display:none}
+.swipe-pins{display:inline-flex;align-items:center;gap:4px;color:var(--warning)}
+.swipe-signs{display:inline-flex;align-items:center;gap:4px;color:var(--text-muted)}
+/* Pins on a preview (comment on a spot) */
+.swipe-pin{position:absolute;z-index:3;display:grid;place-items:center;width:24px;height:24px;margin:-24px 0 0 -12px;border-radius:999px 999px 999px 0;transform:rotate(-45deg);background:var(--warning);color:var(--bg);font-size:12px;font-weight:600;box-shadow:var(--lift-shadow)}
+.swipe-pin>span{transform:rotate(45deg)}
+/* In-deck overlays: comment sheet (bottom) and zoom viewer (full). They live inside the deck so a phone frame keeps them. */
+.swipe-scrim{position:absolute;inset:0;z-index:20;background:var(--scrim);display:flex;align-items:flex-end;justify-content:center;animation:swipe-fade var(--dur-base) var(--ease-out)}
+.swipe-sheet{width:100%;max-width:640px;background:var(--surface);border:1px solid var(--border-strong);border-bottom:0;border-radius:12px 12px 0 0;padding:var(--s4) var(--s4) max(var(--s4),env(safe-area-inset-bottom));display:grid;gap:var(--s3);box-shadow:var(--shadow);animation:swipe-up var(--dur-slow) var(--ease-out)}
+.swipe-desk .swipe-scrim{align-items:center}.swipe-desk .swipe-sheet{border-radius:12px;border-bottom:1px solid var(--border-strong)}
+.swipe-sheet h2{margin:0;font-size:20px;line-height:28px}
+.swipe-sheet .grab{justify-self:center;width:36px;height:4px;border-radius:2px;background:var(--border-strong)}
+.swipe-desk .swipe-sheet .grab{display:none}
+.swipe-sheet textarea{width:100%;min-height:88px;resize:vertical;font:inherit;font-size:14px;line-height:20px;color:var(--text);background:var(--bg);border:1px solid var(--input);border-radius:var(--radius);padding:10px 12px}
+.swipe-sheet textarea:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.swipe-voice{display:flex;align-items:center;gap:var(--s3)}
+.swipe-mic{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border-radius:999px;border:1px solid var(--warning);background:var(--warning-soft);color:var(--warning);font:inherit;font-weight:500;cursor:pointer;touch-action:none;user-select:none}
+.swipe-mic.rec{background:var(--warning);color:var(--bg)}
+.swipe-mic:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.swipe-wave{display:flex;align-items:center;gap:2px;height:24px}
+.swipe-wave i{display:block;width:3px;border-radius:2px;background:var(--warning);height:30%}
+.swipe-mic.rec+.swipe-wave i{animation:swipe-bar .7s ease-in-out infinite alternate}
+.swipe-clip{display:flex;align-items:center;gap:var(--s2);padding:8px 12px;border-radius:var(--radius);background:var(--surface-2);font-size:13px;line-height:18px}
+.swipe-clip q{color:var(--text-muted);quotes:none;flex:1;min-width:0}
+.swipe-sheet-foot{display:flex;justify-content:flex-end;gap:var(--s2)}
+.swipe-viewer{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;background:var(--bg);animation:swipe-fade var(--dur-base) var(--ease-out)}
+.swipe-viewer-bar{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);min-height:52px}
+.swipe-viewer-bar strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.swipe-viewer-bar .btn[aria-pressed="true"]{background:var(--warning-soft);border-color:var(--warning);color:var(--warning)}
+.swipe-viewer-body{position:relative;flex:1;overflow:auto;touch-action:pan-x pan-y}
+.swipe-viewer-body.pinning{cursor:crosshair}
+.swipe-zoomed{position:relative;transform-origin:0 0;transition:transform var(--dur-base) var(--ease-move);margin:var(--s4)}
+.swipe-zoomed>img{display:block;width:100%;height:auto;background:#fff;border-radius:var(--radius)}
+.swipe-zoomed>iframe{display:block;width:100%;height:1100px;border:0;background:#fff;border-radius:var(--radius);pointer-events:none}
+.swipe-zoomed .doc{padding:var(--s5);background:var(--surface);border-radius:var(--radius);font-size:16px;line-height:24px}
+.swipe-zoomed .mini-table{font-size:14px;line-height:20px;width:100%}
+.swipe-viewer-foot{display:grid;gap:var(--s2);padding:var(--s3);border-top:1px solid var(--border);max-height:40%;overflow:auto}
+.swipe-viewer-foot .row{display:flex;align-items:center;gap:var(--s2);font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-pin-note{display:flex;gap:var(--s2);align-items:flex-start;font-size:14px;line-height:20px}
+.swipe-pin-note b{display:grid;place-items:center;flex:none;width:20px;height:20px;border-radius:999px;background:var(--warning);color:var(--bg);font-size:12px}
+.swipe-pin-pop{position:absolute;z-index:4;width:260px;padding:var(--s3);background:var(--surface-2);border:1px solid var(--border-strong);border-radius:var(--radius-card);box-shadow:var(--shadow);display:grid;gap:var(--s2)}
+.swipe-pin-pop input{font:inherit;font-size:14px;color:var(--text);background:var(--bg);border:1px solid var(--input);border-radius:var(--radius);padding:8px 10px;min-height:36px}
+.swipe-done{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:var(--s3);text-align:center;padding:var(--s5)}
+.swipe-done h3{margin:0;font-size:20px;line-height:28px}.swipe-done p{margin:0;color:var(--text-muted)}
+.swipe-done .tally{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s2) var(--s4);font-size:14px}
+.swipe-done .st{width:40px;height:40px;color:var(--done)}
+.swipe-done .tally span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+@keyframes swipe-fade{from{opacity:0}}
+@keyframes swipe-up{from{transform:translateY(40px);opacity:0}}
+@keyframes swipe-bar{from{height:20%}to{height:100%}}
+@media (prefers-reduced-motion:reduce){.swipe-card,.swipe-card.leaving,.swipe-zoomed{transition:none}.swipe-scrim,.swipe-sheet,.swipe-viewer{animation:none}.swipe-mic.rec+.swipe-wave i{animation:none;height:70%}}
+/* Phone frame for mockup and draft pages (shows a phone screen at 390 x 844 inside a desktop page). */
+.device-row{display:flex;flex-wrap:wrap;gap:var(--s6);align-items:flex-start}
+.device-cap{display:grid;gap:var(--s2);width:390px;max-width:100%}
+.device-cap>p{margin:0;font-size:13px;line-height:18px;color:var(--text-muted)}.device-cap>h3{margin:0;font-size:16px;line-height:24px}
+.device-phone{position:relative;width:390px;max-width:100%;height:844px;border-radius:48px;border:10px solid #000;background:var(--bg);overflow:hidden;box-shadow:0 0 0 1px var(--border-strong),var(--shadow);display:flex;flex-direction:column}
+.device-phone .notch{flex:none;height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;font-size:14px;font-weight:600}
+.device-phone .notch::after{content:"";position:absolute;left:50%;top:10px;width:120px;height:32px;margin-left:-60px;border-radius:20px;background:#000}
+.device-phone .app-bar{flex:none;display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s4);min-height:48px}
+.device-phone .app-bar h2{margin:0;flex:1;font-size:20px;line-height:28px}
+.device-phone .app-body{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;padding:0 var(--s4) var(--s5)}
+.device-phone .swipe{flex:1;--swipe-card-h:0px}
+.device-phone .swipe-actions{gap:var(--s5)}
+.device-phone .swipe-scrim,.device-phone .swipe-viewer{margin:0 calc(var(--s4)*-1) calc(var(--s5)*-1)}
+.phone-row{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--border);color:inherit;text-decoration:none}
+.phone-row .av{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:13px;background:var(--surface-2);font-weight:600}
+.phone-row .tx{flex:1;min-width:0;display:grid}.phone-row .tx span{font-size:13px;line-height:18px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phone-review{display:flex;align-items:center;gap:var(--s3);padding:var(--s3);margin:var(--s2) 0;border-radius:14px;background:var(--warning-soft);border:1px solid var(--warning);color:var(--text);text-decoration:none}
+.phone-review .stack{position:relative;width:44px;height:44px;flex:none}
+.phone-review .stack i{position:absolute;inset:0;border-radius:8px;background:var(--surface-3);border:1px solid var(--border-strong)}
+.phone-review .stack i:nth-child(1){transform:rotate(-10deg)}.phone-review .stack i:nth-child(2){transform:rotate(6deg)}
+.phone-review .tx{flex:1;display:grid}.phone-review .tx span{font-size:13px;line-height:18px;color:var(--text-muted)}
+.phone-review .go{padding:6px 14px;border-radius:999px;background:var(--warning);color:var(--bg);font-weight:600;font-size:14px}

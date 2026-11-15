@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Swipe review · orch (draft)</title>
+<link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/gallery.css"></head>
+<body><main class="page" aria-label="Swipe review draft" style="max-width:1000px">
+<div class="page-heading"><div><p class="eyebrow">Draft 15 Nov · owner idea</p><h1>Swipe review</h1>
+<p>Everything that waits on you, one card at a time. Right = <strong>Looks good</strong>, left = <strong>Don't do</strong>, down = <strong>Comment</strong> (voice or text). The middle of the card is the thing itself: a screen, a draft, a file, a link. Tap it to make it bigger, open it, or comment on one spot.</p></div></div>
+
+<div class="row" style="gap:var(--s3);flex-wrap:wrap">
+ <a class="btn primary" href="phone.html">Phone app (6 states, one live)</a>
+ <a class="btn" href="desktop.html">Workspace dashboard (live, keys work)</a>
+</div>
+
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">How it works</h2>
+<table class="mini-table" style="font-size:14px;line-height:20px;width:100%"><thead><tr><th>Move</th><th>Phone</th><th>Workspace</th><th>What happens</th></tr></thead><tbody>
+<tr><td>Right</td><td>swipe right or ✓</td><td>→ or drag or click</td><td>Looks good. The helper goes on. Things that publish or send still ask for Face ID / the one click sign.</td></tr>
+<tr><td>Left</td><td>swipe left or ✕</td><td>←</td><td>Don't do (on a Check result: Send back). The helper stops this.</td></tr>
+<tr><td>Down</td><td>swipe down or mic</td><td>↓</td><td>Comment sheet: hold to talk (gsw / de / en, written out) or type. Send = back to the helper with your words.</td></tr>
+<tr><td>Tap the middle</td><td>tap, pinch</td><td>Space, click, Ctrl+wheel</td><td>Bigger view: zoom, Open, “Comment on a spot” (pin + words). Pins go with whatever you swipe next.</td></tr>
+<tr><td>Oops</td><td>Undo (toast, 5 s)</td><td>Z</td><td>The last card comes back.</td></tr>
+</tbody></table>
+<p class="meta" style="margin:0">Same stack on phone and workspace: what you answer on one is gone on the other. Entry: a yellow “6 things to review” row on top of Chats (and the push); on the workspace a “Review all” button in Home's “Needs you” block, which opens the Review page.</p>
+</section>
+
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">Research: what others do, what we take</h2>
+<table class="mini-table" style="font-size:14px;line-height:20px;width:100%;table-layout:auto"><thead><tr><th>Where</th><th>What they learned</th><th>We take</th></tr></thead><tbody>
+<tr><td>Tinder, Bumble (card stacks)</td><td>One decision at a time is fast and calm. A stamp while dragging tells you what will happen; let go early and it springs back. Buttons under the card for people who don't swipe.</td><td>One card, the stamp, three buttons, the card behind peeks out.</td></tr>
+<tr><td>Apple Mail, Gmail swipe actions</td><td>Swipes fire by accident. Fix: a clear distance (about a third of the width) or a fast flick, and Undo right after.</td><td>30 % width or a flick; Undo toast 5 s; Z on the desk.</td></tr>
+<tr><td>Superhuman, Linear Triage</td><td>On a computer, triage is a keyboard job: one key per answer, preview with Space.</td><td>← ↓ → and Space; drag still works with the mouse.</td></tr>
+<tr><td>Figma, Markup, GitHub review</td><td>“Change this” is much clearer on the spot than in a sentence.</td><td>“Comment on a spot” in the big view.</td></tr>
+<tr><td>WhatsApp voice notes (and our messenger)</td><td>Hold to talk is the quickest way to say a long thing on the phone.</td><td>Hold to talk in the comment sheet, written out like the chat does.</td></tr>
+<tr><td>Accessibility (WCAG 2.2: 2.5.1, 2.5.7; iOS VoiceOver)</td><td>Every swipe needs a one tap way, a drag is never the only way; screen readers need named actions.</td><td>Buttons always there; VoiceOver actions “Looks good / Don't do / Comment”; Reduce Motion = no fly-out.</td></tr>
+<tr><td>Known risk: “rubber stamping”</td><td>Fast stacks tempt you to approve without looking.</td><td>Each card says what happens when you approve; risky ones still need the signature; the stack stays short (what waits now).</td></tr>
+</tbody></table>
+</section>
+
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">My recommendation</h2>
+<ul style="margin:0;padding-left:20px;display:grid;gap:6px">
+<li>Put in the stack: drafts, Check results, helper plans that need a yes, links before they go public. Questions with several choices stay normal question cards (a swipe can't pick option B).</li>
+<li>Left word: “Don't do”, but “Send back” on Check results (that is the word the ticket already uses).</li>
+<li>Swipe up: keep it free for now (later maybe “Later” = to the end of the stack).</li>
+<li>Comment = send back with your words. A “Looks good, plus a note” is a pin or comment and then swipe right.</li>
+<li>Build: one widget in the master design system (already in this draft: <code>UI.swipeDeck</code>, used by both pages), one Review page in the dashboard, one SwiftUI screen in the app. Answers use the same paths as today's Looks good / Send back and the question answers, so nothing new on the wire.</li>
+</ul></section>
+<p class="meta">Files: workspace-addons/dashboard/mockup/proposals/swipe-review/ · widget in workspace/src/orch_ui/static/widgets.css + widgets.js (branch draft/swipe-review).</p>
+</main></body></html>
