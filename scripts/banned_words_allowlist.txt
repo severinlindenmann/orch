@@ -1,0 +1,7 @@
+# Path globs (fnmatch) whose added lines may contain the banned words of R4.1.
+# Keep this small; every entry needs a reason.
+scripts/check_banned_words.py        # the word list itself
+scripts/banned_words_allowlist.txt
+brand/tests/test_banned_words.py     # planted samples
+.github/workflows/rules.yml         # names the check
+.github/workflows/ci.yml             # the existing "gate" job
