@@ -56,3 +56,23 @@ test('a card shows name, size and one date; CSV is a table; Markdown is rendered
   assert.ok(nodes(md).some(x => x.tag === 'h2' && text(x) === 'Dear friends'), 'Markdown is rendered, not shown as # text');
   assert.ok(nodes(c.previewText(t, 'artifacts', {name:'a.txt'}, 'plain\nlines')).some(x => x.tag === 'pre'));
 });
+test('b4: a file attached with a title shows that title, the file name small underneath', () => {
+  const c = ctx(), t = {id:'t_one'};
+  const file = vm.runInContext('evidenceFile', c)(t, {type:'file', ref:'.orch/tickets/t_one/evidence/logo.svg', at:'2026-11-14T09:00:00Z', title:'Poster draft'});
+  assert.equal(file.title, 'Poster draft');
+  const entry = vm.runInContext('fileEntry', c)(t, {kind:'evidence'}, file);
+  assert.equal(entry.title, 'Poster draft');
+  const tile = nodes(vm.runInContext('fileTile', c)(t, entry));
+  assert.match(text(tile[0]), /Poster draft/);
+  assert.ok(tile.some(x => /file-real-name/.test(x.attrs.className || '') && text(x) === 'logo.svg'), 'file name underneath');
+  const row = nodes(vm.runInContext('ticketFileRow', c)(t, 'evidence', file));
+  assert.ok(row.some(x => x.attrs.className === 'file-name' && text(x) === 'Poster draft'));
+  const plain = vm.runInContext('fileEntry', c)(t, {kind:'artifacts'}, {name:'quote-Q-2026-114.pdf'});
+  assert.equal(plain.title, 'Quote Q 2026 114', 'without a title the readable file name stays');
+});
+test('b4: a PDF result shows a small inline preview from the same-origin file endpoint', () => {
+  const c = ctx(), t = {id:'t_one'};
+  const tile = nodes(c.ticketPreviewTile(t, {name:'quote.pdf', mtime:''}, 'evidence'));
+  const obj = tile.find(x => x.tag === 'object');
+  assert.ok(obj && obj.attrs.type === 'application/pdf' && obj.attrs.data.startsWith('/api/file?t=t_one&k=evidence'));
+});
