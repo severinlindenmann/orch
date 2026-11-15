@@ -1146,6 +1146,29 @@ def stop(root: Path, tid: str, hold: bool = False) -> bool:
     return True
 
 
+def stop_hidden(root: Path) -> list[str]:
+    """`orch stop`: also end the live sessions a person can not see in the ticket list: the hidden Chat
+    (General) ticket's and those of tickets with waiting input (run/pending). Only an exact session name of
+    such a ticket, on this workspace's own socket. Best effort: returns the ids stopped."""
+    if shutil.which("tmux") is None:
+        return []
+    ids: list[str] = []
+    with contextlib.suppress(Exception):
+        if (g := tickets.general_id(root)) is not None:
+            ids.append(g)
+    d = runs.run_dir(root) / "pending"
+    with contextlib.suppress(OSError):
+        ids += [f.stem for f in sorted(d.glob("t_*.jsonl")) if f.is_file() and not f.is_symlink()]
+    done = []
+    for tid in dict.fromkeys(ids):
+        try:
+            if session_exists(root, tid) and stop(root, tid):
+                done.append(tid)
+        except Exception:  # noqa: BLE001 - one stuck session never keeps the others running
+            continue
+    return done
+
+
 def _inside_run(rec: dict) -> bool:
     """This process runs inside the run's own process tree: the run's wrapper or agent pid (the identity
     stop() checks before it kills anything) is one of its ancestors. Unknown ancestry: False (ORCH_TICKET

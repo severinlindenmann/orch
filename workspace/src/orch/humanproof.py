@@ -3523,4 +3523,14 @@ def take_update_status(root: Path) -> dict | None:
         _drop_update_requests(root)
     if not isinstance(data, dict) or data.get("state") not in ("running", "finished", "failed"):
         return None
-    return {"state": data["state"], "reason": str(data.get("reason") or "")[:200]}
+    out = {"state": data["state"], "reason": str(data.get("reason") or "")[:200]}
+    if data["state"] == "finished":  # the new install's release number, for "Updated to orch N."
+        try:
+            from orch import updateinfo
+
+            rel = updateinfo.installed().get("release")
+            if rel:
+                out["release"] = rel
+        except Exception:  # noqa: BLE001 - unknown: the page keeps the old text
+            pass
+    return out

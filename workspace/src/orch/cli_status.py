@@ -180,7 +180,12 @@ def _services_cmd(args, root: Path) -> None:
             targets = [root.resolve()]
         else:
             targets = _pick(services.status())
-        done = [{"workspace": str(t), "addons": services.stop(t)} for t in targets]
+        from orch import runs_live
+
+        done = [
+            {"workspace": str(t), "addons": services.stop(t), "sessions": runs_live.stop_hidden(t)}
+            for t in targets
+        ]
         lines = []
         for d in done:
             names = [r["addon"] for r in d["addons"] if r["stopped"]]
