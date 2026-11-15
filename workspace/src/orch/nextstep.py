@@ -64,7 +64,7 @@ def work_on(t: dict | None, fallback: str = "<ticket>") -> str:
     if t.get("status") in ("done", "dropped"):
         return "orch ticket list"
     if t.get("status") == "review":
-        return f"orch needs  (a person looks at {n} and marks it Done)"
+        return "a person looks at it and marks it Done: orch needs"
     checks = t.get("checklist") or []
     if not checks:
         return f'add one task per step: orch check add {n} "<step>"'
@@ -164,6 +164,8 @@ HINTS = {
     "ticket wait": "keep working on other tickets: orch ticket list",
     "ticket changes": _on_ticket,
     "ticket patch": _on_ticket,
+    "pause": "turn it back on with: orch resume",
+    "resume": "orch needs",
     "wait": "keep working on other tickets: orch ticket list",
     "check add": _check_add,
     "check edit": _on_ticket,
@@ -192,9 +194,9 @@ HINTS = {
     "look *": "orch ticket list",
     "publish connect": 'describe this workspace: orch publish profile --description "..." --tags a,b',
     "publish new": lambda d, a: f"orch publish app {a.folder}",
-    "publish *": "orch publish list",
+    "publish *": "carry on with your ticket: orch ticket list",
     "relay connect": 'describe this workspace: orch relay profile --description "..." --tags a,b',
-    "relay *": "orch relay status",
+    "relay *": "carry on; a reply comes in on your next run.",
 }
 
 
