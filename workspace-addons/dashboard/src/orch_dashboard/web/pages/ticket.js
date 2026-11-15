@@ -587,7 +587,9 @@ function previewFile(tid, kind, fileName) {
     const known = array(artifactData.get(tid)?.data?.files).find(f => f.name === fileName) || {name:fileName};
     files = [fileEntry(t || {id:tid}, {kind}, known)]; index = 0;
   }
-  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : ''});
+  // "Share by link…" only when the sharing add-on is on (no hint otherwise); it opens the same Share a file window for this file.
+  const share = isPublish('publish') ? f => shareDialog({name:f.name.split('/').pop(), url:window.FileViewer.urlOf(f)}) : null;
+  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : '', share});
 }
 // One compact file row: type badge, name, meta, Open / Download / Copy link.
 function ticketFileActions(t, kind, file) {

@@ -55,7 +55,7 @@ test('the switch shows Turning on… / Turning off… while the change runs', ()
 test('loadAddon asks nothing for a removed add-on or while an add-on change runs', async () => {
   const calls = [];
   const ctx = settingsCtx({
-    addonBusy: new Set(), addonViews: {}, fetch: async u => { calls.push(u); return {ok: true, json: async () => ({})}; },
+    addonBusy: new Set(), addonAgain: new Set(), addonViews: {}, fetch: async u => { calls.push(u); return {ok: true, json: async () => ({})}; },
     addons: () => [{name: 'sync'}], state: {}, isPublish: () => false, shownAddon: () => null, main: {querySelector: () => null},
     paintAddon: () => {}, loadSharedLinks: async () => {},
   });

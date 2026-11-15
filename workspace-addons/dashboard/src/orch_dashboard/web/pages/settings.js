@@ -935,6 +935,7 @@ function addonNotice(view) {
   if (snapshot || (op !== 'addon.start' && op !== 'addon.refresh')) return h('p', {className:tone}, clean(view.notice));
   return h('div', {className:tone}, h('p', {className:'grow'}, clean(view.notice)), h('button', {type:'button', className:'btn outline sm', 'data-action':op === 'addon.start' ? 'start' : 'retry-addon'}, clean(b.label)));
 }
+let pendingRepeat = null;  // {title}: the repeat being saved, shown as a row
 function paintAddon(id) {
   const host = document.getElementById('addon-body'), a = addons().find(a => a.name === id);
   if (!host || host.dataset.name !== id || !a) return;
@@ -952,6 +953,14 @@ function paintAddon(id) {
     const walker = document.createTreeWalker(blocks, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) walker.currentNode.data = clean(walker.currentNode.data);
   }
+  // A repeat that is being saved shows as its own row ("Saving…") until the list has it.
+  if (pendingRepeat && blocks) {
+    const body = blocks.querySelector('table tbody'), first = body?.querySelector('tr');
+    if (body && first) {
+      const cells = [...first.children].map((_, i) => h('td', {}, i === 0 ? pendingRepeat.title + ' · Saving…' : ''));
+      body.prepend(h('tr', {'data-key':'repeat-saving', role:'status'}, cells));
+    } else blocks.prepend(h('p', {className:'status-line', role:'status'}, pendingRepeat.title + ' · Saving…'));
+  }
   reconcile(host, template);
   const slot = document.getElementById('addon-header');
   if (slot) { slot.replaceChildren(...addonHeaderNodes(id)); bindAddonControls(slot); }
@@ -959,8 +968,10 @@ function paintAddon(id) {
   host.querySelectorAll('[data-action="retry-addon"]').forEach(n => { n.disabled = false; });
   window.scrollTo(...scroll);
 }
+const addonAgain = new Set();
 async function loadAddon(id, manual = false) {
-  if (addonBusy.has(id) || addonChanging()) return;
+  if (addonBusy.has(id)) { addonAgain.add(id); return; }  // a load is under way: it may predate this change, so one more follows it
+  if (addonChanging()) return;
   if (!snapshot && state && !addons().some(a => a.name === id)) return;  // turned off or removed: nothing to ask
   addonBusy.add(id);
   const retry = main.querySelector('[data-action="retry-addon"]');
@@ -977,6 +988,7 @@ async function loadAddon(id, manual = false) {
   } finally { addonBusy.delete(id); }
   if (isPublish(id) && !snapshot) await loadSharedLinks();
   if (shownAddon() === id) paintAddon(id);
+  if (addonAgain.delete(id)) await loadAddon(id);
 }
 // The view of an add-on tab costs the server about half a second the first time. Fetch each once in the background
 // (a quiet start after the first screen, one at a time) so the first click has something to show; a menu entry that
@@ -1130,16 +1142,19 @@ function repeatsDialog(only = null, addonName = null) {
     const plan = repeatPlan(choice);
     if (save.disabled || !ticket.value || !plan.phrase) return;
     save.disabled = true;
-    const label = save.textContent; save.textContent = 'Saving…';  // saving takes a few seconds: say so
+    // Close at once: saving takes a few seconds, so the list shows the repeat as "Saving…" until it is stored.
+    const target = ticket.value, addon = addonName || route().id, title = ticket.selectedOptions[0]?.textContent || 'Repeat';
+    await window.orch.close(d);
+    pendingRepeat = {title};
+    if (route().kind === 'addon') paintAddon(route().id);
     // Saving always ends: the answer, or after 30 s a plain "taking too long" (the schedule may still have been saved)
     let timer;
-    const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list below, then try again.'}), 30000); });
+    const late = new Promise(done => { timer = setTimeout(() => done({ok:false, text:'This is taking too long. Check the list, then try again.'}), 30000); });
     let result;
-    try { result = await Promise.race([act('addon.act', {addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase}), late]); }
+    try { result = await Promise.race([act('addon.act', {addon, verb:'repeat', target, value:plan.phrase}), late]); }
     catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
-    finally { clearTimeout(timer); save.disabled = false; save.textContent = label; }
+    finally { clearTimeout(timer); pendingRepeat = null; }
     window.orch.toast(result.ok ? 'Repeat saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
-    if (result.ok) await window.orch.close(d);  // close first: the list below refreshes right after
     if (route().kind === 'addon') await loadAddon(route().id);
   });
   const refreshSummary = () => {
@@ -1265,34 +1280,52 @@ async function loadSharedLinks() {
   } catch (_) { sharedLinks = null; sharedLinksDown = false; }
 }
 const SHARE_MAX = 3 * 1024 * 1024;  // the same limit as the server (actions.share_file)
-// "Share a file": pick a file here; the dashboard hands it to the sharing server (encrypted on this computer) and the
-// new row shows up in the list. The link, which holds the key, is only ever copied from its row.
-function shareDialog() {
+// "Share a file": pick a file here (or start from a ticket file: `start` = {name, url}); the dashboard hands it to the
+// sharing server (encrypted on this computer). The dialog stays open on success and shows the new link, copied once.
+// The link is rebuilt from the list row (it holds the key), never sent back by the server in the answer.
+function shareDialog(start = null) {
   if (snapshot) return;
   const {d, actions} = dialog('Share a file', 'dialog share-dialog');
-  const picker = h('input', {type:'file', className:'input', id:'share-file', 'aria-label':'File'});
+  const picker = start ? null : h('input', {type:'file', className:'input', id:'share-file', 'aria-label':'File'});
   const note = h('p', {className:'meta', role:'status'});
+  const result = h('div', {className:'stack', hidden:true});
   const create = button('Create link', 'primary', async () => {
-    const file = picker.files[0];
-    if (!file || create.disabled) { note.textContent = 'Choose a file first.'; return; }
-    if (file.size > SHARE_MAX) { note.textContent = 'That file is over 3 MB.'; return; }
+    if (create.disabled) return;
+    let file = picker ? picker.files[0] : null;
+    if (!start && !file) { note.textContent = 'Choose a file first.'; return; }
     create.disabled = true; note.textContent = 'Uploading…';
+    if (start) {
+      try { const res = await fetch(start.url, {cache:'no-store'}); if (!res.ok) throw new Error('read'); file = new File([await res.blob()], start.name); }
+      catch (_) { note.textContent = 'That file could not be read.'; create.disabled = false; return; }
+    }
+    if (file.size > SHARE_MAX) { note.textContent = 'That file is over 3 MB.'; create.disabled = false; return; }
     let data = '';
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       for (let i = 0; i < bytes.length; i += 32768) data += String.fromCharCode(...bytes.subarray(i, i + 32768));
     } catch (_) { note.textContent = 'That file could not be read.'; create.disabled = false; return; }
-    const result = await act('link.share', {name:file.name, data:btoa(data), days:7});
+    const before = new Set((sharedLinks || []).map(l => String(l.id)));
+    const out = await act('link.share', {name:file.name, data:btoa(data), days:7});
     create.disabled = false;
-    if (!result.ok) { note.textContent = result.text || 'That did not work.'; return; }
-    window.orch.toast('Link created. Copy it from the list.', 'ok');
-    await window.orch.close(d);
+    if (!out.ok) { note.textContent = out.text || 'That did not work.'; return; }
     await loadSharedLinks();
     if (shownAddon()) await loadAddon(shownAddon());
+    const row = (sharedLinks || []).filter(l => !before.has(String(l.id)) && l.link)[0];
+    if (!row) { window.orch.toast('Link created. Copy it from the list.', 'ok'); await window.orch.close(d); return; }
+    const copied = await window.UI.copyText(row.link);
+    const box = h('input', {className:'input', type:'text', readOnly:true, value:row.link, 'aria-label':'Link'});
+    box.addEventListener('focus', () => box.select());
+    const again = button('Copy', 'outline sm', async () => { if (await window.UI.copyText(row.link)) { note.textContent = 'Copied'; } else { box.focus(); box.select(); note.textContent = 'Press Ctrl+C (Cmd+C on a Mac) to copy.'; } });
+    result.replaceChildren(h('p', {className:'muted'}, 'Your link is ready. It works for 7 days.'), h('div', {className:'row'}, box, again));
+    result.hidden = false;
+    if (picker) picker.closest('label').hidden = true;
+    intro.hidden = true; create.hidden = true;
+    note.textContent = copied ? 'Copied' : 'Press Ctrl+C (Cmd+C on a Mac) to copy.';
+    if (!copied) { box.focus(); box.select(); }
   });
   actions.append(create);
-  d.append(h('p', {className:'muted'}, 'Choose a file to share by private link. It works for 7 days; you can extend it or stop sharing any time.'),
-    h('label', {className:'field'}, 'File', picker), note, actions);
+  const intro = h('p', {className:'muted'}, start ? 'Share ' + start.name + ' by private link. It works for 7 days; you can extend it or stop sharing any time.' : 'Choose a file to share by private link. It works for 7 days; you can extend it or stop sharing any time.');
+  d.append(intro, ...(picker ? [h('label', {className:'field'}, 'File', picker)] : []), result, note, actions);
   window.orch.open(d);
 }
 async function sharedLinkAction(control) {
