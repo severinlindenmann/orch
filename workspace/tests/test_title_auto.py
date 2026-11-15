@@ -171,7 +171,7 @@ def test_tidy_leaves_a_title_a_person_edited_after_creation(proj):
 
 
 def test_long_note_on_an_add_on_ticket_gets_no_plan_line(proj):
-    """An add-on ticket (ext) carries its own start text; core adds no 'write a plan, split it' line (#894)."""
+    """An add-on ticket (ext) carries its own start text; core adds no plan line (#894)."""
     t = tickets.create(proj, "Idea", "human:t", fields={"note": "word " * 100})
     assert "write a plan, split it into tasks" in runs.fresh_prompt(t, [], proj)
     t["ext"] = {"factory": {"role": "order"}}
