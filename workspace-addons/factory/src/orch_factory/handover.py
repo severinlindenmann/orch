@@ -193,6 +193,39 @@ def _brief(d, t, h):
     return text, [clean(x, 200) for x in proves][:20]
 
 
+SCAN_MAX = 1024 * 1024  # `orch secret scan` takes at most 1 MB; core's group share scans a bigger file itself
+
+
+def _read_file(root, rel):
+    """The text of a hand-over file for the scanner (final path part opened without following a link)."""
+    fd = os.open(Path(root).absolute() / rel, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise Refused(f"{clean(rel, None)} is not a file in this workspace. Nothing was sent.", "refused")
+        data = stream.read(SCAN_MAX + 1)
+    return None if len(data) > SCAN_MAX else data.decode("utf-8", "replace")
+
+
+def scan_files(root, files):
+    """The shared secret scanner (`orch secret scan`) over every file BEFORE anything leaves: a hit refuses the crew
+    start with the scanner's own words. Core's group share scans again at share time (second line)."""
+    for f in files:
+        try:
+            text = _read_file(root, f)
+        except OSError:
+            raise Refused(
+                f"{clean(f, None)} is not a file in this workspace. Nothing was sent.", "refused"
+            ) from None
+        if text is None:
+            continue
+        try:
+            orchcli.call(root, "secret", "scan", stdin=text)
+        except Refused as error:
+            if error.code == "too_large":
+                continue
+            raise Refused(f"{clean(f, None)}: {error} Nothing was sent.", error.code) from None
+
+
 def start(root, store, d, t, crew, h):
     """`crew start` for a hand-over task. Safe to repeat: the delegate goes out once, each file once."""
     ws = h["workspace"]
@@ -211,6 +244,7 @@ def start(root, store, d, t, crew, h):
     mine = book.get(crew["id"]) or {}
     first = not mine.get("sent")
     if first:
+        scan_files(root, files)  # nothing is sent when a file looks like a secret
         text, checks = _brief(d, t, h)
         sent = orchcli.call(
             root,

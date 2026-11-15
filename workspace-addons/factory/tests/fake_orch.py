@@ -189,6 +189,11 @@ elif args[:2] == ["relay", "outbox"]:
     result = {
         "waiting": json.loads((root / "outbox.json").read_text()) if (root / "outbox.json").exists() else []
     }
+elif args[:2] == ["secret", "scan"]:
+    if "SECRETVALUE" in sys.stdin.read():
+        print(json.dumps({"error": "It looks like a secret (an API key, line 1).", "code": "refused"}))
+        sys.exit(2)
+    result = {"found": []}
 elif args[:2] == ["ticket", "status"]:
     t = load(args[2])
     t["status"] = args[3]

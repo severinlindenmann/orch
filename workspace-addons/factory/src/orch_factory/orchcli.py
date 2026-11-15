@@ -7,8 +7,9 @@ import subprocess
 from .store import Refused
 
 
-def call(root, *args, write=False, by=None):
-    """`by`: who a write is recorded as (a person's dashboard click passes `human:<name>`); default the add-on."""
+def call(root, *args, write=False, by=None, stdin=None):
+    """`stdin`: text for the command's standard input (e.g. `orch secret scan`).
+    `by`: who a write is recorded as (a person's dashboard click passes `human:<name>`); default the add-on."""
     cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"]
     if write:
         cmd += ["--by", by or "agent:factory"]
@@ -21,7 +22,7 @@ def call(root, *args, write=False, by=None):
             capture_output=True,
             check=False,
             text=True,
-            stdin=subprocess.DEVNULL,
+            **({"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}),
             timeout=120,
         )
     except (OSError, subprocess.TimeoutExpired):
