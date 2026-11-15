@@ -1,5 +1,4 @@
-/* vendored from drafts-portals/kit (orch-core look), do not edit by hand without updating the drafts */
-:root{color-scheme:dark;--bg:#0e1014;--sidebar:#0a0c0f;--surface:#15181d;--surface-2:#1c2027;--surface-3:#242a32;--border:#2a3038;--border-strong:#3a424d;--text:#e8eaed;--text-muted:#9aa3ad;--text-faint:#8b949e;--brand:#2fc6a3;--on-brand:#06231c;--brand-strong:#1fa98a;--brand-soft:rgba(47,198,163,.14);--addon:#f07a2e;--on-addon:#1a0b02;--addon-soft:rgba(240,122,46,.12);--addon-border:rgba(240,122,46,.45);--success:#4ade80;--success-soft:rgba(74,222,128,.14);--warning:#fbbf24;--warning-soft:rgba(251,191,36,.14);--danger:#f87171;--danger-soft:rgba(248,113,113,.14);--info:#60a5fa;--info-soft:rgba(96,165,250,.14);--disabled-bg:#1c2027;--disabled-text:#7d8590;--disabled-border:var(--border);--focus-ring:0 0 0 2px #0e1014,0 0 0 4px #2fc6a3;--nav-selected:var(--surface-2);--nav-selected-border:transparent;--brand-chip-text:var(--brand);--addon-text:var(--addon);--risk-bar:#fbbf24;--risk-danger-bar:#f87171;--scrim:rgb(0 0 0 / .5);--add-bg:rgba(74,222,128,.14);--del-bg:rgba(248,113,113,.14);--chart-4:#b392f0;--input:var(--border-strong);--radius:8px;--radius-card:10px;--font-ui:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--fs-body:13px;--fs-meta:12px;--fs-key:11px;--fs-title:20px;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--row-height:44px;--control-height:36px;--touch:44px;--lift-shadow:0 10px 24px -6px rgb(0 0 0 / .55),0 2px 6px rgb(0 0 0 / .4)}
+:root{--fs-body:13px;--fs-title:20px;--fs-key:11px;--s5:20px;--s6:24px;--row-height:44px;--lift-shadow:0 10px 24px -6px rgb(0 0 0 / .55),0 2px 6px rgb(0 0 0 / .4)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:400 var(--fs-body)/1.5 var(--font-ui);-webkit-font-smoothing:antialiased;overflow-wrap:anywhere}
 main,section,article,aside,header,footer,div,form,fieldset,nav{min-width:0}
@@ -104,7 +103,7 @@ textarea.input{resize:vertical;min-height:88px}
 body:not(.has-shell) .toasts{left:16px}
 .toast{display:flex;align-items:center;gap:12px;padding:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px}
 .toast.error{border-color:var(--danger)}
-dialog.dialog,dialog.sheet{color:var(--text);background:var(--bg);border:1px solid var(--border);padding:24px;box-shadow:0 16px 48px #0006;max-height:calc(100dvh - 32px);overflow:auto}
+dialog.dialog,dialog.sheet{color:var(--text);background:var(--bg);border:1px solid var(--border);padding:24px;box-shadow:0 16px 48px rgb(0 0 0 / .4);max-height:calc(100dvh - 32px);overflow:auto}
 dialog.dialog{width:min(512px,calc(100% - 32px));border-radius:10px}
 dialog h2{font-size:18px;font-weight:600;margin-bottom:8px}
 dialog .actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:24px}
@@ -312,7 +311,7 @@ a:not(.btn):not(.brand):not(.nav-item){color:var(--brand)}
 @media(max-width:720px){.copy-wrap>.btn{min-width:80px}
 }
 
-:root{--brand:#60a5fa;--brand-strong:#3b82f6;--brand-soft:rgba(96,165,250,.14);--on-brand:#071a33;--brand-chip-text:#60a5fa;--focus-ring:0 0 0 2px #0e1014,0 0 0 4px #60a5fa;--nav-selected:var(--brand-soft)}
+:root{--brand:var(--info);--brand-strong:var(--info);--brand-soft:color-mix(in srgb,var(--info) 14%,transparent);--on-brand:var(--bg);--brand-chip-text:var(--info);--focus-ring:0 0 0 2px var(--bg),0 0 0 4px var(--info);--nav-selected:var(--brand-soft)}
 
 /* Live portal states and accessible fallbacks. */
 .skeleton{animation:none}.brand svg{width:24px;height:24px}.brand .brand-dot{fill:var(--brand)}

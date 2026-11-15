@@ -31,7 +31,11 @@ pub fn router(app: AppState) -> Router {
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    include_str!("../web/style.css"),
+                    concat!(
+                        include_str!("../../workspace/src/orch_ui/static/tokens.css"),
+                        "\n",
+                        include_str!("../web/style.css")
+                    ),
                 )
             }),
         )
@@ -109,7 +113,7 @@ pub fn router(app: AppState) -> Router {
             }
             (
                 StatusCode::NOT_FOUND,
-                Html(include_str!("../web/not-available.html")),
+                Html(crate::api::not_available()),
             )
                 .into_response()
         })

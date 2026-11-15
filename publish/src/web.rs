@@ -21,7 +21,11 @@ pub const ICON_LINKS: &str = "<link rel=\"icon\" href=\"/_/favicon.svg\" type=\"
 /// (sandbox="allow-scripts" without allow-same-origin), so the page's own scripts run but cannot reach the file
 /// page, its #k= key, cookies or storage. https: is allowed so pages that use a CDN script, style or font work.
 pub const FRAME_CSP: &str = "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https:; style-src 'unsafe-inline' blob: https:; img-src blob: data: https:; font-src blob: data: https:; media-src blob: data:; connect-src blob: data: https:; form-action 'none'; base-uri 'self'; frame-ancestors 'self'; sandbox allow-scripts";
-const STYLE_CSS: &str = include_str!("../web/style.css");
+const STYLE_CSS: &str = concat!(
+    include_str!("../../workspace/src/orch_ui/static/tokens.css"),
+    "\n",
+    include_str!("../web/style.css")
+);
 const ONBOARDING_SH: &str = include_str!("../onboarding/onboarding.sh");
 const ONBOARDING_PS1: &str = include_str!("../onboarding/onboarding.ps1");
 
