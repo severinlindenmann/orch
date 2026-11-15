@@ -213,3 +213,22 @@ test('an accepted send shows Delivered at once and refreshes in the background',
   assert.match(JSON.stringify(c.chatDmThread()), /Delivered/);
   finishReload();
 });
+
+// #865 (b): Other workspaces keep their place above the groups, also while the contacts load; newest group first.
+test('chat list: Other workspaces above Groups (placeholder while loading), newest group first', () => {
+  const c = context();
+  vm.runInContext(`chatUi.open = 'chat'; chatDm.contacts = []; chatDm.loaded = false;
+    state.groups = {hosted:[{id:'g_old', title:'Old group', members:[{ws:'ws_a', name:'A', joined_at:'2026-11-10T09:00:00Z'}], tasks:[]},
+      {id:'g_new', title:'New group', members:[{ws:'ws_a', name:'A', joined_at:'2026-11-14T09:00:00Z'}], tasks:[]}], joined:[]};`, c);
+  const text = () => JSON.stringify(c.chatList());
+  let view = text();
+  assert.match(view, /Loading…/);
+  assert.ok(view.indexOf('Other workspaces') < view.indexOf('"Groups"'), 'placeholder sits above Groups');
+  assert.ok(view.indexOf('New group') < view.indexOf('Old group'), 'newest group first');
+  vm.runInContext("chatDm.loaded = true; chatDm.contacts = [{ws:'" + WS + "',name:'Pilatus',count:2}]", c);
+  view = text();
+  assert.doesNotMatch(view, /Loading…/);
+  assert.ok(view.indexOf('Pilatus') < view.indexOf('"Groups"'), 'the workspace chat is above the groups');
+  vm.runInContext("chatDm.loaded = false; chatDm.contacts = []; chatDm.error = true", c);
+  assert.match(text(), /Could not load · Try again/);
+});
