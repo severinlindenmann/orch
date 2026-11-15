@@ -77,6 +77,11 @@ rows (for example "automation is not running"). The same list is on the dashboar
 
 To pause a ticket until a time: `orch wait <id> --until 2026-12-01T08:00:00+01:00`.
 
+When the agent asks: only when a step cannot be undone, costs money, touches production, deletes real data or is
+visible to people outside this workspace and its connected workspaces; everything else it just does. To change that
+list, write your own in `.orch/ask-when.md` (plain lines, one case each); the agent reads it before it asks and it
+replaces the default. While a question waits, the agent keeps working on the steps that do not need the answer.
+
 ## Review stack
 
 Things that wait for your yes (a draft, a Check result, a plan, a link before it goes public, a question with
