@@ -374,3 +374,20 @@ def test_asking_keeps_the_agent_working():
         flat = " ".join(t.split())
         assert not re.search(r"orch ask[^.]*(then|and) stop\b", flat), f"{where}: asking must not mean stop"
         assert "keep working" in flat.lower(), f"{where}: say to keep working while the ticket waits"
+
+
+def test_ask_list_is_in_the_skill_and_editable_in_one_file():
+    """R2.4: the five cases are in the skill, and the person can replace them in one file the skill names."""
+    text = " ".join((SKILLS["orch"] / "SKILL.md").read_text(encoding="utf-8").split())
+    block = (SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8")
+    assert "## When to ask" in text
+    for case in (
+        "cannot be undone",
+        "costs money",
+        "touches production",
+        "deletes real data",
+        "visible to people outside",
+    ):
+        assert case in text, case
+    assert 'Never ask "may I do this step"' in text and "recommended answer" in text
+    assert "`.orch/ask-when.md`" in text and "`.orch/ask-when.md`" in block
