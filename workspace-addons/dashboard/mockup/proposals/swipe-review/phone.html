@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Review on the phone · orch (draft)</title>
+<link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/gallery.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/interaction.css">
+<script src="../../../../../workspace/src/orch_ui/static/overlay.js"></script><script src="../../../../../workspace/src/orch_ui/static/components.js"></script><script src="../../../../../workspace/src/orch_ui/static/icons.js"></script><script src="../../../../../workspace/src/orch_ui/static/widgets.js"></script><script src="data.js"></script></head>
+<body><main class="page wide" aria-label="Review on the phone">
+<div class="page-heading"><div><p class="eyebrow">Draft 15 Nov · <a href="index.html">overview + research</a> · <a href="desktop.html">workspace version</a></p><h1>Review on the phone</h1><p>Phone 2 is live: drag the card with the mouse (or touch), tap the screen to make it bigger. The others show one state each.</p></div></div>
+<div class="device-row">
+ <div class="device-cap"><h3>1 · Where it starts</h3><p>A yellow row on top of Chats when something waits on you; the push “6 things to review” opens the same stack.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><h2>Chats</h2></div><div class="app-body">
+   <a class="phone-review" href="#p2"><span class="stack"><i></i><i></i><i></i></span><span class="tx"><strong>6 things to review</strong><span>3 drafts · 2 results · 1 plan</span></span><span class="go">Review</span></a>
+   <a class="phone-row" href="#"><span class="av" style="background:var(--brand-soft);color:var(--brand)">W</span><span class="tx"><strong>Work</strong><span>Helper: Survey summary is ready</span></span><span class="meta">09:12</span></a>
+   <a class="phone-row" href="#"><span class="av">P</span><span class="tx"><strong>Private</strong><span>You: voice 0:12</span></span><span class="meta">Thu</span></a>
+   <a class="phone-row" href="#"><span class="av">A</span><span class="tx"><strong>Anna</strong><span>Can you look at the café page?</span></span><span class="meta">Wed</span></a>
+  </div></div></div>
+ <div class="device-cap" id="p2"><h3>2 · The stack (live)</h3><p>One card. Middle = the thing itself. Right = Looks good, left = Don't do, down = Comment. Buttons do the same.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="live"></div></div></div></div>
+ <div class="device-cap"><h3>3 · While you drag right</h3><p>The card tilts, a stamp says what will happen. Let go before the line and it springs back.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="drag"></div></div></div></div>
+ <div class="device-cap"><h3>4 · Swipe down: comment</h3><p>Hold the mic and talk (Swiss German, German, English), or type. Send = the card goes back to the helper with your words.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="talk"></div></div></div></div>
+ <div class="device-cap"><h3>5 · Tap the middle: bigger</h3><p>Pinch to zoom, Open in the browser, or “Comment on a spot”: tap where you mean and say what to change.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="zoom"></div></div></div></div>
+ <div class="device-cap"><h3>6 · All done</h3><p>Count of answers, Undo still there for the last one. The yellow row on Chats goes away.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><button class="btn ghost icon sm" aria-label="Close">✕</button><h2>Review</h2></div><div class="app-body"><div id="end"></div></div></div></div>
+</div></main>
+<script>
+const I=window.SWIPE_ITEMS,$=id=>document.getElementById(id),hideKeys=e=>{e.classList.add('swipe-hide-keys');return e};
+UI.swipeDeck(hideKeys($('live')),I,{mode:'phone'});
+const d3=UI.swipeDeck(hideKeys($('drag')),I,{mode:'phone',quiet:true,start:2});requestAnimationFrame(()=>requestAnimationFrame(()=>d3.show(110,14)));
+const d4=UI.swipeDeck(hideKeys($('talk')),I,{mode:'phone',quiet:true,start:0,state:'comment'});requestAnimationFrame(()=>{const c=d4.openComment();c.start();setTimeout(c.stop,40);c.ta.value='And the date should be on the left.';c.ta.dispatchEvent(new Event('input'))});
+const d5=UI.swipeDeck(hideKeys($('zoom')),I,{mode:'phone',quiet:true,start:5,state:'zoom'});d5.pins.d6=[{x:72,y:30,text:'Button bigger, same green as the logo.'}];requestAnimationFrame(()=>{const v=d5.openViewer();v.askPin(30,62,'Show the month here')});
+const d6=UI.swipeDeck(hideKeys($('end')),I,{mode:'phone',quiet:true,start:0});['ok','ok','talk','ok','no','ok'].forEach(()=>{});(function(){let n=0;const seq=['ok','ok','no','ok','ok'];const step=()=>{if(n<seq.length){d6.fly(seq[n++]);setTimeout(step,260)}else{const c=d6.openComment();c.ta.value='Use real numbers';c.ta.dispatchEvent(new Event('input'));c.send.click()}};setTimeout(step,300)})();
+</script></body></html>
