@@ -67,7 +67,7 @@ function ticketForm(t) {
     input.addEventListener('input', updateValidity); input.addEventListener('input', grow);
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
     const zone = el('div', 'new-ticket-drop');
-    const attach = button('＋ Add files or drop them here', 'new-ticket-attach', () => picker.click());
+    const attach = button('＋ Add files: pick, drop or paste them here', 'new-ticket-attach', () => picker.click());
     zone.append(attach, el('p', 'meta new-ticket-file-hint', 'Add as many files as you need · text files and pictures, up to 25 MB each'));
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
     picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
@@ -143,6 +143,8 @@ function ticketForm(t) {
       });
     }
     input.addEventListener('paste', event => {
+      const pasted = window.UI?.pastedFiles?.(event) || [];  // a pasted screenshot or file: same path as a picked file
+      if (pasted.length) { event.preventDefault(); addFiles(pasted); return; }
       const text = event.clipboardData?.getData('text/plain') || '';
       if (text.length <= 1500) return;
       event.preventDefault();

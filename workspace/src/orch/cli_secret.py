@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 
 from orch import humanproof as hp
-from orch import keystore, secretrun, term, tickets
+from orch import keystore, secretrun, secretscan, term, tickets
 from orch.errors import Refused
 
-SUBCOMMANDS = ("env", "file", "exec", "list", "get", "add", "remove", "profile")
+SUBCOMMANDS = ("env", "file", "exec", "list", "get", "add", "remove", "profile", "scan")
 
 
 def add_parsers(sub, common) -> None:
@@ -159,6 +159,22 @@ def _change_profile(root, args, who):
     return extra
 
 
+def _scan(args, root: Path) -> None:
+    """`orch secret scan`: text on stdin in, what looks like a secret out (kind and line, never the text)."""
+    data = sys.stdin.buffer.read(secretscan.MAX_BYTES + 1)
+    if secretscan.too_large(len(data)):
+        err = Refused("The text is bigger than 1 MB. Scan it in smaller parts.")
+        err.extra = {"code": "too_large"}
+        raise err
+    found = secretscan.find(data.decode("utf-8", "replace"), root)
+    if not found:
+        print(json.dumps({"found": []}) if getattr(args, "json", False) else "No secrets found.")
+        return
+    err = Refused(secretscan.refusal(found))
+    err.extra = {"code": "refused", "found": found}
+    raise err
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "secret":
         return False
@@ -194,6 +210,8 @@ def dispatch(args, root: Path) -> bool:
         else:
             for item in answer["items"]:
                 print(f"{item['name']}\t{item['type']}\t{item['source']}\t{item['state']}")
+    elif action == "scan":
+        _scan(args, root)
     elif action in ("add", "remove", "profile"):
         target = args.name
         if action == "profile" and args.profile_action in ("get-enable", "get-disable"):

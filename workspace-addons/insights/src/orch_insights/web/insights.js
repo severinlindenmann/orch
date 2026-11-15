@@ -60,7 +60,7 @@ function showMessage(text) {
 // First day, nothing recorded yet: the same three tiles as the overview, at 0, each saying when it fills.
 function emptyTiles(view) {
   const note = 'Fills after the first helper run';
-  const cards = [['Runs', '0'], ['Connected services', String(view.tabs.connections.count)]];
+  const cards = [['Times helpers worked', '0'], ['Connected services', String(view.tabs.connections.count)]];
   return cards.map(([label, value]) => {
     const card = node('article', undefined, 'card metric');
     card.append(node('p', label, 'meta'), node('strong', value), node('small', note));
@@ -71,7 +71,7 @@ function emptyTiles(view) {
 function fillMetrics() {
   const first = overview.since && (Date.now() - Date.parse(overview.since)) < 31 * 86400000;
   const cards = [
-    ['Runs', String(overview.runs), first ? 'First month of data' : 'In the last 30 days'],
+    ['Times helpers worked', String(overview.runs), first ? 'First month of data' : 'In the last 30 days'],
     ['Connected services', String(overview.tabs.connections.count),
       overview.tabs.connections.count ? 'Used by your helpers' : 'None connected'],
   ];

@@ -97,6 +97,29 @@ def test_edit_save_round_trip_keeps_everything(folder, proj, run):
     assert next(i for i in done if i["id"] == item["id"])["done"] is True
 
 
+@pytest.mark.parametrize("folder", FOLDERS, ids=lambda p: p.name)
+def test_take_back_works_on_an_old_question(folder, proj, run):
+    """`taken_back` is an additive field: an old open question (written by an older version) can be taken
+    back, and every other field of the ticket stays as it was."""
+    before = _install(proj, folder)
+    open_q = [(tid, q) for tid, t in before.items() for q in t["questions"] if q["answer"] is None]
+    assert open_q, "fixture folder has no open question"
+    tid, q = open_q[0]
+    assert "taken_back" not in q
+    code, out, err = run("ask", tid, "--take-back", q["id"], "no longer needed", "--by", "agent:x")
+    assert code == 0, out + err
+    new = _files(proj)[tid]
+    got = next(x for x in new["questions"] if x["id"] == q["id"])
+    assert got["taken_back"]["reason"] == "no longer needed"
+    for key in ("text", "options", "recommended"):
+        assert got[key] == q[key]
+    assert new["checklist"] == before[tid]["checklist"] and new["title"] == before[tid]["title"]
+    assert all(
+        r["ticket"] != tid or r.get("answer", {}).get("question") != q["id"]
+        for r in json.loads(run("needs", "--json")[1])
+    )
+
+
 def test_old_ticket_through_the_cli_in_a_fresh_process(proj):
     _install(proj, NEWEST)
     src = Path(__file__).resolve().parents[1] / "src"

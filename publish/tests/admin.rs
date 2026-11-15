@@ -306,7 +306,11 @@ async fn admin_assets_served() {
     let css = call(&t.admin, "GET", "/admin/style.css", &[], vec![]).await;
     assert_eq!(css.status, 200);
     assert_eq!(css.headers["content-type"], "text/css; charset=utf-8");
-    assert!(css.text().contains("--brand:#60a5fa"));
+    assert!(css.text().contains("--brand:var(--info)"));
+    assert!(
+        css.text().contains("--info:"),
+        "master tokens are served first"
+    );
     let public_css = call(&t.public, "GET", "/_/style.css", &[], vec![]).await;
     assert_eq!(public_css.status, 200);
     assert_ne!(css.text(), public_css.text());

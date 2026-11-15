@@ -280,18 +280,36 @@ const OrchBlocks = (() => {
       if (head) s.append(head);
       const box = el('div', 'blk-card card strip-panel');
       const today = new Date().toDateString();
-      for (const day of arr(b.days)) {
-        const d = parseDate(day.date); if (!d) continue;
-        const li = el('li', 'day' + (d.toDateString() === today ? ' today' : '') + (arr(day.items).length ? ' has' : ' empty'));
+      const days = arr(b.days).filter(day => parseDate(day.date));
+      // A repeat that shows up on several days in a row ("Every 2 hours") is ONE band across those days, not a card per day.
+      const bands = [];
+      days.forEach((day, i) => {
+        for (const it of arr(day.items)) {
+          if (!it.every) continue;
+          const last = bands.find(x => x.link === it.link && x.every === it.every && x.to === i);
+          if (last) last.to = i + 1; else bands.push({link: it.link, every: it.every, title: it.title, tone: it.tone, from: i, to: i + 1});
+        }
+      });
+      const banded = it => it.every && bands.some(x => x.link === it.link && x.every === it.every);
+      if (bands.length) {
+        const row = el('div', 'week-bands');
+        for (const x of bands) {
+          const a = linked('run band t-' + tone(x.tone), x.link, [el('time', 'every', x.every), el('span', '', x.title)]);
+          a.style.gridColumn = (x.from + 1) + ' / ' + (x.to + 1);
+          row.append(a);
+        }
+        box.append(row);
+      }
+      for (const day of days) {
+        const d = parseDate(day.date);
+        const items = arr(day.items).filter(it => !banded(it));
+        const li = el('li', 'day' + (d.toDateString() === today ? ' today' : '') + (items.length ? ' has' : ' empty'));
         const head = el('div', 'day-head'); head.append(el('span', '', d.toLocaleDateString('en-GB', {weekday: 'short'})), el('b', '', d.getDate()));
         li.append(head);
-        for (const it of arr(day.items)) {
-          // A frequent repeat is one item per day: "Every 5 min" in place of the time, a muted note below.
-          const when = it.every ? el('time', 'every', it.every) : el('time', '', it.time || '');
-          const parts = [when, el('span', '', it.title)];
+        for (const it of items) {
+          const parts = [el('time', '', it.time || ''), el('span', '', it.title)];
           if (it.note) parts.push(el('small', 'run-note', it.note));
-          const a = linked('run t-' + tone(it.tone) + (it.every ? ' repeat' : ''), it.link, parts);
-          li.append(a);
+          li.append(linked('run t-' + tone(it.tone), it.link, parts));
         }
         strip.append(li);
       }

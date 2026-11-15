@@ -192,7 +192,11 @@ def test_add_on_kind_wins_and_off_falls_back_to_the_site():
         "Pull request",
     )
     off = refs.describe(ln, [])
-    assert (off["label"], off["status"], off["group"]) == ("GitHub", None, "References")
+    assert (off["label"], off["status"], off["group"]) == (
+        "GitHub",
+        "open",
+        "References",
+    )  # a stored state shows without the add-on
 
 
 def test_addon_type_on_another_host_shows_the_real_host_and_no_site_icon():
@@ -271,7 +275,7 @@ def test_inactive_add_on_link_shows_as_plain_link(proj, run, tid):  # noqa: F811
     )
     tickets.save(proj, t)
     d = refs.describe(t["refs"][0], refs.active_kinds(proj))
-    assert (d["label"], d["status"]) == ("Reference", None)
+    assert (d["label"], d["status"]) == ("Reference", "planned")  # the state stays, the add-on label goes
 
 
 # ---- add-on fields ----------------------------------------------------------------------------------------
@@ -718,3 +722,65 @@ def test_old_key_references_do_not_redirect(proj, new_ticket, artifact):
     value = f"artifact:{old}/report.txt" if artifact else old
     with pytest.raises(Refused, match="doesn't exist"):
         refs.detect(proj, owner, value, check_exists=False)
+
+
+# ---- ref set: the state of a web reference ----------------------------------------------------------------
+
+ISSUE = "https://github.com/acme/billing/issues/812"
+
+
+def test_ref_set_writes_status_and_seen_at_and_keeps_who_added_it(proj, run, tid, validate):  # noqa: F811
+    jrun(run, "ref", "add", tid, ISSUE, "--title", "Export invoices as CSV", "--by", "human:anna")
+    before = tickets.load(proj, tid)["refs"][0]
+    code, out, _ = run("ref", "set", tid, "1", "--status", "open", "--by", "agent:dev-1")
+    assert code == 0 and "Shown on the ticket as: GitHub · open" in out
+    ref = tickets.load(proj, tid)["refs"][0]
+    assert ref["status"] == "open" and ref["seen_at"].endswith("Z")
+    assert (ref["at"], ref["by"]) == (before["at"], before["by"]) == (before["at"], "human:anna")
+    out = jrun(run, "ref", "set", tid, ISSUE, "--status", "closed", "--by", "agent:dev-1")
+    assert out["n"] == 1 and out["status"] == "closed" and out["view"]["status"] == "closed"
+    hist = tickets.load(proj, tid)["history"]
+    assert [h["text"] for h in hist if h["text"].startswith("Reference ")] == [
+        "Reference GitHub #812: status none -> open",
+        "Reference GitHub #812: status open -> closed",
+    ]
+    validate(tickets.load(proj, tid))
+    assert "Closed" in run("ref", "list", tid)[1].split("\n")[0]
+
+
+def test_ref_set_without_change_writes_nothing(proj, run, tid):  # noqa: F811
+    jrun(run, "ref", "add", tid, ISSUE)
+    run("ref", "set", tid, "1", "--status", "open")
+    first = tickets.load(proj, tid)
+    code, out, _ = run("ref", "set", tid, "1", "--status", "open")
+    assert code == 0 and "Nothing to change." in out
+    assert tickets.load(proj, tid) == first
+
+
+def test_ref_set_clears_with_empty_word(proj, run, tid):  # noqa: F811
+    jrun(run, "ref", "add", tid, ISSUE)
+    run("ref", "set", tid, "1", "--status", "open")
+    assert run("ref", "set", tid, "1", "--status", "")[0] == 0
+    assert "status" not in tickets.load(proj, tid)["refs"][0]
+
+
+def test_ref_set_refuses_non_web_and_bad_words(proj, run, tid, new_ticket):  # noqa: F811
+    other = new_ticket("Relay retries")
+    jrun(run, "ref", "add", tid, other)
+    jrun(run, "ref", "add", tid, ISSUE)
+    code, _, err = run("ref", "set", tid, "1", "--status", "closed")
+    assert code == 2 and "Only web references have a state" in err
+    for bad in ("Closed!", "x" * 30, "<b>x</b>"):
+        assert run("ref", "set", tid, "2", "--status", bad)[0] == 2
+    code, _, err = run("ref", "set", tid, "9", "--status", "open")
+    assert code == 2 and "has no reference 9" in err and "orch ref list" in err
+    assert "status" not in tickets.load(proj, tid)["refs"][1]
+
+
+def test_describe_shows_a_stored_status_for_any_web_reference():
+    known = refs.describe({"kind": "url", "url": ISSUE, "status": "in review"}, [])
+    assert (known["label"], known["status"]) == ("GitHub", "in review")
+    plain = refs.describe({"kind": "url", "url": "https://intranet.acme.local/x", "status": "open"}, [])
+    assert (plain["label"], plain["status"]) == ("Reference", "open")
+    assert refs.describe({"kind": "url", "url": ISSUE, "status": "Bad!"}, [])["status"] is None
+    assert refs.describe({"kind": "url", "url": ISSUE}, [])["status"] is None

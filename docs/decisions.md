@@ -27,3 +27,4 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-04: Publish files are end-to-end encrypted (key in the link fragment). The relay is encrypted at rest, and the
   admin can read messages.
 - 2026-10-27: Product text never names the VPN product; it says "private network".
+- 2026-11-15: Linked work = core references + `orch ref set` + tool skills; no tracker add-on.

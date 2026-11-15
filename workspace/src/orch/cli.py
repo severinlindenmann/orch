@@ -264,7 +264,10 @@ def _show(t: dict, root: Path) -> str:
     if block := review.applies_now_block(t, root):
         out.append("\n" + block.rstrip("\n"))
     for q in (x for x in t["questions"] if x["answer"] is not None):
-        out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
+        if (gone := tickets.taken_back_text(q)) is not None:
+            out.append(f"  Taken back {q['id']}: {q['text']} - {gone[len(tickets.TAKEN_BACK) :]}")
+        else:
+            out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
     rows = refs.all_refs(root, t)
     if rows:
         kinds = refs.active_kinds(root)
@@ -592,6 +595,11 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("text")
     x.add_argument("--option", action="append", default=[])
     x.add_argument("--recommend", "--recommended", dest="recommend")
+    x.add_argument(
+        "--take-back",
+        metavar="QID",
+        help='take back your question; the text is the reason: --take-back q3 "why"',
+    )
     x.add_argument("--phone", action="store_true", help="also send the question to the phones via relay")
     x.add_argument(
         "--preview",
@@ -641,6 +649,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x = lk.add_parser("rm", parents=[common], help="remove a reference")
     x.add_argument("id")
     x.add_argument("target")
+    x = lk.add_parser(
+        "set", parents=[common], help="record the state of a web reference (open, closed, merged)"
+    )
+    x.add_argument("id")
+    x.add_argument("target", help="the number from `orch ref list`, or the address")
+    x.add_argument("--status", required=True, metavar="WORD", help='a short lower-case word; "" clears it')
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
@@ -1137,6 +1151,24 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.log(root, args.id, args.text, by())
         h = history.lines(root, t)[-1]
         _out(args, h, f"{h['at']} {h['by']}: {tickets.history_line(h['text'], t['checklist'])}")
+    elif cmd == "ask" and args.take_back:
+        if (
+            args.phone
+            or args.option
+            or args.recommend
+            or args.kind
+            or args.action
+            or args.check
+            or (cli_review.has_card_flags(args))
+        ):
+            raise Refused("--take-back goes with the reason only: orch ask <ticket> --take-back q3 'why'.")
+        t, q, changed = tickets.take_back(root, args.id, args.take_back, args.text, by())
+        _out(
+            args,
+            q,
+            (f"Taken back {q['id']}." if changed else f"{q['id']} was already taken back.")
+            + " Next: keep working on the ticket.",
+        )
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):
             raise Refused(addons.not_on_message(root, "relay"))
@@ -1173,7 +1205,7 @@ def run(args: argparse.Namespace) -> None:
             args,
             q,
             f"Asked {q['id']}" + (f" on {q['check']}" if q.get("check") else "") + f", waiting. {t['title']} "
-            "is now waiting for an answer.",
+            "is now waiting for an answer.\nNext: keep working on the steps that do not need the answer.",
         )
     elif cmd == "answer":
         # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says.
@@ -1182,6 +1214,8 @@ def run(args: argparse.Namespace) -> None:
             (x for x in tickets.load(root, args.id).get("questions") or [] if x.get("id") == args.question),
             None,
         )
+        if shown_q is not None:
+            tickets.refuse_if_taken_back(shown_q)  # said before anything is asked of the person
         shown_digest = tickets.question_digest(shown_q)  # no question shown: any answer is refused
         given = getattr(args, "question_digest", None)
         if given is not None and not re.fullmatch(r"[0-9a-f]{64}", given):
@@ -1277,7 +1311,22 @@ def _ref(args, root: Path, by) -> None:
                 d = refs.describe(ref, kinds, root)
                 value = refs.one_line(d["title"], 300)
                 suffix = " (On this computer only)" if ref.get("local") else ""
-                print(f"  {n}  {d['type']}  {value}{suffix}" + (f"  {d['status']}" if d["status"] else ""))
+                print(
+                    f"  {n}  {d['type']}  {value}{suffix}"
+                    + (f"  {d['status'].capitalize()}" if d["status"] else "")
+                )
+    elif args.sub == "set":
+        t, ref, changed = tickets.ref_set(root, args.id, args.target, args.status, by())
+        d = refs.describe(ref, kinds, root)
+        n = next(i for i, r in refs.all_refs(root, t) if r is ref or r == ref)
+        shown = {"n": n, **history.shown_item(root, t, "refs", ref), "view": d}
+        _out(
+            args,
+            shown,
+            f"Shown on the ticket as: {d['label']}" + (f" · {ref['status']}" if ref.get("status") else "")
+            if changed
+            else "Nothing to change.",
+        )
     else:
         t, ref = tickets.ref_remove(root, args.id, args.target, by())
         _out(
