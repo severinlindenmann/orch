@@ -923,3 +923,11 @@ def test_cli_list_and_show_print_the_due_time(proj, run, new_ticket):
     assert "Late since" in run("ticket", "list")[1] and "Late since" in run("ticket", "show", tid)[1]
     assert run("ticket", "edit", tid, "--due", "2026-12-01")[0] == 0
     assert "Due" not in run("ticket", "list")[1] and "Due: 2026-12-01" in run("ticket", "show", tid)[1]
+
+
+def test_due_words_far_day():
+    from datetime import datetime
+
+    now = datetime(2026, 11, 15, 12, 0)
+    assert tickets.due_label("2026-12-01T09:05", "open", now) == "Due 1 Dec 2026, 09:05"
+    assert tickets.due_label("2026-10-01T09:05", "open", now) == "Late since 1 Oct 2026, 09:05"

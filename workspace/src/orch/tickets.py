@@ -1409,12 +1409,16 @@ def due_label(due: str | None, status: str = "open", now: datetime | None = None
     except ValueError:
         return None
     now = now or datetime.now()
+    gap = (at.date() - now.date()).days
     hm = at.strftime("%H:%M")
-    if at < now and status not in ("done", "dropped"):
-        return f"Late since {hm}" if at.date() == now.date() else f"Late since {at.strftime('%a')} {hm}"
-    if at.date() == now.date():
-        return f"Due {hm}"
-    return f"Due {at.strftime('%a')} {hm}"
+    if gap == 0:
+        when = hm
+    elif abs(gap) < 7:
+        when = f"{at.strftime('%a')} {hm}"
+    else:
+        when = f"{at.day} {at.strftime('%b %Y')}, {hm}"
+    late = at < now and status not in ("done", "dropped")
+    return f"{'Late since' if late else 'Due'} {when}"
 
 
 def clean_field(key: str, value):

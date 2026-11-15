@@ -178,7 +178,7 @@ function ticketForm(t) {
     const dueToggle = el('button', 'btn outline new-ticket-date-toggle', '▦ No date'); dueToggle.type = 'button'; dueToggle.id = 'field-' + serial + '-due';
     const dueLabel = el('label', '', 'Due date (optional)'); dueLabel.htmlFor = dueToggle.id;
     const dueBox = el('div', 'new-ticket-due'); dueBox.append(dueLabel, dueToggle, dueInput);
-    if (window.UI?.date) window.UI.date(dueInput, dueToggle);
+    if (window.UI?.date) window.UI.date(dueInput, dueToggle, null, {time:true});
     const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow ? [] : [helperBox]), dueBox); fields.append(options);
     const doneLabel = el('label', '', 'Done when (optional)');
     const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
@@ -196,11 +196,11 @@ function ticketForm(t) {
     }
     if (field === 'due') {
       input.readOnly = true; input.placeholder = 'Pick a day';
-      input.addEventListener('click', () => pickDate(input, input.value, v => { if (v !== null) input.value = v; }));
+      input.addEventListener('click', () => pickDate(input, input.value.replace(' ', 'T'), v => { if (v !== null) input.value = v.replace('T', ' '); }, true));  // shown as "2026-11-15 18:30", saved the same way (the core takes both)
       input.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); input.click(); } });
     }
     if (field === 'title') { input.required = true; input.maxLength = 200; }
-    input.value = t?.[field] || '';
+    input.value = field === 'due' ? String(t?.[field] || '').replace('T', ' ') : t?.[field] || '';
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs[field] = input;
   }
   const error = el('p', 'bad'); error.setAttribute('role', 'alert');

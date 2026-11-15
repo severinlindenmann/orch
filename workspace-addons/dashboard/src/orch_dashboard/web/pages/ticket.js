@@ -1371,7 +1371,7 @@ const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', not
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
-  const shown = field === 'due' ? date(raw) : field === 'owner' ? name(raw) : clean(raw);
+  const shown = field === 'due' ? dueText(t) : field === 'owner' ? name(raw) : clean(raw);
   if (snapshot) return el('span', MULTILINE.includes(field) ? 'ed-ro preserve-lines' : 'ed-ro', shown || (field === 'title' ? '' : FIELD_HINT[field]));
   const host = el('span', 'inline-host');
   host.dataset.key = 'inline-' + field + '-' + t.id;
@@ -1395,7 +1395,7 @@ function startInline(control) {
   const before = field === 'owner' ? name(t.owner) : t[field] == null ? '' : String(t[field]);
   if (field === 'due') {
     locks.add(key);
-    pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); render(); });
+    pickDate(control, before, async value => { if (value !== null && value !== before) await saveField(t, 'due', value); locks.delete(key); render(); }, true);
     return;
   }
   const input = el(MULTILINE.includes(field) ? 'textarea' : 'input', 'input inline-input');
@@ -1422,13 +1422,17 @@ function startInline(control) {
   input.addEventListener('blur', () => finish(true));
 }
 
-// A small calendar in the orch look instead of the browser's own picker. cb(value) with 'YYYY-MM-DD', '' (clear) or null (closed).
-function pickDate(anchor, current, cb) {
+// A small calendar in the orch look instead of the browser's own picker. cb(value) with 'YYYY-MM-DD' (or 'YYYY-MM-DDTHH:MM' when withTime and a time is set), '' (clear) or null (closed).
+function pickDate(anchor, current, cb, withTime = false) {
   document.querySelectorAll('.cal').forEach(n => n.remove());
   const iso = d => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
   const todayIso = iso(new Date());
   const start = parse(current) || new Date();
   let view = new Date(start.getFullYear(), start.getMonth(), 1), closed = false;
+  const currentDay = String(current || '').slice(0, 10);
+  const timeInput = withTime ? el('input', 'input') : null;
+  if (timeInput) { timeInput.type = 'time'; timeInput.value = String(current || '').slice(11, 16); timeInput.setAttribute('aria-label', 'Time (optional)'); }
+  const withClock = day => day && timeInput && timeInput.value ? day + 'T' + timeInput.value : day;
   const pop = el('div', 'cal');
   pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Choose a day');
   const close = value => {
@@ -1452,13 +1456,13 @@ function pickDate(anchor, current, cb) {
     for (let i = 0; i < lead; i++) grid.append(el('span'));
     for (let n = 1; n <= days; n++) {
       const value = iso(new Date(view.getFullYear(), view.getMonth(), n));
-      const b = el('button', 'cal-x' + (value === todayIso ? ' today' : '') + (value === current ? ' sel' : ''), String(n));
+      const b = el('button', 'cal-x' + (value === todayIso ? ' today' : '') + (value === currentDay ? ' sel' : ''), String(n));
       b.type = 'button'; b.setAttribute('aria-label', value);
-      b.addEventListener('click', () => close(value));
+      b.addEventListener('click', () => close(withClock(value)));
       grid.append(b);
     }
     const foot = el('div', 'cal-f');
-    foot.append(button('Clear', 'ghost sm', () => close('')), button('Today', 'outline sm', () => close(todayIso)));
+    foot.append(button('Clear', 'ghost sm', () => close('')), ...(timeInput ? [timeInput] : []), button('Today', 'outline sm', () => close(withClock(todayIso))));
     pop.append(head, grid, foot);
   };
   draw();
