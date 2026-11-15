@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timedelta
 
-from . import authority, commands, irreversible, orchcli
+from . import authority, commands, irreversible, measure, orchcli
 from .render import clean
 from .store import Refused, Store, clock, validate
 
@@ -47,6 +47,41 @@ def grants(store, tickets, journal=None):
         except Refused:
             continue  # a broken order gives no grant
     return result
+
+
+def day_status(root, store, tickets, journal=None):
+    """The per-day autopilot limit as a WARNING only (owner 15 Nov): {limit, used, reached} in minutes of measured
+    active work today over the running orders, or None when no live grant sets active_min_per_day or the time can't
+    be read. Nothing is ever blocked by this."""
+    now = clock()
+    limits = [
+        g["limits"]["active_min_per_day"]
+        for g in grants(store, tickets, journal)
+        if g["from"] <= now < g["until"] and g["limits"].get("active_min_per_day")
+    ]
+    if not limits:
+        return None
+    ids = []
+    for t in tickets:
+        ext = t.get("ext", {}).get("factory", {})
+        if ext.get("role") == "order" and ext.get("stage") not in ("shipped", "cancelled"):
+            ids += [t["id"], *[c for c in ext.get("crew", []) if isinstance(c, str)]]
+    midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+    used = measure.active_minutes(root, ids, since=midnight)
+    if used is None:
+        return None
+    limit = min(limits)
+    return {"limit": limit, "used": used, "reached": used >= limit}
+
+
+def day_warning(status):
+    """The plain sentence for a reached per-day limit (None when not reached)."""
+    if not status or not status["reached"]:
+        return None
+    return (
+        f"Autopilot has worked {status['used']} min today, past the {status['limit']} min a day you aimed for. "
+        "It keeps going. Stop it if you want it to rest."
+    )
 
 
 def first_orders(grant, decided_rows):

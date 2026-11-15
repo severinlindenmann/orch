@@ -106,6 +106,17 @@ def view(root):
         until = max(g["until"] for g in live).astimezone().strftime("%d %b %H:%M")
         out["notice"] = f"Autopilot is on until {until} · decided today: {today}"
         out["notice_tone"] = "good"
+    warning = autopilot.day_warning(autopilot.day_status(root, store, tickets, journal))
+    if warning:  # a heads-up only: nothing is stopped
+        out["notice"] = f"{warning} · {out['notice']}" if "notice" in out else warning
+        out["notice_tone"] = "warn"
+        blocks.append(
+            {
+                "type": "list",
+                "title": "Heads-up",
+                "items": [{"title": warning, "subtitle": "no action needed"}],
+            }
+        )
     if not service.running_pid(root, clean=False):
         off = "Factory watcher off — answers wait until it runs"
         out["notice"] = f"{off} · {out['notice']}" if "notice" in out else off
