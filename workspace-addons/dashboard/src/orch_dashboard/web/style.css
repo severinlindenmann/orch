@@ -432,6 +432,8 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .sk-card{height:120px;border-radius:var(--radius-card)}
 .sk-story{height:200px}
 .sk-row{height:40px}
+.sk-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start}
+@media(max-width:899px){.sk-board{grid-template-columns:minmax(0,1fr)}.sk-board>:nth-child(n+2){display:none}}
 @media(max-width:899px){.sk-columns{grid-template-columns:minmax(0,1fr)}}
 /* Schedules page (add-on view): table with switch and buttons, week strip, status line, "How often" window. */
 .status-line{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0}

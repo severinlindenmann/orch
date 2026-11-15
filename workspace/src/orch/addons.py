@@ -418,8 +418,12 @@ def copies_base(h: Path) -> Path:
     tag = hashlib.sha256(str(h).casefold().encode("utf-8")).hexdigest()
     names = [".orch-work"] if h.name == ".orch-tool" else []
     names += [f".orch-work-{tag[:8]}", f".oc-{tag[:16]}"]
+    homes = [
+        h,
+        *(c for c in home_candidates(include_real=True) if c != h),
+    ]  # the shell deny of ANY home applies
     for n in names:
-        if not names_clash(h, h.parent / n):
+        if not any(names_clash(c, h.parent / n) for c in homes):
             return h.parent / n
     return h.parent / names[-1]
 
@@ -893,6 +897,10 @@ def _reinstall(
             else {}
         )
         running = _running_workspaces(root)
+        if start and str(root.resolve()) not in running:
+            # add-ons just added here: the finisher "starts the services again" in this workspace after
+            # `then` turned them on, like POSIX does with _start_added (#705)
+            running = sorted({*running, str(root.resolve())})
         if (
             running
         ):  # the finisher stops these first (they run from the folder it replaces), starts them after
