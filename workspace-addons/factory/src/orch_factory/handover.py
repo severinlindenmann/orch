@@ -20,8 +20,6 @@ DIRECTORY = (".agents", "skills", "orch-relay", "workspaces.json")
 TERMINAL = ("done", "failed", "denied", "not_needed")
 KNOWN = ("waiting_start", "waiting_allow", "queued", "working", "review", "done", "failed", "denied")
 NOT_NEEDED = "not_needed"
-# the relay's name for "waiting for the other person's allow" is the cached state waiting_allow (contract)
-RELAY_NAMES = {"waiting_" + "appro" + "val": "waiting_allow"}
 TAKE_BACK_SUFFIX = "-here"  # "Do it here instead": an accepted change that adds the task <handover task>-here
 NO_LONGER = "No longer needed: {title}. Please do not start it."
 
@@ -165,14 +163,24 @@ def _set_cache(root, crew_id, **fields):
                 raise
 
 
+def relay_state(status):
+    """A relay task status as the cached state. The relay's wait-for-the-other-side's-allow status is the only
+    `waiting_*` besides `waiting_start`, and maps to `waiting_allow`. Anything unknown is None: the page shows it
+    as unknown and the cache keeps its last state (fail closed, never a crash)."""
+    if status in KNOWN:
+        return status
+    if isinstance(status, str) and status.startswith("waiting_") and status != "waiting_start":
+        return "waiting_allow"
+    return None
+
+
 def state_of(root, crew, ws, delegate=None):
     """The relay task status of the delegate on this crew ticket, or None while it is not known."""
     mine = [t for t in _group_tasks(root, crew["id"]) if t.get("ws") == ws]
     if delegate:
         mine = [t for t in mine if t.get("delegate") == delegate] or mine
     state = mine[-1].get("status") if mine else None
-    state = RELAY_NAMES.get(state, state)
-    return state if state in KNOWN else None
+    return relay_state(state)
 
 
 # ---- crew start ---------------------------------------------------------------------------------------------

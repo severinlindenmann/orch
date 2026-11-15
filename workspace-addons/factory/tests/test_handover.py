@@ -183,16 +183,13 @@ def test_group_could_not_open_files_are_not_sent(ws, run, directory):
 # ---- state, result, budget ----------------------------------------------------------------------------------
 
 
-ALLOW = "waiting_" + "appro" + "val"  # the relay's own word
-
-
-@pytest.mark.parametrize("state", [ALLOW, "queued", "working", "done", "failed", "denied"])
+@pytest.mark.parametrize("state", ["waiting_allow", "queued", "working", "done", "failed", "denied"])
 def test_state_follows_the_relay_task(ws, run, directory, state):
     order, tid = handed(ws, run)
     run("crew", "start", order, "header-picture")
     set_status(ws, state)
     run("next", order)
-    assert cache(ws, tid)["state"] == {ALLOW: "waiting_allow"}.get(state, state)
+    assert cache(ws, tid)["state"] == state
 
 
 def test_done_is_evidence_and_ticket_done_then_manager_woken(ws, run, directory):
@@ -307,3 +304,12 @@ def test_agent_accept_does_not_take_back(ws, run, directory):
     set_status(ws, "working")
     take_back(ws, run, order, accept=False)
     assert says(ws) == [] and cache(ws, tid)["state"] == "working"
+
+
+def test_unknown_relay_status_keeps_the_last_state(ws, run, directory):
+    order, tid = handed(ws, run)
+    run("crew", "start", order, "header-picture")
+    set_status(ws, "something_new")
+    run("next", order)
+    assert cache(ws, tid)["state"] == "waiting_start"
+    assert handover.relay_state("waiting_other") == "waiting_allow" and handover.relay_state(None) is None
