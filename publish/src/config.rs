@@ -5,6 +5,9 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub apps_dir: PathBuf,
     pub public_url: String,
+    /// Optional private-network listener (address to bind) and its URL; both or neither.
+    pub private_listen: Option<String>,
+    pub private_url: Option<String>,
     pub max_file_mb: u64,
     pub default_days: i64,
     pub max_days: i64,
@@ -39,6 +42,8 @@ impl Config {
             apps_dir: data_dir.join("apps"),
             data_dir,
             public_url: "https://publish.severin.io".into(),
+            private_listen: None,
+            private_url: None,
             max_file_mb: 100,
             default_days: 7,
             max_days: 90,
@@ -71,6 +76,10 @@ impl Config {
             .unwrap_or(c.public_url)
             .trim_end_matches('/')
             .to_string();
+        c.private_listen = var("PRIVATE_LISTEN").filter(|v| !v.trim().is_empty());
+        c.private_url = var("PRIVATE_URL")
+            .map(|v| v.trim().trim_end_matches('/').to_string())
+            .filter(|v| !v.is_empty());
         c.max_file_mb = env_or("MAX_FILE_MB", c.max_file_mb);
         c.default_days = env_or("DEFAULT_DAYS", c.default_days);
         c.max_days = env_or("MAX_DAYS", c.max_days);
@@ -104,6 +113,13 @@ impl Config {
         c
     }
 
+    /// Startup check: the private-network listener and its URL are set together or not at all.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.private_listen.is_some() != self.private_url.is_some() {
+            return Err("ORCH_PUBLISH_PRIVATE_LISTEN and ORCH_PUBLISH_PRIVATE_URL must be set together or not at all.".into());
+        }
+        Ok(())
+    }
     /// Largest accepted upload body: cap + 64 KiB header + 36 bytes overhead.
     pub fn max_blob_bytes(&self) -> usize {
         (self.max_file_mb * 1024 * 1024 + 64 * 1024 + 36) as usize

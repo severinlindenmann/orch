@@ -23,8 +23,26 @@ pub struct Manifest {
     pub test: Option<String>,
     #[serde(default = "none")]
     pub store: String,
-    #[serde(default)]
-    pub public: bool,
+    /// "public" (default) | "private" (private network only)
+    #[serde(default = "public_reach")]
+    pub reach: String,
+    /// true (default): needs the app's private link
+    pub auth: Option<bool>,
+    /// older spelling of `auth = !public`
+    pub public: Option<bool>,
+}
+fn public_reach() -> String {
+    "public".into()
+}
+impl Manifest {
+    /// Whether the app needs its private link (`auth`, or the older `public` turned around).
+    pub fn needs_auth(&self) -> bool {
+        match (self.auth, self.public) {
+            (Some(a), _) => a,
+            (None, Some(p)) => !p,
+            (None, None) => true,
+        }
+    }
 }
 fn none() -> String {
     "none".into()
@@ -59,6 +77,12 @@ fn check_manifest(m: &Manifest, dir: &FsPath, docker_ok: bool) -> ApiResult<()> 
         if let Err(e) = crate::runner::check_dockerfile(&text) {
             return bad(e);
         }
+    }
+    if !["public", "private"].contains(&m.reach.as_str()) {
+        return bad("reach must be public or private.");
+    }
+    if m.auth.is_some() && m.public.is_some() {
+        return bad("use auth (true or false), not public together with auth.");
     }
     if !["none", "json", "markdown", "sqlite"].contains(&m.store.as_str()) {
         return bad("store must be none, json, markdown or sqlite.");
@@ -310,7 +334,14 @@ async fn deploy_inner(
             "The name in app.toml does not match the name in the URL.",
         ));
     }
-    if m.public && !w.rights.public {
+    let auth = m.needs_auth();
+    let private_reach = m.reach == "private";
+    if private_reach && st.cfg.private_url.is_none() {
+        return Err(ApiError::invalid(
+            "This server has no private-network address.",
+        ));
+    }
+    if !private_reach && !auth && !w.rights.public {
         return Err(ApiError::forbidden(
             "This workspace may not make public apps.",
         ));
@@ -426,12 +457,12 @@ async fn deploy_inner(
     touch(st, name);
     let mut view_token = None;
     let mut hash = existing.and_then(|e| e.view_token_hash.clone());
-    if !m.public && (hash.is_none() || new_token) {
+    if auth && (hash.is_none() || new_token) {
         let t = util::rand_token("apv_", 16);
         hash = Some(util::sha256_hex(&t));
         view_token = Some(t);
     }
-    if m.public {
+    if !auth {
         hash = None;
     }
     let row = AppRow {
@@ -440,7 +471,8 @@ async fn deploy_inner(
         about: m.about.clone(),
         stack: m.stack.clone(),
         store: m.store.clone(),
-        public: m.public,
+        public: !auth,
+        reach: m.reach.clone(),
         health: m.health.clone().unwrap_or_default(),
         status: "running".into(),
         port,
@@ -465,7 +497,7 @@ async fn deploy_inner(
     }
     Ok(json!({
         "name": name,
-        "url": format!("{}/a/{}", st.cfg.public_url, name),
+        "url": app_url(st, &m.reach, name),
         "status": "running",
         "expires_at": expires_at,
         "view_token": view_token,
@@ -492,10 +524,20 @@ fn is_awake(st: &State, a: &AppRow) -> bool {
     a.status != "stopped" && (a.stack == "static" || st.runner.is_alive(&a.name))
 }
 
+/// The address of an app on the listener it is served on.
+fn app_url(st: &State, reach: &str, name: &str) -> String {
+    let base = match (reach, &st.cfg.private_url) {
+        ("private", Some(u)) => u,
+        _ => &st.cfg.public_url,
+    };
+    format!("{base}/a/{name}")
+}
+
 pub fn app_json(st: &State, a: &AppRow) -> Value {
     json!({
         "name": a.name, "stack": a.stack, "store": a.store, "public": a.public,
-        "status": status_of(st, a), "awake": is_awake(st, a), "url": format!("{}/a/{}", st.cfg.public_url, a.name),
+        "reach": a.reach, "auth": !a.public,
+        "status": status_of(st, a), "awake": is_awake(st, a), "url": app_url(st, &a.reach, &a.name),
         "expires_at": a.expires_at, "updated_at": a.updated_at,
     })
 }
@@ -649,6 +691,27 @@ fn offline_page() -> Response {
     )
 }
 
+/// An app answers only on the listener it belongs to; on the other one it counts as missing.
+fn visible(app: Option<AppRow>, req: &Request) -> Option<AppRow> {
+    let l = req
+        .extensions()
+        .get::<crate::Listener>()
+        .copied()
+        .unwrap_or(crate::Listener::Public);
+    app.filter(|a| (a.reach == "private") == (l == crate::Listener::Private))
+}
+
+/// URL of the listener the request came in on.
+fn listener_url<'a>(st: &'a State, req: &Request) -> &'a str {
+    match (
+        req.extensions().get::<crate::Listener>(),
+        &st.cfg.private_url,
+    ) {
+        (Some(crate::Listener::Private), Some(u)) => u,
+        _ => &st.cfg.public_url,
+    }
+}
+
 pub async fn serve_root(St(st): St<State>, Path(name): Path<String>, req: Request) -> Response {
     handle(st, name, String::new(), req).await
 }
@@ -766,7 +829,10 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
         && req
             .headers()
             .contains_key(header::ACCESS_CONTROL_REQUEST_METHOD);
-    let app = db::get_app(&st.db.lock().unwrap(), &name).ok().flatten();
+    let app = visible(
+        db::get_app(&st.db.lock().unwrap(), &name).ok().flatten(),
+        &req,
+    );
     let private = app.as_ref().is_some_and(|a| !a.public);
     // CORS for the opaque-origin page: public apps (readable by anyone), and private apps only
     // for requests that carry the app's own capability (an attacker app does not know it)
@@ -835,8 +901,11 @@ fn split_cap(rest: &str) -> Option<(&str, &str)> {
 }
 
 async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Response {
-    let app = match db::get_app(&st.db.lock().unwrap(), &name) {
-        Ok(Some(a)) => a,
+    let app = match visible(
+        db::get_app(&st.db.lock().unwrap(), &name).ok().flatten(),
+        &req,
+    ) {
+        Some(a) => a,
         _ => {
             return crate::web::notice(
                 404,
@@ -925,7 +994,7 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
                     format!("?{}", rest_q.join("&"))
                 }
             );
-            let secure = if st.cfg.public_url.starts_with("https") {
+            let secure = if listener_url(&st, &req).starts_with("https") {
                 "; Secure"
             } else {
                 ""
@@ -1189,7 +1258,7 @@ fn notice_gone() -> Response {
 }
 
 /// Compares what the request was authorized against with the row now: None = same access.
-fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
+pub fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
     if new.status == "stopped" {
         return Some(paused_page());
     }
@@ -1208,6 +1277,7 @@ fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
     }
     if new.workspace != old.workspace
         || new.public != old.public
+        || new.reach != old.reach
         || new.view_token_hash != old.view_token_hash
         || new.stack != old.stack
     {
@@ -1468,7 +1538,9 @@ mod tests {
             health: Some("/health".into()),
             test: None,
             store: "none".into(),
-            public: false,
+            reach: "public".into(),
+            auth: None,
+            public: None,
         }
     }
 

@@ -135,6 +135,28 @@ pub fn public_router(st: State) -> Router {
         .with_state(st)
 }
 
+/// Which listener a request came in on (set as a request extension by the router).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Listener {
+    Public,
+    Private,
+}
+
+/// Private-network listener: only `/a/<name>/...` of apps with `reach = "private"`, the page assets and /health.
+pub fn private_router(st: State) -> Router {
+    Router::new()
+        .route("/health", get(|| async { "ok" }))
+        .route("/a/:name", any(apps::serve_root))
+        .route("/a/:name/", any(apps::serve_root))
+        .route("/a/:name/*rest", any(apps::serve))
+        .route("/_/style.css", get(web::style_css))
+        .route("/_/favicon.svg", get(web::favicon_svg))
+        .route("/_/apple-touch-icon.png", get(web::touch_icon))
+        .fallback(web::not_found)
+        .layer(axum::Extension(Listener::Private))
+        .with_state(st)
+}
+
 /// Admin listener (private network only).
 pub fn admin_router(st: State) -> Router {
     admin::router(st)

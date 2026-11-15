@@ -96,6 +96,30 @@ publish/
 `publish-deploy.yml` on push to `main`: build for linux x86_64, copy binary + web + scripts to the VPS over SSH,
 `systemctl restart orch-publish`, check `/health`. First install: `deploy/install.sh` (user, folders, admin token, Caddy route).
 
+## Private-network listener (app reach)
+An app with `reach = "private"` in `app.toml` is served only on a third listener, on the private network. Two settings, both
+or neither (one alone stops the server at start with a one-sentence message):
+- `ORCH_PUBLISH_PRIVATE_LISTEN`: address to bind, e.g. `<private-network IP>:80`.
+- `ORCH_PUBLISH_PRIVATE_URL`: the address people use, e.g. `http://publish-vps.office.internal` (the auth cookie gets
+  `Secure` only when this URL is `https`).
+
+Without them the server refuses `reach = "private"` (`422 invalid`). The listener serves only `/a/<name>/...` of private-reach
+apps, `/_/` page assets and `/health`; everything else, and public-reach apps, answer `404`. On the public address a
+private-reach app answers exactly like an app that does not exist. Sleeping apps wake on either listener.
+
+Host setup on the VPS (Linux only):
+1. Bind the private-network IP on port 80. Port 80 is below 1024, so give the service the right to bind it, with a systemd
+   drop-in `/etc/systemd/system/orch-publish.service.d/private-listen.conf`:
+   ```
+   [Service]
+   Environment=ORCH_PUBLISH_PRIVATE_LISTEN=<private-network IP>:80
+   Environment=ORCH_PUBLISH_PRIVATE_URL=http://publish-vps.office.internal
+   AmbientCapabilities=CAP_NET_BIND_SERVICE
+   ```
+   then `systemctl daemon-reload && systemctl restart orch-publish`.
+2. Firewall: allow port 80 only in on the private-network interface, e.g.
+   `sudo ufw allow in on <private-network interface> to any port 80 proto tcp`. Do not add a public proxy route for it.
+
 ## Sandbox (`ORCH_PUBLISH_SANDBOX`)
 - unset: plain child process (development and tests). `systemd`: one transient unit per app (static, python, node).
 - `container`: one container per app on the Kiri engine, driven with the `docker` CLI against
