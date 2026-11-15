@@ -64,7 +64,11 @@ PENDING: set[str] = set()
 
 
 def skill_dirs() -> dict[str, Path]:
-    out = {"orch": ROOT / "workspace/skills/orch", "orch-diagnose": ROOT / "workspace/skills/orch-diagnose"}
+    out = {
+        "orch": ROOT / "workspace/skills/orch",
+        "orch-diagnose": ROOT / "workspace/skills/orch-diagnose",
+        "orch-github": ROOT / "workspace/skills/orch-github",
+    }
     for p in sorted(BUILTIN.glob("*/skills/orch-*")):
         out[p.name] = p
     for p in sorted((ROOT / "workspace-addons").glob("*/src/*/skills/orch-*")):
