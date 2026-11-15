@@ -17,7 +17,7 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
 
 ## When to use
 - Any request, even a small one: find or make its ticket first.
-- Ask a person only when a step cannot be undone, costs money, touches production, deletes real data or is visible to people outside the connected workspaces. Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then stop. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before publishing), use `orch ask ... --choose/--draft ...` so it shows as a card.
+- Ask a person only when a step cannot be undone, costs money, touches production, deletes real data or is visible to people outside the connected workspaces. Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then stop. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question (`--choose`, `--draft`, see below) so it shows as a card.
 - You are blocked (a tool or permission is refused): `orch ask` and stop.
 - You are about to say "done": every step needs proof first.
 - The work is big: split it into sub-tickets.
@@ -110,10 +110,10 @@ Write the question for a person who has not seen your work, in plain words:
 - NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
 - If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.
 
-**To ask the owner to decide on something they must see** (a draft, options A/B/C, before/after, a plan, a link before publishing), put a card on the question. It is the same `orch ask`, with `--draft`, `--link`, `--plan` or `--choose` and `--then` (what happens after the answer). Never decide for the owner.
+**To ask the owner to decide on something they must see** (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question. It is the same `orch ask`, with `--draft`, `--link`, `--plan` or `--choose` and `--then` (what happens after the answer). Never decide for the owner.
 
     orch ask <id> "Home: which layout?" --choose "Home layout" --option "A=As today:files/a.png" --option "B=Recent first:files/b.png" --suggest B --then "I build the one you pick."
-    orch ask <id> "New intro text" --draft "Intro" --file files/intro.md --then "I publish it." --ok "Publish"
+    orch ask <id> "New intro text" --draft "Intro" --file files/intro.md --then "I use it." --ok "Use it"
     orch ask <id> "Before or after?" --draft "Header" --before files/old.png --after files/new.png --then "I ship the new one."
     orch review wait <id>        # wait until the card is answered
     orch ticket show <id>        # "What applies now" and the answers, in the owner's words
