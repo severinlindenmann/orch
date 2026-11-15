@@ -12,6 +12,7 @@
     const t = v.ticket;
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
+    S.views.ticket.renderPhoneLine(v);
     els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
     document.getElementById('fx-loading')?.remove();  /* the skeleton goes when the first view is there */
     root.dataset.state = v.state;

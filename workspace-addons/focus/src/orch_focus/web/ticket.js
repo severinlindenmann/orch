@@ -177,9 +177,12 @@
     els.sent = h('section', {class: 'fx-sent', 'aria-label': 'Sent back to you', hidden: true});
     /* "Your next move": the open question first, with how many wait and, when a phone is paired, the phone hand-off */
     els.qCount = h('span', {class: 'meta', text: ''});
-    els.phoneBtn = h('button', {class: 'btn ghost sm', type: 'button', 'data-act': 'phone', hidden: true, text: 'Answer on phone'});
-    els.phoneNote = h('p', {class: 'meta fx-phone-note', hidden: true, text: 'Open this ticket on your paired phone. The same question waits there; the helper stays paused until you answer.'});
-    els.next = h('section', {class: 'fx-next', 'aria-label': 'Your next move', hidden: true}, h('div', {class: 'fx-next-h'}, h('span', {class: 'eyebrow', text: 'Your next move'}), els.qCount), els.qs, h('div', {class: 'fx-next-f'}, els.phoneBtn), els.phoneNote);
+    /* The old "Answer on phone" button is gone (#692.5). live.js still toggles these two, so they stay detached
+       until its next change removes them; the hand-off line below says where the question also waits. */
+    els.phoneBtn = h('button', {type: 'button', hidden: true});
+    els.phoneNote = h('p', {hidden: true});
+    els.phoneLine = h('p', {class: 'handoff', 'aria-live': 'polite', hidden: true});
+    els.next = h('section', {class: 'fx-next', 'aria-label': 'Your next move', hidden: true}, h('div', {class: 'fx-next-h'}, h('span', {class: 'eyebrow', text: 'Your next move'}), els.qCount), els.qs, els.phoneLine);
     /* "With Helper": the ticket's own messages and updates, newest last */
     els.withList = h('div', {class: 'fx-with-list'});
     els.withH = h('section', {class: 'fx-with', 'aria-label': 'With Helper', hidden: true}, h('h2', {text: 'With Helper'}), els.withList);
@@ -336,6 +339,25 @@
       h('div', {class: 'fx-sent-grid'}, cards), ...(review ? [h('p', {class: 'meta', text: 'Checking a result records your feedback. It does not publish anything.'})] : []));
   }
 
+  /* Where a question also waits: one quiet line under the answers. Sent to the phone = "Sent to your phone 12:31.
+     Answer here or there, whichever is first."; answered there a moment ago = "Answered on your phone 12:34: <answer>". */
+  const RECENT = 30 * 60 * 1000;
+  function phoneLine(v, now = Date.now()) {
+    const qs = (v.ticket && v.ticket.questions) || [];
+    const open = qs.filter(q => q.answer == null && typeof q.sent_at === 'string');
+    if (open.length) return {text: 'Sent to your phone ' + S.hhmm(open[open.length - 1].sent_at) + '. Answer here or there, whichever is first.', answered: false};
+    const done = qs.filter(q => q.answer != null && q.via === 'phone' && typeof q.answered_at === 'string' && now - Date.parse(q.answered_at) < RECENT);
+    if (!done.length) return null;
+    const q = done[done.length - 1];
+    return {text: 'Answered on your phone ' + S.hhmm(q.answered_at) + ': ' + String(q.answer).slice(0, 200), answered: true};
+  }
+  function renderPhoneLine(v) {
+    const line = phoneLine(v);
+    els.phoneLine.hidden = !line;
+    els.phoneLine.classList.toggle('answered', !!(line && line.answered));
+    els.phoneLine.textContent = line ? line.text : '';
+  }
+
   /* an empty tab is hidden; if it was the open one, Live opens instead */
   function showTab(i, on) {
     const tab = els.tabs && els.tabs[i];
@@ -344,5 +366,5 @@
     if (!on && tab.getAttribute('aria-selected') === 'true') els.tabs[0].click();
   }
 
-  S.register('ticket', {resultCard, showTab, refreshTickets, picker, pickerSub, build, renderTasks, taskTools, renderHelpers, renderProof});
+  S.register('ticket', {resultCard, phoneLine, renderPhoneLine, showTab, refreshTickets, picker, pickerSub, build, renderTasks, taskTools, renderHelpers, renderProof});
 })();

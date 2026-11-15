@@ -385,6 +385,8 @@
         "recommended": { "type": ["string", "null"] },
         "answer": { "type": ["string", "null"] },
         "answered_by": { "oneOf": [{ "$ref": "#/$defs/who" }, { "type": "null" }] },
+        "sent_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was sent to the person's phones. Set once by the core; absent when it never went to a phone." },
+        "answered_at": { "$ref": "#/$defs/time", "description": "Optional. When the question was answered (set by the core with the answer, whatever `via` says)." },
         "via": { "oneOf": [{ "$ref": "#/$defs/token" }, { "type": "null" }], "description": "Where the answer came from (free word, e.g. cli, web, phone). null while unanswered." },
         "kind": {
           "type": "string",
