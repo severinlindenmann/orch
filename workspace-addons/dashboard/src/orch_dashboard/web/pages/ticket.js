@@ -1299,6 +1299,8 @@ function missingTicket(id) {
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [];
+  const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
+  if (quiet) m.sentence = (m.sentence ? m.sentence + ' ' : '') + quiet + '.';
   if (!snapshot) {
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'active'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
