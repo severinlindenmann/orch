@@ -516,6 +516,7 @@
       // Always begin with home, including deep links, to get watcher/stale status.
       const homeData = await read('/api/home', signal);
       if (serial !== request) return;
+      lastHome = JSON.stringify({...homeData, generated_at: null});
       showNotices(homeData);
       const hash = location.hash || '#/';
       let draw;
@@ -557,5 +558,18 @@
     event.preventDefault(); document.getElementById('content').focus();
   });
   window.addEventListener('hashchange', render);
+  // An open page follows the workspace: every 15 s (only while visible) home is read again, and the page is drawn anew
+  // only when something changed and you are not in the middle of something (typing, a box with text, a request waiting).
+  let lastHome = null;
+  const busy = () => asked.size > 0 || ['TEXTAREA', 'INPUT'].includes(document.activeElement?.tagName)
+    || [...view.querySelectorAll('textarea')].some(t => t.value.trim()) || !!document.querySelector('dialog[open]');
+  async function follow() {
+    if (document.visibilityState !== 'visible' || busy() || view.getAttribute('aria-busy') === 'true') return;
+    try {
+      const data = await read('/api/home');
+      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy()) render();
+    } catch (_) { /* the next tick tries again */ }
+  }
+  setInterval(follow, 15000);
   render();
 })();

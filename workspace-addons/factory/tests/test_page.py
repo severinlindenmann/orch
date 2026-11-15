@@ -185,6 +185,24 @@ def test_unknown_or_bad_order_is_404(ws, run, srv):
     assert get(srv, "/api/order/t_zzzzzz/draft/1")[0] == 404
 
 
+def test_a_new_proposal_is_listed_by_the_running_server_without_a_restart(ws, run, srv, proposal):
+    """Release-22 walk: proposed while the server ran, /api/home must list it on the next read (no cache anywhere)."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    assert next(o for o in get(srv, "/api/home")[1]["orders"] if o["id"] == order)["phase"] == "draft"
+    run("propose", order, "--file", "-", data=proposal)
+    row = next(o for o in get(srv, "/api/home")[1]["orders"] if o["id"] == order)
+    assert row["phase"] == "proposed" and row["open"]
+    assert get(srv, f"/api/order/{order}")[1]["phase"] == "proposed"
+
+
+def test_an_open_page_follows_the_workspace_without_disturbing_you(srv):
+    """The page re-reads home every 15 s while visible and redraws only on a change, never while you type or wait."""
+    js = get(srv, "/web/factory.js")[1].decode()
+    assert "setInterval(follow, 15000)" in js and "document.visibilityState !== 'visible'" in js
+    assert "JSON.stringify({...data, generated_at: null}) !== lastHome" in js
+    assert "asked.size > 0" in js and "t.value.trim()" in js  # a request waiting / a box with your text
+
+
 def test_draft_route(ws, run, srv):
     order = run("idea", "Idea", "--file", "-", data=b"# Hello <b>x</b>")["order"]
     code, body, _ = get(srv, f"/api/order/{order}/draft/1")
