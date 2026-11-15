@@ -1031,7 +1031,7 @@ async function addonRadio(input) {
 function messageSend(control) {
   if (snapshot) return;
   const peer = control.dataset.sendTo;
-  if (/^ws_[a-z0-9]{10}$/.test(peer)) location.hash = '#chat/' + peer;
+  if (/^ws_[a-z0-9]{10}$/.test(peer)) { if (typeof chatDmHint === 'function') chatDmHint(peer, control.dataset.who); location.hash = '#chat/' + peer; }
   else if (/^ph_[a-z0-9]{10}$/.test(peer) || peer === 'phones') location.hash = '#chat';
 }
 async function copyText(control) {
