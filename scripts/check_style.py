@@ -25,8 +25,13 @@ HEX = re.compile(r"(?<![\w&/#-])#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{
 STYLE = re.compile(r"<style\b", re.I)
 
 
+COMMENT = re.compile(r"/\*.*?\*/|<!--.*?-->|(?:^|(?<=\s))//[^\n]*", re.S)
+
+
 def count(text: str) -> dict:
-    return {"hex": len(HEX.findall(text)), "style": len(STYLE.findall(text))}
+    """Comments are skipped: an issue reference like "(#825)" in a comment is not a colour."""
+    code = COMMENT.sub(" ", text)
+    return {"hex": len(HEX.findall(code)), "style": len(STYLE.findall(code))}
 
 
 def scan(root: Path = ROOT) -> dict:

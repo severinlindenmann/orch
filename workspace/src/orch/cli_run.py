@@ -11,7 +11,18 @@ import sys
 import threading
 from pathlib import Path
 
-from orch import adapters, cli_screen, history, net, runs, runs_live, sharedfolder, term, tickets
+from orch import (
+    adapters,
+    cli_screen,
+    history,
+    net,
+    nextstep,
+    runs,
+    runs_live,
+    sharedfolder,
+    term,
+    tickets,
+)
 from orch.errors import Refused
 
 RUN_ID = re.compile(r"r_[a-z0-9_]{6,32}")
@@ -80,6 +91,7 @@ def add_parsers(sub, common) -> None:
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 

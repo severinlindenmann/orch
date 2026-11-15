@@ -1,0 +1,16 @@
+# Lessons: a settings-only page (no nav entry), no background, local-only files.
+schema = "orch.addon/1"
+orch_api = 1
+name = "lessons"
+version = "0.1.0"
+recommended = true
+description = "Helpers remember what they learned here; you see, edit or delete it in one list."
+run = "orch_lessons"
+skill = "skills/orch-lessons"
+agents_block = "skills/orch-lessons/AGENTS-block.md"
+gitignore = [".orch/addons/lessons/"]
+
+[dashboard]
+label = "Lessons"
+icon = "book"
+place = "settings"

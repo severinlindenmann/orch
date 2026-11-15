@@ -34,6 +34,9 @@ def init(root: Path, code: str | None = None) -> list[str]:
     if diag_src.is_dir():  # how an agent reads a problem report (read-only)
         skills.install_skill(root, "orch-diagnose", diag_src)
         skills.set_block(root, "orch-diagnose", skills.read_block(diag_src, "orch-diagnose"))
+    from orch import skillrender
+
+    skillrender.sync_github(root)  # orch-github only where the fact holds (github.com remote and gh)
     linked = skills.apply_agent_files(root)
     # the reminder hooks, merged into the agent tool's local settings (only for a tool that has them)
     reminders = reminder_settings.ensure_each(root)

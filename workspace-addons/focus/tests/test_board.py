@@ -345,3 +345,56 @@ def test_pem_block_across_the_window_is_hidden():
         assert "AAAA" not in ev.clip(cut, limit)
     e = ev.make(RUN, TID, "main", "tool.end", "y" * 450 + " " + pem, "adapter", note="z" * 450 + " " + pem)
     assert "AAAA" not in json.dumps(e)
+
+
+# --- newest result per ticket in review (#692.6) -------------------------------------------------
+def _tk(checklist, tid="t_inv7c2ab"):
+    return {"id": tid, "checklist": checklist}
+
+
+def _ev(ref, type_="file", **kw):
+    return {"type": type_, "ref": ref, "at": "2026-11-15T09:00:00Z", **kw}
+
+
+EVD = ".orch/tickets/t_inv7c2ab/evidence/"
+
+
+def test_result_is_the_last_file_proof_of_done_tasks():
+    from orch_focus.results import newest_result
+
+    t = _tk([
+        {"id": "c1", "done": True, "evidence": [_ev(EVD + "old-totals.csv"), _ev("42 matched", "note")]},
+        {"id": "c2", "done": True, "evidence": [_ev(EVD + "march_report.png", at="2026-11-15T10:00:00Z")]},
+        {"id": "c3", "done": False, "evidence": [_ev(EVD + "draft.pdf")]},
+        {"id": "c4", "done": True, "wont_do": "x", "evidence": [_ev(EVD + "skipped.pdf")]},
+    ])  # fmt: skip
+    assert newest_result(t) == {
+        "name": "March report", "kind": "image", "at": "2026-11-15T10:00:00Z",
+        "preview": "/api/file?t=t_inv7c2ab&n=march_report.png&m=view",
+    }  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "ev,kind,preview",
+    [(_ev(EVD + "notes.md"), "doc", True), (_ev(EVD + "rows.csv"), "table", True), (_ev(EVD + "site.html"), "page", False),
+     (_ev(EVD + "plan.pdf"), "pdf", False), (_ev(EVD + "logo.svg"), "image", False), (_ev(EVD + "anim.gif"), "image", False),
+     (_ev("pytest -q", "command"), "command", False), (_ev("https://example.com/a", "url"), "link", False),
+     (_ev("elsewhere/x.png"), "missing", False), (_ev(EVD + "gone.png", missing=True), "missing", False)],
+)  # fmt: skip
+def test_result_kind_and_preview(ev, kind, preview):
+    from orch_focus.results import newest_result
+
+    r = newest_result(_tk([{"id": "c1", "done": True, "evidence": [ev]}]))
+    assert r["kind"] == kind and (r["preview"] is not None) == preview
+
+
+def test_result_falls_back_to_the_last_note_and_none_without_proofs():
+    from orch_focus.results import newest_result
+
+    r = newest_result(_tk([{"id": "c1", "done": True, "evidence": [_ev("42 matched", "note")]}]))
+    assert r["kind"] == "text" and r["name"] == "42 matched" and r["preview"] is None
+    assert newest_result(_tk([{"id": "c1", "done": True, "evidence": []}])) is None
+    assert newest_result(_tk([])) is None
+    assert (
+        newest_result({"id": "../x", "checklist": [{"done": True, "evidence": [_ev("a", "note")]}]}) is None
+    )

@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, config, diag, history, tickets
+from orch import adapters, config, diag, history, nextstep, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -73,6 +73,7 @@ def _actor(args) -> str:
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 

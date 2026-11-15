@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orch import history, look, tickets
+from orch import history, look, nextstep, tickets
 from orch.errors import Refused
 
 
@@ -37,6 +37,7 @@ def _actor(args) -> str:
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
