@@ -25,12 +25,12 @@ console.log(JSON.stringify({tiles: out.map(text)}));
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node missing")
-def test_first_day_shows_three_tiles_at_zero():
+def test_first_day_shows_two_tiles_at_zero():
     out = subprocess.run(["node", "-e", RUNNER, str(JS)], capture_output=True, text=True, check=True).stdout
     data = json.loads(out)
     assert not data.get("missing"), "insights.js needs emptyTiles()"
     tiles = data["tiles"]
-    assert len(tiles) == 3
-    for tile, label in zip(tiles, ("Runs", "Skills used", "Connected services"), strict=True):
+    assert len(tiles) == 2
+    for tile, label in zip(tiles, ("Runs", "Connected services"), strict=True):
         assert label in tile and "|0|" in tile + "|"
         assert "Fills after the first helper run" in tile
