@@ -32,7 +32,7 @@ def test_paste_title_and_description_use_existing_create_action():
 def test_attachments_and_safe_preview():
     js = (WEB / "pages" / "newticket.js").read_text()
     assert "maxLength = 20000" not in js
-    assert "button('＋ Add files or drop them here', 'new-ticket-attach'" in js
+    assert "button('＋ Add files: pick, drop or paste them here', 'new-ticket-attach'" in js
     assert "At most" not in js  # no file-count limit
     assert "up to 25 MB each" in js  # the real per-file limit
     assert "for (const target of [form])" in js  # drops land on the whole form
