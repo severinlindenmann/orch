@@ -215,3 +215,90 @@ def ensure_each(root: Path) -> list[tuple[str, str, str | None]]:
 def ensure(root: Path) -> list[str]:
     """Put the hooks in place for every detected tool that has them; returns the warning lines."""
     return [w for _, _, w in ensure_each(root) if w]
+
+
+def unmerge(doc: dict) -> dict:
+    """The document without our hook entries (the reverse of merge). A group that only held ours goes with
+    them, an event with no group left goes, and `hooks` goes when empty; everything else stays as it was."""
+    hooks = doc.get("hooks")
+    if not isinstance(hooks, dict):
+        return doc
+    out_hooks = {}
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            out_hooks[event] = groups
+            continue
+        kept = []
+        for g in groups:
+            inner = g.get("hooks") if isinstance(g, dict) else None
+            if not isinstance(inner, list) or not any(_ours(h) for h in inner):
+                kept.append(g)
+                continue
+            rest = [h for h in inner if not _ours(h)]
+            if rest:
+                kept.append({**g, "hooks": rest})
+        if kept or not groups:
+            out_hooks[event] = kept
+    out = {k: v for k, v in doc.items() if k != "hooks"}
+    if out_hooks:
+        out = {**doc, "hooks": out_hooks}
+    return out
+
+
+def has_ours(doc: object) -> bool:
+    hooks = doc.get("hooks") if isinstance(doc, dict) else None
+    if not isinstance(hooks, dict):
+        return False
+    return any(
+        _ours(h)
+        for groups in hooks.values()
+        if isinstance(groups, list)
+        for g in groups
+        if isinstance(g, dict) and isinstance(g.get("hooks"), list)
+        for h in g["hooks"]
+    )
+
+
+def remove_one(root: Path, rel: str) -> str | None:
+    """Take our entries out of one settings file. Returns what happened ("removed", "deleted") or None when
+    there was nothing of ours. The file goes only when nothing else is left in it; a file that is a link, not
+    valid JSON, or that changes while we read it is left alone (a Refused says so)."""
+    path = root / rel
+    if harness.is_link(path.parent) or harness.is_link(path) or not path.is_file():
+        return None
+    for attempt in (0, 1):
+        try:
+            before = _sig(path)
+            doc = json.loads(path.read_bytes().decode("utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            return None
+        if not has_ours(doc):
+            return None
+        new = unmerge(doc)
+        if _sig(path) != before:
+            if attempt == 0:
+                continue
+            raise Refused(f"{rel} keeps changing: orch left it as it is.")
+        if new:
+            harness.write_text(path, json.dumps(new, indent=2, ensure_ascii=False) + "\n", mode=0o600)
+            return "removed"
+        path.unlink()
+        return "deleted"
+    return None
+
+
+def remove_each(root: Path) -> list[tuple[str, str]]:
+    """(settings file, "removed" | "deleted") for every tool orch has hook entries for, detected or not."""
+    from orch import adapters
+
+    out = []
+    seen = set()
+    for n in adapters.builtin_names():
+        a = adapters.load(n)
+        rel = (a.get("reminder") or {}).get("settings_file")
+        if a.get("reminder_hooks") and rel and rel not in seen:
+            seen.add(rel)
+            done = remove_one(root, rel)
+            if done:
+                out.append((rel, done))
+    return out

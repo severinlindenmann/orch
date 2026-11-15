@@ -6,6 +6,7 @@ Focus starts, messages and stops agents only through `orch run start|send|stop`;
 
 from __future__ import annotations
 
+import base64
 import getpass
 import json
 import os
@@ -229,7 +230,68 @@ def _mobile_set(a):
     return ["relay", "mobile", "on" if a["on"] else "off"], [], []
 
 
+# Files added to a ticket: the same limits as the composer (web/compose.js) and orch itself (orch decides).
+ATTACH_EXT = frozenset(
+    [
+        "txt",
+        "md",
+        "csv",
+        "tsv",
+        "json",
+        "log",
+        "yml",
+        "yaml",
+        "toml",
+        "ini",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "webp",
+    ]
+)
+ATTACH_MAX = 25 * 1024 * 1024
+ATTACH_FILES = 5
+
+
+def attachments(op, args) -> list[tuple[str, bytes]]:
+    """The files of a `ticket.attach` request as (name hint, bytes), all checked before anything is run.
+    One plain sentence on every failure; orch checks type, content and size again."""
+    if op != "ticket.attach" or not isinstance(args, dict):
+        return []
+    files = args.get("files")
+    if not isinstance(files, list) or not files:
+        raise BadRequest("Choose a file to add.")
+    if len(files) > ATTACH_FILES:
+        raise BadRequest(f"You can add up to {ATTACH_FILES} files at a time.")
+    out: list[tuple[str, bytes]] = []
+    for f in files:
+        if not isinstance(f, dict) or set(f) - {"name", "data"} or not isinstance(f.get("name"), str):
+            raise BadRequest("That file could not be read. Choose it again.")
+        name = f["name"]
+        if not name.strip() or len(name) > 240 or _CONTROL.search(name):
+            raise BadRequest("That file name is not allowed. Rename the file and choose it again.")
+        try:
+            raw = base64.b64decode(f.get("data") or "", validate=True)
+        except (ValueError, TypeError):
+            raise BadRequest(f"{name[:60]} could not be read. Choose it again.") from None
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext not in ATTACH_EXT:
+            raise BadRequest(f"{name[:60]}: only text files and pictures can be added.")
+        if len(raw) > ATTACH_MAX:
+            raise BadRequest(f"{name[:60]} is over 25 MB. Choose a smaller file.")
+        out.append((name, raw))
+    return out
+
+
+def _ticket_attach(a):
+    """One quiet line in the history; the files go through `orch ticket attach` after it (see run_op)."""
+    _only(a, ("ticket", "files"))
+    return ["log", _t(a)], [], ["Added files to the ticket"]
+
+
 OPS = {
+    "ticket.attach": _ticket_attach,
     "mobile.set": _mobile_set,
     "ticket.done": _ticket_done,
     "answer": _answer,
@@ -318,12 +380,33 @@ def orch(
     return r.returncode, r.stdout, r.stderr
 
 
+def _attach_all(root: Path, orch_bin: str | None, tid: str, files: list[tuple[str, bytes]]) -> dict:
+    """Keep each file with the ticket through `orch ticket attach` (orch picks the name and checks type, content and
+    size). A refused file is listed as failed by its (cleaned) name."""
+    saved, failed = [], []
+    for hint, raw in files:
+        try:
+            r = _run(
+                [*argv0(orch_bin), "ticket", "attach", tid, f"--name={hint}", "--by", actor(), "--json"],
+                check=False, cwd=root, capture_output=True, input=raw, timeout=60, env=human_env(root, orch_bin),
+            )  # fmt: skip
+            out = json.loads(r.stdout.decode("utf-8", "replace")) if r.returncode == 0 else None
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            out = None
+        if isinstance(out, dict) and isinstance(out.get("name"), str):
+            saved.append(out["name"])
+        else:
+            failed.append(re.sub(r"[^A-Za-z0-9._ -]", "_", hint.rsplit("/", 1)[-1])[:60])
+    return {"saved": saved, "failed": failed}
+
+
 def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
     need = proof_for(op, args) if orch_bin == SELF else None  # a test fake (explicit ORCH_BIN) needs none
     if (need or (orch_bin == SELF and needs_session(op))) and mint is None:
         raise NeedsPerson("Open Focus from this computer (orch focus open) to do this.")
+    files = attachments(op, args)  # checked before anything is written
     code, stdout, stderr = orch(root, orch_bin, argv, proof=mint(*need) if need else None)
     if code == 124:
         return 504, stderr, None
@@ -332,6 +415,15 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         out = json.loads(stdout)
     except ValueError:
         pass
+    if code == 0 and files:
+        failed = _attach_all(root, orch_bin, args["ticket"], files)["failed"]
+        if failed:
+            names = ", ".join(failed[:3])
+            return (
+                422,
+                f"{names} could not be added. Choose a text file or a picture up to 25 MB and try again.",
+                None,
+            )
     if code == 0:
         return 200, "", out if isinstance(out, dict) else None
     msg = out.get("error") if isinstance(out, dict) else None

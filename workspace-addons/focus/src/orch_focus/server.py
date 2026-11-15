@@ -47,6 +47,9 @@ def agent_label(claim: dict | None, agents: list[dict] | None) -> str:
 
 DEFAULT_PORT = 8430
 MAX_BODY = 16384
+# a message with files (ticket.attach): up to 5 files of 25 MB as base64; one such body in memory at a time
+MAX_BIG_BODY = 5 * actions.ATTACH_MAX * 4 // 3 + MAX_BODY
+_BIG_READS = threading.BoundedSemaphore(1)
 TID_RE = re.compile(r"t_[a-z0-9]{6,16}")
 TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -871,13 +874,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(415, b"send JSON", "text/plain")
         try:
             n = int(self.headers.get("Content-Length") or "")
-            if not 0 < n <= MAX_BODY:
+            if not 0 < n <= MAX_BIG_BODY:
                 raise ValueError
-            body = json.loads(self.rfile.read(n))
+            if n > MAX_BODY:
+                with _BIG_READS:
+                    raw = self.rfile.read(n)
+            else:
+                raw = self.rfile.read(n)
+            body = json.loads(raw)
             if not isinstance(body, dict) or set(body) - {"op", "args"}:
                 raise ValueError
+            if n > MAX_BODY and body.get("op") != "ticket.attach":
+                raise ValueError  # only a message with files may be big
         except (ValueError, RecursionError, OSError):
-            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+            return self._send(
+                400,
+                b"That request could not be read. Try again with fewer or smaller files.",
+                "text/plain; charset=utf-8",
+            )
         args = body.get("args", {})
         if body.get("op") in ("proc.stop", "proc.stop_all"):
             return self._proc_op(body["op"], args)
