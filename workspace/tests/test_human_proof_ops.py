@@ -1876,7 +1876,8 @@ def test_group_share_refuses_secret_big_and_hidden_files_before_any_click_card(w
             code, out, err = run("relay", "group", sub[0], *sub[1:], str(f), "--click", "--by", "human:pat")
             assert code == 2 and "Refused:" in err, (f.name, sub, code, err)  # a refusal, not a pending click
             assert "Waiting for your click" not in out + err
-    assert "password" in run("relay", "group", "share", tid, str(secret), "--click", "--by", "human:pat")[2]
+    err = run("relay", "group", "share", tid, str(secret), "--click", "--by", "human:pat")[2]
+    assert "password" in err and "hunter2" not in err  # the line names the rule, never the matched value
     assert not [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
     ok = ws / "plain.txt"
     ok.write_text("fine")
