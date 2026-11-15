@@ -44,8 +44,8 @@ jobs:
             contracts: ['contracts/**', '.github/workflows/contracts.yml']
             workspace: ['workspace/**', 'workspace-addons/*/src/**', 'contracts/**', 'install.ps1', 'install.sh', 'e2e/windows/**', '.github/workflows/workspace.yml']
             addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', 'e2e/focus_insights*', '.github/workflows/addons.yml']
-            publish: ['publish/**', 'contracts/**', '.github/workflows/publish.yml']
-            relay: ['relay/**', 'contracts/**', '.github/workflows/relay.yml']
+            publish: ['publish/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', 'workspace/src/orch/templates/**', '.github/workflows/publish.yml']
+            relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
             mobile: ['mobile/**', 'contracts/**', '.github/workflows/mobile.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/ci.yml']
   contracts:
