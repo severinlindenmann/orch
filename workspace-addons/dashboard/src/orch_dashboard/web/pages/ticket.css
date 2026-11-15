@@ -78,7 +78,7 @@
 .ref-tabs [aria-selected=true]{background:var(--surface-2);color:var(--text)}
 .ref-bar{display:flex;align-items:center;gap:12px}
 .ref-bar .input{flex:1;min-width:0}
-.ref-list{display:flex;flex-direction:column;max-height:min(46vh,360px);overflow:auto}
+.ref-picks{display:flex;flex-direction:column;max-height:min(46vh,360px);overflow:auto}
 .ref-pick{display:grid;grid-template-columns:72px minmax(0,1fr) 12px;align-items:center;gap:12px;width:100%;min-height:44px;padding:8px 10px;border:0;border-radius:8px;background:none;color:var(--text);text-align:left;font:inherit;cursor:pointer}
 .ref-pick:hover,.ref-pick[aria-pressed=true]{background:var(--surface-2)}
 .ref-pick[aria-pressed=true]{box-shadow:inset 0 0 0 1px var(--border-strong)}
@@ -149,7 +149,6 @@
 .ticket-page .properties dl{margin:12px 0 0}
 .ticket-page .properties dl>div{display:grid;grid-template-columns:80px minmax(0,1fr);gap:8px;padding:12px 0;border-bottom:1px solid var(--border)}
 .ticket-page .properties dd{margin:0;font-size:14px;line-height:20px;min-width:0;overflow-wrap:anywhere}
-.ticket-page .ticket-meta-line{margin:12px 0 0}
 .ticket-page .change-request{border-left:3px solid var(--needs-you)}
 .ticket-page .change-request h2,.ticket-page .asked h2,.ticket-page .progress-card h2{font-size:14px;line-height:20px;margin:0}
 .ticket-page .request-row p{margin:0}
