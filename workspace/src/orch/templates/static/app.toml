@@ -2,4 +2,7 @@ name = "{{name}}"
 about = "{{about}}"
 stack = "static"
 store = "{{store}}"
-public = false
+# reach: public = on the internet, private = only on the private network
+reach = "public"
+# auth: true = needs the app's private link, false = open to everyone who can reach it
+auth = true

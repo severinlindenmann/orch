@@ -70,7 +70,10 @@ pub struct AppRow {
     pub about: String,
     pub stack: String,
     pub store: String,
+    /// no auth (open to everyone who can reach it); the older name of `!auth`
     pub public: bool,
+    /// "public" | "private" (private network only)
+    pub reach: String,
     pub health: String,
     pub status: String, // running | stopped
     pub port: u16,
@@ -115,6 +118,11 @@ pub fn open(path: &std::path::Path) -> rusqlite::Result<Connection> {
     ] {
         let _ = c.execute(&format!("ALTER TABLE workspaces ADD COLUMN {col}"), []);
     }
+    // Older databases: apps get a reach (existing rows stay public).
+    let _ = c.execute(
+        "ALTER TABLE apps ADD COLUMN reach TEXT NOT NULL DEFAULT 'public'",
+        [],
+    );
     Ok(c)
 }
 
@@ -372,7 +380,7 @@ pub fn file_ids_of(c: &Connection, ws: &str) -> rusqlite::Result<Vec<String>> {
 
 // ---- apps
 
-const APP_COLS: &str = "name,workspace,about,stack,store,public,health,status,port,code_dir,view_token_hash,expires_at,updated_at";
+const APP_COLS: &str = "name,workspace,about,stack,store,public,health,status,port,code_dir,view_token_hash,expires_at,updated_at,reach";
 
 fn app_from(r: &Row) -> rusqlite::Result<AppRow> {
     Ok(AppRow {
@@ -389,6 +397,7 @@ fn app_from(r: &Row) -> rusqlite::Result<AppRow> {
         view_token_hash: r.get(10)?,
         expires_at: r.get(11)?,
         updated_at: r.get(12)?,
+        reach: r.get(13)?,
     })
 }
 
@@ -405,9 +414,9 @@ pub fn get_app(c: &Connection, name: &str) -> rusqlite::Result<Option<AppRow>> {
 pub fn put_app(c: &Connection, a: &AppRow, now: &str) -> rusqlite::Result<()> {
     c.execute(
         &format!(
-            "INSERT INTO apps({APP_COLS},created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+            "INSERT INTO apps({APP_COLS},created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
              ON CONFLICT(name) DO UPDATE SET workspace=?2,about=?3,stack=?4,store=?5,public=?6,health=?7,
-               status=?8,port=?9,code_dir=?10,view_token_hash=?11,expires_at=?12,updated_at=?13"
+               status=?8,port=?9,code_dir=?10,view_token_hash=?11,expires_at=?12,updated_at=?13,reach=?14"
         ),
         params![
             a.name,
@@ -423,6 +432,7 @@ pub fn put_app(c: &Connection, a: &AppRow, now: &str) -> rusqlite::Result<()> {
             a.view_token_hash,
             a.expires_at,
             a.updated_at,
+            a.reach,
             now
         ],
     )?;
@@ -447,7 +457,7 @@ pub fn list_apps(
     let rows = st
         .query_map(
             params![after.unwrap_or(i64::MAX), workspace, limit + 1],
-            |r| Ok((app_from(r)?, r.get::<_, i64>(13)?)),
+            |r| Ok((app_from(r)?, r.get::<_, i64>(14)?)),
         )?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(page(rows, limit, |t| t.1).map_items(|t| t.0))

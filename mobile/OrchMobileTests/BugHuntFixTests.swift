@@ -51,7 +51,7 @@ final class BugHuntFixTests: XCTestCase {
         XCTAssertNotEqual(a, try result(title: "Other", docTitle: "Passed"))
         guard case .shown(let first) = a.doc, case .shown(let second) = a.doc else { return XCTFail("valid document refused") }
         XCTAssertEqual(first.texts, second.texts)
-        XCTAssertEqual(first.texts, ["Proof", "Passed", "Result"])
+        XCTAssertEqual(first.texts, ["Evidence", "Passed", "Result"])
         // Cached formatters still format dates as before.
         XCTAssertEqual(BlocksFormat.cell(.string("2026-11-11T09:00:00Z"), kind: "date"), "2026-11-11 09:00:00 UTC")
         XCTAssertEqual(BlocksFormat.cell(.string("2026-11-11T09:00:00.500Z"), kind: "date"), "2026-11-11 09:00:00 UTC")

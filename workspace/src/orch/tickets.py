@@ -278,6 +278,25 @@ def _replay_tombstone(root: Path, tid: str, ledger=None) -> None:
         pass  # best effort: the reader still shows the truth (a non-done ticket), the next read tries again
 
 
+_SCHEMA_RE = re.compile(r"orch\.ticket/(\d+)$")
+
+
+def _newer_format(data: dict) -> str | None:
+    m = _SCHEMA_RE.match(str(data.get("schema", "")))
+    return m.group(0) if m and int(m.group(1)) > 1 else None
+
+
+def _check_format(data: dict, tid: str) -> None:
+    """A ticket file written by a newer orch (schema orch.ticket/<N>, N above ours) is refused with one
+    plain sentence, so an older orch never edits and saves it (there is no migration code, R8.2)."""
+    fmt = _newer_format(data)
+    if fmt:
+        raise Refused(
+            f"Ticket {tid} was written by a newer orch (format {fmt}). Update orch with `orch update`;"
+            " the file is left as it is."
+        )
+
+
 def _read_ticket(p: Path, tid: str) -> dict:
     """Read one ticket file. Invalid JSON is retried (3x, 100 ms) only while a sync gate is live (a sync step
     may be swapping the file in), then reported as "being updated". Read-only: a reader never rewrites,
@@ -287,6 +306,7 @@ def _read_ticket(p: Path, tid: str) -> dict:
             data = json.loads(p.read_text(encoding="utf-8"))
             if not isinstance(data, dict) or data.get("id") != tid:
                 raise Refused(f"Ticket {tid} is invalid: its id does not match its filename.")
+            _check_format(data, tid)
             return data
         except (ValueError, PermissionError) as e:  # Windows: a sharing violation while a file is swapped in
             if attempt == 3 or syncgate.live_holder(_root_of(p)) is None:
@@ -676,6 +696,8 @@ def list_all(root: Path, include_general: bool = False) -> list[dict]:
                 continue
             if not isinstance(t, dict) or t.get("id") != p.stem:
                 continue
+            if _newer_format(t):
+                continue  # a newer orch's file: not shown here, never rewritten
             if include_general or t.get("general") is not True:
                 out.append(_effective(root, t, checker, checker.ledger()))
     out.sort(key=lambda t: t.get("created_at", ""))
@@ -2141,6 +2163,62 @@ def ref_remove(root: Path, tid: str, target: str, by: str) -> tuple[dict, dict]:
 
     t, _ = apply_op(root, t["id"], op, by=by)
     return t, result
+
+
+def ref_set(root: Path, tid: str, target: str, status: str, by: str) -> tuple[dict, dict, bool]:
+    """Record the state of a web reference as the helper last saw it: `status` and `seen_at`; `at` and `by`
+    keep who added it. `status` is a lower-case word (refs.STATUS_RE) or "" to clear it. Returns
+    (ticket, reference, changed); nothing is written when the state is already that."""
+    from orch import refs
+
+    status = status.strip()
+    if status and not refs.STATUS_RE.fullmatch(status):
+        raise Refused("A state is a short lower-case word such as open, closed, merged or in review.")
+    t = load(root, tid)
+    key = t.get("key") or t["id"]
+    wanted = None
+    if not target.isdigit():
+        try:
+            wanted = refs.detect(root, t["id"], target, check_exists=False)
+        except Refused:
+            wanted = None
+    result, changed = None, False
+
+    def op(ticket):
+        nonlocal result, changed
+        values = refs.numbered({"refs": ticket["refs"] + refs.local_refs(root, ticket["id"])})
+        result = next(
+            (
+                r
+                for n, r in values
+                if isinstance(r, dict)
+                and (
+                    n == int(target)
+                    if target.isdigit()
+                    else wanted is not None and all(r.get(k) == v for k, v in wanted.items() if k != "kind")
+                )
+            ),
+            None,
+        )
+        if result is None:
+            raise Refused(f"{key} has no reference {target}. See them: orch ref list {key}")
+        if "url" not in result or result.get("local"):
+            raise Refused("That reference is not a web address. Only web references have a state.")
+        old = result.get("status") or ""
+        if old == status:
+            return NO_WRITE
+        changed = True
+        if status:
+            result["status"] = status
+        else:
+            result.pop("status", None)
+        result["seen_at"] = now()
+        name = refs.ref_name(result, root)
+        add_history(ticket, by, f"Reference {name}: status {old or 'none'} -> {status or 'none'}")
+        return result
+
+    t, _ = apply_op(root, t["id"], op, by=by)
+    return t, result, changed
 
 
 def merge_refresh(

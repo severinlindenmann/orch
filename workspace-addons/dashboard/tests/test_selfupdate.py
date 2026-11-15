@@ -253,3 +253,28 @@ def test_concurrent_requests_start_one_restart(monkeypatch):
     gate.set()
     selfupdate._state["thread"].join(5)
     assert results.count(True) == 1 and checks == [1]
+
+
+def test_bind_again_waits_for_a_busy_port_and_gives_up_at_the_deadline(tmp_path, monkeypatch):
+    """The restarted server keeps its port: when the number is held for a moment (a client socket of the busy
+    machine), it retries the bind instead of dying with 'Address already in use'."""
+    import threading
+
+    from orch_dashboard import cli
+
+    (tmp_path / ".orch").mkdir()
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))  # no listen and no SO_REUSEADDR: like a client socket using the port
+    port = holder.getsockname()[1]
+    threading.Timer(0.4, holder.close).start()
+    srv = cli._bind_again(tmp_path, port, wait=10)
+    try:
+        assert srv.server_address[1] == port
+    finally:
+        srv.server_close()
+
+    with socket.socket() as busy:
+        busy.bind(("127.0.0.1", 0))
+        with pytest.raises(OSError) as e:
+            cli._bind_again(tmp_path, busy.getsockname()[1], wait=0.3)
+        assert e.value.errno == 98 or e.value.errno == 48  # Linux / macOS "Address already in use"

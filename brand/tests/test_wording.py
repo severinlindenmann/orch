@@ -15,10 +15,17 @@ ALLOWLIST = Path(__file__).with_name("wording_allowlist.json")
 
 NEVER = [
     "Request", "Requests", "Job", "Issue", "Todo", "Subtask", "Epic", "Inbox", "Over to you", "Approval",
-    "Sign-off", "Recommended", "Evidence", "Artifact", "Scheduler", "Cron", "Schedule", "Bot", "NetBird",
+    "Sign-off", "Recommended", "Proof", "Artifact", "Scheduler", "Cron", "Schedule", "Bot", "NetBird",
     "Peer", "Node",
 ]  # fmt: skip
-WORD = re.compile(r"(?<![A-Za-z])(" + "|".join(sorted(map(re.escape, NEVER), key=len, reverse=True)) + r")(?![A-Za-z])")
+# "Issue" alone is banned; an outside item keeps its tool's own word ("GitHub issue", "Jira Issue"): see wording.md
+TOOLS = ("GitHub", "GitLab", "Jira", "Linear", "Trello")
+_ISSUE = "".join(f"(?<!{t} )" for t in TOOLS) + "Issue"
+WORD = re.compile(
+    r"(?<![A-Za-z])("
+    + "|".join(sorted((_ISSUE if w == "Issue" else re.escape(w) for w in NEVER), key=len, reverse=True))
+    + r")(?![A-Za-z])"
+)
 
 UI_GLOBS = [
     "workspace-addons/*/src/**/web/*.js",
@@ -94,3 +101,8 @@ if __name__ == "__main__":
     if "--write-allowlist" in sys.argv:
         ALLOWLIST.write_text(json.dumps({r: dict(c) for r, c in hits().items()}, indent=1, sort_keys=True) + "\n")
     print(todo())
+
+
+def test_issue_is_allowed_only_with_a_tool_name_in_front():
+    assert WORD.findall('"GitHub Issue" "Jira Issue 4"') == []
+    assert WORD.findall('"Issue" "New Issue"') == ["Issue", "Issue"]
