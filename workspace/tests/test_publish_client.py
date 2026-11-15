@@ -633,3 +633,70 @@ def test_net_keeps_pythons_tls_default_elsewhere(monkeypatch):
         assert net._tls() is None
     finally:
         net._tls.cache_clear()
+
+
+# ---- secret scan before every upload (#861) --------------------------------------------------------------
+
+PLANT = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"  # a made-up GitHub token shape
+
+
+def _no_echo(*texts):
+    assert all(PLANT not in t and PLANT[4:] not in t for t in texts)
+
+
+def test_file_with_a_secret_is_refused_and_nothing_is_uploaded(proj, run, pub):
+    connect(run, pub)
+    (proj / "settings.env").write_text(f"A=1\nTOKEN={PLANT}\n")
+    n = len(pub.calls)
+    code, out, err = run("publish", "file", "settings.env")
+    assert code != 0 and "settings.env" in err and "line" in err and "Nothing was shared" in err
+    _no_echo(out, err)
+    assert not pub.files and len(pub.calls) == n
+    code, out, err = run("publish", "file", "settings.env", "--json")
+    assert code != 0
+    _no_echo(out, err)
+
+
+def test_folder_with_a_secret_is_refused_and_binaries_are_not_scanned(proj, run, pub):
+    connect(run, pub)
+    site = proj / "site"
+    (site / "js").mkdir(parents=True)
+    (site / "index.html").write_text("<h1>hi</h1>")
+    (site / "logo.png").write_bytes(b"\x89PNG\0\0" + PLANT.encode())  # binary: skipped on purpose
+    code, out, _ = run("publish", "file", "site")
+    assert code == 0, out
+    (site / "js" / "app.js").write_text(f"x = 1;\nconst k = '{PLANT}';\n")
+    pub.files.clear()
+    code, out, err = run("publish", "file", "site")
+    assert code != 0 and "js/app.js" in err and "line 2" in err
+    _no_echo(out, err)
+    assert not pub.files
+
+
+def test_app_deploy_with_a_secret_is_refused_before_upload(proj, run, pub):
+    connect(run, pub)
+    app = make_app(proj)
+    (app / "config.py").write_text(f"X = 1\nKEY = '{PLANT}'\n")
+    n = len(pub.calls)
+    code, out, err = run("publish", "app", str(app))
+    assert code != 0 and "config.py" in err and "line 2" in err
+    _no_echo(out, err)
+    assert len(pub.calls) == n
+
+
+def test_replace_with_a_secret_is_refused(proj, run, pub):
+    connect(run, pub)
+    (proj / "a.txt").write_text("fine")
+    res = json.loads(run("publish", "file", "a.txt", "--json")[1])
+    (proj / "a.txt").write_text(f"token {PLANT}")
+    code, out, err = run("publish", "file", "a.txt", "--replace", res["id"])
+    assert code != 0 and "a.txt" in err
+    _no_echo(out, err)
+
+
+def test_large_text_file_is_scanned_past_the_first_megabyte(tmp_path):
+    big = b"x" * 99 + b"\n"
+    data = big * 11000 + f"TOKEN={PLANT}\n".encode()  # > 1 MB, secret at the end
+    with pytest.raises(Refused) as e:
+        publish.scan_files(None, [("big.log", data)])
+    assert "line 11001" in str(e.value) and PLANT not in str(e.value)

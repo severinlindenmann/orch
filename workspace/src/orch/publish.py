@@ -16,7 +16,7 @@ from pathlib import Path
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from orch import net
+from orch import net, secretscan
 from orch.errors import Refused
 
 MAGIC = b"OPF1"
@@ -157,7 +157,42 @@ def _bundle_path(rel: str) -> str:
     return rel
 
 
-def bundle(folder: Path, report: dict | None = None) -> bytes:
+def _is_text(data: bytes) -> bool:
+    """Binary files (images, archives, fonts) are not scanned as text; a NUL byte early on marks one."""
+    return b"\0" not in data[:8192]
+
+
+def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
+    """Refuse the upload when any text file holds a secret (secretscan, the one scanner). Runs on the plain
+    bytes that are about to be encrypted and sent. Names the kind, the file and the line, never the value."""
+    hits: list[tuple[str, dict]] = []
+    for name, data in items:
+        if not _is_text(data):
+            continue
+        # chunks of at most MAX_BYTES, cut at line ends, so a big file is scanned in full
+        pos, line0 = 0, 0
+        while pos < len(data):
+            end = min(pos + secretscan.MAX_BYTES, len(data))
+            if end < len(data):
+                cut = data.rfind(b"\n", pos, end)
+                end = cut + 1 if cut > pos else end
+            chunk = data[pos:end]
+            for f in secretscan.find(chunk.decode("utf-8", "replace"), root):
+                hits.append((name, {"kind": f["kind"], "line": f["line"] + line0}))
+            line0 += chunk.count(b"\n")
+            pos = end
+    if not hits:
+        return
+    name, f = hits[0]
+    more = f" (and {len(hits) - 1} more)" if len(hits) > 1 else ""
+    what = secretscan.WORDS.get(f["kind"], "a secret")
+    raise Refused(
+        f"Nothing was shared: {name!r} has {what} on line {f['line']}{more}. "
+        "Remove it from the file and share again."
+    )
+
+
+def bundle(folder: Path, report: dict | None = None, root: Path | None = None) -> bytes:
     """Folder -> bundle bytes (crypto.md "Folder bundle"): u32 BE index length, index JSON, files.
     `report` gets "files" (bundled paths) and "skipped" (secret-looking files left out)."""
     if (folder / ".orch").exists():
@@ -185,6 +220,7 @@ def bundle(folder: Path, report: dict | None = None) -> bytes:
     if sum(p.stat().st_size for _, p in files) > MAX_FILE:
         raise Refused("The folder is bigger than 100 MB.")
     datas = [p.read_bytes() for _, p in files]
+    scan_files(root, [(r, d) for (r, _), d in zip(files, datas, strict=True)])
     index = {
         "v": 1,
         "entry": "index.html" if "index.html" in pages else pages[0],
@@ -233,7 +269,7 @@ def share_file(
         key = b64u_decode(k)
     if path.is_dir():
         shown: dict = {}
-        content, mime = bundle(path, shown), BUNDLE_TYPE
+        content, mime = bundle(path, shown, root), BUNDLE_TYPE
         if len(content) > MAX_FILE:
             raise Refused("The folder is bigger than 100 MB.")
     elif not path.is_file():
@@ -242,6 +278,7 @@ def share_file(
         raise Refused("The file is bigger than 100 MB.")
     else:
         content = path.read_bytes()
+        scan_files(root, [(path.name, content)])
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     name = path.resolve().name if path.is_dir() else path.name
     if replace:
@@ -481,11 +518,18 @@ def _override(text: str, reach: str | None, auth: bool | None) -> str:
     return text
 
 
-def pack(folder: Path, reach: str | None = None, auth: bool | None = None) -> bytes:
+# the manifest's own switches (`auth = true`) are settings, not secrets: blanked before the scan
+_MANIFEST_FLAGS = re.compile(
+    rb'(?m)^[ \t]*(?:auth|public|reach)[ \t]*=[ \t]*(?:true|false|"public"|"private")[ \t]*(?=\r?$)'
+)
+
+
+def pack(folder: Path, reach: str | None = None, auth: bool | None = None, root: Path | None = None) -> bytes:
     """tar.gz of the folder. `reach` ("public" | "private") and `auth` override app.toml (None keeps it)."""
     if (folder / ".orch").exists():
         raise Refused("This folder is the workspace root. Publish an app folder inside it.")
     buf = io.BytesIO()
+    scanned: list[tuple[str, bytes]] = []
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for dirpath, dirs, files in os.walk(folder):
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
@@ -497,10 +541,13 @@ def pack(folder: Path, reach: str | None = None, auth: bool | None = None) -> by
                 if rel == "app.toml" and (reach is not None or auth is not None):
                     raw = _override(p.read_text(encoding="utf-8"), reach, auth).encode("utf-8")
                     info = tarfile.TarInfo(rel)
-                    info.size = len(raw)
-                    tar.addfile(info, io.BytesIO(raw))
-                else:
-                    tar.add(p, arcname=rel, recursive=False)
+                else:  # read once: the bytes that are scanned are the bytes that are sent
+                    raw = p.read_bytes()
+                    info = tar.gettarinfo(str(p), arcname=rel)
+                info.size = len(raw)
+                scanned.append((rel, _MANIFEST_FLAGS.sub(b"", raw) if rel == "app.toml" else raw))
+                tar.addfile(info, io.BytesIO(raw))
+    scan_files(root, scanned)
     data = buf.getvalue()
     if len(data) > MAX_APP:
         raise Refused("The app folder is bigger than 100 MB.")
@@ -535,7 +582,10 @@ def deploy(
     m = read_manifest(folder)
     q = [x for x in (_life(days, permanent), "new_token=1" if new_token else "") if x]
     res = _api(
-        root, "PUT", f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""), pack(folder, reach, auth)
+        root,
+        "PUT",
+        f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""),
+        pack(folder, reach, auth, root),
     )
     needs_link = auth if auth is not None else manifest_auth(m)
     res.setdefault("reach", reach or m.get("reach", "public"))
