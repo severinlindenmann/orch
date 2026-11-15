@@ -68,7 +68,10 @@ def test_repeat_window_offers_plain_choices_and_open_tickets():
         in src
     )
     assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
-    assert "addon = addonName || route().id" in src and "{addon, verb:'repeat', target, value:plan.phrase}" in src
+    assert (
+        "addon = addonName || route().id" in src
+        and "{addon, verb:'repeat', target, value:plan.phrase}" in src
+    )
     assert "verb:'copy', target:ticket.value" in src
     assert "if (route().kind === 'addon') await loadAddon(route().id)" in src
 
