@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import authority, orchcli
 from .render import clean
-from .store import Refused, handover_file_ok, read_bytes
+from .store import Refused, handover_file_ok, now, read_bytes
 
 FILE = "handover.json"
 DIRECTORY = (".agents", "skills", "orch-relay", "workspaces.json")
@@ -106,6 +106,34 @@ def taken_back(d):
         and str(e["q"].get("answered_by", "")).startswith("human:")
         and e["data"].get("takes_back") in names
     }
+
+
+def sent_at(store, crew_id):
+    """When the delegate went out (bookkeeping), or None."""
+    at = (_load(store).get(crew_id) or {}).get("at")
+    return at if isinstance(at, str) else None
+
+
+def display_name(root, ws):
+    entry = workspace(root, ws)
+    return clean((entry or {}).get("name") or ws, 64)
+
+
+def lines(root, proposal):
+    """The hand-over lines of a proposal for the page: who, which task, how long, what they get. No share of time."""
+    titles = {t["slug"]: t["title"] for t in proposal.get("tasks", [])}
+    return [
+        {
+            "task": h["task"],
+            "title": clean(titles.get(h["task"], h["task"]), 120),
+            "workspace": h["workspace"],
+            "name": display_name(root, h["workspace"]),
+            "why": clean(h["why"], 120),
+            "minutes": h.get("minutes"),
+            "files": list((h.get("sends") or {}).get("files", [])),
+        }
+        for h in proposal.get("handovers", [])
+    ]
 
 
 def cached(ticket):
@@ -306,7 +334,11 @@ def start(root, store, d, t, crew, h):
             "--group",
             write=True,
         )
-        mine = {"sent": (sent.get("id") if isinstance(sent, dict) else None) or "sent", "shared": []}
+        mine = {
+            "sent": (sent.get("id") if isinstance(sent, dict) else None) or "sent",
+            "shared": [],
+            "at": now(),
+        }
         book[crew["id"]] = mine
         _save(store, book)  # before anything else: a second crew start never sends a second delegate
         _set_cache(root, crew["id"], ws=ws, name=clean(entry.get("name") or ws, 64), state="waiting_start")

@@ -9,7 +9,7 @@ import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import ask, authority, autopilot, flow, orchcli, service
+from . import ask, authority, autopilot, flow, handover, orchcli, render, service
 from .render import clean
 from .store import Refused, Store, clock, no_links
 
@@ -374,19 +374,37 @@ def _changes(d):
     return out
 
 
-def _crew(d):
+def _crew(d, root, store):
     out = []
+    handovers = {h["task"]: h for h in d.get("proposal", {}).get("handovers", [])}
     for slug, task in d["tasks"].items():
         t = d["crew"].get(slug)
-        out.append(
-            {
-                "ticket": t["id"] if t else None,
-                "title": _text(task["title"]),
-                "role": task["role"],
-                "agent": task.get("agent"),
-                "status": (t.get("status") if t else None) or ("open" if t else "todo"),
+        row = {
+            "ticket": t["id"] if t else None,
+            "title": _text(task["title"]),
+            "role": task["role"],
+            "agent": task.get("agent"),
+            "status": (t.get("status") if t else None) or ("open" if t else "todo"),
+        }
+        h = handover.of(d, slug)
+        if h is not None:
+            mine = handover.cached(t) if t else None
+            name = handover.display_name(root, h["workspace"])
+            state = (mine or {}).get("state")
+            row["with"] = {
+                "name": name,
+                "state": state,
+                "words": render.handover_words(name, state) if state else "Goes to " + name,
+                "since": handover.sent_at(store, t["id"]) if t else None,
             }
-        )
+        elif slug in handovers and t and handover.cached(t):
+            row["with"] = {
+                "name": handover.cached(t).get("name"),
+                "state": "not_needed",
+                "words": "Done here instead",
+                "since": None,
+            }
+        out.append(row)
     return out
 
 
@@ -420,7 +438,8 @@ def order(root, order_id):
         **_summary(ticket, d, root),
         "proposal": proposal,
         "drafts": _drafts(store, order_id),
-        "crew": _crew(d),
+        "crew": _crew(d, root, store),
+        "handover": handover.lines(root, proposal) if proposal and proposal.get("kind") == "run" else [],
         "changes": _changes(d),
         "tiny": _tiny(d),
         "stops": _stops(d, root, tickets),
