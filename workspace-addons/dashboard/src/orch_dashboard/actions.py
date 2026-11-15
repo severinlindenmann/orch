@@ -143,6 +143,10 @@ PROOF_OPS = {
     "config.permissions": ("config.permissions", lambda a: a.get("mode")),
     "config.agent.add": ("config.agent_add", lambda a: _agent_add_target(a)),
     "look.set": ("look.icon", lambda a: "look"),
+    "workspace.set": (
+        "config.workspace_info",
+        lambda a: f"{a.get('field')}:{hashlib.sha256(str(a.get('text', '')).strip().encode()).hexdigest()}",
+    ),
 }
 
 
@@ -822,6 +826,19 @@ def _config_permissions(a):
     return ["config", "set", "workspace.permissions", mode], [], []
 
 
+def _workspace_set(a):
+    """The workspace name or description (settings): `orch config set workspace.<field> <text>`; the text
+    travels after `--` as one value. Empty clears it. A person's click only (signed)."""
+    _only(a, ("field", "text"))
+    field, v = a.get("field"), a.get("text", "")
+    if field not in ("name", "description"):
+        raise BadRequest("Pick the name or the description.")
+    limit = 60 if field == "name" else 280
+    if not isinstance(v, str) or len(v.strip()) > limit or any(c in v for c in "\r\n\x00"):
+        raise BadRequest(f"Write one line of at most {limit} characters.")
+    return ["config", "set", f"workspace.{field}"], [], [v.strip()]
+
+
 def _share_set(a):
     """Share with team: `orch share on|off` (AGENTS.md entry + merge=union; off removes both)."""
     _only(a, ("on",))
@@ -929,6 +946,7 @@ OPS = {
     "config.agent.add": _config_agent_add,
     "config.agent.test": _config_agent_test,
     "config.permissions": _config_permissions,
+    "workspace.set": _workspace_set,
     "addon.set": _addon_set,
     "share.set": _share_set,
     "private.move": _private_move,
@@ -1286,6 +1304,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "addon.set",
             "config.agent",
             "config.permissions",
+            "workspace.set",
             "workflow.set",
             "copies.set",
             "copies.clean",

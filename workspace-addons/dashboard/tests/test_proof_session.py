@@ -548,6 +548,7 @@ ACT_ARGS = {
     "share.set": {"on": True},
     "workflow.set": {"on": True},
     "copies.set": {"mode": "off"},
+    "workspace.set": {"field": "name", "text": "Demo"},
     "copies.clean": {},
     "diag.set": {"on": False},
     "diag.delete_reports": {},

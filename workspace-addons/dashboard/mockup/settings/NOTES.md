@@ -244,5 +244,9 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 - Owner 14 Nov (fb11/fb24): Set up relay is no longer a button/dialog; when no relay is connected the card lists the 3 plain steps (admin page, paste the orch relay connect line, Check again); Pair a phone shows only once connected.
 
+## Update 15 Nov (owner): no phone pairing from the workspace
+- Settings › Phone no longer pairs a phone or shows a QR: one line says phones are paired on the relay's admin page, with an "Open the relay admin page" link (relay address + /admin, only when connected). settings-phone-pair.html and its QR picture are removed; the pairing dialog is gone from every page copy.
+- Settings › General: Name and Description are edited in place (Edit, then Save / Cancel); each Save is one signed click.
+
 ## Report a problem (diagnostics D3, 15 Nov)
 `settings.html` (General): card "Report a problem": the row "Debug log" (one switch, on by default, one click, no review) and "Saved reports" (number and time, Delete all, one click). Interim wording until the owner answers on the new noun (R4.2).

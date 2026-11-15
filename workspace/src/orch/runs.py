@@ -1543,7 +1543,9 @@ def _run_turn(
         return rc, f.read().decode("utf-8", "replace")
 
 
-def _record_turn(root: Path, run: str, tid: str, name: str, work: Path, out: str) -> None:
+def _record_turn(
+    root: Path, run: str, tid: str, name: str, work: Path, out: str, env: dict | None = None
+) -> None:
     """One turn's stdout lines (this turn's only, stderr mixed in: the collector skips what is not its
     format) to the run's record (run_record.collect_turn). Recording never stops a run: a refused record
     (tampered, unavailable) has already left its integrity alert (record._report); anything else (a collector
@@ -1552,7 +1554,7 @@ def _record_turn(root: Path, run: str, tid: str, name: str, work: Path, out: str
     try:
         from orch import run_record
 
-        run_record.collect_turn(root, run, tid, name, work, out.splitlines())
+        run_record.collect_turn(root, run, tid, name, work, out.splitlines(), env)
     except Refused:
         pass
     except Exception as e:
@@ -1658,7 +1660,7 @@ def wrap(
 
     def collected(result):  # a streamed turn's stdout lines go to the record (run_record), never stop the run
         if streams:
-            _record_turn(root, run, tid, name, work, result[1])
+            _record_turn(root, run, tid, name, work, result[1], env)
         return result
 
     turns = 0

@@ -843,7 +843,15 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
     keep = ("name", "label", "adapter", "found", "version", "can", "status", "chosen")
     perm = run_orch(orch_bin, ["config", "get", "workspace.permissions", "--json"], root)
     perm = perm.get("workspace.permissions") if isinstance(perm, dict) else None
-    from orch.config import agents_may_finish, copies_max, copies_mode, copy_setup, diag_enabled
+    from orch.config import (
+        agents_may_finish,
+        copies_max,
+        copies_mode,
+        copy_setup,
+        diag_enabled,
+        workspace_description,
+        workspace_name,
+    )
 
     try:  # read-only look: the entry `orch share on` writes (a link is never followed)
         f = root / "AGENTS.md"
@@ -859,7 +867,9 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
         "copy_setup": copy_setup(root) or "",
-        "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Problem reports)
+        "ws_name": workspace_name(root) or "",
+        "ws_description": workspace_description(root) or "",
+        "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
         "copies_disk": copies_disk(root),
         "folder": str(root),

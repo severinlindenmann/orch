@@ -21,6 +21,8 @@ from orch.errors import Refused
 KEYS = (
     "workspace.agent",
     "workspace.code",
+    "workspace.name",
+    "workspace.description",
     "workspace.permissions",
     "workspace.live_idle_minutes",
     "workflow.agents_may_finish",
@@ -287,6 +289,8 @@ def _config(args, root: Path) -> None:
         getters = {
             "workspace.agent": lambda: config.agent_name(root),
             "workspace.code": lambda: config.workspace_code(root),
+            "workspace.name": lambda: config.workspace_name(root),
+            "workspace.description": lambda: config.workspace_description(root),
             "workspace.permissions": lambda: config.permissions(root),
             "workspace.live_idle_minutes": lambda: config.live_idle_minutes(root),
             "workflow.agents_may_finish": lambda: config.agents_may_finish(root),
@@ -364,6 +368,18 @@ def _config(args, root: Path) -> None:
             "Saved: the debug log is "
             + ("on." if value else "off. New lines are not written; old files stay."),
         )
+    elif args.sub == "set" and args.key in ("workspace.name", "workspace.description"):
+        if _actor(args).startswith("agent:"):
+            raise Refused(f"Only a person can change this. Ask them to run: orch config set {args.key} ...")
+        what = args.key.split(".")[1]
+        setter = config.set_workspace_name if what == "name" else config.set_workspace_description
+        text = args.value.strip()
+        _person(
+            args, root, "config.workspace_info", f"{what}:{hashlib.sha256(text.encode()).hexdigest()}",
+            parts={"setting": what}, value=args.value, exact=text,
+        )  # fmt: skip
+        v = setter(root, args.value)
+        _out(args, {args.key: v}, f"Saved: the workspace {what} is {v!r}." if v else f"Saved: no {what}.")
     elif args.sub == "set" and args.key == "workspace.code":
         code = config.set_code(root, args.value)
         _out(

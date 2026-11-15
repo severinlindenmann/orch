@@ -58,11 +58,14 @@ def _so_far(root: Path, run: str, writer=None) -> tuple[int, int]:
     return seq, helpers
 
 
-def collect_turn(root: Path, run: str, tid: str, name: str, work: Path, lines) -> dict | None:
+def collect_turn(
+    root: Path, run: str, tid: str, name: str, work: Path, lines, env: dict | None = None
+) -> dict | None:
     """One turn's stdout lines into the run's record; the collector's counts, or None when nothing was
     collected (orch cannot read this agent's output, recording is off until key hiding is ready, or the run
     file cannot be read as written: nothing is numbered from a view orch cannot trust). A refusal of the
-    record itself while writing (tampered, unavailable) is raised: the caller decides (the run goes on)."""
+    record itself while writing (tampered, unavailable) is raised: the caller decides (the run goes on).
+    `env`: the environment the agent was started with (names the tool's settings folder, _hooks_off)."""
     from orch import adapters, record, record_hook
 
     collector = adapters.collector(name, root)
@@ -91,7 +94,7 @@ def collect_turn(root: Path, run: str, tid: str, name: str, work: Path, lines) -
     )
     stats = collector.collect(lines, writer, ctx)
     try:
-        off = _hooks_off(collector, name, root, work)
+        off = _hooks_off(collector, name, root, work, env)
     except Exception:  # noqa: BLE001 - the turn is recorded: a failed check is not a collector error
         off = False
     if off:
@@ -101,10 +104,15 @@ def collect_turn(root: Path, run: str, tid: str, name: str, work: Path, lines) -
     return stats
 
 
-def _hooks_off(collector, name: str, root: Path, work: Path) -> bool:
+def _hooks_off(collector, name: str, root: Path, work: Path, env: dict | None = None) -> bool:
     """The tool's settings (the run's folder, the person's own) switch its hooks off (hooks_disabled)."""
     from orch import adapters
 
-    settings = (adapters.load(name, root).get("reminder") or {}).get("settings_file")
+    reminder = adapters.load(name, root).get("reminder") or {}
+    settings = reminder.get("settings_file")
     hooks_disabled = getattr(collector, "hooks_disabled", None)
-    return hooks_disabled is not None and isinstance(settings, str) and hooks_disabled(work, settings)
+    if hooks_disabled is None or not isinstance(settings, str):
+        return False
+    var = reminder.get("settings_dir_env")
+    config_dir = (env or {}).get(var) if isinstance(var, str) else None
+    return hooks_disabled(work, settings, config_dir if isinstance(config_dir, str) and config_dir else None)

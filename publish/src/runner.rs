@@ -42,6 +42,9 @@ struct Proc {
     unit: String,
 }
 
+/// A process entry taken out of the runner (see `Runner::take`).
+pub struct Taken(Proc);
+
 #[derive(Default)]
 pub struct Runner {
     procs: Mutex<HashMap<String, Proc>>,
@@ -359,8 +362,12 @@ fn stack_image(stack: &str) -> &'static str {
 }
 
 /// App name of a runner key / unit name label.
-fn app_of(key: &str) -> &str {
-    key.strip_suffix("~new").unwrap_or(key)
+/// The app name of a runner key: a version being deployed (`~new`) or woken (`~wake`) is the same app,
+/// with the same label, network and unit prefix.
+pub(crate) fn app_of(key: &str) -> &str {
+    key.strip_suffix("~new")
+        .or_else(|| key.strip_suffix("~wake"))
+        .unwrap_or(key)
 }
 
 struct RunOpts<'a> {
@@ -804,9 +811,9 @@ pub async fn remove_images(app: &str, vdir: Option<&str>) {
     }
 }
 
-/// Hex of the app name (the `~new` suffix of a version being deployed is dropped): injective.
+/// Hex of the app name (the `~new` / `~wake` suffix is dropped, see `app_of`): injective.
 fn unit_prefix(key: &str) -> String {
-    let name = key.strip_suffix("~new").unwrap_or(key);
+    let name = app_of(key);
     let hex: String = name.bytes().map(|b| format!("{b:02x}")).collect();
     format!("orch-app-{hex}-")
 }
@@ -1053,22 +1060,32 @@ impl Runner {
 
     /// Kill the process (if any). Returns when it is gone.
     pub async fn stop(&self, name: &str) {
-        let p = self.procs.lock().unwrap().remove(name);
-        if let Some(mut p) = p {
-            if sandboxed() {
-                let _ = Command::new("systemctl")
-                    .args(["stop", &p.unit])
-                    .output()
-                    .await;
-            }
-            if container_mode() {
-                let _ = Command::from(docker_std())
-                    .args(["stop", "-t", "5", &p.unit])
-                    .output()
-                    .await;
-            }
-            let _ = p.child.kill().await;
+        if let Some(p) = self.take(name) {
+            self.stop_taken(p).await;
         }
+    }
+
+    /// Takes the process entry out of the table without stopping it. Stop exactly this handle later
+    /// with `stop_taken` (never by name: the name may belong to a newer process by then).
+    pub fn take(&self, name: &str) -> Option<Taken> {
+        self.procs.lock().unwrap().remove(name).map(Taken)
+    }
+
+    /// Stops a process taken with `take` (its own container/unit name), returns when it is gone.
+    pub async fn stop_taken(&self, Taken(mut p): Taken) {
+        if sandboxed() {
+            let _ = Command::new("systemctl")
+                .args(["stop", &p.unit])
+                .output()
+                .await;
+        }
+        if container_mode() {
+            let _ = Command::from(docker_std())
+                .args(["stop", "-t", "5", &p.unit])
+                .output()
+                .await;
+        }
+        let _ = p.child.kill().await;
     }
 
     /// Moves a process to another key (used when a new version replaces the old one).
@@ -1085,6 +1102,14 @@ impl Runner {
             Some(p) => matches!(p.child.try_wait(), Ok(None)),
             None => false,
         }
+    }
+
+    /// The port of the app's own running process, if it runs: the proxy routes by this, never by a row it
+    /// read earlier (a redeploy or wake may have moved the app meanwhile).
+    pub fn live_port(&self, name: &str) -> Option<u16> {
+        let mut g = self.procs.lock().unwrap();
+        let p = g.get_mut(name)?;
+        matches!(p.child.try_wait(), Ok(None)).then_some(p.port)
     }
 
     pub fn used_ports(&self) -> HashSet<u16> {
@@ -1380,6 +1405,8 @@ mod tests {
         let live: HashSet<String> = ["a-1".to_string()].into();
         assert_eq!(leftover_containers("a-1\na-2\n\n", &live), vec!["a-2"]);
         assert_eq!(app_of("demo~new"), "demo");
+        assert_eq!(app_of("demo~wake"), "demo");
+        assert_eq!(unit_prefix("demo~wake"), unit_prefix("demo"));
     }
 
     #[test]
@@ -1398,6 +1425,7 @@ mod tests {
     fn per_app_networks_and_store_none_is_read_only() {
         assert_ne!(network_name("a-b"), network_name("a-c"));
         assert_eq!(network_name("demo"), network_name("demo~new"));
+        assert_eq!(network_name("demo"), network_name("demo~wake"));
         let d = PathBuf::from("/srv/code");
         let mut o = opts("python", None, &d);
         o.store = "none";
