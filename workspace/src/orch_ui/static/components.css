@@ -122,19 +122,23 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .breadcrumb a{text-decoration:none}
 .breadcrumb a:hover{text-decoration:underline}
 .btn.mobile-menu{display:none}
-/* Page frame */
-.page{width:100%;max-width:calc(var(--content-width) + var(--page-gutter)*2);margin:0 auto;padding:32px var(--page-gutter);display:flex;flex-direction:column;gap:24px}
+/* Page frame (one for every page): content starts at the same y, the heading is title + one muted line on the left and the
+   actions on the right, flush to ONE right edge. Two widths only: full (the default) and .form-width (a narrower form page). */
+.page{width:100%;max-width:none;margin:0;padding:32px var(--page-gutter);display:flex;flex-direction:column;gap:24px}
 .page.wide{max-width:none}
 .page:empty{min-height:calc(100dvh - var(--topbar-height))}
+.form-width{width:100%;max-width:var(--form-width)}
 .page-header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
-.page-heading{display:grid;gap:8px}
-.page-heading:has(>.actions,>.topbar-actions,>.btn){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.page-heading{display:grid;gap:8px;margin:0}
+.page-heading:has(>.actions,>.topbar-actions,>.btn,>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.page-heading>div:first-child{display:grid;gap:4px;min-width:0}
+.page-heading h1{margin:0}
+.page-heading-actions{display:flex;gap:8px;align-items:center;margin-left:auto;margin-right:0}
+.page-heading-actions>.btn.ghost:last-child{padding-right:0}
 .page-header p,.page-heading p{color:var(--text-muted)}
+.page-heading p{margin:0}
 .page-header p{margin-top:8px}
 .page-heading .updated,.page-header .updated,.updated-at{font-size:12px;line-height:16px;color:var(--text-faint)}
-.page.list-page{padding-top:16px;padding-bottom:16px;gap:8px;max-width:none}
-.list-page .page-header{align-items:center}
-.list-page .page-header p{margin:0}
 .columns{display:grid;grid-template-columns:minmax(0,1fr) var(--panel-width);gap:24px;align-items:start}
 .side-panel{padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .side-panel dl{margin:12px 0 0}
@@ -313,7 +317,7 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .file-type{display:inline-grid;place-items:center;min-width:32px;height:32px;border-radius:4px;background:var(--surface-3);color:var(--text-muted);font-size:12px;font-weight:600}
 .thumbnail{width:64px;height:64px;object-fit:cover;border:1px solid var(--border);border-radius:4px;flex:none}
 /* Breakpoints: rail (new markup only, it has .nav-label) < 1280, 16 px gutter < 900, single column < 600. */
-@media(min-width:1600px){:root{--page-gutter:32px;--panel-width:320px}.page{padding-top:40px}}
+@media(min-width:1600px){:root{--page-gutter:32px;--panel-width:320px}}
 @media(max-width:1279px){
 .shell:has(.nav-label){--sidebar-width:64px}
 .sidebar:has(.nav-label){padding:16px 8px}

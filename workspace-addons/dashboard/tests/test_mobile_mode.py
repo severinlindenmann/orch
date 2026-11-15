@@ -163,7 +163,7 @@ def test_mobile_mode_tint_tracks_state_and_banner_keeps_end_time():
     assert "document.body.classList.toggle('mobile-mode-on', !!mm?.on)" in js
     assert js.index("classList.toggle('mobile-mode-on'") < js.index("if (!mm) { toggle.hidden")
     assert "hm(mm.ends_at)" in js and "' until ' + ends" in js
-    assert "className: 'mm-phone'" in js
+    assert "mm-chip" in js  # the chip in the top bar replaces the banner while on
     assert "btn('Turn off'" in js
     assert "Could not keep this computer awake" in js
     assert "Sent to phone" not in js

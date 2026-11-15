@@ -81,7 +81,7 @@
 .task-proofs{margin-top:6px;gap:6px}
 .proof-chip{white-space:normal;overflow-wrap:anywhere;gap:4px}
 .child{padding-left:28px}
-.settings{max-width:1024px;gap:20px}
+.settings{gap:20px}
 .settings .page-heading{margin-bottom:0}
 .set-sec{display:flex;flex-direction:column;gap:24px;min-width:0}
 .settings .set-label{width:96px;flex:none;color:var(--text-muted);font-size:12px}
@@ -417,8 +417,6 @@ body.mobile-mode-on .mm-phone::after{content:'';position:absolute;bottom:3px;lef
 h1,h2,h3,.ticket-title a,.result-link{overflow-wrap:break-word;word-break:normal;min-width:0}
 /* The footer line shows only when there is something to say (e.g. the connection is lost). */
 .side-foot:has(#workspace-mode:empty){display:none}
-/* Phone mode: while it is on, the banner (with Turn off) is the one control; the sidebar switch hides. */
-body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 /* shared system: avatars carry 12px initials; nav rows keep the 18px icon slot. */
 .avatar{width:24px;height:24px}
 .nav-item>.ic-wrap>svg{width:18px;height:18px}
@@ -523,8 +521,6 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 .error-hero{min-height:320px;display:grid;align-content:center;justify-items:start;gap:16px;padding:40px}
 .error-number{font-size:48px;line-height:1;color:var(--text-faint);font-weight:600}
 @media(max-width:600px){.error-hero{padding:24px;min-height:240px}}
-/* Page heading with an actions slot: actions sit at the end of the title row */
-.page-heading:has(>.page-heading-actions){display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
 
 /* "You: <name>" person switch above Settings: the kit menu, opening upward from the sidebar foot. */
 .person-switch .person-menu>.menu-pop{top:auto;bottom:calc(100% + 4px);left:0;right:auto;width:100%;min-width:200px}
@@ -544,3 +540,21 @@ iframe.embed.embed-loading{position:absolute;width:1px;height:1px;min-height:0;o
 .mm-bar.live,body.mobile-mode-on .mm-bar.live{align-items:center}
 .mm-bar.live .grow,body.mobile-mode-on .mm-bar.live .grow{align-items:baseline;align-content:center}
 .mm-bar.live .mm-phone{align-self:center}
+
+/* Phone mode (UX round 15 Nov): an outlined chip in the top bar, right after the breadcrumb; its menu holds the details.
+   The banner is only for the first-click ask, the ended notice and the last five minutes, and is centred. */
+.mm-chip{position:relative;padding:0;border:0;background:none;box-shadow:none;min-width:0;margin:0 auto 0 0}
+.mm-chip[hidden]{display:none}
+.mm-chip>summary{cursor:pointer;list-style:none;gap:6px;padding:4px 10px;color:var(--text)}
+.mm-chip>summary::-webkit-details-marker{display:none}
+.mm-chip>summary.attn{color:var(--warning);border-color:var(--warning)}
+.mm-chip-ic{display:inline-flex}
+.mm-chip-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:60;min-width:340px;padding:8px}
+.mm-chip-pop .mm-chip-title{padding:4px 8px 0;font-weight:500;color:var(--text)}
+.mm-chip-pop .mm-desc{padding:0 8px 8px}
+.mm-chip-pop .menu-item{display:flex;width:100%;justify-content:flex-start}
+.topbar>.mm-chip:not([hidden])~.topbar-wait,.topbar>.mm-chip:not([hidden])~.topbar-actions{margin-left:0}
+.mm-bar.banner{text-align:center;justify-content:center}
+.mm-bar .mm-actions{justify-content:center}
+body.mobile-mode-on .mm-bar.live{justify-content:center}
+body.mobile-mode-on .mm-bar.live .grow,.mm-bar.live .grow{justify-content:center;text-align:center}

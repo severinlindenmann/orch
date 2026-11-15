@@ -1,5 +1,5 @@
 /* Messenger proportions and surfaces follow the accepted Chat + Groups draft. */
-.chat-page{display:grid;grid-template-columns:260px minmax(0,1fr);height:min(760px,calc(100vh - 140px));min-height:520px;overflow:hidden;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface);color:var(--text);font-size:14px}
+.chat-page{display:grid;grid-template-columns:260px minmax(0,1fr);height:min(760px,calc(100vh - 220px));min-height:520px;overflow:hidden;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface);color:var(--text);font-size:14px}
 .chat-page *{box-sizing:border-box;min-width:0}
 .chat-page [hidden]{display:none!important}
 .chat-page h1,.chat-page h2,.chat-page p{margin:0}
@@ -191,3 +191,8 @@
 .chat-page .chat-list{background:transparent;padding:0 12px 0 0}
 .chat-page .chat-list-row{border-radius:8px}
 .chat-page .chat-thread{background:transparent}
+
+/* The page heading above says Chat; the helper conversation keeps only its row of buttons. */
+.chat-page .chat-thread-head.chat-head-plain{padding-top:0}
+.chat-page .chat-head-plain .chat-head-row{margin-top:0}
+.chat-page .chat-head-plain .chat-head-row>:last-child:not(.chat-back){margin-left:auto}

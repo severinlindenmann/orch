@@ -9,6 +9,7 @@
   const needsPhone = () => !!mm && !mm.on && mm.phones === 0;
   const bar = document.getElementById('mm-bar');
   const toggle = document.getElementById('mm-toggle');
+  const chip = document.getElementById('mm-chip');
   const store = {
     get: () => { try { return localStorage.getItem(ASK_OFF_KEY) === '1'; } catch (_) { return false; } },
     set: on => { try { on ? localStorage.setItem(ASK_OFF_KEY, '1') : localStorage.removeItem(ASK_OFF_KEY); } catch (_) { /* no storage: ask every time */ } },
@@ -30,21 +31,55 @@
   const btn = (text, cls, action, testid, extra = {}) =>
     node('button', {type: 'button', className: 'btn ' + cls, 'data-mm': action, 'data-testid': testid, disabled: busy, ...extra}, text);
 
+  // While it is on, the top-bar chip says so (click: a small menu). The banner is only for the first-click ask, the
+  // "ended" notice and the last five minutes.
+  const SOON_MS = 5 * 60 * 1000;
+  const endsSoon = () => {
+    const t = mm?.ends_at ? new Date(mm.ends_at).getTime() : NaN;
+    return Number.isFinite(t) && t - Date.now() <= SOON_MS && t - Date.now() > 0;
+  };
+  // "Keep on longer" reuses the existing hours choice: the smallest one that ends later than the current end.
+  const longer = () => {
+    const t = mm?.ends_at ? new Date(mm.ends_at).getTime() : NaN;
+    const choices = mm?.hours_choices?.length ? mm.hours_choices : HOURS;
+    return choices.find(n => !Number.isFinite(t) || Date.now() + n * 3600000 > t + 1800000) || null;
+  };
+  const phoneIcon = () => {
+    const s = node('span', {className: 'mm-chip-ic', 'aria-hidden': 'true'});
+    try { if (typeof window.icon === 'function') s.innerHTML = window.icon('phone', 14); } catch (_) { /* no icon: the words are enough */ }
+    return s;
+  };
+  function paintChip() {
+    if (!chip) return;
+    if (!mm || !mm.on) { chip.hidden = true; return; }
+    const warn = mm.awake === 'could_not_keep_awake';
+    const ends = hm(mm.ends_at);
+    chip.hidden = false;
+    chip.setAttribute('data-testid', 'mobile-mode-bar');
+    chip.classList.toggle('attn', warn);
+    const more = longer();
+    chip.replaceChildren(
+      node('summary', {className: 'chip outline' + (warn ? ' attn' : ''), 'data-testid': 'mobile-mode-chip', 'aria-label': 'Phone mode is on'}, phoneIcon(), 'Phone' + (ends ? ' until ' + ends : ' on')),
+      node('div', {className: 'menu-pop mm-chip-pop'},
+        node('p', {className: 'mm-chip-title'}, 'Questions go to your phone' + (ends ? ' until ' + ends : '')),
+        node('p', {className: 'meta mm-desc'}, warn ? 'Could not keep this computer awake. Questions may stop reaching your phone when it sleeps.' : 'This computer stays awake meanwhile.'),
+        more ? btn('Keep on for ' + more + (more === 1 ? ' hour' : ' hours'), 'menu-item', 'extend', 'mobile-mode-extend', {'data-hours': more}) : null,
+        btn('Turn off', 'menu-item', 'off', 'mobile-mode-bar-off')));
+  }
+
   function paintBar() {
     bar.replaceChildren();
     if (!mm) { bar.hidden = true; return; }
     if (mm.on) {
-      const warn = mm.awake === 'could_not_keep_awake';
-      const ends = hm(mm.ends_at);
-      const parts = [node('b', {}, 'Questions go to your phone' + (ends ? ' until ' + ends : '')),
-        node('span', {className: 'mm-desc'}, warn
-          ? 'Could not keep this computer awake. Questions may stop reaching your phone when it sleeps.'
-          : 'This computer stays awake.')];
-      bar.className = 'mm-bar banner live' + (warn ? ' attn' : '');
-      bar.setAttribute('data-testid', 'mobile-mode-bar');
-      bar.append(node('span', {className: 'mm-phone', 'aria-hidden': 'true'}), node('div', {className: 'grow'}, ...parts),
-        btn('Turn off', 'outline sm', 'off', 'mobile-mode-bar-off'));
-      bar.hidden = false;
+      // Only the last five minutes bring the banner back; otherwise the chip is all there is.
+      if (endsSoon()) {
+        bar.className = 'mm-bar banner live attn';
+        bar.setAttribute('data-testid', 'mobile-mode-soon');
+        const more = longer();
+        bar.append(node('div', {className: 'grow'}, node('b', {}, 'Phone mode ends in 5 minutes'), node('span', {className: 'mm-desc'}, 'Questions then stay on this computer.')),
+          more ? btn('Keep on for ' + more + (more === 1 ? ' hour' : ' hours'), 'outline sm', 'extend', 'mobile-mode-soon-extend', {'data-hours': more}) : null);
+        bar.hidden = false;
+      } else bar.hidden = true;
     } else if (asking) {
       bar.className = 'mm-bar banner';
       bar.setAttribute('data-testid', 'mobile-mode-ask');
@@ -61,19 +96,19 @@
       bar.append(node('div', {className: 'grow'}, mm.ended.text), btn('OK', 'outline sm', 'ack', 'mobile-mode-ended-ok'));
       bar.hidden = false;
     } else bar.hidden = true;
+    paintChip();
     // No phone paired: nothing to send to, so the switch is not shown at all (an On switch always stays, to turn it off).
     toggle.hidden = needsPhone();
     toggle.setAttribute('aria-checked', mm.on ? 'true' : 'false');
-    // No phone paired yet: nothing to send to, so the switch cannot be turned on (it can always be turned off).
     toggle.disabled = busy;
     toggle.title = '';
     const label = toggle.querySelector('.mm-label');
-    if (label) label.textContent = 'Phone';
+    if (label) label.textContent = mm.on ? 'Phone' + (hm(mm.ends_at) ? ' · until ' + hm(mm.ends_at) : '') : 'Phone';
   }
 
   function paint() {
     document.body.classList.toggle('mobile-mode-on', !!mm?.on);
-    if (!mm) { toggle.hidden = true; bar.hidden = true; return; }
+    if (!mm) { toggle.hidden = true; bar.hidden = true; if (chip) chip.hidden = true; return; }
     paintBar();
   }
 
@@ -87,6 +122,7 @@
     return r;
   }
 
+  const closeChip = () => { if (chip) chip.open = false; };
   async function turnOn() { asking = false; await call('mobile.set', {on: true}); }
 
   document.addEventListener('click', async event => {
@@ -103,7 +139,8 @@
     switch (t.dataset.mm) {
       case 'confirm': store.set(!!document.getElementById('mm-dont')?.checked); await turnOn(); break;
       case 'cancel': asking = false; paint(); break;
-      case 'off': await call('mobile.set', {on: false}); break;
+      case 'off': closeChip(); await call('mobile.set', {on: false}); break;
+      case 'extend': closeChip(); await call('mobile.set', {on: true, hours: Number(t.dataset.hours)}); break;
       case 'ack': await call('mobile.ack', {}); break;
     }
   });
