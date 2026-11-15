@@ -445,8 +445,13 @@ function previewText(t, kind, file, text) {
   return h('pre', {}, text.split('\n').slice(0, 8).join('\n'));
 }
 function ticketPreviewTile(t, file, kind = 'artifacts') {
-  const title = window.DashHelpers.plainFileName(file.name) || 'Result';
+  const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
+  if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
+    tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
+      h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.')));
+    return tile;
+  }
   const html = /\.html?$/i.test(file.name), picture = /\.(png|jpe?g|webp)$/i.test(file.name);
   if (snapshot || html || (!picture && !PREVIEW_EXT.text.test(file.name))) {
     tile.append(h('p', {className:'meta'}, html ? title : 'Preview available when opened'));
@@ -488,7 +493,9 @@ const evidenceFile = (t, ev) => {
   if ((ev.type || ev.kind) !== 'file' || ev.missing || !ref.startsWith(prefix)) return null;
   const name = ref.slice(prefix.length);  // the server checks again; a path that climbs or is not plain never gets a chip
   if (!name || /[\\\0:]/.test(name) || name.startsWith('/') || name.split('/').some(part => ['', '.', '..'].includes(part))) return null;
-  return Number.isFinite(ev.size) && ev.size >= 0 ? {name, mtime:ev.at, size:ev.size} : {name, mtime:ev.at};
+  const file = Number.isFinite(ev.size) && ev.size >= 0 ? {name, mtime:ev.at, size:ev.size} : {name, mtime:ev.at};
+  if (typeof ev.title === 'string' && ev.title.trim()) file.title = ev.title;  // the title given when the file was attached
+  return file;
 };
 // One file = one entry: lists keep the first item per key; items without a key (notes) all stay.
 const uniqueBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (k == null) return true; if (seen.has(k)) return false; seen.add(k); return true; }); };
@@ -532,6 +539,10 @@ function ticketShareButton(t, file) {
 // and the opening control gets the cursor back.
 const fileUrl = (tid, kind, fileName, dl = false) => '/api/file?t=' + encodeURIComponent(tid) + '&k=' + encodeURIComponent(kind) + '&n=' + encodeURIComponent(fileName) + (dl ? '&dl=1' : '');
 const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) || String(fileName).split('/').pop());
+// The title given when the file was attached; else the file name made readable.
+const oneLineTitle = value => typeof value === 'string' ? clean(value).replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+const titleOf = file => oneLineTitle(file.title) || fileTitle(file.name);
+const shortName = file => String(file.name).split('/').pop();
 const fileBadge = fileName => (/\.([^./]+)$/.exec(fileName)?.[1] || 'file').slice(0, 4).toUpperCase();
 const fileMeta = file => [kindWord(file.name), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', file.mtime ? localStamp(file.mtime) : ''].filter(Boolean).join(' · ');
 async function copyFileLink(url) {
@@ -566,7 +577,7 @@ function fileEntry(t, group, file) {
   const role = group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
   const at = file.mtime ? createdText(file.mtime) : '';
   return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
-    title:fileTitle(file.name),
+    title:titleOf(file), named:!!oneLineTitle(file.title),
     meta:[viewerWord(kind), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', at, task ? 'Task: ' + task : '', role].filter(Boolean).join(' · ')};
 }
 function createdText(at) {
@@ -591,19 +602,19 @@ function ticketFileActions(t, kind, file) {
   return h('div', {className:'file-actions'},
     ticketButton('Open', 'ghost sm', () => previewFile(t.id, kind, file.name), {'data-key':'file-open-' + k}),
     h('a', {className:'btn ghost sm', href:fileUrl(t.id, kind, file.name, true), download:file.name.split('/').pop()}, 'Download'),
-    ticketButton('Copy link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k}));
+    ticketButton('Copy local link', 'ghost sm', () => copyFileLink(fileUrl(t.id, kind, file.name)), {'data-key':'file-copy-' + k, title:'Works only on this computer'}));
 }
 function ticketFileRow(t, kind, file) {
   return h('div', {className:'file-row', 'data-key':'file-' + kind + '-' + file.name},
     h('span', {className:'file-type' + (shownThumb(t, kind, file) ? ' has-thumb' : ''), 'aria-hidden':'true'}, fileBadge(file.name), shownThumb(t, kind, file)),
-    h('div', {className:'grow'}, h('p', {className:'file-name'}, fileTitle(file.name)), h('p', {className:'meta'}, fileMeta(file))),
+    h('div', {className:'grow'}, h('p', {className:'file-name'}, titleOf(file)), oneLineTitle(file.title) ? h('p', {className:'meta file-real-name'}, shortName(file)) : null, h('p', {className:'meta'}, fileMeta(file))),
     ticketFileActions(t, kind, file));
 }
 // The result frame: the file heading, then a bounded preview with Expand (the shared viewer).
 // A PDF shows as the PDF and a web page as the page (in a frame that cannot reach this app); other files as a short excerpt.
 function ticketLivePreview(t, file, kind) {
   if (snapshot) return null;
-  const type = viewerKind(file.name), title = fileTitle(file.name);
+  const type = viewerKind(file.name), title = titleOf(file);
   if (type === 'pdf') return h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
     h('p', {className:'meta'}, 'This browser cannot show the PDF here. Open it to read it.'));
   if (type === 'page') return h('iframe', {className:'preview-live', sandbox:'allow-scripts', referrerpolicy:'no-referrer', title, loading:'lazy',
@@ -655,7 +666,7 @@ function fileTile(t, f) {
   const open = () => previewFile(t.id, f.kind, f.name);
   const meta = [viewerWord(f.fileKind), Number.isFinite(f.size) && f.size >= 0 ? sizeText(f.size) : '', f.mtime ? localStamp(f.mtime) : ''].filter(Boolean).join(' · ');
   const link = h('button', {type:'button', className:'file-preview-link', 'aria-label':'Preview ' + f.title + ' · ' + meta, 'data-key':'file-open-' + f.kind + '-' + f.name},
-    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), h('span', {className:'meta'}, meta)));
+    fileThumb(t, f), h('span', {className:'tile-copy'}, h('strong', {}, f.title), f.named ? h('span', {className:'meta file-real-name'}, shortName(f)) : null, h('span', {className:'meta'}, meta)));
   link.onclick = open;
   return h('article', {className:'file-tile', 'data-key':'file-tile-' + f.kind + '-' + f.name}, link);
 }

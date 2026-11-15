@@ -186,3 +186,59 @@ def test_a_value_that_is_the_placeholder_passes_everything_else_is_scanned(proj,
         with pytest.raises(Refused) as e:
             relay.scan_outgoing(proj, {"text": bad})
         assert real not in str(e.value) and TOKEN not in str(e.value), bad
+
+
+def test_resend_scans_an_old_outbox_entry(proj, run, on):
+    """#900: an entry written before the send-time scan is checked again on resend: not sent, marked failed
+    with one sentence, removed from disk, value never printed."""
+    from orch import relay
+
+    ob = proj / ".orch" / "outbox"
+    ob.mkdir(parents=True, exist_ok=True)
+    mid = "m_" + "a" * 16
+    msg = {
+        "id": mid,
+        "from": relay._cfg(proj)["workspace"],
+        "to": PEER,
+        "type": "text",
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+    (ob / f"{mid}.json").write_bytes(json.dumps({**msg, "body": {"text": f"key {TOKEN}"}}).encode())
+    good = "m_" + "b" * 16
+    (ob / f"{good}.json").write_bytes(json.dumps({**msg, "id": good, "body": {"text": "fine"}}).encode())
+    res = relay.resend_outbox(proj)
+    assert [f["id"] for f in res["failed"]] == [mid], res
+    assert res["sent"] == [good], res
+    assert TOKEN not in json.dumps(res) and "GitHub token" in res["failed"][0]["reason"]
+    assert [s["id"] for s in on.sent] == [good]
+    assert not (ob / f"{mid}.json").exists()
+    # the CLI says it in words, without the value
+    (ob / f"{mid}.json").write_bytes(json.dumps({**msg, "body": {"text": f"key {TOKEN}"}}).encode())
+    code, out, err = run("relay", "outbox", "--resend")
+    assert TOKEN not in out + err and "Not sent" in out and mid in out
+
+
+def test_resend_scans_every_field_and_odd_files(proj, run, on):
+    from orch import relay
+
+    ob = proj / ".orch" / "outbox"
+    ob.mkdir(parents=True, exist_ok=True)
+    me = relay._cfg(proj)["workspace"]
+    base = {
+        "from": me,
+        "to": PEER,
+        "type": "text",
+        "created_at": "2026-01-01T00:00:00Z",
+        "body": {"text": "x"},
+    }
+    cases = {
+        "a": {**base, "reply_to": TOKEN},
+        "b": {**base, "body": TOKEN},
+        "c": {**base, "body": {"text": TOKEN.replace("_", "\u005f")}},
+    }
+    for k, v in cases.items():
+        mid = "m_" + k * 16
+        (ob / f"{mid}.json").write_bytes(json.dumps({**v, "id": mid}).encode())
+    res = relay.resend_outbox(proj)
+    assert len(res["failed"]) == 3 and not res["sent"] and not on.sent, res
+    assert TOKEN not in json.dumps(res) and not list(ob.glob("m_*.json"))
