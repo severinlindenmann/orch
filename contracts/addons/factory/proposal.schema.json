@@ -199,11 +199,12 @@
                   "files": {
                     "type": "array",
                     "maxItems": 6,
-                    "description": "Workspace-relative paths of files shared into the hand-over group at crew start (secret scan on each; a hit refuses the crew start).",
+                    "description": "Workspace-relative paths (forward slashes) of files shared into the hand-over group at crew start. The Start question lists them with the receiving workspace, and the answer is bound to the frozen proposal hash, so files cannot be added after Start. At share time the core's group share path rule (inside the workspace, no symlink escape, no dotfiles, VCS or config folders) and the shared secret scan apply; a hit refuses the crew start.",
                     "items": {
                       "type": "string",
                       "minLength": 1,
-                      "maxLength": 200
+                      "maxLength": 120,
+                      "pattern": "^(?![/~])(?!.*\\.\\.)(?!.*(^|/)\\.)[^\\\\:\\u0000-\\u001f\\u007f]+$"
                     }
                   }
                 }

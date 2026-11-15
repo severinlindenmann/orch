@@ -61,12 +61,21 @@ def start_text(p, n):
     if p.get("handovers"):
         segments.append(
             "Handover: "
-            + "; ".join(f"{clean(h['task'], 48)} → {clean(h['workspace'], 64)}" for h in p["handovers"])
+            + "; ".join(handover_line(h) for h in p["handovers"])
         )
     unsure = [a["text"] for a in p.get("assumptions", []) if a.get("uncertain")]
     if unsure:
         segments.append("Unsure: " + lines(unsure))
     return join(segments, f"Proposal {n}")
+
+
+def handover_line(h):
+    """What leaves this computer with a hand-over, in the Start text (R7.3): the receiving workspace and every
+    file, uncut (paths are capped at freeze by the schema), so the person's Start answer, which is bound to the
+    frozen proposal's hash, covers exactly these files and nothing added later."""
+    files = (h.get("sends") or {}).get("files") or []
+    gets = ", ".join(clean(f, None) for f in files) if files else "only the task's brief"
+    return f"{clean(h['task'], 48)} → {clean(h['workspace'], 64)} (they get: {gets})"
 
 
 question_text = start_text

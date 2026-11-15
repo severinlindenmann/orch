@@ -47,11 +47,13 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 
 ## Handing a task to another workspace (#816 B)
 - `propose` refuses: a `workspace` that is not a `ws_` id in the relay workspace list with
-  delegate allowed, a `task` not in `tasks`, a `sends.files` path outside the workspace or missing. There is no cap on the
+  delegate allowed, a `task` not in `tasks`, a `sends.files` path that breaks the schema pattern (relative, forward slashes, no leading `/` or `~`, no `..`, no dot segment, no backslash, colon or control character) or is missing. The Start question lists the receiving workspace and every file uncut (`Handover: <task> → <ws> (they get: …)`); the person's Start is bound to the frozen proposal's hash, so a file added later makes the order `tampered`. There is no cap on the
   share of time (owner, 15 Nov) beyond the schema's 2 hand-overs; `minutes` is shown, never counted in `active_min_cap`.
 - `crew start` for a hand-over task runs `orch relay delegate <ws> "<title>" --text <brief> --check <done-means>…
   --ticket <crew> --group` and `orch relay group share --click <crew> <file>` for each `sends.files` (Start was the
-  person's click for them; a secret hit refuses the crew start) instead of `orch run start`. The crew ticket is the owner.
+  person's click for them, owner Q6). The share goes through the core's group share, so its path rule (inside the
+  workspace, no symlink escape, no dotfiles, VCS or config folders) and the shared secret scan apply; a hit refuses the
+  crew start. No add-on path checker instead of `orch run start`. The crew ticket is the owner.
 - State comes from the relay task status (`ext.factory.handover.state` is a cache): on `done` the result is evidence on
   the crew task and the crew ticket is done (watcher rule b). Watcher rule (d): a hand-over `denied` or `failed` wakes
   the manager once per task and reason; it then files a `factory:change` "Do it here instead · +N min". On Accept, an
