@@ -99,10 +99,10 @@ _KV_VAL = re.compile(
 _TO_EOL = re.compile(r"(?i)cookie")
 
 
-# A value that is exactly the placeholder (also quoted, or url-encoded as safe_url writes it, and ending at
-# a delimiter) is already hidden, not a secret: the ONE place that says so. Anything else next to it, or glued
-# to it, is a value like any other and goes through the detector unchanged.
-_PLACEHOLDER = re.compile(r"[\"'`]?(?:\[hidden\]|%5[Bb]hidden%5[Dd])[\"'`]?(?=$|[\s&,;])")
+# A value that is exactly the placeholder (also in matching quotes) is already hidden, not a secret: the ONE
+# place that says so. The url-encoded one safe_url writes (?token=%5Bhidden%5D&a=1) ends at its `&`. Anything
+# else glued to it or after it is a value like any other and goes through the detector unchanged.
+_PLACEHOLDER = re.compile(r"(?P<q>[\"'`]?)\[hidden\](?P=q)\Z|%5[Bb]hidden%5[Dd](?=&|\Z)")
 
 
 class _Hit:
