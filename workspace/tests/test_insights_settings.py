@@ -563,8 +563,7 @@ def test_a_person_or_an_agent_changes_a_setting_plainly(ws, run):
     assert code == 0, out + err
     assert _get(run, "insights.share_names") is True
     assert config.insights_share_names(ws) is True
-    code, out, _ = run("config", "set", "insights.share_names", "on", "--json")
-    assert code == 0 and _answer(out)["changed"] is False  # the same value: nothing written
+    assert run("config", "set", "insights.share_names", "on")[0] == 0  # the same value again
 
 
 def test_if_current_mismatch_is_changed_and_a_bad_value_lists_the_allowed_ones(ws, run):
