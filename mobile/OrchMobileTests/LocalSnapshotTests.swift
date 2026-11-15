@@ -34,6 +34,20 @@ final class LocalSnapshotTests: XCTestCase {
         return m
     }
 
+    /// Quitting within the 2 s debounce must not lose the change: leaving the foreground writes snapshot and outbox index at once.
+    func testLeavingTheForegroundWritesSnapshotAndOutboxAtOnce() async throws {
+        let m = model()
+        await m.refresh()
+        let before = try? Data(contentsOf: snapshotURL)
+        XCTAssertNil(before, "the 2 s debounce has not written yet")
+        _ = try m.outbox.enqueue(MessageDraft(text: "queued before the app was suspended"), to: .general(workspace: m.workspaces[0].id))
+        m.persistForBackground()
+        LocalSnapshotStore.flush(at: snapshotURL); Outbox.flushAllWrites()
+        XCTAssertNotNil(LocalSnapshotStore.load(from: snapshotURL, phoneId: phone))
+        let index = try Data(contentsOf: dir.appendingPathComponent("outbox.json"))
+        XCTAssertTrue(String(decoding: index, as: UTF8.self).contains("queued before the app was suspended"))
+    }
+
     func testRoundTrip() async throws {
         let m = await filledModel()
         let s = try XCTUnwrap(LocalSnapshotStore.load(from: snapshotURL, phoneId: phone))

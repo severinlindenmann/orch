@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum Tab: Hashable { case chats, settings }
 
@@ -181,6 +184,34 @@ final class AppModel {
         LocalSnapshotStore.save(LocalSnapshot(phoneId: phone, savedAt: lastUpdated ?? Date(), workspaces: workspaces, questions: questions,
             questionLog: questionLog, messages: Array(messages.prefix(LocalSnapshot.messageLimit)), updates: updates, answers: answers,
             messagesNext: cut ? nil : messagesNext), to: snapshotURL)
+    }
+
+    /// The ticket of a sent message by its client_id (from the list, else the workspace's ack).
+    func ticket(forClientId clientId: String, firstId: String? = nil) -> String? {
+        guard let mine = messages.first(where: { ($0.clientId ?? $0.message.body.clientId) == clientId || ($0.id == firstId && firstId != nil) }) else { return nil }
+        return mine.message.ticket ?? ack(for: mine.id)?.ticket
+    }
+    /// Extra voice takes that waited for their topic go to it as soon as the workspace has acked the first take.
+    func resolveJoinedTakes() { outbox.resolveJoins { ticket(forClientId: $0) } }
+
+    /// The app is leaving the foreground (inactive/background, or being swiped away): hands the lists to the writers now and waits
+    /// until the snapshot and the outbox index are on disk, inside a background task so iOS does not suspend the process first.
+    func persistForBackground() {
+        persistSnapshotNow()
+        let url = snapshotURL
+        #if canImport(UIKit)
+        let app = UIApplication.shared
+        let holder = BackgroundTaskHolder()
+        holder.id = app.beginBackgroundTask(withName: "orch-persist") { MainActor.assumeIsolated { holder.end() } }
+        #endif
+        outbox.submitCurrentIndex()
+        DispatchQueue.global(qos: .userInitiated).async {
+            LocalSnapshotStore.flush(at: url)
+            Outbox.flushAllWrites()
+            #if canImport(UIKit)
+            DispatchQueue.main.async { MainActor.assumeIsolated { holder.end() } }
+            #endif
+        }
     }
 
     /// Lets the (Sendable) speech fetch reach the current client, which changes with sign-in.
@@ -425,6 +456,7 @@ final class AppModel {
             if transportDown { transportDown = false }
             if !hasLoaded { hasLoaded = true }
             if lastUpdated == nil || Date().timeIntervalSince(lastUpdated ?? .distantPast) > 30 { lastUpdated = Date() }
+            resolveJoinedTakes()
             await flushOutbox()
             scheduleSnapshot()
         }
@@ -892,6 +924,7 @@ final class AppModel {
             switch p.first {
             case "general" where p.count == 2: path = [.workspace(p[1]), .general(p[1])]
             case "topic" where p.count == 3: path = [.workspace(p[1]), .ticket(workspace: p[1], ticket: p[2])]
+            case "group" where p.count == 3: path = [.group(host: p[1], id: p[2])]   // `group:<host>:<id>`: UI tests skip the list swipes
             case "workspace" where p.count == 2: path = [.workspace(p[1])]
             case "settings": tab = .settings
             default: break
@@ -901,3 +934,11 @@ final class AppModel {
         if phase == .ready { if !useMock { await PushPermission.registerIfAuthorized() } }
     }
 }
+
+#if canImport(UIKit)
+/// The iOS background task that keeps the process alive until the snapshot and the outbox index have been written.
+@MainActor private final class BackgroundTaskHolder {
+    var id = UIBackgroundTaskIdentifier.invalid
+    func end() { if id != .invalid { UIApplication.shared.endBackgroundTask(id); id = .invalid } }
+}
+#endif

@@ -248,8 +248,9 @@ struct ChatsListView: View {
         let starting = newest?.isStarting == true && newest?.lastAt == summary.lastAt
         let working = ChatsRowRules.isWorking(summary.topics)
         let preview = ChatsRowRules.preview(summary.lastLine, starting: starting, working: working, unread: summary.unread)
-        return TimelineView(.everyMinute) { context in
-            let muted = model.notificationsMuted(workspace: summary.id, now: context.date)
+        let now = MinuteClock.shared.now   // one shared clock, not one TimelineView per row (perf step 4)
+        return Group {
+            let muted = model.notificationsMuted(workspace: summary.id, now: now)
             NavigationLink(value: ChatRoute.workspace(summary.id)) {
                 HStack(spacing: 12) {
                     WorkspaceBadge(name: name, icon: summary.workspace.icon, color: summary.workspace.color, size: 46, lastSeen: .some(summary.workspace.lastSeen), id: summary.id)
@@ -274,7 +275,7 @@ struct ChatsListView: View {
                 }.padding(.horizontal, 12).padding(.vertical, 14).contentShape(Rectangle())
             }.buttonStyle(PressStyle()).foregroundStyle(Theme.text).accessibilityIdentifier("room-\(summary.id)")
                 .contextMenu {
-                    MuteMenu(muted: summary.workspace.isMuted(now: context.date)) { mute in
+                    MuteMenu(muted: summary.workspace.isMuted(now: now)) { mute in
                         Task { await model.setMute(summary.id, mute) }
                     }
                 }
