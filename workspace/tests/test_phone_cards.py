@@ -14,7 +14,7 @@ from conftest import ensure_signing
 from fakes import WS
 from test_relay_client import msg
 
-from orch import humanproof, phone_view, relay, review, tickets
+from orch import phone_view, relay, review, tickets
 from orch.errors import Refused
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -237,7 +237,6 @@ def test_old_asked_records_keep_their_mac(proj, conn):
     assert old_fields == relay._asked_signed_fields("m_2", rev)
     rev2["digest"] = "ee" * 32
     assert not relay.asked_mac_ok(proj, "m_3", rev2)
-    assert humanproof.local_ok  # (the MAC is the human-key one)
 
 
 def test_question_without_card_fields_is_byte_identical(proj, new_ticket, conn):

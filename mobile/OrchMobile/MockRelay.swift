@@ -381,7 +381,7 @@ actor MockRelay: RelayAPI {
         let result: ReviewResult, text: String
         switch mode {
         case "changed": result = ReviewResult(result: "changed"); text = "This changed. Look at it again"
-        case "refused": result = ReviewResult(result: "refused", reason: "needs_signature"); text = "Needs your signature on the computer"
+        case "refused": result = ReviewResult(result: "refused", reason: "invalid"); text = "Couldn't use your answer"
         default: result = ReviewResult(result: "applied", summary: summary); text = "Got it"
         }
         counter += 1

@@ -34,7 +34,7 @@ enum VerdictState: Equatable, Sendable {
     case sent                               // the relay stored it, no result yet (final)
     case received(summary: String?)         // applied
     case changed                            // what you saw is not what the computer holds now: nothing applied, look again
-    case refused(reason: String?)           // needs_signature | needs_person | invalid | unavailable
+    case refused(reason: String?)           // needs_person | invalid | unavailable
     case decided(summary: String?)          // the computer answered first
     case failed(String)                     // the relay refused it for good
     var canChange: Bool { self == .savedOnPhone }

@@ -55,7 +55,6 @@ final class ReviewCardCodableTests: XCTestCase {
         guard case .options(let o)? = choice?.preview else { return XCTFail("options") }
         XCTAssertEqual(o.map(\.id), ["A", "B", "C"])
         XCTAssertEqual(o[0].preview, .img(src: .file(0), alt: nil))
-        XCTAssertTrue(try question("card-signs-no-files").message.body.card?.requiresSignature == true)
     }
     func testUnreadableCardLeavesAPlainQuestion() throws {
         // Unknown preview type and unknown kind: the question stays, without card and card_files.
@@ -234,7 +233,7 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         let result = ReviewResult(result: "applied", summary: "Send it")
         XCTAssertEqual(ReviewStackRules.state(item: box.item(clientId: cid), result: result), .received(summary: "Send it"))
         XCTAssertEqual(ReviewStackRules.state(item: nil, result: ReviewResult(result: "changed")), .changed)
-        XCTAssertEqual(ReviewStackRules.state(item: nil, result: ReviewResult(result: "refused", reason: "needs_signature")), .refused(reason: "needs_signature"))
+        XCTAssertEqual(ReviewStackRules.state(item: nil, result: ReviewResult(result: "refused", reason: "invalid")), .refused(reason: "invalid"))
         XCTAssertEqual(ReviewStackRules.state(item: nil, result: ReviewResult(result: "decided", summary: "Other")), .decided(summary: "Other"))
         XCTAssertNil(ReviewStackRules.state(item: nil, result: nil))
         // the result text arrives in /messages: the item leaves the outbox

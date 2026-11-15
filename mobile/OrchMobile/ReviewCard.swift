@@ -118,11 +118,8 @@ struct ReviewCard: Codable, Equatable, Sendable {
     var need: String? = nil
     var then: String
     var okLabel: String? = nil
-    /// Only ever `true` on the wire. The phone cannot approve it (M1).
-    var signs: Bool? = nil
     var open: String? = nil
     var preview: CardPreview? = nil
-    var requiresSignature: Bool { signs == true }
     var fileIndexes: [Int] { preview?.fileIndexes ?? [] }
 
     /// The kinds that need a preview per the schema (choice, link); the card is refused otherwise.
@@ -134,9 +131,6 @@ struct ReviewCard: Codable, Equatable, Sendable {
         need = try c.decodeIfPresent(String.self, forKey: .need)
         then = try c.decode(String.self, forKey: .then)
         okLabel = try c.decodeIfPresent(String.self, forKey: .okLabel)
-        let s = try c.decodeIfPresent(Bool.self, forKey: .signs)
-        guard s != false else { throw DecodingError.dataCorruptedError(forKey: .signs, in: c, debugDescription: "signs is only true") }
-        signs = s
         open = try c.decodeIfPresent(String.self, forKey: .open)
         preview = try c.decodeIfPresent(CardPreview.self, forKey: .preview)
         if kind == .choice {
@@ -145,9 +139,9 @@ struct ReviewCard: Codable, Equatable, Sendable {
         if kind == .link, preview == nil { throw DecodingError.dataCorruptedError(forKey: .preview, in: c, debugDescription: "link needs a preview") }
     }
     init(kind: Kind, title: String, then: String, why: String? = nil, need: String? = nil, okLabel: String? = nil,
-         signs: Bool? = nil, open: String? = nil, preview: CardPreview? = nil) {
+         open: String? = nil, preview: CardPreview? = nil) {
         self.kind = kind; self.title = title; self.then = then; self.why = why; self.need = need; self.okLabel = okLabel
-        self.signs = signs; self.open = open; self.preview = preview
+        self.open = open; self.preview = preview
     }
 }
 
@@ -203,6 +197,6 @@ typealias PendingVerdict = ReviewVerdict
 struct ReviewResult: Codable, Sendable, Equatable {
     let result: String          // applied | changed | refused | decided
     var summary: String? = nil
-    var reason: String? = nil   // needs_signature | needs_person | invalid | unavailable (with refused)
+    var reason: String? = nil   // needs_person | invalid | unavailable (with refused)
     static let known: Set<String> = ["applied", "changed", "refused", "decided"]
 }
