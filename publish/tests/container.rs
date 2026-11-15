@@ -62,10 +62,70 @@ async fn container_python_and_docker_apps_deploy_redeploy_stop() {
         assert_eq!(r.status, 200, "round {round}: {}", r.text());
     }
     for n in ["cpy", "cdk"] {
+        let tok = t
+            .api(
+                &ws,
+                "PUT",
+                &format!("/v1/apps/{n}?new_token=1"),
+                match n {
+                    "cpy" => bundle(&[("app.toml", py_toml), ("main.py", PY)]),
+                    _ => bundle(&[
+                        ("app.toml", dk_toml),
+                        ("main.py", PY),
+                        ("Dockerfile", DOCKERFILE),
+                    ]),
+                },
+            )
+            .await
+            .json()["view_token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let g = call(
+            &t.public,
+            "GET",
+            &format!("/a/{n}/?token={tok}"),
+            &[],
+            vec![],
+        )
+        .await;
+        assert_eq!(g.status, 302);
+        let cookie = g.headers["set-cookie"]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string();
+        let b = call(
+            &t.public,
+            "GET",
+            &format!("/a/{n}/"),
+            &[("cookie", &cookie)],
+            vec![],
+        )
+        .await;
+        assert!(b.text().contains("0.0.0.0"), "{n}: {}", b.text());
         let s = t
             .api(&ws, "POST", &format!("/v1/apps/{n}/stop"), vec![])
             .await;
         assert_eq!(s.json()["status"], "stopped");
     }
+    let left = std::process::Command::new("docker")
+        .env(
+            "DOCKER_HOST",
+            format!(
+                "unix://{}",
+                std::env::var("ORCH_PUBLISH_ENGINE_SOCKET")
+                    .unwrap_or("/run/kiri/docker.sock".into())
+            ),
+        )
+        .args(["ps", "-a", "--filter", "label=orch.publish.app", "-q"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&left.stdout).trim().is_empty(),
+        "containers left"
+    );
     std::env::remove_var("ORCH_PUBLISH_SANDBOX");
 }

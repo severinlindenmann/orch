@@ -23,6 +23,8 @@ pub struct Spec {
 
 /// What a build/test step runs in, in container mode.
 pub struct StepCtx<'a> {
+    /// app name (its network and label)
+    pub app: &'a str,
     pub stack: &'a str,
     pub image: Option<&'a str>,
     /// code folder mounted read-write (the build step), else read-only
@@ -78,7 +80,8 @@ pub fn container_mode() -> bool {
 
 // ---- container mode (driven with the `docker` CLI; the attached `docker run` is the Child)
 
-const NETWORK: &str = "orch-apps";
+/// uid every app container runs as (never the server's own uid); the gid is the server's group.
+const APP_UID: u32 = 61000;
 
 /// `docker` with DOCKER_HOST pointing at the engine socket.
 fn docker_std() -> std::process::Command {
@@ -90,42 +93,67 @@ fn docker_std() -> std::process::Command {
     c
 }
 
-/// "<uid>:<gid>" of this server process (the container runs as the same user).
-fn server_user() -> String {
-    static U: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    U.get_or_init(|| {
-        let id = |f: &str| {
-            std::process::Command::new("id")
-                .arg(f)
-                .output()
-                .ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-                .unwrap_or_else(|| "65534".into())
-        };
-        format!("{}:{}", id("-u"), id("-g"))
-    })
-    .clone()
+/// "61000:<gid>" the app and step containers run as. The gid is the server's group, so the
+/// group-writable (2770) data and code folders are writable for the container.
+fn app_user() -> String {
+    static G: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let gid = G.get_or_init(|| {
+        std::process::Command::new("id")
+            .arg("-g")
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .unwrap_or_else(|| "65534".into())
+    });
+    format!("{APP_UID}:{gid}")
 }
 
-/// Creates the `orch-apps` network once (best effort: a real error shows up when the app starts).
-fn ensure_network() {
-    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if DONE.load(std::sync::atomic::Ordering::Relaxed) {
+/// Creates the folder (if needed) with mode 2770: the server's group owns it, so the container can write.
+pub fn group_writable_dir(p: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::create_dir_all(p);
+    let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o2770));
+}
+
+/// One docker network per app, so apps cannot reach each other.
+pub fn network_name(app: &str) -> String {
+    format!("orch-net-{}", &crate::util::sha256_hex(app_of(app))[..24])
+}
+
+fn known_networks() -> &'static Mutex<HashSet<String>> {
+    static N: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
+    N.get_or_init(Default::default)
+}
+
+/// Creates the app's network once (best effort: a real error shows up when the app starts).
+fn ensure_network(app: &str) {
+    let net = network_name(app);
+    if known_networks().lock().unwrap().contains(&net) {
         return;
     }
     let exists = docker_std()
-        .args(["network", "inspect", NETWORK])
+        .args(["network", "inspect", &net])
         .output()
         .is_ok_and(|o| o.status.success());
     if exists
         || docker_std()
-            .args(["network", "create", NETWORK])
+            .args(["network", "create", &net])
             .output()
             .is_ok_and(|o| o.status.success())
     {
-        DONE.store(true, std::sync::atomic::Ordering::Relaxed);
+        known_networks().lock().unwrap().insert(net);
     }
+}
+
+/// Removes the app's network (when the app is removed).
+pub async fn remove_network(app: &str) {
+    let net = network_name(app);
+    known_networks().lock().unwrap().remove(&net);
+    let _ = Command::from(docker_std())
+        .args(["network", "rm", &net])
+        .output()
+        .await;
 }
 
 fn stack_image(stack: &str) -> &'static str {
@@ -143,8 +171,8 @@ fn app_of(key: &str) -> &str {
 
 struct RunOpts<'a> {
     name: &'a str,
-    /// label value; None for steps
-    app: Option<&'a str>,
+    /// label value and network owner
+    app: &'a str,
     stack: &'a str,
     image: Option<&'a str>,
     code: &'a Path,
@@ -157,6 +185,8 @@ struct RunOpts<'a> {
     script: Option<&'a str>,
     step: bool,
     user: &'a str,
+    /// seconds for the in-container `timeout` backstop (steps)
+    timeout_secs: Option<u64>,
 }
 
 /// Arguments of `docker run` for one app or step container.
@@ -169,17 +199,19 @@ fn container_run_args(o: &RunOpts) -> Vec<String> {
             a.push($v);
         }};
     }
-    if let Some(app) = o.app {
-        kv!("--label", format!("orch.publish.app={app}"));
-        kv!("--label", format!("dev.kiri.domain={app}"));
+    kv!("--label", format!("orch.publish.app={}", o.app));
+    if o.step {
+        kv!("--label", "orch.publish.step=1".into());
     }
-    kv!("--network", NETWORK.into());
+    kv!("--network", network_name(o.app));
     kv!("-p", format!("127.0.0.1:{p}:{p}", p = o.port));
-    kv!("--memory", if o.step { "512m" } else { "128m" }.into());
+    let mem = if o.step { "512m" } else { "128m" };
+    kv!("--memory", mem.into());
+    kv!("--memory-swap", mem.into());
     kv!("--cpus", if o.step { "1" } else { "0.5" }.into());
     kv!("--pids-limit", if o.step { "256" } else { "64" }.into());
     a.push("--read-only".into());
-    kv!("--tmpfs", "/tmp".into());
+    kv!("--tmpfs", "/tmp:size=32m".into());
     kv!("--cap-drop", "ALL".into());
     kv!("--security-opt", "no-new-privileges".into());
     kv!("--user", o.user.into());
@@ -194,7 +226,13 @@ fn container_run_args(o: &RunOpts) -> Vec<String> {
         );
         kv!("-w", "/app".into());
     }
-    kv!("-v", format!("{}:/data", o.data.display()));
+    // store = none: nothing to keep, so /data is read-only for the running app
+    let ro = if !o.step && o.store == "none" {
+        ":ro"
+    } else {
+        ""
+    };
+    kv!("-v", format!("{}:/data{ro}", o.data.display()));
     let mut env = vec![
         ("HOST", "0.0.0.0".to_string()),
         ("PORT", o.port.to_string()),
@@ -212,13 +250,23 @@ fn container_run_args(o: &RunOpts) -> Vec<String> {
     for (k, v) in env {
         kv!("-e", format!("{k}={v}"));
     }
+    // an image ENTRYPOINT must not swallow `start` / `test`: scripts run through sh
+    if docker && o.script.is_some() {
+        kv!("--entrypoint", "sh".into());
+    }
     a.push(
         o.image
             .map(String::from)
             .unwrap_or_else(|| stack_image(o.stack).into()),
     );
     if let Some(s) = o.script {
-        a.extend(["sh".into(), "-c".into(), s.into()]);
+        if let (false, Some(n)) = (docker, o.timeout_secs) {
+            a.extend(["timeout".into(), n.to_string()]);
+        }
+        if !docker {
+            a.push("sh".into());
+        }
+        a.extend(["-c".into(), s.into()]);
     }
     a
 }
@@ -240,14 +288,118 @@ async fn rm_container(name: &str) {
         .await;
 }
 
-/// `docker build` of a docker-stack bundle. Returns (success, output).
+/// Removes the container when dropped (a step or deploy future that is cancelled).
+struct RmOnDrop {
+    name: String,
+    armed: bool,
+}
+
+impl Drop for RmOnDrop {
+    fn drop(&mut self) {
+        if self.armed {
+            let mut c = docker_std();
+            c.args(["rm", "-f", &self.name]);
+            std::thread::spawn(move || {
+                let _ = c.output();
+            });
+        }
+    }
+}
+
+/// `app<TAB>name` lines of `docker ps -a`: the containers whose app is not in `known`.
+fn orphan_containers(listed: &str, known: &HashSet<String>) -> Vec<String> {
+    listed
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .filter(|(app, n)| !n.trim().is_empty() && !known.contains(app.trim()))
+        .map(|(_, n)| n.trim().to_string())
+        .collect()
+}
+
+/// At server start: removes every leftover step container and every app container whose app
+/// is not in the database.
+pub async fn sweep_containers(known_apps: &HashSet<String>) {
+    let list = |filter: &'static str| async move {
+        Command::from(docker_std())
+            .args([
+                "ps",
+                "-a",
+                "--filter",
+                filter,
+                "--format",
+                "{{.Label \"orch.publish.app\"}}\t{{.Names}}",
+            ])
+            .output()
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default()
+    };
+    for l in list("label=orch.publish.step").await.lines() {
+        if let Some((_, n)) = l.split_once('\t') {
+            rm_container(n.trim()).await;
+        }
+    }
+    for n in orphan_containers(&list("label=orch.publish.app").await, known_apps) {
+        rm_container(&n).await;
+    }
+}
+
+/// Reject Dockerfiles that could reach outside the build: a `# syntax=` parser directive (pulls a
+/// frontend image) or any `--mount=` (host cache/secret/ssh mounts). Continuation lines are joined first.
+pub fn check_dockerfile(text: &str) -> Result<(), &'static str> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for l in text.lines() {
+        let t = l.trim_end();
+        if let Some(head) = t.strip_suffix('\\') {
+            cur.push_str(head);
+            cur.push(' ');
+        } else {
+            cur.push_str(t);
+            lines.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    for l in lines {
+        let l = l.trim().to_lowercase();
+        if let Some(rest) = l.strip_prefix('#') {
+            let rest = rest.trim_start();
+            if rest
+                .strip_prefix("syntax")
+                .is_some_and(|r| r.trim_start().starts_with('='))
+            {
+                return Err("The Dockerfile must not have a `# syntax=` line.");
+            }
+        }
+        if l.contains("--mount") {
+            return Err("The Dockerfile must not use `--mount=`.");
+        }
+    }
+    Ok(())
+}
+
+fn build_gate() -> &'static tokio::sync::Semaphore {
+    static S: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    S.get_or_init(|| tokio::sync::Semaphore::new(1))
+}
+
+/// Tag of a new image: unique even after an app name is reused.
+pub fn new_image_tag(app: &str, vdir: &str) -> String {
+    format!("orch-app-{app}:{vdir}-{}", crate::util::rand_id(8))
+}
+
+/// `docker build` of a docker-stack bundle (one build at a time on this server). Returns (success, output).
 pub async fn build_image(tag: &str, dir: &Path, secs: u64) -> (bool, String) {
+    let _permit = build_gate().acquire().await;
     let mut c = Command::from(docker_std());
-    c.args(["build", "-t", tag])
+    // --load: with a buildx docker-container driver the image would stay in the build cache only
+    c.args(["build", "--load", "-t", tag])
         .arg(dir)
         .stdin(Stdio::null())
         .kill_on_drop(true);
-    match tokio::time::timeout(Duration::from_secs(secs), c.output()).await {
+    let r = match tokio::time::timeout(Duration::from_secs(secs), c.output()).await {
         Err(_) => (false, format!("timed out after {secs} s")),
         Ok(Err(e)) => (false, e.to_string()),
         Ok(Ok(o)) => {
@@ -255,25 +407,57 @@ pub async fn build_image(tag: &str, dir: &Path, secs: u64) -> (bool, String) {
             out.push_str(&String::from_utf8_lossy(&o.stderr));
             (o.status.success(), out)
         }
-    }
-}
-
-/// Builds the image unless the engine already has it.
-pub async fn ensure_image(tag: &str, dir: &Path, secs: u64) -> bool {
-    let have = Command::from(docker_std())
-        .args(["image", "inspect", tag])
-        .output()
-        .await
-        .is_ok_and(|o| o.status.success());
-    have || build_image(tag, dir, secs).await.0
-}
-
-/// Removes an image (best effort).
-pub async fn remove_image(tag: &str) {
+    };
     let _ = Command::from(docker_std())
-        .args(["rmi", tag])
+        .args(["builder", "prune", "-f", "--keep-storage", "2GB"])
         .output()
         .await;
+    r
+}
+
+/// Images of an app (`vdir` = only that version).
+async fn find_images(app: &str, vdir: Option<&str>) -> Vec<String> {
+    let pat = match vdir {
+        Some(v) => format!("orch-app-{app}:{v}-*"),
+        None => format!("orch-app-{app}:*"),
+    };
+    Command::from(docker_std())
+        .args([
+            "images",
+            "--format",
+            "{{.Repository}}:{{.Tag}}",
+            "--filter",
+            &format!("reference={pat}"),
+        ])
+        .output()
+        .await
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The image of this version, built now if the engine does not have it. None = could not build.
+pub async fn ensure_image(app: &str, vdir: &str, dir: &Path, secs: u64) -> Option<String> {
+    if let Some(t) = find_images(app, Some(vdir)).await.into_iter().next() {
+        return Some(t);
+    }
+    let tag = new_image_tag(app, vdir);
+    build_image(&tag, dir, secs).await.0.then_some(tag)
+}
+
+/// Removes the images of an app: one version (`vdir`) or all of them (best effort).
+pub async fn remove_images(app: &str, vdir: Option<&str>) {
+    for t in find_images(app, vdir).await {
+        let _ = Command::from(docker_std())
+            .args(["rmi", "-f", &t])
+            .output()
+            .await;
+    }
 }
 
 /// Hex of the app name (the `~new` suffix of a version being deployed is dropped): injective.
@@ -436,7 +620,7 @@ impl Runner {
             }
         }
         let mut cmd = if container_mode() {
-            ensure_network();
+            ensure_network(name);
             let live: HashSet<String> = self
                 .procs
                 .lock()
@@ -453,10 +637,11 @@ impl Runner {
             for n in leftover_containers(&listed, &live) {
                 let _ = docker_std().args(["rm", "-f", &n]).output();
             }
-            let script = (!s.start.is_empty()).then(|| format!("exec {}", s.start));
+            group_writable_dir(&s.data_dir);
+            let script = (!s.start.is_empty()).then(|| format!("umask 002; exec {}", s.start));
             let args = container_run_args(&RunOpts {
                 name: &unit,
-                app: Some(app_of(name)),
+                app: app_of(name),
                 stack: &s.stack,
                 image: s.image.as_deref(),
                 code: &s.dir,
@@ -467,7 +652,8 @@ impl Runner {
                 store: &s.store,
                 script: script.as_deref(),
                 step: false,
-                user: &server_user(),
+                user: &app_user(),
+                timeout_secs: None,
             });
             let mut c = Command::from(docker_std());
             c.args(args);
@@ -571,10 +757,13 @@ pub async fn run_step(
     let unit = format!("orch-step-{}", crate::util::rand_id(8));
     let container = container_mode();
     let mut c = if container {
-        let _ = tokio::task::spawn_blocking(ensure_network).await;
+        let app = ctx.app.to_string();
+        let _ = tokio::task::spawn_blocking(move || ensure_network(&app)).await;
+        group_writable_dir(data_dir);
+        let script = format!("umask 002; {cmd}");
         let args = container_run_args(&RunOpts {
             name: &unit,
-            app: None,
+            app: ctx.app,
             stack: ctx.stack,
             image: ctx.image,
             code: dir,
@@ -583,9 +772,10 @@ pub async fn run_step(
             port,
             base_path,
             store,
-            script: Some(cmd),
+            script: Some(&script),
             step: true,
-            user: &server_user(),
+            user: &app_user(),
+            timeout_secs: Some(secs + 5),
         });
         let mut c = Command::from(docker_std());
         c.args(args);
@@ -603,6 +793,10 @@ pub async fn run_step(
         )
     };
     c.stdin(Stdio::null()).kill_on_drop(true);
+    let mut guard = RmOnDrop {
+        name: unit.clone(),
+        armed: container,
+    };
     let cleanup = |unit: String| async move {
         if container {
             rm_container(&unit).await;
@@ -610,7 +804,9 @@ pub async fn run_step(
             stop_unit(&unit).await;
         }
     };
-    match tokio::time::timeout(Duration::from_secs(secs), c.output()).await {
+    let res = tokio::time::timeout(Duration::from_secs(secs), c.output()).await;
+    guard.armed = false;
+    match res {
         Err(_) => {
             cleanup(unit).await;
             (false, format!("timed out after {secs} s"))
@@ -710,7 +906,7 @@ mod tests {
     fn opts<'a>(stack: &'a str, image: Option<&'a str>, d: &'a Path) -> RunOpts<'a> {
         RunOpts {
             name: "orch-app-6465-9100",
-            app: Some("de"),
+            app: "de",
             stack,
             image,
             code: d,
@@ -721,7 +917,8 @@ mod tests {
             store: "json",
             script: Some("exec python3 main.py"),
             step: false,
-            user: "1001:1002",
+            user: "61000:1002",
+            timeout_secs: None,
         }
     }
 
@@ -737,16 +934,16 @@ mod tests {
         for (k, v) in [
             ("--name", "orch-app-6465-9100"),
             ("--label", "orch.publish.app=de"),
-            ("--label", "dev.kiri.domain=de"),
-            ("--network", "orch-apps"),
+            ("--network", network_name("de").as_str()),
+            ("--memory-swap", "128m"),
             ("-p", "127.0.0.1:9100:9100"),
             ("--memory", "128m"),
             ("--cpus", "0.5"),
             ("--pids-limit", "64"),
-            ("--tmpfs", "/tmp"),
+            ("--tmpfs", "/tmp:size=32m"),
             ("--cap-drop", "ALL"),
             ("--security-opt", "no-new-privileges"),
-            ("--user", "1001:1002"),
+            ("--user", "61000:1002"),
             ("-v", "/srv/code:/app:ro"),
             ("-v", "/srv/code:/data"),
             ("-w", "/app"),
@@ -778,10 +975,21 @@ mod tests {
         let mut o = opts("node", None, &d);
         o.step = true;
         o.code_rw = true;
-        o.app = None;
+        o.timeout_secs = Some(65);
         let a = container_run_args(&o);
         assert!(pair(&a, "-v", "/srv/code:/app"), "build mounts code rw");
-        assert!(a.iter().all(|x| !x.starts_with("orch.publish.app")));
+        assert!(pair(&a, "--label", "orch.publish.step=1"));
+        assert!(pair(&a, "--label", "orch.publish.app=de"));
+        assert!(
+            pair(&a, "-v", "/srv/code:/data"),
+            "steps keep /data writable"
+        );
+        assert!(!a.iter().any(|x| x.contains("dev.kiri")));
+        let n = a.len();
+        assert_eq!(
+            &a[n - 6..n - 1],
+            ["node:22-slim", "timeout", "65", "sh", "-c"].map(String::from)
+        );
         assert!(a.contains(&"node:22-slim".to_string()));
         assert!(!a.iter().any(|x| x.starts_with("PATH=")));
         // docker stack: own image, no code mount, no workdir, optional start
@@ -797,7 +1005,7 @@ mod tests {
         o.script = Some("./run");
         assert_eq!(
             &container_run_args(&o)[container_run_args(&o).len() - 3..],
-            ["sh", "-c", "./run"]
+            ["orch-app-de:v1", "-c", "./run"]
         );
     }
 
@@ -818,5 +1026,55 @@ mod tests {
             "none",
         );
         assert!(e.contains(&("HOST".into(), "127.0.0.1".into())));
+    }
+
+    #[test]
+    fn per_app_networks_and_store_none_is_read_only() {
+        assert_ne!(network_name("a-b"), network_name("a-c"));
+        assert_eq!(network_name("demo"), network_name("demo~new"));
+        let d = PathBuf::from("/srv/code");
+        let mut o = opts("python", None, &d);
+        o.store = "none";
+        assert!(pair(&container_run_args(&o), "-v", "/srv/code:/data:ro"));
+    }
+
+    #[test]
+    fn docker_stack_scripts_go_through_sh_entrypoint() {
+        let d = PathBuf::from("/srv/code");
+        let mut o = opts("docker", Some("orch-app-de:v1-abcd1234"), &d);
+        o.script = Some("./run");
+        o.timeout_secs = Some(60);
+        let a = container_run_args(&o);
+        assert!(pair(&a, "--entrypoint", "sh"));
+        let n = a.len();
+        assert_eq!(
+            &a[n - 3..],
+            ["orch-app-de:v1-abcd1234", "-c", "./run"].map(String::from)
+        );
+        o.script = None;
+        assert!(!container_run_args(&o).contains(&"--entrypoint".to_string()));
+    }
+
+    #[test]
+    fn dockerfile_checks() {
+        assert!(check_dockerfile("FROM x\nRUN a \\\n  && b\n").is_ok());
+        assert!(check_dockerfile("# syntax=docker/dockerfile:1\nFROM x\n").is_err());
+        assert!(check_dockerfile("#syntax = evil/frontend\nFROM x\n").is_err());
+        assert!(check_dockerfile("FROM x\nRUN \\\n  --mount=type=cache,target=/c make\n").is_err());
+        assert!(check_dockerfile("FROM x\n# just a comment about syntax\n").is_ok());
+    }
+
+    #[test]
+    fn orphan_containers_of_unknown_apps() {
+        let known: HashSet<String> = ["keep".to_string()].into();
+        let listed = "keep\torch-app-a-1\ngone\torch-app-b-2\n";
+        assert_eq!(orphan_containers(listed, &known), vec!["orch-app-b-2"]);
+    }
+
+    #[test]
+    fn image_tags_are_unique() {
+        let a = new_image_tag("demo", "v1abc");
+        assert!(a.starts_with("orch-app-demo:v1abc-"));
+        assert_ne!(a, new_image_tag("demo", "v1abc"));
     }
 }
