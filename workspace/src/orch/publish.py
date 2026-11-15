@@ -157,8 +157,8 @@ def _bundle_path(rel: str) -> str:
     return rel
 
 
-def _text_of(data: bytes) -> str | None:
-    """The text of a file, or None for a binary one (images, archives, fonts: a NUL byte early on). UTF-16 and
+def _texts_of(data: bytes) -> list[str]:
+    """The texts to scan, [] for a binary file (a NUL byte early on). UTF-16 and
     UTF-32 text (Windows editors, PowerShell redirects) is NUL-heavy too, so it is decoded, never skipped."""
     for bom, codec in (
         (b"\xff\xfe\0\0", "utf-32"),
@@ -168,16 +168,22 @@ def _text_of(data: bytes) -> str | None:
         (b"\xef\xbb\xbf", "utf-8-sig"),
     ):
         if data.startswith(bom):
-            return data.decode(codec, "replace")
+            return [
+                data.decode(codec, "replace"),
+                data.decode("utf-8", "replace"),
+            ]  # a fake BOM hides nothing
     head = data[:8192]
     if b"\0" not in head:
-        return data.decode("utf-8", "replace")
+        return [data.decode("utf-8", "replace")]
     n = len(head) // 2
     if n >= 8:  # BOM-less UTF-16: NULs sit at one parity only (ASCII text)
         even, odd = head[0 : 2 * n : 2].count(0), head[1 : 2 * n : 2].count(0)
         if max(even, odd) >= 0.4 * n and min(even, odd) <= 0.02 * n:
-            return data.decode("utf-16-le" if odd > even else "utf-16-be", "replace")
-    return None
+            return [
+                data.decode("utf-16-le" if odd > even else "utf-16-be", "replace"),
+                data.decode("utf-8", "replace"),
+            ]
+    return []
 
 
 CHUNK = secretscan.MAX_BYTES // 2
@@ -189,19 +195,17 @@ def scan_files(root: Path | None, items: list[tuple[str, bytes]]) -> None:
     bytes that are about to be encrypted and sent. Names the kind, the file and the line, never the value."""
     hits: dict[tuple[str, int, str], None] = {}
     for name, data in items:
-        text = _text_of(data)
-        if text is None:
-            continue
-        # chunks with an overlap, so a big file is scanned in full and no token is cut in two
-        pos = 0
-        while True:
-            end = min(pos + CHUNK, len(text))
-            line0 = text.count("\n", 0, pos)
-            for f in secretscan.find(text[pos:end], root):
-                hits[(name, f["line"] + line0, f["kind"])] = None
-            if end >= len(text):
-                break
-            pos = end - OVERLAP
+        for text in _texts_of(data):
+            # chunks with an overlap, so a big file is scanned in full and no token is cut in two
+            pos = 0
+            while True:
+                end = min(pos + CHUNK, len(text))
+                line0 = text.count("\n", 0, pos)
+                for f in secretscan.find(text[pos:end], root):
+                    hits[(name, f["line"] + line0, f["kind"])] = None
+                if end >= len(text):
+                    break
+                pos = end - OVERLAP
     if not hits:
         return
     name, line, kind = sorted(hits, key=lambda h: (h[0], h[1]))[0]

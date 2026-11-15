@@ -716,3 +716,10 @@ def test_token_on_a_chunk_boundary_is_found():
     data = (pad + f" {PLANT}\n" + line).encode()
     with pytest.raises(Refused):
         publish.scan_files(None, [("min.js", data)])
+
+
+def test_fake_bom_before_a_utf8_token_does_not_hide_it():
+    for bom in (b"\xff\xfe", b"\xfe\xff", b"\xff\xfe\0\0", b"\0\0\xfe\xff"):
+        with pytest.raises(Refused) as e:
+            publish.scan_files(None, [("x.env", bom + f"A=1\nTOKEN={PLANT}\n".encode())])
+        assert PLANT not in str(e.value)
