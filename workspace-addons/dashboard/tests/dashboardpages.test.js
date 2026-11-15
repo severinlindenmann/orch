@@ -325,25 +325,29 @@ test('General phone messages belong in Chat, not Home Messages', () => {
 });
 
 
-test('settings: the folder is shown plainly with Copy path and the quiet full path, no Details', () => {
+test('settings: the folder name is plain, the full path is behind one "Where is it stored?" click', () => {
   const c = context([], {snapshot:false, addons:() => []});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
   const long = '/Users/someone/Documents/Projects/2026/customer-work/team-shared/pilatus-workspace';
+  const text = n => typeof n === 'string' ? n : n.textContent != null ? String(n.textContent) : (n.children || []).map(text).join('');
   for (const folder of ['/Users/me/pilatus', long]) {
     c.state.settings = {folder, addons:[]};
     const page = c.settingsPage();
     const ws = nodes(page, n => n.attrs?.['data-key'] === 'settings-workspace')[0];
     const row = nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder')[0];
-    assert.ok(row);
-    assert.equal(nodes(ws, n => n.tag === 'details').length, 0);
-    assert.equal(row.attrs.title, folder);
+    assert.equal(row.tag, 'details');
+    assert.match(text(nodes(row, n => n.tag === 'summary')[0]), /^Where is it stored\?$/);
+    const pathLine = nodes(row, n => n.tag === 'p')[0];
+    assert.equal(pathLine.attrs.title, folder);
     assert.equal(nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder-name')[0].textContent, folder.split('/').pop());
     assert.equal(nodes(ws, n => n.attrs?.['data-key'] === 'settings-copy-path')[0].attrs['data-copy'], folder);
     if (folder === long) {
-      assert.ok(row.textContent.length <= 48 && row.textContent.includes('…'));
-      assert.ok(row.textContent.startsWith('/Users/someone') && row.textContent.endsWith('pilatus-workspace'));
-    } else assert.equal(row.textContent, folder);
-    assert.equal(nodes(page, n => n.tag === 'details').length, 0, 'Settings has no Details toggles');
+      assert.ok(text(pathLine).length <= 48 && text(pathLine).includes('…'));
+      assert.ok(text(pathLine).startsWith('/Users/someone') && text(pathLine).endsWith('pilatus-workspace'));
+    } else assert.equal(text(pathLine), folder);
+    // the path is not shown outside that click
+    const outside = nodes(ws, n => n.tag === 'p' && text(n).includes('/Users/') && !nodes(row, m => m === n).length);
+    assert.equal(outside.length, 0);
   }
 });
 

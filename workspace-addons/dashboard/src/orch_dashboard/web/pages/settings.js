@@ -293,7 +293,7 @@ function syncInfo(card) {
   return h('div', {className:'stack', 'data-key':'sync-info'}, banner,
     h('div', {className:'grid-3'},
       box('sync-where-info', 'Where', h('strong', {}, 'This computer'), h('p', {className:'meta'}, 'The ' + (card.folder || 'workspace') + ' folder'),
-        remote ? [h('strong', {}, 'Your own storage'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, ''))] : null),
+        remote ? [h('strong', {}, 'Your own storage'), h('details', {className:'det'}, h('summary', {}, 'Where is it stored?'), h('p', {className:'meta'}, String(card.remote).replace(/^https?:\/\//, '')))] : null),
       box('sync-what-info', 'What', h('strong', {}, c.tickets + ' tickets · ' + c.files + ' files · ' + syncSize(c.bytes)), h('p', {className:'meta'}, 'Never included: passwords and keys, your private files.')),
       box('sync-when-info', 'When', h('strong', {}, 'Last: ' + (syncWhen(card.last_ok) || 'not yet')),
         h('p', {className:'meta'}, 'Next: ' + (card.running && card.next_run ? syncWhen(card.next_run) + ' · ' : card.running ? '' : 'not while sync is stopped · ') + 'every ' + (card.interval || 15) + ' minutes'),
@@ -565,10 +565,11 @@ function settingsPage() {
     panel('general', [privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       wsField('name', 'Name', settings.ws_name || state.workspace, settings, 'The name shown for this workspace. Your folder keeps its own name.'),
       wsField('description', 'About', settings.ws_description, settings, 'One short line about what this workspace is for. Shown here only; the Description under Appearance goes to your phone and shared pages.'),
-      // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
+      // Folder: its name plainly, Copy path, and the full path behind one small "Where is it stored?" click.
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),
-        settingsText('p', {className:'mono meta folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder))),
+        h('details', {className:'det', 'data-key':'settings-folder'}, h('summary', {}, 'Where is it stored?'),
+          settingsText('p', {className:'mono meta folder-path', title:String(settings.folder || '')}, middleShort(settings.folder)))),
         snapshot || !settings.folder ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')))),
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
