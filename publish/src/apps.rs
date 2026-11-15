@@ -648,7 +648,64 @@ fn cookie_value(req: &Request, cname: &str) -> Option<String> {
     None
 }
 
+/// Every response under /a/<name>/ is sandboxed: the page gets an opaque origin, so one app's
+/// script can never read another app's pages (all apps share one origin). Never add
+/// `allow-same-origin` or `allow-top-navigation`; there is deliberately no opt-out.
+const APP_CSP: &str = "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
+
+fn is_public_live(st: &State, name: &str) -> bool {
+    match db::get_app(&st.db.lock().unwrap(), name) {
+        Ok(Some(a)) => {
+            a.public
+                && !a
+                    .expires_at
+                    .as_deref()
+                    .is_some_and(|e| e <= util::now().as_str())
+        }
+        _ => false,
+    }
+}
+
 async fn handle(st: State, name: String, rest: String, req: Request) -> Response {
+    let origin_null = req
+        .headers()
+        .get(header::ORIGIN)
+        .is_some_and(|o| o.as_bytes() == b"null");
+    let preflight = req.method() == axum::http::Method::OPTIONS
+        && req
+            .headers()
+            .contains_key(header::ACCESS_CONTROL_REQUEST_METHOD);
+    let public = (origin_null || preflight) && is_public_live(&st, &name);
+    let mut resp = if preflight && public {
+        // answered here, never forwarded to the app; public content is readable by anyone anyway
+        let mut r = StatusCode::NO_CONTENT.into_response();
+        let h = r.headers_mut();
+        h.insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            "GET, POST, PUT, PATCH, DELETE".parse().unwrap(),
+        );
+        let ah = req
+            .headers()
+            .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
+            .cloned()
+            .unwrap_or_else(|| "content-type".parse().unwrap());
+        h.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, ah);
+        h.insert(header::ACCESS_CONTROL_MAX_AGE, "600".parse().unwrap());
+        r
+    } else {
+        handle_inner(st, name, rest, req).await
+    };
+    let h = resp.headers_mut();
+    if public && (origin_null || preflight) {
+        h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "null".parse().unwrap());
+        h.remove(header::ACCESS_CONTROL_ALLOW_CREDENTIALS);
+        h.append(header::VARY, "Origin".parse().unwrap());
+    }
+    h.append(header::CONTENT_SECURITY_POLICY, APP_CSP.parse().unwrap());
+    resp
+}
+
+async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Response {
     let app = match db::get_app(&st.db.lock().unwrap(), &name) {
         Ok(Some(a)) => a,
         _ => {

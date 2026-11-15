@@ -40,6 +40,12 @@ $ orch publish view --json  # server
 Redeploying an app (`orch publish app <folder>`) keeps its address and private view link; the old version keeps running if the
 new one fails its test.
 
+**Apps run sandboxed.** Every page an app serves is sandboxed by the server (`Content-Security-Policy: sandbox ...`), so
+that one app can never read another app's pages. Scripts, forms, popups and downloads work. But the page has no origin of its
+own: `localStorage`, `sessionStorage`, IndexedDB and cookies throw or stay empty. Keep state on the app's backend and
+identify people by a link token or a typed name. `fetch()` to the app's own paths works for public apps (the server answers
+the cross-origin check for them); private apps get no such answer. An app cannot switch the sandbox off.
+
 ---
 
 # Reference

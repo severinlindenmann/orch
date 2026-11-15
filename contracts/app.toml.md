@@ -43,6 +43,13 @@ public = false                    # false = needs ?token=<view token> (default),
 | `DATA_DIR` | `/var/lib/orch-publish/apps/weekly-report/data` (`/data` in a container) | The only writable folder; kept across deploys. Empty and read-only when `store = "none"` |
 | `STORE` | `sqlite` | The store from app.toml. The app picks file names itself (`data.json`, `*.md`, `app.db`) |
 
+## Browser sandbox
+**Apps run sandboxed.** Every page an app serves is sandboxed by the server (`Content-Security-Policy: sandbox ...`), so
+that one app can never read another app's pages. Scripts, forms, popups and downloads work. But the page has no origin of its
+own: `localStorage`, `sessionStorage`, IndexedDB and cookies throw or stay empty. Keep state on the app's backend and
+identify people by a link token or a typed name. `fetch()` to the app's own paths works for public apps (the server answers
+the cross-origin check for them); private apps get no such answer. An app cannot switch the sandbox off.
+
 ## Sandbox
 
 The server picks one of three modes with `ORCH_PUBLISH_SANDBOX`:

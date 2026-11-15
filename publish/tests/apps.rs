@@ -506,3 +506,237 @@ async fn apps_delete_with_a_dotdot_name_touches_nothing() {
     }
     assert!(marker.is_dir());
 }
+
+// ---- #614: apps are sandboxed from each other
+
+fn csp_all(r: &Resp) -> Vec<String> {
+    r.headers
+        .get_all("content-security-policy")
+        .iter()
+        .map(|v| v.to_str().unwrap().to_string())
+        .collect()
+}
+
+fn assert_sandboxed(r: &Resp, what: &str) {
+    let all = csp_all(r);
+    let ours = all
+        .iter()
+        .find(|c| c.starts_with("sandbox allow-scripts allow-forms"))
+        .unwrap_or_else(|| panic!("{what}: no sandbox CSP in {all:?}"));
+    assert_eq!(
+        ours,
+        "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads",
+        "{what}"
+    );
+    for c in &all {
+        assert!(!c.contains("allow-same-origin"), "{what}");
+        assert!(!c.contains("allow-top-navigation"), "{what}");
+    }
+}
+
+const CSP_APP: &str = r#"import os, json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+HITS = []
+class H(BaseHTTPRequestHandler):
+    def _reply(self, extra=None):
+        HITS.append(self.command)
+        body = json.dumps(HITS).encode()
+        self.send_response(200)
+        self.send_header("Content-Security-Policy", "default-src 'self'")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def do_GET(self): self._reply()
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        self._reply()
+    def do_OPTIONS(self): self._reply()
+    def log_message(self, *a):
+        pass
+HTTPServer(("127.0.0.1", int(os.environ["PORT"])), H).serve_forever()
+"#;
+
+#[tokio::test]
+async fn apps_static_responses_are_sandboxed() {
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let r = deploy(
+        &t,
+        &ws,
+        "site",
+        &[
+            ("app.toml", STATIC_TOML),
+            ("index.html", "<h1>hi</h1>"),
+            ("a.css", "body{}"),
+            ("notes.md", "# T\n"),
+        ],
+        "?days=7",
+    )
+    .await;
+    let tok = r.json()["view_token"].as_str().unwrap().to_string();
+    // private notice (no cookie), wrong-token notice
+    assert_sandboxed(
+        &call(&t.public, "GET", "/a/site/", &[], vec![]).await,
+        "private notice",
+    );
+    // missing app
+    assert_sandboxed(
+        &call(&t.public, "GET", "/a/nope/", &[], vec![]).await,
+        "unknown app",
+    );
+    // token redirect
+    let red = call(
+        &t.public,
+        "GET",
+        &format!("/a/site/?token={tok}"),
+        &[],
+        vec![],
+    )
+    .await;
+    assert_sandboxed(&red, "token redirect");
+    let c = red.headers["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    for (path, what) in [
+        ("/a/site/", "html"),
+        ("/a/site/a.css", "css"),
+        ("/a/site/notes.md", "md"),
+    ] {
+        let r = call(&t.public, "GET", path, &[("cookie", &c)], vec![]).await;
+        assert_eq!(r.status, 200, "{what}");
+        assert_sandboxed(&r, what);
+        // private app: no CORS at all, even for a null origin
+        let r = call(
+            &t.public,
+            "GET",
+            path,
+            &[("cookie", &c), ("origin", "null")],
+            vec![],
+        )
+        .await;
+        assert!(
+            r.headers.get("access-control-allow-origin").is_none(),
+            "{what}"
+        );
+    }
+    // private app preflight is not answered with CORS
+    let pf = call(
+        &t.public,
+        "OPTIONS",
+        "/a/site/",
+        &[
+            ("origin", "null"),
+            ("access-control-request-method", "POST"),
+        ],
+        vec![],
+    )
+    .await;
+    assert!(pf.headers.get("access-control-allow-origin").is_none());
+    assert_sandboxed(&pf, "private preflight");
+    // paused
+    t.api(&ws, "POST", "/v1/apps/site/stop", vec![]).await;
+    let r = call(&t.public, "GET", "/a/site/", &[("cookie", &c)], vec![]).await;
+    assert_eq!(r.status, 503);
+    assert_sandboxed(&r, "paused notice");
+    // expired
+    t.st.db
+        .lock()
+        .unwrap()
+        .execute("UPDATE apps SET expires_at='2000-01-01T00:00:00Z'", [])
+        .unwrap();
+    let r = call(&t.public, "GET", "/a/site/", &[("cookie", &c)], vec![]).await;
+    assert_eq!(r.status, 410);
+    assert_sandboxed(&r, "expired notice");
+}
+
+#[tokio::test]
+async fn apps_public_proxy_sandbox_and_cors_for_null_origin() {
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let toml = py_toml("poll", "public = true");
+    assert_eq!(
+        deploy(
+            &t,
+            &ws,
+            "poll",
+            &[("app.toml", &toml), ("main.py", CSP_APP)],
+            ""
+        )
+        .await
+        .status,
+        200
+    );
+    // backend sends its own CSP: ours is added next to it, never replaced
+    let r = call(&t.public, "GET", "/a/poll/", &[], vec![]).await;
+    assert_eq!(r.status, 200);
+    assert!(csp_all(&r).iter().any(|c| c == "default-src 'self'"));
+    assert_sandboxed(&r, "proxied");
+    // null origin gets ACAO null (overriding the backend's wildcard), no credentials
+    let r = call(
+        &t.public,
+        "POST",
+        "/a/poll/vote",
+        &[("origin", "null")],
+        b"{}".to_vec(),
+    )
+    .await;
+    assert_eq!(r.headers["access-control-allow-origin"], "null");
+    assert!(r.headers.get("access-control-allow-credentials").is_none());
+    assert_sandboxed(&r, "proxied post");
+    // preflight: answered here, backend never sees OPTIONS
+    let pf = call(
+        &t.public,
+        "OPTIONS",
+        "/a/poll/vote",
+        &[
+            ("origin", "null"),
+            ("access-control-request-method", "POST"),
+            ("access-control-request-headers", "content-type"),
+        ],
+        vec![],
+    )
+    .await;
+    assert_eq!(pf.status, 204);
+    assert_eq!(pf.headers["access-control-allow-origin"], "null");
+    assert_eq!(
+        pf.headers["access-control-allow-methods"],
+        "GET, POST, PUT, PATCH, DELETE"
+    );
+    assert_eq!(pf.headers["access-control-allow-headers"], "content-type");
+    assert_eq!(pf.headers["access-control-max-age"], "600");
+    assert_sandboxed(&pf, "preflight");
+    let hits = call(&t.public, "GET", "/a/poll/", &[], vec![]).await.json();
+    assert!(!hits.to_string().contains("OPTIONS"), "{hits}");
+}
+
+#[tokio::test]
+async fn apps_public_static_null_origin_gets_cors() {
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let toml = format!("{STATIC_TOML}public = true\n");
+    deploy(
+        &t,
+        &ws,
+        "site",
+        &[("app.toml", &toml), ("index.html", "x")],
+        "",
+    )
+    .await;
+    let r = call(&t.public, "GET", "/a/site/", &[("origin", "null")], vec![]).await;
+    assert_eq!(r.headers["access-control-allow-origin"], "null");
+    // other origins get nothing
+    let r = call(
+        &t.public,
+        "GET",
+        "/a/site/",
+        &[("origin", "https://evil.test")],
+        vec![],
+    )
+    .await;
+    assert!(r.headers.get("access-control-allow-origin").is_none());
+}
