@@ -225,7 +225,7 @@ struct NewTopicVoiceView: View {
     }
 
     /// The other memos of a long or extended recording: wait for the workspace's ack of the first one, then add them to that topic.
-    /// No ack in time: the files stay on the phone (never sent as new topics).
+    /// No ack in time: the takes wait in the outbox (kept on disk, joined to the topic when the ack arrives, never sent as new topics).
     @MainActor private static func sendRest(_ drafts: [DraftVoice], model: AppModel, workspace: String, clientId: String, firstId: String?) async {
         var ticket: String?
         for _ in 0..<15 {
@@ -235,7 +235,14 @@ struct NewTopicVoiceView: View {
             try? await Task.sleep(for: .milliseconds(700))
             await model.reloadMessages(); await model.refreshUpdates()
         }
-        guard let ticket else { return }
+        guard let ticket else {
+            for d in drafts {
+                if (try? model.outbox.enqueue(MessageDraft(voice: d, replyTo: nil), to: .newTopic(workspace: workspace), joinAfter: clientId)) != nil {
+                    try? FileManager.default.removeItem(at: d.url)
+                }
+            }
+            return
+        }
         for d in drafts {
             do {
                 try await model.send(MessageDraft(voice: d, replyTo: nil), to: NewTopicVoiceFlow.target(workspace: workspace, ticket: ticket, isFirst: false) ?? .topic(workspace: workspace, ticket: ticket))

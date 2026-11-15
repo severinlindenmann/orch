@@ -9,6 +9,10 @@ from pathlib import Path
 
 import pytest
 
+# No test may touch the real ~/.orch-tool: autouse private HOME/ORCH_HOME + a session guard (shared helper).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
+
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 sys.path.insert(0, str(CONTRACTS.parent / "workspace" / "src"))
 
@@ -263,3 +267,7 @@ def start_server(ws, fake_orch):
 @pytest.fixture
 def server(start_server):
     return start_server()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    check_real_home(session)

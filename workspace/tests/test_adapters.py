@@ -857,3 +857,14 @@ def test_session_id_rule_is_shared(sid):
     assert not tickets.valid_session_id(sid)
     with pytest.raises(Refused):
         adapters.render("codex", "resume", "oneshot", {"prompt": "p", "session": sid})
+
+
+def test_windows_leaves_out_the_record_hooks_but_keeps_the_reminder_hooks(monkeypatch):
+    """#547: no Windows process-tree reader, so a record hook could only conclude not_provable."""
+    monkeypatch.setattr(reminder_settings, "can_import_cached", lambda: True)
+    monkeypatch.setattr(adapters, "_is_windows", lambda: True)
+    doc = adapters.reminder_doc("claude")
+    assert set(doc["hooks"]) == {"SessionStart", "UserPromptSubmit"}
+    assert all("record hook" not in c for e in doc["hooks"] for c in _orch_groups(doc, e))
+    monkeypatch.setattr(adapters, "_is_windows", lambda: False)
+    assert set(_RECORD_EVENTS) <= set(adapters.reminder_doc("claude")["hooks"])

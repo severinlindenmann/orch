@@ -420,7 +420,12 @@ def test_windows_batch_hands_its_new_consents_to_the_finisher(proj, monkeypatch)
         for n in ("automation", "dashboard", "focus"):
             _collect(proj, n)
     wid = addons.workspace_id(proj)
-    assert jobs == [{"consents": [str(addons.consent_path()), wid, ["automation", "dashboard"]]}]
+    assert jobs == [
+        {
+            "services": [str(proj.resolve())],  # the added add-ons start after the finisher (#705)
+            "consents": [str(addons.consent_path()), wid, ["automation", "dashboard"]],
+        }
+    ]
 
 
 @pytest.mark.parametrize("failure", ["ok", "exit", "exception"])
@@ -513,6 +518,30 @@ def test_reinstall_collects_the_running_services(proj, monkeypatch):
         done="x",
     )
     assert extras == [{"services": [str(proj.resolve())]}] and not started
+
+
+def test_reinstall_starts_the_workspace_of_a_just_added_addon(proj, monkeypatch):
+    """#705: Windows starts a newly added background add-on like Mac/Linux: the finisher gets the workspace
+    even when nothing ran there before."""
+    from orch import services
+
+    _windows_with_one_finisher(monkeypatch)
+    extras = []
+    monkeypatch.setattr(
+        winfinish,
+        "start",
+        lambda home, uv, then, cwd, done, reg=None, extra=None: extras.append(extra) or home,
+    )
+    monkeypatch.setattr(services, "running", lambda: [])
+    addons._reinstall(
+        [{"name": "factory", "source": "built-in", "version": "0.0.0"}],
+        save=False,
+        then=[],
+        root=proj,
+        done="x",
+        start=["factory"],
+    )
+    assert extras and extras[0]["services"] == [str(proj.resolve())]
 
 
 @pytest.mark.parametrize(

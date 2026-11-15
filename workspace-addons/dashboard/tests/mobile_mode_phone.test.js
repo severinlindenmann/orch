@@ -32,6 +32,6 @@ test('a paired phone, or an unknown count, leaves the switch usable; an On switc
     c.state(mm);
     assert.equal(c.toggle.hidden, false);
     assert.equal(c.toggle.disabled, false);
-    assert.equal(c.label.textContent, 'Send questions to my phone');
+    assert.equal(c.label.textContent, 'Phone');
   }
 });

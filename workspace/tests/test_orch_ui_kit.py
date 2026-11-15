@@ -67,3 +67,9 @@ def test_one_chevron_no_text_glyph():
 def test_an_unsized_icon_sizes_itself():
     css = (STATIC / "components.css").read_text()
     assert ":where(svg.ic,svg.ico,.ico>svg){width:20px;height:20px}" in css
+
+
+def test_shared_date_picker_offers_today_and_tomorrow():
+    js = (STATIC / "date.js").read_text()
+    assert "data-today" in js and "data-tomorrow" in js and "data-clear" in js
+    assert ".ui-quick" in (STATIC / "interaction.css").read_text()

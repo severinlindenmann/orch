@@ -84,6 +84,15 @@ fn check_manifest(m: &Manifest, dir: &FsPath, docker_ok: bool) -> ApiResult<()> 
     Ok(())
 }
 
+/// The node install step: `npm ci` only with a lockfile (it refuses without one), else `npm install`.
+fn node_install(dir: &FsPath) -> &'static str {
+    if dir.join("package-lock.json").is_file() || dir.join("npm-shrinkwrap.json").is_file() {
+        "npm ci --omit=dev"
+    } else {
+        "npm install --omit=dev --no-audit --no-fund"
+    }
+}
+
 /// Scratch data folder of the build/test steps of one deploy: next to the version folders, made by the
 /// server, never inside the code the build can write to.
 fn step_dir(st: &State, name: &str, vroot: &FsPath) -> PathBuf {
@@ -164,6 +173,7 @@ fn version_root(root: &FsPath, code_dir: &FsPath) -> Option<PathBuf> {
 
 fn choose_port(st: &State) -> ApiResult<u16> {
     let mut used = st.runner.used_ports();
+    used.extend(st.sleep.reserved_ports.lock().unwrap().iter());
     for a in db::all_apps(&st.db.lock().unwrap())? {
         used.insert(a.port);
     }
@@ -190,6 +200,7 @@ async fn start_and_check(
     dir: &FsPath,
     m: &Manifest,
     port: u16,
+    poll_ms: u64,
 ) -> Result<(), String> {
     let image = if m.stack == "docker" {
         let v = vdir_of(st, name, dir).ok_or("no version folder")?;
@@ -228,7 +239,7 @@ async fn start_and_check(
         if Instant::now() > deadline {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        tokio::time::sleep(Duration::from_millis(poll_ms)).await;
     }
     st.runner.stop(key).await;
     let log = std::fs::read_to_string(st.cfg.log_path(name)).unwrap_or_default();
@@ -270,6 +281,10 @@ pub async fn deploy(
         st.runner.stop(&format!("{name}~new")).await;
         rm_tree(&step_dir(st, name, &vroot)).await;
         rm_tree(&vroot).await;
+        if existing.is_none() {
+            // a failed first deploy leaves no empty app folder behind (fails harmlessly if not empty)
+            let _ = std::fs::remove_dir(&root);
+        }
     }
     r
 }
@@ -311,7 +326,8 @@ async fn deploy_inner(
         } else {
             "uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt"
         }),
-        "node" if dir.join("package.json").is_file() => Some("npm ci --omit=dev"),
+        // `npm ci` needs a lockfile; the node template (and many small apps) ship package.json only
+        "node" if dir.join("package.json").is_file() => Some(node_install(&dir)),
         _ => None,
     };
     let mut image = None;
@@ -386,7 +402,9 @@ async fn deploy_inner(
     let mut port = 0;
     if m.stack != "static" {
         port = choose_port(st)?;
-        if let Err(out) = start_and_check(st, &format!("{name}~new"), name, &dir, &m, port).await {
+        if let Err(out) =
+            start_and_check(st, &format!("{name}~new"), name, &dir, &m, port, 150).await
+        {
             return Err(ApiError::new(
                 422,
                 "health_failed",
@@ -403,6 +421,9 @@ async fn deploy_inner(
     // switch
     st.runner.stop(name).await;
     st.runner.rename(&format!("{name}~new"), name);
+    st.sleep.sleeping.lock().unwrap().remove(name);
+    st.sleep.cooldown.lock().unwrap().remove(name);
+    touch(st, name);
     let mut view_token = None;
     let mut hash = existing.and_then(|e| e.view_token_hash.clone());
     if !m.public && (hash.is_none() || new_token) {
@@ -454,17 +475,27 @@ async fn deploy_inner(
 pub fn status_of(st: &State, a: &AppRow) -> &'static str {
     if a.status == "stopped" {
         "stopped"
-    } else if a.stack == "static" || st.runner.is_alive(&a.name) {
+    } else if a.stack == "static" || st.runner.is_alive(&a.name) || is_sleeping(st, &a.name) {
         "running"
     } else {
         "failed"
     }
 }
 
+/// Stopped for idleness: the app is available, it starts on the next request.
+pub fn is_sleeping(st: &State, name: &str) -> bool {
+    st.sleep.sleeping.lock().unwrap().contains(name)
+}
+
+/// Static apps are always awake; others while their process runs.
+fn is_awake(st: &State, a: &AppRow) -> bool {
+    a.status != "stopped" && (a.stack == "static" || st.runner.is_alive(&a.name))
+}
+
 pub fn app_json(st: &State, a: &AppRow) -> Value {
     json!({
         "name": a.name, "stack": a.stack, "store": a.store, "public": a.public,
-        "status": status_of(st, a), "url": format!("{}/a/{}", st.cfg.public_url, a.name),
+        "status": status_of(st, a), "awake": is_awake(st, a), "url": format!("{}/a/{}", st.cfg.public_url, a.name),
         "expires_at": a.expires_at, "updated_at": a.updated_at,
     })
 }
@@ -472,6 +503,9 @@ pub fn app_json(st: &State, a: &AppRow) -> Value {
 /// (re)starts the stored version of an app. Caller holds app_lock.
 async fn start_existing(st: &State, a: &AppRow) -> &'static str {
     st.runner.stop(&a.name).await;
+    st.sleep.sleeping.lock().unwrap().remove(&a.name);
+    st.sleep.cooldown.lock().unwrap().remove(&a.name);
+    touch(st, &a.name);
     if a.stack == "docker" && !crate::runner::docker_apps_enabled() {
         // keep the reason where the owner looks: the app's log
         let _ = std::fs::write(
@@ -490,7 +524,7 @@ async fn start_existing(st: &State, a: &AppRow) -> &'static str {
         let ok = match (parse_manifest(&dir), choose_port(st)) {
             (Ok(m), Ok(port)) => {
                 row.port = port;
-                start_and_check(st, &a.name, &a.name, &dir, &m, port)
+                start_and_check(st, &a.name, &a.name, &dir, &m, port, 150)
                     .await
                     .is_ok()
             }
@@ -519,6 +553,7 @@ pub async fn stop(st: &State, name: &str) -> ApiResult<Value> {
     let mut a = db::get_app(&st.db.lock().unwrap(), name)?
         .ok_or_else(|| ApiError::not_found("No such app."))?;
     st.runner.stop(name).await;
+    st.sleep.sleeping.lock().unwrap().remove(name);
     a.status = "stopped".into();
     db::put_app(&st.db.lock().unwrap(), &a, &util::now())?;
     Ok(json!({"name": name, "status": "stopped"}))
@@ -535,6 +570,10 @@ pub async fn remove(st: &State, name: &str) {
         return;
     }
     st.runner.stop(name).await;
+    st.sleep.sleeping.lock().unwrap().remove(name);
+    st.sleep.activity.lock().unwrap().remove(name);
+    st.sleep.cooldown.lock().unwrap().remove(name);
+    st.sleep.wake.lock().unwrap().remove(name);
     if container_mode() {
         crate::runner::remove_images(name, None).await;
     }
@@ -559,6 +598,11 @@ pub async fn resume_all(st: &State) {
         .into_iter()
         .filter(|a| a.status == "running" && a.stack != "static")
     {
+        if st.cfg.idle_secs > 0 && (a.stack != "docker" || crate::runner::docker_apps_enabled()) {
+            // scale to zero: apps start on their first request (saves memory after a restart)
+            st.sleep.sleeping.lock().unwrap().insert(a.name.clone());
+            continue;
+        }
         let _g = st.app_lock.lock().await;
         start_existing(st, &a).await;
     }
@@ -727,13 +771,53 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
     proxy(&st, &app, &rest, &query, req).await
 }
 
+const HOP_BY_HOP: [&str; 8] = [
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
+
 async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) -> Response {
-    if !st.runner.is_alive(&app.name) {
-        return offline_page();
+    // WebSockets are not forwarded (the proxy speaks plain HTTP request/response)
+    if req.headers().contains_key(header::UPGRADE) {
+        return crate::web::notice(
+            501,
+            "offline",
+            "This app can\u{2019}t use WebSockets here.",
+            "Plain page loads and live updates over normal requests work.",
+            false,
+        );
     }
+    // count the request first: an app with requests in flight never sleeps (only where apps sleep)
+    let guard = (st.cfg.idle_secs > 0).then(|| InFlight::new(st, &app.name));
+    let woken;
+    let app = if st.cfg.idle_secs > 0 && is_sleeping(st, &app.name) {
+        let fresh = match wake(st, &app.name).await {
+            Ok(a) => a,
+            Err(r) => return *r,
+        };
+        // the caller was authorized for the OLD row: refuse if access changed meanwhile
+        if let Some(r) = access_changed(app, &fresh) {
+            return r;
+        }
+        woken = fresh;
+        &woken
+    } else {
+        app
+    };
+    // route to the port of THIS app's live process, not the port in a row read before (stale after a
+    // redeploy or a wake): a request can never reach another app's process
+    let Some(port) = st.runner.live_port(&app.name) else {
+        return offline_page();
+    };
     let uri = format!(
         "http://127.0.0.1:{}/{}{}",
-        app.port,
+        port,
         rest,
         if query.is_empty() {
             String::new()
@@ -746,6 +830,7 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
     for (k, v) in parts.headers.iter() {
         let n = k.as_str();
         if k == header::HOST
+            || HOP_BY_HOP.contains(&n)
             || k == header::COOKIE
             || k == header::AUTHORIZATION
             || n.starts_with("x-orch-")
@@ -778,10 +863,305 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
         Ok(resp) => {
             let mut resp = resp.map(Body::new);
             resp.headers_mut().remove("service-worker-allowed");
-            resp
+            // the request stays in flight until the body is done (SSE, long downloads)
+            match guard {
+                Some(g) => resp.map(|b| Body::new(Guarded { inner: b, _g: g })),
+                None => resp,
+            }
         }
         Err(_) => offline_page(),
     }
+}
+
+/// Marks an app as used now.
+fn touch(st: &State, name: &str) {
+    let mut g = st.sleep.activity.lock().unwrap();
+    g.entry(name.to_string()).or_insert((Instant::now(), 0)).0 = Instant::now();
+}
+
+/// One request in flight to an app; counts down on drop (errors and disconnects too).
+struct InFlight {
+    st: State,
+    name: String,
+}
+
+impl InFlight {
+    fn new(st: &State, name: &str) -> Self {
+        let mut g = st.sleep.activity.lock().unwrap();
+        let e = g.entry(name.to_string()).or_insert((Instant::now(), 0));
+        e.0 = Instant::now();
+        e.1 += 1;
+        InFlight {
+            st: st.clone(),
+            name: name.to_string(),
+        }
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        let mut g = self.st.sleep.activity.lock().unwrap();
+        if let Some(e) = g.get_mut(&self.name) {
+            e.0 = Instant::now();
+            e.1 = e.1.saturating_sub(1);
+        }
+    }
+}
+
+/// Response body that holds the in-flight guard until it is dropped.
+struct Guarded {
+    inner: Body,
+    _g: InFlight,
+}
+
+impl http_body::Body for Guarded {
+    type Data = Bytes;
+    type Error = axum::Error;
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Bytes>, axum::Error>>> {
+        std::pin::Pin::new(&mut self.inner).poll_frame(cx)
+    }
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+/// Stops apps that got no request for `idle_secs` (container mode). Runs every `sleep_sweep_secs`; tests call it.
+pub async fn sleep_sweep(st: &State) {
+    let idle = Duration::from_secs(st.cfg.idle_secs);
+    if st.cfg.idle_secs == 0 {
+        return;
+    }
+    let apps = db::all_apps(&st.db.lock().unwrap()).unwrap_or_default();
+    for a in apps
+        .into_iter()
+        .filter(|a| a.status == "running" && a.stack != "static")
+    {
+        let taken;
+        let due = |st: &State| -> bool {
+            if !st.runner.is_alive(&a.name) {
+                return false;
+            }
+            let mut g = st.sleep.activity.lock().unwrap();
+            let e = g.entry(a.name.clone()).or_insert((Instant::now(), 0));
+            e.1 == 0 && e.0.elapsed() > idle
+        };
+        if !due(st) {
+            continue;
+        }
+        {
+            let _g = st.app_lock.lock().await;
+            // re-check under the lock: stopped, deleted or redeployed meanwhile
+            let found = db::get_app(&st.db.lock().unwrap(), &a.name);
+            if !matches!(found, Ok(Some(r)) if r.status == "running" && r.stack != "static") {
+                continue;
+            }
+            // decide and mark sleeping in one step: a request that arrives after this wakes the app
+            let act = st.sleep.activity.lock().unwrap();
+            let Some(e) = act.get(&a.name) else { continue };
+            if e.1 != 0 || e.0.elapsed() <= idle || !st.runner.is_alive(&a.name) {
+                continue;
+            }
+            st.sleep.sleeping.lock().unwrap().insert(a.name.clone());
+            // take the process out under the locks; the slow stop below hits exactly this handle,
+            // never "whatever runs under the name" (a request may have woken a new one by then)
+            taken = st.runner.take(&a.name);
+        }
+        if let Some(p) = taken {
+            st.runner.stop_taken(p).await;
+        }
+        tracing::info!("app {} sleeps (idle)", a.name);
+    }
+}
+
+fn notice_gone() -> Response {
+    crate::web::notice(
+        404,
+        "link",
+        "This app isn\u{2019}t available",
+        "Check the link or ask the sender for a new one.",
+        false,
+    )
+}
+
+/// Compares what the request was authorized against with the row now: None = same access.
+fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
+    if new.status == "stopped" {
+        return Some(paused_page());
+    }
+    if new
+        .expires_at
+        .as_deref()
+        .is_some_and(|e| e <= util::now().as_str())
+    {
+        return Some(crate::web::notice(
+            410,
+            "clock",
+            "This app has expired",
+            "It is no longer available. Ask the owner to share it again.",
+            false,
+        ));
+    }
+    if new.workspace != old.workspace
+        || new.public != old.public
+        || new.view_token_hash != old.view_token_hash
+        || new.stack != old.stack
+    {
+        return Some(private_page());
+    }
+    None
+}
+
+const WAKE_COOLDOWN: Duration = Duration::from_secs(30);
+
+fn wake_503() -> Box<Response> {
+    Box::new(crate::web::notice(
+        503,
+        "offline",
+        "This app could not start",
+        "Try again in a moment.",
+        true,
+    ))
+}
+
+/// Frees a reserved port when dropped.
+struct Reserved {
+    st: State,
+    port: Option<u16>,
+}
+
+impl Drop for Reserved {
+    fn drop(&mut self) {
+        if let Some(p) = self.port {
+            self.st.sleep.reserved_ports.lock().unwrap().remove(&p);
+        }
+    }
+}
+
+/// Starts a sleeping app for a request. One wake per app at a time (others wait for it), at most 4 wakes at once.
+/// The global app_lock is only taken briefly (re-check before, commit after), never during the start.
+async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
+    let lock = st
+        .sleep
+        .wake
+        .lock()
+        .unwrap()
+        .entry(name.to_string())
+        .or_default()
+        .clone();
+    let _w = lock.lock().await;
+    let t0 = Instant::now();
+    // a failed wake is not retried for 30 s
+    if st
+        .sleep
+        .cooldown
+        .lock()
+        .unwrap()
+        .get(name)
+        .is_some_and(|t| t.elapsed() < WAKE_COOLDOWN)
+    {
+        return Err(wake_503());
+    }
+    let _slot = st.sleep.wake_slots.acquire().await;
+    // a dead leftover entry of an earlier run goes first, outside the global lock (a live process is never touched)
+    if is_sleeping(st, name) && !st.runner.is_alive(name) {
+        st.runner.stop(name).await;
+    }
+    let (row, m, port, _reserved) = {
+        let _g = st.app_lock.lock().await;
+        let found = db::get_app(&st.db.lock().unwrap(), name);
+        let row = match found {
+            Ok(Some(r)) => r,
+            _ => return Err(Box::new(notice_gone())),
+        };
+        if row.status == "stopped" {
+            return Err(Box::new(paused_page()));
+        }
+        if !is_sleeping(st, name) {
+            return Ok(row); // woken by an earlier request, or restarted
+        }
+        if row.stack == "docker" && !crate::runner::docker_apps_enabled() {
+            return Err(wake_fail(st, name, "docker apps are disabled".into()));
+        }
+        let dir = PathBuf::from(&row.code_dir);
+        let Ok(m) = parse_manifest(&dir) else {
+            return Err(wake_fail(st, name, "bad manifest".into()));
+        };
+        let mut reserved = Reserved {
+            st: st.clone(),
+            port: None,
+        };
+        // the stored port is reserved by the DB row (choose_port skips it): reuse it
+        let port = if row.port != 0 && std::net::TcpListener::bind(("127.0.0.1", row.port)).is_ok()
+        {
+            row.port
+        } else {
+            match choose_port(st) {
+                Ok(p) => {
+                    st.sleep.reserved_ports.lock().unwrap().insert(p);
+                    reserved.port = Some(p);
+                    p
+                }
+                Err(_) => return Err(wake_fail(st, name, "no free app port".into())),
+            }
+        };
+        (row, m, port, reserved)
+    };
+    let dir = PathBuf::from(&row.code_dir);
+    let key = format!("{name}~wake");
+    if let Err(log) = start_and_check(st, &key, name, &dir, &m, port, 25).await {
+        return Err(wake_fail(st, name, log));
+    }
+    // commit: still the same app, still asleep, not stopped/deleted/redeployed meanwhile
+    let _g = st.app_lock.lock().await;
+    let found = db::get_app(&st.db.lock().unwrap(), name);
+    let mut cur = match found {
+        Ok(Some(r)) if r.code_dir == row.code_dir && is_sleeping(st, name) => r,
+        Ok(None) => {
+            st.runner.stop(&key).await;
+            return Err(Box::new(notice_gone()));
+        }
+        Ok(Some(r)) if r.status == "stopped" => {
+            st.runner.stop(&key).await;
+            return Err(Box::new(paused_page()));
+        }
+        // restarted or redeployed by someone else meanwhile: serve theirs if it runs
+        Ok(Some(r)) if r.status == "running" && st.runner.is_alive(name) => {
+            st.runner.stop(&key).await;
+            return Ok(r);
+        }
+        _ => {
+            st.runner.stop(&key).await;
+            return Err(wake_503());
+        }
+    };
+    st.runner.rename(&key, name);
+    if cur.port != port {
+        // fallback port (the stored one was not free); `_reserved` is released after this
+        cur.port = port;
+        let _ = db::put_app(&st.db.lock().unwrap(), &cur, &cur.updated_at.clone());
+    }
+    st.sleep.sleeping.lock().unwrap().remove(name);
+    st.sleep.cooldown.lock().unwrap().remove(name);
+    tracing::info!("app {name} woke in {} ms", t0.elapsed().as_millis());
+    Ok(cur)
+}
+
+/// Failed wake: log once, start the cooldown. The app stays asleep (not failed).
+fn wake_fail(st: &State, name: &str, why: String) -> Box<Response> {
+    // the app's output is data: logged as an escaped field, never as raw lines
+    tracing::warn!(app = %name, log = ?util::tail(&why, 1500), "app could not wake (no new try for 30 s)");
+    st.sleep
+        .cooldown
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), Instant::now());
+    wake_503()
 }
 
 fn content_type(p: &FsPath) -> &'static str {
@@ -865,6 +1245,20 @@ async fn serve_static(app: &AppRow, rest: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_install_uses_ci_only_with_a_lockfile() {
+        let d = std::env::temp_dir().join(format!("orch-node-install-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("package.json"), "{}").unwrap();
+        assert_eq!(
+            node_install(&d),
+            "npm install --omit=dev --no-audit --no-fund"
+        );
+        std::fs::write(d.join("package-lock.json"), "{}").unwrap();
+        assert_eq!(node_install(&d), "npm ci --omit=dev");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     fn manifest(stack: &str) -> Manifest {
         Manifest {

@@ -48,6 +48,11 @@ if args[:2] == ["ticket", "new"]:
         "parent": flag("--parent") if "--parent" in args else None,
         "history": [],
     }
+    gate = next((a.split("=", 1)[1] for a in args if a.startswith("--start-requires=")), None)
+    if gate:  # core's start gate: "<ticket>:<question>=<answer>"
+        g_ticket, rest = gate.split(":", 1)
+        g_question, g_answer = rest.split("=", 1)
+        t["start_requires"] = {"ticket": g_ticket, "question": g_question, "answer": g_answer}
     save(t)
     result = t
 elif args[:2] == ["ticket", "show"]:
@@ -115,6 +120,12 @@ elif args[:2] == ["run", "start"]:
             + "\n"
         )
     result = {"run": "r1"}
+elif args[:2] == ["record", "query"]:  # core's activity record: events per ticket from record.json (tests)
+    events = json.loads((root / "record.json").read_text()) if (root / "record.json").exists() else {}
+    if (root / "fail-record").exists():
+        print(json.dumps({"error": "The record cannot be read.", "code": "not_available"}))
+        sys.exit(2)
+    result = {"items": events.get(flag("--ticket"), []), "next": None}
 elif args[:2] == ["run", "status"]:
     load(args[2])
     live = (root / "live-runs").read_text().split() if (root / "live-runs").exists() else []

@@ -60,4 +60,9 @@ publish server's group. Code at `/app` (read-only while running), data at `/data
 no process in any mode. Listen on `$HOST`, not on a fixed `127.0.0.1`: in a container `$HOST` is `0.0.0.0` and a
 loopback-only app fails its health check.
 
+Scale to zero (container mode): an app that gets no request for 15 minutes (setting `ORCH_PUBLISH_IDLE_SECS`, 0 = never) is
+stopped and starts again on the next request (about 0.2 s for a small app). Keep everything in `DATA_DIR`; timers and
+background work inside the app stop while it sleeps. An app with a request still open (long poll, SSE) never sleeps.
+Static apps never sleep. The API keeps `status: running` for a sleeping app and reports `awake: false`.
+
 Templates to start from: `orch publish new <name> --stack static|python|node|docker --store …`.

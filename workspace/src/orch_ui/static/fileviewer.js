@@ -224,7 +224,7 @@
   function codeView(stage, text, f, lang) {
     const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
     const bar = el('div', 'fv-bar');
-    const copy = btn('Copy code', 'outline sm', async () => { try { await navigator.clipboard.writeText(lines.join('\n')); window.orch.toast('Code copied', 'ok'); } catch (_) { window.orch.toast('Could not copy.', 'error'); } });
+    const copy = btn('Copy code', 'outline sm', async () => { if (await window.UI.copyText(lines.join('\n'))) window.orch.toast('Code copied', 'ok'); else window.orch.toast('Could not copy. Select the code and press Ctrl+C.', 'error'); });
     bar.append(copy, el('span', 'meta', lines.length + (lines.length === 1 ? ' line' : ' lines')));
     const code = el('div', 'fv-code'); code.tabIndex = 0; code.setAttribute('role', 'region'); code.setAttribute('aria-label', f.title + ' source');
     const frag = document.createDocumentFragment();
@@ -380,8 +380,8 @@
     const open1 = el('a', 'btn outline sm', 'Open in new tab ↗'); open1.target = '_blank'; open1.rel = 'noopener noreferrer';
     const dl = el('a', 'btn ghost sm', 'Download');
     const copy = btn('Copy link', 'ghost sm', async () => {
-      try { await navigator.clipboard.writeText(new URL(urlOf(files[index]), location.href).href); window.orch.toast('Link copied', 'ok'); }
-      catch (_) { window.orch.toast('Could not copy the link.', 'error'); }
+      const link = new URL(urlOf(files[index]), location.href).href;
+      if (await window.UI.copyText(link)) window.orch.toast('Link copied', 'ok'); else window.UI.showLink(link);
     });
     left.append(open1, dl, copy);
     const prev = btn('← Prev', 'outline sm', () => go(index - 1)), next = btn('Next →', 'outline sm', () => go(index + 1));

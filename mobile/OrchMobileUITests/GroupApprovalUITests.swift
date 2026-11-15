@@ -6,13 +6,9 @@ final class GroupApprovalUITests: XCTestCase {
 
     @MainActor func testApprovalCardButtonsAreInsideTheCard() {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockGroups", "YES"]
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockGroups", "YES", "-open", "group:ws_finance001:grp_t_cartax2027"]
         app.launch()
         let any = { (id: String) in app.descendants(matching: .any)[id].firstMatch }
-        XCTAssertTrue(any("chat-search").waitForExistence(timeout: 15))
-        let row = any("group-13-ws_finance001-grp_t_cartax2027")
-        for _ in 0..<6 where !(row.exists && row.isHittable) { app.swipeUp() }
-        XCTAssertTrue(row.waitForExistence(timeout: 10)); row.tap()
         let card = any("group-approval")
         // Let the push and the open-at-newest jumps (now and +300 ms) settle: during them the button has no valid frame and
         // isHittable throws instead of returning false.
@@ -35,13 +31,9 @@ final class GroupApprovalUITests: XCTestCase {
     /// P54: a group approval waits out the same undo window as a topic answer before it is sent.
     @MainActor func testApprovalCanBeUndoneBeforeItIsSent() {
         let app = XCUIApplication()
-        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockGroups", "YES", "-undoSeconds", "60"]
+        app.launchArguments += ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockGroups", "YES", "-open", "group:ws_finance001:grp_t_cartax2027", "-undoSeconds", "60"]
         app.launch()
         let any = { (id: String) in app.descendants(matching: .any)[id].firstMatch }
-        XCTAssertTrue(any("chat-search").waitForExistence(timeout: 15))
-        let row = any("group-13-ws_finance001-grp_t_cartax2027")
-        for _ in 0..<6 where !(row.exists && row.isHittable) { app.swipeUp() }
-        XCTAssertTrue(row.waitForExistence(timeout: 10)); row.tap()
         let card = any("group-approval")
         XCTAssertTrue(card.buttons["Always"].waitForExistence(timeout: 10))
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1.0)
