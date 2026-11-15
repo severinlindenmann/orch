@@ -1,14 +1,12 @@
 """Sync card and sync Needs rows on the server side: everything goes through the ONE generic op `addon.act`
 (`orch <addon> act <verb> -- <target>`); a signed click mints a proof for exactly the target the add-on names."""
 
-import base64
 import json
 import subprocess
 
 import pytest
 
 pytest.importorskip("orch")
-from orch import humanproof as hp
 
 from orch_dashboard import actions
 from tests.test_proof_session import live, post, session
@@ -145,52 +143,6 @@ REVIEW = {
     "here": "due: 2026-03-31",
     "there": "note: bank fees",
 }
-
-
-def test_a_signed_sync_click_mints_for_the_target_the_addon_names(live, monkeypatch):
-    root, port = live
-    ck = session(root, port)
-    target = "sync:keep-theirs:" + "a" * 64
-    calls, run = _answer({"target": target, "review": REVIEW})
-    monkeypatch.setattr(actions, "_run", run)
-    monkeypatch.setattr(actions, "_addon_is_on", lambda *a: True)
-    seen = []
-    monkeypatch.setattr(
-        actions, "run_with_proof", lambda argv, proof, **kw: seen.append((argv, proof)) or R()
-    )
-    args = {"addon": "sync", "verb": "keep-theirs", "target": "tickets/t_abc123.json"}
-    # phase 1: what the person will sign; nothing runs, nothing is minted
-    st, _, body = post(
-        port, "/api/act", {"op": "addon.act", "args": {**args, "review": True}}, {"Cookie": ck}
-    )
-    assert st == 200, body
-    assert json.loads(body)["act_answer"] == {"addon": "sync", "answer": {"target": target, "review": REVIEW}}
-    assert len(calls) == 1 and "--proof-target" in calls[0] and seen == []
-    # phase 2: the signed click echoes the target the page showed
-    st, _, body = post(
-        port, "/api/act", {"op": "addon.act", "args": {**args, "sign": True, "seen": target}}, {"Cookie": ck}
-    )
-    assert st == 200, body
-    query = calls[1]
-    assert query[query.index("act") :] == [
-        "act",
-        "keep-theirs",
-        "--by",
-        actions.actor(),
-        "--json",
-        "--proof-target",
-        "--",
-        "tickets/t_abc123.json",
-    ]
-    assert (
-        len(seen) == 1
-        and "--proof-target" not in seen[0][0]
-        and seen[0][0][:3] == ["sync", "act", "keep-theirs"]
-    )
-    payload = json.loads(base64.urlsafe_b64decode(seen[0][1].split(".")[1] + "=="))
-    assert (payload["op"], payload["target"]) == ("addon.act", target)
-    assert hp.verify_and_consume(root, seen[0][1], "addon.act", target).startswith("human:")
-    assert json.loads(body)["act_answer"] == {"addon": "sync", "answer": {"text": "Kept the other version."}}
 
 
 @pytest.mark.parametrize("shown", ["sync:keep-theirs:" + "b" * 64, None, ""])

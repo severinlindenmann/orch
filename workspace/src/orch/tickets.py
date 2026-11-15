@@ -122,6 +122,15 @@ def current_actor(explicit: str | None = None) -> str:
     return who
 
 
+def acting_by(args) -> str:
+    """Who runs this command: the agent tool seen in the environment, else --by, else human:<os user>.
+    Plain: no op is human-only, an agent's command just runs and is recorded as agent:<tool>."""
+    tool = agent_tool()
+    if tool:
+        return "agent:" + str(tool)
+    return current_actor(getattr(args, "by", None))
+
+
 def tickets_dir(root: Path) -> Path:
     return root / ".orch" / "tickets"
 

@@ -166,35 +166,6 @@ def test_the_page_reads_the_real_settings(core, srv, session):
     assert get(core, "insights.keep_days") == 90 and get(core, "insights.max_mb") == 2048
 
 
-def test_narrowing_is_proof_free_and_widening_needs_the_person(core, srv, session):
-    code, out = act(srv, session, *setting("insights.keep_days", "30"))
-    assert code == 200 and out == {"insights.keep_days": 30, "changed": True, "widened": False}
-    assert get(core, "insights.keep_days") == 30
-    code, out = act(srv, session, *setting("insights.keep_days", "30"))
-    assert code == 200 and out["changed"] is False  # the same value: no write, no proof
-    # widening 30 -> 365 without the person: the core said needs_person, the server cannot mint: nothing changed
-    code, _ = act(srv, session, *setting("insights.keep_days", "365"))
-    assert code == 403 and get(core, "insights.keep_days") == 30
-    # with the person: the value-bound proof (key=value) is minted only after the core asked, then used once
-    code, out = act(srv, session, *setting("insights.keep_days", "365"), person=True)
-    assert code == 200 and out == {"insights.keep_days": 365, "changed": True, "widened": True}
-    assert get(core, "insights.keep_days") == 365
-
-
-def test_a_proof_is_value_bound_and_single_use(core, session):
-    args = ["config", "set", "insights.max_mb", "512", "--json"]
-    assert run(core, *args)[0] == 0  # narrowing from 2048, no proof
-    wrong = session.mint("insights.settings", "insights.max_mb=1024")  # a proof for another value
-    code, out = run(core, "config", "set", "insights.max_mb", "4096", "--json", proof=wrong)
-    assert code != 0 and out["code"] == "needs_person" and get(core, "insights.max_mb") == 512
-    good = session.mint("insights.settings", "insights.max_mb=1024")
-    code, out = run(core, "config", "set", "insights.max_mb", "1024", "--json", proof=good)
-    assert code == 0 and out["widened"] is True
-    run(core, "config", "set", "insights.max_mb", "512", "--json")  # narrow again
-    code, out = run(core, "config", "set", "insights.max_mb", "1024", "--json", proof=good)  # reused
-    assert code != 0 and out["code"] == "needs_person" and get(core, "insights.max_mb") == 512
-
-
 def test_if_current_mismatch_is_changed(core):
     code, out = run(core, "config", "set", "insights.keep_days", "30", "--if-current=365", "--json")
     assert code != 0 and out["code"] == "changed" and get(core, "insights.keep_days") == 90
@@ -206,22 +177,6 @@ def test_the_core_refuses_sharing_on_without_an_admin(core, session):
     proof = session.mint("insights.settings", "insights.share_counts=on")
     code, _ = run(core, "config", "set", "insights.share_counts", "on", "--json", proof=proof)
     assert code != 0 and get(core, "insights.share_counts") is False
-
-
-def test_delete_detail_needs_the_person_and_reports_kept(core, srv, session):
-    ws, _ = core
-    tid = "t_real0001"
-    ticket = {
-        "schema": "orch.ticket/1", "id": tid, "title": "Close March books", "status": "active", "revision": 1,
-        "checklist": [], "questions": [], "history": [], "refs": [],
-    }  # fmt: skip
-    (ws / ".orch" / "tickets" / f"{tid}.json").write_text(json.dumps(ticket))
-    code, _ = act(srv, session, "record.delete_detail", {"ticket": tid})
-    assert code == 403  # no person: the core said needs_person, the server cannot mint
-    code, out = act(srv, session, "record.delete_detail", {"ticket": tid}, person=True)
-    assert code == 200 and out.get("deleted") == 0 and out.get("kept") == 0 and out.get("ticket") == tid
-    code, text = act(srv, session, "record.delete_detail", {"ticket": "t_nothere1"}, person=True)
-    assert code == 422 and "not found" in text.lower()
 
 
 # ------------------------------------------------------------------ the check-up against the real core

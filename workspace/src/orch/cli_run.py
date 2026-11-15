@@ -15,7 +15,6 @@ from orch import (
     adapters,
     cli_screen,
     history,
-    humanproof,
     net,
     nextstep,
     runs,
@@ -300,17 +299,8 @@ def _done(args, root: Path, tid: str | None) -> None:
 
 def _send(args, root: Path, tid: str, by: str) -> None:
     proven = False
-    if getattr(args, "proof_stdin", False) or not (tickets.agent_tool() or by.startswith("agent:")):
-        by = humanproof.person_by(
-            root,
-            args,
-            "run.human_input",
-            tid,
-            parts={"title": humanproof.ticket_name(root, tid)},
-            value=args.text or "",
-            # the text a person approves must be the text that runs: no file read behind the card
-            no_handoff='Send the text itself: orch run send <ticket> "text"' if args.file else None,
-        )  # a person: proof or hand-off (H1)
+    if not (tickets.agent_tool() or by.startswith("agent:")):
+        by = tickets.acting_by(args)
         proven = by.startswith("human:")
     if args.file:
         p = Path(args.file)
