@@ -894,7 +894,7 @@ def test_real_claude_empty_and_hint_prompts_take_the_notice(proj, run, monkeypat
     the one style orch accepts as empty. (A real after-turn suggestion could not be produced here: this build
     shows none in a child session; the placeholder is the tool's hint style, a suggestion should match.
     If it differs, orch holds and says so: never types.)"""
-    for name in ("placeholder", "after-turn"):
+    for name in ("placeholder", "after-turn", "placeholder-2.1.325"):
         tid = _real(name, monkeypatch, proj, run)
         assert runs_live._hold_reason(proj, tid, None) is None, name
 
@@ -1191,3 +1191,51 @@ def test_send_into_an_idle_session_types_only_the_notice_and_says_sent(proj, run
     assert res["delivered"] >= 1 and res["queued"] is False and runs_live.send_text(res, tid) == "Sent."
     assert sent[n:] == [runs_live.notice_line(tid, False), "Enter"]
     assert "rain" not in "".join(sent)
+
+
+def test_claude_2_1_325_placeholder_with_the_cursor_block_is_an_empty_prompt(proj, run, monkeypatch):
+    """First-run proof (15 Nov): the placeholder of Claude Code 2.1.325 is `ESC[7m`T`ESC[0;2m`ry ...: a cursor
+    block on its first character. It was seen as typed text, so the first task was held for ever."""
+    tid = _real("placeholder-2.1.325", monkeypatch, proj, run)
+    assert runs_live._hold_reason(proj, tid, None) is None
+
+
+def test_the_cursor_block_hint_style_is_only_accepted_on_the_first_character():
+    hint = '\x1b[39m\u276f\xa0\x1b[7mT\x1b[0;2mry \x1b[0m\x1b[2m"write"\x1b[0m'
+    assert runs_live._is_hint(hint.split("\xa0", 1)[1]) is True
+    assert (
+        runs_live._is_hint("\x1b[7mTr\x1b[0;2my") is False
+    )  # two inverse characters: a selection, not a hint
+    assert runs_live._is_hint("x\x1b[7mT\x1b[0;2mry") is False  # typed text before the block
+    assert runs_live._is_hint("\x1b[7mT\x1b[0mry") is False  # the rest is not dim
+
+
+def _start_item_waits(proj, run, monkeypatch):
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane=_screen(""))
+    items = runs._pending_read(proj, tid)
+    for i in items:
+        i["via"] = "start"
+    runs._pending_write(proj, tid, items)
+    return tid, rn, sent, screen
+
+
+def test_the_first_task_waits_while_the_tool_still_draws_notices(proj, run, monkeypatch):
+    """Claude Code draws a model hint and an auto-mode note after its prompt shows; a task typed meanwhile was
+    swallowed (15 Nov). The notice goes in only once the pane looked the same for CALM_SECONDS."""
+    tid, rn, sent, screen = _start_item_waits(proj, run, monkeypatch)
+    n, clock = len(sent), [1000.0]
+    monkeypatch.setattr(runs_live.time, "time", lambda: clock[0])
+    hint = "Fable 5.2 is here ... Switch with /model."
+    for pane in (_screen("", above=hint), _screen("", above=hint + "\nAuto mode lets Claude handle ...")):
+        screen["pane"] = pane  # the pane keeps changing: nothing is typed
+        assert runs_live.deliver(proj, tid) == 0
+        clock[0] += 1.0
+    assert len(sent) == n
+    assert runs_live.deliver(proj, tid) == 0 and len(sent) == n  # same pane, only 1 s
+    clock[0] += 2.0
+    assert runs_live.deliver(proj, tid) == 1 and sent[n:] == [runs_live.notice_line(tid, True), "Enter"]
+
+
+def test_typing_alone_never_counts_as_delivered(proj, run, monkeypatch):
+    tid, rn, item, sent, screen = _stuck(proj, run, monkeypatch, pane=_screen("", above="Brewed for 1s"))
+    assert [i["id"] for i in runs.undelivered(proj, tid)] == [item["id"]]
