@@ -574,7 +574,8 @@ def test_view_lists_the_waiting_messages(server, fake_orch, ws):
     assert v["run"]["waiting_input"] == [
         {"id": "p_abc12345", "text": "Use CHF", "at": "2026-11-15T10:00:00Z"}
     ]
-=======
+
+
 # --- files added from the composer (ticket.attach) ---------------------------------------------------
 def _files(*named):
     import base64
@@ -638,4 +639,3 @@ def test_attach_orch_refusal_names_the_file(server, fake_orch):
 def test_attach_wrong_origin_refused(server, fake_orch, headers):
     st, _, _ = _attach(server, _files(("a.txt", b"x")), headers)
     assert st == 403 and calls(fake_orch) == []
->>>>>>> origin/develop
