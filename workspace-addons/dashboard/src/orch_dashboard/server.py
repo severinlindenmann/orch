@@ -164,6 +164,16 @@ def _services_stamp():
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
 
 
+TYPING_OFF = "Typing into the helper's screen is off. Turn on 'Let me type' in Settings to allow it."
+
+
+def _typing_allowed(root) -> bool:
+    """The session_typing setting, a plain one (off unless the workspace turned it on)."""
+    from orch import config
+
+    return bool(config.focus_session_typing(root))  # an unreadable config file counts as off (the default)
+
+
 def _link_msg(session, name: str) -> bytes:
     from orch.pageproof import REVOKED_MSG
 
@@ -431,6 +441,7 @@ class Handler(BaseHTTPRequestHandler):
 
             tid = parse_qs(self.path.partition("?")[2]).get("ticket", [""])[0]
             snap = termsession.snapshot(self.root, self.orch_bin, tid)
+            snap["typing_allowed"] = _typing_allowed(self.root)
             return self._send(
                 200, json.dumps(snap).encode(), "application/json", {"Cache-Control": "no-store"}
             )
@@ -690,6 +701,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except (ValueError, RecursionError, OSError):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        if not _typing_allowed(self.root):  # the setting is checked here, not only hidden in the page
+            return self._send(403, TYPING_OFF.encode(), "text/plain; charset=utf-8")
         from . import termsession
 
         code, text = termsession.keys(self.root, self.orch_bin, str(body["ticket"]), body["items"])
