@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_PORT = 8420
 MAX_BODY = 16384  # every action but the ones below
-MAX_BIG_BODY = 5 * 1024 * 1024  # a new ticket with a long text and up to 5 attached files
+MAX_BIG_BODY = 140 * 1024 * 1024  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
