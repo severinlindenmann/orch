@@ -885,9 +885,13 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         for c in ["orch_app_other=1; Path=/a/ck/", "ORCH_admin=x; Path=/a/ck/", "o=1; Path=/a/other/", "d=1; Path=/a/ck/; Domain=x.test",
-                  "nopath=1", "mine=1; Path=/a/ck/", "mine2=1; path=/a/ck/sub; HttpOnly", "dot=1; Path=/a/ck/../other/"]:
+                  "nopath=1", "__Host-h=1; Path=/a/ck/", "__SECURE-s=1; Path=/a/ck/", "mine=1; Path=/a/ck/", "mine2=1; path=/a/ck/sub; HttpOnly", "dot=1; Path=/a/ck/../other/"]:
             self.send_header("Set-Cookie", c)
         self.send_header("Clear-Site-Data", '"cookies"')
+        for h, v in [("NEL", '{"report_to":"x","max_age":9}'), ("Report-To", '{"group":"x"}'), ("Reporting-Endpoints", 'x="https://evil.test/"'),
+                     ("Strict-Transport-Security", "max-age=9"), ("Alt-Svc", 'h3=":443"'), ("Accept-CH", "Sec-CH-UA"),
+                     ("Critical-CH", "Sec-CH-UA"), ("Origin-Agent-Cluster", "?1")]:
+            self.send_header(h, v)
         self.send_header("Refresh", "0; url=http://evil.test/")
         self.send_header("Link", "<http://evil.test/>; rel=preload")
         self.send_header("Content-Length", "0")
@@ -926,7 +930,19 @@ async fn apps_proxy_drops_dangerous_cookies_and_headers() {
         vec!["mine=1; Path=/a/ck/", "mine2=1; path=/a/ck/sub; HttpOnly"],
         "{cookies:?}"
     );
-    assert!(r.headers.get("clear-site-data").is_none());
+    for h in [
+        "clear-site-data",
+        "nel",
+        "report-to",
+        "reporting-endpoints",
+        "strict-transport-security",
+        "alt-svc",
+        "accept-ch",
+        "critical-ch",
+        "origin-agent-cluster",
+    ] {
+        assert!(r.headers.get(h).is_none(), "{h}");
+    }
     // public apps keep Refresh and Link, private ones lose them
     assert!(r.headers.get("refresh").is_some());
     let toml = py_toml("ckp", "");

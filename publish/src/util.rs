@@ -686,38 +686,47 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     outer.finalize().into()
 }
 
+fn read_key(path: &std::path::Path) -> std::io::Result<Option<[u8; 32]>> {
+    let Ok(t) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(std::io::Error::other(format!(
+                "{} must only be readable by the server (chmod 600)",
+                path.display()
+            )));
+        }
+    }
+    let t = t.trim();
+    if t.len() != 64 || !t.is_ascii() {
+        return Err(std::io::Error::other("bad app-cap.key"));
+    }
+    let mut k = [0u8; 32];
+    for (i, b) in k.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16)
+            .map_err(|_| std::io::Error::other("bad app-cap.key"))?;
+    }
+    Ok(Some(k))
+}
+
 /// The server's private-app capability key: generated at first start, stored 0600 next to the
-/// other server state, never sent in a response.
+/// other server state (the file must stay private to the publish user), never sent in a response.
+/// Two first starts racing end with one key: the file on disk wins.
 pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     use std::io::Write;
-    if let Ok(t) = std::fs::read_to_string(path) {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(path)?.permissions().mode();
-            if mode & 0o077 != 0 {
-                return Err(std::io::Error::other(format!(
-                    "{} must only be readable by the server (chmod 600)",
-                    path.display()
-                )));
-            }
-        }
-        let t = t.trim();
-        if t.len() == 64 {
-            let mut k = [0u8; 32];
-            for (i, b) in k.iter_mut().enumerate() {
-                *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16)
-                    .map_err(|_| std::io::Error::other("bad app-cap.key"))?;
-            }
-            return Ok(k);
-        }
-        return Err(std::io::Error::other("bad app-cap.key"));
+    if let Some(k) = read_key(path)? {
+        return Ok(k);
     }
     let mut k = [0u8; 32];
     OsRng.fill_bytes(&mut k);
     let hex: String = k.iter().map(|b| format!("{b:02x}")).collect();
-    // write a 0600 temp file, flush it to disk, then rename: never a half-written key
-    let tmp = path.with_extension("key.tmp");
+    // write a 0600 temp file, flush it to disk, then link it into place (never overwrites an
+    // existing key, never a half-written file) and use whatever ended up on disk
+    let tmp = path.with_extension(format!("key.tmp{}", std::process::id()));
     let _ = std::fs::remove_file(&tmp);
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create_new(true);
@@ -726,8 +735,14 @@ pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     let mut f = o.open(&tmp)?;
     f.write_all(hex.as_bytes())?;
     f.sync_all()?;
-    std::fs::rename(&tmp, path)?;
-    Ok(k)
+    let linked = std::fs::hard_link(&tmp, path);
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
+    }
+    read_key(path)?.ok_or_else(|| std::io::Error::other("app-cap.key missing after write"))
 }
 
 #[cfg(test)]
@@ -758,7 +773,7 @@ mod key_tests {
             std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        assert!(!d.path().join("app-cap.key.tmp").exists());
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
         assert_eq!(load_or_create_key(&p).unwrap(), k);
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(load_or_create_key(&p).is_err());

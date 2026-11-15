@@ -673,7 +673,8 @@ fn cookie_allowed(v: &str, name: &str) -> bool {
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
-    if cname.starts_with("orch_") {
+    if cname.starts_with("orch_") || cname.starts_with("__host-") || cname.starts_with("__secure-")
+    {
         return false;
     }
     let mut path_ok = false;
@@ -696,7 +697,20 @@ fn cookie_allowed(v: &str, name: &str) -> bool {
 fn sanitize_proxied(resp: &mut Response, app: &AppRow) {
     let h = resp.headers_mut();
     h.remove("service-worker-allowed");
-    h.remove("clear-site-data");
+    // origin-wide policies: one app must never set them for every app on this origin
+    for n in [
+        "clear-site-data",
+        "nel",
+        "report-to",
+        "reporting-endpoints",
+        "strict-transport-security",
+        "alt-svc",
+        "accept-ch",
+        "critical-ch",
+        "origin-agent-cluster",
+    ] {
+        h.remove(n);
+    }
     let kept: Vec<_> = h
         .get_all(header::SET_COOKIE)
         .iter()
