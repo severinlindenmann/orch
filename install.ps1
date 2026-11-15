@@ -3,6 +3,7 @@ if ($env:ORCH_INSTALL_KIND -and $PSBoundParameters.Count -eq 0) { $InstallKind =
 if ($InstallKind -notin @("normal","dev","test")) { throw "InstallKind must be normal, dev or test." }
 # orch installer (Windows): installs uv if missing, then orch.
 # ORCH_REPO / ORCH_REF override the source (default: GitHub main).
+# To leave: `orch uninstall` in a project (your tickets stay), then `uv tool uninstall orch-workspace`.
 # -InstallKind test|dev (given by the person running this installer) marks a test or dev install; default normal.
 # Works for a standard user: no admin rights, no git, no change to the execution policy.
 # Not "Stop": Windows PowerShell turns a native tool's stderr (uv's progress lines) into errors when the output is

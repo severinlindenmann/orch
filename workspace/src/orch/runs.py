@@ -29,7 +29,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import adapters, addons, diag, history, procs, runhooks, services, tickets
+from orch import adapters, addons, brake, diag, history, procs, runhooks, services, tickets
 from orch.errors import Refused
 from orch.procs import pid_started, same_start
 
@@ -1042,6 +1042,8 @@ def _items_text(items: list[dict]) -> str:
 
 def _description_plan(ticket: dict) -> list[str]:
     """A description longer than a title needs a plan before work starts."""
+    if ticket.get("ext"):  # an add-on runs this ticket's flow with its own start text
+        return []
     if not ticket.get("checklist") and len((ticket.get("note") or "").strip()) > 200:
         return ["Read the description, write a plan, split it into tasks with orch check add, then start."]
     return []
@@ -1358,6 +1360,7 @@ def start(
     blocked = tickets.start_blocked(root, tickets.load(root, tid))  # before anything is planned or spawned
     if blocked:
         raise Refused(blocked)
+    brake.check_start(root, tid, by)  # R8.6: paused, or over the daily cap, for an automatic start
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)
     worktrees.schedule_sweep(root)  # B12: copies nobody needs, in a detached run; never waits, never raises
@@ -1725,7 +1728,7 @@ def wrap(
                     )
             with contextlib.suppress(Exception):
                 tickets.log(root, tid, f"The agent stopped with an error: {why}", f"agent:{name}")
-        drain = turns <= MAX_DRAIN_TURNS and not flags.get("hung")
+        drain = turns <= MAX_DRAIN_TURNS and not flags.get("hung") and brake.paused(root) is None
         if release(root, tid, run, keep_if_pending=drain)["released"]:
             # ended without finishing or asking: not Working any more (anything still waiting stays queued)
             settle(root, tid, f"agent:{name}", ignore_input=True)

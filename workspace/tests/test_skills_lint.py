@@ -34,9 +34,13 @@ HUMAN_ONLY = {
     "share",
     "private",  # a person's approvals and Move to private (agents are refused)
     "update",
+    "doctor",  # a person's check of the install
+    "uninstall",  # a person takes orch out of a folder
     "start",
     "stop",
     "status",
+    "pause",  # a person's runaway brake
+    "resume",
     "addon",
     "agents",
     "config",
@@ -60,7 +64,11 @@ PENDING: set[str] = set()
 
 
 def skill_dirs() -> dict[str, Path]:
-    out = {"orch": ROOT / "workspace/skills/orch", "orch-diagnose": ROOT / "workspace/skills/orch-diagnose"}
+    out = {
+        "orch": ROOT / "workspace/skills/orch",
+        "orch-diagnose": ROOT / "workspace/skills/orch-diagnose",
+        "orch-github": ROOT / "workspace/skills/orch-github",
+    }
     for p in sorted(BUILTIN.glob("*/skills/orch-*")):
         out[p.name] = p
     for p in sorted((ROOT / "workspace-addons").glob("*/src/*/skills/orch-*")):
