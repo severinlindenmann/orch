@@ -256,17 +256,21 @@ that something wakes the ticket; an add-on (the scheduler) may wake `kind: time`
 
 A ticket's `refs` holds web addresses, tickets, artifacts and project files (ticket.schema.json).
 Use `orch ref add <ticket> <target> [--kind K] [--title T]`, `orch ref list <ticket>` and
-`orch ref rm <ticket> <n|target>`. Targets are http(s) addresses, ticket keys or ids,
+`orch ref rm <ticket> <n|target>`. `orch ref set <ticket> <n|target> --status <word>` records the state of a web reference
+(`status` and `seen_at`; `at` and `by` stay who added it). Targets are http(s) addresses, ticket keys or ids,
 `artifact:report.pdf`, `artifact:DM-9/report.pdf`, or `docs/spec.md:40`. Repeating a target keeps one entry.
 Ticket and artifact references store ticket ids; titles and status are read when shown.
 Absolute or outside-project file paths stay in `.orch/local/refs/<ticket id>.json`, on this computer only.
 
 Existing add-on fields stay. The manifest table remains `[[ticket_links]]`.
-Web references keep `{kind, url, title?, status?, thumb?, at, by}`. The kind comes from an active add-on's
+Web references keep `{kind, url, title?, status?, seen_at?, thumb?, at, by}`. The kind comes from an active add-on's
 address pattern, or is `url`. `workspace/src/orch/refs.py` chooses the display:
-1. An active add-on kind supplies its label, icon and stored status.
+1. An active add-on kind supplies its label and icon.
 2. Otherwise the known-sites table supplies the site's name and icon.
 3. Otherwise it shows "Reference" and the short address.
+
+A stored `status` is shown for every web reference (first letter upper case), after the site's name (`GitHub · Open`),
+not only for an add-on kind.
 
 An add-on that is off changes nothing in the file; its references regain their label and status when it is on.
 
