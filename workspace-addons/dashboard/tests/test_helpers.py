@@ -709,7 +709,7 @@ def test_ui2_small_bugs_in_markup_and_css():
     mm = (WEB / "mobile-mode.js").read_text()
     html = (WEB / "index.html").read_text()
     # 3: an open-page row is the link alone, not "Focus page | Focus page"
-    assert "r.format === 'open-page' ? h('dd', {className:'addon-page'}, v)" in app
+    assert "rows.map(([, v]) => h('dd', {className:'addon-page'}, v))" in app
     # 2: the sidebar colour and the modal dim layer fill the viewport
     assert (
         "background:linear-gradient(to right,var(--sidebar)" in css
