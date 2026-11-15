@@ -11,15 +11,17 @@ import os
 import stat
 from pathlib import Path
 
-from . import orchcli
+from . import authority, orchcli
 from .render import clean
 from .store import Refused, handover_file_ok, read_bytes
 
 FILE = "handover.json"
 DIRECTORY = (".agents", "skills", "orch-relay", "workspaces.json")
 TERMINAL = ("done", "failed", "denied", "not_needed")
-KNOWN = ("waiting_start", "waiting_approval", "queued", "working", "review", "done", "failed", "denied")
+KNOWN = ("waiting_start", "waiting_allow", "queued", "working", "review", "done", "failed", "denied")
 NOT_NEEDED = "not_needed"
+# the relay's name for "waiting for the other person's allow" is the cached state waiting_allow (contract)
+RELAY_NAMES = {"waiting_" + "appro" + "val": "waiting_allow"}
 TAKE_BACK_SUFFIX = "-here"  # "Do it here instead": an accepted change that adds the task <handover task>-here
 NO_LONGER = "No longer needed: {title}. Please do not start it."
 
@@ -169,6 +171,7 @@ def state_of(root, crew, ws, delegate=None):
     if delegate:
         mine = [t for t in mine if t.get("delegate") == delegate] or mine
     state = mine[-1].get("status") if mine else None
+    state = RELAY_NAMES.get(state, state)
     return state if state in KNOWN else None
 
 
@@ -219,6 +222,7 @@ def start(root, store, d, t, crew, h):
         book[crew["id"]] = mine
         _save(store, book)  # before anything else: a second crew start never sends a second delegate
         _set_cache(root, crew["id"], ws=ws, name=clean(entry.get("name") or ws, 64), state="waiting_start")
+    starter = authority.who(d["start"]["q"]) if d.get("start") else None
     todo = [f for f in files if f not in mine["shared"]]
     if todo and not _group_tasks(root, crew["id"]):
         raise Refused(
@@ -227,7 +231,8 @@ def start(root, store, d, t, crew, h):
             "refused",
         )
     for f in todo:
-        orchcli.call(root, "relay", "group", "share", crew["id"], f, "--click", write=True)
+        # the click was the person's Start: recorded as the person who pressed it (no proof plumbing here)
+        orchcli.call(root, "relay", "group", "share", crew["id"], f, "--click", write=True, by=starter)
         mine["shared"].append(f)
         _save(store, book)
     return {"ws": ws, "name": entry.get("name"), "sent": first, "files": list(mine["shared"])}

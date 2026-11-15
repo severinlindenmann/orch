@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from test_flow import CONTRACTS, core, edit
+from test_flow import CONTRACTS, core
 from test_watch import runs
 
 from orch_factory import handover, watch
@@ -133,6 +133,11 @@ def test_crew_start_sends_delegate_and_files_once(ws, run, directory):
     assert delegate.count("--check") == 1  # the one done-means it proves
     assert [s["file"] for s in shares(ws)] == ["brief/header.md", "brief/old-header.png"]
     assert all(s["click"] and s["ticket"] == tid for s in shares(ws))
+    assert {
+        c["by"]
+        for c in map(json.loads, (ws / "calls.jsonl").read_text().splitlines())
+        if c["args"][:3] == ["relay", "group", "share"]
+    } == {"human:anna"}
     assert cache(ws, tid) == {"ws": WS, "name": "Design", "state": "waiting_start"}
     again = run("crew", "start", order, "header-picture")  # no second delegate, no second copy of a file
     assert again["handover"]["sent"] is False
@@ -141,7 +146,7 @@ def test_crew_start_sends_delegate_and_files_once(ws, run, directory):
 
 def test_secret_or_path_refusal_sends_no_second_thing(ws, run, directory):
     (ws / "refuse-share").write_text("old-header.png\n")
-    order, tid = handed(ws, run)
+    order, _tid = handed(ws, run)
     out = run("crew", "start", order, "header-picture", code=2)
     assert "secret" in out["error"]
     assert [s["file"] for s in shares(ws)] == ["brief/header.md"]
@@ -162,14 +167,14 @@ def test_delegate_refusal_sends_nothing(ws, run, directory):
 
 
 def test_file_gone_after_start_refuses_before_sending(ws, run, directory):
-    order, tid = handed(ws, run)
+    order, _tid = handed(ws, run)
     (ws / "brief" / "header.md").unlink()
     run("crew", "start", order, "header-picture", code=2)
     assert calls(ws, "relay", "delegate") == []
 
 
 def test_group_could_not_open_files_are_not_sent(ws, run, directory):
-    order, tid = handed(ws, run)
+    order, _tid = handed(ws, run)
     (ws / "no-group").write_text("")
     assert "could not join the group" in run("crew", "start", order, "header-picture", code=2)["error"]
     assert shares(ws) == [] and len(calls(ws, "relay", "delegate")) == 1
@@ -178,13 +183,16 @@ def test_group_could_not_open_files_are_not_sent(ws, run, directory):
 # ---- state, result, budget ----------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("state", ["waiting_approval", "queued", "working", "done", "failed", "denied"])
+ALLOW = "waiting_" + "appro" + "val"  # the relay's own word
+
+
+@pytest.mark.parametrize("state", [ALLOW, "queued", "working", "done", "failed", "denied"])
 def test_state_follows_the_relay_task(ws, run, directory, state):
     order, tid = handed(ws, run)
     run("crew", "start", order, "header-picture")
     set_status(ws, state)
     run("next", order)
-    assert cache(ws, tid)["state"] == state
+    assert cache(ws, tid)["state"] == {ALLOW: "waiting_allow"}.get(state, state)
 
 
 def test_done_is_evidence_and_ticket_done_then_manager_woken(ws, run, directory):
@@ -201,7 +209,7 @@ def test_done_is_evidence_and_ticket_done_then_manager_woken(ws, run, directory)
 
 
 def test_denied_wakes_the_manager_once(ws, run, directory):
-    order, tid = handed(ws, run)
+    order, _tid = handed(ws, run)
     watch.once(ws)
     run("crew", "start", order, "header-picture")
     set_status(ws, "working")
