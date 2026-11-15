@@ -501,7 +501,7 @@ def _files(proj):
     return {
         str(p.relative_to(base)): p.read_bytes()
         for p in sorted(base.rglob("*"))
-        if p.is_file() and "lock" not in p.name
+        if p.is_file() and "lock" not in p.name and "diag" not in p.relative_to(base).parts  # the debug log
     }
 
 

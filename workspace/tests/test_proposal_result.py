@@ -7,7 +7,7 @@ import pytest
 from test_phone_proposal import CONTRACTS, answer, proposals, propose, real_tickets
 from test_phone_proposal import conn as conn
 
-from orch import chat, config, relay, tickets
+from orch import chat, config, diag, relay, tickets
 
 VECTORS = json.loads((CONTRACTS / "vectors/proposal-result-v1.json").read_text())
 VALIDATOR = jsonschema.Draft202012Validator(json.loads((CONTRACTS / "message.schema.json").read_text()))
@@ -151,7 +151,9 @@ def test_send_failure_keeps_result_for_retry(proj, run, conn, monkeypatch, failu
     assert run("relay", "inbox")[0] == 0
     saved = relay._asked_edit(proj, lambda a: list(a[q["id"]]["results"].values())[-1]["result"])
     assert saved["body"]["result"] == "made"
-    assert "proposal result" in (proj / ".orch/run/relay-errors.log").read_text()
+    assert any(
+        "proposal result" in e["kv"]["what"] for e in diag.read_events(proj) if e["ev"] == "relay.send_failed"
+    )
     (proj / ".orch/inbox-seen.json").write_text("{}")
 
     def unexpected_make(*args, **kwargs):

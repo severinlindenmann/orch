@@ -31,7 +31,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, history, procs, runhooks, runs, tickets
+from orch import adapters, diag, history, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 MAX_LIVE = 4
@@ -602,10 +602,7 @@ def _squeeze(text: str) -> str:
 
 
 def _log_submit(root: Path, tid: str, run: str, what: str) -> None:
-    with contextlib.suppress(OSError):
-        f = runs.run_dir(root) / "live-submit.log"
-        with open(f, "a", encoding="utf-8") as fh:
-            fh.write(f"{tickets.now()} {tid} {run} {what}\n")
+    diag.log("run.live_submit", "info", root=root, ticket=tid, run=run, what=what)
 
 
 # for a tool whose adapter names no dialog of its own

@@ -12,7 +12,7 @@ import test_phone_v3 as pv3
 import test_run_wrap
 from fakes import WS
 
-from orch import chat, runs, runs_live, tickets
+from orch import chat, diag, runs, runs_live, tickets
 from orch.errors import Refused
 
 conn = pv3.conn  # a relay-connected folder with one paired phone
@@ -1350,7 +1350,8 @@ def test_persistent_chat_write_failure_finishes_phone_intake(proj, run, conn, mo
     assert sum("Keep this message" in h["text"] for h in tickets.load(proj, gid)["history"]) == 1
     assert len(pv3.acks(conn)) == 1
     assert not chat.status(proj)["messages"]
-    log = (proj / ".orch/run/relay-errors.log").read_text()
+    (e,) = [e for e in diag.read_events(proj) if e["ev"] == "relay.send_failed"]
+    log = f"{e['kv']['what']}: {e['kv']['why']}"
     assert f"Chat message {pv3.GEN} could not be saved" in log and str(error) in log
 
 
