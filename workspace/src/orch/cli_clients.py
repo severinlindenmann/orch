@@ -172,6 +172,11 @@ def add_parsers(sub, common) -> None:
         action="store_true",
         help="open the ticket's group chat with that workspace (needs --ticket)",
     )
+    x.add_argument(
+        "--full",
+        action="store_true",
+        help="share the whole ticket (checklist, open question), not only the summary (needs --ticket)",
+    )
     x = rel.add_parser("start", parents=[common, t], help="start a named task on another workspace")
     x.add_argument("workspace")
     x.add_argument("key")
@@ -777,7 +782,9 @@ def _view_hint(m: dict, ticket: str | None, update: str | None) -> None:
 def _build_send(root: Path, args, sub: str, t: str | None) -> dict:
     """send, delegate and start: one path for a real send and for --dry-run (relay.dry_run())."""
     if sub == "delegate":
-        return relay.send_delegate(root, args.workspace, args.title, args.text, args.check, t, args.group)
+        return relay.send_delegate(
+            root, args.workspace, args.title, args.text, args.check, t, args.group, args.full
+        )
     if sub == "start":
         return relay.send_start(root, args.workspace, args.key, args.text, t)
     if args.file and (args.update or args.reply_to or args.speak):
@@ -808,10 +815,26 @@ def _preview_text(m: dict) -> str:
     if m.get("ticket"):
         lines.append(f"ticket: {m['ticket']}")
     for k, v in m["body"].items():
+        if k == "ticket_card":
+            lines.extend(_card_lines(v))
+            continue
         v = "; ".join(map(str, v)) if isinstance(v, list) else v
         lines.append(f"{k}: {v if k != 'allow_token' else '(permission token)'}")
     lines.append("Send it for real: run the same command without --dry-run.")
     return "\n".join(lines)
+
+
+def _card_lines(c: dict) -> list[str]:
+    """The whole ticket (--full) as it leaves: every field of the card."""
+    out = ["whole ticket:"]
+    for k in ("key", "title", "status", "summary"):
+        if c.get(k):
+            out.append(f"  {k}: {c[k]}")
+    if c.get("question"):
+        out.append(f"  open question: {c['question']['text']}")
+    out.append(f"  checklist: {c.get('done', 0)} of {c.get('total', 0)} done")
+    out.extend(f"    [{'x' if i['done'] else ' '}] {i['text']}" for i in c.get("checklist", []))
+    return out
 
 
 def _sent_line(root: Path, m: dict, ok: str) -> str:

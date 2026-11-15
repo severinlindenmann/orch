@@ -982,7 +982,12 @@ def send_delegate(
     checklist: list[str],
     ticket: str | None,
     group: bool = False,
+    full: bool = False,
 ) -> dict:
+    if full and not ticket:
+        raise Refused("--full needs --ticket <id>.")
+    if full and group:
+        raise Refused("--full and --group do not go together. Use one.")
     to = resolve(root, target)
     if group and ticket and _DRY_RUN.get():
         raise Refused("--dry-run does not preview --group (the group card). Preview without --group.")
@@ -998,6 +1003,14 @@ def send_delegate(
     body: dict = {"title": title, "text": text}
     if checklist:
         body["checklist"] = checklist
+    if full and ticket:
+        # opt-in per send (R3.3): the whole ticket as the same card the group shares, never more
+        from orch import chat_groups
+
+        card = chat_groups.card_of_ticket(root, ticket)
+        if card is None:
+            raise Refused(f"Ticket {ticket} could not be read. Nothing was sent.")
+        body["ticket_card"] = chat_groups.fit_card(card)
     tok = _received_token(root, to, "delegate", None)
     if tok:
         body["allow_token"] = tok
@@ -2991,7 +3004,11 @@ def _ticket_for(root: Path, msg: dict) -> str:
                 lambda tk: tickets.add_history(tk, by, f"{peer} handed this task over again", "relay"),
                 by=by,
             )
-            tickets.ext_set(root, copy["id"], "relay", json.dumps({"messages": more[-20:]}), by)
+            upd: dict = {"messages": more[-20:]}
+            if card := _shared_card(msg):
+                upd["shared_card"] = card
+                _note_shared(root, copy["id"], by)
+            tickets.ext_set(root, copy["id"], "relay", json.dumps(upd), by)
             return copy["id"]
         # outside text is data: cleaned, one line, framed with who sent it, never longer than a title
         peer = clean_untrusted(name_of(root, msg["from"]), 60) or msg["from"]
@@ -3029,8 +3046,50 @@ def _ticket_for(root: Path, msg: dict) -> str:
 
         if link := chat_groups.task_link(root, msg):
             ext["group_task"] = link  # sync reports its status to the group's host
+        if card := _shared_card(msg):
+            ext["shared_card"] = card  # the sender's whole ticket, kept as data (never an instruction)
+            _note_shared(root, tid, by)
     tickets.ext_set(root, tid, "relay", json.dumps(ext), by)  # last: `done` finds the ticket by this
     return tid
+
+
+def _shared_card(msg: dict) -> dict | None:
+    """body.ticket_card of a delegate (`--full`), cleaned text by text and capped: outside text is data. It is
+    only kept in ext.relay.shared_card; the copy's title and checklist still come from title and checklist."""
+    c = msg.get("body", {}).get("ticket_card")
+    if not isinstance(c, dict):
+        return None
+
+    def txt(v, n: int) -> str:
+        return " ".join(clean_untrusted(str(v or ""), n).split())[:n]
+
+    q = c.get("question")
+    items = c.get("checklist")
+    card = {
+        "title": txt(c.get("title"), 200),
+        "status": txt(c.get("status"), 20),
+        "summary": txt(c.get("summary"), 280),
+        "checklist": [
+            {"text": txt(i.get("text"), 200), "done": i.get("done") is True}
+            for i in (items if isinstance(items, list) else [])[:20]
+            if isinstance(i, dict)
+        ],
+    }
+    if key := txt(c.get("key"), 20):
+        card["key"] = key
+    if isinstance(q, dict) and (qt := txt(q.get("text"), 500)):
+        card["question"] = qt
+    card["done"] = sum(1 for i in card["checklist"] if i["done"])
+    card["total"] = len(card["checklist"])
+    return card
+
+
+def _note_shared(root: Path, tid: str, by: str) -> None:
+    """One history line; bookkeeping, so an unwritable ticket never fails the receive."""
+    with contextlib.suppress(Refused, OSError):
+        tickets.apply_op(
+            root, tid, lambda tk: tickets.add_history(tk, by, "Shared the whole ticket", "relay"), by=by
+        )
 
 
 def _peer_ticket(msg: dict) -> tuple[str, str | None] | None:
