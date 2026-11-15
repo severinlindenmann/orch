@@ -135,6 +135,57 @@ elif args[:2] == ["run", "status"]:
         args[2] in live and args[2] in states
     ):  # a live session and its state (starting, working, idle, attention)
         result["claim"] = {"mode": "live", "live": {"state": states[args[2]]}}
+# ---- #816 B: hand-over (relay delegate, group share/say/list, outbox, ticket status). Part A appends its own block. ----
+elif args[:2] == ["relay", "delegate"]:
+    if (root / "fail-delegate").exists():
+        print(json.dumps({"error": "Design is not reachable.", "code": "refused"}))
+        sys.exit(2)
+    mid = f"m_{len(list(root.glob('delegate-*.json'))) + 1:016d}"
+    ticket = flag("--ticket")
+    record = {
+        "id": mid,
+        "ws": args[2],
+        "title": args[3],
+        "text": flag("--text"),
+        "checks": [args[i + 1] for i, a in enumerate(args) if a == "--check"],
+        "ticket": ticket,
+        "group": "--group" in args,
+    }
+    (root / f"delegate-{mid}.json").write_text(json.dumps(record))
+    if "--group" in args and not (root / "no-group").exists():
+        groups = json.loads((root / "groups.json").read_text()) if (root / "groups.json").exists() else {"hosted": []}
+        g = next((x for x in groups["hosted"] if x["ticket"] == ticket), None)
+        if g is None:
+            g = {"id": "grp_" + ticket, "ticket": ticket, "tasks": []}
+            groups["hosted"].append(g)
+        g["tasks"].append({"delegate": mid, "ws": args[2], "status": "waiting_start", "title": args[3]})
+        (root / "groups.json").write_text(json.dumps(groups))
+    result = {"id": mid, "sent": True}
+elif args[:3] == ["relay", "group", "share"]:
+    name = Path(args[4]).name
+    refused = (root / "refuse-share").read_text().split() if (root / "refuse-share").exists() else []
+    if name.startswith(".") or name in refused:
+        print(json.dumps({"error": f"{args[4]} can't be shared (it looks like a secret).", "code": "refused"}))
+        sys.exit(2)
+    with (root / "shares.jsonl").open("a") as stream:
+        stream.write(json.dumps({"ticket": args[3], "file": args[4], "click": "--click" in args}) + "\n")
+    result = {"group": "grp_" + args[3], "errors": []}
+elif args[:3] == ["relay", "group", "say"]:
+    with (root / "says.jsonl").open("a") as stream:
+        stream.write(json.dumps({"ticket": args[3], "text": args[4]}) + "\n")
+    result = {}
+elif args[:3] == ["relay", "group", "list"]:
+    result = json.loads((root / "groups.json").read_text()) if (root / "groups.json").exists() else {"hosted": []}
+    result.setdefault("joined", [])
+elif args[:2] == ["relay", "outbox"]:
+    result = {"waiting": json.loads((root / "outbox.json").read_text()) if (root / "outbox.json").exists() else []}
+elif args[:2] == ["ticket", "status"]:
+    t = load(args[2])
+    t["status"] = args[3]
+    t["revision"] += 1
+    save(t)
+    result = t
+# ---- end of the hand-over block ----
 else:
     raise AssertionError(args)
 print(json.dumps(result))

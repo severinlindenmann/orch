@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime
 
-from . import authority, autopilot, commands, irreversible, measure, orchcli
+from . import authority, autopilot, commands, handover, irreversible, measure, orchcli
 from .render import clean
 from .store import Refused, Store, clock, digest, validate
 
@@ -278,7 +278,9 @@ def _measure(root, d):
     can't be read the cached value stays (and nothing is claimed as measured)."""
     if d.get("phase") != "started" or d.get("kind") != "run":
         return
-    minutes = measure.active_minutes(root, [d["tid"], *(t["id"] for t in d.get("crew", {}).values())])
+    # a task handed to another workspace is their time, never counted in this order's active-time budget
+    crew = [t["id"] for t in d.get("crew", {}).values() if not handover.delegated(t)]
+    minutes = measure.active_minutes(root, [d["tid"], *crew])
     if minutes is not None:
         d["used"], d["measured"] = minutes, True
 
@@ -445,6 +447,8 @@ def next_step(root, order):
                     {"type": "stop-answered", "order": order, "q": q["id"], "answer": answer, "by": by}
                 )
         d["rows"] = [r for r in store.journal_read() if r["order"] == order]
+        if d["kind"] == "run" and d["phase"] == "started" and d.get("proposal", {}).get("handovers"):
+            handover.settle(root, store, d)
         if d["kind"] == "autopilot":
             d["grant_valid"] = any(clock() < g["until"] for g in autopilot.grants_of(store, ticket))
         refresh(root, store, order, d)
@@ -517,6 +521,12 @@ def crew_start(root, order, task):
         crew = d["crew"].get(task)
         if crew is None:
             raise Refused("Add the crew ticket first (orch factory crew add).", "invalid")
+        if any(h["task"] == task for h in d["proposal"].get("handovers", [])):
+            handover.settle(root, store, d)  # a taken-back task is told once and then runs here
+            h = handover.of(d, task)
+            if h is not None:
+                info = handover.start(root, store, d, t, crew, h)
+                return {"order": d["tid"], "task": task, "ticket": crew["id"], "handover": info}
         _measure(root, d)  # the budget check uses measured time, never the (synced, settable) cache (#681)
         if d["cap"] and not d.get("measured"):
             raise Refused(

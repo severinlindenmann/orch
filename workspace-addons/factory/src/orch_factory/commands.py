@@ -3,7 +3,7 @@
 import json
 import re
 
-from . import authority, orchcli
+from . import authority, handover, orchcli
 from .render import START_OPTIONS, question_text
 from .store import Refused, Store, digest
 
@@ -123,6 +123,7 @@ def proposal(data):
 
 def propose(root, order, data):
     p = proposal(data)
+    handover.check_freeze(root, p)
     store = Store(root)
     with store.locked():
         ticket = order_ticket(root, order)

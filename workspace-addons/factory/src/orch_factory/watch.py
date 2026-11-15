@@ -3,7 +3,8 @@
 Wake reasons (all decided through authority/flow, never from the ext cache or raw rows):
   a) a person answered a question Factory asked and `next` has not consumed it yet;
   b) a crew sub-ticket of a started order became done or failed since the last pass;
-  c) autopilot: a live grant covers an open stop the manager could decide (once per stop).
+  c) autopilot: a live grant covers an open stop the manager could decide (once per stop);
+  d) a task handed to another workspace was denied or failed there (once per task and reason, no timer).
 Agent answers never wake anything. A run is started only through `orch run start` and only when none is live.
 State in .orch/addons/factory/watch.json: per order the crew statuses seen and the ids already woken for."""
 
@@ -13,7 +14,7 @@ import json
 import sys
 import time
 
-from . import authority, autopilot, flow, orchcli
+from . import authority, autopilot, flow, handover, orchcli
 from .store import Refused, Store, clock
 
 INTERVAL = 20
@@ -37,6 +38,11 @@ def _save(store, orders):
 def _reasons(root, store, ticket, tickets, entry, granted, decided):
     """(why, [ids to remember], new crew statuses) for one order; nothing when it needs no wake."""
     d = flow.derive(root, store, ticket, tickets)
+    states = {}
+    if d["phase"] == "started" and d["kind"] == "run" and d.get("proposal", {}).get("handovers"):
+        states, changed = handover.settle(root, store, d)
+        if changed:  # a finished hand-over made its crew ticket done: rule (b) must see it
+            d = flow.derive(root, store, ticket, orchcli.tickets(root))
     woken = set(entry.get("woken", []))
     why, ids = [], []
     for e in d["pending"]:
@@ -57,6 +63,10 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
                 first = status in FINISHED and seen.get(task) != status
             if first:
                 why.append(f"crew task {task} is {status}")
+        for task, state in states.items():  # d) a hand-over was said no to or failed: once per task and reason
+            if state in ("denied", "failed") and f"handover:{task}:{state}" not in woken:
+                why.append(f"handover task {task} is {state}")
+                ids.append(f"handover:{task}:{state}")
         op = d["open"]
         if op and op["row"]["kind"] == "factory:stop" and f"stop:{op['q']['id']}" not in woken:
             options = list(op["q"].get("options") or [])
