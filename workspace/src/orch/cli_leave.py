@@ -316,8 +316,10 @@ def uninstall(root: Path) -> dict:
     if act.is_file() and not harness.is_link(act) and not addons.listed(root):
         act.unlink()
         removed.append(".orch/addons.json")
-    for d in (".agents/skills", ".agents", ".claude/skills", ".claude"):
-        _rmdir_if_empty(root / d)
+    for place in [*skills._skills_link_paths(), ".agents/skills"]:  # the skill folders, then their parents
+        _rmdir_if_empty(root / place)
+        if (root / place).parent != root:
+            _rmdir_if_empty((root / place).parent)
     kept = [k for k in KEPT if (root / k).exists()]
     return {"removed": removed, "kept": kept}
 
