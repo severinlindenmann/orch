@@ -1105,3 +1105,89 @@ def test_run_status_json_says_why_a_run_waits(proj, run, monkeypatch, capsys):
     screen["box"] = ""
     assert runs_live.deliver(proj, tid) == 1
     assert "hold" not in status()
+
+
+# ---- the very first start after an install: first-run screens, then the task (fix/first-run-live-input)
+
+
+def _after_first_run_screens(proj, run, monkeypatch):
+    """A first start: orch answered the tool's first-run screens; its start hook never said it is up."""
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane=_screen(""))
+    rec = runs.read(proj, tid)
+    rec["live"] = {
+        "state": "attention",
+        "since": tickets.now(),
+        "why": "Claude has not started up after a minute.",
+    }
+    rec.pop("up", None)
+    rec["screens_at"] = tickets.now()
+    runs._write(proj, rec)
+    return tid, rn, sent, screen
+
+
+def test_the_task_goes_in_once_the_prompt_shows_after_the_first_run_screens(proj, run, monkeypatch):
+    tid, rn, sent, screen = _after_first_run_screens(proj, run, monkeypatch)
+    n = len(sent)
+    got = runs_live.retry_deliver(proj, tid, rn, {}, now=time.time(), end=lambda: pytest.fail("ended"))
+    assert got == "sent" and sent[n:] == [runs_live.notice_line(tid, False), "Enter"]
+    assert runs.read(proj, tid)["up"] is True
+
+
+def test_a_dialog_after_the_screens_is_never_answered_or_typed_into(proj, run, monkeypatch):
+    tid, rn, sent, screen = _after_first_run_screens(proj, run, monkeypatch)
+    screen["pane"] = "Do you want to make this edit?\n"
+    n = len(sent)
+    assert runs_live.retry_deliver(proj, tid, rn, {}, now=time.time()) is None
+    assert len(sent) == n and not runs.read(proj, tid).get("up")
+
+
+def test_screen_time_is_not_counted_against_the_input_window(proj, run, monkeypatch):
+    tid, rn, sent, screen = _after_first_run_screens(proj, run, monkeypatch)
+    screen["pane"] = "Select login method\n"  # still no prompt
+    memo, t0 = {}, time.time()
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0 - 400) is None  # counted from long ago ...
+    rec = runs.read(proj, tid)
+    rec["screens_at"] = tickets.now()  # ... but a screen was answered just now: the window restarts
+    runs._write(proj, rec)
+    assert (
+        runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 100, end=lambda: pytest.fail("ended")) is None
+    )
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 190, end=lambda: None) == "gave_up"
+
+
+def test_a_failed_delivery_restarts_once_with_the_kept_input_and_never_loops(proj, run, monkeypatch):
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane="Do you want to make this edit?\n")
+    memo, t0 = {}, time.time()
+    runs_live.retry_deliver(proj, tid, rn, memo, now=t0)
+    assert runs_live.retry_deliver(proj, tid, rn, memo, now=t0 + 181, end=lambda: None) == "gave_up"
+    assert runs.read(proj, tid)["restart"] is True
+    runs.release(proj, tid, rn)
+    starts = []
+    with monkeypatch.context() as m:
+        m.setattr(runs, "start", lambda root, t, by, **k: starts.append((t, by, k)) or {})
+        runs_live.restart_after_give_up(proj, tid, "claude")
+    assert starts == [(tid, runs_live.AUTOMATION_BY, {})]
+    (back,) = runs.undelivered(proj, tid)
+    assert back["live_retry"] is True and back["text"] == "one more"
+    assert _start_modes(proj, tid, monkeypatch) == ["oneshot"]  # one step at a time: no live loop
+
+
+def test_send_into_a_session_still_starting_is_queued_and_never_typed(proj, run, monkeypatch):
+    tid, rn, sent, screen = _after_first_run_screens(proj, run, monkeypatch)
+    n = len(sent)
+    res = runs_live.send(proj, tid, "human:t", "Please add the rain plan.")
+    assert res["delivered"] == 0 and res["queued"] is True
+    assert runs_live.send_text(res, tid).startswith("Queued.")
+    assert len(sent) == n and "rain" not in "".join(sent)  # nothing typed at all
+    assert any(
+        "rain plan" in i["text"] for i in runs.undelivered(proj, tid)
+    )  # kept in the order's pending file
+
+
+def test_send_into_an_idle_session_types_only_the_notice_and_says_sent(proj, run, monkeypatch):
+    tid, rn, sent, screen = _idle_with_input(proj, run, monkeypatch, pane=_screen(""))
+    n = len(sent)
+    res = runs_live.send(proj, tid, "human:t", "Please add the rain plan.")
+    assert res["delivered"] >= 1 and res["queued"] is False and runs_live.send_text(res, tid) == "Sent."
+    assert sent[n:] == [runs_live.notice_line(tid, False), "Enter"]
+    assert "rain" not in "".join(sent)
