@@ -8,6 +8,7 @@
 <div class="row" style="gap:var(--s3);flex-wrap:wrap">
  <a class="btn primary" href="phone.html">Phone app (6 states, one live)</a>
  <a class="btn" href="desktop.html">Workspace dashboard (live, keys work)</a>
+ <a class="btn" href="ticket.html">Ticket page: Decisions tab</a>
 </div>
 
 <section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">How it works</h2>
@@ -39,6 +40,34 @@
 </tbody></table>
 </section>
 
+<section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">Where the answer is kept</h2>
+<p style="margin:0">Every swipe is kept on its ticket, so you can come back later, and helpers read it without guessing. <a href="ticket.html">See the ticket page draft →</a></p>
+<ul style="margin:0;padding-left:20px;display:grid;gap:6px">
+<li><strong>Ticket → Decisions tab</strong> (new, first tab when there are answers): one card per answer, newest first, showing what you saw then (options with the taken one marked, before/after, pins in place), your answer, your words (voice with its text, typed text, the spots you marked), who, when, phone or dashboard. “Open as you saw it” opens the same big view, read-only.</li>
+<li><strong>What you saw stays as it was</strong>: the answer is tied to a fingerprint of the card you were shown (the ticket already does this for question answers). If the helper changes the file later, the old answer can't move onto the new one.</li>
+<li><strong>Activity</strong>: the same answer as one plain line (“Severin took C on …: put the questions on top; on C: show the month here. (phone)”).</li>
+<li><strong>For helpers</strong>: the answer lives in the ticket's existing question list (no new store), plus a ready-made one-sentence summary written by orch from the parts, so a helper reads one line and finds the details (voice file, transcript, pins) next to it. The ticket's own command prints a “Decisions” block in the same words.</li>
+</ul>
+<h3 style="margin:8px 0 0;font-size:16px;line-height:24px">What a helper reads (example)</h3>
+<pre style="white-space:pre-wrap;font:13px/20px var(--font-mono);background:var(--bg);padding:12px;border-radius:8px;border:1px solid var(--border);margin:8px 0 0">Decisions on DT-45 (newest first)
+- q4 Home: which layout? -> TOOK C (Severin, phone, 2026-11-15 10:42)
+  Change: put the questions on top of the list.
+  Spot on C (left, middle): show the month here.
+  Shown: A home-a.png, B home-b.png (suggested), C home-c.png  [fingerprint 3f9a…]
+- q3 Home: "What changed today" block -> SENT BACK (Severin, dashboard, 09:30)
+  Change: the dates should be on the left.
+  Spot 1 on after: button bigger, same green as the logo. Spot 2: show only today.
+
+Stored in the ticket file, questions[]:
+{"id":"q4","kind":"choice","text":"Home: which layout?","options":["A","B","C"],
+ "answer":"C","answered_by":"Severin","via":"phone","at":"2026-11-15T10:42:00+01:00",
+ "decision":{"verdict":"take","picked":"C",
+   "summary":"Took C. Change: put the questions on top of the list. Spot on C: show the month here.",
+   "comment":{"text":"","voice":[{"file":"files/q4-voice-1.m4a","seconds":6,"lang":"gsw",
+     "transcript":"Take C, but put the questions on top of the list."}],
+   "pins":[{"on":"C","x":0.30,"y":0.62,"text":"Show the month here."}]},
+   "shown":{"suggested":"B","items":[{"id":"A","ref":"files/home-a.png"},{"id":"B","ref":"files/home-b.png"},{"id":"C","ref":"files/home-c.png"}],"digest":"sha256:3f9a…"}}}</pre>
+</section>
 <section class="card" style="padding:20px;display:grid;gap:12px"><h2 style="margin:0;font-size:20px;line-height:28px">My recommendation</h2>
 <ul style="margin:0;padding-left:20px;display:grid;gap:6px">
 <li>Put in the stack: drafts, Check results, helper plans that need a yes, links before they go public. Questions with several choices stay normal question cards (a swipe can't pick option B).</li>
