@@ -1,10 +1,11 @@
 """Factory's files only. Atomic replacement, no symlinks, and serialized writers."""
 
+import errno
 import hashlib
 import json
 import os
 import re
-import tempfile
+import stat
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -93,27 +94,74 @@ class Store:
         no_links(result)
         return result
 
+    # Below the store folder every step is opened relative to the folder before it, without following links (openat):
+    # a link swapped in between a check and the open can not redirect a read or a write (#681).
+    def _dir_fd(self, parts, create=False):
+        if create:
+            self.base.mkdir(parents=True, exist_ok=True)
+        no_links(self.base)  # the workspace's own folders above the store: checked once
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        fd = os.open(self.base, flags)
+        try:
+            for part in parts:
+                if create:
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=fd)
+                    except FileExistsError:
+                        pass
+                nxt = os.open(part, flags, dir_fd=fd)
+                os.close(fd)
+                fd = nxt
+        except OSError as error:
+            os.close(fd)
+            if error.errno in (errno.ELOOP, errno.ENOTDIR):  # a link (or a file) where a folder must be
+                raise Refused("Factory cannot use symbolic links.", "not_allowed") from None
+            raise
+        return fd
+
     def read(self, relative):
-        return read_bytes(self.path(relative))
+        parts = self.path(relative).relative_to(self.base).parts
+        dfd = self._dir_fd(parts[:-1])
+        try:
+            try:  # O_NONBLOCK: a FIFO planted here must not hang Factory (it is refused below as not regular)
+                fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+            except OSError as error:
+                if error.errno == errno.ELOOP:
+                    raise Refused("Factory cannot use symbolic links.", "not_allowed") from None
+                raise
+        finally:
+            os.close(dfd)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise Refused("A Factory file is not a regular file.", "not_allowed")
+            os.set_blocking(stream.fileno(), True)
+            return stream.read()
 
     def write(self, relative, data, *, frozen=False):
-        path = self.path(relative)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        no_links(path)
-        if frozen and path.exists():
-            if self.read(relative) == data:
-                return
-            raise Refused("This Factory version is already frozen.", "conflict")
-        fd, name = tempfile.mkstemp(prefix=".new-", dir=path.parent)
+        parts = self.path(relative).relative_to(self.base).parts
+        dfd = self._dir_fd(parts[:-1], create=True)
+        name = ".new-" + uuid4().hex
         try:
+            if frozen:
+                try:
+                    if self.read(relative) == data:
+                        return
+                    raise Refused("This Factory version is already frozen.", "conflict")
+                except FileNotFoundError:
+                    pass
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
             with os.fdopen(fd, "wb") as stream:
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(name, path)
+            os.replace(name, parts[-1], src_dir_fd=dfd, dst_dir_fd=dfd)
+            os.fsync(dfd)  # the rename itself is durable too
         finally:
-            if os.path.exists(name):
-                os.unlink(name)
+            try:
+                os.unlink(name, dir_fd=dfd)
+            except FileNotFoundError:
+                pass
+            os.close(dfd)
 
     @contextmanager
     def locked(self):

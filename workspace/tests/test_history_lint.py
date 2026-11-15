@@ -79,6 +79,7 @@ PERSON_OK = {
 SHOWN = {
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
+    ("workspace/src/orch/tickets.py", "start_blocked"): "other = history.shown_ticket(...) first",
     (
         "workspace/src/orch/relay.py",
         "apply_allow_answers",
