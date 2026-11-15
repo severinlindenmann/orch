@@ -617,6 +617,30 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def _keep_session_for_restart(self) -> None:
+        """An add-on add/remove (clicked in the dashboard) restarts this server too: while the dashboard has
+        armed it, an open tab with a session of this server lets the restarted one adopt that session (once,
+        like the dashboard's own hand-over), so the tab keeps working (#705). At most one check per 2 s."""
+        s, srv = self.session, self.server
+        now = time.monotonic()
+        if s is None or s.key is None or now - getattr(srv, "resume_checked", -10.0) < 2:
+            return
+        srv.resume_checked = now
+        try:
+            if not s.authed(self.headers, srv.server_address[1]):
+                return
+            from orch import humanproof
+
+            exp = humanproof.restart_armed(self.root)
+            if (
+                exp
+                and exp != getattr(srv, "resume_written", None)
+                and humanproof.write_resume_cookie(self.root, s.server, s.cookie, s.secret)
+            ):
+                srv.resume_written = exp
+        except Exception:  # noqa: BLE001, S110 - without it the tab shows "orch restarted. Reload" as before
+            pass
+
     def _send(self, code, body: bytes, ctype: str, extra: dict | None = None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -659,6 +683,8 @@ class Handler(BaseHTTPRequestHandler):
         why = self._fence("GET", path.startswith("/api/"))
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        if path.startswith("/api/"):
+            self._keep_session_for_restart()
         if path == "/api/tickets":
             return self._json(
                 200, {"workspace": self.tracker.workspace(), "tickets": self.tracker.tickets_list()}

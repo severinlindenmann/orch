@@ -333,3 +333,36 @@ def test_secret_compare_is_constant_time_and_rotates_with_the_session(live):
     assert (
         post(port, "/api/act", ANSWER, {"Cookie": new_ck, "X-Orch-Page": old_secret})[0] == 403
     )  # old secret dead
+
+
+def test_open_tab_hands_its_session_over_only_while_a_restart_is_armed(live):
+    """#705: an add-on change in the dashboard arms a restart; Focus then writes its resume cookie for an open,
+    signed-in tab (and for nothing else), so the restarted Focus keeps that tab's session."""
+    root, port = live
+    ck = session(root, port)
+    secret = SECRETS[ck]
+    hdrs = {"Cookie": ck, "X-Orch-Page": secret}
+    assert _raw(port, "GET", "/api/tickets", None, hdrs)[0] == 200
+    assert hp.take_resume_session(root, "focus") is None  # not armed: nothing is written
+    assert hp.restart_armed(root) is None
+    assert hp.arm_restart(root) and hp.restart_armed(root)
+    # a request without a session (or with a wrong secret) writes nothing
+    _raw(port, "GET", "/api/tickets", None, {"Cookie": ck, "X-Orch-Page": "x" * 43})
+    assert hp.take_resume_session(root, "focus") is None
+    import time
+
+    time.sleep(2.1)  # the check runs at most once per 2 s
+    assert _raw(port, "GET", "/api/tickets", None, hdrs)[0] == 200
+    got = hp.take_resume_session(root, "focus")
+    assert got is not None and got[1] == secret and got[0] == ck.split("=", 1)[1]
+    assert hp.take_resume_session(root, "focus") is None  # one use
+
+
+def test_restart_marker_expires(live, monkeypatch):
+    root, _ = live
+    assert hp.arm_restart(root)
+    import time
+
+    real = time.time
+    monkeypatch.setattr(hp.time, "time", lambda: real() + hp.RESTART_ARM_LIFE + 5)
+    assert hp.restart_armed(root) is None

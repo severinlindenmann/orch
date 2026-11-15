@@ -3342,6 +3342,34 @@ def write_resume_cookie(root: Path, server: str, cookie: str, secret: str) -> bo
         return False
 
 
+RESTART_ARM_LIFE = 600  # seconds an add-on change keeps the other open page servers ready to hand over
+
+
+def arm_restart(root: Path) -> bool:
+    """Called by the dashboard after a person's click that restarts the services (an add-on add/remove):
+    for a few minutes the other page server (Focus) may write its own resume cookie (write_resume_cookie), so
+    its open tabs keep their session too. The marker is in the private key folder, which an agent can not
+    write. It grants nothing by itself: no cookie is stored unless a page server with an authenticated tab
+    sees it."""
+    try:
+        _write_private(key_dir(root) / "restart-armed", f"{int(time.time()) + RESTART_ARM_LIFE}\n")
+        return True
+    except (Refused, OSError):
+        return False
+
+
+def restart_armed(root: Path) -> int | None:
+    """The expiry (epoch seconds) of a live arm_restart marker, else None. Any error: not armed."""
+    try:
+        d = key_dir(root, create=False)
+        raw = (d / "restart-armed").read_text(encoding="utf-8").strip()
+    except (Refused, OSError, ValueError):
+        return None
+    if raw.isdigit() and time.time() < int(raw) <= time.time() + RESTART_ARM_LIFE:
+        return int(raw)
+    return None
+
+
 def take_resume_session(root: Path, server: str, why: list | None = None) -> tuple[str, str] | None:
     """The (cookie, page secret) a restarted server may adopt, once; the file is removed whatever it holds."""
     if server not in ("focus", "dashboard"):
