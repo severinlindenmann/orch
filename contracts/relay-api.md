@@ -250,6 +250,11 @@ question (above) may carry the Check card of its ticket. Nothing changes for a q
   `{"file": null, "why": "too_large"|"held_back"}` (not sent: over the phone budget, or kept back by the secret scan
   (`phone_view._gate`) or because the reviewed copy's bytes no longer hash to `shown.files[name]`; the workspace never uploads
   such a file). At most **65536 bytes** as compact UTF-8 JSON (`review.MAX_CARD_JSON`, so every valid card fits).
+  The wire card is stricter than `review.validate_card` today in three places, and review.py must align (until then the
+  workspace checks the wire card against `$defs/review_card` before it sends, and sends the question without `card` when it
+  fails): texts and table cells refuse DEL and the bidi controls U+202A-U+202E, U+2066-U+2069 (cells also C0 controls but
+  newline and tab); `open` is `^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\s\\]*)?$` (a plain host: no userinfo `@`, no
+  backslash, no %-encoding in the authority).
 - `card_files`: 1-20 `{blob_id, name, size, sha256, mime}`, uploaded by the workspace (`POST /v1/blobs`); `sha256` =
   `shown.files[name]`; `name` the base name only; `mime` one of the review file types (png, jpeg, webp, gif, svg, html,
   markdown, plain, csv); the sizes add up to at most **20 MB** (more = `too_large` refs instead).
@@ -322,8 +327,9 @@ unread; the phone shows it as the card's Received state, an old phone the plain 
 
 *Phone.* Cards with `signs: true` show "Needs your signature on the computer" instead of the OK swipe. Face ID before a
 send is a phone-side confirm only. The phone checks each downloaded card file against `card_files[].sha256` (a mismatch =
-"Open on the computer"), renders `html` and `svg` only in a sandbox without scripts or network, and opens `card.open` only
-after showing its host, in the system browser. Card text is plain text, never markup.
+"Open on the computer"), renders `html` and `svg` only in a sandbox without scripts or network, and handles `card.open` with ONE
+WHATWG-compatible URL parser: it shows the host of THAT parse, and opens the parsed, re-serialised URL (never the raw
+string) in the system browser; a string that does not parse, or parses to another scheme, is not offered. Card text is plain text, never markup.
 
 **RULE A (old messages stay byte-identical).** A question without `digest`, `card` and `card_files`, an answer without
 `verdict`, and their asked records are exactly as before: same bytes, same MACs, same digests (`tickets.question_digest` adds

@@ -192,8 +192,8 @@
         { "if": { "properties": { "result": { "const": "changed" } } }, "then": { "not": { "required": ["summary"] } } }
       ]
     },
-    "card_text": { "type": "string", "minLength": 1, "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f]*$" }, { "pattern": "\\S" }], "description": "review.py _text: not blank, no control characters but newline and tab. Lengths are set where it is used (code points, as Python len)." },
-    "card_opt_text": { "type": "string", "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f]*$" }, { "anyOf": [{ "maxLength": 0 }, { "pattern": "\\S" }] }], "description": "As card_text, but empty is allowed (= not given)." },
+    "card_text": { "type": "string", "minLength": 1, "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "pattern": "\\S" }], "description": "review.py _text: not blank, no control characters but newline and tab, no DEL, no bidi embedding/override/isolate characters (U+202A-U+202E, U+2066-U+2069; stricter than review.py today, which must align). Lengths are set where it is used (code points, as Python len)." },
+    "card_opt_text": { "type": "string", "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "anyOf": [{ "maxLength": 0 }, { "pattern": "\\S" }] }], "description": "As card_text, but empty is allowed (= not given)." },
     "card_src": {
       "description": "A file a page/img preview shows, on the wire: {file: i} = card_files[i]; {file: null, why} = not sent to phones (too_large: over the 20 MB card budget; held_back: the secret scan or a changed reviewed copy kept it back). The phone shows \"Open on the computer\" for both.",
       "oneOf": [
@@ -219,7 +219,7 @@
         { "if": { "properties": { "type": { "const": "page" } } }, "then": { "additionalProperties": false, "required": ["src"], "properties": { "type": {}, "src": { "$ref": "#/$defs/card_src" } } } },
         { "if": { "properties": { "type": { "const": "img" } } }, "then": { "additionalProperties": false, "required": ["src"], "properties": { "type": {}, "src": { "$ref": "#/$defs/card_src" }, "alt": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 } } } },
         { "if": { "properties": { "type": { "const": "doc" } } }, "then": { "additionalProperties": false, "properties": { "type": {}, "heading": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 }, "paras": { "type": "array", "maxItems": 50, "items": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 2000 } }, "steps": { "type": "array", "maxItems": 50, "items": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 2000 } } } } },
-        { "if": { "properties": { "type": { "const": "table" } } }, "then": { "additionalProperties": false, "required": ["cols", "rows"], "properties": { "type": {}, "cols": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 100 } }, "rows": { "type": "array", "maxItems": 200, "items": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "type": "string", "maxLength": 500 } } } } } }
+        { "if": { "properties": { "type": { "const": "table" } } }, "then": { "additionalProperties": false, "required": ["cols", "rows"], "properties": { "type": {}, "cols": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 100 } }, "rows": { "type": "array", "maxItems": 200, "items": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 500 } } } } } }
       ]
     },
     "card_preview": {
@@ -250,7 +250,7 @@
         "then": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 },
         "ok_label": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 40 },
         "signs": { "const": true, "description": "Only when true. The phone shows \"Needs your signature on the computer\" instead of the ok swipe; the workspace refuses a phone ok on it either way (M1)." },
-        "open": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500, "pattern": "^https?://[^\\s/]+", "description": "A link the person may open (http/https). Untrusted: the phone shows the host before it opens it, in the system browser." },
+        "open": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500, "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\\s\\\\]*)?$", "description": "A link the person may open: http(s), a plain host (letters, digits, dot, hyphen; no userinfo @, no backslash, no %-encoding), optional port, optional path without whitespace or backslash. Untrusted: the phone parses it with one WHATWG URL parser, shows THAT host and opens the parsed, re-serialised URL in the system browser." },
         "preview": { "$ref": "#/$defs/card_preview" }
       },
       "allOf": [
