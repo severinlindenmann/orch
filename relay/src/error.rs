@@ -42,6 +42,10 @@ pub fn conflict(m: impl Into<String>) -> ApiError {
 pub fn already_answered(m: impl Into<String>) -> ApiError {
     e(StatusCode::CONFLICT, "already_answered", m)
 }
+/// A phone (or subscriber) answered a question its workspace had taken back (relay-api.md "Question taken back").
+pub fn taken_back(m: impl Into<String>) -> ApiError {
+    e(StatusCode::CONFLICT, "taken_back", m)
+}
 pub fn gone(m: impl Into<String>) -> ApiError {
     e(StatusCode::GONE, "gone", m)
 }
