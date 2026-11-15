@@ -350,3 +350,13 @@ def test_check_digest_covers_wont_do_like_the_check_card():
     before = review.check_digest(t)
     t["checklist"][0]["wont_do"] = True  # check_card shows it as Done
     assert review.check_digest(t) != before
+
+
+def test_a_secret_in_a_card_file_name_never_reaches_the_phone(proj, new_ticket, conn):
+    tid = new_ticket()
+    name = f"{SECRET}.png"
+    add_card(proj, tid, img_card(name), {name: png()})
+    phone_view.sync_cards(proj)
+    sent = json.dumps([m["body"] for m in conn.sent if m["type"] == "question"])
+    assert SECRET not in sent
+    assert "card_files" not in json.loads(sent)[0]

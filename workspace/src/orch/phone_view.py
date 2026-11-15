@@ -1855,11 +1855,14 @@ def _card_files(root: Path, tid: str, card: dict, shown: dict, state: dict) -> t
     refs: dict = {}
     files: list[dict] = []
     total = 0
+    h = phone_results.value_hider(root)
     for src in review.card_files_of(card):
         name = src.rsplit("/", 1)[-1]
         mime = review.MIMES.get(Path(name).suffix.lower())
         data = review.read_reviewed(root, tid, shown, src)  # None: gone or no longer the reviewed bytes
         if data is None or not data or mime is None or not _CARD_NAME.fullmatch(name):
+            refs[src] = "held_back"
+        elif h is None or not _text_clean(name, h):  # a file name is shown to the person: no secret in it
             refs[src] = "held_back"
         elif len(files) >= 20 or total + len(data) > review.MAX_PHONE_CARD:
             refs[src] = "too_large"
