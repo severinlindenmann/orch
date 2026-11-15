@@ -508,3 +508,14 @@ def test_core_review_card_shapes_unchanged(ws, run, card):
     """the server uses the same stack and shown filter as `orch review list --json`"""
     code, out, _ = run("review", "list", "--json")
     assert json.loads(out)["cards"] == history.shown_json(ws, review.stack(ws))
+
+
+def test_talk_answer_with_text_only_note_is_recorded(srv, ws, card):
+    port = srv.server_address[1]
+    ck = sign_in(ws, port)
+    tid, qid, d = card
+    body = answer_body(tid, qid, d, verdict="talk", note={"text": "Move the title up.", "pins": []})
+    st, _, out = req(port, "POST", "/api/answer", body, {"Cookie": ck})
+    assert st == 200 and json.loads(out) == {"ok": True}, out
+    q = tickets.load(ws, tid)["questions"][0]
+    assert q["answer"] is not None and "Move the title up." in q["answer"]

@@ -319,6 +319,17 @@ def _note(note) -> dict:
             raise Refused("A note must be JSON.") from e
     if not isinstance(note, dict):
         raise Refused("A note must be an object.")
+    if isinstance(note.get("text"), str) and note["text"].strip():  # the kit page's shape: {text, pins}
+        note = dict(note)
+        text = note.pop("text")
+        words = dict(note.get("words") or {}) if isinstance(note.get("words"), dict) else None
+        if words is not None:
+            words.setdefault("text", text)
+            note["words"] = words
+        elif not note.get("words"):
+            note["words"] = {"text": text}
+        if not note.get("changes"):
+            note["changes"] = [text]
     if len(_canon(note).encode("utf-8")) > MAX_NOTE_BYTES:
         raise Refused("A note is at most 8 KB.")
     changes = note.get("changes") or []

@@ -1,7 +1,6 @@
 """Adversarial tests for the Review stack (security review of feature/review-stack, 15 Nov 2026).
 
-Tests marked xfail(strict=True) are FINDINGS: the attack works today. Each reason names the fix; once the fix
-lands the test passes and strict xfail turns it red, so the marker is removed in the same fix PR.
+Each test pins a finding that is fixed (the attack is refused).
 """
 
 import hashlib
@@ -79,12 +78,6 @@ def test_check_verdict_proof_does_not_open_a_card_question(ws, run, monkeypatch)
     assert code == 2 and tickets.load(ws, tid)["questions"][0]["answer"] is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FINDING M1: `review answer` hand-off shows only the ticket title/question, never the verdict, "
-    "pick or note that runs (cli_review._answer passes no value=/exact=). Fix: no_handoff=humanproof.HANDOFF "
-    "for review answer and drop ('review','answer') from HANDOFF_HEADS (the person answers on the page).",
-)
 def test_terminal_review_answer_queues_no_blind_handoff(ws, run, monkeypatch):  # noqa: F811
     """A command that is not an agent tool (an agent that dropped CLAUDECODE) asks for 'Don't do';
     the person would approve a hand-off card that does not say what it does."""
@@ -96,12 +89,6 @@ def test_terminal_review_answer_queues_no_blind_handoff(ws, run, monkeypatch):  
     assert all('"no"' in s or "Don't do" in s for s in shown), shown
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FINDING L1: an agent answers a person's review card with plain `orch answer` (recorded as agent, "
-    "no decision): the card leaves the stack unseen and `orch review wait` prints the name without 'agent:'. "
-    "Fix: tickets.answer refuses non-human answers on questions with a card; review wait keeps the prefix.",
-)
 def test_agent_cannot_answer_a_review_card_with_plain_answer(ws, run):  # noqa: F811
     tid, qid, _ = _card(ws, run)
     code, out, err = run("answer", tid, qid, "Approve", "--by", "agent:other", "--json")
@@ -225,13 +212,6 @@ def test_answer_mark_binds_the_decision(proj):
 # ------------------------------------------------------------------ Q5: the kit is found by path
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FINDING L2: review_server.kit_dir() takes the FIRST orch_ui on sys.path and _origin_check "
-    "exec()s its origin.py inside the process that holds the human key (e.g. `python -m orch review` from a "
-    "workspace with a planted orch_ui/). Fix: locate the kit next to the orch package "
-    "(Path(orch.__file__).parent.parent / 'orch_ui') and refuse anything else.",
-)
 def test_a_planted_orch_ui_on_sys_path_is_not_used(tmp_path, monkeypatch):
     import orch
 
@@ -296,3 +276,11 @@ def test_page_answer_end_to_end_with_the_real_proof(srv, ws, run):  # noqa: F811
     # stale digest is refused as changed
     st, _, out = req(port, "POST", "/api/answer", {**body, "digest": "0" * 64}, headers={"Cookie": ck})
     assert st in (409, 422), out
+
+
+def test_boot_adds_the_page_secret_only_to_same_origin_paths():
+    from pathlib import Path
+
+    js = (Path(review_server.__file__).resolve().parent.parent / "orch_ui/static/review-boot.js").read_text()
+    assert "startsWith('/')&&!u.startsWith('//')" in js
+    assert "if(s&&same(u))" in js and "String(u).startsWith('/')" not in js
