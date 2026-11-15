@@ -650,6 +650,8 @@ def run_relay(args, root: Path, out) -> None:
         lines = [f"{m['id']}  to {relay.name_of(root, m['to'])}  {m['type']}" for m in left]
         for d in (res or {}).get("dropped", []):
             lines.append(f"Not sent, the relay refused {d['id']}: {d['reason']}")
+        for d in (res or {}).get("failed", []):
+            lines.append(f"Not sent {d['id']}: {d['reason']}")
         if res and res["sent"]:
             lines.insert(0, f"Sent {len(res['sent'])} waiting message{'s' if len(res['sent']) != 1 else ''}.")
         if left and (res or {}).get("problem"):
@@ -793,6 +795,8 @@ def _resend_waiting(root: Path) -> None:
         res = relay.resend_outbox(root)
     except (Refused, OSError):
         return
+    for d in res["failed"]:
+        print(f"A saved message was not sent: {d['reason']} [{d['id']}]", file=sys.stderr)
     for d in res["dropped"]:
         print(
             f"A saved message could not be sent and was removed: {d['reason']} [{d['id']}]", file=sys.stderr
