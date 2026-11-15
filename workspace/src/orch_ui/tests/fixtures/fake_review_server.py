@@ -1,14 +1,21 @@
 """Tiny fake of `orch review` for browser checks of review.html (not used by pytest).
-Usage: python3 fake_review_server.py PORT   -> / = review.html, /kit/<file> = orch_ui/static, /api/* fake data."""
+Usage: python3 fake_review_server.py PORT
+/ = review.html, /kit/<file> = orch_ui/static, /api/* fake data.
+"""
 
-import json, sys, urllib.parse
+import json
+import sys
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[2] / "static"
-PAGE = lambda t, b: (
-    f"<!doctype html><title>{t}</title><body style='font:16px system-ui;padding:24px'>{b}</body>"
-)
+
+
+def PAGE(t, b):
+    return f"<!doctype html><title>{t}</title><body style='font:16px system-ui;padding:24px'>{b}</body>"
+
+
 FILES = {
     "before.html": PAGE("Before", "<h1>Home</h1><p>Cards for questions and work.</p>"),
     "after.html": PAGE("After", "<h1>Home</h1><p>New: what changed today.</p>"),
