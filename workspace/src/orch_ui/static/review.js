@@ -82,7 +82,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
 UI.decisionRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('article','decision');c.dataset.id=e.id||'';
  const h=el('div','decision-h'),v=el('span','decision-verdict '+verdictClass(e),verdictWord(e));
  h.append(el('h3','',k.title||'Answered'),v);
- const by=[String(e.by||'').replace(/^(human|agent):/,''),e.via,fmtTime(e.at,o.now)].filter(Boolean).join(' · ');
+ const by=[String(e.by||'').replace(/^human:/,''),e.via,fmtTime(e.at,o.now)].filter(Boolean).join(' · ');
  c.append(h,el('div','decision-by',by));
  const th=thumbs(e,o);if(th.length){const g=el('div','decision-shown');th.forEach(x=>g.append(x));c.append(g)}
  const w=d.words||{},lines=[];if(w.text)lines.push(w.text);(w.voice||[]).forEach(x=>x&&x.text&&lines.push('Voice: '+x.text));

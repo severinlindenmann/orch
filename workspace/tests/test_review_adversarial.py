@@ -284,3 +284,15 @@ def test_boot_adds_the_page_secret_only_to_same_origin_paths():
     js = (Path(review_server.__file__).resolve().parent.parent / "orch_ui/static/review-boot.js").read_text()
     assert "startsWith('/')&&!u.startsWith('//')" in js
     assert "if(s&&same(u))" in js and "String(u).startsWith('/')" not in js
+
+
+def test_record_answered_refuses_an_agent_entry_with_a_card(tmp_path):
+    """Delta review L2: record_answered checks the person itself (not only its callers)."""
+    import pytest
+
+    from orch import tickets
+
+    with pytest.raises(tickets.Refused):
+        tickets.record_answered(
+            tmp_path, "t_x", {"answer": "Use C", "card": {"kind": "choice"}}, "agent:x", "cli"
+        )

@@ -2481,6 +2481,10 @@ def record_answered(
         raise Refused("via must be a short word (a-z, 0-9, -), e.g. cli or dashboard.")
     if not isinstance(entry.get("answer"), str) or not entry["answer"].strip():
         raise Refused("An answer needs text.")
+    if isinstance(entry.get("card"), dict) and not str(by).startswith("human:"):
+        raise Refused(
+            "This card waits for the owner. Ask with orch review add and wait with orch review wait."
+        )
 
     def op(ticket):
         old = None
