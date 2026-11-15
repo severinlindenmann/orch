@@ -17,10 +17,22 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
 
 ## When to use
 - Any request, even a small one: find or make its ticket first.
-- Ask a person only when a step cannot be undone, costs money, touches production, deletes real data or is visible to people outside the connected workspaces. Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then keep working on what does not depend on the answer. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question (`--choose`, `--draft`, see below) so it shows as a card.
+- Ask a person only for what the ask list says (see "When to ask" below). Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then keep working on what does not depend on the answer. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question (`--choose`, `--draft`, see below) so it shows as a card.
 - You are blocked (a tool or permission is refused): `orch ask`, then go on with the other steps.
 - You are about to say "done": every step needs proof first.
 - The work is big: split it into sub-tickets.
+
+## When to ask
+Ask a person (with `orch ask`) only when a step:
+- cannot be undone,
+- costs money,
+- touches production,
+- deletes real data, or
+- is visible to people outside this workspace and its connected workspaces.
+
+Everything else you just do.
+This is the default list. The person can change it in one file: when `.orch/ask-when.md` exists, read it before you
+ask; its list replaces the one above.
 
 ## Recipes
 
@@ -197,7 +209,7 @@ Choose from the list, never invent an id. If a person already chose, `orch look 
 - Plans may change. There are no signing or planning gates.
 - Keep unknown fields and other add-ons' keys when you edit a ticket file. Prefer the commands.
 - Credentials live in `.orch/secrets/` (ignored by git). Never put them in a ticket, and never ask a person to give you one in a question or answer.
-- Ask the user before anything that cannot be undone.
+- Ask only for what the ask list says ("When to ask", or `.orch/ask-when.md` when it exists).
 - More is possible with optional add-ons: `orch addon list`.
 
 Ticket statuses are Backlog, Ready, Working, Waiting, Review, Done, and Dropped.

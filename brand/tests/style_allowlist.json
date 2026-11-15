@@ -4,10 +4,6 @@
   "style": 0
  },
  "mobile/OrchMobile/MockRelay.swift": {
-  "hex": 2,
-  "style": 0
- },
- "mobile/OrchMobile/Views/ChatScreens.swift": {
   "hex": 1,
   "style": 0
  },
@@ -15,27 +11,7 @@
   "hex": 6,
   "style": 0
  },
- "mobile/OrchMobile/Views/MobileModeBanner.swift": {
-  "hex": 1,
-  "style": 0
- },
- "mobile/OrchMobileTests/DoneReviewTests.swift": {
-  "hex": 1,
-  "style": 0
- },
- "mobile/OrchMobileTests/ExtraTakesTests.swift": {
-  "hex": 1,
-  "style": 0
- },
  "mobile/OrchMobileTests/M0Tests.swift": {
-  "hex": 1,
-  "style": 0
- },
- "mobile/OrchMobileTests/TicketTests.swift": {
-  "hex": 2,
-  "style": 0
- },
- "mobile/OrchMobileUITests/ComposerVisibleUITests.swift": {
   "hex": 1,
   "style": 0
  },
@@ -108,11 +84,7 @@
   "style": 0
  },
  "publish/web/admin.css": {
-  "hex": 33,
-  "style": 0
- },
- "publish/web/file.html": {
-  "hex": 4,
+  "hex": 0,
   "style": 0
  },
  "publish/web/look-bundle.js": {
@@ -128,7 +100,7 @@
   "style": 0
  },
  "publish/web/portal.html": {
-  "hex": 3,
+  "hex": 1,
   "style": 0
  },
  "publish/web/portal.js": {
@@ -136,7 +108,7 @@
   "style": 0
  },
  "publish/web/style.css": {
-  "hex": 73,
+  "hex": 0,
   "style": 0
  },
  "relay/web/look-bundle.js": {
@@ -152,15 +124,15 @@
   "style": 0
  },
  "relay/web/not-available.html": {
-  "hex": 11,
+  "hex": 0,
   "style": 1
  },
  "relay/web/portal.html": {
-  "hex": 8,
+  "hex": 4,
   "style": 0
  },
  "relay/web/style.css": {
-  "hex": 41,
+  "hex": 0,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/automation/automation.css": {
@@ -396,7 +368,7 @@
   "style": 0
  },
  "workspace-addons/dashboard/src/orch_dashboard/web/style.css": {
-  "hex": 44,
+  "hex": 34,
   "style": 0
  },
  "workspace-addons/dashboard/tests/blocks/blocks-demo.css": {
@@ -408,10 +380,6 @@
   "style": 1
  },
  "workspace-addons/dashboard/tests/look.test.js": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/tests/route.test.js": {
   "hex": 1,
   "style": 0
  },

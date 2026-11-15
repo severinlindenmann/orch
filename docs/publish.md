@@ -112,7 +112,7 @@ fd00::/8, or loopback for local runs); `0.0.0.0`, `::` and public IPs stop the s
 `ORCH_PUBLISH_PRIVATE_URL` equal to the public URL. The listener answers `404` unless the request's `Host` is the host (and port,
 default from the URL scheme) of `ORCH_PUBLISH_PRIVATE_URL` (DNS rebinding guard; `/health` is exempt). If the listener cannot
 bind, the server logs one error and keeps serving the public and admin listeners; private-reach apps stay hidden.
-An app that moves between reaches on redeploy gets a new private link.
+An app that moves between reaches on redeploy gets a new private link. Open apps (`auth = false`) on the private network are also served under a secret `/a/<name>/~<key>/` address, so that a page from elsewhere cannot read them cross-origin; their pages must use relative links.
 
 Host setup on the VPS (Linux only):
 1. Check port 80 is free on the private IP: `ss -ltnp 'sport = :80'`.

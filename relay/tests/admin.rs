@@ -718,7 +718,9 @@ async fn admin_kit_served() {
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
-    assert!(r.text().await.unwrap().contains("#a78bfa"));
+    let css = r.text().await.unwrap();
+    assert!(css.contains("--brand:var(--chart-4)"), "violet accent");
+    assert!(css.contains("--chart-4:"), "master tokens are served first");
 }
 
 #[test]

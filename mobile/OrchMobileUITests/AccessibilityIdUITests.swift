@@ -138,9 +138,15 @@ final class AccessibilityIdUITests: XCTestCase {
         // out on slow CI runners ("Failed to get matching snapshots"). The card is found by its own type, then snapshotted alone.
         let app = launch(["-mockGroups", "YES", "-open", "group:ws_finance001:grp_t_cartax2027"])
         XCTAssertTrue(app.otherElements["group-members"].waitForExistence(timeout: 30) || app.buttons["group-members"].exists || app.descendants(matching: .any)["group-members"].waitForExistence(timeout: 10), "room open")
-        // The room opens at the newest message; the approval card is earlier: scroll back up until it is on screen.
-        for _ in 0..<8 where !app.buttons["Allow once"].exists { app.otherElements["group-messages"].firstMatch.swipeDown() }
+        // The room positions itself at the open approval card (GroupRoom .task, after ~300 ms), so the card normally appears on its
+        // own: wait for it first. Swiping "group-messages" straight away raced the room layout and failed with "Failed to swipe down
+        // group-messages: No matches" (#825). Only if the card is still missing, scroll back, and only a container that exists.
         let card = app.otherElements["group-approval"].firstMatch
+        if !card.waitForExistence(timeout: 20) {
+            let list = app.descendants(matching: .any)["group-messages"].firstMatch
+            XCTAssertTrue(list.waitForExistence(timeout: 20), "group-messages list")
+            for _ in 0..<8 where !card.exists { list.swipeDown() }
+        }
         XCTAssertTrue(card.waitForExistence(timeout: 15), "group-approval card")
         assertUniqueIds(in: card)
     }
