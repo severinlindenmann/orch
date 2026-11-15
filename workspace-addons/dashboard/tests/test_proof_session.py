@@ -551,6 +551,8 @@ ACT_ARGS = {
     "workspace.set": {"field": "name", "text": "Demo"},
     "look.profile": {"service": "relay", "description": "Demo", "tags": ["a"]},
     "copies.clean": {},
+    "diag.set": {"on": False},
+    "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},
     "copies.approve": {"ticket": TID, "tip": "a" * 40, "control_paths": 0, "paths_hash": "12345678"},

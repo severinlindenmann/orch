@@ -10,6 +10,8 @@ FAILS = 3
 def check(snap):
     q = data(snap, "queues").get("relay_outbox")
     if q is None:
+        if data(snap, "queues"):
+            return None  # the optional part is off: nothing to check, nothing to show
         return verdict(NAME, "cannot_check", "queues were not collected")
     bad = []
     if q.get("problem"):

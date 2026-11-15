@@ -452,6 +452,7 @@ async function refresh() {
     lastOk = Date.now();
     paintUpdated();
     // rev is the server's hash of the whole state (every ticket field, runs, needs ...); without one, always take it.
+    window.DiagTrail?.install(window).state(state?.rev, next.rev, res.headers.get('X-State-Age-Ms'));  // client vs server revision, cache age
     if (!state || !next.rev || next.rev !== state.rev) accept(next);
   } catch (_) {
     connectionNotice(connection, !!state);
@@ -486,6 +487,8 @@ document.getElementById('new-ticket').hidden = snapshot;
 document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
 document.getElementById('open-agent').hidden = snapshot;
 document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
+document.getElementById('report-problem').hidden = snapshot;
+document.getElementById('report-problem').addEventListener('click', () => reportOpen());
 const toggle = document.getElementById('menu-toggle');
 toggle.addEventListener('click', () => {
   const open = toggle.getAttribute('aria-expanded') !== 'true';
@@ -611,6 +614,8 @@ main.addEventListener('click', async event => {
   // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
+  if (action === 'diag-set') { await diagSwitch(); return; }
+  if (action === 'diag-delete-reports') { await diagDelete(); return; }
   if (action === 'copies-switch') { settingsReviewOpen('copies-switch', control); return; }
   if (action === 'copies-clean') { settingsReviewOpen('copies-clean', control); return; }
   if (action === 'settings-review-ok') { await settingsReviewRun(); return; }

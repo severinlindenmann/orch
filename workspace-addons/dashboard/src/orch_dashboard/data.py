@@ -765,6 +765,16 @@ def _disk_count(root: Path, key: str) -> None:
         _DISK[key] = {"at": time.monotonic(), "val": val, "busy": False}
 
 
+def _diag_stats(root: Path) -> dict:
+    """Reports (count, newest) and saved notes (bytes, since): numbers only, read from the folder."""
+    try:
+        from orch import diag
+
+        return diag.stats(root)
+    except Exception:  # noqa: BLE001 - the card then says nothing; never an error in the settings
+        return {"notes": {"bytes": 0, "files": 0, "since": None}, "reports": {"count": 0, "last": None}}
+
+
 def copies_disk(root: Path) -> dict | None:
     """{copies, bytes, partial} for the settings line "Copies on this computer", or None only while the first
     count runs (the page shows "Counting…"); a count that fails reads as none. The walk runs on a thread
@@ -859,7 +869,8 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "copy_setup": copy_setup(root) or "",
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
-        "diag_enabled": diag_enabled(root),  # the debug log switch (read-only here; its card comes with D3)
+        "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
+        "diag": _diag_stats(root),
         "copies_disk": copies_disk(root),
         "folder": str(root),
         "share": share,

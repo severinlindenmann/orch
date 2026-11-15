@@ -216,6 +216,16 @@ def services_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]
     return {"services": rows}, []
 
 
+def addon_on(root: Path, name: str) -> bool:
+    """True when this workspace turned the optional part `name` on (an unreadable answer is "off")."""
+    try:
+        from orch import addons
+
+        return name in addons.active(root)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def queues_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
     gaps: list[str] = []
     out: dict = {}
@@ -228,11 +238,12 @@ def queues_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
     problem = None
     with contextlib.suppress(OSError):
         problem = (box / ".problem").read_text(encoding="utf-8").strip()[:200] or None
-    out["relay_outbox"] = {
-        "count": len(msgs),
-        "oldest_age_s": max(msgs) if msgs else None,
-        "problem": problem,
-    }
+    if addon_on(root, "relay"):  # an optional part stays invisible until it is turned on (R1.1)
+        out["relay_outbox"] = {
+            "count": len(msgs),
+            "oldest_age_s": max(msgs) if msgs else None,
+            "problem": problem,
+        }
     pend = runs.run_dir(root) / "pending"
     n_in = {}
     if pend.is_dir() and not pend.is_symlink():

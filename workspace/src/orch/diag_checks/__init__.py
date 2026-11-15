@@ -32,7 +32,9 @@ def run_all(snap: dict) -> list[dict]:
     out = []
     for mod in modules():
         try:
-            out.append(mod.check(snap))
+            got = mod.check(snap)
+            if got is not None:  # a check may have nothing to say (its part is off): it is left out
+                out.append(got)
         except Exception as e:  # noqa: BLE001
             out.append(verdict(mod.NAME, "cannot_check", f"the check failed ({type(e).__name__})"))
     return out
