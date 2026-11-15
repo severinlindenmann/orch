@@ -40,7 +40,7 @@ struct Ticket: Identifiable, Equatable, Sendable {
     /// First non-blank of the snapshot title, the title and the key (a blank title would give a blank chat row).
     var displayTitle: String {
         [view?.title, title, key].lazy.compactMap { $0 }
-            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Topic"
+            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.map(TitleTags.clean) ?? "Topic"
     }
 
     /// One plain line under the title, from the update kind.
@@ -132,5 +132,18 @@ enum TicketBuilder {
                                 kind: "question", at: m.createdAt, question: q, key: m.key ?? old?.key, view: old?.view)
         }
         return byKey.values.sorted { ($0.status, $1.at) < ($1.status, $0.at) }
+    }
+}
+
+
+/// Test-run tags in front ("[R] ", "[E2E] ") and machine stamps at the end ("[1731400000]", "[2026-11-12T10:00Z]") are not part of
+/// a title: hidden like the dashboard does (its `clean()` in app.js). A title that is only tags stays as it is.
+enum TitleTags {
+    private static let head = try! NSRegularExpression(pattern: #"^(?:\s*\[[^\]\n]{1,24}\]\s*)+"#)
+    private static let tail = try! NSRegularExpression(pattern: #"(?:\s*\[(?:\d{4,}|\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{8}T?\d{0,6}Z?)\])+\s*$"#)
+    static func clean(_ title: String) -> String {
+        func strip(_ r: NSRegularExpression, _ s: String) -> String { r.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "") }
+        let out = strip(tail, strip(head, title)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return out.isEmpty ? title : out
     }
 }
