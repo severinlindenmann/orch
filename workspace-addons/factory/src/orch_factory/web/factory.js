@@ -223,7 +223,7 @@
       busy(true); say('Sending…');
       const result = await toAgent(order.id, words);
       busy(false);
-      if (result.ticket) { note.value = ''; writing(false); say(sent); if (onSent) onSent(); return; }
+      if (result.ticket) { note.value = ''; writing(false); plan.hidden = change.hidden = true; say(sent); if (onSent) setTimeout(onSent, 8000); return; }
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Nothing was sent.');
     }
     note.addEventListener('input', () => { send.disabled = !note.value.trim(); });
@@ -406,6 +406,14 @@
     for (const a of array(order.activity)) { const li = node('li'); li.append(meta(when(a.at)), p(noIso(a.text))); timeline.append(li); }
     main.append(card('Activity', timeline.children.length ? timeline : meta('No activity recorded.')));
     const aside = group('stack');
+    if (order.phase === 'draft') {  // the same rule as Factory home and the draft page (draftWaiting)
+      const c = draftWaiting(order)
+        ? card('Your draft is ready', meta('Read the draft, then plan the run or ask for changes.'),
+          tail(orderLink(order, 'Read draft', validVersion(order.draft_v) ? '/draft/' + order.draft_v : '')), draftActions(order, render))
+        : card('Draft', meta('Your agent is working on the draft.'));
+      if (draftWaiting(order)) c.classList.add('f-attention');
+      aside.append(c);
+    }
     if (order.open) {
       const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
