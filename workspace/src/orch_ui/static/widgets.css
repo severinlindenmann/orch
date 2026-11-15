@@ -449,3 +449,12 @@ iframe.loading{opacity:0}
 
 .review-main{min-width:0}
 .review-layout .review-side:has(.review-queue:empty){display:none}
+
+/* Report a problem (checks list in the dialog) */
+.report-checks{list-style:none;margin:0;padding:0}
+.report-check{display:flex;gap:8px;align-items:flex-start}
+.report-check .chip{flex:none}
+.report-sub{margin-top:8px}
+dialog.report-dialog{display:grid;gap:12px;width:min(520px,calc(100% - 32px))}
+dialog.report-dialog:not([open]){display:none}
+dialog.report-dialog .actions{margin-top:12px}

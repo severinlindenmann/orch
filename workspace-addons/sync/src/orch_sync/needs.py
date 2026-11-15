@@ -389,11 +389,15 @@ def rows(root):
             )
         )
     for tid, since in state.get("deleted", {}).items():
+        # the ticket's title, never its id (the dashboard hides ids, which left the name blank)
+        name = _sides(root, f"tickets/{tid}.json")[0] if TID.fullmatch(str(tid)) else None
         out.append(
             row(
                 "deleted",
                 tid,
-                f"A ticket file is missing: {tid}. Restored it.",
+                f"A ticket file is missing: {name}. Restored it."
+                if name
+                else "A ticket file is missing. Restored it.",
                 since,
                 f"orch sync deleted {shlex.quote(tid)} --keep",
                 ["Leave deleted", "OK"],

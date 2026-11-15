@@ -542,13 +542,28 @@ test('Watch live and Stop exist only while a helper is at work (not on a ticket 
   assert.equal(helpers.helperAlive({status:'active'}, {running:false}), false);
   assert.equal(helpers.helperAlive({status:'active'}, null), false);
   const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
-  assert.match(ticket, /live = alive \? liveLinkFor\(t\)/); assert.match(ticket, /else if \(alive\) \{ actions\.push\(ticketButton\('Stop'/);
+  // one Stop / Watch live pair, in the helper line; the header keeps only status, title, sentence and the menu
+  assert.equal((ticket.match(/ticketButton\('Stop'/g) || []).length, 1);
+  assert.match(ticket, /function agentBar[\s\S]*className:'btn primary sm'[\s\S]*Watch live[\s\S]*ticketButton\('Stop', 'outline sm'/);
+  assert.doesNotMatch(ticket, /Watch live ↗/);
   assert.doesNotMatch(ticket, /run\?\.running \? ticketButton\('Stop/);
 });
 test('the Automation page heading is the add-on menu name, not a second name', () => {
   const settings = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
   assert.doesNotMatch(settings, /heading\('Schedules'/);
   assert.match(settings, /heading\(addonTitle\(a\), a\?\.dashboard\?\.subtitle \|\| 'Repeat work on a plan you choose\.'/);
+});
+
+test('ticket page: brief heading, Repeats in Properties, plain values with a pencil, no Edit text (UX round 5)', () => {
+  const ticket = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/ticket.js'), 'utf8');
+  assert.match(ticket, /h\('h2', \{\}, 'What you asked'\)/);
+  assert.match(ticket, /field\('Done when', inlineField\(t, 'done_when'\)\), addonPropertyRows\(t\)/);
+  assert.match(ticket, /'Set a due date'/);
+  assert.match(ticket, /iconEl\('pencil'\)/);
+  assert.doesNotMatch(ticket, /'Helper: '/);
+  assert.doesNotMatch(ticket, /Works in a separate copy of your project[^\n]*shared-folder/);
+  const css = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/style.css'), 'utf8');
+  assert.doesNotMatch(css, /\.ticket-details \.ed:after\{content:"Edit"/);
 });
 test('home: a long add-on question is one short title in its row', () => {
   const long = "Start 'Loyalty card'? ~1 h 30 min · you're needed for ~10 min. Goal: " + 'Regular customers collect stamps. '.repeat(10);

@@ -66,3 +66,8 @@ test('motion.js no longer locks the body itself (one lock in overlay.js)', () =>
   const src = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/motion.js'), 'utf8');
   assert.ok(!/body\.style\.overflow/.test(src));
 });
+
+test('a dialog with its own bottom Cancel/Close (ui-bottom-close) gets no top x Close', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../../../workspace/src/orch_ui/static/overlay.js'), 'utf8');
+  assert.match(src, /if\(!d\.classList\.contains\('ui-bottom-close'\)\)d\.prepend\(x\)/);
+});

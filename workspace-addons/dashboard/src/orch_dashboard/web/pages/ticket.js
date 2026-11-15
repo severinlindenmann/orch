@@ -66,10 +66,23 @@ function addonValue(row, value) {
   if (row.format === 'chips') return h('div', {className:'chips'}, array(value).map(v => chip(clean(v))));
   return typeof value === 'object' ? '' : clean(value);
 }
+// Add-on rows of a ticket. Links ("open-page") stay under the story; plain values (Repeats) go into Properties.
+function addonViewRows(ticket, links) {
+  return addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name], a.name]))
+    .filter(([r]) => (r.format === 'open-page') === links)
+    .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], r.label, r.label) : addonValue(r, ext[r.field])) : '', addon]).filter(([, v]) => v);
+}
 function addonRows(ticket) {
-  const rows = addons().flatMap(a => array(a.ticket_view).map(r => [r, (ticket.ext || {})[a.name], a.name]))
-    .map(([r, ext, addon]) => [r, ext && typeof ext === 'object' ? (r.format === 'open-page' ? addonLink(addon, ext[r.field], r.label, r.label) : addonValue(r, ext[r.field])) : '']).filter(([, v]) => v);
-  return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([r, v]) => r.format === 'open-page' ? h('dd', {className:'addon-page'}, v) : [h('dt', {}, r.label), h('dd', {}, v)])) : null;
+  const rows = addonViewRows(ticket, true);
+  return rows.length ? h('dl', {className:'addon-rows'}, rows.map(([, v]) => h('dd', {className:'addon-page'}, v))) : null;
+}
+// A value in Properties from an add-on (Repeats): plain text, a small pencil when it can be changed.
+function addonPropertyRows(t) {
+  return addonViewRows(t, false).map(([r, v, addon]) => {
+    const editable = !snapshot && addon === repeatsAddon();
+    const value = editable ? ticketButton([v, iconEl('pencil')], 'ed ed-plain', () => repeatsDialog(t.id, addon), {title:'Click to change', 'data-key':'property-' + addon + '-' + r.field}) : v;
+    return h('div', {}, h('dt', {}, r.label), h('dd', {}, value));
+  });
 }
 // ---- Ticket links and add-on fields. Each web link carries `view` from the core's one link module (orch/refs.py):
 // label, icon key, monogram, title, status (only while its add-on is on) and the Artifacts group. Fields come typed
@@ -233,7 +246,7 @@ function fieldSections(t) {
       let value;
       if (f.read_only || snapshot) value = h('span', {className:'ed-ro' + (shown ? '' : ' empty-v'), title:f.read_only ? 'Filled in by the ' + addonLabel(a) + ' add-on' : null}, f.read_only && f.key && ext[f.key] && KEY.test(String(ext[f.key])) ? linkStatus(String(ext[f.key])) : shown || '—');
       else {
-        const node = h('button', {type:'button', className:'ed' + (shown ? '' : ' empty-v'), title:'Click to change', 'data-action':'field', 'data-ticket':t.id, 'data-addon':a.name, 'data-field':f.key}, shown || 'Add');
+        const node = h('button', {type:'button', className:'ed ed-plain' + (shown ? '' : ' empty-v'), title:'Click to change', 'data-action':'field', 'data-ticket':t.id, 'data-addon':a.name, 'data-field':f.key}, shown || 'Add', shown ? iconEl('pencil') : null);
         value = h('span', {className:'inline-host', 'data-key':'field-' + a.name + '-' + f.key + '-' + t.id}, node);
       }
       return h('div', {}, h('dt', {}, clean(f.title)), h('dd', {}, value));
@@ -333,8 +346,8 @@ function agentBar(t) {
     h('span', {className:'dot ' + (line.startFailed ? 'error' : run?.running ? 'working' : 'idle'), 'aria-hidden':'true'}),
     line.startFailed ? h('span', {className:'ab-text grow', 'data-key':'start-failed'}, clean(line.status))
       : h('span', {className:'ab-text grow'}, h('strong', {}, name(line.agent)), ' · ', clean(line.hold || step?.text || line.status)), line.startFailed ? null : ticketWarmth(t, run, session),
-    snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn outline', href:liveLink.url}, 'Watch live') : null,
-      alive ? ticketButton('Stop', 'outline', () => act('run.stop', {ticket:t.id})) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
+    snapshot ? null : h('div', {className:'ab-actions'}, liveLink && alive ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'watch-live'}, 'Watch live') : null,
+      alive ? ticketButton('Stop', 'outline sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'}) : line.primary && !['answer', 'open'].includes(line.primary.op) ? ticketButton(line.primary.label, 'primary', () => { const current = window.DashHelpers.agentLine(ticketOf(t.id), state.runs?.[t.id], Date.now(), liveLinkFor(ticketOf(t.id)), state.settings); if (current.primary && !['answer', 'open'].includes(current.primary.op)) act(current.primary.op, current.primary.args); }) : null));
 }
 
 // "X is also changing this folder": one quiet line from the core (orch run status), no banner. A hint, not a lock.
@@ -342,13 +355,14 @@ function sharedFolderLine(t) {
   const text = state.runs?.[t.id]?.shared_folder?.line;
   return typeof text === 'string' && text ? h('p', {className:'shared-folder muted', 'data-key':'shared-folder'}, clean(text)) : null;
 }
-// Draft 1b: a ticket that works in its own copy of the project says so, in one quiet line (branch behind a click).
+// A ticket that works in its own copy of the project says so behind one small click, under Properties.
 // The ticket records branch/base/sub/host only, never the local path (it stays in the machine-local registry).
 function copyLine(t) {
   const f = Array.isArray(t.work?.folders) ? t.work.folders.filter(x => x && typeof x.branch === 'string' && x.branch) : [];
   if (!f.length) return null;
-  return h('div', {className:'shared-folder muted', 'data-key':'work-copy'}, h('span', {}, 'Works in a separate copy of your project, so other helpers do not change the same files.'),
-    h('details', {className:'det'}, h('summary', {}, 'Details'), h('div', {}, f.map(x => h('p', {className:'mono'}, clean(String(x.branch || '')) + (typeof x.path === 'string' && x.path ? ' · ' + clean(x.path) : ''))))));
+  return h('details', {className:'det', 'data-key':'work-copy'}, h('summary', {}, 'Works in a separate copy'),
+    h('p', {className:'meta'}, 'Works in a separate copy of your project, so other helpers do not change the same files.'),
+    f.map(x => h('p', {className:'mono meta'}, clean(String(x.branch || '')) + (typeof x.path === 'string' && x.path ? ' · ' + clean(x.path) : ''))));
 }
 const surface = via => clean(via === 'cli' ? 'terminal' : via);
 function proofLabel(ev) {
@@ -828,7 +842,7 @@ function ticketButton(label, cls, click, attrs = {}) {
 // control paths; all made plain on the server) and sends back that same tip, count and path hash.
 function ticketBringBackDialog(t) {
   const b = t.bring_back || {}, paths = array(b.paths).map(p => clean(p)), count = Number(b.control_paths) || 0;
-  const {d, actions} = dialog('Add these changes to your files?');
+  const {d, actions} = dialog('Apply these changes?');
   const more = Math.max(0, count - paths.length);
   const body = [
     h('p', {}, 'Tip ', h('code', {}, clean(String(b.tip || '').slice(0, 12)))),
@@ -839,7 +853,7 @@ function ticketBringBackDialog(t) {
     paths.length ? h('ul', {className:'bring-back-paths', 'data-key':'bring-back-paths'}, paths.map(p => h('li', {}, h('code', {}, p)))) : null,
     more ? h('p', {className:'meta'}, 'and ' + more + ' more') : null,
   ].filter(Boolean);
-  const go = ticketButton('Add to my files', 'primary', async () => {
+  const go = ticketButton('Apply changes', 'primary', async () => {
     if (go.disabled) return;
     go.disabled = true;
     const r = await act('copies.approve', {ticket:t.id, tip:b.tip, control_paths:b.control_paths, paths_hash:b.paths_hash});
@@ -900,9 +914,9 @@ function ticketBringBackRow(t) {
     const r = await act('copies.ask-update', {ticket:t.id});
     window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
   }) : null;
-  const add = !snapshot && b.tip ? ticketButton('Add to my files', 'primary sm', () => ticketBringBackDialog(t)) : null;
+  const add = !snapshot && b.tip ? ticketButton('Apply changes', 'primary sm', () => ticketBringBackDialog(t)) : null;
   // "Keep as is" is only this page's choice: nothing is changed or signed; the copy stays where it is.
-  if (!snapshot && b.tip && isKept(t)) return h('p', {className:'meta kept-line', 'data-key':'bring-back'}, 'Changes kept in a copy · ', ticketButton('Add to my files', 'ghost sm', () => ticketBringBackDialog(t)));
+  if (!snapshot && b.tip && isKept(t)) return h('p', {className:'meta kept-line', 'data-key':'bring-back'}, 'Changes kept in a copy · ', ticketButton('Apply changes', 'ghost sm', () => ticketBringBackDialog(t)));
   const review = !snapshot && b.tip ? ticketButton('Review changes', 'outline sm', () => ticketChangesDialog(t)) : null;
   const keep = !snapshot && b.tip ? ticketButton('Keep as is', 'ghost sm', () => {
     keptCopies.add(keptKey(t)); try { sessionStorage.setItem(keptKey(t), '1'); } catch (_) { /* optional */ }
@@ -1243,19 +1257,19 @@ function ticketAnswerNodes(t, plainRow) {
     .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
   return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
 }
-const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length],
-  ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
-function ticketProperties(t, parent, agent) {
+const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
+function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = ev?.at || t.done_at || t.updated_at;
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
     h('dl', {className:'ticket-details ed-list'}, parent ? field('Step of', h('a', {href:href(parent.id)}, partName(parent))) : null,
-      field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')),
+      field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
     linksCard(t),
-    h('p', {className:'meta ticket-meta-line'}, [typeof t.key === 'string' && t.key ? 'Ticket ' + t.key : '', agent ? 'Helper: ' + agent : ''].filter(Boolean).join(' · ')));
+    h('p', {className:'meta ticket-meta-line'}, typeof t.key === 'string' && t.key ? 'Ticket ' + t.key : ''),
+    copyLine(t));
 }
 
 // A ticket made outside this page (command line, a helper) may not be in the state we hold yet: read the workspace
@@ -1282,13 +1296,12 @@ function missingTicket(id) {
   return entry.gone ? ticketNotFound() : skeletonFor('ticket');
 }
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
-function ticketStrip(t, run, fresh, planQ, alive, live, menu, tabs, selected) {
+function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [];
   if (!snapshot) {
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'active'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
-    else if (m.pill === 'needs' && questions(t).length) { if (alive) actions.push(ticketButton('Stop', 'ghost sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})); if (!planQ) actions.push(ticketButton('Answer', 'primary sm', focusTicketAnswer, {'data-key':'ticket-answer'})); }
-    else if (alive) { actions.push(ticketButton('Stop', 'ghost sm', () => act('run.stop', {ticket:t.id}), {'data-key':'ticket-stop'})); if (live) actions.push(h('a', {className:'btn primary sm', href:live.url, 'data-key':'watch-live'}, 'Watch live ↗')); }
+    else if (m.pill === 'needs' && questions(t).length) { if (!planQ) actions.push(ticketButton('Answer', 'primary sm', focusTicketAnswer, {'data-key':'ticket-answer'})); }
     else if (fresh) actions.push(ticketButton('Start helper', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-start'}));
     else if (ticketPaused(t, run)) actions.push(ticketButton('Resume', 'primary sm', () => act('run.start', {ticket:t.id}), {'data-key':'ticket-resume'}));
     if (menu) actions.push(menu);
@@ -1306,7 +1319,6 @@ function detail(t) {
   ticketLookups.delete(t.id);
   const openQuestions = questions(t), selected = ticketSelectedTab(t);
   const run = state.runs?.[t.id], sessions = array(t.sessions);
-  const agent = window.DashHelpers.agentLabel(state.settings, run?.claim);
   const parent = window.DashHelpers.parentOf(tickets(), t), children = window.DashHelpers.childrenOf(tickets(), t);
   loadArtifacts(t, selected === 'files');
   const fresh = !sessions.length && !run?.running && ['open', 'ready'].includes(t.status);
@@ -1320,7 +1332,6 @@ function detail(t) {
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
     h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? null : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),
       repeatsAddon() ? [ticketButton('Repeat…', 'menu-item', () => repeatsDialog(t.id, repeatsAddon()), {role:'menuitem', 'data-key':'ticket-repeat'})] : null));
-  const alive = window.DashHelpers.helperAlive(t, run), live = alive ? liveLinkFor(t) : null;
   const tabs = ticketTabList(t);
   const panel = (id, label, body) => h('section', {id:'ticket-panel-' + id, role:snapshot ? null : 'tabpanel', 'aria-labelledby':snapshot ? null : 'ticket-tab-' + id, className:'stack ticket-panel', hidden:!snapshot && selected !== id, tabindex:'0'}, snapshot ? h('h2', {}, label) : null, body);
   const total = array(t.checklist).length, done = array(t.checklist).filter(window.DashHelpers.resolved).length;
@@ -1330,10 +1341,10 @@ function detail(t) {
     t.status !== 'done' ? openQuestions.slice(1).map(q => ticketQuestion(t, q)) : null,
     t.status === 'review' ? ticketReviewCard(t) : null,
     ticketRequestCard(t),
-    working ? agentBar(t) : null, working ? sharedFolderLine(t) : null, copyLine(t), working ? liveSessionStrip(t) : null,
+    working ? agentBar(t) : null, working ? sharedFolderLine(t) : null, working ? liveSessionStrip(t) : null,
     t.description ? h('section', {className:'card asked', 'data-key':'description'}, h('h2', {}, 'What was asked'), h('p', {className:'preserve-lines'}, clean(t.description)), t.description_by ? h('p', {className:'meta'}, 'Written by ' + ticketActor(t.description_by)) : null) : null,
     t.summary && t.status !== 'review' ? h('p', {className:'muted preserve-lines', 'data-key':'summary'}, 'In short: ' + clean(t.summary)) : null,
-    note,
+    note ? h('section', {className:'card asked', 'data-key':'brief'}, h('div', {className:'section-head'}, h('h2', {}, 'What you asked')), note) : null,
     t.status !== 'review' ? ticketResultsCard(t) : null,
     ticketHelperDid(t),
     ticketOutcomeCard(t),
@@ -1343,7 +1354,7 @@ function detail(t) {
     answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
     parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, 'Step of ' + partName(parent)) : null,
-    ticketStrip(t, run, fresh, planQ, alive, live, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
+    ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),
     h('div', {className:'columns ticket-layout' + (selected === 'files' ? ' wide' : '')},
@@ -1352,7 +1363,7 @@ function detail(t) {
         panel('tasks', 'Steps', card('tasks', 'Steps', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No steps yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
-      h('div', {className:'stack ticket-side'}, ticketProperties(t, parent, agent), fieldSections(t)))));
+      h('div', {className:'stack ticket-side'}, ticketProperties(t, parent), fieldSections(t)))));
 }
 
 const MULTILINE = ['note', 'done_when'];
@@ -1364,7 +1375,9 @@ function inlineField(t, field) {
   if (snapshot) return el('span', MULTILINE.includes(field) ? 'ed-ro preserve-lines' : 'ed-ro', shown || (field === 'title' ? '' : FIELD_HINT[field]));
   const host = el('span', 'inline-host');
   host.dataset.key = 'inline-' + field + '-' + t.id;
-  const node = el('button', 'ed' + (shown ? '' : ' empty-v') + (MULTILINE.includes(field) ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), shown || FIELD_HINT[field]);
+  const plain = field !== 'title', setDue = field === 'due' && !shown;
+  const node = el('button', 'ed' + (plain ? ' ed-plain' : '') + (setDue ? ' ed-link' : shown ? '' : ' empty-v') + (MULTILINE.includes(field) ? ' preserve-lines' : '') + (field === 'title' ? ' ed-title' : ''), setDue ? 'Set a due date' : shown || FIELD_HINT[field]);
+  if (plain && !setDue) node.append(iconEl('pencil'));
   Object.assign(node, {type:'button', title:'Click to change'});
   Object.assign(node.dataset, {action:'inline', field, ticket:t.id});
   host.append(node);

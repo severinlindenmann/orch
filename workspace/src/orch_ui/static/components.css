@@ -463,4 +463,16 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
   .preview-page{padding:var(--s4)}
   .preview-metrics{grid-template-columns:minmax(0,1fr)}
 }
+/* The scrollbar gutter is always reserved, so a long page (Factory, Insights) ends at the same right edge as a short one. */
+html{scrollbar-gutter:stable}
+/* A table's owner column never wraps a name ("Be/n", "Marie-/Louise"). */
+.ticket-table .who{white-space:nowrap}.ticket-table td:nth-child(3){min-width:112px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.skeleton:after{display:none}}
+
+/* Plain editable value (ticket properties, brief): reads as text, a small pencil says it can be changed. */
+.ed.ed-plain{display:inline-flex;align-items:center;gap:var(--s2);width:auto;max-width:100%;padding:5px 0;border-color:transparent;background:none}
+.ed.ed-plain:hover,.ed.ed-plain:focus-visible{background:none;border-color:transparent}
+.ed.ed-plain::after,.ed.ed-plain:hover::after{content:none}
+.ed.ed-plain .icon{flex:none;width:14px;height:14px;opacity:.55}
+.ed.ed-plain:hover .icon,.ed.ed-plain:focus-visible .icon{opacity:1}
+.ed.ed-plain.ed-link{color:var(--brand)}

@@ -19,7 +19,6 @@ BUILTIN = ROOT / "workspace/src/orch/builtin"
 # Commands a person types (or the installer runs); no skill needs to teach them to an agent.
 HUMAN_ONLY = {
     *(f"relay mobile {x}" for x in ("on", "off", "status", "hours", "ack", "keeper")),  # a person's switch
-    "diag",  # read-only diagnostics; its skill comes with the dashboard button (D3)
     "look shared-pages",  # a person's switch in the dashboard (agents are refused)
     "review answer",  # a person decides a card (agents are refused: needs_person)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
@@ -61,7 +60,7 @@ PENDING: set[str] = set()
 
 
 def skill_dirs() -> dict[str, Path]:
-    out = {"orch": ROOT / "workspace/skills/orch"}
+    out = {"orch": ROOT / "workspace/skills/orch", "orch-diagnose": ROOT / "workspace/skills/orch-diagnose"}
     for p in sorted(BUILTIN.glob("*/skills/orch-*")):
         out[p.name] = p
     for p in sorted((ROOT / "workspace-addons").glob("*/src/*/skills/orch-*")):

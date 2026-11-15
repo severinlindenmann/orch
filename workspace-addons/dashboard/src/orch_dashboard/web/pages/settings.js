@@ -84,6 +84,29 @@ function privateCard(settings) {
       settingsText('h3', {}, 'This workspace asks to run a command'),
       settingsText('p', {className:'meta'}, hidden + (hidden === 1 ? " request" : " requests") + " orch can't show safely. Not allowed.")))) : null);
 }
+// Report a problem (diagnostics, D3): the debug log switch (one click) and the saved reports.
+function diagCard(settings) {
+  const on = settings.diag_enabled !== false, reports = settings.diag?.reports || {};
+  const off = snapshot || settingsBusy.has('diag');
+  const n = Number(reports.count) || 0;
+  return h('div', {className:'stack', 'data-key':'settings-diag'}, h('h2', {className:'set-sub'}, 'Report a problem'), h('div', {className:'card'},
+    h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Debug log'),
+      settingsText('p', {}, 'orch notes steps, errors and timings in the background, so a helper can find out what went wrong. It stays on this computer.'),
+      settingsText('p', {className:'meta'}, 'On by default. Keeps the last 7 days. Off stops new notes.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Debug log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
+    h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Saved reports'),
+      h('p', {className:'grow set-ctl', 'data-key':'settings-diag-reports'}, n === 1 ? '1 report' : n + ' reports', reports.last ? h('span', {className:'meta'}, ' · last ' + time(reports.last)) : null),
+      snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'diag-delete-reports', 'data-key':'settings-diag-delete-reports', disabled:off || !n}, 'Delete all'))));
+}
+async function diagSwitch() {
+  const on = state.settings?.diag_enabled === false;
+  const result = await settingsSend('diag.set', {on}, 'diag');
+  if (result.ok) window.orch.toast(on ? 'Debug log is on.' : 'Debug log is off.', 'ok');
+}
+async function diagDelete() {
+  const result = await settingsSend('diag.delete_reports', {}, 'diag');
+  if (result.ok) window.orch.toast('Reports deleted.', 'ok');
+}
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
@@ -560,7 +583,7 @@ function settingsPage() {
       everydayCard(settings, phoneAddon),
       snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'kit/gallery.html', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings))]),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),
@@ -816,6 +839,7 @@ function pageFrame(r) {
   if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
   // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session
   if (!addons().find(a => a.name === r.id)?.shipped) frame.setAttribute('sandbox', 'allow-scripts');
+  else window.DiagTrail?.watchFrame(window, frame);  // a same-origin add-on page joins the action trail
   return fragment(skeleton, frame);
 }
 const framesLoaded = new Set();

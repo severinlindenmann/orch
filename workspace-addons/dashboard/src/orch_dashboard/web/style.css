@@ -45,8 +45,6 @@
 .acc-li>.switch{margin:10px 12px 0 0}
 .acc>summary{list-style:none;cursor:pointer}
 .acc>summary::-webkit-details-marker{display:none}
-.chev{width:7px;height:7px;border-right:1.5px solid var(--text-muted);border-bottom:1.5px solid var(--text-muted);transform:rotate(-45deg);flex:none;margin:0 4px;transition:transform 150ms var(--ease-out)}
-.acc[open]>summary .chev{transform:rotate(45deg)}
 .acc-panel{padding:0 12px 12px 36px;display:grid;gap:12px;container-type:inline-size}
 .acc-detail{display:grid;gap:0;margin:0}
 .acc-detail>div{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,3fr);gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}
@@ -365,9 +363,6 @@ button.lk{border:0;background:transparent;text-align:left}button.lk:hover{backgr
 .task-wont{text-decoration:line-through;color:var(--text-muted)}
 .task-check.on{background:var(--brand);border-color:var(--brand)}
 .question-banner{align-items:center;gap:12px}.question-banner .banner-q{font-weight:600;overflow-wrap:anywhere}
-.ticket-details .ed{border-color:var(--border);padding-right:44px}
-.ticket-details .ed:after{content:"Edit";position:absolute;right:8px;top:6px;font-size:12px;color:var(--text-muted)}
-.ticket-details .ed:hover,.ticket-details .ed:focus-visible{border-color:var(--brand)}
 .status-menu>.status-sum{gap:4px}
 .board .activity .chip{white-space:normal}
 .acc-li>.send-msg{margin:6px 12px 10px 36px;flex:none;white-space:nowrap}

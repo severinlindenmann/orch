@@ -141,3 +141,6 @@ The current ticket header is the strip in `../sweep/d-ticket-states.html` (all f
 ### ticket-answers.html
 
 - No Decisions tab (owner 15 Nov): the card answers sit under the ticket's questions ("Earlier answers"): "What applies now" first, then one record per answer, newest first (kit `UI.appliesNow` / `UI.answerRecord`).
+
+## Report a problem (diagnostics D3, 15 Nov)
+`ticket-report.html` (`?s=page|form|busy|done|copied`): the "Report a problem" button in the top bar and its dialog (what happened, what you expected, a picture of the page, ticket text and helper conversation, Create report, Report ready with the checks, a line to paste, Ask a helper to investigate, Open folder). The button is in the top bar of every page; on a ticket page and in an add-on frame the dialog names that ticket or add-on. Sharing a report with a helper on another computer (share code) is a later step and is not in the product or here. The product's picture of the page is a snapshot of the page text with every typed value masked (no screenshot library).

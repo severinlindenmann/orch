@@ -503,7 +503,6 @@ def test_one_name_for_the_ai_and_plain_description_help():
         "' is now the default helper.'",
         "ticketButton('Start helper'",
         "'Ask the helper to check again'",
-        "'Helper: ' + agent",
         "['All', 'People', 'Helper']",
         "'Helper is working'",
         "plainWhy(question, 'The helper')",

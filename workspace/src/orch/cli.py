@@ -942,16 +942,18 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "ticket" and sub == "status":
         who, proven = _verdict_who(root, args, args.id, json.dumps({"status": args.status}), by())
         looked = _looked_at_this(root, args, args.id, args.status, proven)
+        hint = tickets.recheck_hint(root, args.id, args.status, who)
         t = tickets.set_status(root, args.id, args.status, who, proven)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
-        _out(
-            args,
-            shown,
+        if hint and t["status"] == "review":
+            shown = {**shown, "next_step": hint}
+        text = (
             tickets.REVIEW_MESSAGE
             if args.status == "done" and t["status"] == "review"
-            else shown.get("notice") or f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}",
+            else shown.get("notice") or f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}"
         )
+        _out(args, shown, text + (f"\nNext: {hint}" if shown.get("next_step") else ""))
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}

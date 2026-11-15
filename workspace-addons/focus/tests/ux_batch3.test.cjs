@@ -187,3 +187,17 @@ test('UX B: the picker says its list is on Home too, and row actions are 32 px m
   assert.match(src, /They are on Home too\./);
   assert.match(src, /\['review', 'Sent back to you', 'Check result'\]/);
 });
+test('UX B2: Focus opens on the next ticket that needs you (oldest question, then oldest result); nothing waiting -> start page', () => {
+  const H = require('../src/orch_focus/web/helpers.js');
+  const rows = [{id:'a', status:'review', updated_at:'2026-11-01T00:00:00Z'}, {id:'b', status:'waiting', updated_at:'2026-11-05T00:00:00Z'},
+    {id:'c', status:'waiting', updated_at:'2026-11-03T00:00:00Z'}, {id:'d', status:'active'}, {id:'e', status:'review', updated_at:'2026-11-02T00:00:00Z'}];
+  assert.deepEqual([H.nextNeeding(rows).ticket.id, H.nextNeeding(rows).hash], ['c', '']);
+  assert.deepEqual([H.nextNeeding(rows.filter(t => t.status !== 'waiting')).ticket.id, H.nextNeeding(rows.filter(t => t.status !== 'waiting')).hash], ['a', '#results']);
+  assert.equal(H.nextNeeding(rows.filter(t => t.status === 'active')), null);
+  assert.equal(H.nextNeeding([]), null);
+  const src = web('ticket.js');
+  assert.match(src, /INAPP \? window\.FocusHelpers\.nextNeeding\(list\) : null/);
+  assert.match(src, /location\.replace\(P \+ '\/t\/'/);
+  assert.match(src, /all=1/); assert.match(src, /See everything on Home/);
+  assert.match(src, /INAPP && \(status === 'waiting' \|\| status === 'review'\)/);
+});
