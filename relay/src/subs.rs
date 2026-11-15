@@ -729,6 +729,11 @@ async fn answer(
                 b["answer"].as_str().unwrap_or("")
             )));
         }
+        if let Some(reason) = store::taken_back_reason(&c, &app.key, qid) {
+            return Err(taken_back(format!(
+                "This question was taken back: {reason}"
+            )));
+        }
         let (qb, qextra) = store::open_payload(&app.key, &q);
         let m = store::system_message_with_key(
             qextra.get("key").and_then(crate::rules::ticket_key),
