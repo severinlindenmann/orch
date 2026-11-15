@@ -143,8 +143,16 @@ questions and answers, history. Relay and publish ship in the same package as bu
 | `orch ref add\|list\|rm`, `orch ticket set`, `orch log`, `orch ext set\|unset` | References (URLs, tickets, artifacts and files; kind from the active add-ons, else the known-sites table, else Reference), add-on fields, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
 | `orch agents`, `orch config`, `orch run ...` | Agents and runs: [agents.md](agents.md) |
 | `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
+| `orch pause` / `orch resume` | The runaway brake: pause stops all automation in this workspace (nothing starts on its own), resume turns it back on |
 
 All commands accept `--json` for agents. Exit code 0 = ok, 2 = refused (stderr `Refused: <reason>`; a confirmation that needs `--yes` without a terminal prints just its question; with `--json` stdout `{"error": "<reason>"}`), 1 = bug.
+
+## Pause and run cap
+`orch pause` writes `.orch/run/paused.json`. While it is there, every start that is not a person's is refused with
+one sentence ("Automation is paused in this workspace. Turn it back on with: orch resume."), extra turns of a
+running one-step agent are not continued, and `orch status` says so. A person's own start always works. On top of that,
+automatic starts are capped at 20 per ticket in a rolling 24 hours (counted in `.orch/run/starts.json`); the first refusal
+of the day adds one history line to the ticket. Person starts are never counted.
 
 ## Data storage
 `.orch/` in the workspace (contracts/local-files.md). Tickets may be committed; secrets and inbox are gitignored.
