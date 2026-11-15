@@ -94,10 +94,40 @@ publish/
   Per app: network `orch-apps`, port published on 127.0.0.1 only, 128 MB, 0.5 CPU, 64 processes, read-only root,
   `/tmp` tmpfs, no capabilities, `no-new-privileges`, the server's uid:gid, code at `/app` (read-only), data at `/data`.
   Images `python:3.12-slim` / `node:22-slim`; build steps (venv + pip, `npm ci --omit=dev`) and test steps run in the
-  same image (512 MB). Stack `docker` (container mode only, else "This server can't run docker apps."): the bundle has
+  same image (512 MB). Stack `docker` (needs `ORCH_PUBLISH_SANDBOX=container` AND `ORCH_PUBLISH_DOCKER_APPS=1`, off by default because image builds run in a privileged builder; otherwise "This server doesn't run apps with their own Dockerfile."): the bundle has
   a `Dockerfile`; the host builds `orch-app-<name>:<version>`, runs it, and removes the old image after the switch.
   Containers carry the labels `orch.publish.app` and `dev.kiri.domain`; leftovers after a server restart are removed.
   Real-engine test: `ORCH_PUBLISH_TEST_ENGINE=1 cargo test --test container -- --ignored`.
+
+## Container mode: host setup
+
+Run these on the server that runs orch-publish. Apps get the internet; they cannot reach the server itself, the
+private network (VPN), the local network or the cloud metadata address.
+
+1. Install Kiri: download the `kiri` .deb and its `SHA256SUMS` from the Kiri release page, check
+   `sha256sum -c SHA256SUMS --ignore-missing`, then `sudo apt install ./kiri_*.deb`.
+2. Give the publish user access to the engine: `sudo kiri host-access <publish user>`. Caution: this is
+   root-equivalent for that user (whoever controls the engine socket controls the machine). Only the publish user
+   gets it; see the security note of the deploy.
+3. Find the public network interface: `ip route show default` (the name after `dev`, used as `<public interface>`).
+4. If the host uses ufw, add these rules in this order (apps live in 10.213.0.0/16, one /28 per app; change the pool
+   with `ORCH_PUBLISH_APP_SUBNETS`):
+
+```
+sudo ufw allow in on kiri0                      # Kiri's builder reaches Kiri's image mirror
+sudo ufw route allow in on kiri0 out on <public interface>
+sudo ufw route deny from 10.213.0.0/16 to 169.254.0.0/16
+sudo ufw route deny from 10.213.0.0/16 to 10.0.0.0/8
+sudo ufw route deny from 10.213.0.0/16 to 172.16.0.0/12
+sudo ufw route deny from 10.213.0.0/16 to 192.168.0.0/16
+sudo ufw route deny from 10.213.0.0/16 to 100.64.0.0/10   # the private network (VPN)
+sudo ufw route allow from 10.213.0.0/16 out on <public interface>
+sudo ufw allow from 10.213.0.0/16 to any port 53 proto udp   # app DNS on its gateway
+```
+
+The deny rules come first so the final allow only opens the public internet. Per-app networks are never removed
+(Kiri 0.2.0 keeps a DNS listener on the old gateway after `docker network rm`); a redeploy reuses them. Kiri 0.2.0
+also ignores `enable_icc=false`, so apps on different networks are separated by the network, not by that flag.
 
 ## Not included
 Several admins, custom domains per app, app logs view, own databases beyond SQLite.

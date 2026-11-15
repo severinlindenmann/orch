@@ -126,7 +126,83 @@ fn known_networks() -> &'static Mutex<HashSet<String>> {
     N.get_or_init(Default::default)
 }
 
-/// Creates the app's network once (best effort: a real error shows up when the app starts).
+fn parse_cidr(c: &str) -> Option<(u32, u32)> {
+    let (ip, len) = c.trim().split_once('/')?;
+    let ip: std::net::Ipv4Addr = ip.parse().ok()?;
+    let len: u32 = len.parse().ok()?;
+    (len <= 32).then_some((u32::from(ip), len))
+}
+
+/// First free /28 of `pool` (e.g. `10.213.0.0/16`) that overlaps none of the `used` subnets.
+fn pick_subnet(pool: &str, used: &[String]) -> Option<String> {
+    let (base, plen) = parse_cidr(pool)?;
+    if plen > 28 {
+        return None;
+    }
+    let ranges: Vec<(u64, u64)> = used
+        .iter()
+        .filter_map(|u| parse_cidr(u))
+        .map(|(ip, l)| {
+            let size = 1u64 << (32 - l);
+            (ip as u64 & !(size - 1), size)
+        })
+        .collect();
+    let base = base as u64 & !((1u64 << (32 - plen)) - 1);
+    (0..(1u64 << (28 - plen)))
+        .map(|i| base + i * 16)
+        .find(|start| {
+            ranges
+                .iter()
+                .all(|(r, size)| start + 16 <= *r || *start >= r + size)
+        })
+        .map(|s| format!("{}/28", std::net::Ipv4Addr::from(s as u32)))
+}
+
+/// Subnets of the existing per-app networks.
+fn used_app_subnets() -> Vec<String> {
+    let names = docker_std()
+        .args([
+            "network",
+            "ls",
+            "--format",
+            "{{.Name}}",
+            "--filter",
+            "name=orch-net-",
+        ])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    names
+        .lines()
+        .filter(|n| n.starts_with("orch-net-"))
+        .filter_map(|n| {
+            docker_std()
+                .args([
+                    "network",
+                    "inspect",
+                    "-f",
+                    "{{range .IPAM.Config}}{{.Subnet}} {{end}}",
+                    n,
+                ])
+                .output()
+                .ok()
+        })
+        .flat_map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .split_whitespace()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Creates the app's network once, with its own /28 from the pool (best effort: a real error
+/// shows up when the app starts).
+///
+/// A per-app network is NEVER removed (not when the app is removed either): Kiri 0.2.0 keeps its DNS
+/// listener on the old gateway after `docker network rm`, and a new network with the same subnet
+/// then fails every `docker run` with "dns bind: Address in use". The next deploy of the same app
+/// name reuses the network. (Upstream Kiri issue to be filed.)
 fn ensure_network(app: &str) {
     let net = network_name(app);
     if known_networks().lock().unwrap().contains(&net) {
@@ -136,24 +212,17 @@ fn ensure_network(app: &str) {
         .args(["network", "inspect", &net])
         .output()
         .is_ok_and(|o| o.status.success());
-    if exists
-        || docker_std()
-            .args(["network", "create", &net])
-            .output()
-            .is_ok_and(|o| o.status.success())
-    {
+    let pool = crate::config::var("APP_SUBNETS").unwrap_or_else(|| "10.213.0.0/16".into());
+    let created = exists
+        || pick_subnet(&pool, &used_app_subnets()).is_some_and(|subnet| {
+            docker_std()
+                .args(["network", "create", "--subnet", &subnet, &net])
+                .output()
+                .is_ok_and(|o| o.status.success())
+        });
+    if created {
         known_networks().lock().unwrap().insert(net);
     }
-}
-
-/// Removes the app's network (when the app is removed).
-pub async fn remove_network(app: &str) {
-    let net = network_name(app);
-    known_networks().lock().unwrap().remove(&net);
-    let _ = Command::from(docker_std())
-        .args(["network", "rm", &net])
-        .output()
-        .await;
 }
 
 fn stack_image(stack: &str) -> &'static str {
@@ -344,38 +413,37 @@ pub async fn sweep_containers(known_apps: &HashSet<String>) {
     }
 }
 
-/// Reject Dockerfiles that could reach outside the build: a `# syntax=` parser directive (pulls a
-/// frontend image) or any `--mount=` (host cache/secret/ssh mounts). Continuation lines are joined first.
+/// Reject Dockerfiles that could reach outside the build: any parser directive (`syntax`, `escape`,
+/// `check`: a frontend image, or a changed line-continuation character), any `--mount` (host
+/// cache/secret/ssh mounts), any non-ASCII byte. `--mount` is looked for in the raw text and in the
+/// text with every backslash/backtick line continuation removed (no space inserted).
 pub fn check_dockerfile(text: &str) -> Result<(), &'static str> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    for l in text.lines() {
-        let t = l.trim_end();
-        if let Some(head) = t.strip_suffix('\\') {
-            cur.push_str(head);
-            cur.push(' ');
-        } else {
-            cur.push_str(t);
-            lines.push(std::mem::take(&mut cur));
-        }
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    if !text.is_ascii() {
+        return Err("The Dockerfile must use plain ASCII only.");
     }
-    if !cur.is_empty() {
-        lines.push(cur);
-    }
-    for l in lines {
-        let l = l.trim().to_lowercase();
-        if let Some(rest) = l.strip_prefix('#') {
+    let lower = text.to_ascii_lowercase();
+    for l in lower.lines() {
+        if let Some(rest) = l.trim_start().strip_prefix('#') {
             let rest = rest.trim_start();
-            if rest
-                .strip_prefix("syntax")
-                .is_some_and(|r| r.trim_start().starts_with('='))
-            {
-                return Err("The Dockerfile must not have a `# syntax=` line.");
+            for d in ["syntax", "escape", "check"] {
+                if rest
+                    .strip_prefix(d)
+                    .is_some_and(|r| r.trim_start().starts_with('='))
+                {
+                    return Err(
+                        "The Dockerfile must not have a parser directive (# syntax=, # escape=).",
+                    );
+                }
             }
         }
-        if l.contains("--mount") {
-            return Err("The Dockerfile must not use `--mount=`.");
-        }
+    }
+    let mut joined = lower.clone();
+    for pat in ["\\\r\n", "\\\n", "`\r\n", "`\n"] {
+        joined = joined.replace(pat, "");
+    }
+    if lower.contains("--mount") || joined.contains("--mount") {
+        return Err("The Dockerfile must not use `--mount=`.");
     }
     Ok(())
 }
@@ -1062,6 +1130,40 @@ mod tests {
         assert!(check_dockerfile("#syntax = evil/frontend\nFROM x\n").is_err());
         assert!(check_dockerfile("FROM x\nRUN \\\n  --mount=type=cache,target=/c make\n").is_err());
         assert!(check_dockerfile("FROM x\n# just a comment about syntax\n").is_ok());
+        // bypasses
+        assert!(
+            check_dockerfile("\u{feff}# syntax=evil/x\nFROM x\n").is_err(),
+            "BOM"
+        );
+        assert!(check_dockerfile("# escape=`\nFROM x\nRUN --mo`\nunt=type=cache x\n").is_err());
+        assert!(
+            check_dockerfile("FROM x\nRUN --mo\\\r\nunt=type=cache x\n").is_err(),
+            "CRLF"
+        );
+        assert!(check_dockerfile("FROM x\nRUN --MOUNT=type=cache x\n").is_err());
+        assert!(check_dockerfile("FROM x\n  # Check=skip=all\n").is_err());
+        assert!(
+            check_dockerfile("FROM x\nLABEL a=\"\u{e9}\"\n").is_err(),
+            "non-ASCII"
+        );
+    }
+
+    #[test]
+    fn subnet_picker_takes_the_first_free_28() {
+        let pool = "10.213.0.0/16";
+        assert_eq!(pick_subnet(pool, &[]).unwrap(), "10.213.0.0/28");
+        let used = vec!["10.213.0.0/28".to_string(), "10.213.0.16/28".to_string()];
+        assert_eq!(pick_subnet(pool, &used).unwrap(), "10.213.0.32/28");
+        assert_eq!(
+            pick_subnet(pool, &["10.213.0.0/24".to_string()]).unwrap(),
+            "10.213.1.0/28"
+        );
+        assert!(pick_subnet("10.213.0.0/28", &["10.213.0.0/28".into()]).is_none());
+        assert!(pick_subnet("garbage", &[]).is_none());
+        let all: Vec<String> = (0..4096u32)
+            .map(|i| format!("10.213.{}.{}/28", i / 16, (i % 16) * 16))
+            .collect();
+        assert!(pick_subnet(pool, &all).is_none());
     }
 
     #[test]

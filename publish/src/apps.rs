@@ -35,12 +35,13 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
         .map_err(|_| ApiError::invalid("The bundle has no app.toml at its top level."))?;
     let m: Manifest = toml::from_str(&text)
         .map_err(|e| ApiError::invalid(format!("app.toml is not valid: {}", e.message())))?;
-    check_manifest(&m, dir, container_mode())?;
+    let docker_ok = container_mode() && crate::config::var("DOCKER_APPS").is_some_and(|v| v == "1");
+    check_manifest(&m, dir, docker_ok)?;
     Ok(m)
 }
 
-/// Rules for app.toml; `container` = this server runs apps as containers.
-fn check_manifest(m: &Manifest, dir: &FsPath, container: bool) -> ApiResult<()> {
+/// Rules for app.toml; `docker_ok` = container mode AND ORCH_PUBLISH_DOCKER_APPS=1.
+fn check_manifest(m: &Manifest, dir: &FsPath, docker_ok: bool) -> ApiResult<()> {
     let bad = |s: &str| Err(ApiError::invalid(format!("app.toml: {s}")));
     if !util::valid_app_name(&m.name) {
         return bad("name must be 2-40 characters: a-z, 0-9 and -.");
@@ -49,8 +50,8 @@ fn check_manifest(m: &Manifest, dir: &FsPath, container: bool) -> ApiResult<()> 
         return bad("stack must be static, python, node or docker.");
     }
     if m.stack == "docker" {
-        if !container {
-            return bad("This server can't run docker apps.");
+        if !docker_ok {
+            return bad("This server doesn't run apps with their own Dockerfile.");
         }
         let Ok(text) = std::fs::read_to_string(dir.join("Dockerfile")) else {
             return bad("docker apps need a Dockerfile at the top of the bundle.");
@@ -486,7 +487,6 @@ pub async fn remove(st: &State, name: &str) {
     st.runner.stop(name).await;
     if container_mode() {
         crate::runner::remove_images(name, None).await;
-        crate::runner::remove_network(name).await;
     }
     let _ = std::fs::remove_dir_all(st.cfg.app_root(name));
     let _ = std::fs::remove_file(st.cfg.log_path(name));
@@ -828,7 +828,9 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let m = manifest("docker");
         let e = check_manifest(&m, d.path(), false).unwrap_err();
-        assert!(format!("{e:?}").contains("This server can't run docker apps."));
+        assert!(
+            format!("{e:?}").contains("This server doesn't run apps with their own Dockerfile.")
+        );
         assert!(check_manifest(&m, d.path(), true).is_err(), "no Dockerfile");
         std::fs::write(d.path().join("Dockerfile"), "FROM scratch\n").unwrap();
         assert!(check_manifest(&m, d.path(), true).is_ok());
