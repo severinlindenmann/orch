@@ -472,10 +472,7 @@ h1,h2,h3,.ticket-title a,.result-link{overflow-wrap:break-word;word-break:normal
 .week-strip .day.empty::after{content:"\2014";color:var(--text-faint);font-size:12px}
 .week-strip .run{display:block;padding:0 0 0 8px;border-left:2px solid var(--brand);font-size:12px;line-height:16px}
 .week-strip .run time,.week-strip .run>span{display:block}
-.week-bands{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px 0;padding:12px 12px 0;border-bottom:1px solid var(--border)}
-.week-bands .run.band{display:flex;gap:8px;align-items:baseline;margin:0 4px 12px;padding:4px 8px;border-left:2px solid var(--brand);border-radius:4px;background:var(--surface-2);font-size:12px;line-height:16px}
-.week-bands .run.band time{display:inline;color:var(--text-muted)}.week-bands .run.band>span{display:inline}
-@media(max-width:950px){.week-strip{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.week-strip .day{border-width:0 0 1px 0}.week-bands{grid-template-columns:1fr}.week-bands .run.band{grid-column:auto!important}}
+@media(max-width:950px){.week-strip{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.week-strip .day{border-width:0 0 1px 0}}
 
 /* Add-on page layout blocks (contract: addon-view.schema.json "Page layout"): headings with quiet text, two cards side by side,
    a compact list with hover actions, settings rows with a choice, a footnote. */

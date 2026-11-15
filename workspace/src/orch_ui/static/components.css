@@ -484,3 +484,10 @@ html{scrollbar-gutter:stable}
 .ed.ed-plain .icon{flex:none;width:14px;height:14px;opacity:.55}
 .ed.ed-plain:hover .icon,.ed.ed-plain:focus-visible .icon{opacity:1}
 .ed.ed-plain.ed-link{color:var(--brand)}
+
+/* Week bands: a repeat shown as one band across the days it covers, above the day columns of a week strip. */
+.week-bands{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px 0;padding:12px 12px 0;border-bottom:1px solid var(--border)}
+.week-bands .run.band{display:flex;gap:8px;align-items:baseline;margin:0 4px 12px;padding:4px 8px;border-left:2px solid var(--brand);border-radius:4px;background:var(--surface-2);font-size:12px;line-height:16px;color:inherit;text-decoration:none}
+.week-bands .run.band time{display:inline;color:var(--text-muted)}.week-bands .run.band>span{display:inline}
+.week-bands .band-all{grid-column:1/8}
+@media(max-width:950px){.week-bands{grid-template-columns:1fr}.week-bands .run.band{grid-column:auto!important}}
