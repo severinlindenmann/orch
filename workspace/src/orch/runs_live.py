@@ -308,30 +308,46 @@ _HINT_PLAIN = {"39", "0", "", "22"}  # codes around a hint that change nothing v
 
 def _is_hint(raw_row: str) -> bool | None:
     """True: every visible character of the row is drawn in the hint style, nothing else. False: some visible
-    character is not. None: an escape other than the exact hint style (any doubt)."""
-    dim = False
+    character is not. None: an escape other than the exact hint style (any doubt). Claude Code 2.1.325 draws
+    its placeholder with the cursor block on the first character (`ESC[7m` T `ESC[0;2m` ry ...): that one
+    first character may be inverse; the caller checks that the cursor really sits on it."""
+    dim = inv = False
     pos = 0
     seen = False
-    for m in _ANSI.finditer(raw_row):
-        for c in raw_row[pos : m.start()]:
-            if c.strip():
-                seen = True
-                if not dim:
-                    return False
-        pos = m.end()
-        if m.group(2) != "m":
-            return None
-        if m.group(1) == "2":
-            dim = True
-        elif m.group(1) in ("0", "", "22"):
-            dim = False
-        elif m.group(1) != "39":
-            return None
-    for c in raw_row[pos:]:
-        if c.strip():
+    first_inv = False  # the one inverse (cursor) character, only ever the row's first visible one
+
+    def visible(chunk: str) -> bool:
+        nonlocal seen, first_inv
+        for c in chunk:
+            if not c.strip():
+                continue
+            if inv and not seen and not first_inv:
+                first_inv, seen = True, True
+                continue
             seen = True
             if not dim:
                 return False
+        return True
+
+    for m in _ANSI.finditer(raw_row):
+        if not visible(raw_row[pos : m.start()]):
+            return False
+        pos = m.end()
+        if m.group(2) != "m":
+            return None
+        code = m.group(1)
+        if code == "2":
+            dim = True
+        elif code == "7" and not seen:
+            inv = True
+        elif code == "0;2":
+            dim, inv = True, False
+        elif code in ("0", "", "22"):
+            dim = inv = False
+        elif code != "39":
+            return None
+    if not visible(raw_row[pos:]):
+        return False
     return seen or False
 
 
@@ -480,6 +496,25 @@ def _enter(root: Path, tid: str, timeout: float = 20) -> bool:
     return tmux(root, "send-keys", "-t", target(tid), "Enter", timeout=timeout).returncode == 0
 
 
+CALM_SECONDS = 2.0  # the pane must look the same this long before the first task is typed
+
+
+def _calm(root: Path, tid: str, rec: dict) -> bool:
+    """A tool just started draws notices after its prompt shows (a model hint, an auto-mode note): text typed
+    meanwhile is lost. True when the pane has not changed for CALM_SECONDS. Under the run lock (deliver)."""
+    r = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
+    if r.returncode != 0:
+        return False
+    d = hashlib.sha256(r.stdout.encode()).hexdigest()[:16]
+    t = time.time()
+    last = rec.get("calm") or {}
+    if last.get("d") != d:
+        rec["calm"] = {"d": d, "at": t}
+        runs._write(root, rec)
+        return False
+    return t - float(last.get("at", t)) >= CALM_SECONDS
+
+
 def deliver(root: Path, tid: str, stop=None) -> int:
     """Tell the agent input waits, once, if (and only if) it said it is idle: type the notice line. Returns
     how many items wait. The items stay undelivered until the agent reads them (read_input). stop: the
@@ -511,6 +546,10 @@ def deliver(root: Path, tid: str, stop=None) -> int:
             )
         if (stop is not None and stop.is_set()) or (runs.read(root, tid) or {}).get("stop_requested"):
             return 0
+        if any(i.get("via") == "start" for i in items) and not _calm(root, tid, rec):
+            return (
+                0  # the first task waits until the tool has stopped drawing notices (the watcher asks again)
+            )
         if not runhooks.gate(root=root, tid=tid, run=rec["run"]):
             return 0
         if not _type_line(root, tid, line, QUICK):
