@@ -62,3 +62,12 @@ test('the "Update started" banner goes away when the update finishes, fails or i
   p.c.S();
   assert.equal(removed, 0, 'still running: the started banner stays');
 });
+
+test('a finished update names the new release, or keeps the old text when unknown', () => {
+  const a = page(1000, {}, {state: 'finished', reason: '', release: 21});
+  a.c.S();
+  assert.deepEqual(a.banners, ['Updated to orch 21.']);
+  const b = page(1000, {}, {state: 'finished', reason: ''});
+  b.c.S();
+  assert.deepEqual(b.banners, ['Update finished.']);
+});

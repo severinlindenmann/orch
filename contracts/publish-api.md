@@ -31,7 +31,7 @@ Rights per workspace (set by the admin): `files` (temporary files), `apps` (temp
 | POST | `/v1/apps/<name>/stop` | – | `200 {name, status}` |
 | DELETE | `/v1/apps/<name>` | – | `204` (code and data are removed) |
 
-`<name>`: `^[a-z0-9-]{2,40}$`, unique on the server (first workspace wins). `view_token` is set when `public = false`.
+`<name>`: `^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$` (2-40, starts and ends with a letter or digit; checked on deploy only), unique on the server (first workspace wins). `view_token` is set when `public = false`.
 Expired apps are stopped and removed by the hourly sweep, like files.
 
 ## Public routes (no workspace auth)

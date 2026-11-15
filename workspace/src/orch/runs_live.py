@@ -308,30 +308,46 @@ _HINT_PLAIN = {"39", "0", "", "22"}  # codes around a hint that change nothing v
 
 def _is_hint(raw_row: str) -> bool | None:
     """True: every visible character of the row is drawn in the hint style, nothing else. False: some visible
-    character is not. None: an escape other than the exact hint style (any doubt)."""
-    dim = False
+    character is not. None: an escape other than the exact hint style (any doubt). A newer build of the tool
+    draws its placeholder with the cursor block on the first character (`ESC[7m` T `ESC[0;2m` ry ...): that
+    one first character may be inverse; the caller checks that the cursor really sits on it."""
+    dim = inv = False
     pos = 0
     seen = False
-    for m in _ANSI.finditer(raw_row):
-        for c in raw_row[pos : m.start()]:
-            if c.strip():
-                seen = True
-                if not dim:
-                    return False
-        pos = m.end()
-        if m.group(2) != "m":
-            return None
-        if m.group(1) == "2":
-            dim = True
-        elif m.group(1) in ("0", "", "22"):
-            dim = False
-        elif m.group(1) != "39":
-            return None
-    for c in raw_row[pos:]:
-        if c.strip():
+    first_inv = False  # the one inverse (cursor) character, only ever the row's first visible one
+
+    def visible(chunk: str) -> bool:
+        nonlocal seen, first_inv
+        for c in chunk:
+            if not c.strip():
+                continue
+            if inv and not seen and not first_inv:
+                first_inv, seen = True, True
+                continue
             seen = True
             if not dim:
                 return False
+        return True
+
+    for m in _ANSI.finditer(raw_row):
+        if not visible(raw_row[pos : m.start()]):
+            return False
+        pos = m.end()
+        if m.group(2) != "m":
+            return None
+        code = m.group(1)
+        if code == "2":
+            dim = True
+        elif code == "7" and not seen:
+            inv = True
+        elif code == "0;2":
+            dim, inv = True, False
+        elif code in ("0", "", "22"):
+            dim = inv = False
+        elif code != "39":
+            return None
+    if not visible(raw_row[pos:]):
+        return False
     return seen or False
 
 
@@ -480,6 +496,25 @@ def _enter(root: Path, tid: str, timeout: float = 20) -> bool:
     return tmux(root, "send-keys", "-t", target(tid), "Enter", timeout=timeout).returncode == 0
 
 
+CALM_SECONDS = 2.0  # the pane must look the same this long before the first task is typed
+
+
+def _calm(root: Path, tid: str, rec: dict) -> bool:
+    """A tool just started draws notices after its prompt shows (a model hint, an auto-mode note): text typed
+    meanwhile is lost. True when the pane has not changed for CALM_SECONDS. Under the run lock (deliver)."""
+    r = tmux(root, "capture-pane", "-p", "-t", target(tid), timeout=QUICK)
+    if r.returncode != 0:
+        return False
+    d = hashlib.sha256(r.stdout.encode()).hexdigest()[:16]
+    t = time.time()
+    last = rec.get("calm") or {}
+    if last.get("d") != d:
+        rec["calm"] = {"d": d, "at": t}
+        runs._write(root, rec)
+        return False
+    return t - float(last.get("at", t)) >= CALM_SECONDS
+
+
 def deliver(root: Path, tid: str, stop=None) -> int:
     """Tell the agent input waits, once, if (and only if) it said it is idle: type the notice line. Returns
     how many items wait. The items stay undelivered until the agent reads them (read_input). stop: the
@@ -511,6 +546,10 @@ def deliver(root: Path, tid: str, stop=None) -> int:
             )
         if (stop is not None and stop.is_set()) or (runs.read(root, tid) or {}).get("stop_requested"):
             return 0
+        if any(i.get("via") == "start" for i in items) and not _calm(root, tid, rec):
+            return (
+                0  # the first task waits until the tool has stopped drawing notices (the watcher asks again)
+            )
         if not runhooks.gate(root=root, tid=tid, run=rec["run"]):
             return 0
         if not _type_line(root, tid, line, QUICK):
@@ -741,7 +780,7 @@ def _check_submit(root: Path, tid: str, run: str, t: float, end, stop) -> str | 
             root,
             tid,
             f"{label} did not take the new input in its live session, so the session was closed. "
-            "The input is kept and goes in with the next start, one step at a time.",
+            "The input is kept; orch starts the agent again now, one step at a time.",
             f"agent:{rec['agent']}",
         )
     _log_submit(root, tid, run, "gave up: the agent did not take the notice; input queued for a one-step run")
@@ -779,12 +818,35 @@ def _give_up_locked(root: Path, rec: dict) -> None:
         runs._pending_write(root, tid, items)
     rec.pop("submit", None)
     rec["live_retry"] = True
+    rec["restart"] = True  # our own end: the wrapper starts the run again once, one step at a time
     rec["pending"] = True
     rec["stop_requested"] = tickets.now()  # our own end, set before the agent is ended
     runs._write(root, rec)
 
 
 DELIVER_GIVE_UP_SECONDS = 180.0  # input kept back this long (a dialog, a start that never came up): one-step
+
+
+def _prompt_reached(root: Path, rec: dict, stop=None) -> bool:
+    """After orch answered the tool's first-run screens: when the pane shows the tool's own empty prompt
+    (no dialog, nothing typed), the tool is up even if its start hook has not said so: the state becomes idle,
+    so the waiting input goes in. Anything else (a dialog, a login, an unreadable pane) changes nothing."""
+    tid, run = rec["ticket"], rec["run"]
+    if (stop is not None and stop.is_set()) or not session_exists(root, tid):
+        return False
+    if _hold_reason(root, tid, _dialog_rule(rec["agent"], root), _prompt_box(rec["agent"], root)) is not None:
+        return False
+    if adapters.screen(rec["agent"], root, _pane_text(root, tid), ref(root, tid)):
+        return False  # a screen the adapter knows (login ...) still waits for a person
+    if _set_state(root, tid, run, "idle"):
+        tickets.resume_after_start_wait(root, tid, f"agent:{rec['agent']}")
+        return True
+    return False
+
+
+def _pane_text(root: Path, tid: str) -> str:
+    r = tmux(root, "capture-pane", "-p", "-t", target(tid))
+    return r.stdout if r.returncode == 0 else ""
 
 
 def retry_deliver(root: Path, tid: str, run: str, memo: dict, now: float | None = None, end=None, stop=None):
@@ -802,10 +864,17 @@ def retry_deliver(root: Path, tid: str, run: str, memo: dict, now: float | None 
     if not (state in ("idle", "starting") or (state == "attention" and not rec.get("up"))):
         memo.pop("blocked", None)
         return None
+    if state != "idle" and not rec.get("up") and rec.get("screens_at"):
+        _prompt_reached(root, rec, stop)  # orch answered first-run screens: is the tool at its prompt now?
+        rec = runs.read(root, tid) or rec
+        state = (rec.get("live") or {}).get("state", "starting")
     if state == "idle" and deliver(root, tid, stop=stop):
         memo.pop("blocked", None)
         return "sent"
     since = memo.setdefault("blocked", t)
+    if not rec.get("up") and rec.get("screens_at"):
+        with contextlib.suppress(KeyError, ValueError):
+            since = max(since, runs._parse(rec["screens_at"]))  # screen time is not input-window time
     if t - since < DELIVER_GIVE_UP_SECONDS or (stop is not None and stop.is_set()):
         return None
     with runs.locked(root, tid):
@@ -819,7 +888,7 @@ def retry_deliver(root: Path, tid: str, run: str, memo: dict, now: float | None 
             root,
             tid,
             f"{label}'s live session could not take the new input for 3 minutes, so it was closed. "
-            "The input is kept and goes in with the next start, one step at a time.",
+            "The input is kept; orch starts the agent again now, one step at a time.",
             f"agent:{rec['agent']}",
         )
     _log_submit(root, tid, run, "gave up: the notice was kept back (dialog or no start) for 3 minutes")
@@ -981,26 +1050,31 @@ def resume_after_answer(root: Path, tid: str, q: dict, by: str) -> dict | None:
 
 
 def send(root: Path, tid: str, by: str, text: str, kind: str = "message", proven: bool = False) -> dict:
+    """Queue a message for the agent. The words are always put into the ticket's pending input first and never
+    typed into the session: only the fixed notice line is, and only when the tool is up and idle at its prompt
+    (deliver). Starting up, first-run screens, a busy or waiting session: it stays queued and goes in at
+    the next turn end or start. The answer says which: delivered (n > 0, queued False) or queued."""
     tickets.load(root, tid)
     item = runs.pending_add(root, tid, by, kind, text, proven=proven)
     rec = runs.read(root, tid)
     if not rec or runs.state(rec) != "alive":
-        return {"id": item["id"], "delivered": 0, "state": "none"}
+        return {"id": item["id"], "delivered": 0, "queued": True, "state": "none"}
     n = deliver(root, tid) if rec.get("mode") == "live" else 0
     rec = runs.read(root, tid) or rec
     if not n and rec.get("mode") == "live" and rec.get("submit"):
         # the wrapper's watcher typed the notice between our queueing and our deliver(): a notice is out and
         # not yet taken, and the agent reads everything waiting when it takes it, so this input is sent too
         n = 1
-    return {"id": item["id"], "delivered": n, "state": (rec.get("live") or {}).get("state", rec["mode"])}
+    state = (rec.get("live") or {}).get("state", rec["mode"])
+    return {"id": item["id"], "delivered": n, "queued": not n, "state": state}
 
 
 def send_text(result: dict, tid: str) -> str:
     if result["delivered"]:
         return "Sent."
     if result["state"] == "none":
-        return f"Saved. Nothing is working on {tid} now; it goes in when you start it: orch run start {tid}"
-    return "Saved. It goes in when the agent is done with this step."
+        return f"Queued. Nothing is working on {tid} now; it goes in when you start it: orch run start {tid}"
+    return "Queued. It goes in when the agent is ready for it (after this step)."
 
 
 # ---------------------------------------------------------------- attach, stop, cleanup
@@ -1144,6 +1218,29 @@ def stop(root: Path, tid: str, hold: bool = False) -> bool:
     _close(root, rec, interrupt=True)
     start_waiting(root)
     return True
+
+
+def stop_hidden(root: Path) -> list[str]:
+    """`orch stop`: also end the live sessions a person can not see in the ticket list: the hidden Chat
+    (General) ticket's and those of tickets with waiting input (run/pending). Only an exact session name of
+    such a ticket, on this workspace's own socket. Best effort: returns the ids stopped."""
+    if shutil.which("tmux") is None:
+        return []
+    ids: list[str] = []
+    with contextlib.suppress(Exception):
+        if (g := tickets.general_id(root)) is not None:
+            ids.append(g)
+    d = runs.run_dir(root) / "pending"
+    with contextlib.suppress(OSError):
+        ids += [f.stem for f in sorted(d.glob("t_*.jsonl")) if f.is_file() and not f.is_symlink()]
+    done = []
+    for tid in dict.fromkeys(ids):
+        try:
+            if session_exists(root, tid) and stop(root, tid):
+                done.append(tid)
+        except Exception:  # noqa: BLE001 - one stuck session never keeps the others running
+            continue
+    return done
 
 
 def _inside_run(rec: dict) -> bool:
@@ -1294,6 +1391,7 @@ def check_starting(
                     time.sleep(PASTE_DELAY)
                 tmux(root, "send-keys", "-t", target(tid), k)
             answered.append(scr["what"])
+            _note_screen(root, tid, run)
             return None
     note = scr["say"] if scr else None
     if note is None and age >= STARTUP_SECONDS and (rec.get("live") or {}).get("state") == "starting":
@@ -1319,6 +1417,16 @@ def check_starting(
             runs._write(root, cur)
             tickets.wait_for_start(root, tid, note, f"agent:{rec['agent']}")
     return note
+
+
+def _note_screen(root: Path, tid: str, run: str) -> None:
+    """orch just answered a first-run screen: the time it takes the tool to come up after that is not counted
+    against the input window (retry_deliver measures from this moment)."""
+    with contextlib.suppress(Exception), runs.locked(root, tid):
+        cur = runs.read(root, tid)
+        if cur and cur["run"] == run:
+            cur["screens_at"] = tickets.now()
+            runs._write(root, cur)
 
 
 def _names_own_folder(root: Path, text: str, work: Path | None = None) -> bool:
@@ -1354,6 +1462,22 @@ def watch_start(root: Path, tid: str, run: str, name: str, proc: subprocess.Pope
                 root, tid, f"Answered {label}'s first-run screens ({', '.join(answered)}).", f"agent:{name}"
             )
     return answered
+
+
+def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
+    """The live session gave up on its input (retry_deliver / check_submit): start the agent once more, now
+    one step at a time (the kept input has live_retry, so the start is oneshot: it cannot give up again). Only
+    for a run orch ended itself (rec["restart"]), never after a person's Stop. Returns the start result."""
+    try:
+        result = runs.start(root, tid, AUTOMATION_BY)
+    except Exception as e:  # the ticket then says so; the input stays queued
+        with contextlib.suppress(Exception):
+            tickets.log(
+                root, tid, f"The agent could not be started again by itself: {e}. Press Continue.",
+                f"agent:{name}",
+            )  # fmt: skip
+        return None
+    return result
 
 
 def start_waiting(root: Path) -> None:

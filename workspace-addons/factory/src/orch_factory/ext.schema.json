@@ -14,6 +14,7 @@
       "description": "Order only. draft = idea being polished; proposed = a Run proposal waits for Start; running = the crew works; waiting = a stop or change waits for the owner; shipped / cancelled = finished."
     },
     "draft": { "type": "integer", "minimum": 1, "description": "Order only. Newest draft version (.orch/addons/factory/drafts/<order>/v<N>.md)." },
+    "idea_box": { "type": "boolean", "description": "Order only. Filed by a person's click in the idea box: draft v1 is the person's own words, so the draft waits for the person only from v2 (the agent's)." },
     "proposal": {
       "type": "object",
       "additionalProperties": false,

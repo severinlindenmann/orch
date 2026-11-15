@@ -35,10 +35,12 @@ pub type State = Arc<Inner>;
 
 /// Opens the database and folders under `cfg.data_dir`.
 pub fn new_state(cfg: Config) -> std::io::Result<State> {
+    runner::set_instance(&cfg.data_dir);
     for d in ["files", "logs"] {
         std::fs::create_dir_all(cfg.data_dir.join(d))?;
     }
     std::fs::create_dir_all(&cfg.apps_dir)?;
+    runner::set_roots(&[&cfg.data_dir, &cfg.apps_dir]);
     let conn = db::open(&cfg.data_dir.join("publish.db")).map_err(std::io::Error::other)?;
     let http = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
         .build_http();
@@ -113,4 +115,9 @@ pub fn start_background(st: State) {
             sweep::sweep(&st).await;
         }
     });
+}
+
+/// Call before the listeners bind (container mode: removes leftover containers of this instance).
+pub async fn sweep_containers_at_start(st: &State) {
+    apps::startup_sweep(st).await;
 }

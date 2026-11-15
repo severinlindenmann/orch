@@ -33,6 +33,12 @@ def idea(root, title, data, ticket_id=None):
 
 
 IDEA_MAX = 500
+# The start text of an idea-box order: the agent reads the ticket's note when it starts. Without it a neutral idea ("a
+# newsletter template") reads like a normal task and gets built (release-22 walk, WLK-15).
+ORDER_NOTE = (  # under 200 characters: a longer note makes core add "write a plan, split it into tasks, then start"
+    "This ticket is a Factory order: write a short draft with orch factory draft, ask the open questions, "
+    "then wait. Don't build it; the person presses Plan the run."
+)
 PERSON = re.compile(r"human:[A-Za-z0-9_.@ -]{1,64}")
 
 
@@ -56,9 +62,11 @@ def idea_act(root, text, by):
         raise Refused(f"An idea here has at most {IDEA_MAX} characters.", "invalid")
     store = Store(root)
     with store.locked():
-        ticket = orchcli.call(root, "ticket", "new", _idea_title(text), write=True, by=by)
+        ticket = orchcli.call(
+            root, "ticket", "new", _idea_title(text), f"--note={ORDER_NOTE}", write=True, by=by
+        )
         store.write(f"drafts/{ticket['id']}/v1.md", text.encode() + b"\n", frozen=True)
-        orchcli.set_ext(root, ticket, by=by, role="order", kind="run", stage="draft", draft=1)
+        orchcli.set_ext(root, ticket, by=by, role="order", kind="run", stage="draft", draft=1, idea_box=True)
     try:  # the agent writes the first real draft; when no agent can start, the idea is still saved
         orchcli.call(root, "run", "start", ticket["id"], write=True, by=by)
         started = True

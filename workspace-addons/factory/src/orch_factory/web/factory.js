@@ -188,7 +188,11 @@
     const d = e.data;
     if (e.source !== window.parent || e.origin !== location.origin || !d || typeof d.id !== 'string' || !asked.has(d.id)) return;
     if (d.type === 'orch.idea.done' && validId(d.order)) asked.get(d.id)({order: d.order});
-    else if (d.type === 'orch.send.done' && validId(d.ticket)) asked.get(d.id)({ticket: d.ticket});
+    else if (d.type === 'orch.send.done' && validId(d.ticket)) {
+      // "Sent" only when orch says the words were delivered to the agent or queued for it; anything else is an error
+      if (d.delivered === true || d.queued === true) asked.get(d.id)({ticket: d.ticket, delivered: d.delivered === true});
+      else asked.get(d.id)({error: 'orch did not confirm that your message was saved.'});
+    }
     else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
   function askDashboard(message) {
@@ -223,7 +227,7 @@
       busy(true); say('Sending…');
       const result = await toAgent(order.id, words);
       busy(false);
-      if (result.ticket) { note.value = ''; writing(false); say(sent); if (onSent) onSent(); return; }
+      if (result.ticket) { note.value = ''; writing(false); plan.hidden = change.hidden = true; say(result.delivered ? sent : 'Saved. Your agent gets it as soon as it is free.'); if (onSent) setTimeout(onSent, 8000); return; }
       say((result.error ? result.error + ' ' : "That didn't work. ") + 'Nothing was sent.');
     }
     note.addEventListener('input', () => { send.disabled = !note.value.trim(); });
@@ -234,7 +238,9 @@
     box.append(group('actions', plan, change), note, group('actions', send, cancel), status);
     return box;
   }
-  const draftWaiting = o => o.phase === 'draft' && !o.working;
+  // A draft waits for you only once the agent filed its own version (agent_draft) and its turn ended (not working).
+  const draftNote = o => meta(o.working ? 'Your agent is working on the draft.' : 'Waiting for your agent to write the first draft.');
+  const draftWaiting = o => o.phase === 'draft' && o.agent_draft === true && !o.working;
   function ideaBox() {
     const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));
     const field = node('textarea', null, 'text-input'); field.rows = 3; field.setAttribute('aria-label', 'Your idea');
@@ -313,8 +319,8 @@
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     section(secondary, 'Shipped', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
     secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
-    section(secondary, 'Saved ideas', orders.filter(o => (o.phase === 'draft' && o.working) || ['edit','parked','cancelled','broken'].includes(o.phase)),
-      o => card(o.title, ...(o.phase === 'draft' ? [meta('Your agent is working on the draft.')] : [badge(capital(o.phase))]), tail(orderLink(o))), 'No saved ideas.');
+    section(secondary, 'Saved ideas', orders.filter(o => (o.phase === 'draft' && !draftWaiting(o)) || ['edit','parked','cancelled','broken'].includes(o.phase)),
+      o => card(o.title, ...(o.phase === 'draft' ? [draftNote(o)] : [badge(capital(o.phase))]), tail(orderLink(o))), 'No saved ideas.');
     view.append(group('f-grid', primary, secondary));
   }
   function line(items) {
@@ -406,6 +412,14 @@
     for (const a of array(order.activity)) { const li = node('li'); li.append(meta(when(a.at)), p(noIso(a.text))); timeline.append(li); }
     main.append(card('Activity', timeline.children.length ? timeline : meta('No activity recorded.')));
     const aside = group('stack');
+    if (order.phase === 'draft') {  // the same rule as Factory home and the draft page (draftWaiting)
+      const c = draftWaiting(order)
+        ? card('Your draft is ready', meta('Read the draft, then plan the run or ask for changes.'),
+          tail(orderLink(order, 'Read draft', validVersion(order.draft_v) ? '/draft/' + order.draft_v : '')), draftActions(order, render))
+        : card('Draft', draftNote(order));
+      if (draftWaiting(order)) c.classList.add('f-attention');
+      aside.append(c);
+    }
     if (order.open) {
       const question = card('Needs you', node('h3', openTitle(order, order.open)), ...openBody(order, order.open, true), rawDetails(order.open), answer(order));
       question.classList.add('f-attention'); aside.append(question);
@@ -502,6 +516,7 @@
       // Always begin with home, including deep links, to get watcher/stale status.
       const homeData = await read('/api/home', signal);
       if (serial !== request) return;
+      lastHome = JSON.stringify({...homeData, generated_at: null});
       showNotices(homeData);
       const hash = location.hash || '#/';
       let draw;
@@ -523,7 +538,7 @@
           const draft = await read('/api/order/' + match[1] + '/draft/' + match[4], signal);
           if (serial !== request) return;
           showNotices(homeData, order, draft);
-          draw = () => view.append(heading(order.title, 'Draft · version ' + match[4], orderLink(order)), draftTabs(order, match[4]), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [meta('Your agent is working on the draft.')] : []));
+          draw = () => view.append(heading(order.title, 'Draft · version ' + match[4], orderLink(order)), draftTabs(order, match[4]), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [draftNote(order)] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;
@@ -543,5 +558,18 @@
     event.preventDefault(); document.getElementById('content').focus();
   });
   window.addEventListener('hashchange', render);
+  // An open page follows the workspace: every 15 s (only while visible) home is read again, and the page is drawn anew
+  // only when something changed and you are not in the middle of something (typing, a box with text, a request waiting).
+  let lastHome = null;
+  const busy = () => asked.size > 0 || ['TEXTAREA', 'INPUT'].includes(document.activeElement?.tagName)
+    || [...view.querySelectorAll('textarea')].some(t => t.value.trim()) || !!document.querySelector('dialog[open]');
+  async function follow() {
+    if (document.visibilityState !== 'visible' || busy() || view.getAttribute('aria-busy') === 'true') return;
+    try {
+      const data = await read('/api/home');
+      if (lastHome !== null && JSON.stringify({...data, generated_at: null}) !== lastHome && !busy()) render();
+    } catch (_) { /* the next tick tries again */ }
+  }
+  setInterval(follow, 15000);
   render();
 })();

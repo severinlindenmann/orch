@@ -80,7 +80,7 @@ def _eta(d, proposal):
     return eta
 
 
-def _summary(ticket, d):
+def _summary(ticket, d, root=None):
     """One order summary from a derived state `d`."""
     leads = _lead(d)
     proposal = d.get("proposal") or (leads[-1]["data"] if leads else None)
@@ -127,10 +127,40 @@ def _summary(ticket, d):
         "due": (proposal or {}).get("due"),
         "open": open_,
         "owner_min": ((proposal or {}).get("time") or {}).get("owner_min"),
-        # an agent works on the order now (core: Working while a run is on it, Ready again when it ends)
-        "working": ticket.get("status") == "active",
+        "working": _working(root, ticket, phase),
+        "agent_draft": _agent_draft(ticket),
         "draft_v": _draft_v(ticket),
     }
+
+
+IDLE = ("idle", "attention")  # a live session whose turn ended, or that waits for a person
+
+
+def _working(root, ticket, phase):
+    """An agent works on the order right now. Core keeps the ticket Working while a run is on it (Ready again when a
+    one-step run ends), but a LIVE session stays open after its turn: idle at the prompt, or asking the person
+    (attention). For a draft that turn's end is what counts, so the draft waits for you: Plan the run / Ask for changes
+    (sent into that same session). Asked only for an order in draft that is Working (one `orch run status`)."""
+    if ticket.get("status") != "active":
+        return False
+    if phase != "draft" or root is None:
+        return True
+    try:
+        st = orchcli.call(root, "run", "status", ticket["id"])
+    except Refused:
+        return True  # unreadable: as core says (Working)
+    claim = st.get("claim") if isinstance(st.get("claim"), dict) else {}
+    if not st.get("running"):
+        return False
+    return not (claim.get("mode") == "live" and (claim.get("live") or {}).get("state") in IDLE)
+
+
+def _agent_draft(ticket):
+    """The newest draft is the agent's: an idea-box order starts with the person's own words as v1, so only v2 and later
+    count (an order an agent filed with `orch factory idea` has the agent's v1). Until then Plan the run is not offered."""
+    x = (ticket.get("ext") or {}).get("factory") or {}
+    v = _draft_v(ticket) or 0
+    return v >= (2 if x.get("idea_box") is True else 1)
 
 
 def _draft_v(ticket):
@@ -153,6 +183,7 @@ def _broken(ticket, error):
         "open": None,
         "owner_min": None,
         "working": False,
+        "agent_draft": False,
         "draft_v": None,
         "problem": _text(str(error), 200),
     }
@@ -206,7 +237,7 @@ def _all(root):
         except Refused as error:
             summaries.append(_broken(t, error))
             continue
-        summaries.append(_summary(t, d))
+        summaries.append(_summary(t, d, root))
         ok |= d["decided_ok"]
     return summaries, ok, store, tickets, journal
 
@@ -348,7 +379,7 @@ def order(root, order_id):
     leads = _lead(d)
     proposal = d.get("proposal") or (leads[-1]["data"] if leads else None)
     return {
-        **_summary(ticket, d),
+        **_summary(ticket, d, root),
         "proposal": proposal,
         "drafts": _drafts(store, order_id),
         "crew": _crew(d),

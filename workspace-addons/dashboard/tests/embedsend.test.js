@@ -15,7 +15,7 @@ function setup({shipped = true, kind = 'page', snapshot = false, status = 'ready
   const tickets = [{id:'t_order01', title:'Hours page', status, ext}, {id:'t_other01', title:'Other', status:'ready', ext:{sync:{}}}];
   const ctx = {snapshot, location:{origin:ORIGIN}, array:v => Array.isArray(v) ? v : [], clean:v => String(v ?? ''),
     route:() => ({kind, id:'factory'}), addons:() => [{name:'factory', shipped}], ticketOf:id => tickets.find(t => t.id === id),
-    document:{querySelector:() => frame}, act:async (op, args) => { calls.acts.push([op, args]); return results[op] || {ok:true, status:200, state:{}}; },
+    document:{querySelector:() => frame}, act:async (op, args) => { calls.acts.push([op, args]); return results[op] || {ok:true, status:200, state:op === 'run.send' ? {send_result:{id:'i_1', delivered:0, state:'none'}} : {}}; },
     addEventListener(){}, window:{orch:{toast(){}}}};
   vm.createContext(ctx); vm.runInContext(marker, ctx);
   return {ctx, calls, frameWindow};
@@ -46,7 +46,7 @@ test("the click sends the person's message with the dashboard's own run.send, th
   const {ctx, calls, frameWindow} = setup();
   await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.acts), [['run.send', {ticket:'t_order01', text:'Now plan the run.'}], ['run.start', {ticket:'t_order01'}]]);
-  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.done', ticket:'t_order01', started:true, id:'abcdefgh1234'}, ORIGIN]]);
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.send.done', ticket:'t_order01', delivered:false, queued:true, started:true, id:'abcdefgh1234'}, ORIGIN]]);
 });
 
 test('an agent already working gets the message without a second start', async () => {
@@ -71,4 +71,21 @@ test('too long is refused before any act; a second click while sending sends onc
   const req = s.ctx.embedSendRequest(msg(s.frameWindow));
   await Promise.all([s.ctx.sendEmbedMessage(req), s.ctx.sendEmbedMessage(req)]);
   assert.equal(s.calls.acts.filter(a => a[0] === 'run.send').length, 1);
+});
+
+test('"Sent" needs orch to say delivered or queued: a bare 200 is an error and starts nothing', async () => {
+  for (const state of [{}, {send_result:{id:null, delivered:0, state:'idle'}}, {send_result:{id:'', delivered:'2'}}]) {
+    const {ctx, calls, frameWindow} = setup({results:{'run.send':{ok:true, status:200, state}}});
+    await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
+    assert.equal(calls.posts[0][0].type, 'orch.send.failed');
+    assert.match(calls.posts[0][0].error, /did not confirm/);
+    assert.deepEqual(calls.acts.map(a => a[0]), ['run.send']);
+  }
+});
+
+test('delivered into the idle live session: done with delivered, no second start while Working', async () => {
+  const {ctx, calls, frameWindow} = setup({status:'active', results:{'run.send':{ok:true, status:200, state:{send_result:{id:'i_2', delivered:1, state:'idle'}}}}});
+  await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
+  assert.deepEqual(plain(calls.posts[0][0]), {type:'orch.send.done', ticket:'t_order01', delivered:true, queued:true, started:false, id:'abcdefgh1234'});
+  assert.deepEqual(calls.acts.map(a => a[0]), ['run.send']);
 });

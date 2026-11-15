@@ -18,7 +18,7 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 | Command | Does |
 |---|---|
 | `orch factory idea "<title>" [--file draft.md]` / `idea --ticket <id> [--file …]` | Creates the order (stage `draft`) and stores draft v1 — or turns an existing ticket (open, ready, waiting or active; not a sub-ticket) into the order, its note becoming draft v1 (e.g. the ticket the owner made from Chat); idempotent. `orch factory draft <order> --file -` adds v<N+1> |
-| `orch factory act idea --by human:<name> --json -- "<text>"` | The page's idea box, run by the dashboard for the person's click (`addon.act`, manifest `[acts.idea]`, `who = "people"`): one order (title = the first words, at most 80 characters; draft v1 = the text, one line, at most 500 characters), every write recorded `--by` that person, then `orch run start <order> --by <person>` so the agent writes the first real draft. `{"order", "started", "text"}`; `started: false` when no agent could start (the idea is still saved). Refused without a `human:` actor: agents use `idea` as themselves |
+| `orch factory act idea --by human:<name> --json -- "<text>"` | The page's idea box, run by the dashboard for the person's click (`addon.act`, manifest `[acts.idea]`, `who = "people"`): one order (note = a short start text under 200 characters: a Factory order, draft with `orch factory draft`, ask, wait, don't build; title = the first words, at most 80 characters; draft v1 = the text, one line, at most 500 characters), every write recorded `--by` that person, then `orch run start <order> --by <person>` so the agent writes the first real draft. `{"order", "started", "text"}`; `started: false` when no agent could start (the idea is still saved). Refused without a `human:` actor: agents use `idea` as themselves |
 | `orch factory propose <order> --file -` | Validates `$defs/proposal`, freezes p<N>, supersedes the open start question, asks `factory:start` (text rendered by the add-on), stage `proposed`. Refused once the order has started |
 | `orch factory autopilot <order> --file -` | Same for `$defs/autopilot`; asks `factory:autopilot` |
 | `orch factory next <order>` | For the manager run: consumes newly answered `factory:*` questions once (journal `consumed`), returns `{"step": "wait" \| "start-crew" \| "work" \| "stop" \| "ship" \| "edit" \| "parked" \| "resume" \| "done", …}` |
@@ -90,7 +90,8 @@ question `open.q`) to the parent window; the dashboard accepts it only from the 
 origin, opens its own native question card for that ticket's question in a dialog (text and options come from the
 dashboard's data, the person presses the option and the proof path is the ticket page's), then posts
 `{type: "orch.question.done", ticket, question}` back and the page refreshes. Outside the dashboard (or with no open
-question) the button stays a link `target="_top"` to `/#ticket/<order>`. The Factory server stays read only.
+question) the button stays a link `target="_top"` to `/#ticket/<order>`. The Factory server stays read only. An open page re-reads `/api/home` every 15 s while visible and redraws only when it changed and the person is not
+typing or waiting for an answer (every API answer is read fresh from the workspace; nothing is cached).
 
 **Idea box (one click).** Inside the dashboard, *Start with this idea* posts `{type: "orch.idea", id, text}` (`id` = 8–32
 lowercase letters/digits, a random request id) to the parent. The dashboard accepts it only from the embedded shipped
@@ -102,13 +103,19 @@ or `{type: "orch.idea.failed", id, error}`; one idea at a time. On failure (or n
 the page keeps the text and offers *Send it to your helper in Chat instead* (`orch.say`, the old hand-off).
 
 **Plan the run / Ask for changes (drafts).** A draft no agent works on (`phase: "draft"`, `working: false`; order summaries
-also carry `draft_v`, the newest version) shows *Plan the run* and *Ask for changes* on the draft page and under *Drafts
-waiting for you* on Factory home. Inside the dashboard they post `{type: "orch.send", id, ticket, text}` (text: `Now plan
+also carry `draft_v`, the newest version) shows *Plan the run* and *Ask for changes* on the draft page, on the order page and
+under *Drafts waiting for you* on Factory home. A draft waits only when `agent_draft` is true: the newest version is the agent's (an idea-box order, `ext.factory.idea_box`,
+starts with the person's words as v1, so it needs v2 or later; an order an agent filed counts from v1). `working` is core's
+Working status, except for a draft: there it is false
+when no run is on the ticket, or when its LIVE session's turn ended (`orch run status` claim `live.state` `idle` or
+`attention`), so the draft waits for you right after the helper's turn; the message then goes into that same session. Inside the dashboard they post `{type: "orch.send", id, ticket, text}` (text: `Now plan
 the run: …` or `Change the draft: <the person's words>`, at most 1000 characters typed). The dashboard accepts it only from the
 embedded shipped add-on iframe of its own origin and only for a ticket that carries that add-on's data (`ext.<add-on>`),
 keeps line breaks but drops control, bidi and zero-width characters (at most 2000 characters), sends the text with its own
 op `run.send` (the person's message, proven like writing to the agent on the ticket page) and, when no agent works on the
-ticket, `run.start`. It answers `{type: "orch.send.done", id, ticket, started}` or `{type: "orch.send.failed", id, error}`;
+ticket, `run.start`. The dashboard's `/api/act` reply to `run.send` carries `send_result: {id, delivered, state}` (what orch did); the
+dashboard answers done only when orch delivered the words (`delivered` > 0) or queued them (an `id`), else failed. It
+answers `{type: "orch.send.done", id, ticket, delivered, queued, started}` (the page says *Sent* or *Saved*) or `{type: "orch.send.failed", id, error}`;
 one at a time. Outside the dashboard the page shows a link to the ticket instead.
 
 | GET | Answer (JSON) |

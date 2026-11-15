@@ -1,6 +1,6 @@
 """{{name}}: a mini app on orch-apps (python, store {{store}}).
 
-The host gives every app PORT, BASE_PATH (/{{slug}}), DATA_DIR (kept across deploys) and APP_ENV. Requests arrive
+The host gives every app HOST, PORT, BASE_PATH (/{{slug}}), DATA_DIR (kept across deploys) and APP_ENV. Requests arrive
 without the /{{slug}} prefix; links in pages must start with BASE_PATH or be relative.
 """
 
@@ -69,7 +69,7 @@ class _Server(ThreadingHTTPServer):
 
 
 def make_server(port: int) -> ThreadingHTTPServer:
-    return _Server(("127.0.0.1", port), App)
+    return _Server((os.environ.get("HOST", "127.0.0.1"), port), App)
 
 
 if __name__ == "__main__":

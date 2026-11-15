@@ -1767,9 +1767,15 @@ def wrap_live(root: Path, run: str, tid: str, name: str, argv: list[str], new_se
             said = f"The live session ended with an error (exit code {rc})."
         with contextlib.suppress(Exception):
             tickets.log(root, tid, said, f"agent:{name}")
+    again = bool(now and now["run"] == run and now.get("restart") and now.get("live_retry"))
     release(root, tid, run)  # input still waiting stays in the pending file for the next start
     # no agent reads what waits now: Ready, the input stays queued (the automation host may start the next)
     settle(root, tid, f"agent:{name}", say=said is None, ignore_input=True)
+    if again:  # orch ended the session itself (input not taken): start once more, one step at a time
+        with contextlib.suppress(Exception):
+            from orch import runs_live as _rl
+
+            _rl.restart_after_give_up(root, tid, name)
     (run_dir(root) / f"hooks-{run}.json").unlink(missing_ok=True)
     with contextlib.suppress(Exception):
         from orch import runs_live

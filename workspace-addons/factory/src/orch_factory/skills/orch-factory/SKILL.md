@@ -28,7 +28,8 @@ from Chat for a Factory run (you are working on it), turn that ticket into the o
     orch factory idea --ticket <id> [--file draft.md]            # its Chat note becomes draft v1 without --file
 
 The owner may also file it with one click on the Factory page (the idea box): you are started on that order and draft v1
-is the owner's own words. Then write the real first draft as v2 with `orch factory draft`.
+is the owner's own words; its note says it is a Factory order. Then write the real first draft as v2 with `orch factory
+draft`, ask your open questions and stop: do NOT build it, however small it sounds. The owner presses Plan the run.
 
 The draft is one short page in plain words: what it is, for whom, 3 rough parts or screens, open questions. Answer in the
 chat with 3–5 lines and say where the draft is. Keep it small: the goal is that you and the owner mean the same thing.
