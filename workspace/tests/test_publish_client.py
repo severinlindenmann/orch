@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import tarfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -215,10 +216,11 @@ def test_list_and_delete_file(proj, run, pub):
     assert run("publish", "list")[1].strip().startswith("Nothing shared yet")
 
 
-def make_app(proj, public="false"):
+def make_app(proj, public="false", extra=None):
     d = proj / "myapp"
     d.mkdir()
-    (d / "app.toml").write_text(f'name = "weekly-report"\nstack = "static"\npublic = {public}\n')
+    head = 'name = "weekly-report"\nstack = "static"\n'
+    (d / "app.toml").write_text(extra if extra is not None else head + f"public = {public}\n")
     (d / "index.html").write_text("<h1>hi</h1>")
     (d / ".git").mkdir()
     (d / ".git" / "config").write_text("secret")
@@ -236,13 +238,92 @@ def test_app_deploy_private_with_view_token(proj, run, pub):
     assert app["query"] == {"days": ["2"]}
 
 
-def test_app_public_flag_rewrites_manifest(proj, run, pub):
+def sent_manifest(pub):
+    tar = tarfile.open(fileobj=io.BytesIO(pub.apps["weekly-report"]["tar"]))
+    return tar.extractfile("app.toml").read().decode()
+
+
+def test_app_flags_rewrite_manifest(proj, run, pub):
+    connect(run, pub)
+    make_app(proj)  # legacy `public = false`
+    code, out, _ = run("publish", "app", "myapp", "--public", "--no-auth", "--permanent")
+    m = sent_manifest(pub)
+    assert 'reach = "public"' in m and "auth = false" in m and "public =" not in m.replace("reach", "")
+    assert "public, open" in out and "?token" not in out
+    assert pub.apps["weekly-report"]["query"] == {"permanent": ["1"]}
+    run("publish", "app", "myapp", "--private", "--auth")
+    m = sent_manifest(pub)
+    assert 'reach = "private"' in m and "auth = true" in m and m.count("auth") == 1
+
+
+def test_app_flag_replaces_existing_lines(proj, run, pub):
+    connect(run, pub)
+    make_app(proj, extra='name = "weekly-report"\nstack = "static"\nreach = "public"\nauth = true\n')
+    run("publish", "app", "myapp", "--private", "--no-auth")
+    m = sent_manifest(pub)
+    assert m.count("reach") == 1 and 'reach = "private"' in m and "auth = false" in m and m.count("auth") == 1
+    run("publish", "app", "myapp")  # no flag: the file is sent unchanged
+    assert sent_manifest(pub).count("auth = true") == 1
+
+
+def test_app_flags_are_exclusive(proj, run, pub):
     connect(run, pub)
     make_app(proj)
-    run("publish", "app", "myapp", "--public", "--permanent")
-    tar = tarfile.open(fileobj=io.BytesIO(pub.apps["weekly-report"]["tar"]))
-    assert b"public = true" in tar.extractfile("app.toml").read()
-    assert pub.apps["weekly-report"]["query"] == {"permanent": ["1"]}
+    for flags in (("--public", "--private"), ("--auth", "--no-auth")):
+        with pytest.raises(SystemExit) as e:
+            run("publish", "app", "myapp", *flags)
+        assert e.value.code == 2
+
+
+def test_deploy_auth_precedence(tmp_path):
+    f = tmp_path
+    for text, want in [
+        ("auth = false\npublic = true\n", False),  # auth wins over legacy public
+        ("public = true\n", False),
+        ("public = false\n", True),
+        ("", True),
+        ("auth = true\n", True),
+    ]:
+        assert publish.manifest_auth(tomllib.loads(text)) is want, text
+    # an override beats the manifest
+    (f / "app.toml").write_text('name = "my-app"\nstack = "static"\nauth = true\n')
+    sent = {}
+
+    def fake_api(root, method, path, body=None):
+        sent["body"] = body
+        return {"name": "x", "url": "https://h/a/x", "status": "running", "expires_at": None}
+
+    import orch.publish as p
+
+    orig = p._api
+    p._api = fake_api
+    try:
+        r = p.deploy(tmp_path, f, None, False, None, False, False)
+    finally:
+        p._api = orig
+    assert r["auth"] is False and r["link"] == "https://h/a/x"
+
+
+@pytest.mark.parametrize(
+    ("fields", "words"),
+    [
+        ({"reach": "public", "auth": True}, "public, needs link"),
+        ({"reach": "public", "auth": False}, "public, open"),
+        ({"reach": "private", "auth": True}, "private network, needs link"),
+        ({"reach": "private", "auth": False}, "private network, open"),
+        ({"public": True}, "public, open"),  # older server: no reach, no auth
+        ({"public": False}, "public, needs link"),
+    ],
+)
+def test_list_wording(proj, run, pub, fields, words):
+    connect(run, pub)
+    make_app(proj)
+    run("publish", "app", "myapp")
+    pub.apps["weekly-report"]["extra"] = fields
+    if "public" not in fields:
+        fields["public"] = not fields["auth"]  # the server sends `public` as well
+    code, out, _ = run("publish", "list")
+    assert f"running, {words}," in out
 
 
 def test_app_manifest_errors(proj, run, pub):
