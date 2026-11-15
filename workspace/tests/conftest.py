@@ -286,6 +286,7 @@ REAL_PROOF_MODULES = (
     "test_humanproof",
     "test_verdict_mac",
     "test_cli_secret",
+    "test_cli_review_proof",
     "test_insights_settings",
 )
 

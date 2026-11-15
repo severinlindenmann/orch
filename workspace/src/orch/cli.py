@@ -21,6 +21,7 @@ from orch import (
     cli_look,
     cli_needs,
     cli_record,
+    cli_review,
     cli_run,
     cli_screen,
     cli_secret,
@@ -34,6 +35,7 @@ from orch import (
     net,
     refs,
     relay,
+    review,
     runs,
     runs_live,
     services,
@@ -254,10 +256,13 @@ def _show(t: dict, root: Path) -> str:
         for c in t["checklist"]:
             out += _check_lines(root, t, c, open_q)
     answered = [q for q in t["questions"] if q["answer"] is not None]
-    if answered:
+    plain = [q for q in answered if not isinstance(q.get("decision"), dict)]
+    if plain:
         out.append("\nAnswered:")
-        for q in answered:
+        for q in plain:
             out.append(f"  {q['text']} - {q['answer']} ({q['answered_by']})")
+    if block := review.decisions_block(t, root):
+        out.append("\nDecisions:\n" + block.rstrip("\n"))
     rows = refs.all_refs(root, t)
     if rows:
         kinds = refs.active_kinds(root)
@@ -619,6 +624,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_clients.add_parsers(sub, common)
     cli_run.add_parsers(sub, common)
     cli_needs.add_parsers(sub, common)
+    cli_review.add_parsers(sub, common)
     cli_conn.add_parsers(sub, common)
     cli_job.add_parsers(sub, common)
     cli_record.add_parsers(sub, common)
@@ -843,7 +849,12 @@ def run(args: argparse.Namespace) -> None:
             _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
     elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root):
         pass
-    elif cli_run.dispatch(args, root) or cli_needs.dispatch(args, root) or cli_config.dispatch(args, root):
+    elif (
+        cli_run.dispatch(args, root)
+        or cli_needs.dispatch(args, root)
+        or cli_review.dispatch(args, root)
+        or cli_config.dispatch(args, root)
+    ):
         pass
     elif (
         cli_conn.dispatch(args, root)

@@ -496,12 +496,13 @@ def decide(
     by: str,
     via: str,
     digest: str | None = None,
+    proven: bool = False,
 ) -> dict:
     """One swipe. key is a question id (q3) or "review" (a ticket in Review). Returns the decision entry
     (the answered question). The person's own checks (human: author, not an agent) stay in tickets."""
     ticket = tickets.load(root, tid)
     if key == "review":
-        return _decide_check(root, ticket, verdict, note, by, via, digest)
+        return _decide_check(root, ticket, verdict, note, by, via, digest, proven)
     q = _find(ticket, key)
     if q.get("answer") is not None:
         raise Refused(f"{key} is already answered. Use change to answer again.")
@@ -514,9 +515,11 @@ def decide(
 
 
 def _decide_check(
-    root: Path, ticket: dict, verdict: str, note, by: str, via: str, digest: str | None
+    root: Path, ticket: dict, verdict: str, note, by: str, via: str, digest: str | None, proven: bool = False
 ) -> dict:
     tid = ticket["id"]
+    if not proven:  # a verdict on a Check result is a person's, proven by the caller (never assumed here)
+        raise Refused("Only a person can decide this. Ask the human to do it themselves.")
     if verdict not in VERDICTS:
         raise Refused(f"verdict is one of {', '.join(VERDICTS)}.")
     if ticket.get("status") != "review":
@@ -527,13 +530,13 @@ def _decide_check(
     n = _note(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
-        tickets.accept_review(root, tid, by, via, proven=True)
+        tickets.accept_review(root, tid, by, via, proven=proven)
     else:
         changes = _what_changes(n)
         if not changes:
             raise Refused("Say what should change.")
         d = _bare("send_back", None, changes, n)
-        tickets.ask_for_changes(root, tid, "; ".join(changes), by, via=via, proven=True)
+        tickets.ask_for_changes(root, tid, "; ".join(changes), by, via=via, proven=proven)
     d["summary"] = summary(d, card)
     entry = {
         "text": _clip("Check: " + ticket.get("title", tid), 300),
