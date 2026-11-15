@@ -2362,6 +2362,19 @@ def note_answer_kept(root: Path, asked: dict, m: dict) -> None:
         )
 
 
+def note_answer_refused(root: Path, asked: dict, m: dict, why: str) -> None:
+    """A member's answer to our question was refused: say so in the ticket's history (no silent drop). Only
+    while the question is open; text is cut and cleaned."""
+    with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
+        t = tickets.load(root, asked["ticket"])
+        q = next(x for x in t["questions"] if x["id"] == asked["question_id"])
+        if q.get("answer") is not None:
+            return
+        who = f"agent:{_line(m['from'], 60)}"
+        line = f"Answer to {asked['question_id']} not applied: {clean_untrusted(why, 200)}"
+        tickets.apply_op(root, asked["ticket"], lambda t: tickets.add_history(t, who, line, "relay"), by=who)
+
+
 def on_allow(root: Path, m: dict) -> None:
     """The member's existing `allow` (reply_to = a delegate we sent it): event `approved`."""
     rid = m.get("reply_to")

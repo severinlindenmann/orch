@@ -2882,3 +2882,49 @@ def test_mixed_case_orch_folder_is_refused_even_on_a_case_insensitive_disk(proj,
         )
         assert code != 0 and not sent(rel, type="file")
     assert cg.secret_path(proj / ".ORCH" / "Tickets" / host / "ARTIFACTS" / "ok.txt", proj, artifacts_ok=True)
+
+
+def _answer_msg(qm, n, text="Tuesday works"):
+    body = {"question_id": "q1", "answer": text, "answered_by": "human:test"}
+    body |= {"group": {**qm["body"]["group"]}, "by": HOME, "via": "helper"}
+    return {
+        "schema": "orch.msg/1",
+        "id": mid(n),
+        "from": HOME,
+        "to": WS,
+        "type": "answer",
+        "created_at": "2026-11-08T10:06:00Z",
+        "reply_to": qm["id"],
+        "ticket": None,
+        "body": body,
+    }
+
+
+def test_group_answer_applies_when_the_key_did_not_exist_at_ask_time(proj, run, rel, host):
+    """Lane C P4.2: the question was asked before the workspace had a human key; the answer was dropped."""
+    import json
+
+    from orch import humanproof, relay
+
+    humanproof.key_dir(proj, create=False).joinpath("human.key").unlink()
+    tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
+    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
+    qm = sent(rel, type="question")[0]
+    assert "question_mac" in json.loads(relay._asked_path(proj).read_text())[qm["id"]]
+    out = inbox(run, rel, _answer_msg(qm, "ansk"))
+    assert out[0]["note"].startswith("answered q1")
+    assert tickets.load(proj, host)["questions"][0]["answer"] == "Tuesday works"
+
+
+def test_refused_group_answer_is_visible_in_the_ticket(proj, run, rel, host, monkeypatch):
+    from orch import relay
+
+    monkeypatch.setattr(relay, "asked_mac_ok", lambda *a, **k: False)
+    tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
+    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
+    qm = sent(rel, type="question")[0]
+    out = inbox(run, rel, _answer_msg(qm, "ansv"))
+    assert "not applied" in out[0]["note"]
+    t = tickets.load(proj, host)
+    assert t["questions"][0]["answer"] is None
+    assert any("not applied" in h["text"] and "Answer to q1" in h["text"] for h in t["history"])
