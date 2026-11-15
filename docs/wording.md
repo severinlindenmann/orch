@@ -20,6 +20,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | where it was done | dashboard, phone, terminal | `via` | CLI |
 | another workspace | its name (landing-site) | `ws_...` | Peer, Node |
 | outside item | its tool's name + its own word ("GitHub issue", "Jira issue") | web reference | "Issue" alone |
+| something a helper learned here | Lesson (list: Lessons) | `orch lessons`, `l_...` | Memory, Tip |
 | private network | private network (VPN) | - | NetBird (any product name) |
 
 Rules

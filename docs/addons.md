@@ -63,6 +63,23 @@ $ orch stop
 Leave out `--no-open` and your browser opens. With Claude you also see each step as it happens. With a generic agent you see
 the tasks it ticks off and its questions. When an agent waits for your OK, it shows as a card in Needs you.
 
+## Lessons
+
+Helpers write down what they learned in this workspace, one plain line each (for example "Run the web tests with
+npm run test:web"). Every later helper reads the newest lessons at its start (at most 3 KB). You see, edit or delete
+them in one list (Settings, Add-ons, Lessons). Lessons stay on this computer: they are not synced or sent anywhere.
+
+```sh
+$ orch addon add lessons --yes
+$ orch lessons add "Run the web tests with npm run test:web" --ticket <id>
+$ orch lessons list
+$ orch lessons edit <id> "<new text>"
+$ orch lessons rm <id>
+```
+
+A secret in the text is refused. When the lessons are over 3 KB, helpers see only the newest; the helper merges or
+removes old ones itself. Files: `.orch/addons/lessons/` (gitignored).
+
 ## Write your own add-on
 
 The core knows no add-on by name. An add-on is a folder with an `orch-addon.toml`

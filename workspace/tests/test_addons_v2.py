@@ -127,7 +127,7 @@ def test_exclude_block_is_idempotent_and_keeps_other_lines(proj):
 
 
 def test_shipped_local_addons_are_recommended_and_server_ones_are_not():
-    """`orch init --recommended` acts only on manifests that say so (dashboard, automation, focus, lessons)."""
+    """`orch init --recommended` acts only on manifests that say so (dashboard, focus, lessons...)."""
     import tomllib
     from pathlib import Path
 
