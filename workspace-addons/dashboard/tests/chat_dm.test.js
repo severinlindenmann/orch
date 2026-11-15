@@ -55,28 +55,28 @@ test('failed send offers retry, deep links select the workspace', async () => {
   assert.equal(vm.runInContext('chatUi.open', c), WS);
 });
 
-test('DM refresh syncs before GET, fetches only the open thread, and throttles state events', async () => {
+test('DM refresh reads contacts and only the open thread (the server imports first), and throttles state events', async () => {
   const c = context(), calls = [], timers = [];
   let now = 10000;
   c.Date = {now:() => now};
   c.setTimeout = (fn, delay) => {timers.push({fn, delay}); return timers.length;};
   c.clearTimeout = () => {};
-  c.window.orchAct = async (op, args) => {calls.push([op, args.workspace]); return {ok:true};};
+  c.window.orchAct = async op => {calls.push(op); return {ok:true};};
   c.fetch = async url => {
     calls.push(url);
     return {ok:true, json:async () => url.endsWith('contacts') ?
       [{ws:WS,name:'Home'}, {ws:'ws_0123456789',name:'Other'}] : {ws:WS,messages:[]}};
   };
   await c.chatDmLoad();
-  assert.deepEqual(calls, [['chat.sync_ws', undefined], '/api/chat/contacts', '/api/chat/thread/' + WS]);
+  assert.deepEqual(calls, ['/api/chat/contacts', '/api/chat/thread/' + WS]);
   for (let i = 0; i < 20; i++) c.chatDmRoute();
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 2);
   assert.equal(timers.length, 1);
   assert.equal(timers[0].delay, 5000);
   now += 5000;
   timers[0].fn();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 4);
 });
 
 test('retry sends the persisted failed id to the server', async () => {
@@ -136,13 +136,13 @@ test('Chat list route imports unopened conversations and sorts newest first', as
   const c = context(), calls = [];
   c.location.hash = '#chat';
   vm.runInContext("chatUi.open = 'chat'", c);
-  c.window.orchAct = async (op, args) => { calls.push(op); assert.equal(args.workspace, undefined); return {ok:true}; };
+  c.window.orchAct = async op => { calls.push(op); return {ok:true}; };
   c.fetch = async url => { calls.push(url); return {ok:true,json:async () => [
     {ws:WS,name:'Older',count:1,last_at:'2026-11-08T10:00:00Z'},
     {ws:'ws_0123456789',name:'Newer',count:2,last_at:'2026-11-09T10:00:00Z'}]}; };
   c.chatDmRoute();
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(calls, ['chat.sync_ws', '/api/chat/contacts']);
+  assert.deepEqual(calls, ['/api/chat/contacts']);
   const rows = c.chatList().children.filter(n => n.attrs?.['data-chat-action'] === 'select-dm');
   assert.deepEqual(Array.from(rows, n => n.attrs['data-id']), ['ws_0123456789', WS]);
 });
@@ -175,4 +175,41 @@ test('workspace chat header without a description shows no empty line', () => {
   const c = context();
   vm.runInContext(`chatDm.contacts[0] = {ws:'${WS}',name:'Shop',can:{chat:true}}; chatDm.threads.set('${WS}', {messages:[]});`, c);
   assert.doesNotMatch(JSON.stringify(c.chatDmThread()), /chat-desc/);
+});
+
+// #865: Home opened Pilatus' thread while a contacts load was running; the peer's texts (by = a workspace id) must show.
+test('receiver: a thread opened while a load runs still renders the peer messages at once', async () => {
+  const PEER = 'ws_w9pcj20gdf', c = context(), calls = [];
+  vm.runInContext("chatDm.contacts = []; chatUi.open = 'chat';", c);
+  let release;
+  c.fetch = async url => {
+    calls.push(url);
+    if (url.endsWith('contacts')) { await new Promise(resolve => { release = resolve; }); return {ok:true, json:async () => [{ws:PEER,name:'Pilatus',can:{chat:true},count:2}]}; }
+    return {ok:true, json:async () => ({ws:PEER, messages:[
+      {id:'m_peer000000000001', by:PEER, text:'Hi Home, can you bring 2 extra chairs?', state:'delivered', at:'2026-11-15T18:21:24Z'},
+      {id:'m_peer000000000002', by:PEER, text:'Second text', state:'delivered', at:'2026-11-15T18:22:24Z'}]})};
+  };
+  const first = c.chatDmLoad();                       // the Chat page load: nothing open yet
+  vm.runInContext(`chatUi.open = '${PEER}'`, c);      // the person clicks the row while it runs
+  c.chatDmLoad();                                     // returns at once (a load is running)
+  release();
+  await first;
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, ['/api/chat/contacts', '/api/chat/thread/' + PEER]);
+  const view = JSON.stringify(c.chatDmThread());
+  assert.match(view, /bring 2 extra chairs/); assert.match(view, /Second text/);
+  assert.doesNotMatch(view, /chat-out/);              // both are the peer's, shown as received
+});
+
+test('an accepted send shows Delivered at once and refreshes in the background', async () => {
+  const c = context(); let reloaded = 0, finishReload;
+  c.fetch = async url => { if (url.endsWith('contacts')) { reloaded++; await new Promise(resolve => { finishReload = resolve; }); }
+    return {ok:true, json:async () => url.endsWith('contacts') ? [{ws:WS,name:'Home',can:{chat:true}}] : {ws:WS,messages:[]}}; };
+  c.window.orchAct = async () => ({ok:true, state:{chat_dm_result:{id:'m_accepted0000000a', by:'you', text:'hello', state:'delivered'}}});
+  await c.chatDmSend('hello');                        // resolves although the background refresh has not finished
+  assert.equal(reloaded, 1);
+  assert.equal(vm.runInContext(`chatUi.sending.has('${WS}')`, c), false);
+  assert.match(JSON.stringify(c.chatDmThread()), /Delivered/);
+  finishReload();
 });

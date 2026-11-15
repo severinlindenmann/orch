@@ -464,3 +464,25 @@ def r16(e):
     check(ad.call("DELETE", f"/admin/api/subscribers/{sid}").status in (200, 204), "delete")
     check(http("GET", e.rel.url + f"/v1/sub/{new}/events").status == 401, "token works after delete")
     check(sid not in [s["id"] for s in ad.call("GET", "/admin/api/subscribers").json()["items"]], "still listed after delete")
+
+
+@scenario("R17")
+def r17(e):
+    """#865 F1: a workspace text arrives, the receiver's Chat thread (what the dashboard shows) holds the peer's
+    message under the peer's workspace id, and the reply reaches the sender's thread. Scripted, no agent."""
+    i = ids(e)
+    me = "human:e2e"
+    for n in ("Pilatus", "Reports"):
+        e.orch(n, "relay", "refresh")
+    text, back = "R17 hello from Pilatus", "R17 reply from Reports"
+    e.orch("Pilatus", "chat", "send", i["Reports"], text, by=me)
+    e.orch("Reports", "relay", "inbox")  # the pull imports a workspace text into its Chat thread
+    t = e.orchj("Reports", "chat", "thread", i["Pilatus"], "--sync", by=me)
+    got = [m for m in t["messages"] if m.get("text") == text]
+    check(len(got) == 1 and got[0]["by"] == i["Pilatus"], f"receiver thread lacks the peer text: {t['messages']}")
+    check(e.orchj("Reports", "chat", "sync", by=me), "contacts after sync")
+    e.orch("Reports", "chat", "send", i["Pilatus"], back, by=me)
+    e.orch("Pilatus", "relay", "inbox")
+    t = e.orchj("Pilatus", "chat", "thread", i["Reports"], "--sync", by=me)
+    sides = {m["text"]: m["by"] for m in t["messages"]}
+    check(sides.get(text) == "you" and sides.get(back) == i["Reports"], f"sender thread: {sides}")
