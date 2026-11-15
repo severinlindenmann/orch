@@ -439,7 +439,7 @@ function previewText(t, kind, file, text) {
   return h('pre', {}, text.split('\n').slice(0, 8).join('\n'));
 }
 function ticketPreviewTile(t, file, kind = 'artifacts') {
-  const title = oneLineTitle(file.title) || window.DashHelpers.plainFileName(file.name) || 'Result';
+  const title = (typeof file.title === 'string' && file.title.trim().slice(0, 200)) || window.DashHelpers.plainFileName(file.name) || 'Result';
   const tile = h('div', {className:'ticket-preview'}, h('span', {className:'ticket-preview-label'}, title));
   if (!snapshot && /\.pdf$/i.test(file.name)) {  // the browser's own PDF view, from the same-origin file endpoint
     tile.append(h('object', {className:'preview-live', type:'application/pdf', data:fileUrl(t.id, kind, file.name), 'aria-label':title},
