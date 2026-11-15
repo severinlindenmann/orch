@@ -453,4 +453,6 @@ html{scrollbar-gutter:stable}
 .more-details>summary::-webkit-details-marker{display:none}
 .more-details>summary:hover{color:var(--text)}
 .more-details>*:not(summary){margin-top:4px;padding:0;overflow-wrap:anywhere}
+/* A table's owner column never wraps a name ("Be/n", "Marie-/Louise"). */
+.ticket-table .who{white-space:nowrap}.ticket-table td:nth-child(3){min-width:112px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.skeleton:after{display:none}}

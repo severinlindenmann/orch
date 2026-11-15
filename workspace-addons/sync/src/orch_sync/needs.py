@@ -395,7 +395,9 @@ def rows(root):
             row(
                 "deleted",
                 tid,
-                f"A ticket file is missing: {name}. Restored it." if name else "A ticket file is missing. Restored it.",
+                f"A ticket file is missing: {name}. Restored it."
+                if name
+                else "A ticket file is missing. Restored it.",
                 since,
                 f"orch sync deleted {shlex.quote(tid)} --keep",
                 ["Leave deleted", "OK"],
