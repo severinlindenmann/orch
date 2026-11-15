@@ -254,5 +254,5 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 ## lessons/lessons.html — Lessons (settings-only add-on page)
 
 - `place = "settings"`: Lessons has no nav entry. Its row in Settings › Add-ons (`settings-addons.html`, now 7 installed) leads to its settings page, whose "Open Lessons →" opens this page (the mockup links the row straight to it).
-- One list card (two lessons: text, "Added 15 Nov by Claude · from DM1-12", Edit, Delete), the Edit dialog (`?dialog=edit`: one text line prefilled, Save disabled when empty or over 200 characters with a plain hint, Cancel) and the empty state (`?state=empty`: "No lessons yet" + one sentence). Delete is one click, no confirm (routine step).
-- Only master components and the existing settings rows are used; no new CSS. The product draws the same list with the existing add-on list rows (a row opens to Edit and Delete); the master has no list-row-with-actions component yet (follow-up).
+- The list is drawn exactly as the dashboard draws it: the add-on list rows (accordion; the page's own `style.css` is linked, no new CSS). The first row is open and shows Edit and Delete; the others open with one click. Edit dialog: `?dialog=edit` (one text line prefilled, Save disabled when empty or over 200 characters with a plain hint, Cancel). Empty state: `?state=empty`. Delete is one click, no confirm (routine step).
+- Follow-up: the master kit has no list row with visible actions (issue filed).
