@@ -1,4 +1,4 @@
-// Focus mockup: the helper's screen as a strip above the message box and as a "Screen" tab (#692). Demo only.
+// Focus mockup: the helper's screen as a strip above the message box and as a "Screen" tab. Demo only.
 (() => {
   'use strict';
   const $ = s => document.querySelector(s);
