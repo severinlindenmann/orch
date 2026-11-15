@@ -616,7 +616,7 @@ def test_info_question_and_answer_flow(proj, run, rel, host):
     assert out[0]["note"].startswith("answered q1")
     t = tickets.load(proj, host)
     q = t["questions"][0]
-    assert q["answer"] == "Household account." and q["answered_by"] == f"agent:{HOME}"  # never a person
+    assert q["answer"] == "Household account." and q["answered_by"] == f"agent:Home {HOME}"  # never a person
     assert sent(rel, to="phones")  # the group sees the answer
     # a second answer is kept as a note, the first one stays
     ans2 = {**ans, "id": mid("ans2"), "body": {**ans["body"], "answer": "Another account."}}
@@ -664,7 +664,8 @@ def test_group_answer_applies_from_another_orch_home_and_shows_the_peer_name(
     assert note.startswith("answered q1") and applied == host, note
     q = tickets.load(proj, host)["questions"][0]
     assert q["answer"] == "Tuesday works"
-    assert q["answered_by"] == f"agent:Home ({HOME})", q["answered_by"]
+    assert q["answered_by"] == f"agent:Home {HOME}", q["answered_by"]
+    assert re.match(r"^(agent|human):[A-Za-z0-9_.@ -]{1,64}$", q["answered_by"])  # ticket.schema.json `who`
 
 
 def test_group_answer_with_an_old_question_mac_field_still_applies(proj, run, rel, host):
@@ -1814,7 +1815,7 @@ def test_group_answer_without_group_body_is_ignored_and_never_a_person(proj, run
     inbox(run, rel, ok)
     q = tickets.load(proj, host)["questions"][0]
     assert (
-        q["answer"] == "y" and q["answered_by"] == f"agent:{HOME}"
+        q["answer"] == "y" and q["answered_by"] == f"agent:Home {HOME}"
     )  # from the asked record, not the message
 
 

@@ -1559,7 +1559,8 @@ def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -
         asked is not None and asked.get("group") and not frm.startswith("ph_")
     ):  # we asked a group member: recorded by its id from the asked record, whatever the answer says
         shown = _shown_name(root, frm, frm) if root is not None and frm.startswith("ws_") else frm
-        who = frm if shown == frm else f"{shown} ({frm})"  # the name to read, the id keeps it unique
+        safe = " ".join(re.sub(r"[^A-Za-z0-9_.@ -]", " ", shown).split())[: 63 - len(frm)].strip()
+        who = frm if not safe or shown == frm else f"{safe} {frm}"  # name + unique id
         by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{who}"
     via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"
     return by, via

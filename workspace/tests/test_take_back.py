@@ -159,7 +159,6 @@ def _asked_question(proj):
         "to": "phones",
         "question_digest": tickets.question_digest(tickets.load(proj, tid)["questions"][0]),
     }
-    relay.sign_asked(proj, "m_q00000000000001", rec)
     relay._asked_path(proj).parent.mkdir(parents=True, exist_ok=True)
     relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
     return tid

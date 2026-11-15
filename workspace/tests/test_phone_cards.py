@@ -215,7 +215,7 @@ def test_old_phone_without_a_verdict_keeps_working_on_plain_questions(proj, run,
 
 
 def test_asked_records_carry_no_mac(proj, conn):
-    assert not hasattr(relay, "sign_asked") and not hasattr(relay, "asked_mac_ok")
+    assert not any(n.startswith(("sign_", "asked_mac")) for n in dir(relay))  # MAC gone
 
 
 def test_question_without_card_fields_is_byte_identical(proj, new_ticket, conn):
