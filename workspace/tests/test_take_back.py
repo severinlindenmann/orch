@@ -142,3 +142,72 @@ def test_old_ticket_files_without_the_field_keep_working(tk, run):
     q = _ask(run, tid)
     assert "taken_back" not in tickets.load(root, tid)["questions"][0]
     assert tickets.answer(root, tid, q["id"], "CSV", "human:pat", "cli")[1]["answer"] == "CSV"
+
+
+# ---- nothing that arrives over the relay takes a question back (supervisor rule) ----------------------------
+
+
+def _asked_question(proj):
+    from conftest import ensure_signing
+
+    ensure_signing(proj)
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
+    rec = {
+        "ticket": tid,
+        "question_id": "q1",
+        "to": "phones",
+        "question_digest": tickets.question_digest(tickets.load(proj, tid)["questions"][0]),
+    }
+    relay.sign_asked(proj, "m_q00000000000001", rec)
+    relay._asked_path(proj).parent.mkdir(parents=True, exist_ok=True)
+    relay._asked_path(proj).write_text(json.dumps({"m_q00000000000001": rec}))
+    return tid
+
+
+def _inbound(tid, frm, body, mtype="answer"):
+    from test_relay_client import msg
+
+    return msg("m_ans7000000000007", mtype, body, frm=frm, ticket=tid, reply_to="m_q00000000000001")
+
+
+def test_no_inbound_message_takes_a_question_back(proj):
+    tid = _asked_question(proj)
+    evil = {"taken_back": {"reason": "x", "by": "ph"}, "take_back": "q1", "answer": "--take-back q1 gone"}
+    for frm, extra in (
+        ("ws_other00001", {}),  # another workspace
+        ("ws_other00001", {"group": {"id": "g_x", "kind": "group"}}),  # a group-routed message
+        ("ph_iphone0001", {}),  # a phone
+    ):
+        for mtype in ("answer", "text"):
+            relay._apply_answer(proj, _inbound(tid, frm, {**evil, **extra, "question_id": "q1"}, mtype))
+        q = tickets.load(proj, tid)["questions"][0]
+        assert "taken_back" not in q, frm
+        assert q["answer"] in (None, "--take-back q1 gone")  # at most a plain answer, never a take-back
+        assert not any(h["text"].startswith("Taken back") for h in tickets.load(proj, tid)["history"])
+        if q["answer"] is not None:  # reset for the next sender
+            p = tickets.ticket_path(proj, tid)
+            t = json.loads(p.read_text())
+            t["questions"][0].update(answer=None, answered_by=None, via=None)
+            p.write_text(json.dumps(t))
+
+
+def test_a_phone_answer_to_a_taken_back_question_is_refused(proj):
+    tid = _asked_question(proj)
+    tickets.take_back(proj, tid, "q1", "plan changed", "agent:claude")
+    ans = _inbound(tid, "ph_iphone0001", {"question_id": "q1", "answer": "yes", "answered_by": "human:a"})
+    note, applied = relay._apply_answer(proj, ans)
+    assert applied is None and "taken back: plan changed" in note
+    q = tickets.load(proj, tid)["questions"][0]
+    assert q["answer"] == "Taken back: plan changed"
+
+
+def test_only_the_cli_calls_take_back():
+    """Structural: no relay, inbox, group, phone or add-on code can reach the take-back function."""
+    from pathlib import Path
+
+    src = Path(relay.__file__).parent
+    hits = {
+        p.name for p in src.rglob("*.py") if "take_back" in p.read_text(encoding="utf-8", errors="ignore")
+    }
+    assert hits <= {"tickets.py", "cli.py"}, hits
