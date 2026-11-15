@@ -157,7 +157,7 @@
     els.phoneBtn = h('button', {type: 'button', hidden: true});
     els.phoneNote = h('p', {hidden: true});
     els.phoneLine = h('p', {class: 'handoff', 'aria-live': 'polite', hidden: true});
-    els.next = h('section', {class: 'fx-next', 'aria-label': 'Your next move', hidden: true}, h('div', {class: 'fx-next-h'}, h('span', {class: 'eyebrow', text: 'Your next move'}), els.qCount), els.qs);
+    els.next = h('section', {class: 'fx-next', 'aria-label': 'Your next move', hidden: true}, h('div', {class: 'fx-next-h'}, h('span', {class: 'eyebrow', text: 'Your next move'}), els.qCount), els.qs, els.phoneLine);
     /* "With Helper": the ticket's own messages and updates, newest last */
     els.withList = h('div', {class: 'fx-with-list'});
     els.withH = h('section', {class: 'fx-with', 'aria-label': 'With Helper', hidden: true}, h('h2', {text: 'With Helper'}), els.withList);
@@ -168,7 +168,7 @@
     els.showTerm = h('button', {class: 'btn ghost sm fx-desktop fx-show-term', type: 'button', 'data-act': 'mode', text: 'Show terminal →'});
     els.trace = h('div', {class: 'fx-trace'}, els.traceText, els.showTerm, els.newPill, h('label', {class: 'fx-follow-l'}, els.follow, h('span', {text: 'Follow the helper'})));
     els.human = h('aside', {class: 'fx-human', 'aria-label': 'Your side'});
-    els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.clash, els.next, els.phoneLine, els.sent, els.line, els.feed, els.working);
+    els.paneLive = h('div', {class: 'fx-pane', id: 'fx-p-live', role: 'tabpanel', 'aria-labelledby': 'fx-t-live'}, els.clash, els.next, els.sent, els.line, els.feed, els.working);
     els.paneProof = h('div', {class: 'fx-pane', id: 'fx-p-proof', role: 'tabpanel', 'aria-labelledby': 'fx-t-proof', hidden: true});
     els.paneFiles = h('div', {class: 'fx-pane', id: 'fx-p-files', role: 'tabpanel', 'aria-labelledby': 'fx-t-files', hidden: true});
     els.paneUsed = h('div', {class: 'fx-pane', id: 'fx-p-used', role: 'tabpanel', 'aria-labelledby': 'fx-t-used', hidden: true});
