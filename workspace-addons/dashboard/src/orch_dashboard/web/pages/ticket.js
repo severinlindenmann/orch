@@ -134,12 +134,13 @@ function refKey(url) {
     return n ? '#' + n[1] : j ? j[1] : '';
   } catch (_) { return ''; }
 }
-// 0 issue, 1 pull request, 2 ticket, 3 anything else (plain links, files, results)
+// 0 issue, 1 pull request or Jira issue, 2 ticket, 3 anything else (plain links, files, results)
 function refGroup(link) {
   if (link.kind === 'ticket') return 2;
   if (!link.view || typeof link.url !== 'string') return 3;
   const path = (() => { try { return new URL(link.url).pathname; } catch (_) { return ''; } })();
   if (/\/(?:pull|pulls|merge_requests)\/\d+/.test(path)) return 1;
+  if (/\/browse\/[A-Za-z][A-Za-z0-9]*-\d+/.test(path)) return 1;  // a Jira issue sits with the pull requests, in the order added
   return refKey(link.url) ? 0 : 3;
 }
 const refTone = word => REF_DONE.includes(String(word).toLowerCase()) ? 'done' : REF_ACTIVE.includes(String(word).toLowerCase()) ? 'active' : String(word).toLowerCase() === 'not found' ? 'bad' : '';

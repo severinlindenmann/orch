@@ -29,7 +29,7 @@ test('keys come from issue, pull request and Jira addresses only', () => {
 
 test('order: issues, pull requests, tickets, then other links', () => {
   const order = [figma, ticket, pr, jira, issue].map(refGroup);
-  assert.deepEqual(order, [3, 2, 1, 0, 0]);
+  assert.deepEqual(order, [3, 2, 1, 1, 0]);
 });
 
 test('state tones: done, active, bad, none', () => {
