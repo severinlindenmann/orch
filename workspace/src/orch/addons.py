@@ -1177,14 +1177,15 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     if pg is not None:
         if (
             not isinstance(pg, dict)
-            or set(pg) - {"path", "label"}
+            or set(pg) - {"path", "label", "live_session"}
+            or not isinstance(pg.get("live_session", False), bool)
             or not isinstance(pg.get("path"), str)
             or not PAGE_PATH_RE.fullmatch(pg["path"])
             or ".." in pg["path"]
             or pg["path"].startswith("//")
             or ("label" in pg and not _text_ok(pg["label"], 24))
         ):
-            raise _bad("[page] has a path that starts with / (and an optional label)")
+            raise _bad("[page] has a path that starts with / (and an optional label, live_session)")
         if not bg:
             raise _bad("[page] needs background = true")
     if any(r["format"] == "open-page" for r in tv) and pg is None:

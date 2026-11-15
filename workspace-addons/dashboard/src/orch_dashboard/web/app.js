@@ -411,6 +411,29 @@ async function addonSet(name, on, tries = 20, pause = 1500) {
   }
   return result;
 }
+// Remove an add-on from this computer (`orch addon uninstall`, refused while it is on: turn it off first). The
+// services restart like for the switch, so a lost answer is checked by reading the state again.
+async function addonUninstall(name, tries = 20, pause = 1500) {
+  const still = rows => array(rows).some(a => a && a.name === name);
+  if (array(state.settings?.addons).find(a => a && a.name === name)?.active) {
+    const off = await addonSet(name, false);
+    if (!off.ok) return off;
+  }
+  const result = await act('addon.uninstall', {name});
+  if (result.ok || result.status !== 0 || snapshot) return result;
+  for (let i = 0; i < tries; i++) {
+    await new Promise(done => setTimeout(done, pause));
+    let next = null;
+    try {
+      const res = await fetch('/api/state', {cache:'no-store'});
+      if (res.ok) next = await res.json();
+    } catch (_) { /* still restarting */ }
+    if (!next) continue;
+    accept(next);
+    return still(next.settings?.addons) ? result : {ok:true, status:200, state:next, recovered:true};
+  }
+  return result;
+}
 async function act(op, args) {
   if (snapshot) return {ok:false, status:0, text:'This is a shared copy.'};
   const before = op === 'run.start' ? ticketOf(args.ticket)?.status : null;
@@ -657,6 +680,20 @@ main.addEventListener('click', async event => {
     const send = () => settingsSend('addon.set', {name:addon.name, on:!addon.active}, 'addon-' + addon.name, (_, a) => addonSet(a.name, a.on));
     if (addon.active) await send();
     else settingsConfirm('Turn on ' + capitalise(addon.name) + '?', addon.consent, 'preserve-lines', 'Turn on', send);
+    return;
+  }
+  if (action === 'addon-remove') {
+    const addon = array(state.settings?.addons).find(addon => addon.name === control.dataset.name);
+    if (!addon || addon.name === 'dashboard' || settingsBusy.has('addon-' + addon.name)) return;
+    const send = async () => {
+      settingsBusy.add('addon-' + addon.name); render();
+      const result = await addonUninstall(addon.name);
+      settingsBusy.delete('addon-' + addon.name);
+      window.orch.toast(result.ok ? 'Removed.' : result.text, result.ok ? 'ok' : 'error');
+      if (result.ok) location.hash = '#settings/addons';
+      render();
+    };
+    settingsConfirm('Remove ' + capitalise(addon.name) + '?', 'It is turned off and taken off this computer. Your tickets stay as they are. You can add it again any time.', '', 'Remove', send);
     return;
   }
   if (action === 'agent') {
