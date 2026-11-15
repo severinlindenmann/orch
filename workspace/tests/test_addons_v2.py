@@ -127,7 +127,7 @@ def test_exclude_block_is_idempotent_and_keeps_other_lines(proj):
 
 
 def test_shipped_local_addons_are_recommended_and_server_ones_are_not():
-    """`orch init --recommended` only does something when manifests say so: dashboard, automation, focus."""
+    """`orch init --recommended` acts only on manifests that say so (dashboard, automation, focus, lessons)."""
     import tomllib
     from pathlib import Path
 
@@ -136,8 +136,8 @@ def test_shipped_local_addons_are_recommended_and_server_ones_are_not():
     for f in sorted(base.glob("*/src/*/orch-addon.toml")):
         m = tomllib.loads(f.read_text(encoding="utf-8"))
         got[m["name"]] = m.get("recommended", False)
-    assert got["dashboard"] and got["automation"] and got["focus"], got
-    assert not any(v for k, v in got.items() if k not in ("dashboard", "automation", "focus")), got
+    assert got["dashboard"] and got["automation"] and got["focus"] and got["lessons"], got
+    assert not any(v for k, v in got.items() if k not in ("dashboard", "automation", "focus", "lessons")), got
 
 
 def test_dashboard_title_and_subtitle_are_optional_plain_text(tmp_path):

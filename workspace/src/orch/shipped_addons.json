@@ -181,6 +181,35 @@
   "ticket_view": [],
   "version": "0.1.0"
  },
+ "lessons": {
+  "acts": {},
+  "agents_block": "skills/orch-lessons/AGENTS-block.md",
+  "background": false,
+  "dashboard": {
+   "icon": "book",
+   "label": "Lessons",
+   "order": 50,
+   "place": "settings"
+  },
+  "description": "Helpers remember what they learned here; you see, edit or delete it in one list.",
+  "gitignore": [
+   ".orch/addons/lessons/"
+  ],
+  "name": "lessons",
+  "needs": false,
+  "orch_api": 1,
+  "recommended": true,
+  "requires": [],
+  "run": "orch_lessons",
+  "runs_agents": false,
+  "schema": "orch.addon/1",
+  "skill": "skills/orch-lessons",
+  "ticket_ext_inert": false,
+  "ticket_fields_section": null,
+  "ticket_links": [],
+  "ticket_view": [],
+  "version": "0.1.0"
+ },
  "sync": {
   "acts": {},
   "agents_block": "skills/orch-sync/AGENTS-block.md",

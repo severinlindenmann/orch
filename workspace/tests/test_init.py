@@ -396,7 +396,7 @@ def test_shipped_recommended_reads_the_local_source_manifests(monkeypatch):
     repo = Path(__file__).resolve().parents[2]
     monkeypatch.setenv("ORCH_REPO", str(repo))
     monkeypatch.setattr(addons, "discover", lambda: {})
-    assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus"]
+    assert sorted(addons.shipped_recommended()) == ["automation", "dashboard", "focus", "lessons"]
 
 
 def test_secrets_stay_ignored_even_when_linking_is_refused(proj, run, tmp_path_factory):
