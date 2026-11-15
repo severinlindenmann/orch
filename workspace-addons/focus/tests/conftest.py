@@ -66,6 +66,13 @@ elif a[:2] == ["ticket", "list"]:
     print(json.dumps([json.loads(x.read_text()) for x in sorted(d.glob("t_*.json"))]))
 elif a[:2] == ["run", "session"]:
     print(json.dumps({{"agent": a[3], "session": None}}))
+elif a[:2] == ["ticket", "attach"]:
+    nm = [x for x in a if x.startswith("--name=")][0][7:]
+    data = sys.stdin.buffer.read()
+    (d / "attached.log").open("a").write(nm + ":" + str(len(data)) + "\\n")
+    if "refuse" in nm:
+        print(json.dumps({{"error": "no"}})); sys.exit(2)
+    print(json.dumps({{"name": nm, "size": len(data)}}))
 elif a[:2] == ["run", "send"]:
     print(json.dumps({{"id": "p1", "delivered": 0, "state": "none"}}))
 elif a[0] == "ask":
