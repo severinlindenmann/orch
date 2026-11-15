@@ -45,6 +45,11 @@ ICONS = (
     "folder",
     "user",
     "bolt",
+    "target",
+    "hammer",
+    "cloud",
+    "share",
+    "users",
 )
 FORMATS = ("text", "time", "cron-human", "chips", "yes-no", "open-page")
 

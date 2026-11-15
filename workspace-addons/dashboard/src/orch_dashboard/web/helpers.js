@@ -486,7 +486,7 @@
   const needsYou = n => n + (n === 1 ? ' needs you' : ' need you');  // same words as the phone
   const columnChipLabel = (label, n) => n > 0 ? label + ' ' + n : label;
   // "x of y steps": one pattern for every step counter (always "steps").
-  const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + ' steps';
+  const stepsText = (done, total) => (Number(done) || 0) + ' of ' + (Number(total) || 0) + (Number(total) === 1 ? ' step' : ' steps');
   // Topbar freshness: when /api/state last answered. Under a minute is "just now".
   function updatedText(at, nowMs) {
     const t = typeof at === 'number' ? at : Date.parse(at);

@@ -15,7 +15,7 @@ needs = true                                # orch focus needs --json
 
 [dashboard]
 label = "Focus"
-icon = "bolt"
+icon = "target"
 order = 20
 
 [page]
