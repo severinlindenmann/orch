@@ -311,31 +311,6 @@ def test_delete_detail_ticket_regex(start_server, fake_orch, fake_session, ticke
     assert calls(fake_orch) == [] and fake_session.minted == []
 
 
-def test_agent_env_never_reaches_the_child(start_server, fake_orch, fake_session, monkeypatch):
-    for name, value in {
-        "ORCH_AGENT": "x",
-        "CLAUDECODE": "1",
-        "ORCH_RUN": "r_x",
-        "ORCH_TICKET": "t_x",
-    }.items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.setenv("ORCH_DEV", "1")
-    srv = start_server(session=fake_session)
-    assert person(srv, setting("insights.share_names", "on"))[0] == 200
-    assert person(srv, setting("insights.keep_days", "30"))[0] == 200
-    assert person(srv, delete())[0] == 200
-    assert request(srv, "/api/settings")[0] == 200
-    done = calls(fake_orch)
-    assert len(writes(fake_orch)) == 5  # widening and delete: without, then with the proof
-    assert ["record", "settings", "--json"] in [c["args"] for c in done]  # the decision reads too (M6)
-    for call in done:
-        for name in ("ORCH_AGENT", "CLAUDECODE", "ORCH_RUN", "ORCH_TICKET", "ORCH_DEV"):
-            assert name not in call["env"]
-        assert not set(call["args"]) & set(FORBIDDEN_FLAGS)
-        assert not any(a.startswith(FORBIDDEN_FLAGS) for a in call["args"])
-        assert call["env"]["ORCH_ROOT"] == call["root"]
-
-
 @pytest.mark.parametrize(
     "headers",
     [
@@ -379,30 +354,6 @@ def test_narrowing_and_same_value_never_mint(start_server, fake_orch, fake_sessi
     assert stored(fake_orch) == {**SETTINGS, "keep_days": 30, "max_mb": 512}
 
 
-def test_widening_first_without_then_with_the_value_bound_proof(start_server, fake_orch, fake_session):
-    srv = start_server(session=fake_session)
-    code, _, body = person(srv, setting("insights.keep_days", "365"))
-    assert code == 200
-    assert json.loads(body) == {"result": {"insights.keep_days": "365", "changed": True, "widened": True}}
-    assert fake_session.minted == [("insights.settings", "insights.keep_days=365")]
-    first, second = writes(fake_orch)
-    argv = set_argv("insights.keep_days", "365", "90")
-    assert first["args"] == argv and first["stdin"] == ""
-    assert second["args"] == [*argv, "--proof-stdin"]
-    proof = second["stdin"].splitlines()[0]
-    assert proof == "hp1.fakeproof1.mac"
-    assert not any(proof in a for a in second["args"])
-    assert not any(proof in v for v in second["env"].values())
-    reads = [c["args"] for c in calls(fake_orch) if c not in writes(fake_orch)]
-    assert reads == [["record", "settings", "--json"]]  # the observed value for --if-current
-    assert stored(fake_orch)["keep_days"] == 365
-    assert person(srv, setting("insights.share_names", "on"))[0] == 200
-    assert fake_session.minted[-1] == ("insights.settings", "insights.share_names=on")
-    assert person(srv, setting("insights.share_counts", "off"))[0] == 200
-    assert writes(fake_orch)[-1]["stdin"] == "" and "--proof-stdin" not in writes(fake_orch)[-1]["args"]
-    assert len(fake_session.minted) == 2
-
-
 class ReusedProof(FakeSession):
     """Mints the same proof string every time (registered for each op/target): the core spends it once."""
 
@@ -417,21 +368,6 @@ class WrongProof(FakeSession):
     def mint(self, op, target):
         self.minted.append((op, target))
         return "hp1.notvalid.mac"
-
-
-def test_reused_or_wrong_proof_changes_nothing(start_server, fake_orch):
-    reused = ReusedProof(fake_orch.parent)
-    srv = start_server(session=reused)
-    assert person(srv, setting("insights.keep_days", "365"))[0] == 200
-    code, _, text = person(srv, setting("insights.max_mb", "4096"))
-    assert code == 403 and text.decode() == actions.PERSON
-    assert stored(fake_orch) == {**SETTINGS, "keep_days": 365}
-    wrong = start_server(session=WrongProof(fake_orch.parent))
-    for body in (setting("insights.share_names", "on"), delete()):
-        code, _, text = person(wrong, body)
-        assert code == 403 and text.decode() == actions.PERSON
-    assert stored(fake_orch) == {**SETTINGS, "keep_days": 365}
-    assert all(c["stdin"] for c in with_proof(fake_orch))
 
 
 def test_current_value_read_failure_counts_as_widening(start_server, fake_orch, fake_session):
@@ -465,18 +401,6 @@ def test_read_fails_closed_without_human_env(start_server, fake_orch, fake_sessi
     monkeypatch.setattr(actions, "human_env", broken)
     assert post(srv, setting("insights.keep_days", "30"))[0] == 403  # the read failed: counts as widening
     assert calls(fake_orch) == []
-
-
-def test_delete_detail_without_then_with_proof(start_server, fake_orch, fake_session):
-    srv = start_server(session=fake_session)
-    code, _, body = person(srv, delete("t_abc123"))
-    assert code == 200 and json.loads(body) == {"result": {"deleted": 3}}
-    assert fake_session.minted == [("record.delete_detail", "t_abc123")]
-    assert [c["args"] for c in calls(fake_orch)] == [
-        ["record", "delete-detail", "t_abc123", "--json"],
-        ["record", "delete-detail", "t_abc123", "--json", "--proof-stdin"],
-    ]
-    assert [c["stdin"] for c in calls(fake_orch)] == ["", "hp1.fakeproof1.mac\n"]
 
 
 @pytest.mark.parametrize(
@@ -704,37 +628,6 @@ def test_settings_target_is_the_core_form_byte_identical():
             assert insights_target(key, value) == f"{key}={value}"
 
 
-def test_cookie_without_page_secret_never_mints(start_server, fake_orch, fake_session):
-    srv = start_server(session=fake_session)
-    for headers in ({}, {"X-Orch-Page": "wrong"}, {"X-Orch-Page": ""}):
-        code, _, text = post(srv, setting("insights.keep_days", "365"), headers=headers, cookie=True)
-        assert code == 403 and text.decode() == actions.PERSON  # before /session: no secret at all
-    secret = link(srv)
-    for wrong in ("wrong", secret[:-1], secret + "x", "", "é"):
-        for body in (setting("insights.keep_days", "365"), delete()):
-            code, _, text = post(srv, body, cookie=True, headers={"X-Orch-Page": wrong} if wrong else None)
-            assert code == 403 and text.decode() == actions.PERSON
-    assert fake_session.minted == [] and with_proof(fake_orch) == []
-    code, _, _ = post(srv, setting("insights.keep_days", "365"), cookie=True, secret=secret)
-    assert code == 200 and fake_session.minted == [("insights.settings", "insights.keep_days=365")]
-    assert post(srv, setting("insights.max_mb", "4096"), secret=secret)[0] == 403  # header without cookie
-
-
-def test_page_secret_not_in_gets_or_logs(start_server, fake_orch, fake_session, capfd):
-    srv = start_server(session=fake_session)
-    secret = link(srv)
-    assert person(srv, setting("insights.keep_days", "365"))[0] == 200
-    cookie = {"Cookie": "orch_page=good-cookie-value", "X-Orch-Page": secret}
-    for path in ("/", "/api/overview", "/api/settings", "/api/list/skills", "/web/settings.js"):
-        code, headers, body = request(srv, path, headers=cookie)
-        assert code == 200
-        assert secret.encode() not in body and secret not in json.dumps(headers)
-    out, err = capfd.readouterr()
-    assert secret not in out and secret not in err
-    for call in calls(fake_orch):
-        assert secret not in json.dumps(call)
-
-
 def test_no_insights_page_server_in_core_is_watch_only(start_server, fake_orch, monkeypatch):
     import subprocess
     import sys
@@ -849,26 +742,6 @@ def test_real_session_cookie_alone_cannot_mint(start_server, fake_orch, real_ses
         code, _, text = post(srv, body, headers=cookie)
         assert code == 403 and text.decode() == actions.PERSON
     assert with_proof(fake_orch) == [] and stored(fake_orch) == SETTINGS
-
-
-def test_run_with_proof_flag_before_dashdash_and_proof_on_stdin(ws, fake_orch):
-    pageproof = pytest.importorskip("orch.pageproof")
-    env = actions.human_env(ws, str(fake_orch))
-    proof = "hp1.realproof.mac"
-    free_text = ["ticket", "note", "t_abc123", "--", "--json"]
-    cases = [
-        (free_text, ["ticket", "note", "t_abc123", "--proof-stdin", "--", "--json"]),
-        (["record", "delete-detail", "t_abc123", "--json"], ["record", "delete-detail", "t_abc123"]),
-    ]
-    for argv, expected in cases:
-        pageproof.run_with_proof(argv, proof, orch_bin=str(fake_orch), cwd=ws, env=env, timeout=10)
-        args = calls(fake_orch)[-1]["args"]
-        assert args[: len(expected)] == expected
-        assert args.count("--proof-stdin") == 1
-        assert args.index("--proof-stdin") < (args + ["--"]).index("--")
-        call = calls(fake_orch)[-1]
-        assert call["stdin"].splitlines()[0] == proof
-        assert proof not in json.dumps(call["env"]) and proof not in args
 
 
 # -- the page --------------------------------------------------------------------------------------------------

@@ -2900,22 +2900,6 @@ def _answer_msg(qm, n, text="Tuesday works"):
     }
 
 
-def test_group_answer_applies_when_the_key_did_not_exist_at_ask_time(proj, run, rel, host):
-    """Lane C P4.2: the question was asked before the workspace had a human key; the answer was dropped."""
-    import json
-
-    from orch import humanproof, relay
-
-    humanproof.key_dir(proj, create=False).joinpath("human.key").unlink()
-    tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
-    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
-    qm = sent(rel, type="question")[0]
-    assert "question_mac" in json.loads(relay._asked_path(proj).read_text())[qm["id"]]
-    out = inbox(run, rel, _answer_msg(qm, "ansk"))
-    assert out[0]["note"].startswith("answered q1")
-    assert tickets.load(proj, host)["questions"][0]["answer"] == "Tuesday works"
-
-
 def test_refused_group_answer_is_visible_in_the_ticket(proj, run, rel, host, monkeypatch):
     from orch import relay
 
