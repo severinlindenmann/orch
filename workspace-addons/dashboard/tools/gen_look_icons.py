@@ -1,4 +1,4 @@
-"""Generate src/orch_dashboard/web/look-icons.js and look.css colours from contracts/look/ (icons, look.json).
+"""Generate src/orch_dashboard/web/look-icons.js and look-colors.css colours from contracts/look/ (icons, look.json).
 
 Run from anywhere:  python3 workspace-addons/dashboard/tools/gen_look_icons.py [--check]
 --check exits 1 when the generated files differ (tests/test_look.py runs it that way).
