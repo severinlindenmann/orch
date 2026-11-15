@@ -275,3 +275,9 @@ def person_run(sh, root: Path, cmd: list, *, env=None, input=None, timeout: int 
     if rc != 0 and HANDOFF_TEXT in out + err:
         raise XFail(f"{' '.join(map(str, cmd[1:4]))}: {XFAIL_WHY}")
     return rc, out, err
+
+
+def page_needs_person(r) -> None:
+    """A page API write without a page session (the person opened it from this computer): XFAIL until #799 (R4.1)."""
+    if r.status == 403 and "from this computer" in r.text:
+        raise XFail(f"page write {XFAIL_WHY}")

@@ -123,6 +123,12 @@ class E:
         cmd = agent_line.split("=", 1)[1].strip()  # the agent is core's [workspace] agent now (generic adapter)
         p.write_text(f'[workspace]\nagent = "e2eagent"\n\n[agents.e2eagent]\nadapter = "generic"\ncommand = {cmd}\n\n'
                      f"[automation]\ninterval = {interval}\n{extra}")
+        # the machine's yes for this agent command (a person's click in real life; the harness plays the person)
+        allow = ("import sys; from pathlib import Path; from orch import config; r = Path(sys.argv[1]); "
+                 "[config.allow_agent(r, p['name'], p['key'], 'human:e2e') for p in config.pending_agents(r)]")
+        rc, out, err = self.sh([lib.tool_python(self.bin), "-c", allow, str(self.path_of(ws))])
+        if rc != 0:
+            raise Fail(f"allow the e2e agent: {(err or out)[-200:]}")
 
     def ensure_addons(self):
         if not self._addons:
@@ -158,12 +164,13 @@ class E:
                 "name": self.label(name), "description": desc or f"{name} workspace", "tags": tags or [name.lower()]})
             check(r.status == 201, f"relay admin add {name}: {r}")
             j = r.json()
-            self.creds[key] = (j["id"], j["token"])
             self.prompts = getattr(self, "prompts", {})
             self.prompts[key] = j.get("prompt", "")
             self.cleanup.append(lambda i=j["id"]: self.rel.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
             self.orch(self.ws(name), "addon", "add", "relay", "--yes")
+            # not cached before the connect worked: every scenario that needs a connected relay is an XFAIL (#799), not a fail
             self.person(self.ws(name), "relay", "connect", self.rel.url, "--workspace", j["id"], "--token", j["token"])
+            self.creds[key] = (j["id"], j["token"])
         return self.creds[key]
 
     def relay_all(self):
@@ -225,7 +232,11 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
             status, reason = "FAIL", str(f)
         except Exception as x:  # noqa: BLE001
             status, reason = "FAIL", f"{type(x).__name__}: {x} ({traceback.format_exc().splitlines()[-3].strip()})"
-        reason = " ".join(str(reason).split())[:300]
+        try:  # no scenario leaves add-on servers behind (they would show in the next one's `orch status`, and as a LEAK)
+            e.sh(["orch", "stop", "--all"], cwd=e.tmp, timeout=120)
+        except Exception:  # noqa: BLE001
+            pass
+        reason = " ".join(str(reason).split())[:int(os.environ.get("E2E_REASON_MAX", "300"))]
         line = f"{sid:<5} {status:<4} {reason}"
         print(line, flush=True)
         lines.append(f"- {line}  ({time.time() - t0:.0f}s)")
@@ -288,6 +299,11 @@ def main() -> int:
         if rc:
             print("install record failed:", (err or out)[-400:])
             return 1
+        if shutil.which("claude", path=e.path) is None:
+            # orch links its skills into the folder of every agent it finds on the PATH (W1, A12, A13): a CI runner
+            # has none, so a stand-in that only exists keeps those checks the same everywhere
+            (e.bin / "claude").write_text("#!/bin/sh\nexit 0\n")
+            (e.bin / "claude").chmod(0o755)
         needs_servers = any(s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))) for s in ids)
         if needs_servers:
             if a.mode == "local":
@@ -344,6 +360,7 @@ def leaked_servers(tmp: Path) -> list[int]:
         cwd = next((x[1:] for x in lsof.splitlines() if x.startswith("n")), "")
         if cwd and (cwd == str(tmp) or cwd.startswith(str(tmp) + os.sep)):
             found.append(int(pid_s))
+            print(f"LEAK pid {pid_s}: {cmd[:160]}")
     for pid in found:
         try:
             os.kill(pid, signal.SIGKILL)

@@ -12,7 +12,7 @@ cmd = next((a for a in args if not a.startswith("-")), "hello")
 root = Path(os.environ.get("ORCH_ROOT", "."))
 if cmd == "view":
     if (root / ".orch" / "addons" / "hello-world" / "slow").exists():
-        time.sleep(6)
+        time.sleep(14)  # longer than the dashboard's 10 s view timeout
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     print(json.dumps({"schema": "orch.addon-view/1", "generated_at": now, "blocks": [
         {"type": "stat", "label": "Greetings", "value": 3, "tone": "good"},
