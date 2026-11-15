@@ -134,12 +134,14 @@ final class AccessibilityIdUITests: XCTestCase {
 
     @MainActor
     func testGroupApprovalCardHasUniqueAccessibilityIds() {
-        let app = launch(["-mockGroups", "YES"])
-        XCTAssertTrue(element(app, "chat-search").waitForExistence(timeout: 15))
-        reveal(app, "group-13-ws_finance001-grp_t_cartax2027").tap()
-        XCTAssertTrue(element(app, "group-members").waitForExistence(timeout: 10))
-        // Snapshot only the approval card (its own subtree), not the whole app: the full-tree query timed out about every 3rd CI run.
-        let card = reveal(app, "group-approval")
+        // Open the room directly (-open group:…): no list swiping and no match-anything query over the big Chats list, which timed
+        // out on slow CI runners ("Failed to get matching snapshots"). The card is found by its own type, then snapshotted alone.
+        let app = launch(["-mockGroups", "YES", "-open", "group:ws_finance001:grp_t_cartax2027"])
+        XCTAssertTrue(app.otherElements["group-members"].waitForExistence(timeout: 30) || app.buttons["group-members"].exists || app.descendants(matching: .any)["group-members"].waitForExistence(timeout: 10), "room open")
+        // The room opens at the newest message; the approval card is earlier: scroll back up until it is on screen.
+        for _ in 0..<8 where !app.buttons["Allow once"].exists { app.otherElements["group-messages"].firstMatch.swipeDown() }
+        let card = app.otherElements["group-approval"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 15), "group-approval card")
         assertUniqueIds(in: card)
     }
 }
