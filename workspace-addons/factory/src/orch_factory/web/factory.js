@@ -377,6 +377,12 @@
         p('ETA ' + whenRange(time.eta_from, time.eta_to)), meta('Budget preset · ' + capital(b.preset)),
         meta('Active time cap: ' + duration(b.active_min_cap) + '. API spend is a target, not a cap.'), meta('Your time: about ' + text(time.owner_min) + ' min.')),
       card('Crew + what it needs', crewPlan(data.crew), list(array(data.needs).map(n => (n.ready ? '✓ Ready · ' : 'Needs you · ') + text(n.what) + (!n.ready && n.fix ? ' — ' + n.fix : '')), 'No additional needs recorded.'))));
+    for (const h of array(order.handover)) {
+      const tiles = group('actions', ...array(h.files).map(f => badge(f.split('/').pop())));
+      view.append(card(text(h.name) + ' does this', p(text(h.name) + ' makes ' + text(h.title) + (h.minutes ? ' · about ' + h.minutes + ' min' : '')), meta(h.why),
+        p('They get: this brief' + (array(h.files).length ? ' and ' + plural(array(h.files).length, 'file', 'files') + ':' : '')), ...(array(h.files).length ? [tiles] : []),
+        meta(text(h.name) + '’s time is not counted here. Everything else stays here, and ' + text(h.name) + ' allows it on their side.')));
+    }
     view.append(group('grid-2', card('Done means', list(data.done_means)), card('Won’t do', list(data.wont_do), node('h3','What Ship does'), p(data.ship?.does), meta('Undo: ' + text(data.ship?.undo)))));
     const assumptions = card('Assumptions');
     for (const a of array(data.assumptions)) assumptions.append(group('row', ...(a.uncertain ? [badge('Unsure')] : []), p(a.text)));
@@ -389,6 +395,20 @@
       node('h3','Skipped stages'), list(array(data.skipped).map(s => capital(s.stage) + ' — ' + text(s.why))),
       node('h3','Handovers'), list(array(data.handovers).map(h => text(h.task) + ' → ' + text(h.workspace) + ' — ' + text(h.why)))));
     view.append(details);
+  }
+  // A task handed to another workspace that nobody has picked up for a day: one click asks your helper to propose "Do it here instead".
+  const DAY = 24 * 3600 * 1000, handoverOpen = ['waiting_start', 'waiting_allow', 'queued'];
+  const waitedADay = w => handoverOpen.includes(w.state) && w.since && Date.now() - Date.parse(w.since) > DAY;
+  function doItHere(order, c) {
+    const button = node('button', 'Ask Helper to do it here', 'btn outline sm'); button.type = 'button';
+    const status = node('span', null, 'meta'); status.setAttribute('role', 'status');
+    button.addEventListener('click', async () => {
+      button.disabled = true; status.textContent = ' Sending…';
+      const result = await toAgent(order.id, 'Propose a change "Do it here instead" for the task "' + text(c.title) + '": ' + text(c.with.name) + ' has not finished it after a day.');
+      status.textContent = result.ticket ? ' Sent. Your helper proposes the change; you decide.' : ' That didn’t work. Nothing was sent.';
+      if (!result.ticket) button.disabled = false;
+    });
+    return group('actions', button, status);
   }
   function tiny(order) { return card('Changed during the run', list(array(order.tiny).map(t => text(t.what) + ' · +' + text(t.minutes) + ' min'), 'No tiny changes recorded.')); }
   const statusWord = {open: 'open', todo: 'not started', doing: 'working', done: 'done', blocked: 'blocked'};
@@ -403,10 +423,11 @@
     const main = group('stack', lineCard, card('Time + budget', budget(order), meta('Due ' + when(order.due))));
     const crew = card('Crew now');
     for (const c of array(order.crew)) {
-      const label = [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
+      const label = c.with ? [roleName(c.role), c.with.name, c.with.words].filter(Boolean).join(' · ') : [roleName(c.role), c.agent, statusWord[c.status] || c.status].filter(Boolean).join(' · ');
       const row = group('f-record f-crew');
       if (validId(c.ticket)) { const a = link(label + ' ↗', '/#ticket/' + c.ticket); a.className = 'f-crewlink'; a.title = c.title || ''; row.append(a); } else row.append(node('span', label));
       row.append(meta(c.title));
+      if (c.with && waitedADay(c.with) && embedded() && validId(order.id)) row.append(doItHere(order, c));
       crew.append(row);
     }
     if (!array(order.crew).length) crew.append(meta('No crew assigned yet.'));

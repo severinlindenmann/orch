@@ -55,6 +55,20 @@ not be delivered the row says Failed, with **Send again**. When you answer the s
 
 On the command line: `orch factory ask <order> <stop> <workspace> --item 0 --by human:<name>`.
 
+## Hand one task to another workspace
+Now and then another connected workspace is clearly better at one task (for example Design makes the pictures). Then the
+proposal says so in one line: "Design makes the header picture · about 40 min", what they get (the brief and the files
+listed, each one named) and "Design's time is not counted here". Everything else stays in your workspace. Pressing **Start**
+is your click for those files too, so what you see on the proposal is exactly what leaves this computer; a file added later
+is not sent. Before anything goes, every file is checked for passwords and keys and nothing is sent if one is found.
+
+On the order page the task shows in plain words: Waiting for Design to start, Waiting for Design to allow, Queued at Design,
+Working at Design, Ready for review at Design, Done, Design said no, Failed at Design. Design's person has to allow the task
+on their side. When Design says it is done, the result is added to the task and the crew carries on; look at the result before
+you rely on it. If nobody picks it up for a day the row offers **Ask Helper to do it here**. If Design says no or fails, your
+helper is woken once and proposes **Do it here instead**; only your **Accept** takes the task back, and Design is told "No
+longer needed". There is never a second copy without your Accept.
+
 ## What protects your decisions
 Only your own answers count (the ones you give in the dashboard, Focus, the CLI or on your phone), and
 only for questions Factory itself asked about a frozen proposal. A proposal cannot change after Start; more scope is always
