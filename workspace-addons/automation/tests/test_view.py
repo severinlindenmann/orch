@@ -487,11 +487,23 @@ def test_plain_words_in_the_week_strip_and_the_notice(ws, monkeypatch):
 
     assert _every(7200) == "Every 2 hours" and _every(3600) == "Every hour" and _every(300) == "Every 5 min"
     monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
-    add_ticket(ws, "t_wk000010", key="DEM-3", title="Answer mail", ext={"automation": {"recurring": True, "cron": "0 */2 * * *"}})
-    add_ticket(ws, "t_wk000011", key="DEM-4", title="Weekly", ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}})
+    add_ticket(
+        ws,
+        "t_wk000010",
+        key="DEM-3",
+        title="Answer mail",
+        ext={"automation": {"recurring": True, "cron": "0 */2 * * *"}},
+    )
+    add_ticket(
+        ws,
+        "t_wk000011",
+        key="DEM-4",
+        title="Weekly",
+        ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}},
+    )
     v = build(ws, T(7))
     (week,) = blocks(v, "calendar")
     titles = [i["title"] for d in week["days"] for i in d["items"]]
     assert titles and not any("DEM-" in x for x in titles)
     assert "times a day" in json.dumps(week) and "runs" not in json.dumps(week)
-    assert " h\"" not in json.dumps(week)
+    assert ' h"' not in json.dumps(week)

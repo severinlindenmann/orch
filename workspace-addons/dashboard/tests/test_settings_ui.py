@@ -35,9 +35,9 @@ def test_settings_navigation_and_cards():
     assert "Pair a phone" not in src and "phonePairDialog" not in src
     assert "history.replaceState(null, '', '#settings/' + tab)" in src
     assert "h('span', {className:'set-label'}, 'Folder')" in src
-    # folder: plain name + Copy path + the full path behind one small "Where is it stored?" click
+    # folder: plain name + Copy path + quiet full path, no Details toggle
     folder = src[src.index("h('span', {className:'set-label'}, 'Folder')") :][:900]
-    assert "'Copy path'" in folder and "h('summary', {}, 'Where is it stored?')" in folder
+    assert "'Copy path'" in folder and "h('summary'" not in folder
     assert "['agent', 'Helper']" in src and "['agent', 'Agent']" not in src
     css = (webjs.WEB / "pages/settings.css").read_text()
     assert "@media(max-width:760px)" in css
