@@ -1663,8 +1663,10 @@ async function sendEmbedMessage(req) {
     const delivered = !!r && Number.isInteger(r.delivered) && r.delivered > 0;
     const queued = !!r && typeof r.id === 'string' && r.id !== '';
     if (!delivered && !queued) return reply({type:'orch.send.failed', error:'orch did not confirm that your message was saved. Nothing was sent.'});
-    const working = ticketOf(req.ticket)?.status === 'active';
-    const started = working ? null : await act('run.start', {ticket:req.ticket});
+    // Start an agent only when orch says nothing is on the ticket (state "none"): a live session took or keeps the
+    // words itself, and a second start would only be refused (422) and toast an error.
+    const nothingOn = r.state === 'none' && !delivered;
+    const started = nothingOn ? await act('run.start', {ticket:req.ticket}) : null;
     reply({type:'orch.send.done', ticket:req.ticket, delivered, queued, started:!!started?.ok});
   } finally { embedSendBusy = false; }
 }

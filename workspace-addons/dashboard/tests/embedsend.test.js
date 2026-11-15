@@ -50,7 +50,7 @@ test("the click sends the person's message with the dashboard's own run.send, th
 });
 
 test('an agent already working gets the message without a second start', async () => {
-  const {ctx, calls, frameWindow} = setup({status:'active'});
+  const {ctx, calls, frameWindow} = setup({status:'active', results:{'run.send':{ok:true, status:200, state:{send_result:{id:'i_9', delivered:0, state:'working'}}}}});
   await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
   assert.deepEqual(calls.acts.map(a => a[0]), ['run.send']);
   assert.equal(calls.posts[0][0].type, 'orch.send.done');
@@ -88,4 +88,13 @@ test('delivered into the idle live session: done with delivered, no second start
   await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
   assert.deepEqual(plain(calls.posts[0][0]), {type:'orch.send.done', ticket:'t_order01', delivered:true, queued:true, started:false, id:'abcdefgh1234'});
   assert.deepEqual(calls.acts.map(a => a[0]), ['run.send']);
+});
+
+test('no extra run.start when a live session holds the words (only state "none" starts one)', async () => {
+  for (const send_result of [{id:'i_3', delivered:0, state:'idle'}, {id:'i_4', delivered:0, state:'working'}, {id:'i_5', delivered:1, state:'idle'}]) {
+    const {ctx, calls, frameWindow} = setup({status:'ready', results:{'run.send':{ok:true, status:200, state:{send_result}}}});
+    await ctx.sendEmbedMessage(ctx.embedSendRequest(msg(frameWindow)));
+    assert.deepEqual(calls.acts.map(a => a[0]), ['run.send'], JSON.stringify(send_result));
+    assert.equal(calls.posts[0][0].type, 'orch.send.done');
+  }
 });

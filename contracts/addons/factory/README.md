@@ -112,8 +112,8 @@ when no run is on the ticket, or when its LIVE session's turn ended (`orch run s
 the run: …` or `Change the draft: <the person's words>`, at most 1000 characters typed). The dashboard accepts it only from the
 embedded shipped add-on iframe of its own origin and only for a ticket that carries that add-on's data (`ext.<add-on>`),
 keeps line breaks but drops control, bidi and zero-width characters (at most 2000 characters), sends the text with its own
-op `run.send` (the person's message, proven like writing to the agent on the ticket page) and, when no agent works on the
-ticket, `run.start`. The dashboard's `/api/act` reply to `run.send` carries `send_result: {id, delivered, state}` (what orch did); the
+op `run.send` (the person's message, proven like writing to the agent on the ticket page) and, only when orch reports nothing on
+the ticket (`send_result.state` is `none`), `run.start` (a live session takes the words itself: no second start). The dashboard's `/api/act` reply to `run.send` carries `send_result: {id, delivered, state}` (what orch did); the
 dashboard answers done only when orch delivered the words (`delivered` > 0) or queued them (an `id`), else failed. It
 answers `{type: "orch.send.done", id, ticket, delivered, queued, started}` (the page says *Sent* or *Saved*) or `{type: "orch.send.failed", id, error}`;
 one at a time. Outside the dashboard the page shows a link to the ticket instead.
