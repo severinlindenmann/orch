@@ -168,6 +168,15 @@ phone), and (3) when `reply_to` names a question this workspace sent (relay.py `
 inbox`); what it can apply is decided by the relay, not by the caller. Device-key-signed phone verdicts are a later step
 (Level 2 later).
 
+**Review cards from the phone** (relay-api.md "Review cards on the phone", vectors/review-card-v1.json). A swipe on a card
+(`answer.verdict`) is proven exactly like the answers above: rules (1)-(3), plus the digest the phone echoes must equal the
+digest of the question as the workspace stores it now (else `changed`, nothing applied). The workspace takes the ticket, the
+question and the card (`signs` included) only from its own MAC'd asked record and its own ticket, never from the answer.
+Face ID on the phone is a phone-side confirm only; it adds no proof the workspace can check. A card with `signs: true`
+needs the computer: a phone `ok` on it is refused (`review_result: refused`, `needs_signature`) and the question stays open
+there, until phone verdicts are signed with a device key (Level 2 later). A phone verdict never changes an answer that
+already exists (`decided`); changing a decision is a computer action.
+
 ## Dev mode: the test human persona (demo workspaces only)
 
 e2e drives owner-only steps in demo workspaces with a scripted test human. Its proofs carry `"dev": true` in the payload and
