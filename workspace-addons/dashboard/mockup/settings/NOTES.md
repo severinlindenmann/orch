@@ -243,3 +243,6 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - New tab "About & updates": installed release, newest release, "What changed" (max 5 plain lines), one Update button, steps (Downloading / Installing / Restarting / Done) and "Updated 16 → 17". Click the button to see the steps.
 
 - Owner 14 Nov (fb11/fb24): Set up relay is no longer a button/dialog; when no relay is connected the card lists the 3 plain steps (admin page, paste the orch relay connect line, Check again); Pair a phone shows only once connected.
+
+## Problem reports (diagnostics D3, 15 Nov)
+`settings.html` (General): card "Problem reports": the switch "Keep a debug log" (on by default; turning it off shows a short review first), the number and time of saved reports with Delete all, and the size of the saved notes with Delete notes. Deleting is one click and says what went.

@@ -199,9 +199,9 @@ def test_existing_claude_skills_folder_gets_per_skill_links(proj, run):
 
 def test_all_packaged_skills_have_front_matter():
     root = skills.packaged_skills_dir()
-    assert sorted(p.name for p in root.iterdir() if p.is_dir()) == ["orch"]
+    assert sorted(p.name for p in root.iterdir() if p.is_dir()) == ["orch", "orch-diagnose"]
     builtin = Path(skills.__file__).parent / "builtin"  # publish and relay: built-in add-ons
-    dirs = {"orch": root / "orch"} | {
+    dirs = {"orch": root / "orch", "orch-diagnose": root / "orch-diagnose"} | {
         f"orch-{n}": builtin / n / "skills" / f"orch-{n}" for n in ("publish", "relay")
     }
     for n, d in dirs.items():
@@ -1232,16 +1232,18 @@ def test_old_junction_is_migrated_and_second_init_works(proj, run, monkeypatch):
         real_rmdir(p, *a, **k)
 
     monkeypatch.setattr(os, "rmdir", rmdir)
-    monkeypatch.setattr(os, "readlink", lambda p: "\\\\?\\" + str(target.absolute()))
-    # turn the first run's result into "a junction an old orch made"
-    if dest.is_symlink():
-        dest.unlink()
-    else:
-        import shutil
+    monkeypatch.setattr(os, "readlink", lambda p: "\\\\?\\" + str((target.parent / Path(p).name).absolute()))
+    # turn the first run's result into "a junction an old orch made" (for each skill orch installs)
+    import shutil
 
-        shutil.rmtree(dest)
-    dest.mkdir()  # empty folder: rmdir works like on a junction
-    junctions.add(dest)
+    for name in ("orch", "orch-diagnose"):
+        d = proj / ".agents/skills" / name
+        if d.is_symlink():
+            d.unlink()
+        else:
+            shutil.rmtree(d)
+        d.mkdir()  # empty folder: rmdir works like on a junction
+        junctions.add(d)
     assert harness.is_link(dest)
     assert skills._shared_skills(proj) == []
     skills.apply_agent_files(proj)  # the repeated init: no crash

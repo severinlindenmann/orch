@@ -80,6 +80,7 @@ def accept_trail(root: Path, body) -> dict:
     """Write the events of one batch; the answer says whether the log is on (the page stops sending when not)."""
     if diag is None:
         return {"enabled": False}
+    diag.forget_settings()  # the setting is changed by another process (the CLI): read it fresh, not from the 5 s cache
     if not diag.enabled(root):
         return {"enabled": False}
     events = body.get("events") if isinstance(body, dict) else None
