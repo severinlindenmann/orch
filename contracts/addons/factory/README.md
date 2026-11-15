@@ -10,6 +10,9 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 - **Order** = a parent ticket with `ext.factory.role = order`. **Crew** = its sub-tickets (`parent` = order,
   `ext.factory.role = crew`, one per order + task slug). Crew runs start with `orch run start <crew> --agent <agent>`
   (no task leases; Focus opens a crew ticket like any ticket).
+- **Ask** = a small sub-ticket of the order (`parent` = order, `ext.factory.role = ask`, `stop`, `ws`) that carries one
+  stop to another workspace for its view (#816 part A). **Hand-over** = a crew sub-ticket whose task is in the started
+  proposal's `handovers[]`; it is delegated to that workspace instead of run here (`ext.factory.handover`, #816 part B).
 - Files (the add-on's own folder `.orch/addons/factory/`): `drafts/<order>/v<N>.md`, `proposals/<order>/p<N>.json` (frozen;
   `ext.factory.proposal.hash` = sha256 of the file bytes), `changes/<order>/c<N>.json`, `stops/<order>/s<N>.json` (+ images
   in the same folder), `journal.jsonl` (append only, `$defs/journal_line`). Runtime: none in phase 1 (no background).
@@ -23,6 +26,7 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 | `orch factory autopilot <order> --file -` | Same for `$defs/autopilot`; asks `factory:autopilot` |
 | `orch factory next <order>` | For the manager run: consumes newly answered `factory:*` questions once (journal `consumed`), returns `{"step": "wait" \| "start-crew" \| "work" \| "stop" \| "ship" \| "edit" \| "parked" \| "resume" \| "done", …}` |
 | `orch factory crew add <order> <task>` / `crew start <order> <task>` | Idempotent sub-ticket for a task of the started proposal; `crew start` refuses when the order is not started by a person or the task is not in an approved bundle |
+| `orch factory ask <order> <stop> <ws> [--item N]… [--no-pictures] --by human:<name>` / `act ask` | #816 A. The person's click (`[acts.ask]`, `who = "people"`, target `<order>:s<N>:<ws>:<items>`, items = comma list of 0-based stop item indexes or `-` for none): makes the ask sub-ticket ("Your view: <order title> · <stop label>", summary = the fixed line "<order title> · <stop label>: what would you change before this ships?", checklist = the ticked item titles), `orch relay group add <ask> <ws>`, `orch relay group share --click` for each picture of the ticked items (secret scan; a hit refuses the whole ask before anything is sent), `orch ask` an information question on the ask ticket + `orch relay group ask`. Refused: stop not open, `ws` not reachable for groups, an open ask of the same stop to the same workspace. Journal `asked`; order history "Asked <name> for a view on <stop label>". Answering the stop closes its ask sub-tickets |
 | `orch factory change <order> --file -` | `$defs/change` → asks `factory:change` (`Accept` · `Edit` · `Save for later`) |
 | `orch factory tiny <order> --minutes N --what "<text>"` | Records a small change; refused (code `refused`, "make a change proposal") past 3 changes or 30 min, or when it adds a stage, a done-means point, a tool or cost |
 | `orch factory stop <order> --file -` | `$defs/stop` → asks `factory:stop` for that stage (`Ship it` / `Continue` · `Send back`) |
@@ -31,6 +35,28 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 | `orch factory start` / `stop` / `status` | The Factory watcher (manifest `background = true`, `runs_agents = true`; core's `orch start` calls `start`). `start` → `{"running": true, "pid"}`, `stop` → `{"stopped": bool}` (`stop` without an order; `stop <order> --file` is the stop stage above), `status` → `{"running": bool, "pid"?}`, exit 1 when not running. Pid record in `.orch/run/factory/`, signalled only after start time and command-line check |
 | `orch factory watch [--once]` | The watcher loop (every 20 s); `--once` = one pass, prints `{"woken": [{"order", "why"}]}`. Wakes the manager with `orch run start <order> --by agent:factory` when (a) a person answered a Factory question `next` has not consumed, (b) a crew sub-ticket of a started order became done/failed, (c) a live autopilot grant covers an open routine/taste stop; never for an agent answer, never twice for one id, never while a run is live. Seen state in `.orch/addons/factory/watch.json`; one history line "Factory woke the manager: <why>" |
 | `orch factory list` / `show <order>` / `view` / `needs` | Read only. `view` = dashboard tab blocks (addon-view.schema.json) |
+
+## Asking another workspace (#816 A)
+- What leaves the machine is only the ask sub-ticket's group card (title, the fixed line, the ticked item titles, its one
+  information question) and the ticked items' pictures. The order's summary, tasks, crew logs, budget and chat never leave
+  (R3.3). The secret scan runs when the page's dialog opens (`/api/order/<id>/stop/<n>/scan`) and again at send.
+- Replies: the member's answer on the ask question (`answered_by` `agent:<ws>` = their helper, or a person's group text in
+  the ask ticket's history) is untrusted text, shown cleaned on the stop (at most 3 lines + more). It never counts as a
+  stop answer: the stop question is a different question of a different ticket.
+- `decide` (autopilot) refuses a stop that has an ask: the person decides.
+
+## Handing a task to another workspace (#816 B)
+- `propose` refuses: a `workspace` that is not a `ws_` id in the relay workspace list with
+  delegate allowed, a `task` not in `tasks`, a `sends.files` path outside the workspace or missing. There is no cap on the
+  share of time (owner, 15 Nov) beyond the schema's 2 hand-overs; `minutes` is shown, never counted in `active_min_cap`.
+- `crew start` for a hand-over task runs `orch relay delegate <ws> "<title>" --text <brief> --check <done-means>…
+  --ticket <crew> --group` and `orch relay group share --click <crew> <file>` for each `sends.files` (Start was the
+  person's click for them; a secret hit refuses the crew start) instead of `orch run start`. The crew ticket is the owner.
+- State comes from the relay task status (`ext.factory.handover.state` is a cache): on `done` the result is evidence on
+  the crew task and the crew ticket is done (watcher rule b). Watcher rule (d): a hand-over `denied` or `failed` wakes
+  the manager once per task and reason; it then files a `factory:change` "Do it here instead · +N min". On Accept, an
+  undelivered delegate is dropped from the outbox, a delivered one gets a group text "No longer needed"; never a second
+  copy without the person's Accept.
 
 ## Question kinds (rows in `../question-kinds.md`)
 | kind | options | `action` |
@@ -46,8 +72,8 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
   `after` 80, `recommend` 40), so what the owner reads is never cut.
 
 ## Authority (what counts, phase 1)
-1. **Only a person's answer counts**: `answered_by` starts with `human:` (the core records a person's answer only with the
-   human proof, H1). Agent answers on `factory:*` questions are ignored and logged — except `factory:stop` items decided with
+1. **Only a person's answer counts**: `answered_by` starts with `human:` (the answer a person gives in the dashboard,
+   Focus, the CLI or the phone). Agent answers on `factory:*` questions are ignored and logged — except `factory:stop` items decided with
    `orch factory decide` under a valid autopilot grant.
 2. **Only questions about a frozen file count**: the question's `action` (stored by the core when it was asked) must name a
    file whose bytes still hash to `action.hash`, and the question text and options must equal what Factory renders from that
@@ -100,7 +126,7 @@ call too) until that question carries that answer from a person (`answered_by: h
 only (not patchable); core knows nothing about Factory. Factory counts a sub-ticket as crew only when its gate is exactly the
 one its task needs (a sub-ticket an agent made with Factory's crew data but no gate is ignored). Known limit (light,
 inside the workspace): tickets are synced, and core trusts a synced ticket's `answered_by` and fields like any other
-reader (core-wide H1 note, not Factory's).
+reader (core-wide note, not Factory's).
 
 ## Page (phase 2a, read only)
 The watcher process also serves the Factory page on `127.0.0.1:<port>` (`orch factory status --json` gives `url`;
@@ -110,7 +136,7 @@ manifest `[page] path = "/"`). The dashboard embeds it as `#addon/factory/<path>
 (phase 2b): inside the dashboard, a decision button posts `{type: "orch.question", ticket, question}` (the order's open
 question `open.q`) to the parent window; the dashboard accepts it only from the embedded shipped add-on iframe of its own
 origin, opens its own native question card for that ticket's question in a dialog (text and options come from the
-dashboard's data, the person presses the option and the proof path is the ticket page's), then posts
+dashboard's data, the person presses the option there, as on the ticket page), then posts
 `{type: "orch.question.done", ticket, question}` back and the page refreshes. Outside the dashboard (or with no open
 question) the button stays a link `target="_top"` to `/#ticket/<order>`. The Factory server stays read only. An open page re-reads `/api/home` every 15 s while visible and redraws only when it changed and the person is not
 typing or waiting for an answer (every API answer is read fresh from the workspace; nothing is cached).
@@ -146,9 +172,11 @@ one at a time. Outside the dashboard the page shows a link to the ticket instead
 | `/api/order/<id>` | order summary + `proposal` (frozen data of the started or newest proposal), `drafts` `[{"v", "at"}]`, `crew` `[{"ticket", "title", "role", "agent", "status"}]`, `changes` `[{"n", "title", "adds_min", "state": "open"\|"accepted"\|"edit"\|"later"}]`, `tiny` `[{"what", "minutes"}]`, `stops` `[{"n", "stage", "data", "state", "answer", "by"}]`, `activity` `[{"at", "text"}]` (Factory lines of the order history) |
 | `/api/order/<id>/draft/<v>` | `{"v", "text"}` (markdown as plain text; the page renders it as text) |
 | `/api/order/<id>/file/<name>` | an image of a stop round (`png`, `jpg`, `webp`, `gif` only, from `stops/<id>/`; no other path) |
+| `/api/reach` | `[{"ws", "name", "description"}]`: connected workspaces that may get group messages (empty when the relay is off; the page then shows no Ask button) |
+| `/api/order/<id>/stop/<n>/scan` | `{"items": [{"i", "title", "files": [{"name", "ok", "why"?}]}]}`: the secret scan of the stop's pictures, run when the ask dialog opens |
 | `/api/autopilot` | `{"grants": [{"order", "until", "may", "limits"}], "decisions": [{"order", "q", "answer", "why", "at"}]}` |
 
-Order summary: `{"id", "title", "kind": "run"\|"autopilot", "phase": "draft"\|"proposed"\|"started"\|"edit"\|"parked"\|"shipped"\|"cancelled", "stage", "line": [{"stage", "stop", "state"}], "budget": {"used", "cap", "warn"}, "eta", "due", "open": {"q", "kind", "text", "options"} \| null, "owner_min"}` — every field derived through `flow.derive` (never `ext.factory`). `line[].label` comes from the frozen proposal; `open.data` carries the frozen stop/change data for stop and change questions. `phase` may also be `broken` (the add-on refused the order's files as tampered; the summary then has `problem`).
+Order summary: `{"id", "title", "kind": "run"\|"autopilot", "phase": "draft"\|"proposed"\|"started"\|"edit"\|"parked"\|"shipped"\|"cancelled", "stage", "line": [{"stage", "stop", "state"}], "budget": {"used", "cap", "warn"}, "eta", "due", "open": {"q", "kind", "text", "options"} \| null, "owner_min"}` — every field derived through `flow.derive` (never `ext.factory`). #816: `stops[]` also carry `asks: [{"ws_name", "at", "state": "queued"|"delivered"|"answered"|"failed"|"closed", "replies": [{"text", "at", "by": "person"|"helper", "name"?}]}]`; `crew[]` rows carry `with: {"name", "state"}` for a hand-over task. `line[].label` comes from the frozen proposal; `open.data` carries the frozen stop/change data for stop and change questions. `phase` may also be `broken` (the add-on refused the order's files as tampered; the summary then has `problem`).
 Also: `/api/home` `watcher` is `true` only while a verified watcher runs (else `false`); grants carry `live`; a draft answer
 may carry `truncated: true` (over 256 KB); any answer may carry `stale: true` (a slow build gave the last good answer); with no
 earlier answer a slow or failed build is `503 {"error", "stale": true}`.

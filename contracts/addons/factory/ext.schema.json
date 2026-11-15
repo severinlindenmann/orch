@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orch.severin.io/contracts/addons/factory/ext.schema.json",
   "title": "orch factory ticket data: ext.factory",
-  "description": "Owned by the factory add-on (its ticket_ext; the add-on ships a byte-identical copy). The core never reads it. A CACHE for the dashboard and the manager: every authority decision (start, stops, changes, autopilot) is derived again from the ticket's human-answered factory:* questions and the add-on journal, never from these fields (contracts/addons/factory/README.md, Authority). On an order (parent ticket) role = order; on a crew sub-ticket role = crew.",
+  "description": "Owned by the factory add-on (its ticket_ext; the add-on ships a byte-identical copy). The core never reads it. A CACHE for the dashboard and the manager: every authority decision (start, stops, changes, autopilot) is derived again from the ticket's human-answered factory:* questions and the add-on journal, never from these fields (contracts/addons/factory/README.md, Authority). On an order (parent ticket) role = order; on a crew sub-ticket role = crew; on an ask sub-ticket (one stop shared with another workspace for its view) role = ask.",
   "type": "object",
   "required": ["role"],
   "additionalProperties": false,
   "properties": {
-    "role": { "enum": ["order", "crew"] },
+    "role": { "enum": ["order", "crew", "ask"], "description": "order = the parent ticket; crew = a sub-ticket doing one proposal task; ask = a small sub-ticket of the order carrying one stop's line and the ticked items to another workspace's group (the group card is built from this ticket, never from the order). Asks are derived from these sub-tickets; the order keeps no list of them." },
     "kind": { "enum": ["run", "autopilot"], "description": "Order only. run = a normal Factory run; autopilot = an autopilot order (the agent may decide routine/taste items itself while its grant is valid)." },
     "stage": {
       "enum": ["draft", "proposed", "running", "waiting", "shipped", "cancelled"],
@@ -67,13 +67,27 @@
       }
     },
     "grant_until": { "type": "string", "format": "date-time", "pattern": "Z$", "description": "Autopilot order only: when its grant ends (display; checked against the journal and the answer)." },
-    "order": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Crew only: the order (same as the ticket's parent)." },
+    "order": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$", "description": "Crew and ask: the order (same as the ticket's parent)." },
     "task": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$", "description": "Crew only: the proposal task slug this sub-ticket does (one sub-ticket per order + task)." },
     "crew_role": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,23}$", "description": "Crew only: builder, reviewer, writer, designer, checker …" },
-    "agent": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Crew only: the adapter or [agents.<name>] entry its runs use." }
+    "agent": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$", "description": "Crew only: the adapter or [agents.<name>] entry its runs use." },
+    "stop": { "type": "integer", "minimum": 1, "description": "Ask only: the stop number (stops/<order>/s<N>.json) this ask is about." },
+    "ws": { "type": "string", "pattern": "^ws_[a-z0-9]{6,32}$", "description": "Ask only: the workspace asked." },
+    "handover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ws", "state"],
+      "description": "Crew only, for a task handed to another workspace: a display cache of the delegate's state (derived again from the relay task status).",
+      "properties": {
+        "ws": { "type": "string", "pattern": "^ws_[a-z0-9]{6,32}$" },
+        "name": { "type": "string", "maxLength": 64, "description": "The workspace's display name at hand-over time." },
+        "state": { "enum": ["waiting_start", "waiting_approval", "queued", "working", "review", "done", "failed", "denied", "not_needed"], "description": "Relay task status; review = ready for review at the other workspace; not_needed = the owner accepted 'Do it here instead' and the other side was told." }
+      }
+    }
   },
   "allOf": [
-    { "if": { "properties": { "role": { "const": "crew" } } }, "then": { "required": ["order", "task"], "not": { "anyOf": [{ "required": ["stage"] }, { "required": ["crew"] }, { "required": ["proposal"] }] } } },
-    { "if": { "properties": { "role": { "const": "order" } } }, "then": { "required": ["stage"], "not": { "anyOf": [{ "required": ["order"] }, { "required": ["task"] }] } } }
+    { "if": { "properties": { "role": { "const": "crew" } } }, "then": { "required": ["order", "task"], "not": { "anyOf": [{ "required": ["stage"] }, { "required": ["crew"] }, { "required": ["proposal"] }, { "required": ["stop"] }] } } },
+    { "if": { "properties": { "role": { "const": "order" } } }, "then": { "required": ["stage"], "not": { "anyOf": [{ "required": ["order"] }, { "required": ["task"] }, { "required": ["stop"] }, { "required": ["handover"] }] } } },
+    { "if": { "properties": { "role": { "const": "ask" } } }, "then": { "required": ["order", "stop", "ws"], "not": { "anyOf": [{ "required": ["stage"] }, { "required": ["crew"] }, { "required": ["proposal"] }, { "required": ["task"] }, { "required": ["handover"] }] } } }
   ]
 }
