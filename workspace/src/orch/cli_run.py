@@ -298,10 +298,8 @@ def _done(args, root: Path, tid: str | None) -> None:
 
 
 def _send(args, root: Path, tid: str, by: str) -> None:
-    proven = False
     if not (tickets.agent_tool() or by.startswith("agent:")):
         by = tickets.acting_by(args)
-        proven = by.startswith("human:")
     if args.file:
         p = Path(args.file)
         if p.stat().st_size > 64_000:
@@ -311,7 +309,7 @@ def _send(args, root: Path, tid: str, by: str) -> None:
         text = args.text
     if not text:
         raise Refused('Say what to send: orch run send <ticket> "text"  (or --file <path>)')
-    res = runs_live.send(root, tid, by, text, args.kind, proven=proven)
+    res = runs_live.send(root, tid, by, text, args.kind)
     _out(args, res, runs_live.send_text(res, tid))
 
 

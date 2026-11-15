@@ -142,7 +142,7 @@ def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch):
     assert code == 0, out + err
     e = json.loads(out)
     assert e["decision"]["action"] == "approve" and e["answered_by"] == ME and e["via"] == "page"
-    assert len(seen) == 1 and seen[0][1] == {"proven": True}
+    assert len(seen) == 1 and seen[0][1] == {}
     code, out, _ = run("review", "list", "--json")
     assert json.loads(out)["cards"] == []
 

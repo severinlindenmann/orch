@@ -715,21 +715,8 @@ def _init_guard(cwd: Path) -> None:
         raise Refused("This folder is a copy that orch made. Run orch init in the original folder.")
 
 
-def _undo_gated(root: Path, args, who: str, action: str, call, value: str = ""):
-    """check reopen / edit / remove on a step that may be a Won't do: the requirement is decided UNDER THE
-    TICKET LOCK (tickets.NeedsProof), so there is no check-then-act gap and a ticket that cannot be read
-    refuses. `call(who, proven)` runs the locked operation."""
-    try:
-        return call(who, False)
-    except tickets.NeedsProof:
-        who = tickets.acting_by(args)
-        return call(who, who.startswith("human:"))
-
-
-def _is_verdict(root: Path, args, tid: str, status) -> bool:
-    """THE one place that decides "this ticket status change by a person is a verdict" (Done, or away from
-    Review). Every writer of a ticket's status from a person's command (`ticket status`, `ticket patch`)
-    calls it; test_every_status_writer_asks_the_verdict_gate walks the source to keep it so."""
+def _is_done_by_person(root: Path, args, tid: str, status) -> bool:
+    """A person's own Done (or leaving Review) from a command: the person is named, an agent keeps its own."""
     if status is None or (getattr(args, "by", None) or "").startswith("agent:") or tickets.agent_tool():
         return False
     if status == "done":
@@ -740,25 +727,24 @@ def _is_verdict(root: Path, args, tid: str, status) -> bool:
         return False
 
 
-def _verdict_who(root: Path, args, tid: str, data: str, by: str, shown: str = "") -> tuple[str, bool]:
-    """(actor, proven): the person for a verdict, or the plain actor when the change is no verdict.
-    `proven` is True when a person made this verdict (it lets tickets.set_status / patch close the ticket)."""
+def _status_who(root: Path, args, tid: str, data: str, by: str) -> tuple[str, bool]:
+    """(actor, person): the person's name for their own Done, or the plain actor otherwise."""
     try:
         status = json.loads(data).get("status")
     except (ValueError, AttributeError):
         status = None
-    if not _is_verdict(root, args, tid, status):
+    if not _is_done_by_person(root, args, tid, status):
         return by, False
     who = tickets.acting_by(args)
     return who, who.startswith("human:")
 
 
-def _looked_at_this(root: Path, args, tid: str, status, proven: bool) -> bool:
+def _looked_at_this(root: Path, args, tid: str, status, person: bool) -> bool:
     """A person's Done from a page names the review tip the page showed (--shown-tip). Bound here, before
     the Done is written: False when new changes arrived after they looked (the Done still happens; bringing
     the work back waits for their approval). Without a shown tip (the terminal, older pages) nothing
     changes."""
-    if status != "done" or not proven:
+    if status != "done" or not person:
         return True
     try:
         if tickets.load(root, tid)["status"] == "done":
@@ -905,10 +891,10 @@ def run(args: argparse.Namespace) -> None:
         t = _visible(root, tickets.load(root, args.id))
         _out(args, t, _show(t, root))
     elif cmd == "ticket" and sub == "status":
-        who, proven = _verdict_who(root, args, args.id, json.dumps({"status": args.status}), by())
-        looked = _looked_at_this(root, args, args.id, args.status, proven)
+        who, person = _status_who(root, args, args.id, json.dumps({"status": args.status}), by())
+        looked = _looked_at_this(root, args, args.id, args.status, person)
         hint = tickets.recheck_hint(root, args.id, args.status, who)
-        t = tickets.set_status(root, args.id, args.status, who, proven)
+        t = tickets.set_status(root, args.id, args.status, who)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         if hint and t["status"] == "review":
@@ -966,18 +952,16 @@ def run(args: argparse.Namespace) -> None:
         _out(args, {"path": rel}, rel)
     elif cmd == "ticket" and sub == "changes":
         who = tickets.acting_by(args)
-        t = tickets.ask_for_changes(root, args.id, args.text, who, proven=who.startswith("human:"))
+        t = tickets.ask_for_changes(root, args.id, args.text, who)
         _out(args, t, f"{t['title']} - sent back with your note. An agent picks it up.")
     elif cmd == "ticket" and sub == "patch":
-        who, proven = _verdict_who(
-            root, args, args.id, args.data, by(), args.data
-        )  # Looks good needs the person's proof
+        who, person = _status_who(root, args, args.id, args.data, by())
         try:
             status = json.loads(args.data).get("status")
         except (ValueError, AttributeError):
             status = None
-        looked = _looked_at_this(root, args, args.id, status, proven)
-        t = tickets.patch(root, args.id, args.if_revision, args.data, who, proven)
+        looked = _looked_at_this(root, args, args.id, status, person)
+        t = tickets.patch(root, args.id, args.if_revision, args.data, who)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
         _out(
@@ -1013,37 +997,18 @@ def run(args: argparse.Namespace) -> None:
     elif cmd == "check" and sub in ("edit", "move", "remove", "reopen", "start", "stop"):
         who = by()
         if sub == "edit":
-            t, c = _undo_gated(
-                root,
-                args,
-                who,
-                "edit",
-                lambda w, p: tickets.check_edit(
-                    root, args.id, args.check, args.text, w, args.if_revision, args.was, args.covers, proven=p
-                ),
-                value=args.text or "",
+            t, c = tickets.check_edit(
+                root, args.id, args.check, args.text, who, args.if_revision, args.was, args.covers
             )
             msg = f"{c['id']} renamed."
         elif sub == "move":
             t, c = tickets.check_move(root, args.id, args.check, args.after, who)
             msg = f"{c['id']} now follows {args.after}."
         elif sub == "remove":
-            t, c = _undo_gated(
-                root,
-                args,
-                who,
-                "remove",
-                lambda w, p: tickets.check_remove(root, args.id, args.check, w, proven=p),
-            )
+            t, c = tickets.check_remove(root, args.id, args.check, who)
             msg = f"{c['id']} removed. It and its proof are kept in the history."
         elif sub == "reopen":
-            t, c = _undo_gated(
-                root,
-                args,
-                who,
-                "reopen",
-                lambda w, p: tickets.check_reopen(root, args.id, args.check, w, proven=p),
-            )
+            t, c = tickets.check_reopen(root, args.id, args.check, who)
             msg = f"{c['id']} is open again. Its proof stays in the history."
         elif sub == "start":
             t, c = tickets.check_start(root, args.id, args.check, who)
@@ -1161,7 +1126,7 @@ def run(args: argparse.Namespace) -> None:
         with contextlib.suppress(
             Refused
         ):  # the answer is saved; a busy run only delays it reaching the agent
-            runs_live.pass_answer(root, t["id"], q, who, proven=who.startswith("human:"))
+            runs_live.pass_answer(root, t["id"], q, who)
         note = _addon_note(root, q)
         _out(
             args,
