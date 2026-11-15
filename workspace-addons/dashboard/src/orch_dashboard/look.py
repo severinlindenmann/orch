@@ -100,7 +100,12 @@ def _workspaces(root: Path, orch_bin: str | None) -> list[dict]:
         needs = None
         path = Path(w["workspace"])
         try:
-            if path.is_absolute() and path.is_dir() and (path / ".orch").is_dir():
+            if (
+                (url or w["workspace"] == here)
+                and path.is_absolute()
+                and path.is_dir()
+                and (path / ".orch").is_dir()
+            ):
                 items = run_orch(orch_bin, ["needs", "--json"], path, timeout=3.0)
                 if isinstance(items, list):
                     needs = len(items)
