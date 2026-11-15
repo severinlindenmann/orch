@@ -1043,6 +1043,10 @@ def send_question(
     }
     sign_asked(root, msg["id"], rec)
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
+    with contextlib.suppress(
+        Refused, OSError
+    ):  # a page says "Sent to your phone 12:31"; never blocks the send
+        tickets.mark_question_sent(root, ticket["id"], q["id"])
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
         send_text(root, "phones", "Waiting for your answer", ticket["id"], "note", view=True)
