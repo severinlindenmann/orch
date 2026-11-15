@@ -61,6 +61,21 @@ def _manage(args, root):
     return 1 if args.cmd == "status" and not data["running"] else 0
 
 
+def _needs(args, root):
+    from .needs import from_env
+
+    try:
+        rows = from_env(root)
+    except Exception:  # noqa: BLE001 - a failing check-up read is "nothing to show", never an error
+        rows = []
+    print(
+        json.dumps(rows)
+        if args.json
+        else "\n".join(f"{r['title']}: {r['text']}" for r in rows) or "Nothing needs you here."
+    )
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="orch insights", description="What your helpers used.")
     parser.add_argument("--dir", default=".")
@@ -69,6 +84,8 @@ def main(argv=None):
     serve.add_argument("--port", type=int, default=DEFAULT_PORT)
     serve.add_argument("--auto-port", action="store_true", help=argparse.SUPPRESS)
     serve.add_argument("--ready-file", help=argparse.SUPPRESS)
+    needs = commands.add_parser("needs", help="rows for `orch needs`")
+    needs.add_argument("--json", action="store_true")
     for name in ("start", "stop", "status", "open"):
         command = commands.add_parser(name)
         command.add_argument("--json", action="store_true")
@@ -81,6 +98,8 @@ def main(argv=None):
         return 2
     if args.cmd is None:
         args = parser.parse_args(["--dir", str(root), "serve"])
+    if args.cmd == "needs":
+        return _needs(args, root)
     try:
         return _serve(args, root) if args.cmd == "serve" else _manage(args, root)
     except (RuntimeError, OSError) as error:

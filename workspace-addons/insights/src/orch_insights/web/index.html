@@ -17,6 +17,7 @@
 <script src="__P__/kit/widgets.js" defer></script>
 <script src="__P__/web/insights.js" defer></script>
 <script src="__P__/web/settings.js" defer></script>
+<script src="__P__/web/checkup.js" defer></script>
 </head>
 <body>
 <main id="content" class="page wide area-page page-enter" tabindex="-1" aria-label="Insights">
@@ -33,6 +34,7 @@
 </header>
 <div id="view-region" aria-busy="true">
 <div id="main-view" class="area-body">
+<section id="checkup" class="stack" aria-label="Check-up" hidden><p id="checkup-note" class="note" role="status" hidden></p></section>
 <div id="loading" class="area-body loading-mask" inert aria-hidden="true">
 <div class="metric-grid"><article class="card metric"><p class="meta">Runs</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Skills used</p><strong>00</strong><small>Loading data</small></article><article class="card metric"><p class="meta">Connected services</p><strong>00</strong><small>Loading data</small></article></div>
 <div class="analysis-grid"><section class="card chart-card"><div class="section-head"><h2>Runs over time</h2><span class="meta">Last 30 days</span></div><div class="chart-stage"></div></section><section class="card chart-card"><div class="section-head"><h2>Skill use</h2></div><p class="muted">Loading the skills your helpers used.</p><div class="bar-row"><span>Loading</span><div class="progress"><span></span></div></div></section></div>
