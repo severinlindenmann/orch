@@ -177,7 +177,7 @@ test('workspace chat header without a description shows no empty line', () => {
   assert.doesNotMatch(JSON.stringify(c.chatDmThread()), /chat-desc/);
 });
 
-// #865: Home opened Pilatus' thread while a contacts load was running; the peer's texts (by = a workspace id) must show.
+// Issue 865: Home opened Pilatus' thread while a contacts load was running; the peer's texts (by = a workspace id) must show.
 test('receiver: a thread opened while a load runs still renders the peer messages at once', async () => {
   const PEER = 'ws_w9pcj20gdf', c = context(), calls = [];
   vm.runInContext("chatDm.contacts = []; chatUi.open = 'chat';", c);

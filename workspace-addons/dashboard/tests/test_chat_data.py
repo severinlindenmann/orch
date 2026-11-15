@@ -185,7 +185,7 @@ def test_dm_actions_go_through_the_act_fence(act_server, act_orch, operation, co
 
 
 def test_dm_send_answers_without_a_full_state_rebuild(act_server, monkeypatch):
-    """#865: a full load_state took ~10 s on a big workspace and kept "Sending…" on screen."""
+    """Issue 865: a full load_state took ~10 s on a big workspace and kept "Sending…" on screen."""
     from orch_dashboard import server as server_mod
 
     from .test_act import post
@@ -194,7 +194,9 @@ def test_dm_send_answers_without_a_full_state_rebuild(act_server, monkeypatch):
         raise AssertionError("a workspace text must not rebuild the whole state")
 
     monkeypatch.setattr(server_mod, "load_state", boom)
-    code, _ = post(act_server, {"op": "chat.send_ws", "args": {"workspace": "ws_abcdefghij", "text": "hi"}})[:2]
+    code, _ = post(act_server, {"op": "chat.send_ws", "args": {"workspace": "ws_abcdefghij", "text": "hi"}})[
+        :2
+    ]
     assert code == 200
 
 
