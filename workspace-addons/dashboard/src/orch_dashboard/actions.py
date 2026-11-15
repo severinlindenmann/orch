@@ -618,6 +618,16 @@ def _diag_set(a):
     return ["config", "set", "diag.enabled", "on" if a["on"] else "off"], [], []
 
 
+def _typing_set(a):
+    """Settings > Add-ons: may the person type into the helper's screen, a plain `orch config set` (core names the key)."""
+    from orch.config import SESSION_TYPING_KEY
+
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", SESSION_TYPING_KEY, "on" if a["on"] else "off"], [], []
+
+
 def _diag_delete(what):
     def build(a):
         _only(a, ())
@@ -1030,6 +1040,7 @@ OPS = {
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
     "diag.set": _diag_set,
+    "typing.set": _typing_set,
     "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,

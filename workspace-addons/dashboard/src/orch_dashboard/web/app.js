@@ -646,6 +646,13 @@ main.addEventListener('click', async event => {
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
   if (action === 'diag-set') { await diagSwitch(); return; }
+  if (action === 'focus-typing') {
+    if (settingsBusy.has('focus-typing')) return;
+    const on = state.settings?.typing_on !== true;
+    const result = await settingsSend('typing.set', {on}, 'focus-typing');
+    if (result.ok) window.orch.toast(on ? 'You can type into the helper\u2019s screen.' : 'Typing into the helper\u2019s screen is off.', 'ok');
+    return;
+  }
   if (action === 'diag-delete-reports') { await diagDelete(); return; }
   if (action === 'copies-switch') { settingsReviewOpen('copies-switch', control); return; }
   if (action === 'copies-clean') { settingsReviewOpen('copies-clean', control); return; }

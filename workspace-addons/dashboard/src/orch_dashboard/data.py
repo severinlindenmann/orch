@@ -855,6 +855,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copies_mode,
         copy_setup,
         diag_enabled,
+        focus_session_typing,
         workspace_description,
         workspace_name,
     )
@@ -875,6 +876,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "copy_setup": copy_setup(root) or "",
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
+        "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),
         "copies_disk": copies_disk(root),

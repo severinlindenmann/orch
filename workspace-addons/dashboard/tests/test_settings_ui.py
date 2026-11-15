@@ -1,5 +1,7 @@
 """Settings contracts shared with delegated shell handlers and the API lane."""
 
+import pytest
+
 from tests import webjs
 
 
@@ -354,3 +356,21 @@ def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
     monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: True)
     out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
     assert all(a["dashboard"] for a in out)
+
+
+def test_typing_on_is_a_plain_setting_the_dashboard_can_switch(ws, monkeypatch):
+    """885: the refusal names a real switch (Settings > Add-ons > Focus); the op is `orch config set focus.session_typing`."""
+    from orch_dashboard import actions, data, server
+
+    assert actions.build_argv("typing.set", {"on": True})[:4] == [
+        "config",
+        "set",
+        "focus.session_typing",
+        "on",
+    ]
+    assert actions.build_argv("typing.set", {"on": False})[3] == "off"
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("typing.set", {"on": "yes"})
+    assert "Let me type into the helper's screen" in server.TYPING_OFF and "Add-ons" in server.TYPING_OFF
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
+    assert data.load_settings(ws, "orch")["typing_on"] is False

@@ -158,3 +158,19 @@ test('while the update runs the banner names both versions and what changed', ()
   assert.equal(lines(null), '');
   assert.match(hsrc, /sessionStorage\.setItem\("orch-update-from"/);  // so the end says "Updated orch 23 → 24."
 });
+
+// 885: the Focus add-on page has the one switch the refusal points to
+test('the Focus add-on page shows the typing switch with one plain line, only when Focus is on', () => {
+  const mk = (settings) => {
+    const ctx = settingsCtx({addons: () => [], state: {look: null, settings}, heading: t => el('h1', {}, t)});
+    vm.runInContext(head + '\n' + slice(ssrc, 'function addonDetailPage(', 'function settingsPage()') + '\nthis.page = addonDetailPage;', ctx);
+    return ctx;
+  };
+  const on = mk({typing_on: false}).page({name: 'focus', active: true, description: 'd', removable: true});
+  const sw = find(on, byKey('addon-detail-typing'));
+  assert.equal(sw.props['data-action'], 'focus-typing');
+  assert.equal(sw.props['aria-checked'], false);
+  assert.match(text(find(on, byKey('addon-detail-typing-row'))), /Let me type into the helper’s screen.*click the helper’s live screen and type into it/);
+  assert.equal(find(mk({typing_on: false}).page({name: 'focus', active: false, description: 'd'}), byKey('addon-detail-typing')), null);
+  assert.equal(find(mk({typing_on: true}).page({name: 'sync', active: true, description: 'd'}), byKey('addon-detail-typing')), null);
+});

@@ -172,7 +172,10 @@ def _services_stamp():
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
 
 
-TYPING_OFF = "Typing into the helper's screen is off. Turn on 'Let me type' in Settings to allow it."
+TYPING_OFF = (
+    "Typing into the helper's screen is off. "
+    "Turn on 'Let me type into the helper's screen' in Settings \u2192 Add-ons, on the page of the add-on that shows this screen."
+)
 
 
 def _typing_allowed(root) -> bool:
