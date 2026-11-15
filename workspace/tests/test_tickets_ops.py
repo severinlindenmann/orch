@@ -871,3 +871,63 @@ def test_invalid_session_id_never_recorded_or_selected(proj, new_ticket, sid):
     path.with_name("own-sessions.adopted").write_text("{}")
     assert tickets.sessions_for(proj, tid, before | {"sessions": [entry]}, "agent", "host") is None
     assert tickets._own_sessions(proj) == []
+
+
+def test_due_takes_a_time_of_day(proj, run, validate, new_ticket):
+    """G1: `due` is `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` (local wall time); `18:30` means today."""
+    from datetime import datetime
+
+    tid = new_ticket()
+    today = datetime.now().strftime("%Y-%m-%d")
+    for given, stored in (
+        ("2026-11-15", "2026-11-15"),
+        ("2026-11-15 18:30", "2026-11-15T18:30"),
+        ("2026-11-15T08:05", "2026-11-15T08:05"),
+        ("18:30", f"{today}T18:30"),
+        ("7:05", f"{today}T07:05"),
+    ):
+        assert run("ticket", "edit", tid, "--due", given)[0] == 0, given
+        t = read(proj, tid)
+        assert t["due"] == stored
+        validate(t)
+    for bad in ("25:00", "2026-11-15 24:00", "2026-11-15 18", "18:30:10", "tomorrow", "2026-02-30 10:00"):
+        code, _, err = run("ticket", "edit", tid, "--due", bad)
+        assert code == 2 and "due must be a date like 2026-11-10 or a time like 18:30." in err, bad
+
+
+def test_due_words_for_a_time():
+    from datetime import datetime
+
+    now = datetime(2026, 11, 15, 12, 0)  # a Sunday
+    label = tickets.due_label
+    assert label("2026-11-15T18:30", "active", now) == "Due 18:30"
+    assert label("2026-11-15T09:00", "active", now) == "Late since 09:00"
+    assert label("2026-11-15T09:00", "done", now) == "Due 09:00"
+    assert label("2026-11-16T18:30", "open", now) == "Due Mon 18:30"
+    assert label("2026-11-14T18:30", "open", now) == "Late since Sat 18:30"
+    assert label("2026-11-15", "open", now) is None and label(None, "open", now) is None
+
+
+def test_cli_list_and_show_print_the_due_time(proj, run, new_ticket):
+    from datetime import datetime, timedelta
+
+    tid = new_ticket()
+    later = (datetime.now() + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
+    assert run("ticket", "edit", tid, "--due", later)[0] == 0
+    hm = later[-5:]
+    day_label = "Due " + hm if later[:10] == datetime.now().strftime("%Y-%m-%d") else None
+    out = run("ticket", "list")[1]
+    assert "Due " in out and hm in out
+    assert (day_label or "Due") in run("ticket", "show", tid)[1]
+    assert run("ticket", "edit", tid, "--due", "2020-01-01 09:00")[0] == 0
+    assert "Late since" in run("ticket", "list")[1] and "Late since" in run("ticket", "show", tid)[1]
+    assert run("ticket", "edit", tid, "--due", "2026-12-01")[0] == 0
+    assert "Due" not in run("ticket", "list")[1] and "Due: 2026-12-01" in run("ticket", "show", tid)[1]
+
+
+def test_due_words_far_day():
+    from datetime import datetime
+
+    now = datetime(2026, 11, 15, 12, 0)
+    assert tickets.due_label("2026-12-01T09:05", "open", now) == "Due 1 Dec 2026, 09:05"
+    assert tickets.due_label("2026-10-01T09:05", "open", now) == "Late since 1 Oct 2026, 09:05"

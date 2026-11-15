@@ -43,3 +43,5 @@ document.querySelectorAll('[data-demo-tab]').forEach(t=>{t.onclick=()=>tab(t.dat
 document.querySelector('[data-copy]').onclick=async()=>{try{await navigator.clipboard.writeText(new URL('samples/sample-sign.svg',location.href).href);announce('File link copied');}catch{announce('Copy is unavailable here. Open the file and copy its address.');}};
 }
 document.getElementById('g-density')?.addEventListener('change',e=>{document.documentElement.dataset.density=e.target.value});
+
+if(window.UI?.date){const v=document.getElementById('g-due'),t=document.getElementById('g-due-toggle');if(v&&t)window.UI.date(v,t,null,{time:true});}
