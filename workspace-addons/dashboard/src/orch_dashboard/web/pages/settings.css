@@ -40,6 +40,7 @@
 .settings .switch::after{top:14px;left:4px}
 .settings .switch[aria-checked=true]::before{background:var(--brand)}
 .settings .ad-h>.switch{padding-left:48px;min-width:80px;color:var(--text)}
+.settings [data-key=settings-profile]{order:-2}
 .settings [data-key=settings-workspace]{order:-1}
 
 /* Separate copies: one row with a switch; the rest behind Details. */

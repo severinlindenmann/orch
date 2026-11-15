@@ -1296,17 +1296,14 @@ def test_attach_files_to_an_existing_ticket():
         )
 
 
-def test_workspace_set_builds_one_config_set_argv_and_signs_the_text():
-    import hashlib
-
+def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
     argv = actions.build_argv("workspace.set", {"field": "name", "text": " Newsletter "})
     assert argv[:3] == ["config", "set", "workspace.name"] and argv[-2:] == ["--", "Newsletter"]
     assert actions.build_argv("workspace.set", {"field": "description", "text": ""})[-2:] == ["--", ""]
-    sha = hashlib.sha256(b"Newsletter").hexdigest()
-    assert actions.proof_for("workspace.set", {"field": "name", "text": " Newsletter "}) == (
-        "config.workspace_info",
-        "name:" + sha,
-    )
+    assert actions.proof_for("workspace.set", {"field": "name", "text": "x"}) is None
+    assert actions.needs_session("workspace.set") and actions.needs_session(
+        "look.profile"
+    )  # a login, no proof
     for bad in (
         {"field": "other", "text": "x"},
         {"field": "name", "text": "a\nb"},

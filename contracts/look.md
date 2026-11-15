@@ -67,13 +67,15 @@ the core records it per machine (orch home `shared-pages.json`) and sends `PATCH
   callers (vectors `shared_pages_set`); publish cannot tell them apart, so the core is where this is enforced.
 App pages (`/a/<name>`) are the workspace's own and are not changed.
 
-## Description from the dashboard
+## Workspace profile card (dashboard)
 
-The dashboard can edit the description (and tags) through the **same proposal path** as `orch relay|publish profile`:
-`PATCH /v1/me {description}` to each connected service → pending → the owner approves it in the admin portal →
-`description_by = workspace`. The dashboard shows "Waiting for approval" with a link to the admin portal while
-`whoami.pending` is set. No new endpoint, no new trust path (the services cannot tell a person from an agent holding the
-workspace token). Not connected anywhere → the row says "Shown once you connect a relay or publish".
+Settings → General → *Workspace profile* holds the name, ONE description, tags, icon and colour. The description is
+saved locally (`config set workspace.description`, a plain action, no proof) and, when a relay (or publish) is turned on, the same
+text and the tags are sent to the first one that is connected, through the **same proposal path** as `orch relay|publish profile`: `PATCH /v1/me
+{description, tags}` → pending → the owner approves it in the admin portal → `description_by = workspace`. The card
+shows "Waiting for relay approval" while `whoami.pending` is set and "Live on relay" after; the name on the relay is
+shown read only. Icon and colour apply at once (`look set`). Relay rows appear only when the relay is on (AGENTS.md R1.1).
+No new endpoint, no new trust path.
 
 ## Body rules (`PATCH /v1/me`, admin PATCH)
 
