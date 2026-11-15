@@ -52,6 +52,13 @@ GALLERY_CSP = (
 )
 
 
+def _traceparent() -> str | None:
+    try:
+        return diag.traceparent() if diag else None
+    except Exception:  # noqa: BLE001 - never stops an answer
+        return None
+
+
 def kit_dir() -> Path | None:
     """The master kit: orch_ui's static folder (the dashboard keeps no copy of it)."""
     try:
@@ -236,11 +243,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", (extra or {}).get("Cache-Control", "no-store"))
         self.send_header("X-Content-Type-Options", "nosniff")
-        if diag:  # the request's trace id, so the page can tie a click to its request in the debug log
-            try:
-                self.send_header("traceparent", diag.traceparent())
-            except Exception:  # noqa: BLE001 - never stops an answer
-                pass
+        tp = _traceparent()  # the request's trace id, so the page can tie a click to its request in the log
+        if tp:
+            self.send_header("traceparent", tp)
         for k, v in (extra or {}).items():
             if k != "Cache-Control":
                 self.send_header(k, v)

@@ -174,7 +174,7 @@ def open_folder(root: Path, body) -> tuple[int, dict | str]:
         else ["xdg-open", str(folder)]
     )
     try:
-        subprocess.Popen(  # noqa: S603 - fixed program, one validated folder
+        subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

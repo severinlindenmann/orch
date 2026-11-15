@@ -110,11 +110,11 @@ def dispatch(args, root: Path) -> bool:
             for g in res["unavailable"]:
                 print(f"not available: {g}")
     elif args.sub == "delete":
-        from orch import cli_config, config
+        from orch import cli_config
 
-        config.require_person(
-            cli_config._actor(args), "delete reports or debug notes"
-        )  # evidence: a person's click
+        # evidence: a person's own click, verified like `diag.enabled off` (not the self-declared --by)
+        who = cli_config._person(args, root, f"diag.delete_{args.what}", args.what, parts={"what": args.what})
+        diag.log("diag.delete_requested", "warn", root=root, actor=who, what=args.what)
         gone = diag_report.delete_all(root) if args.what == "reports" else diag.delete_notes(root)
         label = "report" if args.what == "reports" else "file of notes"
         text = f"Deleted {gone} {label}{'' if gone == 1 else 's'}."

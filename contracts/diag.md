@@ -93,6 +93,7 @@ of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until
 | `diag.dropped` | `count`, `n_<reason>` |
 | `diag.report_failed` | (error event; `err` has the class) the dashboard could not make a report |
 | `diag.report_made` | `ref`, `scope` (`ticket`, `add-on` or `workspace`), `content`, `page` (a page snapshot was added); written when the dashboard makes a report |
+| `diag.delete_requested` | `actor`, `what` (`reports` or `notes`; written before a person's verified delete) |
 | `diag.reports_deleted` | `count` (Settings > Delete all) |
 | `diag.notes_deleted` | `files` (Settings > Delete notes; the first line of the new log) |
 | `ui.error` | `kind` (`error` or `rejection`), `what` (the error class or name, cut), `file`, `line`, `col` (script file name, no query) |

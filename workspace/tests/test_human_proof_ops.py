@@ -2403,3 +2403,19 @@ def test_switching_the_debug_log_off_needs_the_person_proof_a_forged_by_is_not_e
     assert run("config", "get", "diag.enabled", "--json")[1].count("false") == 1
     assert any(e["ev"] == "diag.disabled" and e["kv"]["actor"] == "human:pat" for e in diag.read_events(ws))
     assert run("config", "set", "diag.enabled", "on", "--by", "agent:claude", "--json")[0] == 0  # on is free
+
+
+def test_deleting_reports_and_notes_needs_the_person_proof(ws, run, monkeypatch):
+    from orch import diag
+
+    diag.log("diag.test_note", "info", root=ws)
+    for what in ("reports", "notes"):
+        for by in ("agent:claude", "human:pat"):  # a self-declared --by proves nothing
+            assert run("diag", "delete", what, "--by", by, "--json")[0] == 2
+    assert diag.stats(ws)["notes"]["files"] == 1
+    wrong = _proof(ws, "diag.delete_reports", "notes")
+    assert _cli(run, monkeypatch, wrong, "diag", "delete", "notes", "--json")[0] == 2
+    proof = _proof(ws, "diag.delete_notes", "notes")
+    assert _cli(run, monkeypatch, proof, "diag", "delete", "notes", "--json")[0] == 0
+    evs = [e["ev"] for e in diag.read_events(ws)]
+    assert "diag.notes_deleted" in evs and "diag.test_note" not in evs  # the old lines are gone

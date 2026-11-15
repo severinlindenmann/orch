@@ -183,6 +183,8 @@ def proof_for(op, args, root=None):
         return None
     if op == "diag.set":  # the debug log: off is a person's decision (on needs no proof)
         return ("config.diag_enabled", "off") if args.get("on") is False else None
+    if op in ("diag.delete_reports", "diag.delete_notes"):  # evidence: always a person's proof
+        return op, op.removeprefix("diag.delete_")
     if op == "share.set":  # sharing the orch entry with the team (off needs no proof)
         return ("config.share", "on") if args.get("on") is True else None
     if op == "look.shared":
