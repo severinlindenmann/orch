@@ -68,7 +68,7 @@
     toggle.disabled = busy;
     toggle.title = '';
     const label = toggle.querySelector('.mm-label');
-    if (label) label.textContent = 'Send questions to my phone';
+    if (label) label.textContent = 'Phone';
   }
 
   function paint() {

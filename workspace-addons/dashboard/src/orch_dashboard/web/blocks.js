@@ -108,6 +108,12 @@ const OrchBlocks = (() => {
     if (a.confirm) b.dataset.confirm = String(a.confirm);
     return actionAttrs(b, a.action, a.label) ? b : null;
   };
+  // A shared link also gets "Open" (owner 15 Nov, fb4): same checked link id, the page opens the link in a new tab.
+  const openFirst = b => {
+    if (b.dataset.native !== 'link-copy') return [b];
+    const o = el('button', 'btn ghost sm', 'Open'); o.type = 'button'; o.dataset.native = 'link-open'; o.dataset.linkId = b.dataset.linkId; o.setAttribute('aria-label', 'Open link');
+    return [o, b];
+  };
   // Heading row of a block: the title, then quiet text (`meta`, or the `count`) at the right.
   function blkHead(b, tag) {
     const quiet = b.meta || (Number.isInteger(b.count) ? String(b.count) : '');
@@ -202,7 +208,7 @@ const OrchBlocks = (() => {
     t.title = String(it.title);
     row.append(t); for (const m of arr(it.meta)) row.append(el('span', 'meta', m));
     const box = el('div', 'compact-actions');
-    for (const a of arr(it.actions)) { const b = rowButton(a); if (b) box.append(b); }
+    for (const a of arr(it.actions)) { const b = rowButton(a); if (b) box.append(...openFirst(b)); }
     row.append(box); li.append(row);
     return li;
   }
@@ -329,7 +335,7 @@ const OrchBlocks = (() => {
         });
         if (hasActions) {
           const td = el('td'), box = el('div', 'row');
-          for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) box.append(btn); }
+          for (const a of arr(r.actions)) { const btn = rowButton(a); if (btn) box.append(...openFirst(btn)); }
           td.append(box); tr.append(td);
         }
         if (hasToggle) { const td = el('td'), sw = r.toggle ? toggleEl(r.toggle) : null; if (sw) td.append(sw); tr.append(td); }

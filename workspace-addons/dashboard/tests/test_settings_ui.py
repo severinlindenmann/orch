@@ -80,7 +80,7 @@ def test_shared_links_are_optional_and_use_plain_actions():
         "Array.isArray(data.links)",
         "catch (_) { sharedLinks = null; sharedLinksDown = false; }",
         "if (!link.copy) return;",
-        "navigator.clipboard.writeText(link.link)",
+        "window.UI.copyText(link.link)",
         "act('link.extend', {id:link.id, days:7})",
         "act('link.stop', {id:link.id})",
         "'The link stops working.'",
