@@ -675,3 +675,43 @@ def test_many_sibling_tickets_keep_the_command_line_short(proj_ws, monkeypatch, 
     assert not _covered(pats, "Read", str(own / "x"))
     assert len(flag) < 30000
     assert "other copies are not covered" in capsys.readouterr().err  # said, never dropped silently
+
+
+def test_copies_base_avoids_a_name_that_clashes_with_any_candidate_home(tmp_path, monkeypatch):
+    """#740: the name choice looks at every home the agent's shell deny covers (ORCH_HOME and the real
+    folder), not only the home it is made for."""
+    from orch import addons
+
+    h = tmp_path / ".orch-tool"
+    h.mkdir()
+    other = tmp_path / "x"
+    other.mkdir()
+    first = addons.copies_base(h)
+    assert first.name == ".orch-work"
+    # another home whose name is a part of the first copies name: that name would be denied as shell text
+    clash = tmp_path / ".orch-w"
+    clash.mkdir()
+    monkeypatch.setattr(addons, "home_candidates", lambda include_real=False: [clash.resolve(), h.resolve()])
+    assert addons.copies_base(h).name != ".orch-work"
+    assert not any(addons.names_clash(c, addons.copies_base(h)) for c in (clash.resolve(), h.resolve()))
+
+
+def test_a_full_set_of_copies_rows_fits_a_windows_command_line(proj_ws, monkeypatch):
+    """#740: COPY_BUDGET counts raw pattern characters; the whole deny flag (JSON/quote escaping on a Windows
+    command line doubles every backslash and quote) must stay below 32767 characters."""
+    import json
+
+    from orch import addons
+
+    home = addons.home(proj_ws).resolve()
+    base = addons.copies_base(home)
+    own = base / "ab12cd34" / "t_own001abc"
+    own.mkdir(parents=True)
+    for i in range(400):
+        (base / "ab12cd34" / f"t_{i:06d}").mkdir()
+    rows = denyrules.copies_rules(str(own), str(proj_ws), None, bases=[str(base)])
+    pats = denyrules.tool_patterns(rows)
+    flag = ",".join(pats)
+    assert len(flag) <= denyrules.COPY_BUDGET + 200
+    escaped = json.dumps(flag.replace("/", "\\"))  # worst case: every separator a backslash, all escaped
+    assert len(escaped) < 32767 - 5000  # room for the rest of the command line

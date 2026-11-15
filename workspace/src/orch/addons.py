@@ -418,8 +418,12 @@ def copies_base(h: Path) -> Path:
     tag = hashlib.sha256(str(h).casefold().encode("utf-8")).hexdigest()
     names = [".orch-work"] if h.name == ".orch-tool" else []
     names += [f".orch-work-{tag[:8]}", f".oc-{tag[:16]}"]
+    homes = [
+        h,
+        *(c for c in home_candidates(include_real=True) if c != h),
+    ]  # the shell deny of ANY home applies
     for n in names:
-        if not names_clash(h, h.parent / n):
+        if not any(names_clash(c, h.parent / n) for c in homes):
             return h.parent / n
     return h.parent / names[-1]
 
