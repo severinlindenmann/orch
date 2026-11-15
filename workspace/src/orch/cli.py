@@ -19,6 +19,7 @@ from orch import (
     cli_conn,
     cli_diag,
     cli_job,
+    cli_leave,
     cli_look,
     cli_needs,
     cli_record,
@@ -35,6 +36,7 @@ from orch import (
     is_record_hook,
     mobile_mode,
     net,
+    nextstep,
     refs,
     relay,
     review,
@@ -109,6 +111,7 @@ def _copies_folders() -> list[Path]:
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -422,6 +425,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_status.add_parsers(sub, common)
     cli_addons.add_parsers(sub, common)
     cli_diag.add_parsers(sub, common)
+    cli_leave.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -839,12 +843,7 @@ def run(args: argparse.Namespace) -> None:
             + agent
             + "\n"
             + "\n".join(lines)
-            + (f"\nTurned on: {', '.join(on)}" if on else "")
-            + (
-                "\nNext: orch init --recommended"
-                if not args.recommended and init_mod.has_recommended(root)
-                else ""
-            ),
+            + (f"\nTurned on: {', '.join(on)}" if on else ""),
         )
     elif cmd == "dev-mark":
         humanproof.dev_mark_cli(root, getattr(args, "by", None))
@@ -892,7 +891,12 @@ def run(args: argparse.Namespace) -> None:
         elif args.project_only and (args.json or not report):
             data = {"ok": True, "refreshed": done, **({"notes": notes} if args.json and notes else {})}
             _out(args, data, "Refreshed: " + ", ".join(done or ["nothing"]))
-    elif cli_status.dispatch(args, root) or cli_addons.dispatch(args, root) or cli_diag.dispatch(args, root):
+    elif (
+        cli_status.dispatch(args, root)
+        or cli_addons.dispatch(args, root)
+        or cli_diag.dispatch(args, root)
+        or cli_leave.dispatch(args, root)
+    ):
         pass
     elif (
         cli_run.dispatch(args, root)
@@ -926,8 +930,7 @@ def run(args: argparse.Namespace) -> None:
         _out(
             args,
             t,
-            f'Created {t["key"]} "{t["title"]}" [{t["id"]}]{part}\n'
-            f'Next: add one checklist item per step: orch check add {t["key"]} "<step>"',
+            f'Created {t["key"]} "{t["title"]}" [{t["id"]}]{part}',
         )
     elif cmd == "ticket" and sub == "tree":
         top = _visible(root, tickets.load(root, args.id))
@@ -955,7 +958,7 @@ def run(args: argparse.Namespace) -> None:
                 _line(t) + (" - parent missing" if t.get("parent") and t["parent"] not in ids else "")
                 for t in ts
             )
-            or 'No open tickets. Create one with: orch ticket new "<title>"'
+            or "No open tickets."
         )
         if hidden and not args.json:
             txt += f"\n({hidden} finished - show them with: orch ticket list --all)"
@@ -977,7 +980,7 @@ def run(args: argparse.Namespace) -> None:
             if args.status == "done" and t["status"] == "review"
             else shown.get("notice") or f"{t['title']} - {tickets.STATUS_WORDS[t['status']]}"
         )
-        _out(args, shown, text + (f"\nNext: {hint}" if shown.get("next_step") else ""))
+        _out(args, shown, text)
     elif cmd == "ticket" and sub == "edit":
         keys = ("owner", "due", "note", "done_when")
         fields = {k: getattr(args, k) for k in keys if getattr(args, k) is not None}
@@ -1166,8 +1169,7 @@ def run(args: argparse.Namespace) -> None:
         _out(
             args,
             q,
-            (f"Taken back {q['id']}." if changed else f"{q['id']} was already taken back.")
-            + " Next: keep working on the ticket.",
+            f"Taken back {q['id']}." if changed else f"{q['id']} was already taken back.",
         )
     elif cmd == "ask":
         if args.phone and "relay" not in addons.active(root):
@@ -1205,7 +1207,7 @@ def run(args: argparse.Namespace) -> None:
             args,
             q,
             f"Asked {q['id']}" + (f" on {q['check']}" if q.get("check") else "") + f", waiting. {t['title']} "
-            "is now waiting for an answer.\nNext: keep working on the steps that do not need the answer.",
+            "is now waiting for an answer.",
         )
     elif cmd == "answer":
         # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says.
@@ -1455,6 +1457,10 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
             "cli.command", "info", root=root, command=argv[0] if argv else "", sub=_sub_word(argv)
         ):
             run(args)
+        if not want_json:
+            line = nextstep.hint(nextstep.leaf_path(parser, args), getattr(args, "_next_data", None), args)
+            if line:
+                print(f"Next: {line}")
         cli_run.after_command(args, root, want_json)
         for text in humanproof.cli_notices(root):  # e.g. "orch reset its protection ...": said once, in words
             print(text, file=sys.stderr)

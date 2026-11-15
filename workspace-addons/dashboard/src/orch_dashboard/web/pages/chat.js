@@ -102,8 +102,16 @@ function chatDmRow(c) {
     h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', chatPreview(last?.text))),
     h('span', {className:'chat-row-time'}, time(last?.shown_at || last?.at || c.last_at)));
 }
+const chatGroupTime = g => Date.parse(g.last_at || g.finished || g.started) || 0;
+// Other workspaces keep their place above the groups while the contacts load (or fail), instead of appearing later.
+function chatDmPending() {
+  if (snapshot || chatDm.loaded) return null;
+  return h('div', {className:'chat-dm-pending', 'data-key':'dm-pending'}, h('h2', {}, 'Other workspaces'),
+    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatText('p', 'chat-muted', 'Loading…'));
+}
 function chatList() {
-  const groups = chatGroups().filter(g => !chatFinished(g)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
+  // Newest group first, so an old group never sits above a fresh one.
+  const groups = chatGroups().filter(g => !chatFinished(g)).sort((a, b) => chatGroupTime(b) - chatGroupTime(a)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
   const dms = chatDm.contacts.filter(c => c.count > 0 || chatDmMessages(c.ws).length || chatUi.open === c.ws)
     .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0));
   const helperRow = chatListRow(null), dmRows = dms.map(chatDmRow), groupRows = groups.map(chatListRow), rows = [helperRow, ...dmRows, ...groupRows];
@@ -111,7 +119,7 @@ function chatList() {
   const heading = (text, list) => list.length && list.some(row => !row.hidden) ? h('h2', {}, text) : null;
   return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'),
     snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), history ? null : chatSearch(),
-    heading('This workspace', [helperRow]), helperRow, heading('Other workspaces', dmRows), dmRows, heading('Groups', groupRows), groupRows,
+    heading('This workspace', [helperRow]), helperRow, heading('Other workspaces', dmRows), dmRows, dmRows.length || history ? null : chatDmPending(), heading('Groups', groupRows), groupRows,
     rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null);
 }
 // The grouped list shows only when there is something besides the helper chat (a live group or a workspace chat); an open
@@ -525,7 +533,8 @@ function chatDmMessages(ws) {
   return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
 }
 async function chatDmLoad(force = false) {
-  if (snapshot || route().kind !== 'chat' || chatDm.loading) return;
+  if (snapshot || route().kind !== 'chat') return;
+  if (chatDm.loading) return;  // a thread opened meanwhile is picked up when this load ends (see finally)
   const delay = force || (!chatDm.loaded && !chatDm.contacts.length) ? 0 : 5000 - (Date.now() - chatDm.lastFetch);
   if (delay > 0) {
     if (!chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, delay);
@@ -534,22 +543,22 @@ async function chatDmLoad(force = false) {
   if (chatDm.timer) { clearTimeout(chatDm.timer); chatDm.timer = null; }
   chatDm.lastFetch = Date.now();
   chatDm.loading = true;
-  const ws = chatUi.open;
+  let fetched = null;
   try {
-    const synced = await window.orchAct('chat.sync_ws', {});
-    if (!synced?.ok) throw new Error('Sync');
+    // The server imports new messages itself before it answers (no separate slow sync step in front of the read).
     const response = await fetch('/api/chat/contacts');
     if (!response.ok) throw new Error('Contacts');
     const contacts = await response.json();
     if (!Array.isArray(contacts)) throw new Error('Contacts');
     chatDm.contacts = chatObjects(contacts).filter(c => chatDmId(c.ws));
     chatDm.loaded = true;
+    const ws = chatUi.open;  // read now: the person may have opened another thread while the contacts loaded
     if (chatDmId(ws) && chatDmContact(ws)) {
       const response = await fetch('/api/chat/thread/' + ws);
       if (!response.ok) throw new Error('Thread');
       const thread = await response.json();
       if (!Array.isArray(thread?.messages)) throw new Error('Thread');
-      chatDm.threads.set(ws, thread);
+      chatDm.threads.set(ws, thread); fetched = ws;
       const stored = new Set(thread.messages.map(m => m.id));
       chatDm.pending.set(ws, array(chatDm.pending.get(ws)).filter(m => !stored.has(m.id)));
     }
@@ -560,7 +569,9 @@ async function chatDmLoad(force = false) {
     if (chatDm.picker) chatDm.picker();
     if (route().kind === 'chat') {
       render();
-      if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, 5000);
+      // The person opened another thread while this load ran: read that one now, not on the next 5 s tick.
+      if (!chatDm.error && chatDmId(chatUi.open) && chatUi.open !== fetched && chatDmContact(chatUi.open)) chatDmLoad(true);
+      else if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, 5000);
     }
   }
 }
@@ -665,7 +676,7 @@ chatClick = async function (event) {
   const action = control.dataset.chatAction;
   if (action === 'contacts') { chatDmContacts(); return chatDmLoad(true); }
   if (action === 'select-dm') return chatDmSelect(control.dataset.id);
-  if (action === 'retry-dm') return chatDmLoad();
+  if (action === 'retry-dm') { chatDm.error = false; return chatDmLoad(true); }
   if (action === 'retry-send') {
     const message = chatDmMessages(chatUi.open).find(m => m.id === control.dataset.id);
     if (message?.state === 'failed') return chatDmSend(message.text, message.id);
@@ -720,9 +731,10 @@ async function chatDmSend(text, retryId) {
     if (result?.ok && saved?.id) { Object.assign(entry, saved); accepted = true; }
   } catch { /* Reconcile a possibly stored send before reporting failure. */ }
   finally {
-    await chatDmLoad(true);
-    if (!accepted) entry.state = 'failed';
+    // Accepted: show "Delivered" now and refresh in the background. Unknown: read the thread first (it may be stored).
+    if (!accepted) { await chatDmLoad(true); entry.state = 'failed'; }
     chatUi.sending.delete(ws); render();
+    if (accepted) chatDmLoad(true);
   }
 }
 

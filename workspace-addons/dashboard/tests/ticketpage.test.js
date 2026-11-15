@@ -567,3 +567,11 @@ test('the Changes to add card offers Review changes and Keep as is; a kept copy 
   assert.match(JSON.stringify(kept), /Changes kept in a copy/);
   assert.deepEqual(labels(kept), ['Apply changes']);
 });
+test('Watch live opens the live-session add-on, not the first add-on with a running page', () => {
+  const rows = [{name:'factory', page:{path:'/'}}, {name:'focus', page:{path:'/', live_session:true}}];
+  const c = context({addons:() => rows, state:{services:[{addon:'factory', running:true}, {addon:'focus', running:true}]}, addonLabel:a => a.name, pageHash:(name, path) => '#addon/' + name + path});
+  vm.runInContext(source.slice(source.indexOf('function liveLinkFor'), source.indexOf('// Live session: two commands')), c);
+  assert.equal(c.liveLinkFor({ext:{}}).url, '#addon/focus/');
+  c.state.services = [{addon:'factory', running:true}, {addon:'focus', running:false}];
+  assert.equal(c.liveLinkFor({ext:{}}), null, 'no live-session page is running: no Watch live');
+});

@@ -111,7 +111,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const pinEl=(pn,i)=>{const p=el('span','swipe-pin');p.style.left=pn.x+'%';p.style.top=pn.y+'%';p.append(el('span','',String(i+1)));p.title=pn.text;return p};
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:''));c.setAttribute('aria-label',it.title);
   const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
-  h.append(m,el('h3','',it.title));if(it.why)h.append(el('p','',it.why));
+  h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));h.append(el('h3','',it.title));if(it.why)h.append(el('p','',it.why));
   const pv=el('div','swipe-preview');pv.append(buildPreview(it,false));
   const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex);
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));
@@ -182,14 +182,22 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const openOverview=()=>{if(overlay)closeOverlay();const v=el('div','swipe-viewer swipe-overview');v.setAttribute('role','dialog');v.setAttribute('aria-label','All cards');
   const b=el('div','swipe-viewer-bar'),x=btn('btn ghost icon sm',[ic('x',18)],'Close');x.onclick=()=>{closeOverlay();render()};
   const k=Object.keys(ans).length;b.append(x,el('strong','','All cards · '+(items.length-k)+' waiting'));
-  const g=el('div','swipe-ov-grid');
   const tile=i=>{const it=items[i],a=ans[it.id],t=btn('swipe-ov'+(i===idx?' current':'')+(a?' answered':''),[]);
    const th=el('span','swipe-ov-thumb');const p=it.preview||{},pv=p.type==='compare'?p.after:p.type==='options'?(p.options[0]||{}).preview:p;th.append(buildPreview({title:it.title,preview:pv||{}},false));
    const m=el('span','swipe-meta'),kd=el('span','swipe-kind');kd.append(ic(it.icon||'file',12),it.kindLabel||it.kind);m.append(kd);if(it.need&&!a)m.append(el('span','swipe-need',it.need));
    const st=el('span','swipe-ov-state '+(a?a.verdict:later.has(it.id)?'later':'wait'),a?ansWord(a):later.has(it.id)?'Later':i===idx?'Now':'Waiting');
    t.append(th,m,el('span','swipe-ov-title',it.title),st);t.onclick=()=>jump(i);return t};
-  const order=waiting().concat(items.map((_,i)=>i).filter(i=>ans[items[i].id]));order.forEach(i=>g.append(tile(i)));
-  const body=el('div','swipe-viewer-body');body.append(g);v.append(b,body);openOverlay(v,g.querySelector('.current')||x);return v};
+  const order=waiting().concat(items.map((_,i)=>i).filter(i=>ans[items[i].id]));
+  /* grouped by ticket (the round), then by task ("About: ..."); cards without a task come last under their ticket */
+  const tk=new Map();order.forEach(i=>{const it=items[i],key=it.ticketId||it.ticket||'';let t=tk.get(key);if(!t){t={title:it.ticketTitle,key:it.ticket,tasks:new Map(),plain:[]};tk.set(key,t)}
+   if(it.about){if(!t.tasks.has(it.task||it.about))t.tasks.set(it.task||it.about,{about:it.about,rows:[]});t.tasks.get(it.task||it.about).rows.push(i)}else t.plain.push(i)});
+  const body=el('div','swipe-viewer-body');
+  const head=(text,tag,cls)=>{const h=el(tag,cls,text);h.style.cssText='margin:0;padding:var(--s3) var(--s4) 0';body.append(h)};
+  const grid=rows=>{const gr=el('div','swipe-ov-grid');rows.forEach(i=>gr.append(tile(i)));body.append(gr)};
+  if(![...tk.values()].some(t=>t.title||t.tasks.size))grid(order);
+  else tk.forEach(t=>{head(t.title?(t.key&&t.key!==t.title?t.title+' · '+t.key:t.title):t.key,'h3');
+   t.tasks.forEach(k=>{head('About: '+k.about,'p','meta');grid(k.rows)});if(t.plain.length)grid(t.plain)});
+  v.append(b,body);openOverlay(v,body.querySelector('.current')||x);return v};
  /* Comment sheet. The subject (which option) and the outcome are separate: the buttons say what happens.
     Voice: hold to talk, or tap once to start and once to stop; clips can be removed. The draft is kept per card. */
  const openComment=()=>{const it=items[idx];if(!it)return null;const dr=drafts[it.id]=drafts[it.id]||{text:'',clips:[]};

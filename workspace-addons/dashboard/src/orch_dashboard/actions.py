@@ -788,6 +788,12 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
             value = a["value"]
+        elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
+            value = _text(a["value"], "text").strip()
+            if HIDDEN_CHARS.search(value):
+                raise BadRequest("Use plain text on one line.")
+            if len(value) > 200:
+                raise BadRequest("Write at most 200 characters.")
         else:
             value = _text(a["value"], "time")
             if verb != "repeat" or len(value) > 200:
@@ -950,6 +956,15 @@ def _addon_set(a):
     return (["addon", "add", name], ["--yes"], []) if a["on"] else (["addon", "remove", name], [], [])
 
 
+def _addon_uninstall(a):
+    """Remove an add-on from this computer: `orch addon uninstall <name>` (the same CLI path as the terminal)."""
+    _only(a, ("name",))
+    name = a.get("name")
+    if not (isinstance(name, str) and ADDON.fullmatch(name) and name not in RESERVED):
+        raise BadRequest("That is not an add-on.")
+    return (["addon", "uninstall", name], [], [])
+
+
 def _link(a, extend=False):
     _only(a, ("id", "days") if extend else ("id",))
     fid = a.get("id")
@@ -996,6 +1011,7 @@ OPS = {
     "config.permissions": _config_permissions,
     "workspace.set": _workspace_set,
     "addon.set": _addon_set,
+    "addon.uninstall": _addon_uninstall,
     "share.set": _share_set,
     "private.move": _private_move,
     "private.allow": _private_allow,
@@ -1242,7 +1258,7 @@ def share_file(root: Path, orch_bin: str | None, args, mint=None) -> tuple[int, 
 
 def _op_timeout(op, args) -> int:
     """Seconds one op may run. Adding an add-on installs it (a download), so it gets longer than a setting."""
-    if op == "addon.set" and args.get("on") is True:
+    if (op == "addon.set" and args.get("on") is True) or op == "addon.uninstall":
         return 180
     return 75 if op == "config.agent.test" else 60
 
@@ -1279,6 +1295,10 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         raise BadRequest("That add-on is not on in this workspace.")
     if op == "addon.set" and not _addon_known(root, orch_bin, args["name"]):
         raise BadRequest("That add-on is not installed.")
+    if op == "addon.uninstall":
+        row = _addon_row(root, orch_bin, args["name"])
+        if row is None or row.get("installed") is False:
+            raise BadRequest("That add-on is not installed.")
     if op == "addon.set" and args.get("on") is False:
         row = _addon_row(root, orch_bin, args["name"])
         if row is not None and row.get("installed") is False:
@@ -1352,6 +1372,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "link.stop",
             "config.agent.add",
             "addon.set",
+            "addon.uninstall",
             "config.agent",
             "config.permissions",
             "workspace.set",

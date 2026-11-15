@@ -47,7 +47,7 @@ def _rows(run):
 def test_nothing_needs_you(proj, run):
     assert run("init")[0] == 0
     assert _rows(run) == []
-    assert run("needs")[1].strip() == "Nothing needs you."
+    assert run("needs")[1].startswith("Nothing needs you.")
 
 
 def test_open_question_row_and_answered_one_gone(proj, run):
