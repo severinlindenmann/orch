@@ -18,7 +18,8 @@ test('dash32: a group shows five rows and the rest behind Show all', () => {
   assert.equal(H.limitGroup([1, 2]).more, 0);
   const src = web('ticket.js');
   assert.match(src, /Show all \(/);
-  assert.match(src, /fx-row-chip/);
+  assert.match(src, /class: 'btn outline sm', text: action/); assert.doesNotMatch(src, /fx-row-chip/);
+  assert.match(src, /'Check result'/);
   assert.doesNotMatch(src, /row-action/);
 });
 
@@ -180,4 +181,9 @@ test('dash24: the vendor name is not shown on the helper row or in Results', () 
 
 test('dash33: outside the app the empty state does not link back to the same page', () => {
   assert.match(web('ticket.js'), /INAPP \? h\('div', \{class: 'row'\}, h\('a', \{class: 'btn primary sm', href: '\/#new'/);
+});
+test('UX B: the picker says its list is on Home too, and row actions are 32 px master buttons', () => {
+  const src = web('ticket.js');
+  assert.match(src, /They are on Home too\./);
+  assert.match(src, /\['review', 'Sent back to you', 'Check result'\]/);
 });
