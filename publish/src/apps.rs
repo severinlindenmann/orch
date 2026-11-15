@@ -816,7 +816,7 @@ fn sanitize_proxied(resp: &mut Response, app: &AppRow) {
     for v in kept {
         h.append(header::SET_COOKIE, v);
     }
-    if !app.public {
+    if capped(app) {
         h.remove(header::REFRESH);
         h.remove(header::LINK);
     }
@@ -835,16 +835,18 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
         db::get_app(&st.db.lock().unwrap(), &name).ok().flatten(),
         &req,
     );
-    let private = app.as_ref().is_some_and(|a| !a.public);
+    let private = app.as_ref().is_some_and(capped);
     // CORS for the opaque-origin page: public apps (readable by anyone), and private apps only
     // for requests that carry the app's own capability (an attacker app does not know it)
     let cap_valid = app.as_ref().is_some_and(|a| {
-        !a.public
+        capped(a)
             && is_live(a)
             && split_cap(&rest)
                 .is_some_and(|(c, _)| app_cap(&st, a).is_some_and(|k| util::ct_eq(c, &k)))
     });
-    let public_live = app.as_ref().is_some_and(|a| a.public && is_live(a));
+    let public_live = app
+        .as_ref()
+        .is_some_and(|a| a.public && a.reach == "public" && is_live(a));
     let public = (origin_null || preflight) && (public_live || cap_valid);
     let mut resp = if preflight && public {
         // answered here, never forwarded to the app; public content is readable by anyone anyway
@@ -882,6 +884,15 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
 /// sandboxed (opaque-origin) page can load its own relative CSS, JS, images and fetch() calls.
 /// A new view token changes the cap.
 fn app_cap(st: &State, app: &AppRow) -> Option<String> {
+    if app.public {
+        // open app on the private network: stable address, no view token
+        return (app.reach == "private").then(|| {
+            util::hmac_sha256(&st.app_key, format!("open\0{}", app.name).as_bytes())[..16]
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        });
+    }
     let hash = app.view_token_hash.as_deref().filter(|h| !h.is_empty())?;
     let mut m = b"orch-publish-app-cap/1".to_vec();
     for f in [app.name.as_bytes(), hash.as_bytes()] {
@@ -894,6 +905,12 @@ fn app_cap(st: &State, app: &AppRow) -> Option<String> {
             .map(|b| format!("{b:02x}"))
             .collect(),
     )
+}
+
+/// Apps served under a secret `~<cap>` address: those with auth, and open apps on the private network
+/// (so a foreign page on that network cannot read them cross-origin).
+fn capped(a: &AppRow) -> bool {
+    !a.public || a.reach == "private"
 }
 
 /// `~<cap>/<inner>` -> (cap, inner)
@@ -923,7 +940,7 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
     let mut cap_ok = false;
     let mut had_cap = false;
     let mut rest = rest;
-    if !app.public {
+    if capped(&app) {
         if let Some((cap, inner)) = split_cap(&rest) {
             cap_ok = app_cap(&st, &app).is_some_and(|k| util::ct_eq(cap, &k));
             had_cap = true;
@@ -966,6 +983,24 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
             "It is no longer available. Ask the owner to share it again.",
             false,
         );
+    }
+    if app.public && app.reach == "private" && !cap_ok {
+        // open app on the private network: move to its secret address (no token needed, no CORS headers)
+        if req.method() != axum::http::Method::GET && req.method() != axum::http::Method::HEAD {
+            return private_page();
+        }
+        let Some(cap) = app_cap(&st, &app) else {
+            return private_page();
+        };
+        let loc = format!(
+            "/a/{name}/~{cap}/{rest}{}",
+            if query.is_empty() {
+                String::new()
+            } else {
+                format!("?{query}")
+            }
+        );
+        return (StatusCode::FOUND, [(header::LOCATION, loc)]).into_response();
     }
     if !app.public && !cap_ok {
         let Some(cap) = app_cap(&st, &app) else {
@@ -1261,6 +1296,9 @@ fn notice_gone() -> Response {
 
 /// Compares what the request was authorized against with the row now: None = same access.
 pub fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
+    if new.reach != old.reach {
+        return Some(notice_gone());
+    }
     if new.status == "stopped" {
         return Some(paused_page());
     }
@@ -1276,9 +1314,6 @@ pub fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
             "It is no longer available. Ask the owner to share it again.",
             false,
         ));
-    }
-    if new.reach != old.reach {
-        return Some(notice_gone());
     }
     if new.workspace != old.workspace
         || new.public != old.public

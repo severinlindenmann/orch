@@ -64,6 +64,14 @@ test('mapCard maps a stack card to the widget item and turns file refs into urls
   assert.equal(it.open, undefined, 'only http(s) links are kept');
 });
 
+test('mapCard carries the round and the task so the card can say About', () => {
+  const {UI} = load();
+  const it = UI.review.mapCard(card('x', {ticket: 't_abc', ticket_title: 'Home update', about: 'Draw the block', task: 'c1'}), fakeApi([[]]), NOW);
+  assert.equal(it.about, 'Draw the block');
+  assert.equal(it.ticketTitle, 'Home update');
+  assert.equal(it.ticketId, 't_abc');
+  assert.equal(UI.review.mapCard(card('y'), fakeApi([[]]), NOW).about, undefined);
+});
 test('mapCard keeps option previews and picks a kind label', () => {
   const {UI} = load();
   const c = card('o'); c.card = {kind: 'choice', title: 'Which?', preview: {type: 'options', options: [{id: 'A', title: 'As today', preview: {type: 'page', src: 'reviewed/aa/a.html'}}, {id: 'B', title: 'New', suggested: true}]}};

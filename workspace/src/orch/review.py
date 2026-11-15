@@ -839,25 +839,41 @@ def change(
 # ---------------------------------------------------------------- the stack
 
 
+ABOUT_MAX = 120
+
+
 def stack(root: Path) -> list[dict]:
-    """Everything waiting for a person's swipe, oldest first: card questions, plain open questions (as
-    options cards) and tickets in Review (as Check cards). Each item:
-    {id, ticket, ticket_key, ticket_title, key, kind, card, digest, since, options, recommended}."""
+    """Everything waiting for a person's swipe: card questions, plain open questions (as options cards) and
+    tickets in Review (as Check cards), grouped by ticket (the round whose oldest card waited longest first),
+    then by the task a question belongs to (`orch ask --check`), then oldest first. Each item:
+    {id, ticket, ticket_key, ticket_title, key, kind, card, digest, since, options, recommended} and, when the
+    question belongs to a task, `about` (its text, one line) and `task` (its id). Neither is part of the card
+    or its digest."""
     from orch import needs  # needs imports tickets; no cycle back
 
     out = []
+    order = {}  # ticket id -> {task id: position in its checklist}
     for t in history.shown_json(root, tickets.list_all(root)):
         if t.get("general") is True or not isinstance(t.get("id"), str):
             continue
         base = {"ticket": t["id"], "ticket_key": t.get("key"), "ticket_title": t.get("title", t["id"])}
+        tasks = {
+            c.get("id"): (i, c.get("text"))
+            for i, c in enumerate(t.get("checklist") or [])
+            if isinstance(c, dict)
+        }
+        order[t["id"]] = {k: v[0] for k, v in tasks.items()}
         if t.get("status") not in needs.OPEN:
             for q in t.get("questions") or []:
                 if q.get("answer") is not None or q.get("kind") not in (None, "plain"):
                     continue  # an add-on's own question is its business
                 card = q["card"] if isinstance(q.get("card"), dict) else _card_of(q)
+                task = tasks.get(q.get("check"))
+                about = _clip(task[1], ABOUT_MAX) if task and isinstance(task[1], str) else ""
                 out.append(
                     {
                         **base,
+                        **({"about": about, "task": q["check"]} if about else {}),
                         "id": f"core:q:{t['id']}:{q['id']}",
                         "key": q["id"],
                         "kind": card.get("kind"),
@@ -883,7 +899,20 @@ def stack(root: Path) -> list[dict]:
                     "recommended": None,
                 }
             )
-    out.sort(key=lambda r: (r["since"] or "", r["id"]))
+    # grouped: the ticket (round) with the longest-waiting card first, then its tasks in checklist order,
+    # cards without a task last; inside a group oldest first
+    oldest: dict[str, str] = {}
+    for r in out:
+        oldest[r["ticket"]] = min(oldest.get(r["ticket"], r["since"] or ""), r["since"] or "")
+    out.sort(
+        key=lambda r: (
+            oldest[r["ticket"]],
+            r["ticket"],
+            order[r["ticket"]].get(r["task"], 1 << 20) if r.get("task") else 1 << 30,
+            r["since"] or "",
+            r["id"],
+        )
+    )
     return out
 
 
