@@ -7,7 +7,8 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-15: The orch-core proof/signing leftovers (humanproof, pageproof, filesig, keystore, denyrules, human-proof
   contract, syncgate) are removed in one clean-up PR.
 - 2026-11-15: The relay and publish clients stay in the core as optional built-ins (off until `orch addon add`). They
-  are not add-on packages.
+  are not add-on packages. Until a workspace
+  turns one on, agents see no trace of it (no skill, AGENTS entry, help text or hints).
 - 2026-11-15: Add-on stylesheets and the copied kit merge into the master design system; a style lint stops new ones.
 - 2026-11-15: Windows: a CLI smoke runs on Windows + macOS on every PR touching `workspace/` or `workspace-addons/`; the
   full suite runs nightly.

@@ -68,7 +68,7 @@ Reviewer points not taken:
 | Question | Choice |
 |---|---|
 | orch-core proof/signing leftovers in the repo | Remove them (one clean-up PR) |
-| Relay and publish clients: add-ons or core? | Keep them in the core as optional built-ins; fix the docs (R1.1) |
+| Relay and publish clients: add-ons or core? | Keep them in the core as optional built-ins, opt-in; agents see no trace of them until turned on (R1.1) |
 | Add-on stylesheets and the copied kit | Merge into the master design system and add the style lint |
 | Windows testing | CLI smoke on Windows + macOS on every PR touching workspace/add-ons; full run nightly |
 | Sharing agent context | Summary plus picked items with a preview; full ticket opt-in per send |
@@ -76,12 +76,13 @@ Reviewer points not taken:
 
 ## Known violations at the time of writing (clean-up issues)
 
-The repo check found places where the code already breaks the rules. Each one is a GitHub issue labelled `rules`:
+The repo check found places where the code already breaks the rules. Each one is a GitHub issue labelled `rules` (#794–#799):
 
 - **R4.1, banned concepts.** Still in the code:
   - `workspace/src/orch/humanproof.py`, `pageproof.py`, `filesig.py`, `keystore.py`, `denyrules.py`;
   - `contracts/human-proof.md` and its schema;
   - `syncgate.py`.
+- **R1.1, relay/publish visible before opt-in?** Check help text, the skill, the AGENTS block and hints (#794).
 - **R1.2, the core names add-on packages.** `workspace/src/orch/addons.py` (`SHIPPED_ADDONS`), and "dashboard" is
   hard-coded in `chat.py` and `chat_groups.py`.
 - **R6.2, more than one source of styles:**

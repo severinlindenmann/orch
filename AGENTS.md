@@ -21,7 +21,8 @@ agent works on its own, and the human is asked only for real decisions.
 
 - **R1.1** `orch` (CLI + skills) works fully with no add-on, server, relay, publish, phone or dashboard. A missing or
   offline server never blocks local work. The relay and publish clients are built into the core as optional parts: off
-  until turned on (`orch addon add relay|publish`), and nothing else in the core depends on them.
+  until turned on (`orch addon add relay|publish`), and nothing else in the core depends on them. Until a workspace turns
+  one on, agents must not know it exists: no skill, no AGENTS block entry, no help text, no hints in other output.
 - **R1.2** The core never names an add-on package (everything under `workspace-addons/`). Add-ons plug in through `contracts/addon-manifest.md` (entry point
   `orch.addons`, `ext.<addon>` in tickets). Every add-on ships its own skill and AGENTS block. Removing an add-on never
   breaks the core or a ticket. A lint test checks this: the core imports no add-on package and contains no add-on package names.
