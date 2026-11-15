@@ -3,7 +3,7 @@ import Foundation
 import UIKit
 
 /// Fixture for `-mockReviewStack YES`: 8 stack questions of the Pilatus workspace (3 drafts incl. one compare, 2 choices, 2 checks,
-/// 1 plan) with fake blobs whose size and sha256 match the cards. One check needs the computer's signature (signs: true).
+/// 1 plan) with fake blobs whose size and sha256 match the cards.
 enum MockReviewStack {
     struct Blob { let data: Data; let name: String; let mime: String }
     private static let ws = MockRelay.pilatus
@@ -67,9 +67,6 @@ enum MockReviewStack {
             question(6, qid: "review-1", ticket: "t_rv6", key: "RV-6", title: "Fish test page", text: "Is this done?",
                      card: ReviewCard(kind: .check, title: "Fish test page", then: "The ticket moves to Done.", preview: .page(src: .file(0))),
                      files: ["b_rv6f0"], review: true, options: ["accept", "changes"]),
-            question(7, qid: "review-1", ticket: "t_rv7", key: "RV-7", title: "Deploy to production", text: "Is this done?",
-                     card: ReviewCard(kind: .check, title: "Deploy to production", then: "The helper keeps the release.", signs: true),
-                     review: true, options: ["accept", "changes"]),
             question(8, qid: "q8", ticket: "t_rv8", key: "RV-8", title: "Backup plan", text: "Backup plan",
                      card: ReviewCard(kind: .plan, title: "Backup plan", then: "The helper starts at step 1.", okLabel: "Start",
                                       preview: .doc(heading: nil, paras: [], steps: ["Copy the files", "Check the copy", "Delete the old files"]))),

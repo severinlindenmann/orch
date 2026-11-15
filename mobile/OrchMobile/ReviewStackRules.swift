@@ -16,7 +16,6 @@ struct ReviewItem: Equatable, Sendable, Identifiable {
     let digest: String?
     var id: String { question.id }
     var files: [CardFile] { question.message.body.cardFiles ?? [] }
-    var signs: Bool { card.requiresSignature }
     /// Option ids the person may pick (choice / plain question), else empty.
     var optionIds: [String] { if case .options(let o)? = card.preview { o.map(\.id) } else { [] } }
     var isChoice: Bool { !optionIds.isEmpty }
@@ -24,8 +23,8 @@ struct ReviewItem: Equatable, Sendable, Identifiable {
     func file(for src: CardSrc) -> CardFile? { src.fileIndex.flatMap { files.indices.contains($0) ? files[$0] : nil } }
 }
 
-/// What a swipe can do right now. `needsSignature` = "Needs your signature on the computer" (M1): an `ok` on a signs card is never queued.
-enum SwipeOutcome: Equatable, Sendable { case allowed, needsSignature, pickFirst }
+/// What a swipe can do right now: `pickFirst` = a choice needs a pick before approving.
+enum SwipeOutcome: Equatable, Sendable { case allowed, pickFirst }
 
 enum SwipeDirection: Equatable, Sendable { case right, left, down, up }
 
@@ -87,17 +86,28 @@ enum ReviewStackRules {
     /// The cards still to decide: stack questions minus answered ones (`answers`) and the ones already swiped on this phone (`pending`:
     /// question ids with an Outbox answer). Oldest first; cards moved to Later (`later`: ids, oldest move first) go to the end in that order.
     static func stack(questions: [Question], answers: [String: String], pending: Set<String> = [], later: [String] = [],
-                      workspace: String? = nil) -> [ReviewItem] {
+                      workspace: String? = nil, changed: Set<String> = []) -> [ReviewItem] {
         let open = questions.deduplicated().filter {
-            answers[$0.id] == nil && !pending.contains($0.id) && (workspace == nil || $0.message.from == workspace)
+            (answers[$0.id] == nil || changed.contains($0.id)) && !pending.contains($0.id) && (workspace == nil || $0.message.from == workspace)
         }
         let items = open.compactMap(item(for:)).sorted {
             $0.question.message.createdAt == $1.question.message.createdAt ? $0.id < $1.id : $0.question.message.createdAt < $1.question.message.createdAt
         }
+        // A card whose result says "changed" goes back to the front: what you saw is not what the computer holds now.
+        let front = items.filter { changed.contains($0.id) }
         let laterSet = Set(later)
-        let rest = items.filter { !laterSet.contains($0.id) }
-        let moved = later.compactMap { id in items.first { $0.id == id } }
-        return rest + moved
+        let rest = items.filter { !laterSet.contains($0.id) && !changed.contains($0.id) }
+        let moved = later.compactMap { id in items.first { $0.id == id && !changed.contains(id) } }
+        return front + rest + moved
+    }
+
+    /// Question ids whose newest review_result is "changed" and that are not answered again right now (`pending`).
+    static func changedIds(questions: [Question], messages: [PhoneMessage], pending: Set<String>) -> Set<String> {
+        Set(questions.compactMap { q in
+            guard !pending.contains(q.id), isStackQuestion(q),
+                  result(for: q.id, workspace: q.message.from, in: messages)?.result == "changed" else { return nil }
+            return q.id
+        })
     }
 
     /// M5: the "Needs your OK" list must not show a question that is a stack card. Pass the questions through this before
@@ -135,13 +145,11 @@ enum ReviewStackRules {
         }
     }
 
-    /// What a right swipe (`ok`) may do on this card (M1): a signs card is never answered on the phone; a choice needs a pick first.
+    /// What a right swipe (`ok`) may do on this card: a choice needs a pick first.
     static func okOutcome(_ item: ReviewItem, picked: String?) -> SwipeOutcome {
-        if item.signs { return .needsSignature }
         if item.isChoice, picked == nil || !item.optionIds.contains(picked!) { return .pickFirst }
         return .allowed
     }
-    static let needsSignatureText = "Needs your signature on the computer"
 
     // MARK: Verdict
 
@@ -204,10 +212,11 @@ enum ReviewStackRules {
         return item.sentMessageId == nil ? .savedOnPhone : .sent
     }
 
+    static let changedText = "This changed. Look again."
+
     /// Plain words for a refusal reason (never the raw code).
     static func refusedText(_ reason: String?) -> String {
         switch reason {
-        case "needs_signature": return needsSignatureText
         case "needs_person": return "Needs you on the computer"
         case "invalid": return "The computer could not use this answer"
         default: return "The computer could not use this answer"

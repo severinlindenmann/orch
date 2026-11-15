@@ -297,8 +297,6 @@ final class Outbox {
 
     /// Why a swipe on a review card cannot be queued.
     enum VerdictProblem: Error, Equatable {
-        /// An `ok` on a card with `signs: true`: only the computer signs (M1). Nothing is queued.
-        case needsSignature
         /// The verdict breaks the contract rules (digest, size, picked, talk without words): the relay would refuse it.
         case invalid
         /// The relay already has this answer: it can no longer be changed (M4).
@@ -331,7 +329,6 @@ final class Outbox {
 
     nonisolated static func checkVerdict(_ verdict: PendingVerdict, for question: Question) throws {
         guard let digest = question.message.body.digest, verdict.digest == digest, verdict.isValid else { throw VerdictProblem.invalid }
-        if verdict.verdict == .ok, question.message.body.card?.requiresSignature == true { throw VerdictProblem.needsSignature }
         if let picked = verdict.picked, case .options(let o)? = question.message.body.card?.preview, !o.contains(where: { $0.id == picked }) { throw VerdictProblem.invalid }
     }
 
@@ -359,10 +356,16 @@ final class Outbox {
         let known = Set(messages.compactMap { $0.clientId ?? $0.message.body.clientId })
         // A stored review answer is done once the workspace's result for its question is listed (the result text itself stays in the list).
         // Matched as (workspace, question) pairs: a result from another workspace never closes this answer.
-        let resulted = Set(messages.compactMap { m in m.message.body.isReviewResult ? m.message.replyTo.map { "\(m.message.from)|\($0)" } : nil })
+        // Only a result newer than the answer counts: an older "changed" result must not close a fresh answer.
+        var resulted: [String: String] = [:]   // "workspace|question" -> newest result time
+        for m in messages where m.message.body.isReviewResult {
+            guard let q = m.message.replyTo else { continue }
+            let k = "\(m.message.from)|\(q)"
+            if (resulted[k] ?? "") < m.message.createdAt { resulted[k] = m.message.createdAt }
+        }
         let done = items.filter {
             ($0.kind == .send && known.contains($0.clientId))
-                || ($0.kind == .answer && $0.verdict != nil && $0.sentMessageId != nil && resulted.contains("\($0.workspace)|\($0.questionMessageId ?? "")"))
+                || ($0.kind == .answer && $0.verdict != nil && $0.sentMessageId != nil && (resulted["\($0.workspace)|\($0.questionMessageId ?? "")"] ?? "") >= $0.createdAt)
         }
         guard !done.isEmpty else { return }
         for d in done { removeFolder(d.clientId) }

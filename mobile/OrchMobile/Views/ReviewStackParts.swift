@@ -9,6 +9,7 @@ struct ReviewCardView: View {
     let item: ReviewItem
     @Binding var picked: String?
     let state: String?
+    var workspaceName: String? = nil
     let onOpen: () -> Void
 
     private var kindName: String {
@@ -22,6 +23,7 @@ struct ReviewCardView: View {
                     .background(Theme.surface3, in: Capsule()).accessibilityIdentifier("review-kind")
                 if let need = item.card.need, !need.isEmpty { Text(need).themeFont(12, .semibold).foregroundStyle(Theme.warn).lineLimit(1) }
                 Spacer()
+                if let workspaceName { Text(workspaceName).themeFont(12, .semibold).foregroundStyle(Theme.muted).lineLimit(1).accessibilityIdentifier("review-workspace") }
                 if let key = item.question.message.key { Text(key).themeFont(12).foregroundStyle(Theme.muted) }
                 Text(ShellTime.short(item.question.message.createdAt)).themeFont(12).foregroundStyle(Theme.muted)
             }
@@ -36,11 +38,6 @@ struct ReviewCardView: View {
                 Text("If you approve: \(item.card.then)").themeFont(14).foregroundStyle(Theme.text).lineLimit(3).accessibilityIdentifier("review-then")
             }
             HStack(spacing: 8) {
-                if item.signs {
-                    Label("Face ID when you approve", systemImage: "faceid").themeFont(12, .semibold)
-                        .padding(.horizontal, 10).padding(.vertical, 4).background(Theme.surface3, in: Capsule())
-                        .accessibilityIdentifier("review-signs-chip")
-                }
                 if let state { Text(state).themeFont(12, .semibold).foregroundStyle(Theme.warn).accessibilityIdentifier("review-state") }
             }
         }
@@ -195,8 +192,12 @@ struct ReviewCommentSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var recorder: VoiceRecorder?
-    @State private var working = false
+    @State private var listening = false     // the mic is open (held, or toggled on by a tap)
+    @State private var working = false       // writing down what was said
     @State private var error: String?
+    @State private var pressAt: Date?
+    @State private var pressOpened = false   // this press is the one that opened the mic
+    @State private var startTask: Task<Void, Never>?
 
     private var hasContent: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pins.count > 0 }
 
@@ -210,18 +211,25 @@ struct ReviewCommentSheet: View {
                     }.pickerStyle(.segmented).accessibilityIdentifier("comment-about")
                 }
                 Text("Say it or type it. The helper reads your words and tries again.").themeFont(13).foregroundStyle(Theme.muted)
-                HStack(alignment: .top, spacing: 10) {
-                    TextField("What should change?", text: $text, axis: .vertical).lineLimit(3...8).themeFont(16).padding(12)
-                        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
-                        .accessibilityIdentifier("comment-text")
-                    Button { toggleMic() } label: {
-                        Image(systemName: recorder?.isRecording == true ? "stop.fill" : "mic.fill").frame(width: 48, height: 48)
-                            .background(Theme.surface3, in: Circle())
-                    }.disabled(working).accessibilityLabel(recorder?.isRecording == true ? "Stop recording" : "Record voice comment")
+                TextField("What should change?", text: $text, axis: .vertical).lineLimit(3...8).themeFont(16).padding(12)
+                    .background(Theme.surface2, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+                    .accessibilityIdentifier("comment-text")
+                HStack(spacing: 12) {
+                    Image(systemName: listening ? "stop.fill" : "mic.fill").themeFont(20, .bold).foregroundStyle(listening ? Theme.onBrand : Theme.warn)
+                        .frame(width: 56, height: 56).background(listening ? Theme.warn : Theme.surface2, in: Circle())
+                        .overlay(Circle().stroke(Theme.warn.opacity(0.6)))
+                        .gesture(DragGesture(minimumDistance: 0).onChanged { _ in micDown() }.onEnded { _ in micUp() })
+                        .opacity(working ? 0.5 : 1)
+                        .accessibilityElement().accessibilityAddTraits(.isButton)
+                        .accessibilityLabel(listening ? "Stop talking" : "Talk")
+                        .accessibilityAction { if listening { stopListening() } else { startListening() } }
                         .accessibilityIdentifier("comment-mic")
+                    Text(listening ? "Listening. Let go or tap to stop. \(Int(recorder?.elapsed ?? 0))s" : (working ? "Writing down what you said" : "Hold or tap to talk"))
+                        .themeFont(15, .semibold).foregroundStyle(listening ? Theme.warn : Theme.text).monospacedDigit()
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("comment-mic-label")
+                    Spacer(minLength: 0)
                 }
-                if recorder?.isRecording == true { Text("Recording \(Int(recorder?.elapsed ?? 0))s").themeFont(14).monospacedDigit() }
-                else if working { ProgressView().accessibilityLabel("Writing down what you said") }
+                if working { ProgressView().accessibilityLabel("Writing down what you said") }
                 if let error { Text(error).themeFont(14).foregroundStyle(Theme.muted) }
                 if pins.count > 0 { PinChipRow(store: pins) }
                 Button { onSend(.talk, nil) } label: { Text("Send back for changes") }
@@ -240,22 +248,40 @@ struct ReviewCommentSheet: View {
         .accessibilityIdentifier("comment-sheet")
     }
 
-    private func toggleMic() {
-        guard !working else { return }
+    /// Press: open the mic. Let go after a hold = stop; a quick tap leaves it on, the next tap stops it.
+    private func micDown() {
+        guard pressAt == nil, !working else { return }
+        pressAt = Date()
+        if listening { pressOpened = false } else { pressOpened = true; startListening() }
+    }
+    private func micUp() {
+        guard let at = pressAt else { return }
+        pressAt = nil
+        if pressOpened && Date().timeIntervalSince(at) < 0.4 { return }   // a quick tap: keep listening
+        stopListening()
+    }
+
+    private func startListening() {
+        guard !listening, !working else { return }
         if recorder == nil { recorder = model.makeVoiceRecorder() }
         guard let recorder else { return }
-        error = nil; working = true
+        error = nil; listening = true
+        startTask = Task { @MainActor in
+            do { try await recorder.start() } catch { self.error = recorder.error ?? "Could not start the microphone."; listening = false }
+        }
+    }
+
+    private func stopListening() {
+        guard listening, let recorder else { return }
+        listening = false; working = true
         Task { @MainActor in
             defer { working = false }
-            if recorder.isRecording {
-                guard let segment = recorder.stop().first else { return }
-                let draft = await model.voiceDraft(for: segment)
-                let t = draft.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !t.isEmpty { text = text.isEmpty ? t : text + " " + t }   // v1: the transcript only, no audio is sent
-                recorder.cancel()
-            } else {
-                do { try await recorder.start() } catch { self.error = recorder.error ?? "Could not start the microphone." }
-            }
+            await startTask?.value
+            guard recorder.isRecording, let segment = recorder.stop().first else { return }
+            let draft = await model.voiceDraft(for: segment)
+            let t = draft.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { text = text.isEmpty ? t : text + " " + t }   // v1: the transcript only, no audio is sent
+            recorder.cancel()
         }
     }
 }
@@ -368,7 +394,6 @@ struct ReviewOverview: View {
     let waiting: [ReviewItem]
     let answered: [ReviewItem]
     let later: Set<String>
-    let workspace: String
     let onJump: (String) -> Void
     let onChange: (String) -> Void
     @Environment(AppModel.self) private var model
@@ -390,7 +415,7 @@ struct ReviewOverview: View {
                     Section("Answered") {
                         ForEach(answered) { item in
                             let outbox = model.verdictItem(for: item.id)
-                            let result = ReviewStackRules.result(for: item.id, workspace: workspace, in: model.messages)
+                            let result = ReviewStackRules.result(for: item.id, workspace: item.question.message.from, in: model.messages)
                             let state = ReviewStateText.text(ReviewStackRules.state(item: outbox, result: result))
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {

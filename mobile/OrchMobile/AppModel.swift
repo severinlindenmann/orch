@@ -893,7 +893,7 @@ final class AppModel {
             path = [.workspace(ws), .general(ws)]
             return
         }
-        if q.message.body.digest != nil, ReviewStackRules.isStackQuestion(q) { path = [.review(workspace: ws)]; return }   // opens the stack at that card
+        if q.message.body.digest != nil, ReviewStackRules.isStackQuestion(q) { path = [.review(workspace: nil)]; return }   // opens the stack (all workspaces) at that card
         path = q.message.ticket.map { [.workspace(ws), .ticket(workspace: ws, ticket: $0)] } ?? [.workspace(ws)]
     }
 
