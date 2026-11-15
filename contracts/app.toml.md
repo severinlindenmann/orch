@@ -47,8 +47,11 @@ public = false                    # false = needs ?token=<view token> (default),
 **Apps run sandboxed.** Every page an app serves is sandboxed by the server (`Content-Security-Policy: sandbox ...`), so
 that one app can never read another app's pages. Scripts, forms, popups and downloads work. But the page has no origin of its
 own: `localStorage`, `sessionStorage`, IndexedDB and cookies throw or stay empty. Keep state on the app's backend and
-identify people by a link token or a typed name. `fetch()` to the app's own paths works for public apps (the server answers
-the cross-origin check for them); private apps get no such answer. Private apps are served under a secret `/a/<name>/~<key>/` path (the server redirects there after the view link or cookie check): use relative links (`style.css`, `data.json`), not root-absolute ones (`/a/<name>/style.css`), or they get no access. An app cannot switch the sandbox off.
+identify people by a link token or a typed name. `fetch()` to the app's own paths works: the server answers the cross-origin
+check for public apps, and for private apps only under their own private address. A private app is served under a secret
+`/a/<name>/~<key>/` address (the server redirects there after the view link or cookie check). That private link, and the address
+it opens, is the key to the app, as before; both change when the link is reset. Use relative links (`style.css`, `data.json`),
+not root-absolute ones (`/a/<name>/style.css`), or they get no access. An app cannot switch the sandbox off.
 
 ## Sandbox
 

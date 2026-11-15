@@ -783,7 +783,10 @@ async fn apps_public_proxy_sandbox_and_cors_for_null_origin() {
         pf.headers["access-control-allow-methods"],
         "GET, POST, PUT, PATCH, DELETE"
     );
-    assert_eq!(pf.headers["access-control-allow-headers"], "content-type");
+    assert_eq!(
+        pf.headers["access-control-allow-headers"],
+        "content-type, accept, x-requested-with"
+    );
     assert_eq!(pf.headers["access-control-max-age"], "600");
     assert_sandboxed(&pf, "preflight");
     let hits = call(&t.public, "GET", "/a/poll/", &[], vec![]).await.json();
@@ -874,4 +877,172 @@ async fn apps_private_proxy_strips_the_cap_before_forwarding() {
     )
     .await;
     assert_eq!(bad.status, 401);
+}
+
+const COOKIE_APP: &str = r#"import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        for c in ["orch_app_other=1; Path=/a/ck/", "ORCH_admin=x; Path=/a/ck/", "o=1; Path=/a/other/", "d=1; Path=/a/ck/; Domain=x.test",
+                  "nopath=1", "mine=1; Path=/a/ck/", "mine2=1; path=/a/ck/sub; HttpOnly", "dot=1; Path=/a/ck/../other/"]:
+            self.send_header("Set-Cookie", c)
+        self.send_header("Clear-Site-Data", '"cookies"')
+        self.send_header("Refresh", "0; url=http://evil.test/")
+        self.send_header("Link", "<http://evil.test/>; rel=preload")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+    def log_message(self, *a):
+        pass
+HTTPServer(("127.0.0.1", int(os.environ["PORT"])), H).serve_forever()
+"#;
+
+#[tokio::test]
+async fn apps_proxy_drops_dangerous_cookies_and_headers() {
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let toml = py_toml("ck", "public = true");
+    assert_eq!(
+        deploy(
+            &t,
+            &ws,
+            "ck",
+            &[("app.toml", &toml), ("main.py", COOKIE_APP)],
+            ""
+        )
+        .await
+        .status,
+        200
+    );
+    let r = call(&t.public, "GET", "/a/ck/", &[], vec![]).await;
+    let cookies: Vec<String> = r
+        .headers
+        .get_all("set-cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        cookies,
+        vec!["mine=1; Path=/a/ck/", "mine2=1; path=/a/ck/sub; HttpOnly"],
+        "{cookies:?}"
+    );
+    assert!(r.headers.get("clear-site-data").is_none());
+    // public apps keep Refresh and Link, private ones lose them
+    assert!(r.headers.get("refresh").is_some());
+    let toml = py_toml("ckp", "");
+    let body = COOKIE_APP.replace("/a/ck/", "/a/ckp/");
+    let d = deploy(
+        &t,
+        &ws,
+        "ckp",
+        &[("app.toml", &toml), ("main.py", &body)],
+        "",
+    )
+    .await;
+    let tok = d.json()["view_token"].as_str().unwrap().to_string();
+    let red = call(
+        &t.public,
+        "GET",
+        &format!("/a/ckp/?token={tok}"),
+        &[],
+        vec![],
+    )
+    .await;
+    let loc = red.headers["location"].to_str().unwrap().to_string();
+    let r = call(&t.public, "GET", &loc, &[], vec![]).await;
+    assert_eq!(r.status, 200);
+    assert!(r.headers.get("refresh").is_none() && r.headers.get("link").is_none());
+}
+
+#[tokio::test]
+async fn apps_expired_or_paused_private_app_ignores_its_cap_for_cors() {
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let r = deploy(
+        &t,
+        &ws,
+        "site",
+        &[("app.toml", STATIC_TOML), ("index.html", "x")],
+        "",
+    )
+    .await;
+    let tok = r.json()["view_token"].as_str().unwrap().to_string();
+    let red = call(
+        &t.public,
+        "GET",
+        &format!("/a/site/?token={tok}"),
+        &[],
+        vec![],
+    )
+    .await;
+    let cap = red.headers["location"].to_str().unwrap().to_string();
+    let pf = [
+        ("origin", "null"),
+        ("access-control-request-method", "POST"),
+        ("access-control-request-headers", "x-evil"),
+    ];
+    let ok = call(&t.public, "OPTIONS", &cap, &pf, vec![]).await;
+    assert_eq!(ok.status, 204);
+    // fixed list, never a reflection
+    assert_eq!(
+        ok.headers["access-control-allow-headers"],
+        "content-type, accept, x-requested-with"
+    );
+    assert!(ok.headers.get_all("vary").iter().any(|v| v == "Origin"));
+    // paused
+    t.api(&ws, "POST", "/v1/apps/site/stop", vec![]).await;
+    let r = call(&t.public, "GET", &cap, &[("origin", "null")], vec![]).await;
+    assert_eq!(r.status, 503);
+    assert!(r.headers.get("access-control-allow-origin").is_none());
+    assert_ne!(
+        call(&t.public, "OPTIONS", &cap, &pf, vec![]).await.status,
+        204
+    );
+    t.api(&ws, "POST", "/v1/apps/site/restart", vec![]).await;
+    // expired
+    t.st.db
+        .lock()
+        .unwrap()
+        .execute("UPDATE apps SET expires_at='2000-01-01T00:00:00Z'", [])
+        .unwrap();
+    let r = call(&t.public, "GET", &cap, &[("origin", "null")], vec![]).await;
+    assert_eq!(r.status, 410);
+    assert!(r.headers.get("access-control-allow-origin").is_none());
+    let p = call(&t.public, "OPTIONS", &cap, &pf, vec![]).await;
+    assert_eq!(p.status, 410);
+    assert!(p.headers.get("access-control-allow-origin").is_none());
+}
+
+#[tokio::test]
+async fn apps_private_without_a_view_token_hash_has_no_cap() {
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let r = deploy(
+        &t,
+        &ws,
+        "site",
+        &[("app.toml", STATIC_TOML), ("index.html", "x")],
+        "",
+    )
+    .await;
+    let tok = r.json()["view_token"].as_str().unwrap().to_string();
+    let red = call(
+        &t.public,
+        "GET",
+        &format!("/a/site/?token={tok}"),
+        &[],
+        vec![],
+    )
+    .await;
+    let cap = red.headers["location"].to_str().unwrap().to_string();
+    assert_eq!(call(&t.public, "GET", &cap, &[], vec![]).await.status, 200);
+    t.st.db
+        .lock()
+        .unwrap()
+        .execute("UPDATE apps SET view_token_hash=NULL", [])
+        .unwrap();
+    let r = call(&t.public, "GET", &cap, &[("origin", "null")], vec![]).await;
+    assert_eq!(r.status, 401);
+    assert!(r.text().contains("This app is private"));
+    assert!(r.headers.get("access-control-allow-origin").is_none());
 }

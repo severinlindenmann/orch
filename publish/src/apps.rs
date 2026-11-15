@@ -653,16 +653,63 @@ fn cookie_value(req: &Request, cname: &str) -> Option<String> {
 /// `allow-same-origin` or `allow-top-navigation`; there is deliberately no opt-out.
 const APP_CSP: &str = "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
 
-fn is_public_live(st: &State, name: &str) -> bool {
-    match db::get_app(&st.db.lock().unwrap(), name) {
-        Ok(Some(a)) => {
-            a.public
-                && !a
-                    .expires_at
-                    .as_deref()
-                    .is_some_and(|e| e <= util::now().as_str())
+/// Not expired and not paused: only then does any CORS answer or capability count.
+fn is_live(a: &AppRow) -> bool {
+    a.status != "stopped"
+        && !a
+            .expires_at
+            .as_deref()
+            .is_some_and(|e| e <= util::now().as_str())
+}
+
+/// Set-Cookie headers an app may set: own cookies only, host-only, scoped under /a/<name>/.
+/// Anything that could touch orch's cookies or another app's path is dropped.
+fn cookie_allowed(v: &str, name: &str) -> bool {
+    let mut parts = v.split(';');
+    let first = parts.next().unwrap_or("");
+    let cname = first
+        .split('=')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if cname.starts_with("orch_") {
+        return false;
+    }
+    let mut path_ok = false;
+    for attr in parts {
+        let (k, val) = attr.split_once('=').unwrap_or((attr, ""));
+        match k.trim().to_ascii_lowercase().as_str() {
+            "domain" => return false,
+            "path" => {
+                let val = val.trim();
+                let base = format!("/a/{name}");
+                path_ok =
+                    !val.contains("..") && (val == base || val.starts_with(&format!("{base}/")));
+            }
+            _ => {}
         }
-        _ => false,
+    }
+    path_ok
+}
+
+fn sanitize_proxied(resp: &mut Response, app: &AppRow) {
+    let h = resp.headers_mut();
+    h.remove("service-worker-allowed");
+    h.remove("clear-site-data");
+    let kept: Vec<_> = h
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter(|v| v.to_str().is_ok_and(|v| cookie_allowed(v, &app.name)))
+        .cloned()
+        .collect();
+    h.remove(header::SET_COOKIE);
+    for v in kept {
+        h.append(header::SET_COOKIE, v);
+    }
+    if !app.public {
+        h.remove(header::REFRESH);
+        h.remove(header::LINK);
     }
 }
 
@@ -680,9 +727,13 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
     // CORS for the opaque-origin page: public apps (readable by anyone), and private apps only
     // for requests that carry the app's own capability (an attacker app does not know it)
     let cap_valid = app.as_ref().is_some_and(|a| {
-        !a.public && split_cap(&rest).is_some_and(|(c, _)| util::ct_eq(c, &app_cap(&st, a)))
+        !a.public
+            && is_live(a)
+            && split_cap(&rest)
+                .is_some_and(|(c, _)| app_cap(&st, a).is_some_and(|k| util::ct_eq(c, &k)))
     });
-    let public = (origin_null || preflight) && (is_public_live(&st, &name) || cap_valid);
+    let public_live = app.as_ref().is_some_and(|a| a.public && is_live(a));
+    let public = (origin_null || preflight) && (public_live || cap_valid);
     let mut resp = if preflight && public {
         // answered here, never forwarded to the app; public content is readable by anyone anyway
         let mut r = StatusCode::NO_CONTENT.into_response();
@@ -691,12 +742,10 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
             header::ACCESS_CONTROL_ALLOW_METHODS,
             "GET, POST, PUT, PATCH, DELETE".parse().unwrap(),
         );
-        let ah = req
-            .headers()
-            .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
-            .cloned()
-            .unwrap_or_else(|| "content-type".parse().unwrap());
-        h.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, ah);
+        h.insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            "content-type, accept, x-requested-with".parse().unwrap(),
+        );
         h.insert(header::ACCESS_CONTROL_MAX_AGE, "600".parse().unwrap());
         r
     } else {
@@ -706,8 +755,8 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
     if public && (origin_null || preflight) {
         h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "null".parse().unwrap());
         h.remove(header::ACCESS_CONTROL_ALLOW_CREDENTIALS);
-        h.append(header::VARY, "Origin".parse().unwrap());
     }
+    h.append(header::VARY, "Origin".parse().unwrap());
     if private {
         // the capability path must not leak through Referer or caches
         h.insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
@@ -720,14 +769,19 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
 /// Capability for a private app: pages under `/a/<name>/~<cap>/` need no cookie, so the
 /// sandboxed (opaque-origin) page can load its own relative CSS, JS, images and fetch() calls.
 /// A new view token changes the cap.
-fn app_cap(st: &State, app: &AppRow) -> String {
+fn app_cap(st: &State, app: &AppRow) -> Option<String> {
+    let hash = app.view_token_hash.as_deref().filter(|h| !h.is_empty())?;
     let mut m = b"orch-publish-app-cap/1".to_vec();
-    m.extend_from_slice(app.name.as_bytes());
-    m.extend_from_slice(app.view_token_hash.as_deref().unwrap_or("").as_bytes());
-    util::hmac_sha256(&st.app_key, &m)[..16]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    for f in [app.name.as_bytes(), hash.as_bytes()] {
+        m.extend_from_slice(&(f.len() as u32).to_be_bytes());
+        m.extend_from_slice(f);
+    }
+    Some(
+        util::hmac_sha256(&st.app_key, &m)[..16]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
 }
 
 /// `~<cap>/<inner>` -> (cap, inner)
@@ -756,7 +810,7 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
     let mut rest = rest;
     if !app.public {
         if let Some((cap, inner)) = split_cap(&rest) {
-            cap_ok = util::ct_eq(cap, &app_cap(&st, &app));
+            cap_ok = app_cap(&st, &app).is_some_and(|k| util::ct_eq(cap, &k));
             had_cap = true;
             rest = inner.to_string();
         }
@@ -799,7 +853,9 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
         );
     }
     if !app.public && !cap_ok {
-        let cap = app_cap(&st, &app);
+        let Some(cap) = app_cap(&st, &app) else {
+            return private_page();
+        };
         let ok = |t: &str| {
             app.view_token_hash
                 .as_deref()
@@ -920,7 +976,7 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
     match st.http.request(r).await {
         Ok(resp) => {
             let mut resp = resp.map(Body::new);
-            resp.headers_mut().remove("service-worker-allowed");
+            sanitize_proxied(&mut resp, app);
             resp
         }
         Err(_) => offline_page(),

@@ -691,6 +691,17 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
 pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     use std::io::Write;
     if let Ok(t) = std::fs::read_to_string(path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(path)?.permissions().mode();
+            if mode & 0o077 != 0 {
+                return Err(std::io::Error::other(format!(
+                    "{} must only be readable by the server (chmod 600)",
+                    path.display()
+                )));
+            }
+        }
         let t = t.trim();
         if t.len() == 64 {
             let mut k = [0u8; 32];
@@ -705,11 +716,17 @@ pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     let mut k = [0u8; 32];
     OsRng.fill_bytes(&mut k);
     let hex: String = k.iter().map(|b| format!("{b:02x}")).collect();
+    // write a 0600 temp file, flush it to disk, then rename: never a half-written key
+    let tmp = path.with_extension("key.tmp");
+    let _ = std::fs::remove_file(&tmp);
     let mut o = std::fs::OpenOptions::new();
     o.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
-    o.open(path)?.write_all(hex.as_bytes())?;
+    let mut f = o.open(&tmp)?;
+    f.write_all(hex.as_bytes())?;
+    f.sync_all()?;
+    std::fs::rename(&tmp, path)?;
     Ok(k)
 }
 
@@ -724,5 +741,26 @@ mod hmac_tests {
             h,
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod key_tests {
+    use super::load_or_create_key;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn key_is_created_0600_and_reloaded_and_loose_modes_are_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("app-cap.key");
+        let k = load_or_create_key(&p).unwrap();
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(!d.path().join("app-cap.key.tmp").exists());
+        assert_eq!(load_or_create_key(&p).unwrap(), k);
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(load_or_create_key(&p).is_err());
     }
 }
