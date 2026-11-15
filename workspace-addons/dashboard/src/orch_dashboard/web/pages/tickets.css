@@ -1,14 +1,14 @@
 .ticket-filters{flex-wrap:wrap}.ticket-filters input{min-height:44px;max-width:100%;width:240px}
 .board-tools{flex-wrap:wrap;margin-bottom:24px;gap:12px}
 .board-tools .btn,.ticket-row .btn,.ticket-card .btn,.ticket-not-found .btn{min-height:44px}
-.ticket-row .move-button,.ticket-card .move-button{width:44px;min-width:44px;min-height:44px}
+.ticket-row .move-button{width:44px;min-width:44px;min-height:44px}
 .ticket-row .menu-item,.ticket-card .menu-item{min-height:44px}
 .ticket-row{gap:12px;flex-wrap:wrap}.ticket-row .grow{min-width:180px}
 .ticket-row h3 a::after{display:none}.ticket-row h3 a{display:inline-flex;align-items:center;min-height:44px;gap:8px}
 .ticket-next{gap:10px;flex-wrap:wrap;margin-top:8px}.ticket-next .btn{position:relative;z-index:2}
-.ticket-meta{flex-wrap:wrap;gap:8px}.ticket-row .status-menu{position:relative}
+.ticket-meta{flex-wrap:wrap;gap:8px}
 .board .board-track{grid-template-columns:repeat(5,minmax(0,1fr))}
-.board .col-head{border:0;border-top:2px solid var(--border-strong);border-radius:0;padding:12px 0;margin-bottom:0}
+.board .col-head{border:0;border-top:2px solid var(--border-strong);border-radius:0}
 .column-hint{min-height:36px;margin:0 0 12px}.board-hint{text-align:right;margin-bottom:16px}
 .board .ticket-card{padding:12px}.ticket-card h3{display:block;overflow:visible}.ticket-card h3 a{display:inline-flex;min-height:44px;align-items:center}
 .board-family .board-family{margin-left:14px;border-left:1px solid var(--border);padding-left:6px}
@@ -36,7 +36,7 @@
 .board-none{padding:16px 8px;text-align:center;border:1px dashed var(--border);border-radius:8px}
 .changes-pending{color:var(--warning);font-weight:500;margin:2px 0 0}
 .ticket-card .who{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)}
-.owner-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.owner-line .when{margin-left:auto;white-space:nowrap}
+.owner-line{gap:8px;flex-wrap:wrap}.owner-line .when{margin-left:auto;white-space:nowrap}
 .tickets-empty{display:grid;justify-items:center;gap:12px;padding:48px 24px;text-align:center}.tickets-empty p{max-width:52ch}
 @media(max-width:720px){.board .kanban-col{max-height:none}.board .col-body{overflow:visible}}
 /* Ticket toolbar: layout toggle, active view chip, person, search (accepted Tickets draft) */
@@ -44,7 +44,6 @@
 .board-toolbar .view-toggle{margin:0}
 .board-toolbar .ticket-select{min-height:36px;font-size:12px;padding:6px 8px}
 .board-toolbar .search-field{width:220px;max-width:100%}.board-toolbar .search-field input{min-height:36px;font-size:12px;width:100%;max-width:100%}
-.view-chip{text-decoration:none}
 /* List: one table, grouped by status */
 .ticket-table .ticket-line{display:flex;align-items:center;gap:8px;min-width:0}
 .ticket-table .ticket-cell a{font-weight:500;color:var(--text);text-decoration:none}
@@ -77,7 +76,6 @@
 .view-chip.active{background:var(--accent-soft,var(--surface-3));color:var(--text);border-color:var(--border-strong)}
 .view-chip.add{border-style:dashed;background:none}
 .view-chip.add[disabled]{opacity:.5;cursor:default}
-.board-toolbar{flex-wrap:wrap;gap:12px;align-items:center}
 .board .kanban-col.col-collapsed{flex:0 0 56px;min-width:56px;min-height:0;max-height:none}
 .board .kanban-col.col-collapsed .col-head{flex-direction:column;align-items:flex-start;gap:4px}
 .board .kanban-col.col-collapsed .board-none{display:none}
@@ -93,5 +91,5 @@
 .ticket-card>.row:first-child>h3{flex:1 1 0;min-width:0;overflow-wrap:anywhere;word-break:normal}
 .ticket-card>.row:first-child>h3 a{min-height:28px}
 .ticket-card>.row:first-child>details.menu{flex:none;margin:-4px -4px 0 0}
-.ticket-card .move-button{width:28px;min-width:28px;min-height:28px;height:28px;padding:0}
+.ticket-card .move-button{width:28px;min-width:28px;min-height:28px;height:28px}
 .board .ticket-card .menu-pop{min-width:180px}
