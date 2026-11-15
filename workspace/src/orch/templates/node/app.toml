@@ -5,4 +5,7 @@ store = "{{store}}"
 start = "node server.js"
 health = "/health"
 test = "node --test"
-public = false
+# reach: public = on the internet, private = only on the private network
+reach = "public"
+# auth: true = needs the app's private link, false = open to everyone who can reach it
+auth = true

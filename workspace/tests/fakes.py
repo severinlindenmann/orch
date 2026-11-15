@@ -176,6 +176,7 @@ def make_publish() -> Fake:
                         "url": f"{f.url}/a/{n}",
                         "expires_at": None,
                         "updated_at": "2026-11-04T09:00:00Z",
+                        **a.get("extra", {}),  # reach/auth/public of a newer server
                     }
                     for n, a in f.apps.items()
                 ],
