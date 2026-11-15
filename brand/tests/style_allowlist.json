@@ -135,100 +135,12 @@
   "hex": 0,
   "style": 0
  },
- "workspace-addons/dashboard/mockup/automation/automation.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/board/board.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/board/board.html": {
-  "hex": 11,
-  "style": 1
- },
- "workspace-addons/dashboard/mockup/board/new.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/chat/chat.css": {
-  "hex": 8,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/errors/errors.css": {
-  "hex": 1,
-  "style": 0
- },
  "workspace-addons/dashboard/mockup/errors/not-found.html": {
   "hex": 1,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/errors/offline.html": {
   "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/factory/factory.css": {
-  "hex": 23,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/a1-session.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/a2-dock.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b1-blocks.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b2-queued.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b4-attach.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b5-phone.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b6-results.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/focus-help.html": {
-  "hex": 4,
-  "style": 1
- },
- "workspace-addons/dashboard/mockup/focus/focus-work.css": {
-  "hex": 6,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/focus.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/focus.html": {
-  "hex": 6,
-  "style": 2
- },
- "workspace-addons/dashboard/mockup/home/home.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/home/states.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/insights/insights.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/notes/notes.css": {
-  "hex": 0,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/previews/assets/catalogue-page.html": {
@@ -239,39 +151,11 @@
   "hex": 19,
   "style": 0
  },
- "workspace-addons/dashboard/mockup/previews/previews.css": {
-  "hex": 10,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/previews/viewer-error.html": {
-  "hex": 1,
-  "style": 0
- },
  "workspace-addons/dashboard/mockup/previews/viewer-html.html": {
   "hex": 19,
   "style": 0
  },
- "workspace-addons/dashboard/mockup/previews/viewer-loading.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/previews/viewer-pdf.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/proposals/fb11-settings-phone.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/publish/publish.css": {
-  "hex": 1,
-  "style": 0
- },
  "workspace-addons/dashboard/mockup/publish/publish.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/relay/relay.css": {
   "hex": 1,
   "style": 0
  },
@@ -284,59 +168,27 @@
   "style": 0
  },
  "workspace-addons/dashboard/mockup/settings/settings-about.html": {
-  "hex": 12,
+  "hex": 11,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/settings/settings-addons.html": {
-  "hex": 12,
+  "hex": 11,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/settings/settings-helper.html": {
-  "hex": 12,
+  "hex": 11,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/settings/settings-phone.html": {
-  "hex": 12,
+  "hex": 11,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/settings/settings-revision.js": {
   "hex": 1,
   "style": 0
  },
- "workspace-addons/dashboard/mockup/settings/settings.css": {
-  "hex": 1,
-  "style": 0
- },
  "workspace-addons/dashboard/mockup/settings/settings.html": {
-  "hex": 12,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/sweep/d-board.html": {
-  "hex": 13,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/sweep/d-dialogs.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/sweep/d-home-answer.html": {
-  "hex": 2,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/sweep/d-kit-v2.html": {
-  "hex": 3,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/sweep/d-shell.html": {
-  "hex": 2,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/sweep/d-ticket-states.html": {
-  "hex": 3,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/sync/sync.css": {
-  "hex": 1,
+  "hex": 11,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/sync/sync.html": {
@@ -346,18 +198,6 @@
  "workspace-addons/dashboard/mockup/ticket/assets/survey-results.html": {
   "hex": 5,
   "style": 1
- },
- "workspace-addons/dashboard/mockup/ticket/ticket-report.html": {
-  "hex": 0,
-  "style": 1
- },
- "workspace-addons/dashboard/mockup/ticket/ticket-sections.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/ticket/ticket.css": {
-  "hex": 1,
-  "style": 0
  },
  "workspace-addons/dashboard/src/orch_dashboard/web/look-icons.js": {
   "hex": 24,
