@@ -214,7 +214,7 @@ test('an accepted send shows Delivered at once and refreshes in the background',
   finishReload();
 });
 
-// #865 (c): Contacts -> Send a message opens the conversation with the name, never an empty "Workspace" pane.
+// Issue 865 (c): Contacts -> Send a message opens the conversation with the name, never an empty "Workspace" pane.
 test('opening a workspace before the contacts load shows its name and a loading line', () => {
   const c = context();
   vm.runInContext(`chatDm.contacts = []; chatDm.loaded = false; chatUi.open = '${WS}'; chatDmHint('${WS}', 'Pilatus');`, c);
