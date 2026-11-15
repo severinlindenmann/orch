@@ -28,6 +28,7 @@ async fn container_python_and_docker_apps_deploy_redeploy_stop() {
         return;
     }
     std::env::set_var("ORCH_PUBLISH_SANDBOX", "container");
+    std::env::set_var("ORCH_PUBLISH_DOCKER_APPS", "1");
     let t = setup_with(|c| {
         c.health_secs = 60;
         c.build_secs = 600;
