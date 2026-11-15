@@ -43,8 +43,13 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
   Today: question cards and completion notes at 20 px bold, tab counts at 11 px mono, "Updated" value at 16 px.
 - SX-3 Spacing: 4-pt scale; 20 px card padding, 16 px row padding, 24 px between cards, 32 px between sections; the
   shell never shifts (F15) and the sidebar never scrolls at 800 px (F12).
-- SX-4 Page header: eyebrow (optional) + h1 + one subtitle + actions right on the h1 baseline; no in-page breadcrumb,
-  no back link, no frame header (Factory, Focus, Sync all break this). Topbar crumb = "Tickets › DT-4" only.
+- SX-4 Page header (UX round 15 Nov): h1 + one muted line (no eyebrow; a date goes into that line), actions right,
+  flush to ONE right edge (`.page-heading` + `.page-heading-actions`); no in-page breadcrumb, no back link, no frame
+  header (Factory, Focus, Sync all break this). Topbar crumb = "Tickets › DT-4" only. Content starts at the same y on
+  every page (`.page`, 32 px top). Two widths only: full (default, no max-width) and `.form-width` (`--form-width`,
+  1024 px) for a form page such as Settings; both left-aligned. The top bar holds one outlined `New ticket`; the page's
+  own main action is the only filled button. Phone mode while on = an outlined chip after the breadcrumb (menu),
+  never a banner.
 - SX-5 Buttons: Primary (one per page, counts the topbar), Secondary, Ghost, Danger; icon buttons have aria-labels;
   "Got it", pill buttons, underlined text actions, full-width outline buttons are deleted.
 - SX-6 Selects and chevrons: one Select (36 px, border like inputs, SVG chevron), the same chevron on nav groups, ticket

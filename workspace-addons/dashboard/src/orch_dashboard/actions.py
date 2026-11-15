@@ -59,7 +59,7 @@ ATTACH_EXT = frozenset(
         "webp",
     }
 )
-ATTACH_MAX = 2 * 1024 * 1024
+ATTACH_MAX = 25 * 1024 * 1024
 LONG_NOTE = (
     "The full text is attached as note.md. Read it, then give this ticket a short title and description."
 )
@@ -369,7 +369,7 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
         if ext not in ATTACH_EXT:
             raise BadRequest(f"{f['name'][:60]}: only text files and pictures can be added.")
         if len(raw) > ATTACH_MAX:
-            raise BadRequest(f"{f['name'][:60]} is over 2 MB.")
+            raise BadRequest(f"{f['name'][:60]} is over 25 MB. Choose a smaller file.")
         out.append((f["name"], raw))
     return out
 

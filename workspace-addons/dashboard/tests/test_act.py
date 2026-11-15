@@ -1019,7 +1019,7 @@ def test_big_body_is_allowed_only_for_a_new_ticket(act_server, act_orch):
 def test_body_over_the_hard_cap_is_refused(act_server):
     try:
         status = _post_raw(
-            act_server, {"op": "ticket.new", "args": {"title": "T", "long_text": "y" * (5 * 1024 * 1024)}}
+            act_server, {"op": "ticket.new", "args": {"title": "T", "long_text": "y" * (141 * 1024 * 1024)}}
         )[0]
     except (BrokenPipeError, ConnectionResetError):  # answered before the whole body was sent
         return
@@ -1121,10 +1121,21 @@ def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
         {"title": "T\ud800"},
         {"title": "T", "files": [{"name": "a.md", "text": "x\udc00"}]},
         {"title": "T", "files": [{"name": "tool.exe", "text": "x"}]},
-        {"title": "T", "files": [{"name": "big.txt", "text": "x" * (2 * 1024 * 1024 + 1)}]},
+        {"title": "T", "files": [{"name": "big.txt", "text": "x" * (25 * 1024 * 1024 + 1)}]},
     ):
         assert _post_raw(act_server, {"op": "ticket.new", "args": args})[0] == 400, args
     assert acts(act_orch) == []  # nothing was created
+
+
+def test_a_20_mb_file_is_accepted_and_26_mb_refused_plainly():
+    ok = actions.attachments(
+        "ticket.new", {"title": "T", "files": [{"name": "big.txt", "text": "x" * (20 * 1024 * 1024)}]}
+    )
+    assert len(ok[0][1]) == 20 * 1024 * 1024
+    with pytest.raises(actions.BadRequest, match="over 25 MB. Choose a smaller file"):
+        actions.attachments(
+            "ticket.new", {"title": "T", "files": [{"name": "big.txt", "text": "x" * (26 * 1024 * 1024)}]}
+        )
 
 
 def test_approval_ops_sit_behind_the_origin_fence(act_server, act_orch):
