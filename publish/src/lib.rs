@@ -58,6 +58,8 @@ pub struct Inner {
     /// deploy, restart, stop and delete of apps run one at a time
     pub app_lock: tokio::sync::Mutex<()>,
     pub http: Http,
+    /// key for private-app capability paths (`/a/<name>/~<cap>/`)
+    pub app_key: [u8; 32],
     pub sleep: SleepState,
 }
 
@@ -74,12 +76,14 @@ pub fn new_state(cfg: Config) -> std::io::Result<State> {
     let conn = db::open(&cfg.data_dir.join("publish.db")).map_err(std::io::Error::other)?;
     let http = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
         .build_http();
+    let app_key = util::load_or_create_key(&cfg.data_dir.join("app-cap.key"))?;
     Ok(Arc::new(Inner {
         cfg,
         db: Mutex::new(conn),
         runner: runner::Runner::default(),
         app_lock: tokio::sync::Mutex::new(()),
         http,
+        app_key,
         sleep: SleepState::new(),
     }))
 }

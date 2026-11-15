@@ -3,11 +3,13 @@
 from tests import webjs
 
 
-def test_home_has_no_next_step_line_and_folds_needs():
+def test_home_has_no_next_step_line_and_lists_the_whole_needs_list():
     home = (webjs.WEB / "pages/home.js").read_text()
     assert "Next step" not in home  # fb6
     assert "'Send back'" not in home and "'Mark done'" not in home  # Dash 04: sign-off is in the result view
-    assert ">= 3 && !needsOpen" in home and "' more questions'" in home  # fb2, Dash 12
+    # UX round 15 Nov, item 4: no fold; one row and one button per further item, notices are one quiet line
+    assert "needsOpen" not in home and "' more questions'" not in home
+    assert "needListRow" in home and "notesLine" in home
 
 
 def test_new_ticket_button_stays_right_with_hidden_switch():

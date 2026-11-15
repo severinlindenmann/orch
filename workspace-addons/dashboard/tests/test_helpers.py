@@ -600,7 +600,7 @@ def test_agent_line_waiting_text_has_no_command():
 
 def test_ticket_screens_use_plain_wording_and_one_chip():
     src = webjs.all_js()
-    assert "working.length ? homeSection('working-now', 'Working now'" in src  # empty section is hidden
+    assert "working.length ? card('working-now', 'Working now'" in src  # empty section is hidden
     assert "No tickets are being worked on." not in src and "No agent is working right now" not in src
     assert "plainWhy(question" in src  # Needs-you rows carry no command text
     assert "seconds + ' s ago'" not in src  # one calm time format

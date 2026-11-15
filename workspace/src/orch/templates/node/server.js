@@ -1,6 +1,6 @@
 // {{name}}: a mini app on orch-apps (node, store {{store}}).
 // The host gives every app PORT, BASE_PATH (/{{slug}}), DATA_DIR (kept across deploys) and APP_ENV.
-// Requests arrive without the /{{slug}} prefix; links in pages must start with BASE_PATH or be relative.
+// Requests arrive without the /{{slug}} prefix; use relative links in pages (style.css, items), not BASE_PATH: private apps are served under a secret address.
 import http from "node:http";
 import { openStore } from "./store.js";
 
@@ -17,10 +17,10 @@ button{padding:8px 14px;font:inherit}li{padding:4px 0}
 
 function page(items) {
   const form = store.writable
-    ? `<form method="post" action="${BASE}/items"><input name="text" required maxlength="200" aria-label="New entry"><button>Add</button></form>`
+    ? `<form method="post" action="items"><input name="text" required maxlength="200" aria-label="New entry"><button>Add</button></form>`
     : "";
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{name}}</title><link rel="stylesheet" href="${BASE}/style.css">
+<title>{{name}}</title><link rel="stylesheet" href="style.css">
 <main><h1>{{name}}</h1>${form}<ul>${items.map((i) => `<li>${esc(i.text)}</li>`).join("")}</ul></main></html>`;
 }
 
@@ -50,7 +50,7 @@ export const server = http.createServer(async (req, res) => {
     if (url.pathname === "/items" && req.method === "POST" && store.writable) {
       const text = new URLSearchParams(await readBody(req)).get("text")?.trim();
       if (text) store.add(text.slice(0, 200));
-      res.writeHead(303, { location: `${BASE}/` });
+      res.writeHead(303, { location: "./" });
       return res.end();
     }
     res.writeHead(404, { "content-type": "text/plain" });

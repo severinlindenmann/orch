@@ -11,7 +11,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const p = await b.newPage({ viewport: { width: w, height: h } });
     const errs = []; p.on('pageerror', e => errs.push(e.message));
     await p.goto(base + '/#settings');
-    await p.waitForSelector('[data-testid=settings-look]');
+    await p.waitForSelector('[data-testid=settings-profile]');
     if (w === 1280) {
       // pick Wallet / Amber from Money
       await p.click('[data-testid=look-change]');
@@ -25,11 +25,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       out.favicon = (await p.getAttribute('link[rel=icon]', 'href')).slice(0, 40);
       out.title = await p.title();
       // description: a proposal
-      await p.click('[data-key=lk-desc-edit]');
-      await p.fill('[data-key=lk-desc-input]', desc);
-      await p.click('[data-key=lk-desc-save]');
-      await p.waitForSelector('[data-testid=look-pending]', { timeout: 15000 });
-      out.pending = await p.textContent('[data-testid=look-pending]');
+      await p.click('[data-key=pf-edit]');
+      await p.fill('[data-key=pf-description]', desc);
+      await p.click('[data-key=pf-save]');
+      await p.waitForSelector('[data-testid=profile-relay-state]', { timeout: 15000 });
+      out.pending = await p.textContent('[data-testid=profile-relay-state]');
       // shared pages switch off
       await p.click('[data-testid=look-shared-pages]');
       await sleep(1500);
