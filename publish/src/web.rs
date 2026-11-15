@@ -247,7 +247,7 @@ pub fn markdown_page(title: &str, md: &str) -> String {
     )
 }
 
-const LOGO: &str = r##"<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="20" fill="none" stroke="#e8eaed" stroke-width="6"/><circle cx="32" cy="32" r="6" fill="#2fc6a3"/><circle cx="47" cy="17" r="7" fill="#2fc6a3" stroke="#0a0c0f" stroke-width="3"/></svg>"##;
+const LOGO: &str = r##"<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="20" fill="none" stroke="var(--text)" stroke-width="6"/><circle cx="32" cy="32" r="6" class="brand-dot"/><circle cx="47" cy="17" r="7" class="brand-dot" stroke="var(--sidebar)" stroke-width="3"/></svg>"##;
 
 /// Icon names: "lock", "offline", "clock", "link". Inline SVG, also used by file.js.
 pub fn icon(name: &str) -> &'static str {

@@ -7,7 +7,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,su
 button,.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text);padding:9px 14px;cursor:pointer;font-weight:550;white-space:nowrap}
 button:hover,.button:hover{background:var(--surface-3)}
 .primary{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
-.primary:hover{background:var(--brand-strong)}
+.primary:hover{background:color-mix(in srgb,var(--brand) 80%,var(--ink))}
 .quiet{background:transparent}
 .small{padding:5px 10px;font-size:12px}
 .shell{display:grid;grid-template-columns:224px minmax(0,1fr);min-height:100vh}
@@ -40,7 +40,7 @@ p{margin:0 0 15px;color:var(--text-muted)}
 .workspace:last-child{border:0}
 .avatar{width:40px;height:40px;display:grid;place-items:center;border:1px solid color-mix(in srgb,var(--brand) 20%,transparent);background:color-mix(in srgb,var(--brand) 5%,transparent);color:var(--brand);border-radius:10px;font-size:15px}
 .avatar.purple{color:var(--chart-4);background:color-mix(in srgb,var(--chart-4) 4%,transparent);border-color:color-mix(in srgb,var(--chart-4) 19%,transparent)}
-.avatar.orange{color:var(--warning);background:color-mix(in srgb,var(--warning) 4%,transparent);border-color:color-mix(in srgb,var(--warning) 19%,transparent)}
+.avatar.orange{color:var(--addon);background:color-mix(in srgb,var(--addon) 4%,transparent);border-color:color-mix(in srgb,var(--addon) 19%,transparent)}
 .workspace h2{font-weight:550;font-size:14px;margin:0 0 5px}
 .workspace p{font-size:12px;margin:3px 0}
 .number{font-size:14px}
@@ -316,7 +316,7 @@ input[type=checkbox]{width:24px;height:24px}
 
 /* ---- publish accent (blue) ---- */
 :root{--publish:var(--info);--publish-soft:color-mix(in srgb,var(--info) 12%,transparent)}
-.brand svg circle[fill="var(--brand)"]{fill:var(--publish)}
+.brand-dot{fill:var(--publish)}
 .brand em{color:var(--publish)}
 .admin-shell .side-nav a.active{color:var(--publish);background:var(--publish-soft)}
 .admin-shell .admin-sidebar{box-shadow:inset 0 3px 0 var(--publish)}
@@ -326,7 +326,7 @@ p.fact{margin-top:16px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 
 /* ---- public file page (draft-v3 public-file): the document is the focus ---- */
 .public,.pf-body{--brand:var(--publish);--on-brand:var(--bg)}
-.public .primary:hover{background:var(--info)}
+.public .primary:hover{background:color-mix(in srgb,var(--info) 80%,var(--text))}
 .public .file-icon{background:var(--publish-soft);border-color:color-mix(in srgb,var(--info) 25%,transparent)}
 .no-scroll{overflow:hidden}
 body.pf-body{font-size:14px;background:var(--bg)}
@@ -334,7 +334,6 @@ body.pf-body{font-size:14px;background:var(--bg)}
 .pf-head{display:flex;align-items:center;gap:12px;min-height:52px;padding:6px 16px;border-bottom:1px solid var(--border);background:var(--bg);flex:none}
 .pf-logo{display:inline-flex;align-items:center;padding-right:12px;border-right:1px solid var(--border)}
 .pf-logo svg{width:22px;height:22px}
-.pf-logo svg circle[fill="var(--brand)"]{fill:var(--publish)}
 .pf-title{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px}
 .pf-title h1{font-size:14px;line-height:1.4;font-weight:600;letter-spacing:0;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .pf-title h1:focus{outline:none}

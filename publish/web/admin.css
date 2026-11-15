@@ -1,4 +1,5 @@
-:root{--fs-body:13px;--fs-title:20px;--fs-key:11px;--s5:20px;--s6:24px;--row-height:44px;--lift-shadow:0 10px 24px -6px rgb(0 0 0 / .55),0 2px 6px rgb(0 0 0 / .4)}
+/* page-scoped values that differ from the master and would move the layout; C2 removes them */
+:root{--fs-body:13px;--row-height:44px;--lift-shadow:0 10px 24px -6px rgb(0 0 0 / .55),0 2px 6px rgb(0 0 0 / .4)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:400 var(--fs-body)/1.5 var(--font-ui);-webkit-font-smoothing:antialiased;overflow-wrap:anywhere}
 main,section,article,aside,header,footer,div,form,fieldset,nav{min-width:0}
@@ -311,7 +312,7 @@ a:not(.btn):not(.brand):not(.nav-item){color:var(--brand)}
 @media(max-width:720px){.copy-wrap>.btn{min-width:80px}
 }
 
-:root{--brand:var(--info);--brand-strong:var(--info);--brand-soft:color-mix(in srgb,var(--info) 14%,transparent);--on-brand:var(--bg);--brand-chip-text:var(--info);--focus-ring:0 0 0 2px var(--bg),0 0 0 4px var(--info);--nav-selected:var(--brand-soft)}
+:root{--brand:var(--info);--brand-strong:color-mix(in srgb,var(--info) 80%,var(--ink));--brand-soft:color-mix(in srgb,var(--info) 14%,transparent);--on-brand:var(--bg);--brand-chip-text:var(--info);--focus-ring:0 0 0 2px var(--bg),0 0 0 4px var(--info);--nav-selected:var(--brand-soft)}
 
 /* Live portal states and accessible fallbacks. */
 .skeleton{animation:none}.brand svg{width:24px;height:24px}.brand .brand-dot{fill:var(--brand)}
