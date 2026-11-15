@@ -343,6 +343,8 @@ actor MockRelay: RelayAPI {
     }
     func answer(_ r: AnswerRequest) async throws -> SendReceipt {
         try await check()
+        // Simulator evidence hook `-mockFailAnswers YES`: reads work, sending an answer fails like no network (the card stays "Saved on this phone").
+        if UserDefaults.standard.bool(forKey: "mockFailAnswers") { throw URLError(.notConnectedToInternet) }
         if let id = clientIds[r.clientId] { return SendReceipt(id: id, clientId: r.clientId, duplicate: true) }
         guard all.contains(where: { $0.id == r.questionMessageId }) else { throw RelayError.api(status: 404, code: "not_found", message: "Question not found.") }
         // Simulator evidence hook `-mockRace YES`: another phone answered "DATE" a moment before this one.

@@ -240,7 +240,12 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         // the result text arrives in /messages: the item leaves the outbox
         let msg = PhoneMessage(message: TextMessage(id: "m_res1", from: "ws_pilatus001", to: "ph_iphone0001", type: "text", createdAt: "2026-11-15T09:02:00Z", ticket: nil,
                                                     body: TextBody(text: "Got it", reviewResult: result), replyTo: qid), workspaceName: "P")
-        XCTAssertEqual(ReviewStackRules.result(for: qid, in: [msg])?.result, "applied")
+        XCTAssertEqual(ReviewStackRules.result(for: qid, workspace: "ws_pilatus001", in: [msg])?.result, "applied")
+        // a result from another workspace with the same replyTo is ignored by both
+        let other = PhoneMessage(message: TextMessage(id: "m_res2", from: "ws_other0001", to: "ph_iphone0001", type: "text", createdAt: "2026-11-15T09:03:00Z", ticket: nil,
+                                                      body: TextBody(text: "x", reviewResult: result), replyTo: qid), workspaceName: "O")
+        XCTAssertNil(ReviewStackRules.result(for: qid, workspace: "ws_pilatus001", in: [other]))
+        box.reconcile(with: [other]); XCTAssertEqual(box.items.count, 1)
         box.reconcile(with: [msg]); XCTAssertTrue(box.items.isEmpty)
         let verdicts = await relay.verdicts
         XCTAssertEqual(verdicts.count, 1); XCTAssertEqual(verdicts[0].verdict, ok(q))
@@ -317,5 +322,22 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         let bad = CardFile(blobId: "b_rv1f0", name: "invoice.png", size: 3, sha256: String(repeating: "0", count: 64), mime: "image/png")
         do { _ = try await relay.cardFile(bad); XCTFail("hash mismatch must fail") } catch RelayError.api(let s, _, _) { XCTAssertEqual(s, 422) }
         do { _ = try await relay.blob(id: "b_nope") ; XCTFail() } catch RelayError.api(let s, _, _) { XCTAssertEqual(s, 404) }
+    }
+}
+
+@MainActor
+final class CardFileCacheTests: XCTestCase {
+    /// A blob already in the plain blob cache (no hash check) is never served as a card file with another hash.
+    func testCachedBlobWithDifferentHashIsNotReturnedAsCardFile() async throws {
+        let model = AppModel(useMock: true)
+        let good = try XCTUnwrap(MockReviewStack.questions[0].message.body.cardFiles?.first)
+        _ = await model.blob(good.blobId)                         // fills blobCache without a hash check
+        let forged = CardFile(blobId: good.blobId, name: good.name, size: good.size, sha256: String(repeating: "0", count: 64), mime: good.mime)
+        let bad = await model.cardFile(forged)
+        XCTAssertNil(bad)
+        let ok = await model.cardFile(good)
+        XCTAssertNotNil(ok)
+        let again = await model.cardFile(forged)                  // a verified cache hit for another hash does not leak either
+        XCTAssertNil(again)
     }
 }
