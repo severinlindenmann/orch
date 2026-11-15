@@ -43,6 +43,8 @@ final class AppModel {
     private(set) var answerSentAt: [String: Date] = [:]
     /// questions someone else answered first (409): `answers` then holds their answer
     private(set) var answeredElsewhere: Set<String> = []
+    /// questions the relay refused an answer for with 409 taken_back (this run): their cards are gone
+    private(set) var takenBackRefused: Set<String> = []
     private(set) var isLoading = false
     private(set) var hasLoaded = false
     /// When the last refresh succeeded (drives "Last updated ...").
@@ -451,6 +453,7 @@ final class AppModel {
                 answers[qid] = ""; answeredElsewhere.insert(qid)
             }
             await reloadMessages()
+            applyTakenBack()
             for item in questions where questionLog[item.id] != item { questionLog[item.id] = item }
             if message != nil { message = nil }
             if transportDown { transportDown = false }
@@ -532,6 +535,15 @@ final class AppModel {
         skipGroupRebuild = !touched.contains { $0.message.body.group != nil || $0.fromPhone }
         messages = next
         skipGroupRebuild = false
+        applyTakenBack()
+    }
+    /// A question the workspace took back leaves Needs, the Review stack and "Needs your OK" at once (TakenBackRules).
+    private func applyTakenBack() {
+        let all = questions + Array(questionLog.values)
+        let closed = TakenBackRules.closedIds(questions: all, messages: messages, refused: takenBackRefused)
+        guard !closed.isEmpty else { return }
+        if questions.contains(where: { closed.contains($0.id) }) { questions.removeAll { closed.contains($0.id) } }
+        for id in closed where questionLog[id] != nil { questionLog[id] = nil }
     }
     /// client_ids of messages the relay stored (first tick) that `/messages` has not listed yet.
     private func unlistedSentClientIds() -> Set<String> {
@@ -629,6 +641,9 @@ final class AppModel {
                 // Only the answer value is kept; "" = answered elsewhere, value unknown (the card then shows no chip).
                 answers[qid] = Outbox.takenAnswer(from: text) ?? ""; answeredElsewhere.insert(qid); message = nil
                 noticeTick += 1; announcement = "Answered on your computer"
+            case .questionTakenBack(_, let qid, let text):
+                takenBackRefused.insert(qid); applyTakenBack()
+                message = text; errorTick += 1; announcement = text
             case .sent: sendTick += 1; announcement = "Message sent"
             case .failed(_, _, let text): message = text; errorTick += 1; announcement = text
             case .unauthorized: handle(RelayError.unauthorized)
@@ -921,7 +936,7 @@ final class AppModel {
         readState = ReadState(); blobCache = [:]; verifiedCardFiles = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         UserDefaults.standard.removeObject(forKey: HiddenQuestions.defaultsKey); NotificationCenter.default.post(name: .orchPhoneReset, object: nil)
-        credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false
+        credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; takenBackRefused = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; transportDown = false; tab = .chats; phase = .onboarding
     }
 
