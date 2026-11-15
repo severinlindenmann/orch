@@ -97,7 +97,7 @@ function reportReady(d, actions, body, result) {
     window.orch.toast(ok ? 'Copied. Paste it to a helper.' : 'Could not copy. Select the line and copy it.', ok ? undefined : 'error');
   });
   body.replaceChildren(h('p', {}, h('strong', {}, 'Checks')), reportChecks(array(result.checks)),
-    h('p', {className:'report-sub'}, h('strong', {}, 'Give it to a helper')), h('p', {className:'muted'}, 'Paste this into Claude or a helper chat:'),
+    h('p', {className:'report-sub'}, h('strong', {}, 'Give it to a helper')), h('p', {className:'muted'}, 'Paste this into a helper chat:'),
     h('div', {className:'row'}, h('input', {type:'text', className:'input grow', readOnly:true, value:line, 'aria-label':'Line for a helper', 'data-key':'report-line'}), copy),
     h('p', {className:'meta'}, folder));
   actions.replaceChildren(button('Close', 'outline', () => window.orch.close(d)),
