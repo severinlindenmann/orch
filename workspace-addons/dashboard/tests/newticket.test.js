@@ -51,10 +51,10 @@ test('file validation, first nonempty title, and base64 stripping', () => {
   const c = setup().c;
   for (const ext of ['txt','md','csv','tsv','json','log','yml','yaml','toml','ini','png','jpg','jpeg','gif','webp']) assert.ok(c.ticketFileType('X.' + ext.toUpperCase()));
   assert.equal(c.ticketFileError({name:'x.html',size:1}, []), 'x.html: only text files and pictures');
-  assert.equal(c.ticketFileError({name:'x.md',size:2097153}, []), 'x.md is over 2 MB');
-  assert.equal(c.ticketFileError({name:'x.md',size:2097152}, []), '');
+  assert.equal(c.ticketFileError({name:'x.md',size:25*1024*1024+1}, []), 'x.md is over 25 MB');
+  assert.equal(c.ticketFileError({name:'x.md',size:20*1024*1024}, []), '');
   assert.equal(c.ticketFileError({name:'x.md',size:1}, Array(12).fill({size:1})), '');  // no file-count limit
-  assert.equal(c.ticketFileError({name:'x.md',size:2*1024*1024}, [{size:2*1024*1024}]), 'Files are over 3.5 MB');
+  assert.equal(c.ticketFileError({name:'x.md',size:25*1024*1024}, [{size:80*1024*1024}]), 'Files are over 100 MB');
   assert.equal(c.ticketTextTitle('\n  hello\r\nworld', 3), 'hel');
   assert.equal(c.ticketTextTitle('  \n ', 80), '');
   assert.equal(c.ticketBase64('data:image/png;base64,YQ=='), 'YQ==');

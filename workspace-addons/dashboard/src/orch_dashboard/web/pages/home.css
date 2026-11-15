@@ -1,15 +1,12 @@
 /* Home cards share the shell's dark theme tokens. */
 .home-columns{grid-template-columns:minmax(0,1fr) 280px;align-items:start}
-.home-need,.home-work,.home-result,.home-message,.home-ticket{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px}
+.home-need,.home-work,.home-message,.home-ticket{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:16px}
 .home-columns .ticket-title h3{margin:0;line-height:1.5}
 .home-columns p{margin:0}
 .home-columns .ticket-title a{text-decoration:none}
-.home-columns .btn,.home-columns summary,#connection .btn,#connection summary{min-height:44px}
+.home-columns summary,#connection .btn,#connection summary{min-height:44px}
 .home-columns .row{flex-wrap:wrap}
 .home-columns .home-message .btn{align-self:flex-start}
-.segments{display:flex;gap:4px;margin:4px 0}
-.segments span{flex:1;height:4px;border-radius:2px;background:var(--surface-3)}
-.segments .complete{background:var(--brand)}
 .message-field{display:grid;gap:8px;margin:16px 0}
 .message-field input,.message-field textarea{width:100%;min-height:44px}
 .skeleton-heading,.skeleton-line{border-radius:6px;background:var(--surface-3);animation:home-shimmer 1.8s ease-in-out infinite}
@@ -39,15 +36,10 @@
 .status-leaving{opacity:0;transition:opacity 160ms ease-out}
 @media(prefers-reduced-motion:reduce){.status-leaving{transition:none}}
 /* A result row is one link with a chevron; signing off happens in the result view. */
-.home-result .result-link{display:flex;align-items:center;gap:12px;min-height:44px;color:var(--text);text-decoration:none;font-weight:600}
-.home-result .result-link:hover .grow{text-decoration:underline}
-.home-result .result-link .meta{font-weight:400}
-.home-result .chevron{font-size:20px;line-height:1;color:var(--text-muted)}
 .home-columns .see-all{display:inline-flex;align-items:center;min-height:44px;color:var(--text)}
 /* Home draft (mockup/home): Question, Check and Changes cards, then Working now; Finished today on the right. */
 .home-columns{grid-template-columns:minmax(0,1fr) 296px;gap:24px}
 .home-card>.card-h{display:flex;align-items:center;gap:8px;padding:12px 16px 0}
-.home-card .badge.changes{color:var(--brand)}
 .home-need .question-title{font-size:20px;line-height:28px;margin:0}
 .home-need .answer-options{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .answer-option{display:flex;flex-direction:column;gap:8px;text-align:left;min-height:44px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;padding:12px;color:var(--text);cursor:pointer;transition:border-color 100ms ease,background 100ms ease}
@@ -58,22 +50,12 @@
 .answer-option:disabled{opacity:.6;cursor:default}
 .answer-option .badge{padding:0 4px;background:var(--brand-soft);color:var(--brand);border:0;font-size:12px}
 .home-need>.btn.ghost{align-self:flex-start;color:var(--text-muted)}
-.home-result{flex-direction:row;align-items:center;gap:12px}
-.home-result>.grow{min-width:0}
-.preview-thumbnail{flex:none;width:56px;height:56px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);display:grid;align-content:start;gap:4px;padding:6px;overflow:hidden;font-size:10px;color:var(--text-muted)}
-.preview-thumbnail i{display:block;height:3px;border-radius:2px;background:var(--surface-3)}
-.preview-thumbnail img{margin:-6px;width:calc(100% + 12px);height:calc(100% + 12px);object-fit:cover}
-.inline-preview{display:flex;gap:12px;flex-wrap:wrap;background:none;border:0;padding:4px 0 0;color:var(--text-muted);text-align:left;font-size:12px;line-height:16px;min-height:28px;cursor:pointer}
-.inline-preview span{color:var(--brand)}
-.home-change{flex-direction:row;align-items:center;flex-wrap:wrap;gap:12px}
-.home-change h3{margin:0 0 4px;font-size:14px}
 .working-row{display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:68px;color:var(--text);text-decoration:none}
 .working-row+.working-row{border-top:1px solid var(--border)}
 .working-row:hover{background:var(--surface-2)}
 .working-row strong{display:block;font-weight:500}
 .working-row .grow{min-width:0}.working-row .grow>.meta{display:block;margin-top:4px}
 .working-row .avatar{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--surface-3);font-size:12px}
-.working-progress{width:120px;flex:none;display:grid;gap:4px;text-align:right}
 .home-columns .quiet-note{padding:8px 16px;color:var(--text-faint);font-size:12px}
 .home-columns .quiet-note a{color:var(--text-muted)}
 .empty-workspace{min-height:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center}
@@ -88,13 +70,9 @@
 .home-need .choose-line{margin-top:4px}
 .home-card>.card-h{padding:12px 16px}
 .home-card>.card-h+.card-row{border-top:1px solid var(--border)}
-.home-changes{overflow:hidden}.home-changes .home-change{padding:16px}
-.home-change>.badge{flex:none}
-.home-result>.btn{flex:none}
 .home-section-head{align-items:center;justify-content:space-between;margin-bottom:12px}.home-section-head h2{margin:0}
 .home-section>.home-section-head+.card{margin:0}
 .home-section>h2{margin:0 0 12px}
-.home-result .result-link{min-height:0;margin:0;font-size:14px;font-weight:500}.home-result .result-link:hover .grow{text-decoration:none}
 .home-section-head h2{font-size:14px;line-height:20px}
 /* Owner feedback 14 Nov: the question is body text, not a heading. */
 .home-need .question-title{font-size:14px;line-height:20px;font-weight:600}

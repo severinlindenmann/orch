@@ -137,9 +137,9 @@ const statusControl = (t, scope) => {
   if (snapshot) return statusChip(t);
   return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'btn outline xs status-sum', 'aria-label':'Move to… ' + clean(t.title) + ' (now ' + statusWord(shown(t)) + ')'}, 'Move to', iconEl('down')), h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, statusItems(t, scope)));
 };
-// Page header: (eyebrow) title + one line under it; an optional actions slot at the end.
-const heading = (title, sub = '', {eyebrow = '', actions = null} = {}) => h('header', {className:'page-heading', 'data-key':'heading'},
-  h('div', {}, eyebrow ? h('p', {className:'eyebrow'}, eyebrow) : null, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
+// Page header (the one frame): title + one muted line under it, no eyebrow; an optional actions slot at the end.
+const heading = (title, sub = '', {actions = null} = {}) => h('header', {className:'page-heading', 'data-key':'heading'},
+  h('div', {}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
   actions ? h('div', {className:'page-heading-actions'}, actions) : null);
 // Loading shapes that match the page they stand in for; `section` is a part of a page (add-on body, chat history ...).
 function skeletonFor(kind) {
@@ -679,14 +679,6 @@ main.addEventListener('click', async event => {
   }
   if (action === 'copies-retry') {
     (async () => { for (const s of array(state.settings?.copies_disk?.stuck)) await settingsSend('copies.retry', {ticket:s.ticket}, 'copies-clean'); })();
-    return;
-  }
-  if (action === 'ws-edit') { wsEditing = control.dataset.field; render(); document.querySelector('[data-key="settings-ws-' + wsEditing + '"]')?.focus(); return; }
-  if (action === 'ws-cancel') { wsEditing = null; render(); return; }
-  if (action === 'ws-save') {
-    const field = control.dataset.field;
-    const result = await settingsSend('workspace.set', {field, text:document.querySelector('[data-key="settings-ws-' + field + '"]')?.value || ''}, 'ws-' + field);
-    if (result.ok) { wsEditing = null; render(); }
     return;
   }
   if (action === 'copies-setup-edit') { copySetupEditing = true; render(); document.querySelector('[data-key="settings-copy-setup"]')?.focus(); return; }

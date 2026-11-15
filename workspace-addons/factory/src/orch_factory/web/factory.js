@@ -281,8 +281,8 @@
     const needing = orders.filter(o => o.open || draftWaiting(o));
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
     view.append(heading('Factory', needing.length
-      ? plural(needing.length, 'thing needs you', 'things need you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
-      : 'Nothing needs you right now. Your ideas and planned runs are below.'));
+      ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
+      : 'Nothing in Factory waits for you right now. Your ideas and planned runs are below.'));
     view.append(ideaBox(), askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
@@ -308,7 +308,7 @@
       const c = card(o.title, ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
       c.classList.add('f-attention'); return c;
     }, 'No proposals waiting for Start.');
-    section(primary, 'Needs you · stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
+    section(primary, 'Factory stops waiting for you', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
       const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false), rawDetails(o.open),
         tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
       c.classList.add('f-attention'); return c;

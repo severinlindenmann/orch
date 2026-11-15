@@ -161,9 +161,24 @@
     return out;
   }
 
-  /* The one "Needs you" number (greeting, heading, fold): one per ticket (or per row without a ticket) plus failed starts. */
-  function needsYouCount(rows, failed) {
-    return new Set(arr(rows).filter(Boolean).map(r => r.ticket || r.id)).size + arr(failed).length;
+  /* A row that only tells the person something and needs no answer (an add-on's note that offers just an OK, or a
+     warning with no button): it stays reachable on Home as one quiet line and is never counted. */
+  function isNotice(row) {
+    const r = row || {}, acts = arr(r.actions);
+    if (r.answer && r.answer.question && !acts.some(a => a && String(a.label).toLowerCase() === 'ok')) return false;
+    if (!r.source || r.source === 'core' || r.kind === 'overdue-wait' || r.kind === 'addon:not-running') return false;
+    if (acts.some(a => a && String(a.label).toLowerCase() === 'ok')) return true;
+    return !r.answer && !acts.length && r.tone === 'warn';
+  }
+  /* A helper's changes waiting to be added: shown as "Changes to add" from the ticket, not as a second row. */
+  const isBringBack = row => !!row && row.kind === 'copies:bring-back';
+  /* The one "Needs you" number (sidebar badge, top bar, Home heading and pill, Tickets pill): one per ticket (or per
+     row without a ticket) that needs an answer, plus failed starts, results to check and changes to add. Notices
+     (isNotice) and the bring-back rows (counted as changes) are not counted. results/changes are numbers or lists. */
+  function needsYouCount(rows, failed, results = 0, changes = 0) {
+    const asked = new Set(arr(rows).filter(r => r && !isNotice(r) && !isBringBack(r)).map(r => r.ticket || r.id)).size;
+    const n = v => Array.isArray(v) ? v.length : Number(v) || 0;
+    return asked + arr(failed).length + n(results) + n(changes);
   }
 
   /* True when "Needs you" already lists a question of this ticket (the question text is shown there only). */
@@ -483,5 +498,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

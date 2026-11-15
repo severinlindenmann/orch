@@ -9,7 +9,7 @@ import pytest
 from orch_dashboard import actions, look
 from orch_dashboard.data import load_state
 
-from .test_act import acts, post
+from .test_act import acts, calls, post
 
 HERE = Path(__file__).parent
 WEB = HERE.parent / "src" / "orch_dashboard" / "web"
@@ -31,8 +31,10 @@ def fake(tmp_path, show=None, profile=None, services=("relay",)):
         "shared": True,
         "profile": profile
         or {
+            "name": "Pilatus relay",
             "description": "Bills and taxes",
-            "pending": {"description": "Bills, taxes and budget", "tags": None},
+            "tags": ["money"],
+            "pending": {"description": "Bills, taxes and budget", "tags": ["money", "tax"]},
         },
         "status": [
             {
@@ -99,15 +101,22 @@ def test_op_table_builds_the_look_commands():
         BY,
         "--json",
     ]
-    assert actions.build_argv("look.description", {"service": "relay", "text": " Bills "}) == [
+    assert actions.build_argv(
+        "look.profile", {"service": "relay", "description": " Bills ", "tags": ["a", "b-1"]}
+    ) == [
         "relay",
         "profile",
         "--description=Bills",
+        "--tags=a,b-1",
         "--by",
         BY,
         "--json",
     ]
-    assert actions.build_argv("look.description", {"service": "publish", "text": "x"})[0] == "publish"
+    assert actions.build_argv("look.profile", {"service": "publish", "tags": []})[:3] == [
+        "publish",
+        "profile",
+        "--tags=",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -119,10 +128,14 @@ def test_op_table_builds_the_look_commands():
         ("look.set", {"icon": "wallet", "by": "agent:claude"}),  # a caller is never a request field
         ("look.shared", {"on": "yes"}),
         ("look.shared", {"on": True, "by": "human:boss"}),
-        ("look.description", {"service": "ssh", "text": "x"}),
-        ("look.description", {"service": "relay", "text": "two\nlines"}),
-        ("look.description", {"service": "relay", "text": "x" * 281}),
-        ("look.description", {"service": "relay", "text": "x", "tags": "a"}),
+        ("look.profile", {"service": "ssh", "description": "x"}),
+        ("look.profile", {"service": "relay", "description": "two\nlines"}),
+        ("look.profile", {"service": "relay", "description": "x" * 281}),
+        ("look.profile", {"service": "relay", "tags": "a"}),
+        ("look.profile", {"service": "relay", "tags": ["a", "b", "c", "d", "e"]}),
+        ("look.profile", {"service": "relay", "tags": ["Bad Tag"]}),
+        ("look.profile", {"service": "relay"}),
+        ("look.profile", {"service": "relay", "text": "x"}),
     ],
 )
 def test_bad_requests_are_refused(op, args):
@@ -142,6 +155,8 @@ def test_load_look_reads_show_status_and_profile(tmp_path, ws):
         "relay",
     )
     assert d["description"] == "Bills and taxes" and d["pending"] == "Bills, taxes and budget"
+    assert d["tags"] == ["money"] and d["pending_tags"] == ["money", "tax"] and d["waiting"] is True
+    assert d["relay_name"] == "Pilatus relay"
     by_name = {w["name"]: w for w in d["workspaces"]}
     assert by_name["Pilatus"]["here"] is True and by_name["Pilatus"]["url"] == "http://127.0.0.1:8421"
     assert by_name["Home"]["url"] is None  # only a link to this computer is kept
@@ -178,6 +193,27 @@ def test_ops_run_orch_and_the_cache_is_dropped(tmp_path, act_server, act_orch):
     ]
     code, text, _ = post(act_server, {"op": "look.set", "args": {"icon": "a b"}})
     assert code == 400
+
+
+def test_profile_proposal_reaches_the_relay_without_a_proof(act_server, act_orch):
+    code, text, _ = post(
+        act_server,
+        {"op": "look.profile", "args": {"service": "relay", "description": "Bills", "tags": ["money"]}},
+    )
+    assert code == 200, text
+    assert [c for c in calls(act_orch) if c[:2] == ["relay", "profile"]][-1] == [
+        "relay",
+        "profile",
+        "--description=Bills",
+        "--tags=money",
+        "--by",
+        BY,
+        "--json",
+    ]
+    code, text, _ = post(
+        act_server, {"op": "workspace.set", "args": {"field": "description", "text": "Bills"}}
+    )
+    assert code == 200, text
 
 
 def test_web_files_are_served_and_hooked(server):

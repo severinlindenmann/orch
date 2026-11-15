@@ -100,7 +100,6 @@ function workflowCard(settings) {
 const COPY_CHOICES = [['together', 'When helpers work at the same time'], ['always', 'Every time, even for one helper']];
 // Text fields on this page: Edit, then the field with Save / Cancel (like Description); switches save at once.
 let copySetupEditing = false;
-let wsEditing = null; // 'name' | 'description' while that field is being edited
 // Review step (owner rule): a change here is one plain click after a shown review: what will happen and what it
 // touches, then [Verb] [Cancel]; never a typed word. It opens in place, in the same look as the command review of
 // "+ Add your own helper" (.cmd-preview with its .acts row). Only its first button makes the change.
@@ -122,18 +121,6 @@ function settingsReviewText(id, settings) {
     affects:(n === 0 ? 'There are no copies right now, so nothing will be removed.'
       : typeof n === 'number' ? 'Up to ' + n + (n === 1 ? ' copy' : ' copies') + ' will be removed, only the ones no ticket needs any more. Saved changes stay in the version history.'
       : 'Only copies no ticket needs any more are removed. Saved changes stay in the version history.') + ' Your own files are not touched.'};
-}
-// Workspace name and description: Edit, then the field with Save / Cancel (a person's click, signed in the page).
-function wsField(field, label, value, settings, hint) {
-  const busy = settingsBusy.has('ws-' + field), editing = wsEditing === field && !snapshot;
-  return h('div', {className:'card-row name-row', 'data-key':'settings-ws-' + field + '-row'}, h('span', {className:'set-label'}, label),
-    editing
-      ? h('div', {className:'grow set-ctl ws-edit'}, h('input', {type:'text', className:'input ws-input', maxLength:field === 'name' ? 60 : 280, value:field === 'name' ? (settings.ws_name || '') : (settings.ws_description || ''), placeholder:field === 'name' ? state.workspace : 'For example: our website and newsletter', 'aria-label':label, 'data-key':'settings-ws-' + field, disabled:busy}),
-        settingsText('p', {className:'meta'}, hint),
-        h('div', {className:'row'}, h('button', {type:'button', className:'btn sm primary', 'data-key':'settings-ws-' + field + '-save', 'data-action':'ws-save', 'data-field':field, disabled:busy}, 'Save'),
-          h('button', {type:'button', className:'btn sm ghost', 'data-key':'settings-ws-' + field + '-cancel', 'data-action':'ws-cancel'}, 'Cancel')))
-      : h('div', {className:'grow set-ctl row ws-view'}, settingsText('p', {className:value ? 'grow' : 'grow meta', 'data-key':'settings-ws-' + field + '-value'}, value || 'Not set'),
-        snapshot ? null : h('button', {type:'button', className:'btn sm', 'data-key':'settings-ws-' + field + '-edit', 'data-action':'ws-edit', 'data-field':field}, 'Edit')));
 }
 function reviewPanel(id, settings) {
   if (settingsReview !== id || snapshot) return null;
@@ -562,12 +549,10 @@ function settingsPage() {
     null);
   const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
   if (detailAddon) return addonDetailPage(detailAddon);
-  return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
+  return fragment(h('div', {className:'settings stack form-width', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
-    panel('general', [privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
+    panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       // Folder: its name plainly; the full path and Copy path sit behind one small Details toggle.
-      wsField('name', 'Name', settings.ws_name || state.workspace, settings, 'The name shown for this workspace. Your folder keeps its own name.'),
-      wsField('description', 'About', settings.ws_description, settings, 'One short line about what this workspace is for. Shown here only; the Description under Appearance goes to your phone and shared pages.'),
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),
         settings.folder ? moreDetails(settingsText('p', {className:'mono meta folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder)),
