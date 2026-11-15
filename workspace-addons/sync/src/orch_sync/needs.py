@@ -154,6 +154,100 @@ def _ticket_of(path):
     return tid if tid and TID.fullmatch(tid) else None
 
 
+def _ticket_name(root, tid):
+    """A ticket's title and code ("Fix login (ORCH-12)"); the code alone, the title alone, or None."""
+    from . import repo, step
+
+    try:
+        live = repo.safe(root, f"tickets/{tid}.json")
+        data = (
+            live.read_bytes()
+            if live.is_file()
+            else step.blob(root, step.entries(root, "HEAD").get(f"tickets/{tid}.json"))
+        )
+    except Exception:  # noqa: BLE001 - only the wording suffers
+        return None
+    doc = _doc(data)
+    title, key = doc.get("title"), doc.get("key")
+    title = " ".join(title.split())[:80] if isinstance(title, str) else ""
+    key = " ".join(key.split())[:20] if isinstance(key, str) else ""
+    if title and key:
+        return f"{title} ({key})"
+    return title or key or None
+
+
+def _deleted_rows(root, state):
+    """Missing-ticket notices: one row each, or one grouped row when there are several. A notice for a
+    ticket that is no longer in the synced copy nor on disk has nothing left to say and is dropped."""
+    from . import repo, step
+
+    entries = {}
+    try:
+        entries = step.entries(root, "HEAD")
+    except Exception:  # noqa: BLE001 - keep the notices rather than hide them
+        entries = None
+    items = []
+    for tid, since in sorted((state.get("deleted") or {}).items(), key=lambda kv: str(kv[1])):
+        if not TID.fullmatch(str(tid)):
+            continue
+        path = f"tickets/{tid}.json"
+        try:
+            gone = entries is not None and path not in entries and not repo.safe(root, path).exists()
+        except Exception:  # noqa: BLE001
+            gone = False
+        if not gone:
+            items.append((tid, since))
+    if not items:
+        return []
+    if len(items) == 1:
+        tid, since = items[0]
+        name = _ticket_name(root, tid)
+        return [
+            row(
+                "deleted",
+                tid,
+                f"A ticket file was missing: {name}. Restored it."
+                if name
+                else "A ticket file was missing. Restored it.",
+                since,
+                f"orch sync deleted {shlex.quote(tid)} --keep",
+                ["Leave deleted", "OK"],
+                ticket=tid,
+                actions=[
+                    action(
+                        "Leave deleted",
+                        "leave-deleted",
+                        tid,
+                        sign=True,
+                        review={
+                            "title": "Leave this ticket deleted?",
+                            "body": "It is removed on every computer that syncs.",
+                            "done": "Left deleted.",
+                        },
+                    ),
+                    action("OK", "restored", tid),
+                ],
+            )
+        ]
+    ids = ",".join(tid for tid, _ in items)
+    names = [n for n in (_ticket_name(root, tid) for tid, _ in items[:3]) if n]
+    text = f"{len(items)} ticket files were missing and are restored."
+    if names:
+        text += " " + ", ".join(names) + (" and more." if len(items) > len(names) else ".")
+    return [
+        row(
+            "deleted",
+            "all",
+            text,
+            items[0][1],
+            f"orch sync deleted {shlex.quote(ids)} --keep",
+            ["OK, all"],
+            title="Sync",
+            actions=[action("OK, all", "restored", ids)],
+        )
+    ]
+
+
 def rows(root):
     state = cli.read(root, "state")
     now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -388,36 +482,7 @@ def rows(root):
                 tone="warn",
             )
         )
-    for tid, since in state.get("deleted", {}).items():
-        # the ticket's title, never its id (the dashboard hides ids, which left the name blank)
-        name = _sides(root, f"tickets/{tid}.json")[0] if TID.fullmatch(str(tid)) else None
-        out.append(
-            row(
-                "deleted",
-                tid,
-                f"A ticket file is missing: {name}. Restored it."
-                if name
-                else "A ticket file is missing. Restored it.",
-                since,
-                f"orch sync deleted {shlex.quote(tid)} --keep",
-                ["Leave deleted", "OK"],
-                ticket=tid,
-                actions=[
-                    action(
-                        "Leave deleted",
-                        "leave-deleted",
-                        tid,
-                        sign=True,
-                        review={
-                            "title": "Leave this ticket deleted?",
-                            "body": "It is removed on every computer that syncs.",
-                            "done": "Left deleted.",
-                        },
-                    ),
-                    action("OK", "restored", tid),
-                ],
-            )
-        )
+    out.extend(_deleted_rows(root, state))
     if _unconfirmed(root):
         out.append(
             row(

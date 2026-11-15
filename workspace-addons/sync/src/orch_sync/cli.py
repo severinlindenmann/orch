@@ -328,7 +328,9 @@ def deleted(root, ticket, keep, args):
 
     with step_lock(root), syncgate.hold(root):
         state = read(root, "state")
-        if ticket not in state.get("deleted", {}):
+        # OK on the grouped card: every listed notice at once (only OK, never the signed leave-deleted)
+        group = ticket.split(",") if keep and "," in ticket else [ticket]
+        if any(t not in state.get("deleted", {}) for t in group):
             raise repo.Refused("No missing ticket notice")
         if not keep:
             by = humanproof.person_by(
@@ -350,7 +352,8 @@ def deleted(root, ticket, keep, args):
                 root, "delete", f"{ticket}:{old[1]}", {"ticket": ticket, "blob": old[1]}
             )
             write(root, "run/sync/allow-delete.json", encoded(allowed))
-        state["deleted"].pop(ticket)
+        for t in group:
+            state["deleted"].pop(t)
         from .pause import verified_pause
 
         state["paused"] = verified_pause(root, state)  # a planted pause is not written back

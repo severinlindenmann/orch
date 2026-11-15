@@ -1164,3 +1164,31 @@ def test_the_jump_row_says_the_far_tickets_arrive(machines):
     _, b, _ = counter_jump(machines, "key")
     row = next(r for r in needs.rows(b) if r.get("title") == "ticket-counter.json")
     assert "far numbers arrive" in row["text"] and len(row["text"]) <= 500
+
+
+def test_missing_ticket_card_names_title_and_code(machines):
+    a, _, _ = both(machines)
+    save(a, TICKET, ticket(key="ORCH-7"))
+    success(a)
+    repo.safe(a, TICKET).unlink()
+    success(a)
+    (card,) = [r for r in needs.rows(a) if r["id"] == "sync:deleted:t_abc123"]
+    assert "A task (ORCH-7)" in card["text"]
+    assert ": ." not in card["text"]
+
+
+def test_missing_ticket_cards_are_grouped_and_one_ok_clears_all(machines):
+    a, _, _ = both(machines)
+    other = "tickets/t_def456.json"
+    save(a, other, {**ticket(), "id": "t_def456", "title": "Another"})
+    success(a)
+    for p in (TICKET, other):
+        repo.safe(a, p).unlink()
+    success(a)
+    deleted = [r for r in needs.rows(a) if r["kind"] == "sync:deleted"]
+    assert len(deleted) == 1
+    assert deleted[0]["text"].startswith("2 ticket files were missing and are restored.")
+    (ok,) = deleted[0]["actions"]
+    assert ok["label"] == "OK, all" and ok["verb"] == "restored"
+    assert cli.main(["--dir", str(a), "deleted", ok["target"], "--keep", "--json"]) == 0
+    assert not [r for r in needs.rows(a) if r["kind"] == "sync:deleted"]
