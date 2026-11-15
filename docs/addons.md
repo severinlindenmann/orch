@@ -2,13 +2,15 @@
 
 Add-ons give orch more. Each one is off until you turn it on, and works on its own. Without add-ons, orch shows no trace of them.
 
+publish and relay are built into orch (no separate package) but are also off until you turn them on; orch works fully without them. The others are separate packages under `workspace-addons/`.
+
 | Add-on | What it does |
 |---|---|
 | automation | Starts your agent at a time, on a repeat, or when the phone or another workspace sends work |
 | focus | A live page for one ticket: watch the agent work, answer, send a message |
 | dashboard | One page with every ticket and what needs you |
-| publish | Share a file or a small app by private link ([publish.md](publish.md)) |
-| relay | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |
+| publish (built in) | Share a file or a small app by private link ([publish.md](publish.md)) |
+| relay (built in) | Messages and tasks between workspaces and phones ([relay.md](relay.md)) |
 
 ## Turn on and off
 
