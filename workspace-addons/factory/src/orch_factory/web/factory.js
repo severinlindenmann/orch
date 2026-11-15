@@ -181,23 +181,60 @@
   function toChat(message) {
     window.parent.postMessage({type: 'orch.say', text: message}, location.origin);
   }
-  const IDEA_MAX = 500;
-  const ideaWait = new Map();  // request id -> callback, for the dashboard's answer
+  const IDEA_MAX = 500, NOTE_MAX = 1000;
+  // A request to the dashboard waits for its answer by a random id: orch.idea.* and orch.send.* (see below).
+  const asked = new Map();  // request id -> callback
   window.addEventListener('message', e => {
     const d = e.data;
-    if (e.source !== window.parent || e.origin !== location.origin || !d || typeof d.id !== 'string' || !ideaWait.has(d.id)) return;
-    if (d.type === 'orch.idea.done' && validId(d.order)) ideaWait.get(d.id)({order: d.order});
-    else if (d.type === 'orch.idea.failed') ideaWait.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
+    if (e.source !== window.parent || e.origin !== location.origin || !d || typeof d.id !== 'string' || !asked.has(d.id)) return;
+    if (d.type === 'orch.idea.done' && validId(d.order)) asked.get(d.id)({order: d.order});
+    else if (d.type === 'orch.send.done' && validId(d.ticket)) asked.get(d.id)({ticket: d.ticket});
+    else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
-  function fileIdea(textValue) {
+  function askDashboard(message) {
     return new Promise(resolve => {
       const id = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
       const timer = setTimeout(() => finish({error: ''}), 30000);  // an older dashboard never answers
-      function finish(result) { clearTimeout(timer); ideaWait.delete(id); resolve(result); }
-      ideaWait.set(id, finish);
-      window.parent.postMessage({type: 'orch.idea', id, text: textValue}, location.origin);
+      function finish(result) { clearTimeout(timer); asked.delete(id); resolve(result); }
+      asked.set(id, finish);
+      window.parent.postMessage({...message, id}, location.origin);
     });
   }
+  const fileIdea = textValue => askDashboard({type: 'orch.idea', text: textValue});
+  // Plan the run / Ask for changes on a draft: the dashboard sends the words to the agent on the order as YOUR message
+  // (its own proven "send to the agent" click, the same as typing on the ticket) and starts the agent when none works.
+  const PLAN_TEXT = 'Now plan the run: propose the whole run for this order (orch factory propose).';
+  const toAgent = (order, words) => askDashboard({type: 'orch.send', ticket: order, text: words});
+  function draftActions(order, onSent) {
+    const box = group('stack f-draft-actions');
+    if (!validId(order.id)) return box;
+    if (!embedded()) { box.append(meta('Open Factory in the dashboard to plan the run or ask for changes with one click.'), tail(ticket(order.id, 'Open the ticket', false))); return box; }
+    const plan = node('button', 'Plan the run', 'btn primary'); plan.type = 'button';
+    const change = node('button', 'Ask for changes', 'btn outline sm'); change.type = 'button';
+    const note = node('textarea', null, 'text-input'); note.rows = 3; note.maxLength = NOTE_MAX; note.style.width = '100%';
+    note.setAttribute('aria-label', 'What should change'); note.placeholder = 'For example: shorter, and add a map'; note.hidden = true;
+    const send = node('button', 'Send', 'btn primary sm'); send.type = 'button'; send.hidden = true; send.disabled = true;
+    const cancel = node('button', 'Cancel', 'btn ghost sm'); cancel.type = 'button'; cancel.hidden = true;
+    const status = node('p', null, 'meta'); status.setAttribute('role', 'status'); status.hidden = true;
+    const say = value => { status.textContent = value; status.hidden = !value; };
+    const writing = on => { note.hidden = send.hidden = cancel.hidden = !on; plan.hidden = change.hidden = on; if (on) note.focus(); };
+    const busy = on => { for (const b of [plan, change, send, cancel]) b.disabled = on || (b === send && !note.value.trim()); note.readOnly = on; };
+    async function go(words, sent) {
+      busy(true); say('Sending…');
+      const result = await toAgent(order.id, words);
+      busy(false);
+      if (result.ticket) { note.value = ''; writing(false); say(sent); if (onSent) onSent(); return; }
+      say((result.error ? result.error + ' ' : "That didn't work. ") + 'Nothing was sent.');
+    }
+    note.addEventListener('input', () => { send.disabled = !note.value.trim(); });
+    plan.addEventListener('click', () => go(PLAN_TEXT, 'Sent. Your agent is planning the run; the proposal shows up here.'));
+    change.addEventListener('click', () => { say(''); writing(true); });
+    cancel.addEventListener('click', () => { writing(false); say(''); });
+    send.addEventListener('click', () => { const words = note.value.trim(); if (words) go('Change the draft: ' + words, 'Sent. Your agent is changing the draft.'); });
+    box.append(group('actions', plan, change), note, group('actions', send, cancel), status);
+    return box;
+  }
+  const draftWaiting = o => o.phase === 'draft' && !o.working;
   function ideaBox() {
     const el = card('Start with an idea', meta('Describe something you want built. Factory plans it and builds it step by step.'));
     const field = node('textarea', null, 'text-input'); field.rows = 3; field.setAttribute('aria-label', 'Your idea');
@@ -235,8 +272,8 @@
   }
   function home(data) {
     const orders = array(data.orders), auto = data.autopilot;
-    const needing = orders.filter(o => o.open);
-    const minutes = needing.reduce((sum, o) => sum + (Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
+    const needing = orders.filter(o => o.open || draftWaiting(o));
+    const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
     view.append(heading('Factory', needing.length
       ? plural(needing.length, 'thing needs you', 'things need you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
       : 'Nothing needs you right now. Your ideas and planned runs are below.'));
@@ -255,6 +292,11 @@
       const el = node('section', null, 'f-section'); el.append(node('h2', title));
       el.append(...(rows.length ? rows.map(render) : [meta(empty)])); parent.append(el);
     };
+    section(primary, 'Drafts waiting for you', orders.filter(draftWaiting), o => {
+      const c = card(o.title, meta('Read the draft, then plan the run or ask for changes.'),
+        tail(orderLink(o, 'Read draft', validVersion(o.draft_v) ? '/draft/' + o.draft_v : '')), draftActions(o, render));
+      c.classList.add('f-attention'); return c;
+    }, 'No drafts waiting for you.');
     section(primary, 'Proposals waiting for Start', orders.filter(o => o.phase === 'proposed'), o => {
       const need = yourTime(o.owner_min);
       const c = card(o.title, ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
@@ -271,7 +313,8 @@
     // The summary contract has no shipped timestamp. Do not infer a week from due dates.
     section(secondary, 'Shipped', orders.filter(o => o.phase === 'shipped'), o => card('✓ ' + text(o.title), badge('Shipped'), tail(orderLink(o))), 'No shipped work recorded.');
     secondary.append(meta('Shipped orders are listed from the workspace record; shipment dates are not available yet.'));
-    section(secondary, 'Saved ideas', orders.filter(o => ['draft','edit','parked','cancelled','broken'].includes(o.phase)), o => card(o.title, badge(capital(o.phase)), tail(orderLink(o))), 'No saved ideas.');
+    section(secondary, 'Saved ideas', orders.filter(o => (o.phase === 'draft' && o.working) || ['edit','parked','cancelled','broken'].includes(o.phase)),
+      o => card(o.title, ...(o.phase === 'draft' ? [meta('Your agent is working on the draft.')] : [badge(capital(o.phase))]), tail(orderLink(o))), 'No saved ideas.');
     view.append(group('f-grid', primary, secondary));
   }
   function line(items) {
@@ -480,7 +523,7 @@
           const draft = await read('/api/order/' + match[1] + '/draft/' + match[4], signal);
           if (serial !== request) return;
           showNotices(homeData, order, draft);
-          draw = () => view.append(heading(order.title, 'Draft · version ' + match[4], orderLink(order)), draftTabs(order, match[4]), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []));
+          draw = () => view.append(heading(order.title, 'Draft · version ' + match[4], orderLink(order)), draftTabs(order, match[4]), node('pre', draft.text, 'card f-draft'), ...(draft.truncated ? [meta('This draft is too large to display in full. The text shown is truncated.')] : []), ...(draftWaiting(order) ? [draftActions(order)] : order.phase === 'draft' ? [meta('Your agent is working on the draft.')] : []));
         } else draw = () => orderPage(order);
       }
       if (serial !== request) return;

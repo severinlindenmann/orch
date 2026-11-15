@@ -25,4 +25,15 @@
   });
   chat.addEventListener('click', () => { location.href = '../chat/chat.html'; });
 })();
+// ?state=draft: Factory home after the one-click idea, once your agent wrote the draft ("Drafts waiting for you").
+(() => {
+  if (new URLSearchParams(location.search).get('state') !== 'draft') return;
+  document.querySelector('.page-heading p').textContent = '1 thing needs you';
+  document.querySelector('main .card').insertAdjacentHTML('afterend', `<section class="f-section stack-sm"><h2>Drafts waiting for you</h2><section class="card"><div class="pad-card stack-sm"><div class="t-row">A page that shows our opening hours</div><p class="meta">Read the draft, then plan the run or ask for changes.</p><div class="actions"><a class="btn outline sm" href="../factory/draft.html">Read draft</a></div><div class="actions" id="d-buttons"><button class="btn primary" type="button" id="d-plan">Plan the run</button><button class="btn outline sm" type="button" id="d-change">Ask for changes</button></div><div class="stack-sm" id="d-box" hidden><textarea class="text-input" rows="3" maxlength="1000" aria-label="What should change" placeholder="For example: shorter, and add a map"></textarea><div class="actions"><button class="btn primary sm" type="button" id="d-send">Send</button><button class="btn ghost sm" type="button" id="d-cancel">Cancel</button></div></div><p class="meta" id="d-status" role="status" hidden></p></div></section></section>`);
+  const $ = id => document.getElementById(id), say = t => { $('d-status').textContent = t; $('d-status').hidden = false; };
+  $('d-plan').addEventListener('click', () => say('Sent. Your agent is planning the run; the proposal shows up here.'));
+  $('d-change').addEventListener('click', () => { $('d-buttons').hidden = true; $('d-box').hidden = false; $('d-box').querySelector('textarea').focus(); });
+  $('d-cancel').addEventListener('click', () => { $('d-buttons').hidden = false; $('d-box').hidden = true; });
+  $('d-send').addEventListener('click', () => { const t = $('d-box').querySelector('textarea'); if (!t.value.trim()) return t.focus(); t.value = ''; $('d-buttons').hidden = false; $('d-box').hidden = true; say('Sent. Your agent is changing the draft.'); });
+})();
 </script></body></html>

@@ -1631,3 +1631,36 @@ async function fileEmbedIdea(req) {
   } finally { embedIdeaBusy = false; }
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
+
+// Plan the run / Ask for changes on a Factory draft: the shown shipped add-on page names a ticket of ITS OWN (one that
+// carries that add-on's data) and the words. The dashboard sends them as the person's message with its own proven op
+// (`run.send`, the same click as writing to the agent on the ticket page) and, when no agent works on it, starts one
+// (`run.start`). Both need this page's session: never an agent's request or a foreign frame's.
+const EMBED_SEND_MAX = 2000;
+function embedSendRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.send') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.ticket !== 'string' || !EMBED_TICKET.test(data.ticket) || typeof data.text !== 'string') return null;
+  const t = ticketOf(data.ticket);
+  if (!t || t.id !== data.ticket || !t.ext || typeof t.ext !== 'object' || !t.ext[shown.addon]) return null;  // only its own tickets
+  const text = data.text.replace(IDEA_HIDDEN, m => m === '\n' ? '\n' : ' ').trim();
+  if (!text) return null;
+  return {...shown, id:data.id, ticket:data.ticket, text};
+}
+let embedSendBusy = false;  // one message at a time: a second click while sending is dropped
+async function sendEmbedMessage(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (req.text.length > EMBED_SEND_MAX) return reply({type:'orch.send.failed', error:'That is too long (at most ' + EMBED_SEND_MAX + ' characters).'});
+  if (embedSendBusy) return;
+  embedSendBusy = true;
+  try {
+    const sent = await act('run.send', {ticket:req.ticket, text:req.text});
+    if (!sent.ok) return reply({type:'orch.send.failed', error:String(sent.text || '').slice(0, 300)});
+    const working = ticketOf(req.ticket)?.status === 'active';
+    const started = working ? null : await act('run.start', {ticket:req.ticket});
+    reply({type:'orch.send.done', ticket:req.ticket, started:!!started?.ok});
+  } finally { embedSendBusy = false; }
+}
+addEventListener('message', e => { const req = embedSendRequest(e); if (req) sendEmbedMessage(req); });

@@ -58,7 +58,21 @@ def put_file(ws, rel, data=PNG):
 
 # ---- API shapes ---------------------------------------------------------------------------------------------
 
-ORDER_KEYS = {"id", "title", "kind", "phase", "stage", "line", "budget", "eta", "due", "open", "owner_min"}
+ORDER_KEYS = {
+    "id",
+    "title",
+    "kind",
+    "phase",
+    "stage",
+    "line",
+    "budget",
+    "eta",
+    "due",
+    "open",
+    "owner_min",
+    "working",
+    "draft_v",
+}
 
 
 def test_home_lists_orders_in_every_phase(ws, run, srv, proposal):
@@ -180,6 +194,30 @@ def test_draft_route(ws, run, srv):
     put_file(ws, f"drafts/{order}/v7.md", b"a" * (pageapi.MAX_DRAFT + 10))
     body = get(srv, f"/api/order/{order}/draft/7")[1]
     assert len(body["text"]) == pageapi.MAX_DRAFT and body["truncated"] is True
+
+
+def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, run, srv):
+    """Drafts waiting for you = phase draft and no agent working (core: Working while a run is on the ticket)."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    run("draft", order, "--file", "-", data=b"v2")
+    o = get(srv, f"/api/order/{order}")[1]
+    assert o["phase"] == "draft" and o["working"] is False and o["draft_v"] == 2
+    path = ws / "fake-tickets" / f"{order}.json"
+    t = json.loads(path.read_text())
+    t["status"] = "active"
+    path.write_text(json.dumps(t))
+    row = next(x for x in get(srv, "/api/home")[1]["orders"] if x["id"] == order)
+    assert row["working"] is True
+
+
+def test_draft_page_and_home_offer_plan_and_changes_inside_the_dashboard_only(srv):
+    js = get(srv, "/web/factory.js")[1].decode()
+    assert "section(primary, 'Drafts waiting for you', orders.filter(draftWaiting)" in js
+    assert "'Plan the run'" in js and "'Ask for changes'" in js
+    assert "...(draftWaiting(order) ? [draftActions(order)]" in js  # the draft page
+    assert (
+        "if (!embedded()) { box.append(" in js
+    )  # outside the dashboard: a link to the ticket, nothing is sent
 
 
 def test_autopilot_route_and_home_block(ws, run, srv):
@@ -568,8 +606,13 @@ def test_page_decisions_only_post_the_open_question():
     assert len(posts) == 3 and all("location.origin" in x for x in posts)
     assert sum("'orch.question'" in x for x in posts) == 1 and sum("'orch.say'" in x for x in posts) == 1
     # the idea box only NAMES the text: the dashboard files it as the person's click (orch.idea), the page writes nothing
-    assert sum(x.startswith("{type: 'orch.idea', id, text: textValue}") for x in posts) == 1
+    assert (
+        sum(x.startswith("{...message, id}") for x in posts) == 1
+    )  # askDashboard: orch.idea and orch.send only
+    assert "askDashboard({type: 'orch.idea', text: textValue})" in js
+    assert "askDashboard({type: 'orch.send', ticket: order, text: words})" in js
     assert "d.type === 'orch.idea.done' && validId(d.order)" in js and "e.source !== window.parent" in js
+    assert "d.type === 'orch.send.done' && validId(d.ticket)" in js
     assert "window.top !== window" in js
     assert not re.search(r"fetch\([^)]*method|method:\s*['\"]POST", js)
 
