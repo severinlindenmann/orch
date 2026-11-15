@@ -159,3 +159,22 @@ def test_dashboard_title_and_subtitle_are_optional_plain_text(tmp_path):
     for n, bad in enumerate(bads):
         with pytest.raises(Refused):
             addons.folder_manifest(make_addon(tmp_path / f"c{n}", mutate=with_(bad)))
+
+
+def test_dashboard_place_is_nav_or_settings(tmp_path):
+    """`place = "settings"` keeps the page out of the nav; the dashboard list carries it unchanged."""
+
+    def with_(extra):
+        return lambda t: t.replace("order = 20\n", "order = 20\n" + extra)
+
+    ok = addons.folder_manifest(make_addon(tmp_path / "a", mutate=with_('place = "settings"\n')))
+    assert ok["dashboard"]["place"] == "settings"
+    assert (
+        addons.folder_manifest(make_addon(tmp_path / "n", mutate=with_('place = "nav"\n')))["dashboard"][
+            "place"
+        ]
+        == "nav"
+    )
+    for n, bad in enumerate(('place = "side"\n', "place = 3\n", 'place = ""\n')):
+        with pytest.raises(Refused):
+            addons.folder_manifest(make_addon(tmp_path / f"c{n}", mutate=with_(bad)))

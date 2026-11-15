@@ -483,3 +483,42 @@ def test_allow_on_this_computer_is_drawn_only_for_a_ticket_id(tmp_path):
     assert [n["data"]["syncAllow"] for n in allow] == ["t_mec009"]
     assert allow[0]["text"] == "Allow on this computer"  # a view cannot word it differently
     assert not any(n["text"] == "Bad" for n in nodes)
+
+
+LESSONS = (
+    Path(__file__).resolve().parents[3] / "contracts" / "examples" / "addon-view" / "valid-lessons-page.json"
+)
+
+
+@node
+def test_a_list_row_draws_the_edit_prompt_and_delete_for_an_item_id(tmp_path):
+    v = json.loads(LESSONS.read_text())
+    tree = run(tmp_path, v)
+    nodes = list(walk(tree))
+    prompt = [n for n in nodes if n["tag"] == "button" and n["data"].get("addonPrompt")]
+    assert [n["data"]["addonPrompt"] for n in prompt] == ["l_k2m9q4", "l_a1b2c3"]
+    assert prompt[0]["data"]["verb"] == "edit" and prompt[0]["data"]["promptLabel"] == "Edit lesson"
+    assert prompt[0]["data"]["value"].startswith("Run the web tests") and prompt[0]["text"] == "Edit"
+    rm = [n for n in nodes if n["tag"] == "button" and n["data"].get("addonAct")]
+    assert [(n["data"]["verb"], n["data"]["target"]) for n in rm] == [("rm", "l_k2m9q4"), ("rm", "l_a1b2c3")]
+
+
+@node
+def test_the_edit_prompt_is_not_drawn_for_unsafe_arguments(tmp_path):
+    good = {"verb": "edit", "target": "l_k2m9q4", "value": "ok", "label": "Edit lesson"}
+    bads = [
+        {**good, "target": "../x"},
+        {**good, "verb": "Edit now"},
+        {**good, "value": "x" * 201},
+        {**good, "value": "two\nlines"},
+        {**good, "value": 5},
+        {**good, "label": ""},
+        {**good, "label": "x" * 41},
+    ]
+    for args in bads:
+        v = json.loads(LESSONS.read_text())
+        v["blocks"][0]["items"] = [
+            {"title": "T", "actions": [{"label": "Edit", "action": {"op": "addon.prompt", "args": args}}]}
+        ]
+        nodes = list(walk(run(tmp_path, v)))
+        assert not [n for n in nodes if n["data"].get("addonPrompt")], args

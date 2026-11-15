@@ -1198,6 +1198,44 @@ function repeatsDialog(only = null, addonName = null) {
   if (had) actions.append(remove, save); else actions.append(copy, save);
   d.append(fields, actions); window.orch.open(d);
 }
+// `addon.prompt` (a row's Edit in an add-on view): one text line in a small window, prefilled; Save sends the add-on's
+// own verb with the new text. 1 to 200 characters; the add-on's refusal is shown here in one sentence.
+const PROMPT_MAX = 200;
+function promptDialog(control) {
+  const id = shownAddon();
+  if (snapshot || !id) return;
+  const {verb, addonPrompt: target, value = '', promptLabel = 'Edit'} = control.dataset;
+  const {d, actions} = dialog(promptLabel, 'dialog');
+  const input = h('input', {className:'input', type:'text', maxLength:String(PROMPT_MAX + 50), value, 'aria-label':promptLabel});
+  const hint = h('p', {className:'meta', role:'status'}), failed = h('p', {className:'meta', role:'alert', hidden:true});
+  const save = button('Save', 'primary', async () => {
+    const text = input.value.trim();
+    if (save.disabled || !text || text.length > PROMPT_MAX) return;
+    save.disabled = true; failed.hidden = true;
+    const label = save.textContent; save.textContent = 'Saving…';
+    let result;
+    try { result = await act('addon.act', {addon:id, verb, target, value:text}); }
+    catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
+    save.textContent = label;
+    if (!result.ok) { failed.textContent = result.text || 'That did not work. Try again.'; failed.hidden = false; refresh(); return; }
+    await window.orch.close(d);
+    window.orch.toast('Saved.', 'ok');
+    await loadAddon(id);
+  });
+  const refresh = () => {
+    const n = input.value.trim().length;
+    save.disabled = n === 0 || n > PROMPT_MAX;
+    hint.textContent = n === 0 ? 'Write at least one character.' : n > PROMPT_MAX ? 'Too long: at most ' + PROMPT_MAX + ' characters (now ' + n + ').' : '';
+    hint.hidden = !hint.textContent;
+  };
+  input.addEventListener('input', () => { failed.hidden = true; refresh(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } });
+  d.append(h('div', {className:'form-fields'}, h('label', {className:'field'}, input), hint, failed), actions);
+  actions.append(save);
+  refresh();
+  window.orch.open(d);
+  input.focus();
+}
 let sharedLinks = null, sharedLinksDown = false;
 async function loadSharedLinks() {
   try {
