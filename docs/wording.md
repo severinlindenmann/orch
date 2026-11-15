@@ -13,7 +13,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | list of things for the person | Needs you | `orch needs` | Over to you, Inbox |
 | question with options | Question / Your answer | `question`, `q1` | Approval, Sign-off |
 | the suggested option | Suggested | `recommended` | Recommended |
-| proof on a task | Proof | `evidence` | Evidence, Artifact |
+| evidence on a task | Evidence | `evidence` | Proof, Artifact |
 | repeating work | Repeats | `ext.scheduler` | Scheduler, Cron, Schedule |
 | an AI tool working | its adapter label (Claude, Codex, ...) | `agent:<tool>` | Bot |
 | the person | You / first name | `human:<name>` | Human |
@@ -23,6 +23,6 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | private network | private network (VPN) | - | NetBird (any product name) |
 
 Rules
-- Words are the same in sentences: "Needs you (2)", "Answered Yes · Marco · phone", "Proof on this task".
+- Words are the same in sentences: "Needs you (2)", "Answered Yes · Marco · phone", "Evidence on this task".
 - The agent's own text (what it writes in a ticket) is not rewritten. Only words that orch itself puts on screen follow the table.
 - Add a word here first, then in the UI; the test list is in `brand/tests/test_wording.py`.

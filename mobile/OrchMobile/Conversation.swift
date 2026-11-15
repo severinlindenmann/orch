@@ -237,7 +237,7 @@ enum ConversationBuilder {
 
     /// The conversation a stored message belongs to; nil for a receipt (shown as ticks, not as a bubble).
     static func conversation(of pm: PhoneMessage, _ ix: Index? = nil, _ d: ConversationInputs) -> ConversationID? {
-        guard !pm.message.body.isProposalResult else { return nil }
+        guard !(pm.message.body.isProposalResult || pm.message.body.isReviewResult) else { return nil }
         let ix = ix ?? index(d)
         let m = pm.message, ws = pm.workspaceId
         if pm.fromPhone {
@@ -314,7 +314,7 @@ enum ConversationBuilder {
         let ix = index(d)
         var out: [ConvItem] = []
         var listed = Set<String>()
-        for pm in d.messages where pm.workspaceId == id.workspace && !pm.message.body.isProposalResult {
+        for pm in d.messages where pm.workspaceId == id.workspace && !(pm.message.body.isProposalResult || pm.message.body.isReviewResult) {
             if let c = pm.clientId ?? pm.message.body.clientId { listed.insert(c) }
             if conversation(of: pm, ix, d) == id {
                 let chat: Bool = if case .general = id { true } else { false }
@@ -422,7 +422,7 @@ enum ConversationBuilder {
         return d.workspaces.map { w in
             WorkspaceSummary(workspace: w, presence: w.presence(now: d.now), general: general(workspace: w.id, d, read: read),
                              topics: topics(workspace: w.id, d, read: read),
-                             openQuestions: ChatsRowRules.openQuestions(d.questions, answers: d.answers, workspace: w.id).count)
+                             openQuestions: ChatsRowRules.openQuestions(ReviewStackRules.withoutStackQuestions(d.questions), answers: d.answers, workspace: w.id).count)
         }.sorted { ($0.openQuestions > 0 ? 1 : 0, $0.lastAt ?? "") > ($1.openQuestions > 0 ? 1 : 0, $1.lastAt ?? "") }
     }
 }

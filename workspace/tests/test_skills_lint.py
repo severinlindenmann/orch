@@ -20,6 +20,7 @@ BUILTIN = ROOT / "workspace/src/orch/builtin"
 HUMAN_ONLY = {
     *(f"relay mobile {x}" for x in ("on", "off", "status", "hours", "ack", "keeper")),  # a person's switch
     "look shared-pages",  # a person's switch in the dashboard (agents are refused)
+    "review answer",  # a person decides a card (agents are refused: needs_person)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
     "check wont-do",  # a person decides a step will not be done (agents ask with orch ask)
     "chat",  # the dashboard and the Chat helper (its prompt names the commands)
@@ -365,3 +366,13 @@ def test_orch_block_is_five_numbered_rules():
     assert "orch check done" in numbered[2] and "orch ask" in numbered[3]
     assert "orch ticket summary" in numbered[4]
     assert "There are no signing or planning gates" in block
+
+
+def test_asking_keeps_the_agent_working():
+    """R2.6: after `orch ask` the agent keeps working on what does not need the answer; never stops there."""
+    block = (SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8")
+    text = (SKILLS["orch"] / "SKILL.md").read_text(encoding="utf-8")
+    for where, t in (("AGENTS block", block), ("SKILL.md", text)):
+        flat = " ".join(t.split())
+        assert not re.search(r"orch ask[^.]*(then|and) stop\b", flat), f"{where}: asking must not mean stop"
+        assert "keep working" in flat.lower(), f"{where}: say to keep working while the ticket waits"

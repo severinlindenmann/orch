@@ -2107,7 +2107,14 @@ def test_every_status_writer_asks_the_verdict_gate():
                 and node.func.attr in ("set_status", "patch", "accept_review")
             ):
                 writers.setdefault(f.name, []).append((node.func.attr, node.lineno))
-    assert set(writers) <= {"cli.py", "relay.py", "chat_groups.py", "phone_view.py", "cli_run.py"}, writers
+    assert set(writers) <= {
+        "cli.py",
+        "relay.py",
+        "chat_groups.py",
+        "phone_view.py",
+        "cli_run.py",
+        "review.py",
+    }, writers
     cli_src = (src / "cli.py").read_text()
     for attr, line in writers.get("cli.py", []):
         if attr == "accept_review":
@@ -2117,6 +2124,20 @@ def test_every_status_writer_asks_the_verdict_gate():
     for name in ("relay.py", "chat_groups.py", "phone_view.py", "cli_run.py"):
         for attr, line in writers.get(name, []):
             assert attr == "accept_review" and name == "relay.py", (name, attr, line)
+    # review.py (Review stack): accept_review only, inside _decide_check, which refuses unless `by` is human:
+    for attr, line in writers.get("review.py", []):
+        assert attr == "accept_review", ("review.py", attr, line)
+    rsrc = (src / "review.py").read_text()
+    body = rsrc[rsrc.index("def _decide_check(") :]
+    body = body[: body.index("\ndef ", 1)]
+    assert 'by.startswith("human:")' in body and "tickets.accept_review(" in body
+    import re as _re
+
+    for f in sorted(src.glob("*.py")):
+        if f.name in ("review.py",):
+            continue
+        for m in _re.finditer(r"review\.(decide|change)\([^)]*proven=True", f.read_text(), _re.S):
+            raise AssertionError((f.name, m.group(0)[:80]))  # review.decide takes no proven argument
 
 
 def test_copy_setup_is_a_command_orch_runs_so_it_needs_the_proof(ws, run, monkeypatch):

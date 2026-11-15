@@ -96,8 +96,15 @@ def add_parsers(sub, common) -> None:
     x = pub.add_parser("app", parents=[common, life], help="deploy a folder that has app.toml")
     x.add_argument("folder")
     g = x.add_mutually_exclusive_group()
-    g.add_argument("--public", action="store_true", help="open link (needs the public right)")
-    g.add_argument("--private", action="store_true", help="needs a view token (default)")
+    g.add_argument("--public", action="store_true", help="reachable on the internet")
+    g.add_argument("--private", action="store_true", help="only reachable on the private network")
+    g = x.add_mutually_exclusive_group()
+    g.add_argument("--auth", action="store_true", help="needs the app's private link")
+    g.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="open to everyone who can reach it (on the internet needs the public right)",
+    )
     x.add_argument("--new-token", action="store_true", help="make a new view token")
     x = pub.add_parser("new", parents=[common], help="start an app from a template")
     x.add_argument("stack", choices=templates.STACKS)
@@ -486,20 +493,24 @@ def run_publish(args, root: Path, out) -> None:
         ]
         out(args, v, "\n".join(rows) or "Nothing shared yet.")
     elif sub == "app":
-        pub = True if args.public else False if args.private else None
+        reach = "public" if args.public else "private" if args.private else None
+        auth = True if args.auth else False if args.no_auth else None
         with net.working(f"Deploying {Path(args.folder).name}"):
-            r = publish.deploy(root, Path(args.folder), args.days, args.permanent, pub, args.new_token)
+            r = publish.deploy(
+                root, Path(args.folder), args.days, args.permanent, reach, auth, args.new_token
+            )
         note = ""
-        if r.get("private") and not r.get("view_token"):
+        if r.get("auth") and not r.get("view_token"):
             note = (
-                "\nThis app is private and its view link is not saved here. "
+                "\nThis app needs its private link and the link is not saved here. "
                 "Make a new one with: orch publish app <folder> --new-token"
             )
         word = "running" if r["status"] == "running" else r["status"]
         out(
             args,
             r,
-            f"Deployed {r['name']} ({word}), {_exp(r['expires_at'])}. Open this link:\n{r['link']}{note}",
+            f"Deployed {r['name']} ({word}, {publish.describe(r)}), {_exp(r['expires_at'])}. "
+            f"Open this link:\n{r['link']}{note}",
         )
     elif sub == "new":
         r = templates.create(args.stack, args.store, Path(args.folder))
@@ -515,7 +526,7 @@ def run_publish(args, root: Path, out) -> None:
             nm = f.get("name") or "(unnamed file)"
             lines.append(f"file  {nm}  {_size(f['size'])}  {_exp(f['expires_at'])}  [{f['id']}]")
         for a in r["apps"]:
-            vis = "public" if a["public"] else "private"
+            vis = publish.describe(a)
             link = a.get("link") or a["url"]
             lines.append(f"app   {a['name']}  {a['status']}, {vis}, {_exp(a['expires_at'])}\n      {link}")
         out(args, r, "\n".join(lines) or "Nothing shared yet. Try: orch publish file <path>")

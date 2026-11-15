@@ -3,6 +3,9 @@
 One line per decision, newest first. Agents never reopen a decision without the owner (AGENTS.md R9.5).
 Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 
+- 2026-11-15: Publish apps have two independent settings: reach (public = internet, private = only on the private
+  network, own listener) and auth (needs the app's private link). The link key stays the auth; no passwords, no
+  end-to-end encryption for apps. In product text "public"/"private" mean reach, never auth.
 - 2026-11-15: The fixed rules in `AGENTS.md` are accepted. Reasons and choices: `principles.md`.
 - 2026-11-15: The orch-core proof/signing leftovers (humanproof, pageproof, filesig, keystore, denyrules, human-proof
   contract, syncgate) are removed in one clean-up PR.

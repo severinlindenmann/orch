@@ -17,8 +17,8 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
 
 ## When to use
 - Any request, even a small one: find or make its ticket first.
-- You need a decision from a person: ask through the ticket, then stop.
-- You are blocked (a tool or permission is refused): `orch ask` and stop.
+- Ask a person only when a step cannot be undone, costs money, touches production, deletes real data or is visible to people outside the connected workspaces. Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then keep working on what does not depend on the answer. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question (`--choose`, `--draft`, see below) so it shows as a card.
+- You are blocked (a tool or permission is refused): `orch ask`, then go on with the other steps.
 - You are about to say "done": every step needs proof first.
 - The work is big: split it into sub-tickets.
 
@@ -99,7 +99,7 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
     orch check reopen <id> <c>            # a done step that turned out wrong
     orch check stop <id> <c>              # stop working on it without finishing
 
-**Need a decision or blocked**
+**Need an answer or blocked**
 
     orch ask <id> "<question>" --option A --option B --recommend A
     orch ask <id> "<question>" --check <c>        # tie it to a step
@@ -110,8 +110,21 @@ Write the question for a person who has not seen your work, in plain words:
 - NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
 - If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.
 
-The ticket now waits. Then stop; do not treat silence as an answer. When the answer is in `orch ticket show <id>`,
-set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
+**To ask the owner to decide on something they must see** (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question. It is the same `orch ask`, with `--draft`, `--link`, `--plan` or `--choose` and `--then` (what happens after the answer). Never decide for the owner.
+
+    orch ask <id> "Home: which layout?" --choose "Home layout" --option "A=As today:files/a.png" --option "B=Recent first:files/b.png" --suggest B --then "I build the one you pick."
+    orch ask <id> "New intro text" --draft "Intro" --file files/intro.md --then "I use it." --ok "Use it"
+    orch ask <id> "Before or after?" --draft "Header" --before files/old.png --after files/new.png --then "I ship the new one."
+    orch review wait <id>        # wait until the card is answered
+    orch ticket show <id>        # "What applies now" and the answers, in the owner's words
+    orch review list             # what still waits for the owner
+    orch review link             # the address of the review page, to send the owner
+
+Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
+
+The ticket now waits for the answer (Waiting). Keep working on the steps that do not depend on it; stop only when
+nothing is left that you can do without the answer. Do not treat silence as an answer. On your next run, when the
+answer is in `orch ticket show <id>`, set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
 waits for a person with `orch needs`.
 
 **Wait**
@@ -133,7 +146,7 @@ Read the parent first, work only in yours, keep it at most 3 levels deep. Close 
 **Plan big work**
 
 Big = several steps or several areas, clearly. A small request stays one ticket. For big work:
-1. Ask only if the goal is genuinely unclear: `orch ask <id> "<question>" --option A --option B --recommend A` (one tap answers), then stop.
+1. Ask only if the goal is genuinely unclear: `orch ask <id> "<question>" --option A --option B --recommend A` (one tap answers); plan the parts the answer does not change meanwhile.
 2. Make the parent ticket: the goal in `--note`, and a line "Not included: ..." for what you will not do.
    Show it on the plan: `orch ticket plan <parent> --goal "<goal>" --not-included "<what you will not do>"`.
 3. Make each sub-ticket with its own `--done-when "<one plain line>"`, and add its checks (`orch check add`) so every part of the done line has a step. When `orch check add` has a `--covers` flag, say which done line each step covers.

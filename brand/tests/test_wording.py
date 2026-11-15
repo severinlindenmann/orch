@@ -15,7 +15,7 @@ ALLOWLIST = Path(__file__).with_name("wording_allowlist.json")
 
 NEVER = [
     "Request", "Requests", "Job", "Issue", "Todo", "Subtask", "Epic", "Inbox", "Over to you", "Approval",
-    "Sign-off", "Recommended", "Evidence", "Artifact", "Scheduler", "Cron", "Schedule", "Bot", "NetBird",
+    "Sign-off", "Recommended", "Proof", "Artifact", "Scheduler", "Cron", "Schedule", "Bot", "NetBird",
     "Peer", "Node",
 ]  # fmt: skip
 # "Issue" alone is banned; an outside item keeps its tool's own word ("GitHub issue", "Jira Issue"): see wording.md

@@ -33,6 +33,7 @@ jobs:
       publish: ${{ steps.f.outputs.publish }}
       relay: ${{ steps.f.outputs.relay }}
       mobile: ${{ steps.f.outputs.mobile }}
+      brand: ${{ steps.f.outputs.brand }}
     steps:
       - uses: actions/checkout@v4
       - id: f
@@ -46,6 +47,7 @@ jobs:
             publish: ['publish/**', 'contracts/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', '.github/workflows/relay.yml']
             mobile: ['mobile/**', 'contracts/**', '.github/workflows/mobile.yml']
+            brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/ci.yml']
   contracts:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
@@ -76,9 +78,21 @@ jobs:
     needs: changes
     if: needs.changes.outputs.mobile == 'true' || github.event_name == 'schedule'
     uses: ./.github/workflows/mobile.yml
+  brand:
+    # words from docs/wording.md (R7.5) and design tokens; pure text checks, a few seconds
+    needs: changes
+    if: needs.changes.outputs.brand == 'true' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - run: python -m pytest -q brand/tests
   gate:
     if: always()
-    needs: [changes, contracts, workspace, addons, publish, relay, mobile]
+    needs: [changes, contracts, workspace, addons, publish, relay, mobile, brand]
     runs-on: ubuntu-latest
     steps:
       - name: draft PRs are not tested

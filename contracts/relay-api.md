@@ -20,6 +20,8 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 |---|---|
 | text with `body.ticket_view` | as text (a `ticket_view.light: true` update is a quiet status update of a ticket the phone already lists: only title, status, started, running, summary, agent, updated_at; the phone overlays them on its last full snapshot; the relay treats it like any other), and: `body.update` is set (schema), `body.ticket_view` is at most 16384 bytes as compact UTF-8 JSON (else `422 invalid`), and every attachment `blob_id` was uploaded by the sender with that `size` (another sender's or a missing blob → `404`, a wrong size → `422`). The relay never reads the snapshot otherwise; `ticket_view.results` (phone block snapshots, blocks.md Phone results) is checked only by the schema and the same 16 KB cap |
 | text with `body.proposal_result` | as text, plus the rules in "Ticket proposal result" (a workspace result for a proposal answer; the relay checks `reply_to`, `to` and the shape) |
+| text with `body.review_result` | as text, plus the rules in "Review cards on the phone" (a workspace result for a phone verdict; the relay checks `reply_to`, `to`, `ticket` and the fixed text) |
+| question with `body.digest` / `card` / `card_files` | as question, plus the rules in "Review cards on the phone" (card size, file blobs uploaded by the sender, sizes and hashes, indexes) |
 | text (phone fields) | `body.client_id`, `attachments`, `voice`, `location` and `feedback` are set only by the relay on the texts it builds for `POST /v1/phone/send`; a workspace text with any of them → `422 invalid` |
 | text, question | to a workspace: pair rule `text` from → to. `to: "ph_…"`: that phone is paired (signed in) and the sender is on its list, else `403 not_allowed` ("That phone is not paired with <name>. In the relay admin, open Phones and tick <name> …"). `to: "phones"` = every paired phone with the sender on its list (none = stored, reaches nobody). Only text and questions go to phones |
 | answer | `reply_to` is a `question` that `to` sent to `from` (questions to `phones` / `ph_…` are answered by phones only, `POST /v1/phone/answer`). `ticket` (absent when the question has none: a ticket proposal) and `question_id` are copied from that question, not trusted from the sender |
@@ -44,7 +46,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/inbox?wait=0..30` | – | `{items: [message…], next: null}` not yet acked, oldest first, max 100. `wait` = long-poll seconds |
 | POST | `/v1/inbox/ack` | `{ids: [m_…]}` | `204`. Acked messages are no longer delivered (the admin can still read them). The relay keeps the ack time; for a phone's text it is that text's `delivered_at` (Phone API) |
 | POST | `/v1/blobs` | raw bytes, max 100 MB | `201 {blob_id, size, sha256}` |
-| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
+| GET | `/v1/blobs/<blob_id>` | – | raw bytes; only for the uploader, receivers of a `file` message with this blob, and the workspace a stored phone text names it in (`body.attachments[].blob_id`, `body.voice.blob_id`, `body.feedback.pins[].voice_blob_id` of a phone text whose `to` is exactly the calling workspace; never via `to: phones`), the workspace a phone answer names it in (`body.verdict.note.words.voice[].blob_id` of a stored phone `answer` whose `to` is exactly the calling workspace), else `404`. That access lasts as long as the phone text is stored: removing the workspace from the phone or signing the phone out does not take it back. Always served as `application/octet-stream` |
 | POST | `/v1/webhooks` | `{mode: "once"\|"permanent", ticket?}` | `201 {id, url}`; `url` = `https://relay.severin.io/webhook/<id>?token=whk_…` (shown once) |
 | GET | `/v1/webhooks` | – | list of `{id, mode, ticket, created_at, last_call_at}` (own only) |
 | DELETE | `/v1/webhooks/<id>` | – | `204` |
@@ -75,8 +77,8 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 | GET | `/v1/phone/messages?after=&limit=` | – | list of `{message, workspace_name, delivered_at, client_id}`, newest first: `text` messages that workspaces on its list sent to this phone or to `phones`, and the texts this phone sent to them (`workspace_name` = the other side). General texts (no `ticket`) are listed like all others. `delivered_at` = when the receiving workspace acked the phone's own text (`POST /v1/inbox/ack`), else `null`; `client_id` = the text's `body.client_id`. Both are `null` on workspace texts. See Phone app v3 |
 | GET | `/v1/phone/updates?workspace=&ticket=&after=&limit=` | – | A read view over the same stored `text` messages as `/v1/phone/messages` (no second store, nothing is written): only texts with `body.update` that a workspace sent to this phone or to `phones`, filtered by the phone's workspace list **as it is at read time** (a workspace removed from the list disappears at once). **Grouped** (no `ticket`): one item per (workspace, ticket) with its newest update, newest first, at most `limit` (1–100, default 50) items; no paging, `next` is always `null`; `workspace` optionally narrows it. **One ticket** (`ticket` + `workspace`): that ticket's updates, newest first, `limit` per page; `after` = the `id` of an item of this same filtered view (the last item of the previous page), `next` = the last item's `id` when more exist, else `null`. `ticket` without `workspace` → `422 invalid`; an `after` that is not in this phone's filtered view of that ticket → `422 invalid`; a `workspace` that is not on the phone's list answers exactly like an unknown one: `200 {items: [], next: null}` (never `403`, so nothing tells them apart). Items: `{id, workspace, workspace_name, ticket, key, kind, title, text, reply_to, at, ticket_view}` (`key` = the ticket's display key from the message, e.g. `DM1-12`, or `null`); `title`/`text` are plain text from the message, never HTML `ticket_view` = the message's `body.ticket_view` (message.schema.json), else `null`; in the **grouped** view it is the newest `ticket_view` of that ticket (looked for in the same bounded rows as the title), so a newer update without one keeps the last snapshot. The relay passes it through as stored |
 | POST | `/v1/phone/blobs` | Body = the raw bytes, any `Content-Type` (image/jpeg, image/png, image/heic, application/pdf, audio/m4a, text/plain, application/octet-stream, …), max 25 MB | `201 {blob_id, size, sha256}`. `413 too_large` over 25 MB, `422 invalid` when empty. Stored like workspace blobs (encrypted at rest), kept **90 days** after the upload, then deleted (`404`). Readable only by this phone (`GET /v1/phone/blobs/<id>`) and by the workspace a text of this phone names it in (`GET /v1/blobs/<id>`). A retried upload makes a new blob; an unused one simply expires. The `Content-Type` is not stored or checked: every blob is served as `application/octet-stream`. No upload rate limit or storage cap in v3 besides the 25 MB per blob |
-| GET | `/v1/phone/blobs/<blob_id>` | – | raw bytes (`application/octet-stream`) of a proof file a workspace on the phone's list named in a `body.ticket_view` attachment of a text it sent to this phone or to `phones` (the same filter as `/v1/phone/messages`), or of a blob this phone uploaded; anything else, an unknown id included, answers `404` |
-| POST | `/v1/phone/answer` | `{question_message_id, answer, client_id}` | `201 {id, client_id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, `body.client_id`, routed as above). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}` with the first answer's id (checked before the 409, so a retry of the winning answer is not a conflict). First answer wins; later answers from any phone → `409 already_answered` |
+| GET | `/v1/phone/blobs/<blob_id>` | – | raw bytes (`application/octet-stream`) of a proof file a workspace on the phone's list named in a `body.ticket_view` attachment of a text it sent to this phone or to `phones` (the same filter as `/v1/phone/messages`), of a card file such a workspace named in `body.card_files[].blob_id` of a **question** it sent to this phone or to `phones` (same filter: uploaded by that workspace, the workspace on the list at read time, a question to `phones` only when stored after this phone was paired; answered or not, while the question is stored), or of a blob this phone uploaded; anything else, an unknown id included, answers `404` |
+| POST | `/v1/phone/answer` | `{question_message_id, answer, client_id, verdict?}` | `201 {id, client_id}`. The relay builds the `answer` message (`from: ph_…`, `answered_by: human:<phone name>`, `body.client_id`, `body.verdict` copied as is when sent (rules in "Review cards on the phone"), routed as above). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}` with the first answer's id (checked before the 409, so a retry of the winning answer is not a conflict). First answer wins; later answers from any phone → `409 already_answered` |
 | POST | `/v1/phone/send` | `{to: ws_…, client_id, text?, ticket?, general?, reply_to?, attachments?, voice?, location?, feedback?}` (phone-api.schema.json `send_request`) | `201 {id, client_id}`. A `text` message from the phone, built by the relay (see Phone app v3). `to` must be on the phone's list (`403 not_allowed`). Same `client_id` from this phone again → `200 {id, client_id, duplicate: true}`, no second message (the relay does not compare the content) |
 | POST | `/v1/phone/control` | `{to: ws_…, control: "mobile_mode_off", client_id?}` (phone-api.schema.json `control_request`) | `201 {id, client_id}`. The relay stores a `control` message `from: ph_…`, `to` the workspace, `body: {control, client_id?}`. `to` must be on the phone's list (`403 not_allowed`), an unknown `control` value → `422 invalid`. Same `client_id` again → `200 {id, client_id, duplicate: true}`. Not listed in any phone view (`/v1/phone/messages` shows `text` only). See **Mobile mode** |
 | POST | `/v1/phone/transcribe` | Body = the audio bytes, `Content-Type: audio/m4a` (also `audio/wav`, `audio/webm`), max 10 MB / 2 min, optional `?language=de` (`de`, `en`, `de-CH`, …; else the language is detected, or `de-CH` when the phone's `swiss_german` setting is on: Deepgram nova-3 with `language=de-CH`) | `200 {text, language, duration}` (`duration` in seconds). `503 transcription_off` when the admin set no Deepgram key (the app then uses on-device speech), `502 transcription_failed` when Deepgram fails or is unreachable, `429 rate_limited` after 30 calls a minute per phone, `413 too_large`, `422 invalid` (type, empty, language) |
@@ -212,7 +214,7 @@ with `question_id: "review-<n>"` (n = the review round, new each time the ticket
 `recommended: null`. The phone shows it only as that ticket chat's review bar, while the ticket is in Review and the question is open: Accept answers `accept`;
 Ask for changes answers the typed text (1-2000 chars, never empty). The workspace acts on an answer only if the ticket is still in Review and the
 question is the current round, once (relay: first answer wins); `accept` = the dashboard Accept, any other text = the dashboard "Ask for changes" with
-that note (a bare `changes` is nothing to send: history line only). Attributed `human:<stored name of the paired phone>` (`human:<ph id>` if it has none), from the relay-authenticated sender only, never from `body.answered_by`. Only a phone paired with this workspace may answer; a group-routed answer is refused. The relay refuses (`422`) a question with `body.review` unless `question_id` is `review-<n>`, `options` are exactly `["accept","changes"]` and there is no `scope`. The relay stores and lists it like any question but does not push it (the Ready-for-review text is the push). A stale or repeated answer is a history line only. vectors/review-question-v1.json.
+that note (a bare `changes` is nothing to send: history line only). Attributed `human:<stored name of the paired phone>` (`human:<ph id>` if it has none), from the relay-authenticated sender only, never from `body.answered_by`. Only a phone paired with this workspace may answer; a group-routed answer is refused. The relay refuses (`422`) a question with `body.review` unless `question_id` is `review-<n>`, `options` are exactly `["accept","changes"]` and there is no `scope`. The relay stores and lists it like any question but does not push it (the Ready-for-review text is the push). A stale or repeated answer is a history line only. A new workspace may add `digest` and the Check `card` to it and a new phone may answer with a `verdict` ("Review cards on the phone", below); the rules here stay for answers without one. vectors/review-question-v1.json.
 
 **Ticket proposal question** (`body.proposal: "make_ticket"`): when the General helper proposes a ticket, the workspace sends ONE normal `question` to `phones` (no `ticket` on the message, no separate text) with `question_id: "proposal-<this question's own message id>"`, `title` = the proposed ticket title (1-120 chars, cleaned), `text` = the helper's one sentence, `options: ["make","not_now"]`, `recommended: null`, optional `when` (YYYY-MM-DD, only with the marker; the workspace does not send it yet). The phone shows a Make ticket card. `make` = the dashboard "Make ticket" (same code, idempotent per proposal id), no separate ack text; the phone shows "Making ticket..." until the workspace's proposal result arrives (Ticket proposal result, below), never "Ticket made" on send; the ordinary ack `Got it: <title>` (ticket + key, `reply_to` = the question, closes the card) is sent only when the dashboard decides first with no phone answer pending; a phone `make` that meets an already decided proposal gets `proposal_result: decided` instead of an ack; `not_now` = a history line only. First answer wins; a stale answer (the dashboard decided first, a second answer, a moved proposal) is nothing but a history line. Attributed `human:<stored name of the paired phone>`, from the relay-authenticated sender only, never from `body.answered_by`; only a phone paired with this workspace may answer, a group-routed answer, a subscriber or an agent is refused. The relay refuses (`422`) `body.proposal` unless it is `make_ticket`, `question_id` is `proposal-<the message's own id>`, `title` is 1-120 chars, `options` are exactly `["make","not_now"]`, there is no `scope`, no `review`, and the message has no `ticket`; and refuses a `question_id` starting with `proposal-` without the marker. Stored, listed and pushed like any question (it is the helper's reply to the person's own Chat message). vectors/proposal-question-v1.json.
 
@@ -232,12 +234,111 @@ that note (a bare `changes` is nothing to send: history line only). Attributed `
 
 **Phone card.** `make` shows "Making ticket..." until the result arrives. After 2 minutes, or when the workspace is not live (mobile-mode heartbeat), it shows "Waiting for <workspace>..." and still accepts a late result. Results apply only to the proposal in `reply_to` (an unknown `reply_to` is ignored); for one `reply_to` a `made` is final: a later `refused` or `decided` never replaces it. `decided` with a key shows the ticket, without a key it closes the card. Results never count as unread or badge. An old phone keeps the old card and the plain line in the chat.
 
+**Review cards on the phone** (Review stack; message.schema.json `$defs/question` `digest`/`card`/`card_files`, `$defs/review_card`,
+`$defs/verdict`, `$defs/review_result`; phone-api.schema.json `answer_request.verdict`; vectors/review-card-v1.json and the
+`verdict_cases` of vectors/review-question-v1.json). A card question is a normal question of a ticket (`question_id` `q<n>`) that
+the workspace asked with a Review card (`orch review add`); it goes to `phones` like any question and is pushed like one. A review
+question (above) may carry the Check card of its ticket. Nothing changes for a question without these fields (RULE A, below).
+
+*Question body (workspace → relay).* Optional, all three only together as said:
+- `digest` (64 hex): what the person is shown, as the workspace hashes it: `tickets.question_digest(q)` for a card question
+  (it covers `card` and `shown` of the stored question), `review.check_digest(ticket)` for a review question. Opaque to the
+  phone; it echoes it. Allowed on `q<n>` and `review-<n>` questions, never with `proposal` or `scope`; required with `card`.
+- `card`: the card as `review.validate_card` stores it, sent as `$defs/review_card` (`additionalProperties: false` at every
+  level; the workspace sends only the listed keys and leaves out null or empty optional values; the relay refuses any other
+  key). Kind `check` only on a review question, never on `q<n>`. File references become `{"file": i}` (= `card_files[i]`) or
+  `{"file": null, "why": "too_large"|"held_back"}` (not sent: over the phone budget, or kept back by the secret scan
+  (`phone_view._gate`) or because the reviewed copy's bytes no longer hash to `shown.files[name]`; the workspace never uploads
+  such a file). At most **65536 bytes** as compact UTF-8 JSON (`review.MAX_CARD_JSON`, so every valid card fits).
+  The wire card is stricter than `review.validate_card` today in three places, and review.py must align (until then the
+  workspace checks the wire card against `$defs/review_card` before it sends, and sends the question without `card` when it
+  fails): texts and table cells refuse DEL and the bidi controls U+202A-U+202E, U+2066-U+2069 (cells also C0 controls but
+  newline and tab); `open` is `^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\s\\]*)?$` (a plain host: no userinfo `@`, no
+  backslash, no %-encoding in the authority).
+- `card_files`: 1-20 `{blob_id, name, size, sha256, mime}`, uploaded by the workspace (`POST /v1/blobs`); `sha256` =
+  `shown.files[name]`; `name` the base name only; `mime` one of the review file types (png, jpeg, webp, gif, svg, html,
+  markdown, plain, csv); the sizes add up to at most **20 MB** (more = `too_large` refs instead).
+
+Relay checks on intake (`422 invalid` unless noted): the schema; the compact card size; option ids differ and every table row
+has one cell per column (the two rules the schema cannot say); every `{"file": i}` has `i < len(card_files)`; every
+`card_files` blob was uploaded by the sender (`404 not_found` otherwise, unknown ids included) with exactly that `size` and
+`sha256`; the sizes add up to at most 20 MB.
+
+*Answer (phone → relay → workspace).* `POST /v1/phone/answer` takes an optional `verdict` = `{verdict: ok|no|talk, picked?,
+digest, note?}` (`$defs/verdict`: changes ≤ 20 × 500, words.text ≤ 2000, words.voice ≤ 3 `{blob_id, transcript ≤ 2000, lang,
+duration ≤ 120}`, pins ≤ 30 `{n, on?, x 0..1, y 0..1, text?}`; `picked` null with `no`; no other keys, so it cannot name a
+ticket or question). `answer` stays required: the phone's own plain line for the swipe, for old readers only. The relay
+refuses the verdict (`422 invalid`) on a question without `body.digest`, when `verdict.digest` is not exactly that
+`body.digest`, or when it is over **8192 bytes** as compact UTF-8 JSON (`review.MAX_NOTE_BYTES`); every voice `blob_id` must be
+an upload of **this** phone (`404 not_found` for another phone's, a workspace's or an unknown blob; the same rule as `send`).
+It then copies `verdict` unchanged into the answer body (`ticket`, `key`, `question_id` from the question, as for every
+answer). First answer wins (`409 already_answered`), as for every question: a phone cannot change its verdict once the relay
+stored it; until then it sits in the phone's Outbox and may be changed there (M4). A blob named in an answer counts as used
+(not deleted after 24 h).
+
+*Workspace rules* (vectors/review-card-v1.json `workspace`, review-question-v1.json `verdict_cases`). It acts on a verdict only
+as for every phone answer (human-proof.md "Phone actions"): fetched itself, `from` a phone of its `phones` list, not
+group-routed (`body.group`), `reply_to` a question it sent (its MAC'd asked record), never from a subscriber or a workspace;
+otherwise nothing at all (no result). Ticket, question and card come only from its own record and ticket, never from the answer.
+Then, in this order:
+1. Already answered on the workspace (the computer first), a review question no longer in Review or not the current round →
+   `decided` (with the existing decision's summary when there is one). A phone verdict never replaces an answer (no
+   `review.change` from the phone; changing is a computer action).
+2. `verdict.digest` is not the digest of the question as the workspace holds it **now** (and as the asked record says it was
+   sent) → `changed`; nothing applied, the question stays open on the computer (the phone shows "This changed"; re-sending the
+   new card is later, M4).
+3. Decide with the review rules (`review.decide`; for a review question `_decide_check`: `ok` = Accept, `no`/`talk` = Ask
+   for changes with `"; ".join(changes)` or `words.text`, a note is required): attributed `human:<stored phone name>`, via
+   `phone`; the decision and summary are exactly review.py's. A verdict review.py refuses (an unknown or missing `picked`,
+   `talk` with nothing to change, `picked` on a Check) → `refused`, `invalid`, nothing applied. Any other refusal →
+   `refused`, `unavailable` (`needs_person` when the answer is not a person's).
+4. Applied → `applied` with the decision's summary.
+An answer **without** `verdict` to a card question (an old phone) keeps today's answer path with one mapping: an answer that is
+exactly an option id of a choice card = `ok` with that `picked`; any other text = `talk` with `words.text` = the text; No `review_result` is sent for it. Old review answers
+(`accept` / a note) are unchanged.
+All note text (changes, words, pins, transcripts) is the person's words: stored and shown as data, cleaned like every phone
+text (`clean_untrusted`), handed to a helper only quoted as the person's request, never as instructions; a transcript never
+becomes a change or an approval by itself. In v1 the workspace keeps the transcript and does not need the audio
+(`GET /v1/blobs/<voice blob>` is allowed, optional).
+
+*Review result (workspace → phone).* For every verdict answer it acts on (rules above), the workspace sends exactly ONE `text`
+to the answering `ph_…` with `reply_to` = the question, `ticket` (and `key`) = the question's, and a body that is only
+`{text, review_result: {result, summary?, reason?}}`:
+
+| result | review_result | body.text (fixed) |
+|---|---|---|
+| applied | `summary` = the decision's one line (≤ 400, one line) | `Got it` |
+| changed | – | `This changed. Look at it again` |
+| refused | `reason`: `needs_person`, `invalid` or `unavailable` | `Couldn't use your answer` |
+| decided | optional `summary` (the answer that stands) | `Already decided` |
+
+The same byte rules as the proposal result (ASCII apostrophe, no trailing period). The workspace records "result sent" with
+the outcome, so a retry resends the same message id. Relay rules (`422` unless noted, replayed from vectors/review-card-v1.json
+`relay`): the schema and the fixed text; `type` text; `to` a `ph_…` (never `phones` or a workspace); `reply_to` is a question
+this sender sent (`404` for any other id, unknown included) that has `body.digest` (`403 not_allowed` for the sender's own
+question without it); `ticket` equals that question's `ticket`; `to` is the phone whose answer to it the relay stored
+(`403 not_allowed` otherwise, also when no answer is stored); at most one `review_result` per `reply_to` (another id `409
+conflict`, the same id `200 duplicate`). A phone cannot send the field. Never pushed, never in the text push budget, never
+unread; the phone shows it as the card's Received state, an old phone the plain line in the ticket chat.
+
+*Phone.* Face ID before a
+send is a phone-side confirm only. The phone checks each downloaded card file against `card_files[].sha256` (a mismatch =
+"Open on the computer"), renders `html` and `svg` only in a sandbox without scripts or network, and handles `card.open` with ONE
+WHATWG-compatible URL parser: it shows the host of THAT parse, and opens the parsed, re-serialised URL (never the raw
+string) in the system browser; a string that does not parse, or parses to another scheme, is not offered. Card text is plain text, never markup.
+
+**RULE A (old messages stay byte-identical).** A question without `digest`, `card` and `card_files`, an answer without
+`verdict`, and their asked records are exactly as before: same bytes, same MACs, same digests (`tickets.question_digest` adds
+`card`/`shown` only when present). The workspace's signed asked record (`relay._asked_signed_fields`) gets `review_digest` (the
+`check_digest` a review question was sent with) appended as a 12th element **only when the record has it**; records without it
+sign the same 11 elements as today. A card question needs no new field: its `question_digest` already binds the card.
+
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
 Push for a new text to a phone (`ph_…` or `phones`): same `aps`, plus `"type": "text", "text_id": "m_…", "workspace": "ws_…"` (no `message_id`); tapping opens the messages with that workspace.
 Work updates (`body.update` on a text, message.schema.json): the relay pushes a text with `update.kind` = `result`, `question`,
 `failure` or `stopped` as above (push body = `update.title` + ": " + the first line of the text, max 120 chars); `ack`, `working`
 and `note` are stored and listed (`/v1/phone/messages`, `/v1/phone/updates`) but **never pushed**. A text without `update` is
-pushed as before, except a text with `body.proposal_result`, which is never pushed. The filter runs in the relay, not in the sender.
+pushed as before, except a text with `body.proposal_result` or `body.review_result`, which is never pushed. The filter runs in the relay, not in the sender.
 **Text push budget** (per sending workspace and phone, kept in the relay's memory): at most 1 text push per 10 s and 30 per hour
 window (the window starts with the first push after the last one ended) for each (workspace, phone) pair; a text over the budget is still stored and listed, only its push is skipped.
 Questions are not limited by it. The budget applies after the update-kind filter (quiet kinds never use it up).

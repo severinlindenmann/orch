@@ -33,6 +33,13 @@ test('unknown addresses are Page not found; empty and #home stay Home; a query k
   assert.deepEqual({...route('#tickets?view=working', [])}, {kind:'tickets', hash:'#tickets?view=working'});
   assert.equal(route('#notes?x=1', []).kind, 'home');
 });
+test('#review and the link `orch review link` prints (#/review) are the Review page', () => {
+  assert.deepEqual({...route('#review', [])}, {kind:'review', hash:'#review'});
+  assert.deepEqual({...route('#/review', [])}, {kind:'review', hash:'#review'});
+  assert.equal(route('#review?x=1', []).kind, 'review');
+  assert.equal(route('#reviews', []).kind, 'notfound');
+  assert.equal(route('#/reviewx', []).kind, 'notfound');
+});
 const skSource = source.slice(source.indexOf('function skeletonFor('), source.indexOf('function notFoundPage('));
 test('skeletonFor draws the page shape, busy, with one status text and hidden shapes', () => {
   const h = (tag, attrs = {}, ...kids) => ({tag, attrs, kids:kids.flat(Infinity).filter(Boolean)});

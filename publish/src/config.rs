@@ -5,6 +5,9 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub apps_dir: PathBuf,
     pub public_url: String,
+    /// Optional private-network listener (address to bind) and its URL; both or neither.
+    pub private_listen: Option<String>,
+    pub private_url: Option<String>,
     pub max_file_mb: u64,
     pub default_days: i64,
     pub max_days: i64,
@@ -39,6 +42,8 @@ impl Config {
             apps_dir: data_dir.join("apps"),
             data_dir,
             public_url: "https://publish.severin.io".into(),
+            private_listen: None,
+            private_url: None,
             max_file_mb: 100,
             default_days: 7,
             max_days: 90,
@@ -71,6 +76,10 @@ impl Config {
             .unwrap_or(c.public_url)
             .trim_end_matches('/')
             .to_string();
+        c.private_listen = var("PRIVATE_LISTEN").filter(|v| !v.trim().is_empty());
+        c.private_url = var("PRIVATE_URL")
+            .map(|v| v.trim().trim_end_matches('/').to_string())
+            .filter(|v| !v.is_empty());
         c.max_file_mb = env_or("MAX_FILE_MB", c.max_file_mb);
         c.default_days = env_or("DEFAULT_DAYS", c.default_days);
         c.max_days = env_or("MAX_DAYS", c.max_days);
@@ -104,6 +113,32 @@ impl Config {
         c
     }
 
+    /// Startup check: the private-network listener and its URL are set together or not at all.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.private_listen.is_some() != self.private_url.is_some() {
+            return Err("ORCH_PUBLISH_PRIVATE_LISTEN and ORCH_PUBLISH_PRIVATE_URL must be set together or not at all.".into());
+        }
+        if let (Some(l), Some(u)) = (&self.private_listen, &self.private_url) {
+            let ok = l
+                .parse::<std::net::SocketAddr>()
+                .is_ok_and(|a| private_ip(a.ip()));
+            if !ok {
+                return Err("ORCH_PUBLISH_PRIVATE_LISTEN must be an IP address and port on the private network (not 0.0.0.0, not a public address).".into());
+            }
+            if u.trim_end_matches('/') == self.public_url.trim_end_matches('/') {
+                return Err("ORCH_PUBLISH_PRIVATE_URL must differ from the public URL.".into());
+            }
+        }
+        Ok(())
+    }
+    /// Host[:port] that requests on the private listener must carry (default port from the scheme).
+    pub fn private_authority(&self) -> Option<(String, u16)> {
+        let u = self.private_url.as_deref()?;
+        let (scheme, rest) = u.split_once("://").unwrap_or(("http", u));
+        let auth = rest.split('/').next().unwrap_or("");
+        let dflt = if scheme == "https" { 443 } else { 80 };
+        Some(split_authority(auth, dflt))
+    }
     /// Largest accepted upload body: cap + 64 KiB header + 36 bytes overhead.
     pub fn max_blob_bytes(&self) -> usize {
         (self.max_file_mb * 1024 * 1024 + 64 * 1024 + 36) as usize
@@ -157,4 +192,39 @@ fn admin_token(data_dir: &std::path::Path) -> String {
     let _ = std::fs::write(&own, &t);
     eprintln!("orch-publish: admin token written to {}", own.display());
     t
+}
+
+/// Lower-case host and port of an authority; a missing port becomes `dflt`.
+pub fn split_authority(a: &str, dflt: u16) -> (String, u16) {
+    let a = a.to_ascii_lowercase();
+    if let Some(r) = a.strip_prefix('[') {
+        if let Some((h, p)) = r.split_once(']') {
+            let port = p
+                .strip_prefix(':')
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(dflt);
+            return (format!("[{h}]"), port);
+        }
+    }
+    match a.rsplit_once(':') {
+        Some((h, p)) if p.parse::<u16>().is_ok() => (h.to_string(), p.parse().unwrap()),
+        _ => (a, dflt),
+    }
+}
+
+/// 100.64/10, 10/8, 172.16/12, 192.168/16, fd00::/8 or loopback (local runs). Never unspecified.
+fn private_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr::*;
+    match ip {
+        V4(a) => {
+            let o = a.octets();
+            !a.is_unspecified()
+                && (a.is_loopback()
+                    || o[0] == 10
+                    || (o[0] == 100 && (64..128).contains(&o[1]))
+                    || (o[0] == 172 && (16..32).contains(&o[1]))
+                    || (o[0] == 192 && o[1] == 168))
+        }
+        V6(a) => !a.is_unspecified() && (a.is_loopback() || a.octets()[0] == 0xfd),
+    }
 }

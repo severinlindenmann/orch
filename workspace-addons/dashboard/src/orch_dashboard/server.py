@@ -505,6 +505,8 @@ class Handler(BaseHTTPRequestHandler):
             code, body, ctype, extra = ticketfiles.read_file(
                 self.root, one("t"), one("k"), one("n"), one("dl") == "1"
             )
+            if one("k") == "reviewed":  # a card's own copy: inert, sandboxed, never sniffed
+                return self._send(code, body, ctype, extra, csp=ticketfiles.REVIEWED_CSP)
             rng = re.fullmatch(r"bytes=(\d{0,15})-(\d{0,15})", self.headers.get("Range") or "")
             if (
                 code == 200
@@ -553,7 +555,8 @@ class Handler(BaseHTTPRequestHandler):
             static = name == "kit/gallery.html" or name.startswith("kit/samples/")
             return self._send(200, got[0], got[1], csp=GALLERY_CSP if static else None)
         if re.fullmatch(
-            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)", name
+            r"pages/(home|tickets|ticket|newticket|settings|chat|report|desktop)\.(js|css)|pages/review\.js",
+            name,
         ):  # the page modules
             return self._send(200, web_file(name), TYPES["." + name.rsplit(".", 1)[1]])
         if name in (

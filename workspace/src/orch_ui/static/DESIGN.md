@@ -17,6 +17,7 @@ This folder (`workspace/src/orch_ui/static/`) is the single component library an
 | `tokens.css` | Generated tokens: colour, type, spacing, shape, motion durations and easings. |
 | `components.css` | Shell, sidebar, topbar, page, card, button, input, badge, chip, table, tabs, segmented, progress, empty/error, skeleton, tooltip, toast, dialog, sheet, menu, the one `.chev` chevron. |
 | `widgets.css`, `widgets.js` | Added 14 Nov: status icon set, pill, empty/error/loading state, stat tile, labelled progress, sortable table, `data-tip` tooltip, sheet, dialog S/M/L, strip, board, file card, type utilities. `UI.statusIcon`, `UI.state`, `UI.stat`, `UI.progress`, `UI.table`, `UI.sheet`, `UI.chevron`. |
+| `review.js`, `review.html`, `review-boot.js` | Review stack (15 Nov): `UI.reviewPage` (Waiting deck on `UI.swipeDeck` + Answered list), `UI.answerRecord` and `UI.appliesNow` (answers under a ticket's questions), `UI.reviewFetchApi` (same-origin api of the page `orch review` serves). `review.html` is that page, `review-boot.js` signs in from the `#t=` fragment and starts it. Voice in the deck only with `voice:true`. |
 | `interaction.css`, `overlay.js`, `select.js`, `date.js`, `components.js` | Dialog lifecycle, custom select (one SVG chevron), calendar, toast with Undo (`UI.toast`), menus, tabs and segments keyboard. |
 | `motion.css`, `motion.js` | Motion tokens in use (see Motion contract). |
 | `icons.js` | One icon set, `icon('check', 16)`. |
