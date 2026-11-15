@@ -12,7 +12,7 @@ ADDONS = sorted(d.name for d in (ROOT / "workspace-addons").iterdir() if (d / "s
 
 # file (relative to workspace/src) -> {literal: reason / issue}. Everything else must be clean.
 _MANIFEST = "manifest field of contracts/addon-manifest.md, not a package name"
-_FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see the PR body of #794)"
+_FOLLOW_UP = "follow-up: core still names this add-on's setting/marker (see #837)"
 _GONE = "removed by #799"
 ALLOW = {
     "orch/addons.py": {"dashboard": _MANIFEST},
