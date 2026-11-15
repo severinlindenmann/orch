@@ -9,3 +9,6 @@
 .insights-header .segmented,.insights-header .insights-settings{height:42px;box-sizing:border-box;border-color:var(--border);background:var(--sidebar)}
 .insights-header .insights-settings{font-size:inherit;padding:4px 12px;white-space:nowrap}
 .insights-header .insights-settings:hover{background:var(--surface-3)}
+
+/* Check-up card (same rules as the product's insights.css) */
+.checkup-head{gap:16px}.checkup-head .grow{display:grid;gap:2px}.checkup-weekly{gap:8px;font-size:13px;cursor:pointer}.checkup-row .grow h3{font-size:14px}.checkup-row .grow p{margin-top:2px}

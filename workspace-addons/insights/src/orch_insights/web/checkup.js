@@ -108,6 +108,7 @@
   function chips(proposal) {
     const box = node('span', undefined, 'row');
     if (proposal.likely) box.append(node('span', 'likely', 'chip outline'));
+    if (proposal.status === 'proposed' && !canTest(proposal)) return box;  // nothing to test: no state to show
     const tests = proposal.tests;
     if (proposal.status === 'proposed' && (tests.state === 'failed' || tests.state === 'error')) {
       box.append(node('span', 'Did not pass', 'badge failed'));
@@ -118,9 +119,13 @@
     return box;
   }
 
-  function mainButton(proposal) {
+  function canTest(proposal) {
     const ask = proposal.target.source === 'admin' || proposal.kind === 'key.ask_admin';
-    if (ask || proposal.kind === 'note' || proposal.kind === 'connection.fix') return null;
+    return !ask && proposal.kind !== 'note' && proposal.kind !== 'connection.fix';
+  }
+
+  function mainButton(proposal) {
+    if (!canTest(proposal)) return null;
     const make = (text, cls, fn) => {
       const button = node('button', text, `btn ${cls}`);
       button.type = 'button';
