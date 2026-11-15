@@ -12,7 +12,7 @@ import json
 import time
 from pathlib import Path
 
-from orch import diag_checks, diag_collect, diag_query, diag_report
+from orch import diag, diag_checks, diag_collect, diag_query, diag_report
 from orch.errors import Refused
 
 
@@ -48,6 +48,8 @@ def add_parsers(sub, common) -> None:
         help="include ticket text and helper excerpts (default)",
     )
     r.add_argument("--no-content", dest="content", action="store_false")
+    x = d.add_parser("delete", parents=[common], help="delete saved reports or the saved debug notes")
+    x.add_argument("what", choices=["reports", "notes"])
 
 
 def _check_id(value, what: str, rx) -> None:
@@ -79,8 +81,8 @@ def dispatch(args, root: Path) -> bool:
         return False
     from orch import tickets
 
-    _check_id(args.ticket, "ticket", tickets._ID_RE)
-    _check_id(args.run, "run", __import__("re").compile(r"r_[A-Za-z0-9]{1,32}"))
+    _check_id(getattr(args, "ticket", None), "ticket", tickets._ID_RE)
+    _check_id(getattr(args, "run", None), "run", __import__("re").compile(r"r_[A-Za-z0-9]{1,32}"))
     if args.sub == "inspect":
         res = inspect(root, args.ticket, args.run)
         print(json.dumps(res, indent=2, ensure_ascii=False) if args.json else _text_inspect(res))
@@ -107,6 +109,16 @@ def dispatch(args, root: Path) -> bool:
                 print(f"more: --page {res['next']}")
             for g in res["unavailable"]:
                 print(f"not available: {g}")
+    elif args.sub == "delete":
+        from orch import cli_config, config
+
+        config.require_person(
+            cli_config._actor(args), "delete reports or debug notes"
+        )  # evidence: a person's click
+        gone = diag_report.delete_all(root) if args.what == "reports" else diag.delete_notes(root)
+        label = "report" if args.what == "reports" else "file of notes"
+        text = f"Deleted {gone} {label}{'' if gone == 1 else 's'}."
+        print(json.dumps({"deleted": gone, "what": args.what}) if args.json else text)
     else:
         made = diag_report.make(
             root,

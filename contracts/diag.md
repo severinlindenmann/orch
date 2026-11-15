@@ -91,6 +91,22 @@ of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until
 | `diag.incident` | `reason`, `ref` (an incident was frozen; `ticket`, `run` are the event fields) |
 | `diag.disabled` | `actor` (written just before a person switches the log off; an agent cannot) |
 | `diag.dropped` | `count`, `n_<reason>` |
+| `diag.report_failed` | (error event; `err` has the class) the dashboard could not make a report |
+| `diag.report_made` | `ref`, `scope` (`ticket`, `add-on` or `workspace`), `content`, `page` (a page snapshot was added); written when the dashboard makes a report |
+| `diag.reports_deleted` | `count` (Settings > Delete all) |
+| `diag.notes_deleted` | `files` (Settings > Delete notes; the first line of the new log) |
+| `ui.error` | `kind` (`error` or `rejection`), `what` (the error class or name, cut), `file`, `line`, `col` (script file name, no query) |
+| `ui.console_error` | `what` (first argument's type, never its text), `n` (arguments) |
+| `ui.fetch` | `route` (path without query, ids folded to `:id`), `method`, `status`, `ms`, `outcome` (`ok`, `error`, `cancelled`, `failed`) |
+| `ui.action` | `id` (the button's `data-action`), `route` |
+| `ui.route` | `from`, `to` (the page hash with ids folded to `:id`) |
+| `ui.state` | `client_rev`, `server_rev` (revision hashes, 12 chars), `cache_age_ms` (`X-State-Age-Ms` of the last state read) |
+| `ui.env` | `w`, `h`, `zoom`, `browser`, `assets` (the dashboard version the page loaded), `touch`; once per page load |
+
+The page (the dashboard window and the same-origin add-on frames in it) sends `ui.*` events in batches to `POST /api/diag`
+(`src` `ui`, same budgets). Only the names above are accepted; never a request body, response body, header, cookie, text
+the person typed or a console message. Dashboard routes carry the request's `traceparent` header (the answer repeats it),
+so a click, its request and the helper's work share one trace id.
 
 New events add a row here and keep their `kv` keys stable; readers skip names they do not know.
 

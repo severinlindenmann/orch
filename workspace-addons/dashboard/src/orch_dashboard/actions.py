@@ -181,6 +181,8 @@ def proof_for(op, args, root=None):
         if isinstance(v, str) and v.strip() not in ("", "none"):
             return "config.copy_setup", hashlib.sha256(v.strip().encode()).hexdigest()
         return None
+    if op == "diag.set":  # the debug log: off is a person's decision (on needs no proof)
+        return ("config.diag_enabled", "off") if args.get("on") is False else None
     if op == "share.set":  # sharing the orch entry with the team (off needs no proof)
         return ("config.share", "on") if args.get("on") is True else None
     if op == "look.shared":
@@ -559,6 +561,22 @@ def _copies_set(a):
     return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
 
 
+def _diag_set(a):
+    """Problem reports (settings): keep the debug log on or off, `orch config set diag.enabled`."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "diag.enabled", "on" if a["on"] else "off"], [], []
+
+
+def _diag_delete(what):
+    def build(a):
+        _only(a, ())
+        return ["diag", "delete", what], [], []
+
+    return build
+
+
 def _copies_clean(a):
     """The Clean up now button (settings): `orch copy clean`, the same sweep every start runs."""
     _only(a, ())
@@ -922,6 +940,9 @@ OPS = {
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
+    "diag.set": _diag_set,
+    "diag.delete_reports": _diag_delete("reports"),
+    "diag.delete_notes": _diag_delete("notes"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
     "copies.remove_orphaned": _copies_remove_orphaned,

@@ -17,7 +17,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-from . import actions, copychanges, reffiles, selfupdate, ticketfiles
+from . import actions, copychanges, diagapi, reffiles, selfupdate, ticketfiles
 from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
 from .events import Revisions
 from .state_cache import StateCache
@@ -194,6 +194,8 @@ class Handler(BaseHTTPRequestHandler):
         if not diag:
             return
         diag.new_trace(self.headers.get("traceparent"))
+        if self.path.startswith("/api/diag"):  # the page's own trail is not logged again as a request
+            return
         diag.log(
             "dashboard.request",
             "debug",
@@ -234,6 +236,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", (extra or {}).get("Cache-Control", "no-store"))
         self.send_header("X-Content-Type-Options", "nosniff")
+        if diag:  # the request's trace id, so the page can tie a click to its request in the debug log
+            try:
+                self.send_header("traceparent", diag.traceparent())
+            except Exception:  # noqa: BLE001 - never stops an answer
+                pass
         for k, v in (extra or {}).items():
             if k != "Cache-Control":
                 self.send_header(k, v)
@@ -613,6 +620,42 @@ class Handler(BaseHTTPRequestHandler):
             return "This request came from another website and was refused."
         return check_request("POST", self.headers, self.server.server_address[1], api=True)
 
+    def _diag_post(self, path: str):
+        """The page's action trail (any page of this app, a fence only) and Report a problem (the person's own
+        session: a report holds ticket text)."""
+        why = self._fence()
+        if why:
+            return self._send(403, why.encode(), "text/plain; charset=utf-8")
+        report = path != "/api/diag"
+        if report and not (
+            self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
+        ):
+            return self._send(
+                403, b"Open the dashboard from this computer to do this.", "text/plain; charset=utf-8"
+            )
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self._send(415, b"send JSON", "text/plain")
+        limit = diagapi.MAX_REPORT if path == "/api/diag/report" else diagapi.MAX_TRAIL
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+            if not 0 < n <= limit:
+                raise ValueError
+            body = diagapi.parse_json(self.rfile.read(n))
+        except (ValueError, OSError):
+            return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
+        if path == "/api/diag":
+            return self._send(
+                200, json.dumps(diagapi.accept_trail(self.root, body)).encode(), "application/json"
+            )
+        code, out = (
+            diagapi.make_report(self.root, body)
+            if path == "/api/diag/report"
+            else diagapi.open_folder(self.root, body)
+        )
+        if code != 200:
+            return self._send(code, str(out).encode(), "text/plain; charset=utf-8")
+        self._send(200, json.dumps(out).encode(), "application/json")
+
     def _term_keys(self):
         """Type into the live helper session: the person's own dashboard session only (cookie + page secret, loopback
         Host, no proxy headers: the same rule as a human-only action). A script or an agent has none of it."""
@@ -712,6 +755,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._session_reopen()
         if path == "/api/term/keys":
             return self._term_keys()
+        if path in ("/api/diag", "/api/diag/report", "/api/diag/open"):
+            return self._diag_post(path)
         px = PROXY.fullmatch(path)
         if path != "/api/act" and not (px and px.group(2) == "/api/act"):
             return self._refuse()
