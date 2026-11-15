@@ -2215,3 +2215,139 @@ def test_view_names_the_real_sender_of_phone_messages(proj, run, rel):
     titles = {i["title"] for i in v["blocks"][0]["items"]}
     assert "Helper → your phone" in titles
     assert not any("the phones" in t or t.startswith("you →") for t in titles)
+
+
+def _dry_state(proj):
+    """What a preview must leave untouched: outbox files, relay_view records, the tickets."""
+    snap = {}
+    for sub in (".orch/outbox", ".orch/tickets"):
+        d = proj / sub
+        if d.exists():
+            for f in sorted(d.rglob("*")):
+                if f.is_file():
+                    snap[str(f)] = f.read_bytes()
+    return snap, sorted(p.name for p in (proj / ".orch").iterdir())
+
+
+def test_dry_run_sends_nothing_and_prints_the_body(proj, run, rel, new_ticket):
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    connect(run, rel)
+    tid = new_ticket()
+    before = _dry_state(proj)
+    posted = len(rel.sent)
+    cases = [
+        (
+            ("relay", "send", "reports", "Field X renamed", "--ticket", tid),
+            "text",
+            {"text": "Field X renamed"},
+        ),
+        (
+            (
+                "relay",
+                "delegate",
+                "reports",
+                "Use event_time",
+                "--text",
+                "why",
+                "--check",
+                "Change query",
+                "--ticket",
+                tid,
+            ),
+            "delegate",
+            {"title": "Use event_time", "text": "why", "checklist": ["Change query"]},
+        ),
+        (
+            ("relay", "start", "reports", "weekly-report", "go", "--ticket", tid),
+            "start",
+            {"key": "weekly-report", "text": "go"},
+        ),
+    ]
+    for argv, type_, body in cases:
+        code, out, _ = run(*argv, "--dry-run")
+        assert code == 0 and "Nothing was sent" in out and f"type: {type_}" in out
+        code, out, _ = run(*argv, "--dry-run", "--json")
+        m = json.loads(out)
+        assert m["type"] == type_ and m["to"] == PEER and m["body"] == body and m["ticket"] == tid
+        assert "id" not in m and "created_at" not in m
+    assert len(rel.sent) == posted
+    assert _dry_state(proj) == before
+    # a real send afterwards still works and is what the preview showed
+    run(*cases[0][0])
+    assert rel.sent[-1]["body"] == {"text": "Field X renamed"}
+
+
+def _delegate(run, rel, tid, title="Use event_time"):
+    run("relay", "delegate", PEER, title, "--text", "x", "--check", "Change query", "--ticket", tid)
+    return rel.sent[-1]
+
+
+def test_delegate_links_both_tickets(proj, run, rel, new_ticket):
+    rel.snapshot["workspaces"]["workspaces"] = [{"id": PEER, "name": "Reports"}]
+    connect(run, rel)
+    tid = new_ticket("Rename the field")
+    sent = _delegate(run, rel, tid)
+    own = json.loads(run("ticket", "show", tid, "--json")[1])
+    d = own["ext"]["relay"]["delegated"]
+    assert d == [{"to": PEER, "message": sent["id"], "at": sent["created_at"]}]
+    assert any(h["text"] == "Handed to Reports" for h in own["history"])
+    # the receiving side holds a linked copy that names the sender's ticket
+    m = msg(
+        "m_deleg00000000009",
+        "delegate",
+        {"title": "Use event_time", "text": "x"},
+        ticket="t_7k3f9q",
+        key="K-1",
+    )
+    rel.inbox.append(m)
+    run("relay", "inbox")
+    run("relay", "allow", m["id"], "--once")
+    t = json.loads(
+        run("ticket", "show", json.loads(run("relay", "done", m["id"], "--json")[1])["ticket"], "--json")[1]
+    )
+    assert t["ext"]["relay"]["peer_ticket"] == "t_7k3f9q" and t["ext"]["relay"]["peer_key"] == "K-1"
+
+
+def test_second_delegate_never_overwrites_the_copy(proj, run, rel):
+    connect(run, rel)
+    first = msg(
+        "m_deleg00000000011",
+        "delegate",
+        {"title": "First title", "text": "x", "checklist": ["Step A"]},
+        ticket="t_7k3f9q",
+    )
+    rel.inbox.append(first)
+    run("relay", "inbox")
+    run("relay", "allow", first["id"], "--once")
+    t1 = json.loads(run("relay", "done", first["id"], "--json")[1])["ticket"]
+    run("ticket", "status", t1, "active", "--by", "human:tester")
+    before = json.loads(run("ticket", "show", t1, "--json")[1])
+    second = msg(
+        "m_deleg00000000012",
+        "delegate",
+        {"title": "Changed title", "text": "y", "checklist": ["Step B"]},
+        ticket="t_7k3f9q",
+    )
+    rel.inbox.append(second)
+    run("relay", "inbox")
+    run("relay", "allow", second["id"], "--once")
+    t2 = json.loads(run("relay", "done", second["id"], "--json")[1])["ticket"]
+    after = json.loads(run("ticket", "show", t1, "--json")[1])
+    assert t2 == t1
+    assert (after["title"], after["status"], after["checklist"]) == (
+        before["title"],
+        before["status"],
+        before["checklist"],
+    )
+    assert after["title"].endswith("First title") and [c["text"] for c in after["checklist"]] == [
+        f"From {PEER}: Step A"
+    ]
+    assert len(_tickets_with_peer(run)) == 1
+
+
+def _tickets_with_peer(run):
+    return [
+        t
+        for t in json.loads(run("ticket", "list", "--json")[1])
+        if t.get("ext", {}).get("relay", {}).get("peer_ticket")
+    ]
