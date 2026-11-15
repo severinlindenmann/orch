@@ -446,4 +446,11 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
   .preview-page{padding:var(--s4)}
   .preview-metrics{grid-template-columns:minmax(0,1fr)}
 }
+/* The scrollbar gutter is always reserved, so a long page (Factory, Insights) ends at the same right edge as a short one. */
+html{scrollbar-gutter:stable}
+/* Details: raw paths and connection addresses sit behind this one small toggle (never on the page by default). */
+.more-details>summary{display:inline-flex;align-items:center;gap:2px;margin:0;color:var(--text-muted);font-size:12px;line-height:16px;cursor:pointer;list-style:none}
+.more-details>summary::-webkit-details-marker{display:none}
+.more-details>summary:hover{color:var(--text)}
+.more-details>*:not(summary){margin-top:4px;padding:0;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.skeleton:after{display:none}}

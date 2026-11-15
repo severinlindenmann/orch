@@ -222,6 +222,8 @@ test('several helpers: a select, each once; a non-default choice is the owner. O
   const one = setupWith({agents:[{name:'claude', label:'Claude'}]});
   assert.equal(walk(one.d).some(n => n.name === 'helper'), false);
   assert.equal(walk(one.d).find(n => n.className === 'new-ticket-helper-fixed').textContent, 'Claude');
+  const same = setupWith({agents:[{name:'helper', label:'Helper'}]});
+  assert.equal(walk(same.d).some(n => n.className === 'new-ticket-helper-fixed' || n.className === 'new-ticket-helper'), false, 'no dead Helper / Helper row');
   const none = setupWith({agents:[]});
   assert.match(walk(none.d).find(n => n.className.includes('new-ticket-empty')).textContent, /No helper is set up yet/);
 });
@@ -241,6 +243,7 @@ test('window closes through the shared overlay; an empty submit shows the plain 
   assert.equal(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, 'Describe what needs doing before you continue.');
   assert.equal(s.calls.length, 0);
   assert.ok(!walk(s.d).some(n => /^Close/.test(n['aria-label'] || '')), 'the Close button comes from the shared overlay, not from the page');
+  assert.match(s.d.className, /ui-bottom-close/, 'the dialog has its own Cancel at the bottom, so the overlay adds no top Close');
   await s.c.window.orch.close(s.d); assert.equal(s.d.open, false);
 });
 

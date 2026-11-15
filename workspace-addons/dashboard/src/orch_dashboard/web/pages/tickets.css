@@ -55,7 +55,7 @@
 .ticket-table .group-row th{padding:0;background:var(--surface-2);height:36px}
 .ticket-table .group-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:36px;padding:0 12px;background:none;border:0;color:var(--text);font:inherit;font-size:12px;font-weight:600;text-align:left;cursor:pointer}
 .ticket-table .step-progress{display:flex;align-items:center;gap:8px}.ticket-table .step-progress .progress{width:56px;flex:none}
-.ticket-table .who{display:inline-flex;align-items:center;gap:6px}
+.ticket-table .who{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.ticket-table td:nth-child(3){min-width:112px}
 .ticket-table .ticket-actions{text-align:right;white-space:nowrap}.ticket-table .ticket-actions .btn+.btn{margin-left:4px}
 .ticket-table tr.child .ticket-cell{padding-left:36px}
 .ticket-table .when{white-space:nowrap}

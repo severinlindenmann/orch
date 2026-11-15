@@ -76,7 +76,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   const nodes = n => n && typeof n === 'object' ? [n, ...n.children.flatMap(nodes)] : [];
   const row = c.ticketBringBackRow({id:'t_abc123', bring_back:b});
   assert.doesNotMatch(JSON.stringify(row), /Ask the helper to update/);
-  const button = nodes(row).find(n => n.tag === 'button' && n.children.includes('Add to my files'));
+  const button = nodes(row).find(n => n.tag === 'button' && n.children.includes('Apply changes'));
   button.onclick();
   assert.equal(dialogs.length, 1);
   const {d, actions} = dialogs[0];
@@ -89,7 +89,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   assert.deepEqual(nodes(list).filter(n => n.tag === 'code').map(n => n.children[0]), b.paths);
   assert.match(text, /and 2 more/);
   assert.equal(calls.length, 0, 'opening the dialog sends nothing');
-  await nodes(actions).find(n => n.tag === 'button' && n.children.includes('Add to my files')).onclick();
+  await nodes(actions).find(n => n.tag === 'button' && n.children.includes('Apply changes')).onclick();
   assert.equal(JSON.stringify(calls), JSON.stringify([['copies.approve', {ticket:'t_abc123', tip:b.tip, control_paths:7, paths_hash:'abcdef12'}]]));
   assert.equal(closed, d);
   assert.deepEqual(toasts, ['Review submitted']);
@@ -97,7 +97,7 @@ test('Review and bring back opens a dialog with the plain paths and sends the sh
   const update = c.ticketBringBackRow({id:'t_abc123', bring_back:{state:'waiting', reason:'x', reason_code:'update'}});
   await nodes(update).find(n => n.tag === 'button' && n.children.includes('Ask the helper to update')).onclick();
   assert.equal(JSON.stringify(calls.pop()), JSON.stringify(['copies.ask-update', {ticket:'t_abc123'}]));
-  assert.equal(nodes(update).filter(n => n.tag === 'button' && n.children.includes('Add to my files')).length, 0);
+  assert.equal(nodes(update).filter(n => n.tag === 'button' && n.children.includes('Apply changes')).length, 0);
   c.snapshot = true;
   assert.equal(nodes(c.ticketBringBackRow({id:'t_abc123', bring_back:b})).filter(n => n.tag === 'button').length, 0);
 });
@@ -561,9 +561,9 @@ test('the Changes to add card offers Review changes and Keep as is; a kept copy 
   const t = {id:'t_k1', bring_back:{state:'waiting', reason:'Needs review', tip:'d'.repeat(40)}};
   const nodes = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodes)] : [];
   const labels = r => nodes(r).filter(n => n.tag === 'button').map(n => n.children.join(''));
-  assert.deepEqual(labels(c.ticketBringBackRow(t)), ['Add to my files', 'Review changes', 'Keep as is']);
+  assert.deepEqual(labels(c.ticketBringBackRow(t)), ['Apply changes', 'Review changes', 'Keep as is']);
   nodes(c.ticketBringBackRow(t)).find(n => n.tag === 'button' && n.children.includes('Keep as is')).onclick();
   const kept = c.ticketBringBackRow(t);
   assert.match(JSON.stringify(kept), /Changes kept in a copy/);
-  assert.deepEqual(labels(kept), ['Add to my files']);
+  assert.deepEqual(labels(kept), ['Apply changes']);
 });

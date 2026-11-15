@@ -23,12 +23,14 @@ const OrchBlocks = (() => {
     if (text != null && text !== '') e.textContent = String(text);
     return e;
   }
+  // Icons come from the kit's one set (kit/icons.js, trusted constants, parsed as SVG, never as page HTML); an unknown
+  // name draws an empty icon instead of a stray glyph.
   function icon(id, cls) {
+    const markup = window.icon ? window.icon(id === 'chevron' ? 'chevron-right' : id, 16, cls || '') : '';
+    const svg = markup ? new DOMParser().parseFromString(markup, 'image/svg+xml').documentElement : null;
+    if (svg && svg.localName === 'svg') return document.importNode(svg, true);
     const s = document.createElementNS(SVG, 'svg');
-    s.setAttribute('class', 'ic' + (cls ? ' ' + cls : ''));
-    s.setAttribute('aria-hidden', 'true'); s.setAttribute('focusable', 'false');
-    const u = document.createElementNS(SVG, 'use'); u.setAttribute('href', '#i-' + id);
-    s.append(u);
+    s.setAttribute('class', 'ic' + (cls ? ' ' + cls : '')); s.setAttribute('aria-hidden', 'true');
     return s;
   }
   // Wrap `child` in a link when `link` is a ticket id or an https URL; otherwise return it as is.

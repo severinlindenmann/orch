@@ -46,7 +46,7 @@ RESERVED = frozenset(
     "version view start stop status run needs agents record job secret conn screen type".split()
 )
 ICONS = frozenset(
-    "clock calendar inbox list chart bell book globe link check star box chat folder user bolt".split()
+    "clock calendar inbox list chart bell book globe link check star box chat folder user bolt target hammer cloud share users".split()
 )
 FORMATS = frozenset({"text", "time", "cron-human", "chips", "yes-no", "open-page"})
 GITIGNORE_RE = re.compile(r"(?!/)(?![A-Za-z]:)(?!.*\.\.)(?!.*\\)[A-Za-z0-9_./* -]{1,200}")

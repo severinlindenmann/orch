@@ -45,8 +45,6 @@
 .acc-li>.switch{margin:10px 12px 0 0}
 .acc>summary{list-style:none;cursor:pointer}
 .acc>summary::-webkit-details-marker{display:none}
-.chev{width:7px;height:7px;border-right:1.5px solid var(--text-muted);border-bottom:1.5px solid var(--text-muted);transform:rotate(-45deg);flex:none;margin:0 4px;transition:transform 150ms var(--ease-out)}
-.acc[open]>summary .chev{transform:rotate(45deg)}
 .acc-panel{padding:0 12px 12px 36px;display:grid;gap:12px;container-type:inline-size}
 .acc-detail{display:grid;gap:0;margin:0}
 .acc-detail>div{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,3fr);gap:12px;padding:8px 0;border-bottom:1px solid var(--border)}

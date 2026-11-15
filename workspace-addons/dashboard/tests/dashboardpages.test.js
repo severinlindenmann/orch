@@ -325,7 +325,7 @@ test('General phone messages belong in Chat, not Home Messages', () => {
 });
 
 
-test('settings: the folder is shown plainly with Copy path and the quiet full path, no Details', () => {
+test('settings: the folder name is plain; the full path and Copy path sit behind one small Details toggle', () => {
   const c = context([], {snapshot:false, addons:() => []});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8'), c);
   const long = '/Users/someone/Documents/Projects/2026/customer-work/team-shared/pilatus-workspace';
@@ -335,7 +335,10 @@ test('settings: the folder is shown plainly with Copy path and the quiet full pa
     const ws = nodes(page, n => n.attrs?.['data-key'] === 'settings-workspace')[0];
     const row = nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder')[0];
     assert.ok(row);
-    assert.equal(nodes(ws, n => n.tag === 'details').length, 0);
+    const toggles = nodes(ws, n => n.tag === 'details');
+    assert.equal(toggles.length, 1);
+    assert.equal(toggles[0].attrs.className, 'more-details');
+    assert.ok(nodes(toggles[0], n => n.attrs?.['data-key'] === 'settings-folder').length && nodes(toggles[0], n => n.attrs?.['data-key'] === 'settings-copy-path').length);
     assert.equal(row.attrs.title, folder);
     assert.equal(nodes(ws, n => n.attrs?.['data-key'] === 'settings-folder-name')[0].textContent, folder.split('/').pop());
     assert.equal(nodes(ws, n => n.attrs?.['data-key'] === 'settings-copy-path')[0].attrs['data-copy'], folder);
@@ -343,7 +346,7 @@ test('settings: the folder is shown plainly with Copy path and the quiet full pa
       assert.ok(row.textContent.length <= 48 && row.textContent.includes('…'));
       assert.ok(row.textContent.startsWith('/Users/someone') && row.textContent.endsWith('pilatus-workspace'));
     } else assert.equal(row.textContent, folder);
-    assert.equal(nodes(page, n => n.tag === 'details').length, 0, 'Settings has no Details toggles');
+    assert.equal(nodes(page, n => n.tag === 'details').length, 1, 'Settings has only the one folder Details toggle');
   }
 });
 

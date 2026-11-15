@@ -28,10 +28,12 @@ function addonSummary(addon) {
   const n = array(d.workspaces).length;
   return h('span', {className:'on-dot'}, 'Connected' + (n ? ' · ' + n + (n === 1 ? ' workspace' : ' workspaces') : ''));
 }
+// Raw paths and connection addresses: one small Details toggle (kit .more-details), closed by default.
+const moreDetails = (...body) => h('details', {className:'more-details'}, h('summary', {}, 'Details', h('span', {className:'chev', 'aria-hidden':'true'})), ...body);
 function addonFacts(addon) {
   const d = addon.detail, rows = [];
   const row = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
-  rows.push(row('Address', [settingsText('span', {className:'mono'}, d.address), h('button', {type:'button', className:'ad-more', 'data-copy':d.address}, 'Copy')]));
+  rows.push(row('Address', moreDetails(settingsText('span', {className:'mono'}, d.address), h('button', {type:'button', className:'ad-more', 'data-copy':d.address}, 'Copy'))));
   rows.push(row('Status', h('span', {className:'on-dot'}, 'Connected')));
   const ws = array(d.workspaces);
   if (ws.length) rows.push(row('Can talk to', ws.map(w => h('span', {className:w.online ? 'on-dot' : 'off-dot'}, settingsText('span', {}, w.name), settingsText('span', {className:'meta'}, ' · ' + (w.online ? 'Reachable from your phone' : 'Not reachable from your phone'))))));
@@ -452,7 +454,7 @@ function phonePanel(phoneAddon, settings) {
   const btn = (label, cls, name, extra = {}) => snapshot ? null : h('button', {type:'button', className:'btn sm ' + cls, 'data-action':name, 'data-key':'phone-' + name, ...extra}, label);
   const relay = h('div', {className:'stack', 'data-key':'phone-relay'}, h('h2', {className:'set-sub'}, '1. Relay connection'), h('div', {className:'card'},
     rowOf('Status', [connected ? h('strong', {className:'on-dot', 'data-key':'phone-relay-status'}, 'Connected') : h('strong', {className:'muted', 'data-key':'phone-relay-status'}, 'Not set up'),
-      settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, connected && address ? address : 'No relay connected')],
+      (connected && address ? h('div', {'data-key':'phone-relay-address'}, moreDetails(settingsText('p', {className:'meta'}, address))) : settingsText('p', {className:'meta', 'data-key':'phone-relay-address'}, 'No relay connected'))],
       h('div', {className:'row'}, btn(connected ? 'Check connection' : 'Check again', 'outline', 'relay-reconnect')), 'phone-relay-row'),
     // Not connected: the next step is written here, no dead end (a relay is connected from its own admin page + one line)
     connected ? null : h('div', {className:'card-row', 'data-key':'phone-relay-steps'}, h('ol', {className:'meta relay-steps'},
@@ -515,7 +517,7 @@ function addonDetailPage(addon) {
     h('div', {className:'card'}, settingsRows),
     where,
     h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
-      settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
+      (connected && d.address ? moreDetails(settingsText('p', {className:'meta'}, 'Connection address: ' + d.address)) : settingsText('p', {className:'meta'}, addon.description || 'No connection address.')))));
 }
 function settingsPage() {
   const settings = state.settings;
@@ -543,7 +545,7 @@ function settingsPage() {
   const addonRow = addon => {
     const d = addon.detail, connected = addon.active && d?.connected;
     const status = !addon.active || !d ? null : connected ? h('span', {className:'on-dot ad-status'}, 'Connected') : h('span', {className:'off-dot ad-status'}, 'Not connected yet');
-    const about = connected && d.address ? settingsText('p', {className:'meta ad-about', 'data-key':'settings-addon-about-' + addon.name}, 'Connection address: ' + d.address) : null;
+    const about = connected && d.address ? h('div', {className:'ad-about', 'data-key':'settings-addon-about-' + addon.name}, moreDetails(settingsText('p', {className:'meta'}, 'Connection address: ' + d.address))) : null;
     return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
       h('div', {className:'grow'}, settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
       h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
@@ -562,11 +564,11 @@ function settingsPage() {
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
     panel('general', [privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
-      // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
+      // Folder: its name plainly; the full path and Copy path sit behind one small Details toggle.
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),
-        settingsText('p', {className:'mono meta folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder))),
-        snapshot || !settings.folder ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')))),
+        settings.folder ? moreDetails(settingsText('p', {className:'mono meta folder-path', title:String(settings.folder || ''), 'data-key':'settings-folder'}, middleShort(settings.folder)),
+          snapshot ? null : settingsText('button', {type:'button', className:'btn outline sm', 'data-copy':String(settings.folder), 'data-key':'settings-copy-path'}, 'Copy path')) : null)))),
       snapshot ? null : window.OrchLook?.settingsSection(),
       syncCard(settings),
       everydayCard(settings, phoneAddon),

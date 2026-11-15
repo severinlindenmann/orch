@@ -4,7 +4,7 @@ const expanded = new Set();
 const treeExpanded = new Set(), treeSeen = new Set(), treeAll = new Set(), ticketTabs = new Map();
 let ticketSearch = '', ticketMine = false, ticketPerson = '';
 // Saved views live on the address: #tickets?view=needs-you|working|done-week.
-const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs me'], ['working', 'Working'], ['done-week', 'Done this week']];
+const TICKET_VIEWS = [['', 'All'], ['needs-you', 'Needs you'], ['working', 'Working'], ['done-week', 'Done this week']];
 function savedView() {
   const full = typeof location === 'object' ? String(location.hash || '') : '', at = full.indexOf('?');
   const view = at < 0 ? '' : new URLSearchParams(full.slice(at + 1)).get('view') || '';

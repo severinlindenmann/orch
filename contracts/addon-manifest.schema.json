@@ -30,7 +30,7 @@
       "additionalProperties": false,
       "properties": {
         "label": { "$ref": "#/$defs/text", "maxLength": 24, "description": "Nav label, one or two words." },
-        "icon": { "enum": ["clock", "calendar", "inbox", "list", "chart", "bell", "book", "globe", "link", "check", "star", "box", "chat", "folder", "user", "bolt"] },
+        "icon": { "enum": ["clock", "calendar", "inbox", "list", "chart", "bell", "book", "globe", "link", "check", "star", "box", "chat", "folder", "user", "bolt", "target", "hammer", "cloud", "share", "users"] },
         "order": { "type": "integer", "minimum": 0, "maximum": 99, "default": 50, "description": "Position in the nav after the built-in tabs." },
         "title": { "$ref": "#/$defs/text", "maxLength": 40, "description": "Optional page heading when it differs from the nav label (nav 'Phone & workspaces', heading 'Messages')." },
         "subtitle": { "$ref": "#/$defs/text", "maxLength": 120, "description": "Optional one plain sentence under the page heading." },

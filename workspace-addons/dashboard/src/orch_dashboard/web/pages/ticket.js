@@ -828,7 +828,7 @@ function ticketButton(label, cls, click, attrs = {}) {
 // control paths; all made plain on the server) and sends back that same tip, count and path hash.
 function ticketBringBackDialog(t) {
   const b = t.bring_back || {}, paths = array(b.paths).map(p => clean(p)), count = Number(b.control_paths) || 0;
-  const {d, actions} = dialog('Add these changes to your files?');
+  const {d, actions} = dialog('Apply these changes?');
   const more = Math.max(0, count - paths.length);
   const body = [
     h('p', {}, 'Tip ', h('code', {}, clean(String(b.tip || '').slice(0, 12)))),
@@ -839,7 +839,7 @@ function ticketBringBackDialog(t) {
     paths.length ? h('ul', {className:'bring-back-paths', 'data-key':'bring-back-paths'}, paths.map(p => h('li', {}, h('code', {}, p)))) : null,
     more ? h('p', {className:'meta'}, 'and ' + more + ' more') : null,
   ].filter(Boolean);
-  const go = ticketButton('Add to my files', 'primary', async () => {
+  const go = ticketButton('Apply changes', 'primary', async () => {
     if (go.disabled) return;
     go.disabled = true;
     const r = await act('copies.approve', {ticket:t.id, tip:b.tip, control_paths:b.control_paths, paths_hash:b.paths_hash});
@@ -900,9 +900,9 @@ function ticketBringBackRow(t) {
     const r = await act('copies.ask-update', {ticket:t.id});
     window.orch.toast(r.ok ? 'Asked the helper to update its copy' : r.text || 'That did not work.', r.ok ? 'success' : 'error');
   }) : null;
-  const add = !snapshot && b.tip ? ticketButton('Add to my files', 'primary sm', () => ticketBringBackDialog(t)) : null;
+  const add = !snapshot && b.tip ? ticketButton('Apply changes', 'primary sm', () => ticketBringBackDialog(t)) : null;
   // "Keep as is" is only this page's choice: nothing is changed or signed; the copy stays where it is.
-  if (!snapshot && b.tip && isKept(t)) return h('p', {className:'meta kept-line', 'data-key':'bring-back'}, 'Changes kept in a copy · ', ticketButton('Add to my files', 'ghost sm', () => ticketBringBackDialog(t)));
+  if (!snapshot && b.tip && isKept(t)) return h('p', {className:'meta kept-line', 'data-key':'bring-back'}, 'Changes kept in a copy · ', ticketButton('Apply changes', 'ghost sm', () => ticketBringBackDialog(t)));
   const review = !snapshot && b.tip ? ticketButton('Review changes', 'outline sm', () => ticketChangesDialog(t)) : null;
   const keep = !snapshot && b.tip ? ticketButton('Keep as is', 'ghost sm', () => {
     keptCopies.add(keptKey(t)); try { sessionStorage.setItem(keptKey(t), '1'); } catch (_) { /* optional */ }

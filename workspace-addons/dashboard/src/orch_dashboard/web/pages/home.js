@@ -88,7 +88,7 @@ function needRow(row, newest, questionCount = 1, same = []) {
   return h('div', {className:'card-row home-need' + (row.id === enterRowId ? ' row-new' : ''), 'data-key':key, 'data-need-row':row.id, 'data-newest':row.id === newest ? '' : null},
     h('h2', {className:'question-title'}, clean(source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper'))),
     h('p', {className:'meta question-context'}, asked + ' asked' + (when ? ' ' + when : ''),
-      t ? [' on ‘' + clean(t.title) + '’ · ', h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
+      t ? [(clean(t.title).toLowerCase() === String(window.DashHelpers.plainWhy(question, 'The helper')).trim().toLowerCase() ? ' · ' : ' on ‘' + clean(t.title) + '’ · '), h('a', {href:href(t.id)}, 'Open ticket')] : null, typeof titleTag === 'function' && t ? titleTag(t) : null),
     actions && options.length ? h('p', {className:'meta choose-line'}, 'Needs you · Choose an answer') : null,
     same.length ? h('p', {className:'meta', 'data-key':key + '-same'}, 'Asked on ' + (same.length + 1) + ' tickets – answer once') : null,
     questionCount > 1 ? h('p', {className:'meta'}, questionCount + ' questions') : null,
@@ -185,7 +185,7 @@ function workingRow(t) {
     h('span', {className:'grow'}, h('strong', {}, clean(t.title)), task ? h('span', {className:'meta'}, clean(task.text || task.title)) : null),
     h('span', {className:'working-progress'},
       tasks.length ? h('span', {className:'segments', role:'progressbar', 'aria-label':'Steps done', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done}, tasks.map(task => h('span', {className:window.DashHelpers.resolved(task) ? 'complete' : ''}))) : null,
-      tasks.length ? h('span', {className:'meta'}, done + ' of ' + tasks.length + ' steps') : null,
+      tasks.length ? h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length)) : null,
       h('span', {className:'meta'}, [who, typeof age === 'function' ? age(claim?.started_at) : ''].filter(Boolean).join(' · '))));
 }
 // Results with the same name are one row ("9 versions"): the row opens the newest; "Mark older as done" closes the rest
@@ -238,10 +238,10 @@ function resultRow(group) {
 // Changes a helper made in its own copy, waiting to be added to the person's files (the signed copies.approve path).
 function changeRow(t) {
   const add = !snapshot && t.bring_back?.tip && typeof ticketBringBackDialog === 'function'
-    ? h('button', {type:'button', className:'btn outline sm', 'data-key':'add-files-' + t.id}, 'Add to my files') : null;
+    ? h('button', {type:'button', className:'btn outline sm', 'data-key':'add-files-' + t.id}, 'Apply changes') : null;
   if (add) add.onclick = () => ticketBringBackDialog(t);
   return h('div', {className:'card-row home-change', 'data-key':'change-' + t.id}, h('span', {className:'badge needs'}, '↗ Changes to add'),
-    h('div', {className:'grow'}, h('h3', {}, 'Add the changes from ‘' + clean(t.title) + '’ to your files?'), h('a', {className:'meta', href:href(t.id)}, 'See what changed')), add);
+    h('div', {className:'grow'}, h('h3', {}, 'Apply the changes from ‘' + clean(t.title) + '’?'), h('a', {className:'meta', href:href(t.id)}, 'See what changed')), add);
 }
 function attentionCard(key, badge, cls, body, meta = '') {
   return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge), h('span', {className:'grow'}), meta ? h('span', {className:'meta'}, meta) : null), body);
