@@ -33,7 +33,7 @@ EXEMPT_FILES = {
     "publish/web/look-bundle.js",  # scripts/gen_look_web.py
     "workspace-addons/dashboard/mockup/previews/viewer-html.html",  # a sample user web page inside the preview mockup
 }
-EXEMPT_TESTS = ("/tests/", ".test.js")  # tests may plant hex colours and <style> to check the lint and the CSP
+EXEMPT_TESTS = re.compile(r"(^|/)tests/|\.test\.js$")  # tests may plant hex colours and <style> to check the lint and the CSP
 EXTS = {".css", ".html", ".js", ".swift"}
 HEX = re.compile(r"(?<![\w&/#-])(?<!href=\")(?<!href=')(?<!href:')(?<!href:\")#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![\w-])")
 STYLE = re.compile(r"<style\b", re.I)
@@ -52,7 +52,7 @@ def scan(root: Path = ROOT) -> dict:
     files = subprocess.run(["git", "-C", str(root), "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
     out = {}
     for f in files:
-        if not f or Path(f).suffix not in EXTS or f.startswith(EXEMPT_PREFIX) or f in EXEMPT_FILES or any(x in f for x in EXEMPT_TESTS):
+        if not f or Path(f).suffix not in EXTS or f.startswith(EXEMPT_PREFIX) or f in EXEMPT_FILES or EXEMPT_TESTS.search(f):
             continue
         p = root / f
         if not p.is_file():
