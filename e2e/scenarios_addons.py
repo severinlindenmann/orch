@@ -53,7 +53,10 @@ def _dashboard(e, ws: Path):
 
 
 def _help(e, ws) -> str:
-    return e.sh(["orch", "--help-all"], cwd=ws)[1] + e.sh(["orch", "--help"], cwd=ws)[1]
+    """--help-all plus --help, without `pause` / `resume`: those are core commands (R8.6, one brake for all automation)
+    and say the plain word "automation", which is not the add-on."""
+    txt = e.sh(["orch", "--help-all"], cwd=ws)[1] + e.sh(["orch", "--help"], cwd=ws)[1]
+    return "\n".join(l for l in txt.splitlines() if not l.strip().startswith(("pause ", "resume ")))
 
 
 def _tree_text(ws: Path) -> str:
@@ -116,7 +119,7 @@ def a8(e):
     check(rc == 2 and "not turned on in this workspace" in err and "orch addon add automation" in err, f"command not refused: {rc} {err!r}")
     check(not (ws / ".agents/skills/orch-automation").exists(), "skill still there")
     check(not (ws / ".orch/harness/AGENTS.orch.md").exists() or "orch-automation" not in (ws / ".orch/harness/AGENTS.orch.md").read_text(), "block still there")
-    check("automation" not in _help(e, ws).lower(), "automation still in --help")
+    check("automation" not in _help(e, ws).lower(), f"automation still in --help: {[l.strip() for l in _help(e, ws).splitlines() if 'automation' in l.lower()][:4]}")
     check("automation" not in json.loads((ws / ".orch/addons.json").read_text())["active"], "still in addons.json")
     with _dashboard(e, ws) as (_, get):
         check(not any(a["name"] == "automation" for a in get("/api/state")[1]["addons"]), "tab still there after remove")
@@ -227,7 +230,7 @@ def a12(e):
     ws = e.ws("Bare")
     h = _help(e, ws).lower()
     for w in ("automation", "dashboard", "add-ons:"):
-        check(w not in h.replace("orch addon", "").replace("add-ons: add, remove, list", ""), f"--help mentions {w}")
+        check(w not in h.replace("orch addon", "").replace("add-ons: add, remove, list", ""), f"--help mentions {w}: {[l.strip() for l in h.splitlines() if w in l][:4]}")
     txt = _tree_text(ws)
     for w in ("automation", "dashboard", "wake_at", "--recurring"):
         check(w not in txt, f"skills/AGENTS.md mention {w}")

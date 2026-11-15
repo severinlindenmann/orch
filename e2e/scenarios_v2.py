@@ -204,10 +204,12 @@ def i1_init_recommended(e):
     """`orch init --recommended --yes` turns on the dashboard, automation and focus add-ons, and not relay or publish."""
     w = W(e, "V2-I1")
     out = w.j("init", "--recommended", "--yes", by=None)
-    check(sorted(out.get("recommended") or []) == ["automation", "dashboard", "focus"], f"init turned on {out.get('recommended')}")
+    base = {"automation", "dashboard", "focus"}  # the recommended set grows (lessons since 15 Nov); relay and publish never
+    got = set(out.get("recommended") or [])
+    check(base <= got and not got & {"relay", "publish"}, f"init turned on {sorted(got)}")
     rows = w.j("addon", "list", by=None)
     on = sorted(r["name"] for r in rows if r["active"])
-    check(on == ["automation", "dashboard", "focus"], f"active add-ons after init --recommended: {on}")
+    check(base <= set(on) and not set(on) & {"relay", "publish"} and set(on) == got, f"active add-ons after init --recommended: {on}")
 
 
 @scenario("V2-C1")

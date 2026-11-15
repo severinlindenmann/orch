@@ -213,6 +213,16 @@ class E:
         return m
 
 
+# Known product bugs: a scenario that fails with one of these texts is an expected failure (XFAIL), not a red nightly.
+# Delete the line when the issue is fixed.
+KNOWN = [
+    ("record of your Done decisions is damaged", "https://github.com/severinlindenmann/orch/issues/921"),
+    ("stored keys on line", "https://github.com/severinlindenmann/orch/issues/922"),
+    ("from this computer", "https://github.com/severinlindenmann/orch/issues/924"),
+    ("Skills updated; they apply from the next agent session", "https://github.com/severinlindenmann/orch/issues/923"),
+]
+
+
 def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
     results = {}
     lines = []
@@ -228,6 +238,10 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
             status, reason = "SKIP", str(s)
         except Fail as f:
             status, reason = "FAIL", str(f)
+            for needle, issue in KNOWN:
+                if needle in str(f):
+                    status, reason = "XFAIL", f"known product bug {issue}: {str(f)[:140]}"
+                    break
         except Exception as x:  # noqa: BLE001
             status, reason = "FAIL", f"{type(x).__name__}: {x} ({traceback.format_exc().splitlines()[-3].strip()})"
         try:  # no scenario leaves add-on servers behind (they would show in the next one's `orch status`, and as a LEAK)
@@ -339,8 +353,8 @@ def main() -> int:
     if leaked:
         print(f"LEAK: {len(leaked)} add-on server(s) still running in {tmp}; ended: {leaked}")
         res["LEAK"] = "FAIL"
-    n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP")}
-    summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip"
+    n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP", "XFAIL")}
+    summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip, {n['XFAIL']} xfail (known bugs)"
     print(summary)
     with open(out_md, "a") as f:
         f.write(summary + "\n")

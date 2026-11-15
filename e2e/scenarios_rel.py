@@ -477,6 +477,13 @@ def r17(e):
             raise Skip(f"xfail #799: relay connect from the CLI is refused ({str(exc)[:80]})") from None
         raise
     me = "human:e2e"
+    # the reply needs a rule too (relay_all only lets Pilatus write to Reports)
+    cur = e.rel.admin.call("GET", "/admin/api/rules").json() or {"rules": []}
+    old = cur.get("rules", [])
+    r = e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old + [
+        {"from": i["Reports"], "to": i["Pilatus"], "text": True, "files": False, "delegate": False, "start": False}]})
+    check(r.status == 200, f"rule for the reply: {r}")
+    e.cleanup.append(lambda: e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old}))
     for n in ("Pilatus", "Reports"):
         e.orch(n, "relay", "refresh")
     text, back = "R17 hello from Pilatus", "R17 reply from Reports"

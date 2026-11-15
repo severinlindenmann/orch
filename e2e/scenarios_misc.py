@@ -56,7 +56,7 @@ def m2(e):
     d = tload(e.ws("Pilatus"), t)
     q = d["questions"][0]
     check(q["answer"] == "yes" and q["via"] == "phone" and q["answered_by"].startswith("human:"), f"question: {q}")
-    check(d["status"] == "active", f"ticket status {d['status']}")
+    check(d["status"] in ("active", "ready"), f"ticket status {d['status']}")  # an answered question: back to work
     return "push + tap in the Simulator: mobile lane"
 
 
