@@ -31,6 +31,6 @@ def test_first_day_shows_two_tiles_at_zero():
     assert not data.get("missing"), "insights.js needs emptyTiles()"
     tiles = data["tiles"]
     assert len(tiles) == 2
-    for tile, label in zip(tiles, ("Runs", "Connected services"), strict=True):
+    for tile, label in zip(tiles, ("Times helpers worked", "Connected services"), strict=True):
         assert label in tile and "|0|" in tile + "|"
         assert "Fills after the first helper run" in tile

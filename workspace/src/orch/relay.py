@@ -735,7 +735,7 @@ def send_text(
         if not update:
             actor = tickets.current_actor()
             body["by"] = "you" if sender == "you" else _cfg(root)["workspace"]
-            body["via"] = via or ("helper" if actor.startswith("agent:") else "dashboard")
+            body["via"] = via or ("helper" if actor.startswith("agent:") else tickets.PERSON_VIA)
     if speak:
         body["speak"] = speak
     if update:
@@ -1358,6 +1358,9 @@ def _is_mine(rec: dict, q: dict, answer_id: str, by: str) -> bool:
 
 
 def _verdict_summary(q: dict) -> str | None:
+    # taken back: the phone is told "decided", with the reason as the summary
+    if (taken := tickets.taken_back_text(q)) is not None:
+        return _one_line(taken)
     dec = q.get("decision")
     return _one_line(dec["summary"]) if isinstance(dec, dict) and dec.get("summary") else None
 
