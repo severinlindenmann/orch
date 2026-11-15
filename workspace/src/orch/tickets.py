@@ -2985,7 +2985,7 @@ ATTACH_IMAGES = {
     "gif": (b"GIF87a", b"GIF89a"),
     "webp": (b"RIFF",),
 }
-ATTACH_MAX = 25 * 1024 * 1024  # one attached file: the one limit (dashboard, Focus and phone files are all 25 MB)
+ATTACH_MAX = 25 * 1024 * 1024  # one attached file: the one limit (dashboard and Focus use it too)
 LONG_TEXT = 1500  # a text longer than this is kept as a file (note.md); the Note stays short
 PASTED_NAME = "note.md"
 

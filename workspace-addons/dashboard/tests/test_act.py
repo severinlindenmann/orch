@@ -1128,10 +1128,14 @@ def test_lone_surrogate_and_early_refusals_are_plain_400s(act_server, act_orch):
 
 
 def test_a_20_mb_file_is_accepted_and_26_mb_refused_plainly():
-    ok = actions.attachments("ticket.new", {"title": "T", "files": [{"name": "big.txt", "text": "x" * (20 * 1024 * 1024)}]})
+    ok = actions.attachments(
+        "ticket.new", {"title": "T", "files": [{"name": "big.txt", "text": "x" * (20 * 1024 * 1024)}]}
+    )
     assert len(ok[0][1]) == 20 * 1024 * 1024
     with pytest.raises(actions.BadRequest, match="over 25 MB. Choose a smaller file"):
-        actions.attachments("ticket.new", {"title": "T", "files": [{"name": "big.txt", "text": "x" * (26 * 1024 * 1024)}]})
+        actions.attachments(
+            "ticket.new", {"title": "T", "files": [{"name": "big.txt", "text": "x" * (26 * 1024 * 1024)}]}
+        )
 
 
 def test_approval_ops_sit_behind_the_origin_fence(act_server, act_orch):
