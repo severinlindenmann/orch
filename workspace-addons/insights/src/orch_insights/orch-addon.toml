@@ -6,6 +6,7 @@ description = "See what your helpers used in the last 30 days."
 run = "orch_insights"
 skill = "skills/orch-insights"
 agents_block = "skills/orch-insights/AGENTS-block.md"
+needs = true                               # orch insights needs --json
 background = true
 
 [dashboard]

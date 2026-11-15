@@ -15,6 +15,7 @@ from importlib import resources
 from pathlib import Path
 
 from . import actions
+from .checkup import build_checkup, build_show
 from .lists import KINDS, build_list
 from .overview import build_overview
 from .settings import build_settings
@@ -33,7 +34,7 @@ KIT_FILES = (
     "widgets.css",
     "widgets.js",
 )
-WEB_FILES = ("index.html", "insights.css", "insights.js", "settings.js")
+WEB_FILES = ("index.html", "insights.css", "insights.js", "settings.js", "checkup.js")
 PLAIN = "text/plain; charset=utf-8"
 RELINK = "This sign-in link can not be used. Open Insights from the dashboard on this computer again."
 TYPES = {
@@ -170,6 +171,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(build_overview(read_counts(self.root, self.orch_bin)))
         if path.startswith("/api/list/") and path[10:] in KINDS:
             return self._json(build_list(read_counts(self.root, self.orch_bin), path[10:]))
+        if path == "/api/checkup":
+            return self._json(build_checkup(self._read("insights", "checkup", "list", "--json")))
+        if path.startswith("/api/checkup/") and actions.PROPOSAL.fullmatch(path[13:]):
+            shown = build_show(self._read("insights", "checkup", "show", path[13:], "--json"))
+            return self._json(shown) if shown else self._send(404, b"not found")
         if path == "/api/settings":
             return self._json(self._settings_view())
         if path == "/":

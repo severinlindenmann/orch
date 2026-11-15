@@ -463,6 +463,14 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
   .preview-page{padding:var(--s4)}
   .preview-metrics{grid-template-columns:minmax(0,1fr)}
 }
+/* Split card header, check row, code block, disclosure, end-aligned actions (check-up card, any add-on) */
+.card-h-split{gap:16px}.card-h-split .grow{display:grid;gap:2px}
+.check-row{gap:8px;font-size:13px;cursor:pointer}
+.row-split .grow h3{font-size:14px}.row-split .grow p{margin-top:2px}
+.code-block{margin:0;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);font-size:12px;line-height:16px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+.code-block.dim{opacity:.7}
+.disclosure summary{cursor:pointer;color:var(--text-muted);font-size:13px;padding:4px 0}
+.actions-end{justify-content:flex-end;margin-top:16px}
 /* The scrollbar gutter is always reserved, so a long page (Factory, Insights) ends at the same right edge as a short one. */
 html{scrollbar-gutter:stable}
 /* A table's owner column never wraps a name ("Be/n", "Marie-/Louise"). */

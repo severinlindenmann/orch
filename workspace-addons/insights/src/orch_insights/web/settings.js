@@ -43,6 +43,8 @@
     return (await response.json()).result || {};
   }
 
+  window.insightsAct = act;  // the check-up card (checkup.js) sends its clicks through the same call
+
   function say(text) { byId('settings-status').textContent = text || ''; }
 
   async function change(row, option) {
