@@ -58,6 +58,11 @@ def core(monkeypatch):
     monkeypatch.delenv("ORCH_DEV", raising=False)
     monkeypatch.setenv("ORCH_HOME", str(folder / "home"))
     monkeypatch.setenv("ORCH_HOME_STRICT", "1")
+    from orch import addons
+
+    # this test needs the true account home (the core trusts a test home only under its ~/.orch-test); the
+    # shared guard faked it, and only ORCH_HOME (under ~/.orch-test, never ~/.orch-tool) is written
+    monkeypatch.setattr(addons, "real_home", lambda: account)
     shim = folder / "orch"
     shim.write_text(
         f"#!{CORE_PYTHON}\nimport sys\nsys.path.insert(0, {str(WORKSPACE_SRC)!r})\n"

@@ -4,6 +4,10 @@ from pathlib import Path
 
 import pytest
 
+# No test may touch the real ~/.orch-tool: autouse private HOME/ORCH_HOME + a session guard (shared helper).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _orch_test_guard import check_real_home, isolated_orch_home  # noqa: F401
+
 HERE = Path(__file__).parent
 CONTRACTS = HERE.parents[2] / "contracts" / "review"
 
@@ -12,29 +16,6 @@ def _ticket(i, title, status, **kw):
     t = json.loads((CONTRACTS / "ticket.example.json").read_text())
     t.update(id=i, title=title, status=status, **kw)
     return t
-
-
-@pytest.fixture(autouse=True, scope="session")
-def _isolated_orch_home():
-    """`orch` children of these tests (run_orch, the act ops) must never fall back to the real ~/.orch-tool
-    (ORCH_HOME unset = real folder, and maybe a line in the temp fallback trace). One private home for the
-    session, under ~/.orch-test (a trusted place: under the user's home, outside every cwd and any .git/.orch
-    parent), removed by its exact path at the end."""
-    import os
-    import shutil
-    import tempfile
-
-    base = Path.home() / ".orch-test"
-    base.mkdir(exist_ok=True)
-    home = Path(tempfile.mkdtemp(prefix="dash-home-", dir=base))
-    old = os.environ.get("ORCH_HOME")
-    os.environ["ORCH_HOME"] = str(home)
-    yield home
-    if old is None:
-        os.environ.pop("ORCH_HOME", None)
-    else:
-        os.environ["ORCH_HOME"] = old
-    shutil.rmtree(home, ignore_errors=True)
 
 
 @pytest.fixture
@@ -243,6 +224,7 @@ def _reap_started_servers(monkeypatch):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    check_real_home(session)
     alive = [p.pid for p in _STARTED if p.poll() is None]
     if alive:
         print(f"\nLEAK: orch_dashboard servers started by the tests are still alive: {alive}")
