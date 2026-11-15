@@ -1684,6 +1684,7 @@ async function fileEmbedAsk(req) {
     const answer = result.ok ? result.state?.act_answer : null;
     const state = answer && answer.addon === req.addon ? answer.answer?.state : null;
     if (state === 'delivered' || state === 'queued') reply({type:'orch.ask.done', state});
+    else if (state === 'partial') reply({type:'orch.ask.done', state, said:String(answer.answer?.said || '').slice(0, 300)});
     else reply({type:'orch.ask.failed', error:result.ok ? 'orch did not confirm that it was sent.' : String(result.text || '').slice(0, 300)});
   } finally { embedAskBusy = false; }
 }

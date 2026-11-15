@@ -193,7 +193,7 @@
       if (d.delivered === true || d.queued === true) asked.get(d.id)({ticket: d.ticket, delivered: d.delivered === true});
       else asked.get(d.id)({error: 'orch did not confirm that your message was saved.'});
     }
-    else if (d.type === 'orch.ask.done' && (d.state === 'delivered' || d.state === 'queued')) asked.get(d.id)({state: d.state});
+    else if (d.type === 'orch.ask.done' && ['delivered', 'queued', 'partial'].includes(d.state)) asked.get(d.id)({state: d.state, said: typeof d.said === 'string' ? d.said.slice(0, 300) : ''});
     else if (d.type === 'orch.idea.failed' || d.type === 'orch.send.failed' || d.type === 'orch.ask.failed') asked.get(d.id)({error: typeof d.error === 'string' ? d.error.slice(0, 300) : ''});
   });
   function askDashboard(message, wait = 30000) {
@@ -453,8 +453,8 @@
     return figure;
   }
   const picturesOf = item => [item.before, item.after].filter(imageName);
-  const askState = {queued: 'Queued', delivered: 'Delivered', answered: 'Answered', failed: 'Failed', closed: 'Closed'};
-  const askPill = state => { const el = node('span', null, 'pill ' + ({answered: 'done', failed: 'needs', queued: 'todo'}[state] || 'working')); el.append(node('span', askState[state] || state)); return el; };
+  const askState = {queued: 'Queued', delivered: 'Delivered', answered: 'Answered', failed: 'Failed', partial: 'Partly sent', closed: 'Closed'};
+  const askPill = state => { const el = node('span', null, 'pill ' + ({answered: 'done', failed: 'needs', partial: 'needs', queued: 'todo'}[state] || 'working')); el.append(node('span', askState[state] || state)); return el; };
   // "Maya says" / "Design's helper says": text from another workspace is data, shown as plain text and cut to a few lines.
   function replyBlock(a, r, retry) {
     const row = group('list-row', askPill('answered'), group('grow', node('strong', r.by === 'helper' ? a.ws_name + "'s helper says: " : a.ws_name + ' says: '), document.createTextNode(text(r.text)), ...(r.more ? [meta(' …more on the ask ticket')] : [])), meta(r.at ? when(r.at) : ''));
@@ -472,9 +472,9 @@
       const replies = array(a.replies);
       if (replies.length) for (const r of replies) c.append(replyBlock(a, r));
       else {
-        const note = {queued: a.ws_name + ' is offline. Your question goes out when it is back.', failed: 'Not delivered to ' + a.ws_name + '.', closed: 'Asked ' + a.ws_name + ' · closed when you answered', delivered: 'Asked ' + a.ws_name + ' · no answer yet'}[a.state] || 'Asked ' + a.ws_name;
+        const note = {queued: a.ws_name + ' is offline. Your question goes out when it is back.', failed: a.note || 'Not delivered to ' + a.ws_name + '.', partial: a.note || 'Only part of it reached ' + a.ws_name + '.', closed: 'Asked ' + a.ws_name + ' · closed when you answered', delivered: 'Asked ' + a.ws_name + ' · no answer yet'}[a.state] || 'Asked ' + a.ws_name;
         const row = group('list-row', askPill(a.state), group('grow', document.createTextNode(note)), meta(a.at ? when(a.at) : ''));
-        if (a.state === 'failed' && openAskDialog) { const again = node('button', 'Send again', 'btn outline sm'); again.type = 'button'; again.addEventListener('click', () => openAskDialog(a)); row.append(again); }
+        if ((a.state === 'failed' || a.state === 'partial') && openAskDialog) { const again = node('button', 'Send again', 'btn outline sm'); again.type = 'button'; again.addEventListener('click', () => openAskDialog(a)); row.append(again); }
         c.append(row);
       }
     }
@@ -491,19 +491,23 @@
       const n = picturesOf(item).length;
       const box = node('input'); box.type = 'checkbox'; box.checked = true;
       const label = node('label', null, 'check-label'); label.append(box, document.createTextNode(' ' + text(item.title) + (n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : '')));
-      return {box, label, i};
+      return {box, label, i, text: label.lastChild, suffix: n ? ' · before and after (' + plural(n, 'picture', 'pictures') + ')' : ''};
     });
     const checked = meta('Checking for passwords and keys…');
+    const preview = group('stack', meta('Reading what will be sent…'));
     const problem = p(''); problem.hidden = true; problem.setAttribute('role', 'alert');
     const cancel = node('button', 'Cancel', 'btn'); cancel.type = 'button'; cancel.addEventListener('click', () => d.close());
     const send = node('button', 'Send', 'btn primary'); send.type = 'button'; send.disabled = true;
     const close = node('div', null, 'row between'); close.append(node('h2', 'Ask another workspace'));
     close.firstChild.id = 'ask-title';
-    d.append(close, who, node('h3', 'What leaves this computer'), p('“' + text(order.title) + ' · ' + stageName(order, stop.stage) + ': what would you change before this ships?”'), ...ticks.map(t => t.label),
+    d.append(close, who, node('h3', 'What leaves this computer'), preview, ...ticks.map(t => t.label),
       p('Not sent: other orders, crew logs, budget, chat, anything you untick.'), checked, problem, group('actions actions-end', cancel, send));
     // the check runs when the dialog opens, before Send: a file with a hit is shown unticked and disabled with its reason
     read('/api/order/' + order.id + '/stop/' + stop.n + '/scan').then(scan => {
       const hits = [];
+      // exactly what the add-on sends, built by the one function that sends it: card title, line, question, item texts
+      preview.replaceChildren(node('strong', text(scan.title)), p('“' + text(scan.line) + '”'), meta('Question: ' + text(scan.question)));
+      for (const row of array(scan.items)) { const t = ticks[row.i]; if (t) t.text.nodeValue = ' ' + text(row.check) + t.suffix; }
       for (const row of array(scan.items)) {
         const t = ticks[row.i]; const bad = array(row.files).filter(f => f.ok === false);
         if (!t || !bad.length) continue;
@@ -517,7 +521,7 @@
       send.disabled = true; cancel.disabled = true; problem.hidden = true;
       const picked = ticks.filter(t => t.box.checked).map(t => t.i);
       const result = await askWorkspace(order.id + ':s' + stop.n + ':' + select.value + ':' + (picked.length ? picked.join(',') : '-'));
-      if (result.state) { d.close(); render(); return; }
+      if (result.state) { d.close(); render(); return; }  // partial: the row on the stop says what went out
       problem.textContent = result.error || 'It was not sent. Nothing left this computer. Try again.'; problem.hidden = false;
       send.disabled = false; cancel.disabled = false;
     });

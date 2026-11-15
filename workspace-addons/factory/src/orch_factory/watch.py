@@ -82,6 +82,7 @@ def once(root):
     """One pass. Returns [{"order", "why"}] for the runs it started."""
     store = Store(root)
     tickets = orchcli.tickets(root)
+    ask.resume(root, tickets)  # asks that waited for the relay go on
     todo = []
     with store.locked():
         orders = _load(store)

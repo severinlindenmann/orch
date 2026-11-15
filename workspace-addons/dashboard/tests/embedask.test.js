@@ -65,3 +65,9 @@ test('a second click while sending asks nothing twice', async () => {
   await Promise.all([ctx.fileEmbedAsk(req), ctx.fileEmbedAsk(req)]);
   assert.equal(calls.acts.length, 1);
 });
+
+test('a partly sent ask is reported with what went out, never as "nothing was sent"', async () => {
+  const {ctx, calls, frameWindow} = setup({result:{ok:true, status:200, state:{act_answer:{addon:'factory', answer:{state:'partial', said:'Only part of it went out: the card.'}}}}});
+  await ctx.fileEmbedAsk(ctx.embedAskRequest(msg(frameWindow)));
+  assert.deepEqual(plain(calls.posts), [[{type:'orch.ask.done', state:'partial', said:'Only part of it went out: the card.', id:'abcdefgh1234'}, ORIGIN]]);
+});

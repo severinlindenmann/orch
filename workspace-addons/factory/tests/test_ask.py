@@ -266,3 +266,77 @@ def test_target_shape():
 def test_manifest_has_the_ask_act():
     text = (Path(ask.__file__).parent / "orch-addon.toml").read_text()
     assert "[acts.ask]" in text and 'who = "people"' in text
+
+
+def test_a_failure_after_the_card_went_out_says_what_went_out(ws, run):
+    reach(ws)
+    order, _ = stop_with_pictures(ws, run)
+    (ws / "fail-share-after").write_text("1")  # the card and one picture go, the second picture is refused
+    out = run("act", "ask", target(order), "--by", "human:anna")
+    assert out["state"] == "partial" and "nothing" not in out["said"].lower()
+    assert "the card" in out["said"] and "1 of 2 pictures" in out["said"]
+    row = pageapi.order(ws, order)["stops"][0]["asks"][0]
+    assert row["state"] == "partial" and "1 of 2 pictures" in row["note"]
+    (ws / "fail-share-after").unlink()
+    assert (
+        run("act", "ask", target(order), "--by", "human:anna")["state"] == "delivered"
+    )  # Send again is allowed
+
+
+def test_offline_relay_queues_the_pictures_and_the_question_for_later(ws, run):
+    reach(ws)
+    order, _ = stop_with_pictures(ws, run)
+    (ws / "offline-share").write_text("x")
+    out = run("act", "ask", target(order), "--by", "human:anna")
+    assert out["state"] == "queued"
+    [sub] = asks(ws, order)
+    assert sub["status"] == "open" and any(c[:3] == ["relay", "group", "add"] for c in calls(ws))
+    assert not any(
+        c[:3] == ["relay", "group", "ask"] for c in calls(ws)
+    )  # the question waits for the pictures
+    assert pageapi.order(ws, order)["stops"][0]["asks"][0]["state"] == "queued"
+    run("watch", "--once")  # still offline: nothing changes, nothing is sent twice
+    assert sum(1 for c in calls(ws) if c[:3] == ["relay", "group", "add"]) == 1
+    (ws / "offline-share").unlink()
+    run("watch", "--once")  # the relay is back: the watcher's pass finishes the ask
+    assert sum(1 for c in calls(ws) if c[:3] == ["relay", "group", "share"] and c[3] == sub["id"]) >= 2
+    assert sum(1 for c in calls(ws) if c[:3] == ["relay", "group", "ask"]) == 1
+    assert sum(1 for c in calls(ws) if c[:3] == ["relay", "group", "add"]) == 1  # the card is not sent again
+    assert pageapi.order(ws, order)["stops"][0]["asks"][0]["state"] == "delivered"
+    run("watch", "--once")
+    assert sum(1 for c in calls(ws) if c[:3] == ["relay", "group", "ask"]) == 1
+
+
+def test_the_preview_is_what_is_sent(ws, run):
+    reach(ws)
+    order, _ = stop_with_pictures(ws, run)
+    shown = pageapi.scan(ws, order, 1)
+    run("act", "ask", target(order, items="0,1"), "--by", "human:anna")
+    [sub] = asks(ws, order)
+    assert (
+        shown["title"] == sub["title"]
+        and shown["line"] == sub["summary"]
+        and shown["question"] == sub["questions"][0]["text"]
+    )
+    assert [i["check"] for i in shown["items"]] == [c["text"] for c in sub["checklist"]]
+
+
+def test_the_scan_gets_bytes(ws, run, monkeypatch):
+    reach(ws)
+    order, _ = stop_with_pictures(ws, run)
+    seen = []
+    real = ask.orchcli.call
+    monkeypatch.setattr(ask.orchcli, "call", lambda *a, **k: (seen.append((a, k)), real(*a, **k))[1])
+    assert pageapi.scan(ws, order, 1)
+    scans = [k for a, k in seen if a[1:3] == ("secret", "scan")]
+    assert scans and all(isinstance(k["data"], bytes) for k in scans)
+    import subprocess
+
+    captured = {}
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: (captured.update(k), subprocess.CompletedProcess(a, 0, b"{}", b""))[1],
+    )
+    ask.orchcli.call(ws, "secret", "scan", data=b"\x89PNG")
+    assert captured["input"] == b"\x89PNG" and captured["text"] is False

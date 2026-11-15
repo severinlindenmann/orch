@@ -629,6 +629,7 @@ def reconcile(root):
     result = []
     with store.locked():
         tickets = orchcli.tickets(root)
+        ask.resume(root, tickets)
         for t in tickets:
             ext = t.get("ext", {}).get("factory", {})
             if ext.get("role") != "order":

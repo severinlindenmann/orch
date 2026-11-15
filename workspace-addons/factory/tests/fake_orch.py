@@ -116,6 +116,28 @@ elif args[:3] == ["relay", "group", "add"]:
     result = {"added": True}
 elif args[:3] == ["relay", "group", "share"]:
     assert "--click" in args
+    if (root / "offline-share").exists():  # the relay can't be reached (blob upload): core's own words
+        print(
+            json.dumps(
+                {
+                    "error": "Can't reach relay.test right now. Check your internet and try again.",
+                    "code": "refused",
+                }
+            )
+        )
+        sys.exit(2)
+    if (root / "fail-share-after").exists():  # let N shares through, then a clear refusal
+        done = (
+            sum(
+                1
+                for x in (root / "calls.jsonl").read_text().splitlines()
+                if json.loads(x)["args"][:3] == args[:3]
+            )
+            - 1
+        )
+        if done >= int((root / "fail-share-after").read_text()):
+            print(json.dumps({"error": "The relay refused the file.", "code": "refused"}))
+            sys.exit(2)
     result = {"group": "g1"}
 elif args[:3] == ["relay", "group", "ask"]:
     if (root / "kept-ask").exists():
