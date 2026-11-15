@@ -86,34 +86,36 @@ def test_text_is_text_not_markup(tmp_path):
     )
 
 
-@node
-def test_calendar_repeat_item_shows_every_and_note(tmp_path):
-    v = {
-        "blocks": [
-            {
-                "type": "calendar",
-                "days": [
-                    {
-                        "date": "2026-11-05",
-                        "items": [
-                            {
-                                "time": "15:05",
-                                "every": "Every 5 min",
-                                "title": "TEST: pick a word",
-                                "note": "next 15:05 · 288 runs/day",
-                                "link": "t_wd5m0001",
-                            }
-                        ],
-                    }
-                ],
-            }
-        ]
+def _repeat(date, link="t_wd5m0001", every="Every 5 min"):
+    return {
+        "date": date,
+        "items": [{"time": "15:05", "every": every, "title": "TEST: pick a word", "note": "x", "link": link}],
     }
+
+
+@node
+def test_calendar_repeat_shows_every_and_title_as_one_band(tmp_path):
+    v = {"blocks": [{"type": "calendar", "days": [_repeat("2026-11-05")]}]}
     tree = run(tmp_path, v)
     runs = [x for x in walk(tree) if "run" in x["cls"].split()]
-    assert len(runs) == 1 and "repeat" in runs[0]["cls"]
+    assert len(runs) == 1 and "band" in runs[0]["cls"]
     t = texts(runs[0])
-    assert "Every 5 min" in t and "TEST: pick a word" in t and "288 runs/day" in t and "15:05 " not in t[:6]
+    assert "Every 5 min" in t and "TEST: pick a word" in t
+
+
+@node
+def test_calendar_repeat_over_days_is_one_band_across_them_not_a_card_per_day(tmp_path):
+    days = [_repeat(f"2026-11-0{n}") for n in (5, 6, 7)]
+    days.append({"date": "2026-11-08", "items": [{"time": "09:00", "title": "Once", "link": "t_once0001"}]})
+    days.append(_repeat("2026-11-09", link="t_other001", every="Every 2 hours"))
+    tree = run(tmp_path, {"blocks": [{"type": "calendar", "days": days}]})
+    runs = [x for x in walk(tree) if "run" in x["cls"].split()]
+    bands = [x for x in runs if "band" in x["cls"].split()]
+    assert len(bands) == 2 and len(runs) == 3  # two bands and the single-time item stays a normal entry
+    assert bands[0]["style"]["gridColumn"] == "1 / 4"  # Thu-Sat, one band
+    assert bands[1]["style"]["gridColumn"] == "5 / 6"
+    cards = [x for x in runs if "band" not in x["cls"].split()]
+    assert texts(cards[0]).startswith("09:00") and "Once" in texts(cards[0])
 
 
 ACCORDION = {
@@ -483,3 +485,42 @@ def test_allow_on_this_computer_is_drawn_only_for_a_ticket_id(tmp_path):
     assert [n["data"]["syncAllow"] for n in allow] == ["t_mec009"]
     assert allow[0]["text"] == "Allow on this computer"  # a view cannot word it differently
     assert not any(n["text"] == "Bad" for n in nodes)
+
+
+LESSONS = (
+    Path(__file__).resolve().parents[3] / "contracts" / "examples" / "addon-view" / "valid-lessons-page.json"
+)
+
+
+@node
+def test_a_list_row_draws_the_edit_prompt_and_delete_for_an_item_id(tmp_path):
+    v = json.loads(LESSONS.read_text())
+    tree = run(tmp_path, v)
+    nodes = list(walk(tree))
+    prompt = [n for n in nodes if n["tag"] == "button" and n["data"].get("addonPrompt")]
+    assert [n["data"]["addonPrompt"] for n in prompt] == ["l_k2m9q4", "l_a1b2c3"]
+    assert prompt[0]["data"]["verb"] == "edit" and prompt[0]["data"]["promptLabel"] == "Edit lesson"
+    assert prompt[0]["data"]["value"].startswith("Run the web tests") and prompt[0]["text"] == "Edit"
+    rm = [n for n in nodes if n["tag"] == "button" and n["data"].get("addonAct")]
+    assert [(n["data"]["verb"], n["data"]["target"]) for n in rm] == [("rm", "l_k2m9q4"), ("rm", "l_a1b2c3")]
+
+
+@node
+def test_the_edit_prompt_is_not_drawn_for_unsafe_arguments(tmp_path):
+    good = {"verb": "edit", "target": "l_k2m9q4", "value": "ok", "label": "Edit lesson"}
+    bads = [
+        {**good, "target": "../x"},
+        {**good, "verb": "Edit now"},
+        {**good, "value": "x" * 201},
+        {**good, "value": "two\nlines"},
+        {**good, "value": 5},
+        {**good, "label": ""},
+        {**good, "label": "x" * 41},
+    ]
+    for args in bads:
+        v = json.loads(LESSONS.read_text())
+        v["blocks"][0]["items"] = [
+            {"title": "T", "actions": [{"label": "Edit", "action": {"op": "addon.prompt", "args": args}}]}
+        ]
+        nodes = list(walk(run(tmp_path, v)))
+        assert not [n for n in nodes if n["data"].get("addonPrompt")], args

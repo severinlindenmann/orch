@@ -16,6 +16,8 @@ const OrchBlocks = (() => {
   const LOCAL = /^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}\/?$/;
   let opts = {};   // {addonUrl(name) -> local page address or null}, set per render()
   const VERB = /^[a-z][a-z-]{0,20}$/;
+  const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
+  const ITEM = /^[a-z]_[a-z0-9]{6,16}$/;   // the id of one thing an add-on keeps (a ticket t_…, a lesson l_…)
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -96,7 +98,12 @@ const OrchBlocks = (() => {
     if (nat && opts.links === true && FILE.test(String(args.id))) { node.dataset.native = 'link-' + nat[1]; node.dataset.linkId = String(args.id); node.textContent = LINK_LABEL[a.op]; node.setAttribute('aria-label', LINK_LABEL[a.op]); return true; }   // always orch's words
     // A schedule that came by sync: "Allow on this computer" (the page signs it with the sync add-on; DOM = ticket id only)
     if (a && a.op === 'addon.allow' && TICKET.test(String(args.target))) { node.dataset.syncAllow = String(args.target); node.textContent = 'Allow on this computer'; node.setAttribute('aria-label', 'Allow on this computer'); return true; }   // always orch's words
-    const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && TICKET.test(String(args.target));
+    // One text line in a small window (addon.prompt): the dialog is the page's; here only checked plain text goes into the DOM.
+    if (a && a.op === 'addon.prompt' && VERB.test(String(args.verb)) && ITEM.test(String(args.target)) && typeof args.value === 'string' && args.value.length <= 200 && !HIDDEN.test(args.value) && typeof args.label === 'string' && args.label.length >= 1 && args.label.length <= 40 && !HIDDEN.test(args.label)) {
+      node.dataset.addonPrompt = String(args.target); node.dataset.verb = String(args.verb); node.dataset.value = args.value; node.dataset.promptLabel = args.label;
+      return true;
+    }
+    const ok = a && a.op === 'addon.act' && VERB.test(String(args.verb)) && ITEM.test(String(args.target));
     if (!ok) return false;
     node.dataset.addonAct = 'true'; node.dataset.verb = String(args.verb); node.dataset.target = String(args.target);
     if (label) node.dataset.label = label;
@@ -104,7 +111,7 @@ const OrchBlocks = (() => {
   }
   const LINK_LABEL = {'link.copy': 'Copy link', 'link.extend': 'Extend', 'link.stop': 'Stop sharing'};
   const rowButton = (a, cls) => {
-    const ghost = a.action && (a.action.op === 'addon.edit' || a.action.op === 'link.extend' || a.action.op === 'link.stop');
+    const ghost = a.action && (a.action.op === 'addon.edit' || a.action.op === 'addon.prompt' || a.action.op === 'link.extend' || a.action.op === 'link.stop');
     const fixed = a.action && LINK_LABEL[a.action.op];   // a link op always says what it does, in orch's own words
     const b = el('button', 'btn ' + (ghost && a.tone !== 'bad' ? 'ghost' : 'outline') + ' sm' + (a.tone === 'bad' ? ' danger' : '') + (cls ? ' ' + cls : ''), fixed || a.label); b.type = 'button';
     if (a.confirm) b.dataset.confirm = String(a.confirm);
@@ -280,18 +287,36 @@ const OrchBlocks = (() => {
       if (head) s.append(head);
       const box = el('div', 'blk-card card strip-panel');
       const today = new Date().toDateString();
-      for (const day of arr(b.days)) {
-        const d = parseDate(day.date); if (!d) continue;
-        const li = el('li', 'day' + (d.toDateString() === today ? ' today' : '') + (arr(day.items).length ? ' has' : ' empty'));
+      const days = arr(b.days).filter(day => parseDate(day.date));
+      // A repeat that shows up on several days in a row ("Every 2 hours") is ONE band across those days, not a card per day.
+      const bands = [];
+      days.forEach((day, i) => {
+        for (const it of arr(day.items)) {
+          if (!it.every) continue;
+          const last = bands.find(x => x.link === it.link && x.every === it.every && x.to === i);
+          if (last) last.to = i + 1; else bands.push({link: it.link, every: it.every, title: it.title, tone: it.tone, from: i, to: i + 1});
+        }
+      });
+      const banded = it => it.every && bands.some(x => x.link === it.link && x.every === it.every);
+      if (bands.length) {
+        const row = el('div', 'week-bands');
+        for (const x of bands) {
+          const a = linked('run band t-' + tone(x.tone), x.link, [el('time', 'every', x.every), el('span', '', x.title)]);
+          a.style.gridColumn = (x.from + 1) + ' / ' + (x.to + 1);
+          row.append(a);
+        }
+        box.append(row);
+      }
+      for (const day of days) {
+        const d = parseDate(day.date);
+        const items = arr(day.items).filter(it => !banded(it));
+        const li = el('li', 'day' + (d.toDateString() === today ? ' today' : '') + (items.length ? ' has' : ' empty'));
         const head = el('div', 'day-head'); head.append(el('span', '', d.toLocaleDateString('en-GB', {weekday: 'short'})), el('b', '', d.getDate()));
         li.append(head);
-        for (const it of arr(day.items)) {
-          // A frequent repeat is one item per day: "Every 5 min" in place of the time, a muted note below.
-          const when = it.every ? el('time', 'every', it.every) : el('time', '', it.time || '');
-          const parts = [when, el('span', '', it.title)];
+        for (const it of items) {
+          const parts = [el('time', '', it.time || ''), el('span', '', it.title)];
           if (it.note) parts.push(el('small', 'run-note', it.note));
-          const a = linked('run t-' + tone(it.tone) + (it.every ? ' repeat' : ''), it.link, parts);
-          li.append(a);
+          li.append(linked('run t-' + tone(it.tone), it.link, parts));
         }
         strip.append(li);
       }

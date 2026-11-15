@@ -40,7 +40,7 @@ def w0(e):
     home = e.tmp / "w0home"
     home.mkdir(parents=True)
     # like lane C's test network: a TEST install, and the workspace + tool home under <real home>/.orch-test
-    # (never the real ~/.orch-tool); the harness marks the demo workspace dev, then the test human proves updates
+    # (never the real ~/.orch-tool); update runs as a plain person command
     real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
     base = real / ".orch-test" / f"e2e-w0-{os.getpid()}"
     ohome = base / "home"
@@ -66,16 +66,9 @@ def w0(e):
     proj = base / "proj"
     rc, out, err = run(["orch", "init"], cwd=proj)
     check(rc == 0 and (proj / ".orch/tickets").is_dir(), f"orch init: {err[-200:]}")
-    rc, out, err = run(["orch", "dev-mark"], cwd=proj)  # the harness marks the demo workspace dev (before any key)
-    check(rc == 0, f"orch dev-mark: {(err or out)[-200:]}")
     skill = proj / ".agents/skills/orch/SKILL.md"
     skill.write_text("tampered\n")
     rc, out, err = run(["orch", "update"], cwd=proj)
-    if rc != 0 and ("dashboard on this computer" in out + err or "Waiting for your click" in out + err):
-        # a person's action (H1): the scripted test human proves it in a dev demo workspace
-        prc, proof, perr = run(["orch", "dev-proof", "update", "orch"], cwd=proj)
-        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof for orch update: {(perr or proof)[-200:]}")
-        rc, out, err = run(["orch", "update", "--proof-stdin"], cwd=proj, input=proof.strip() + "\n")
     check(rc == 0 and skill.read_text() != "tampered\n", f"orch update did not refresh the skill: rc={rc} {err[-200:]}")
     return f"one-liner ({ref}) -> uv fetched, version, init, update ok"
 
@@ -135,19 +128,15 @@ def w4(e):
     d = json.loads(p.read_text())
     d["checklist"][0]["done"] = True  # hand-edited: checked, no evidence
     p.write_text(json.dumps(d))
-    # the agent's finish is what is guarded (a person's Done is their own call)
-    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False, by="agent:claude-code")
+    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False, by="agent:e2e")
     check(rc == 2 and "evidence" in err.lower(), f"expected refusal, got rc={rc} {err!r}")
     d["checklist"][0]["evidence"] = [{"type": "note", "ref": "checked by hand"}]
     p.write_text(json.dumps(d))
-    e.orch(ws, "ticket", "status", t, "done", by="agent:claude-code")  # now it may go to Check
-    check(tload(ws, t)["status"] == "review", f"agent finish should wait for the person: {tload(ws, t)['status']}")
-    e.person(ws, "ticket", "status", t, "done")
-    check(tload(ws, t)["status"] == "done", "the person's Done did not stick")
+    e.orch(ws, "ticket", "status", t, "done", by="agent:e2e")
     # an UNCHECKED item blocks done too; a dropped ticket is not affected
     t2 = e.orchj(ws, "ticket", "new", "W4 unchecked")["id"]
     e.orch(ws, "check", "add", t2, "never done")
-    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False, by="agent:claude-code")
+    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False, by="agent:e2e")
     check(rc == 2 and "not checked" in err.lower(), f"unchecked item must refuse done, got rc={rc} {err!r}")
     e.orch(ws, "ticket", "status", t2, "dropped")
     return "refusal ok (checked without evidence, and unchecked)"
@@ -166,6 +155,23 @@ def w5(e):
     q = tload(ws, t)["questions"][0]
     check(q["answer"] == "blue" and q["answered_by"].startswith("human:") and q["via"] == "cli", f"answer fields {q}")
     check(tload(ws, t)["status"] == "active", "ticket did not resume")
+
+
+@scenario("W5T")
+def w5t(e):
+    """Take a question back (G3): it leaves `orch needs`, the ticket stops waiting, an answer afterwards is refused."""
+    ws = e.ws("Pilatus")
+    t = e.orchj(ws, "ticket", "new", "W5T question")["id"]
+    e.orch(ws, "ask", t, "Which size?", "--option", "S", "--option", "L", by="agent:claude-code")
+    check(any(r["ticket"] == t for r in e.orchj(ws, "needs")), "the question must be in needs")
+    e.orch(ws, "ask", t, "--take-back", "q1", "no longer needed", by="agent:claude-code")
+    d = tload(ws, t)
+    check(d["questions"][0]["taken_back"]["reason"] == "no longer needed" and d["waiting_on"] is None, f"take back {d}")
+    check(d["history"][-1]["text"] == "Taken back: no longer needed", "history line")
+    check(not any(r["ticket"] == t for r in e.orchj(ws, "needs")), "a taken-back question must leave needs")
+    rc, out, err = e.orch(ws, "review", "answer", t, "q1", "--verdict", "ok", "--picked", "S", by="human:sev", ok=False)
+    check(rc != 0 and "taken back: no longer needed" in (out + err), f"answer must be refused: {out!r} {err!r}")
+    return "taken back: left needs, refused an answer"
 
 
 @scenario("W6")
@@ -219,7 +225,7 @@ def w7(e):
     check(got["title"] == "W7 reports", "ticket not in the remote")
     st = e.sh(["git", "ls-files"], cwd=rep)[1]
     check(".orch/secrets" not in st, "secrets would be committed")
-    e.person(home, "ticket", "status", t, "done")  # last: XFAIL until #799 must not hide the git part
+    e.person(home, "ticket", "status", t, "done")
     check(tload(home, t)["status"] == "done", "Home flow failed")
     return "codex exec part not run (agent)"
 

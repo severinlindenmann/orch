@@ -526,6 +526,7 @@ function addonDetailPage(addon) {
     heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
     h('div', {className:'card'}, settingsRows),
     where,
+    snapshot || addon.name === 'dashboard' ? null : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove from this computer')),
     h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
       settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
 }
@@ -879,7 +880,7 @@ function addonTab(id) {
   // The add-on that repeats tickets has a page of its own (its heading is its menu name): its main button sits in the heading.
   const a = addons().find(a => a.name === id), slot = h('div', {id:'addon-header', className:'row'}, addonHeaderNodes(id));
   if (panelOf(id) === 'repeats') {
-    const add = snapshot ? null : h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ New schedule');
+    const add = snapshot ? null : h('button', {type:'button', className:'btn primary', 'data-native':'repeat'}, '+ New repeat');
     if (add) add.onclick = () => repeatsDialog(null, id);
     return fragment(heading(addonTitle(a), a?.dashboard?.subtitle || 'Repeat work on a plan you choose.', {actions:h('div', {className:'row'}, slot, add)}), addonHost(id));
   }
@@ -1049,27 +1050,27 @@ function repeatPlan(c) {
   if (c.freq === 'custom' && (c.unit === 'minutes' || c.unit === 'hours')) {  // a steady rhythm: no time of day
     const n = Number(c.every), mins = c.unit === 'minutes', word = mins ? 'minutes' : n === 1 ? 'hour' : 'hours';
     if (!Number.isInteger(n) || n < (mins ? 5 : 1) || n > (mins ? 59 : 23)) return {phrase:null, summary:mins ? 'Choose between 5 and 59 minutes.' : 'Choose between 1 and 23 hours.', hint:''};
-    return {phrase:'every ' + n + ' ' + word, summary:'Runs every ' + n + ' ' + word, hint:''};
+    return {phrase:'every ' + n + ' ' + word, summary:'Repeats every ' + n + ' ' + word, hint:''};
   }
   const [hh, mm] = String(c.time || '').split(':').map(Number);
   if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return {phrase:null, summary:'Choose a time.', hint:''};
   const at = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
-  if (c.freq === 'daily') return {phrase:'daily ' + at, summary:'Runs every day at ' + at, hint:''};
+  if (c.freq === 'daily') return {phrase:'daily ' + at, summary:'Repeats every day at ' + at, hint:''};
   if (c.freq === 'weekly') {
     const picked = REPEAT_DAYS.filter(d => c.days.includes(d[2]));
     if (!picked.length) return {phrase:null, summary:'Choose at least one day.', hint:''};
     const phrase = picked.length === 1 ? 'every ' + picked[0][1].toLowerCase() + ' ' + at : mm + ' ' + hh + ' * * ' + picked.map(d => d[2]).join(',');
-    return {phrase, summary:'Runs every ' + andList(picked.map(d => d[1])) + ' at ' + at, hint:''};
+    return {phrase, summary:'Repeats every ' + andList(picked.map(d => d[1])) + ' at ' + at, hint:''};
   }
   if (c.freq === 'monthly') {
     const day = Number(c.monthday);
     if (!Number.isInteger(day) || day < 1 || day > 31) return {phrase:null, summary:'Choose a day from 1 to 31.', hint:''};
-    return {phrase:'monthly ' + day + ' ' + at, summary:'Runs on day ' + day + ' of every month at ' + at, hint:day > 28 ? 'In shorter months it runs on the last day.' : ''};
+    return {phrase:'monthly ' + day + ' ' + at, summary:'Repeats on day ' + day + ' of every month at ' + at, hint:day > 28 ? 'In shorter months it happens on the last day.' : ''};
   }
   const n = Number(c.every);
   if (!Number.isInteger(n) || n < 1 || n > 30) return {phrase:null, summary:'Choose between 1 and 30 days.', hint:''};
-  if (n === 1) return {phrase:'daily ' + at, summary:'Runs every day at ' + at, hint:''};
-  return {phrase:mm + ' ' + hh + ' */' + n + ' * *', summary:'Runs every ' + n + ' days at ' + at, hint:'Counted from the 1st of each month.'};
+  if (n === 1) return {phrase:'daily ' + at, summary:'Repeats every day at ' + at, hint:''};
+  return {phrase:mm + ' ' + hh + ' */' + n + ' * *', summary:'Repeats every ' + n + ' days at ' + at, hint:'Counted from the 1st of each month.'};
 }
 // The reverse of repeatPlan for the plans it writes: a saved 5-field cron -> the dialog's choices (null when it is some other plan).
 function cronToChoice(cron) {
@@ -1099,7 +1100,7 @@ function repeatsDialog(only = null, addonName = null) {
   if (snapshot) return;
   const saved = only ? tickets().find(t => t.id === only)?.ext?.[addonName || repeatsAddon()] : null;
   const had = saved?.recurring === true ? cronToChoice(saved.cron) : null;
-  const {d, actions} = dialog(had ? 'Edit schedule' : 'New schedule', 'dialog repeat-dialog');
+  const {d, actions} = dialog(had ? 'Edit repeat' : 'New repeat', 'dialog repeat-dialog');
   const ticket = h('select', {className:'input', name:'ticket', id:'repeat-ticket'});
   tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status)).forEach(t => ticket.append(new Option(t.title || t.id, t.id)));
   const choice = had || {freq:'weekly', days:[1], monthday:1, every:2, time:'08:00', unit:'minutes'};
@@ -1108,7 +1109,7 @@ function repeatsDialog(only = null, addonName = null) {
   const summary = h('p', {className:'repeat-summary', role:'status'}), hint = h('span', {className:'meta'});
   const rowsHost = h('div', {className:'schedule-fields'});
   const row = (label, ...kids) => h('div', {className:'schedule-row'}, h('span', {}, label), ...kids);
-  const save = button('Save schedule', 'primary', async () => {
+  const save = button('Save repeat', 'primary', async () => {
     const plan = repeatPlan(choice);
     if (save.disabled || !ticket.value || !plan.phrase) return;
     save.disabled = true;
@@ -1185,7 +1186,7 @@ function repeatsDialog(only = null, addonName = null) {
   });
   draw();
   // An existing schedule: Save changes, or remove it (its tickets stay); a new one may also copy the ticket.
-  const remove = button('Delete schedule', 'outline danger', async () => {
+  const remove = button('Delete repeat', 'outline danger', async () => {
     if (remove.disabled) return;
     remove.disabled = true;
     const label = remove.textContent; remove.textContent = 'Removing…';
@@ -1197,6 +1198,44 @@ function repeatsDialog(only = null, addonName = null) {
   });
   if (had) actions.append(remove, save); else actions.append(copy, save);
   d.append(fields, actions); window.orch.open(d);
+}
+// `addon.prompt` (a row's Edit in an add-on view): one text line in a small window, prefilled; Save sends the add-on's
+// own verb with the new text. 1 to 200 characters; the add-on's refusal is shown here in one sentence.
+const PROMPT_MAX = 200;
+function promptDialog(control) {
+  const id = shownAddon();
+  if (snapshot || !id) return;
+  const {verb, addonPrompt: target, value = '', promptLabel = 'Edit'} = control.dataset;
+  const {d, actions} = dialog(promptLabel, 'dialog');
+  const input = h('input', {className:'input', type:'text', maxLength:String(PROMPT_MAX + 50), value, 'aria-label':promptLabel});
+  const hint = h('p', {className:'meta', role:'status'}), failed = h('p', {className:'meta', role:'alert', hidden:true});
+  const save = button('Save', 'primary', async () => {
+    const text = input.value.trim();
+    if (save.disabled || !text || text.length > PROMPT_MAX) return;
+    save.disabled = true; failed.hidden = true;
+    const label = save.textContent; save.textContent = 'Saving…';
+    let result;
+    try { result = await act('addon.act', {addon:id, verb, target, value:text}); }
+    catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
+    save.textContent = label;
+    if (!result.ok) { failed.textContent = result.text || 'That did not work. Try again.'; failed.hidden = false; refresh(); return; }
+    await window.orch.close(d);
+    window.orch.toast('Saved.', 'ok');
+    await loadAddon(id);
+  });
+  const refresh = () => {
+    const n = input.value.trim().length;
+    save.disabled = n === 0 || n > PROMPT_MAX;
+    hint.textContent = n === 0 ? 'Write at least one character.' : n > PROMPT_MAX ? 'Too long: at most ' + PROMPT_MAX + ' characters (now ' + n + ').' : '';
+    hint.hidden = !hint.textContent;
+  };
+  input.addEventListener('input', () => { failed.hidden = true; refresh(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } });
+  d.append(h('div', {className:'form-fields'}, h('label', {className:'field'}, input), hint, failed), actions);
+  actions.append(save);
+  refresh();
+  window.orch.open(d);
+  input.focus();
 }
 let sharedLinks = null, sharedLinksDown = false;
 async function loadSharedLinks() {

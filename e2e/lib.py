@@ -245,39 +245,8 @@ def strip_ansi(s: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", s)
 
 
-# ---- person actions (#815, #799) --------------------------------------------------------------------
-# A person's action (answer, ticket Done, relay connect/allow ...) is refused at the CLI with a hand-off to the dashboard
-# until #799 (R4.1) removes the proof mechanism. The harness does NOT fake the person: such a scenario is an expected
-# failure (XFAIL) and turns green on its own once the action is a plain person action.
-
-HANDOFF_TEXT = "dashboard on this computer"
-XFAIL_WHY = "needs a person's action that is still a dashboard hand-off; turns green with #799 (R4.1)"
-
-
 def tool_python(bin_dir: Path) -> str:
     shim = (bin_dir / "orch").resolve()
     first = shim.read_text(errors="replace").splitlines()[0]
     check(first.startswith("#!"), f"orch shim has no shebang: {first[:80]!r}")
     return first[2:].strip().split()[0]
-
-
-class XFail(Exception):
-    pass
-
-
-def person_run(sh, root: Path, cmd: list, *, env=None, input=None, timeout: int = 300):
-    """Run `cmd` as the person (no --by). Raises XFail while the CLI hands the action off to the dashboard."""
-    cmd = list(cmd)
-    if "--by" in cmd:
-        i = cmd.index("--by")
-        del cmd[i:i + 2]
-    rc, out, err = sh(cmd, cwd=root, env=env, input=input, timeout=timeout)
-    if rc != 0 and HANDOFF_TEXT in out + err:
-        raise XFail(f"{' '.join(map(str, cmd[1:4]))}: {XFAIL_WHY}")
-    return rc, out, err
-
-
-def page_needs_person(r) -> None:
-    """A page API write without a page session (the person opened it from this computer): XFAIL until #799 (R4.1)."""
-    if r.status == 403 and "from this computer" in r.text:
-        raise XFail(f"page write {XFAIL_WHY}")

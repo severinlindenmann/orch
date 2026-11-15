@@ -9,7 +9,7 @@ import re
 import time
 from pathlib import Path
 
-from orch import history, review, review_server, runs, runs_live, safefile, tickets
+from orch import history, nextstep, review, review_server, runs, runs_live, safefile, tickets
 from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link")
@@ -77,6 +77,7 @@ def _guard(fn, *a, **kw):
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 
@@ -240,6 +241,7 @@ def _answer(args, root: Path) -> None:
         q = next((x for x in t.get("questions") or [] if x.get("id") == key), None)
         if q is None:
             raise ReviewError("not_found", f"{tid} has no question {key}.")
+        _guard(tickets.refuse_if_taken_back, q)  # said first, before anything is asked of the person
         current = tickets.question_digest(q)
     given = args.digest
     if given is not None and not re.fullmatch(r"[0-9a-f]{64}", given):

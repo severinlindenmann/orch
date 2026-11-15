@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from lib import Fail, Skip, check, free_port, http, page_needs_person, scenario, wait_http
+from lib import Fail, Skip, check, free_port, http, scenario, wait_http
 
 AGENT = Path(__file__).parent / "fixtures" / "generic-agent" / "agent.py"
 NEEDS_FIXTURE = Path(__file__).parent / "fixtures" / "needs-addon"
@@ -90,12 +90,8 @@ class W:
         return self
 
     def person(self, *args, ok=True, env=None, input=None):
-        """A person's action (answer, ticket done, relay connect ...), no --by. XFAIL until #799 (see lib.person_run)."""
-        from lib import person_run
-        rc, out, err = person_run(lambda c, cwd=None, **kw: self.sh(c, **kw), self.root, ["orch", *args], env=env or {}, input=input)
-        if ok and rc != 0:
-            raise Fail(f"orch {' '.join(map(str, args))[:70]} (as the person) exit {rc}: {(err or out).strip()[-240:]}")
-        return rc, out, err
+        """A person's action (answer, ticket done, relay connect ...): a plain CLI action, no --by."""
+        return self.o(*args, ok=ok, by=None, env=env, input=input)
 
     def add_agent(self, name: str, command: str, interactive: str | None = None):
         """`orch config agent add` and `config set workspace.agent` are a person's actions with no test-human proof:
@@ -374,9 +370,6 @@ def r2(e):
     rc, out = pty_run(["orch", "init"], w.root, {**e.env, **w.env}, ["fake", f"{py} {ag} {{prompt}}"])
     check(rc == 0 and "fake" in out, f"orch init with Other: rc={rc} {out[-300:]!r}")
     got = w.o("config", "get", "workspace.agent", by=None)[1].strip()
-    if got == "(not set)" and "click" in out.lower():  # "Other" leaves a dashboard hand-off for the person (config.agent_add)
-        from lib import XFail, XFAIL_WHY
-        raise XFail(f"init with Other: {XFAIL_WHY}")
     check(got == "fake", f"fake is not the chosen agent: {got!r}; init said {out[:900]!r}")
     rows = w.j("agents", by=None)
     chosen = [r for r in rows if r["chosen"]]
@@ -807,7 +800,6 @@ class Focus:
 
     def act_ok(self, op: str, args: dict) -> dict:
         r = self.act(op, args)
-        page_needs_person(r)
         check(r.status == 200, f"act {op}: {r}")
         return r.json()
 
@@ -1068,7 +1060,6 @@ def s2_dashboard_start_makes_tasks(e):
     dbase = w.j("dashboard", "status", by=None)["url"].rstrip("/")
     check(wait_http(dbase + "/"), "the dashboard did not come up")
     r = http("POST", dbase + "/api/act", {"Origin": dbase, "Sec-Fetch-Site": "same-origin"}, {"op": "run.start", "args": {"ticket": tid}})
-    page_needs_person(r)
     check(r.status == 200, f"dashboard run.start: {r}")
     done = wait_for(lambda: [c for c in w.load(tid)["checklist"] if c.get("done")], 45)
     check(done, f"no task done 45 s after Start: {w.load(tid)['checklist']}; agent log: {w.lines('prompt')}")
@@ -1120,14 +1111,7 @@ def u1_upgrade_from_old_orch(e):
     check(rc == 0, f"orch start after the upgrade: {(err or out)[-300:]}")
     dbase = w.j("dashboard", "status", by=None, env=new_env_all)["url"].rstrip("/")
     check(wait_http(dbase + "/"), "the dashboard add-on did not start after the upgrade")
-    rc, out, err = w.sh(["orch", "dev-mark"], env=new_env_all)  # the harness marks the demo workspace dev
-    check(rc == 0, f"orch dev-mark: {(err or out)[-200:]}")
     rc, out, err = w.sh(["orch", "update"], env=new_env_all, timeout=900)
-    if rc != 0 and ("dashboard on this computer" in out + err or "Waiting for your click" in out + err):
-        # `orch update` is a person's action (H1): in a dev demo workspace the scripted test human proves it
-        prc, proof, perr = w.sh(["orch", "dev-proof", "update", "orch"], env=new_env_all)
-        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof for orch update: {(perr or proof)[-200:]}")
-        rc, out, err = w.sh(["orch", "update", "--proof-stdin"], env=new_env_all, timeout=900, input=proof.strip() + "\n")
     check(rc == 0 and "Traceback" not in out + err, f"orch update: {(err or out)[-400:]}")
     rc, out, err = w.sh(["orch", "addon", "add", "focus", "--yes"], env=new_env_all, timeout=900)
     check(rc == 0, f"addon add focus after the upgrade: {(err or out)[-300:]}")

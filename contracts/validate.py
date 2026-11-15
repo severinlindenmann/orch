@@ -81,6 +81,7 @@ V = {
     "focus-ext": validator("addons/focus/ext"),
     "factory-ext": validator("addons/factory/ext"),
     "factory-proposal": validator("addons/factory/proposal"),
+    "lessons-list": validator("addons/lessons/list"),
 }
 # The [workspace] agent + [agents.<name>] part of .orch/config.toml: a $def of agent-adapter.schema.json.
 _adapters = json.loads((HERE / "agent-adapter.schema.json").read_text())

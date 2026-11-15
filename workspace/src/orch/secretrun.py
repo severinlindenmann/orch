@@ -744,12 +744,10 @@ AGENT_COMMAND = (
 
 
 def _switch_on(root, name, flag) -> bool:
-    """A profile switch (allow_get, agents_may_env): the file flag AND the person's record. The file is read
-    again under the key lock, the same lock a person's enable holds across record and file, so a reader never
-    writes an off record over an enable in progress."""
+    """A profile switch (allow_get, agents_may_env): the flag in the profile."""
     with hp._key_lock(hp.key_dir(root)):
         profile = _verified(root, name)
-        return hp.effective(root, f"secret.{flag}.{name}", bool(profile and profile.get(flag) is True))
+        return bool(profile and profile.get(flag) is True)
 
 
 def _agent_may_run(root, name, profile, command) -> bool:
@@ -769,8 +767,6 @@ def _verified(root, name):
     profile = keystore.read_profiles(root).get(name)
     if profile is None:
         return None
-    if not hp.profile_verified(root, name, profile):
-        raise Refused("Refused: " + hp.PROFILE_CHANGED + ".")
     keystore._profile_check({name: profile}, set())  # the variable rules again at run time (same code as set)
     for sect in ("env", "files", "set"):
         if any(
@@ -1047,9 +1043,7 @@ def _get(root, profile_name, key, *, stdout_is_tty, out, agent) -> None:
 
 def list_answer(root) -> dict:
     try:  # display only: a damaged file lists the keys with no profiles
-        profiles = {  # a profile changed outside orch counts for nothing (it cannot run)
-            n: v for n, v in keystore.read_profiles(root).items() if hp.profile_verified(root, n, v)
-        }
+        profiles = keystore.read_profiles(root)
     except Refused:
         profiles = {}
     items = []

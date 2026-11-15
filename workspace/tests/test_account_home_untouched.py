@@ -247,8 +247,8 @@ def test_relay_connect_and_refresh(fsguard):
         srv.stop()
 
 
-def test_proof_mint_and_verify_on_the_test_path(fsguard, monkeypatch):
-    """The dev/test proof path writes its key and nonce store to the TEST home only, never to Z/.orch-tool."""
+def test_human_key_and_reset_on_the_test_path(fsguard, monkeypatch):
+    """The key and the reset write to the TEST home only, never to Z/.orch-tool."""
     z, orch_home, ws, _ = fsguard
     monkeypatch.setattr(hp, "install_kind", lambda: "test")
     prefix = z / ".orch-test"
@@ -257,9 +257,7 @@ def test_proof_mint_and_verify_on_the_test_path(fsguard, monkeypatch):
     (tws / ".orch").mkdir(parents=True)
     monkeypatch.setenv("ORCH_HOME", str(prefix / "home"))
     (prefix / "home").mkdir()
-    key = hp.human_key(tws)
-    pr = hp.mint(key, hp.new_payload("run.takeover", "t_abc123", "human:pat"))
-    assert hp.verify_and_consume(tws, pr, "run.takeover", "t_abc123") == "human:pat"
+    hp.human_key(tws)
     hp.reset_protection(tws, "test:mode")
 
 

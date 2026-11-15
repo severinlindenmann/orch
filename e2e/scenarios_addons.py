@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from lib import page_needs_person, check, free_port, http, kill_group, scenario
+from lib import check, free_port, http, kill_group, scenario
 from scenarios_ws import tload
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hello-world"
@@ -292,7 +292,6 @@ def a13(e):
         for verb in ("toggle", "run", "delete"):
             r = http("POST", base + "/api/act", headers={"Origin": base, "Content-Type": "application/json"},
                      body={"op": "addon.act", "args": {"addon": "automation", "verb": verb, "target": tid}})
-            page_needs_person(r)  # a page write needs the person's page session: XFAIL until #799
             check(r.status == 200, f"addon.act automation {verb}: {r.status} {r.body[:200]!r}")
     check(before_help != _help(e, ws), "help unchanged")
 
@@ -311,15 +310,6 @@ def a14(e):
     check("hello-world" not in _help(e, ws), "changed add-on still in --help")
     check(not [x for x in e.orchj(ws, "addon", "list") if x["name"] == "hello-world" and x["active"]], "still active in list")
     rc, out, err = e.sh(["orch", "update"], cwd=ws, timeout=600)
-    if rc != 0 and ("dashboard on this computer" in out + err or "Waiting for your click" in out + err):
-        # `orch update` is a person's action (H1): in a dev demo workspace the scripted test human proves it
-        mrc, mout, merr = e.sh(["orch", "dev-mark"], cwd=ws)
-        check(mrc == 0 or "already" in (mout + merr), f"orch dev-mark: {(merr or mout)[-200:]}")
-        prc, proof, perr = e.sh(["orch", "dev-proof", "update", "orch"], cwd=ws)
-        check(prc == 0 and proof.startswith("hp1."), f"no test-human proof: {(perr or proof)[-200:]}")
-        rc, out, err = e.sh(
-            ["orch", "update", "--proof-stdin"], cwd=ws, timeout=600, input=proof.strip() + "\n"
-        )
     check("changed on disk" in (out + err), f"update does not say 'changed on disk': {(err or out)[-300:]}")
     check(e.sh(["orch", "hello-world", "hello"], cwd=ws)[0] == 2, "update re-activated a changed add-on")
     # the user checks it and turns it on again

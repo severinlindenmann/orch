@@ -122,6 +122,15 @@ def current_actor(explicit: str | None = None) -> str:
     return who
 
 
+def acting_by(args) -> str:
+    """Who runs this command: the agent tool seen in the environment, else --by, else human:<os user>.
+    Plain: no op is human-only, an agent's command just runs and is recorded as agent:<tool>."""
+    tool = agent_tool()
+    if tool:
+        return "agent:" + str(tool)
+    return current_actor(getattr(args, "by", None))
+
+
 def tickets_dir(root: Path) -> Path:
     return root / ".orch" / "tickets"
 
@@ -805,6 +814,11 @@ def history_line(text: str, checklist: list[dict] | None = None) -> str:
     if m := re.fullmatch(r"Removed ext\.([a-z][a-z0-9-]*)(\.[\w-]+)?", t):
         return f"Removed {addon(m.group(1))} settings"
     return t
+
+
+# The `via` / origin word for "the person, through a UI" (contracts/chat-groups.md). The wire and the stored
+# files keep this value, so old tickets, messages and peers stay readable; the only place core spells it.
+PERSON_VIA = "dashboard"
 
 
 def _env_via() -> str:
@@ -2526,6 +2540,76 @@ def question_digest(q) -> str:
         return QUESTION_UNENCODABLE
 
 
+def _release_wait(root: Path, tid: str, ticket: dict, qid: str) -> None:
+    """A question is settled (answered or taken back): a ticket that waited on it stops waiting."""
+    from orch import runs  # runs imports tickets
+
+    w = ticket.get("waiting_on")
+    if w and w.get("kind") == "question" and w.get("ref") == qid:
+        still = _open_questions(ticket)
+        if still:  # more questions wait: the ticket keeps waiting, on the oldest of them
+            ticket["waiting_on"] = {"kind": "question", "ref": still[0]}
+        else:
+            ticket["waiting_on"] = None
+            if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
+                chat = ticket.get("general") is True  # the Chat ticket is never Working
+                ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
+
+
+TAKEN_BACK = "Taken back: "
+MAX_TAKE_BACK_REASON = 300
+
+
+def taken_back_text(q: dict) -> str | None:
+    """ "Taken back: <reason>" for a taken-back question, else None. The one place that word is built."""
+    tb = q.get("taken_back") if isinstance(q, dict) else None
+    if not isinstance(tb, dict):
+        return None
+    return TAKEN_BACK + " ".join(str(tb.get("reason") or "").split())
+
+
+def refuse_if_taken_back(q: dict) -> None:
+    """The one check every answer path makes (CLI, dashboard, phone, card): taken back stays closed."""
+    if (text := taken_back_text(q)) is not None:
+        raise Refused(f"This question was taken back: {text[len(TAKEN_BACK) :]}")
+
+
+def take_back(root: Path, tid: str, qid: str, reason: str, by: str) -> tuple[dict, dict, bool]:
+    """A helper takes back its own question that no longer matters. The question stays in the ticket, settled
+    (`taken_back` {at, by, reason}; `answer` is "Taken back: <reason>", so every reader that lists open
+    questions drops it), one history line, and a `waiting_on` that pointed at it clears.
+    Returns (ticket, question, changed). changed is False when the same reason was given before (a no-op).
+    The phone message that removes the card hooks in here (G3b): it needs only tid and q["id"]."""
+    reason = " ".join(str(reason or "").split())
+    if not reason:
+        raise Refused('A reason is needed: orch ask <ticket> --take-back q3 "why it no longer matters".')
+    if len(reason) > MAX_TAKE_BACK_REASON:
+        raise Refused(f"Keep the reason to one short line (at most {MAX_TAKE_BACK_REASON} characters).")
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None:
+            raise Refused(f"Ticket {tid} has no question {qid}. See the open ones: orch needs.")
+        if (old := q.get("taken_back")) is not None:
+            if isinstance(old, dict) and old.get("reason") == reason:
+                return NO_WRITE
+            refuse_if_taken_back(q)
+        if q["answer"] is not None:
+            raise Refused(f"{qid} is already answered, so it cannot be taken back.")
+        at = now()
+        q["taken_back"] = {"at": at, "by": by, "reason": reason}
+        q["answer"], q["answered_by"], q["via"] = TAKEN_BACK + reason, by, _env_via()
+        _release_wait(root, tid, ticket, qid)
+        add_history(ticket, by, TAKEN_BACK + reason)
+        return q
+
+    t, q = apply_op(root, tid, op, by=by)
+    if q is None:  # NO_WRITE: the same reason again
+        q = next(x for x in t["questions"] if x["id"] == qid)
+        return t, q, False
+    return t, q, True
+
+
 def answer(
     root: Path,
     tid: str,
@@ -2546,12 +2630,12 @@ def answer(
     if not text.strip():
         raise Refused("An answer needs text.")
     text = text.strip()
-    from orch import runs  # runs imports tickets
 
     def op(ticket):
         q = next((x for x in ticket["questions"] if x["id"] == qid), None)
         if q is None:
             raise Refused(f"Ticket {tid} has no question {qid}.")
+        refuse_if_taken_back(q)
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
         if isinstance(q.get("card"), dict) and not str(by).startswith("human:"):
@@ -2570,16 +2654,7 @@ def answer(
         q["answer"], q["answered_by"], q["via"] = ans, by, via
         if decision is not None:
             q["decision"], q["at"] = dict(decision), now()
-        w = ticket.get("waiting_on")
-        if w and w.get("kind") == "question" and w.get("ref") == qid:
-            still = _open_questions(ticket)
-            if still:  # more questions wait: the ticket keeps waiting, on the oldest of them
-                ticket["waiting_on"] = {"kind": "question", "ref": still[0]}
-            else:
-                ticket["waiting_on"] = None
-                if ticket["status"] == "waiting":  # Working only while an agent runs; else Ready to go on
-                    chat = ticket.get("general") is True  # the Chat ticket is never Working
-                    ticket["status"] = "ready" if chat or not runs.running(root, tid) else "active"
+        _release_wait(root, tid, ticket, qid)
         add_history(ticket, by, f"Answered {qid}: {ans}", via)
         history.created("answers", q)  # the answer point: this question, as answered, is core's own
         return q

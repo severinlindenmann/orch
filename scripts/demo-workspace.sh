@@ -12,7 +12,6 @@ Usage:
   scripts/demo-workspace.sh remove [--yes]   stop it and delete the demo folders
 Environment: DEMO_HOME (~/orch-demo/home), DEMO_DIR (~/orch-demo/work/demo), DEMO_PORT (first free 8780-8799),
 ORCH_REF (main), ORCH_REPO, ORCH_INSTALL_KIND (normal).
-DEMO_TEST_PROOF=1: test installs under ~/.orch-test only (orch refuses elsewhere): the e2e test human clicks instead of a person.
 EOF
 }
 
@@ -168,45 +167,21 @@ cmd_setup() {
   fi
   home_check
   orch_demo init --yes >/dev/null
-  if [ "${DEMO_TEST_PROOF:-}" = 1 ]; then
-    # TEST installs under ~/.orch-test only: mark it for the e2e test human right after creating it (orch refuses later)
-    orch_demo dev-mark >/dev/null 2>&1 || echo "Note: test marking refused (already marked, or not a test folder)."
-  fi
   echo "Workspace folder ready: $DEMO_DIR"
 
-  # 3. add-ons and services (the dashboard must run before connecting: connecting needs a person's click there)
+  # 3. add-ons and services
   orch_demo addon add dashboard --yes >/dev/null
   orch_demo addon add relay --yes >/dev/null
   cmd_start
   port="$(cat "$STATE/port")"
 
-  # 4. relay connection: a person's action (proof)
+  # 4. relay connection
   if relay_connected; then
     echo "Already connected to the relay."
   else
     echo "Connecting to the relay ..."
-    if [ "${DEMO_TEST_PROOF:-}" = 1 ]; then
-      # TEST installs under ~/.orch-test only (orch refuses everywhere else): the e2e test human's proof.
-      target="$(tool_py -c 'import sys; from orch import humanproof as h; print(h.server_address(sys.argv[1]))' "$RELAY")"
-      tool_py -c 'import sys; from pathlib import Path; from orch import humanproof as h
-print(h.mint_dev(Path(sys.argv[1]), "relay.connect", sys.argv[2]))' "$DEMO_DIR" "$target" \
-        | orch_demo relay connect "$RELAY" --workspace "$WS" --token "$TOKEN" --proof-stdin >/dev/null \
-        || die "Could not connect to the relay (test proof)."
-    else
-      # The CLI hands the connect to the dashboard; it opens the browser on THIS machine when it runs in a terminal.
-      if [ "$(uname)" = Darwin ] && command -v script >/dev/null 2>&1; then
-        (cd "$DEMO_DIR" && denv script -q /dev/null orch relay connect "$RELAY" --workspace "$WS" --token "$TOKEN" >/dev/null 2>&1) || true
-      else
-        orch_demo relay connect "$RELAY" --workspace "$WS" --token "$TOKEN" >/dev/null 2>&1 || true
-      fi
-      echo "On this machine's screen, open the demo dashboard (http://127.0.0.1:$port/) and press Continue."
-      echo "Waiting up to 10 minutes for that click ..."
-      i=0
-      until relay_connected; do
-        i=$((i + 1)); [ $i -le 120 ] || die "Not connected after 10 minutes. Run setup again to retry."
-        sleep 5
-      done
-    fi
+    orch_demo relay connect "$RELAY" --workspace "$WS" --token "$TOKEN" >/dev/null \
+      || die "Could not connect to the relay."
   fi
   TOKEN=""
   echo "$WS" > "$STATE/workspace"

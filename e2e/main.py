@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import lib  # noqa: E402
-from lib import Admin, Fail, Resp, Skip, XFail, check, http  # noqa: E402
+from lib import Admin, Fail, Resp, Skip, check, http  # noqa: E402
 
 REGISTRY = lib.REGISTRY
 
@@ -79,9 +79,9 @@ class E:
         return rc, out, err
 
     def person(self, ws, *args, ok=True):
-        """A person's action (answer, ticket done, relay connect ...), no --by. XFAIL until #799 (see lib.person_run)."""
+        """A person's action (answer, ticket done, relay connect ...), no --by. plain CLI action since #799."""
         root = self.path_of(ws)
-        rc, out, err = lib.person_run(self.sh, root, ["orch", *args])
+        rc, out, err = self.orch(root, *args, ok=False)
         if ok and rc != 0:
             raise Fail(f"orch {' '.join(map(str, args))[:60]} (as the person) exit {rc}: {(err or out).strip()[-200:]}")
         return rc, out, err
@@ -226,8 +226,6 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
             status, reason = "PASS", note or ""
         except Skip as s:
             status, reason = "SKIP", str(s)
-        except XFail as x:
-            status, reason = "XFAIL", str(x)
         except Fail as f:
             status, reason = "FAIL", str(f)
         except Exception as x:  # noqa: BLE001
@@ -255,7 +253,7 @@ def main() -> int:
     ap.add_argument("--repo", required=True)
     ap.add_argument("--bins", default="")
     a = ap.parse_args()
-    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory  # noqa: F401,E401
+    import scenarios_ws, scenarios_addons, scenarios_pub, scenarios_rel, scenarios_misc, scenarios_v2, scenarios_phone_v3, scenarios_sim, scenarios_look, scenarios_sync, scenarios_factory, scenarios_lessons  # noqa: F401,E401
 
     if a.what == "all":
         ids = [k for k in REGISTRY if k != "V3-SIM"]  # V3-SIM is a long-lived harness, only by name
@@ -291,14 +289,12 @@ def main() -> int:
         if r.returncode:
             print("orch install failed:", r.stderr[-400:])
             return 1
-        # a TEST install: the install record is what lets the scripted test human (orch dev-proof) act, in workspaces
-        # under <real home>/.orch-test only
-        py = lib.tool_python(e.bin)
-        rc, out, err = e.sh([py, "-c", "import sys; from pathlib import Path; from orch import humanproof as h; "
-                             "h.write_install_record(Path(sys.prefix), 'test')"])
-        if rc:
-            print("install record failed:", (err or out)[-400:])
-            return 1
+        # a dev install: add-on add / update may change this orch's own tool folder (a normal install refuses
+        # another ORCH_HOME, MSG_ENV_CHANGE); the same record the installer writes with ORCH_INSTALL_KIND=dev
+        shim = (e.bin / "orch").resolve().read_text(errors="replace").splitlines()[0]
+        subprocess.run([shim[2:].strip().split()[0], "-c", "import sys; from pathlib import Path; "
+                        "from orch import humanproof as h; h.write_install_record(Path(sys.prefix), 'dev')"],
+                       env=e.env, capture_output=True, text=True)
         if shutil.which("claude", path=e.path) is None:
             # orch links its skills into the folder of every agent it finds on the PATH (W1, A12, A13): a CI runner
             # has none, so a stand-in that only exists keeps those checks the same everywhere
@@ -343,8 +339,8 @@ def main() -> int:
     if leaked:
         print(f"LEAK: {len(leaked)} add-on server(s) still running in {tmp}; ended: {leaked}")
         res["LEAK"] = "FAIL"
-    n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP", "XFAIL")}
-    summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip, {n['XFAIL']} xfail (#799)"
+    n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP")}
+    summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip"
     print(summary)
     with open(out_md, "a") as f:
         f.write(summary + "\n")
