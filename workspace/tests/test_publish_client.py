@@ -657,12 +657,12 @@ def test_file_with_a_secret_is_refused_and_nothing_is_uploaded(proj, run, pub):
     _no_echo(out, err)
 
 
-def test_folder_with_a_secret_is_refused_and_binaries_are_not_scanned(proj, run, pub):
+def test_folder_with_a_secret_is_refused_and_a_clean_binary_passes(proj, run, pub):
     connect(run, pub)
     site = proj / "site"
     (site / "js").mkdir(parents=True)
     (site / "index.html").write_text("<h1>hi</h1>")
-    (site / "logo.png").write_bytes(b"\x89PNG\0\0" + PLANT.encode())  # binary: skipped on purpose
+    (site / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" + bytes(range(256)) * 20)  # clean binary
     code, out, _ = run("publish", "file", "site")
     assert code == 0, out
     (site / "js" / "app.js").write_text(f"x = 1;\nconst k = '{PLANT}';\n")
@@ -723,3 +723,19 @@ def test_fake_bom_before_a_utf8_token_does_not_hide_it():
         with pytest.raises(Refused) as e:
             publish.scan_files(None, [("x.env", bom + f"A=1\nTOKEN={PLANT}\n".encode())])
         assert PLANT not in str(e.value)
+
+
+def test_misaligned_bom_nul_padded_and_binary_files_do_not_hide_a_token():
+    tok = f"TOKEN={PLANT}\n"
+    cases = {
+        "shifted-bom": b"\xff\xfeX" + tok.encode("utf-16-le"),
+        "utf32-bom-utf16-body": b"\xff\xfe\0\0" + tok.encode("utf-16-le"),
+        "wrong-endian-bom": b"\xfe\xff" + tok.encode("utf-16-le"),
+        "one-nul": b"\0" + tok.encode(),
+        "tar-like": b"a.env" + b"\0" * 100 + tok.encode() + b"\0" * 400,
+        "utf32-no-bom": tok.encode("utf-32-le"),
+    }
+    for name, data in cases.items():
+        with pytest.raises(Refused) as e:
+            publish.scan_files(None, [(name, data)])
+        assert PLANT not in str(e.value), name

@@ -158,32 +158,27 @@ def _bundle_path(rel: str) -> str:
 
 
 def _texts_of(data: bytes) -> list[str]:
-    """The texts to scan, [] for a binary file (a NUL byte early on). UTF-16 and
-    UTF-32 text (Windows editors, PowerShell redirects) is NUL-heavy too, so it is decoded, never skipped."""
+    """Every reading of a file that is scanned; always the plain UTF-8 text, so never empty (binary files
+    are scanned too). Extra readings: the text with its NUL bytes dropped (ASCII inside UTF-16/32 at any
+    alignment, tar and database files with NUL padding) and the byte-order-mark or NUL-parity decode."""
+    views = [data.decode("utf-8", "replace")]
+    if b"\0" in data:
+        views.append(data.replace(b"\0", b"").decode("utf-8", "replace"))
     for bom, codec in (
         (b"\xff\xfe\0\0", "utf-32"),
         (b"\0\0\xfe\xff", "utf-32"),
         (b"\xff\xfe", "utf-16"),
         (b"\xfe\xff", "utf-16"),
-        (b"\xef\xbb\xbf", "utf-8-sig"),
     ):
         if data.startswith(bom):
-            return [
-                data.decode(codec, "replace"),
-                data.decode("utf-8", "replace"),
-            ]  # a fake BOM hides nothing
+            views.append(data.decode(codec, "replace"))
     head = data[:8192]
-    if b"\0" not in head:
-        return [data.decode("utf-8", "replace")]
     n = len(head) // 2
     if n >= 8:  # BOM-less UTF-16: NULs sit at one parity only (ASCII text)
         even, odd = head[0 : 2 * n : 2].count(0), head[1 : 2 * n : 2].count(0)
         if max(even, odd) >= 0.4 * n and min(even, odd) <= 0.02 * n:
-            return [
-                data.decode("utf-16-le" if odd > even else "utf-16-be", "replace"),
-                data.decode("utf-8", "replace"),
-            ]
-    return []
+            views.append(data.decode("utf-16-le" if odd > even else "utf-16-be", "replace"))
+    return views
 
 
 CHUNK = secretscan.MAX_BYTES // 2
