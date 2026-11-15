@@ -62,6 +62,10 @@ PERSON_OK = {
     ): "proof code: the bytes a person's decision MAC covers",
     ("workspace/src/orch/relay.py", "_answer_by"): "a relay message's body (its own rule), not a ticket",
     (
+        "workspace/src/orch/relay.py",
+        "_is_mine",
+    ): "writer-side crash check: compares the raw stored by with what this verdict wrote",
+    (
         "workspace-addons/factory/src/orch_factory/authority.py",
         "who",
     ): "CLI JSON (shown); Factory's one reader of answered_by",
