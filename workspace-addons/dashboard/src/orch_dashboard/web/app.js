@@ -291,7 +291,7 @@ function render(arrived = new Set()) {
   const active = document.activeElement;
   const activeKey = nodeKey(active);
   const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'notfound' ? 'Page not found' : 'Home';
-  document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
+  document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
   let title = pageName;
@@ -638,7 +638,6 @@ main.addEventListener('click', async event => {
     return;
   }
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
-  if (action === 'phone-pair') { phonePairDialog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {
@@ -680,6 +679,14 @@ main.addEventListener('click', async event => {
   }
   if (action === 'copies-retry') {
     (async () => { for (const s of array(state.settings?.copies_disk?.stuck)) await settingsSend('copies.retry', {ticket:s.ticket}, 'copies-clean'); })();
+    return;
+  }
+  if (action === 'ws-edit') { wsEditing = control.dataset.field; render(); document.querySelector('[data-key="settings-ws-' + wsEditing + '"]')?.focus(); return; }
+  if (action === 'ws-cancel') { wsEditing = null; render(); return; }
+  if (action === 'ws-save') {
+    const field = control.dataset.field;
+    const result = await settingsSend('workspace.set', {field, text:document.querySelector('[data-key="settings-ws-' + field + '"]')?.value || ''}, 'ws-' + field);
+    if (result.ok) { wsEditing = null; render(); }
     return;
   }
   if (action === 'copies-setup-edit') { copySetupEditing = true; render(); document.querySelector('[data-key="settings-copy-setup"]')?.focus(); return; }

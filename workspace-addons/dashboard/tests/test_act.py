@@ -1283,3 +1283,26 @@ def test_attach_files_to_an_existing_ticket():
         actions.attachments(
             "ticket.attach", {"ticket": "t_abcdef12", "files": [{"name": "x.exe", "text": "x"}]}
         )
+
+
+def test_workspace_set_builds_one_config_set_argv_and_signs_the_text():
+    import hashlib
+
+    argv = actions.build_argv("workspace.set", {"field": "name", "text": " Newsletter "})
+    assert argv[:3] == ["config", "set", "workspace.name"] and argv[-2:] == ["--", "Newsletter"]
+    assert actions.build_argv("workspace.set", {"field": "description", "text": ""})[-2:] == ["--", ""]
+    sha = hashlib.sha256(b"Newsletter").hexdigest()
+    assert actions.proof_for("workspace.set", {"field": "name", "text": " Newsletter "}) == (
+        "config.workspace_info",
+        "name:" + sha,
+    )
+    for bad in (
+        {"field": "other", "text": "x"},
+        {"field": "name", "text": "a\nb"},
+        {"field": "name", "text": "x" * 61},
+        {"field": "description", "text": "x" * 281},
+        {"field": "name", "text": 5},
+        {"field": "name", "text": "x", "extra": 1},
+    ):
+        with pytest.raises(actions.BadRequest):
+            actions.build_argv("workspace.set", bad)

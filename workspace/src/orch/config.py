@@ -12,6 +12,7 @@ import re
 import secrets
 import sys
 import tomllib
+import unicodedata
 from pathlib import Path
 
 from orch.errors import Refused
@@ -701,6 +702,54 @@ def set_code(root: Path, value: str) -> str:
     code = clean_code(value)
     set_key(root, "workspace", "code", code)
     return code
+
+
+MAX_WS_NAME = 60
+MAX_WS_DESCRIPTION = 280
+
+
+def _ws_text(value: str, what: str, limit: int) -> str:
+    v = " ".join(unicodedata.normalize("NFC", value).split())  # one line, single spaces
+    if any(unicodedata.category(c)[0] == "C" for c in v):
+        raise Refused(f"The {what} cannot contain control characters.")
+    if len(v) > limit:
+        raise Refused(f"The {what} can be at most {limit} characters.")
+    return v
+
+
+def workspace_name(root: Path | None) -> str | None:
+    """[workspace] name: the name shown for this workspace; None when not set (the folder name is shown)."""
+    if root is None:
+        return None
+    try:
+        v = (read(root).get("workspace") or {}).get("name")
+    except Refused:
+        return None
+    return v if isinstance(v, str) and 1 <= len(v) <= MAX_WS_NAME and v == v.strip() else None
+
+
+def workspace_description(root: Path | None) -> str | None:
+    """[workspace] description: one short line about this workspace, or None."""
+    if root is None:
+        return None
+    try:
+        v = (read(root).get("workspace") or {}).get("description")
+    except Refused:
+        return None
+    return v if isinstance(v, str) and 1 <= len(v) <= MAX_WS_DESCRIPTION else None
+
+
+def set_workspace_name(root: Path, value: str) -> str | None:
+    """ "" clears it (the folder name is shown again)."""
+    v = _ws_text(value, "name", MAX_WS_NAME)
+    set_key(root, "workspace", "name", v or None)
+    return v or None
+
+
+def set_workspace_description(root: Path, value: str) -> str | None:
+    v = _ws_text(value, "description", MAX_WS_DESCRIPTION)
+    set_key(root, "workspace", "description", v or None)
+    return v or None
 
 
 def agent_entries(root: Path) -> dict[str, dict]:
