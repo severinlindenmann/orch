@@ -1110,6 +1110,12 @@ def _run_runner(ws, monkeypatch, code_text):
     return pageproof._runner([sys.executable, "-c", code_text])
 
 
+def test_finished_update_carries_the_new_release(ws, monkeypatch):
+    monkeypatch.setattr("orch.updateinfo.installed", lambda: {"sha": None, "release": 21})
+    hp.write_update_status(ws, "finished")
+    assert hp.take_update_status(ws) == {"state": "finished", "reason": "", "release": 21}
+
+
 def test_runner_records_a_finished_update(ws, monkeypatch):
     assert _run_runner(ws, monkeypatch, "import sys; sys.stdin.read(); print('ok')") == 0
     assert hp.take_update_status(ws) == {"state": "finished", "reason": ""}

@@ -250,7 +250,7 @@
       tell(s.state, s.reason);
       updateDone();
       var why = (s.reason || "it did not finish").replace(/[.\s]+$/, "");
-      var t = s.state === "finished" ? "Update finished." : "Update failed: " + why + ".";
+      var t = s.state === "finished" ? (Number(s.release) > 0 ? "Updated to orch " + Number(s.release) + "." : "Update finished.") : "Update failed: " + why + ".";
       if (t !== shown) { shown = t; startedGone(); banner(t); }
       poll();  // an update request that waited no longer applies: it is gone from the list now
     }).catch(function () { tell("unreachable"); updateOverdue(true); });
