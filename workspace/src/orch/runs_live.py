@@ -31,7 +31,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, diag, history, procs, runhooks, runs, tickets
+from orch import adapters, brake, diag, history, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 MAX_LIVE = 4
@@ -1464,7 +1464,10 @@ def watch_start(root: Path, tid: str, run: str, name: str, proc: subprocess.Pope
 def restart_after_give_up(root: Path, tid: str, name: str) -> dict | None:
     """The live session gave up on its input (retry_deliver / check_submit): start the agent once more, now
     one step at a time (the kept input has live_retry, so the start is oneshot: it cannot give up again). Only
-    for a run orch ended itself (rec["restart"]), never after a person's Stop. Returns the start result."""
+    for a run orch ended itself (rec["restart"]), never after a person's Stop. Returns the start result.
+    While automation is paused nothing starts (the input stays queued)."""
+    if brake.paused(root) is not None:
+        return None
     try:
         result = runs.start(root, tid, AUTOMATION_BY)
     except Exception as e:  # the ticket then says so; the input stays queued
