@@ -99,7 +99,7 @@ def test_nested_fields_and_view_refused(proj, on):
     assert not on.sent
 
 
-def test_question_and_group_post_use_the_same_gate(proj, on):
+def test_question_and_group_post_use_the_same_check(proj, on):
     from orch import relay
 
     for type_, body in (
@@ -113,7 +113,7 @@ def test_question_and_group_post_use_the_same_gate(proj, on):
     assert not on.sent
 
 
-def test_blob_upload_gate_covers_every_blob_caller(proj, on):
+def test_blob_upload_check_covers_every_blob_caller(proj, on):
     from orch import relay
 
     with pytest.raises(Exception) as e:
@@ -133,7 +133,7 @@ def test_protocol_fields_are_not_content(proj, on):
     json.dumps({})  # (no secret: no refusal)
 
 
-def test_blob_gate_big_file_utf16_and_odd_paths(proj, on):
+def test_blob_check_big_file_utf16_and_odd_paths(proj, on):
     from orch import relay
 
     big = b"x\n" * 700_000 + f"token={TOKEN}\n".encode()  # secret past the first MB

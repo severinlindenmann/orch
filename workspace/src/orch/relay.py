@@ -51,7 +51,7 @@ def _cfg(root: Path) -> dict:
     return net.load_service(root, "relay")
 
 
-scan_outgoing = secretscan.refuse_if_secret_in  # one shared gate (secretscan.py), also used by publish
+scan_outgoing = secretscan.refuse_if_secret_in  # one shared check (secretscan.py), also used by publish
 
 
 def scan_blob(data: bytes, root: Path | None = None) -> None:

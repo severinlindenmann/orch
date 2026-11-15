@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import urllib.parse
 from pathlib import Path
 
 from orch.errors import Refused
@@ -161,7 +162,19 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
         parts.append(text)
         lines += text.count("\n") + 1
     try:
-        found = find("\n".join(parts), _stored_root(root))
+        from orch import phone_view
+
+        joined = "\n".join(parts)
+        found = find(joined, _stored_root(root))
+        # a line the phone view already scrubbed (it carries its "[hidden]" marker) is not flagged for a
+        # key=value shape again; token patterns and stored keys still hit on it
+        rows = joined.split("\n")
+        marks = (phone_view.HIDDEN, urllib.parse.quote(phone_view.HIDDEN, safe=""))
+        found = [
+            f
+            for f in found
+            if not (f["kind"] == "secret-value" and any(m in rows[f["line"] - 1] for m in marks))
+        ]
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
             f"orch could not check the {what} for secrets, so nothing was sent. Try again."
