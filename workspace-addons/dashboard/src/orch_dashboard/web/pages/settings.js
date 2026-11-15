@@ -9,8 +9,12 @@ const middleShort = (value, max = 48) => {
   const tail = Math.ceil((max - 1) / 2), head = max - 1 - tail;
   return text.slice(0, head) + '…' + text.slice(-tail);
 };
-// The add-on's name as the sidebar shows it (its manifest label), from the live add-on list.
-const rowLabel = a => addonLabel(addons().find(x => x.name === a.name) || a);
+// The add-on's name, the same whether it is on or off (never the lower-case package name, never a tab label).
+const rowLabel = a => capitalise(a?.name || 'add-on');
+// "Turning on…" next to a switch while the change runs (it can take half a minute: the services restart).
+const switchBusy = a => settingsBusy.has('addon-' + a.name) ? h('span', {className:'meta', 'data-key':'addon-busy-' + a.name, role:'status'}, a.active ? 'Turning off…' : 'Turning on…') : null;
+// A change of the add-ons restarts this page's server: nothing asks it (or an add-on's page) until it is back.
+const addonChanging = () => [...settingsBusy].some(k => String(k).startsWith('addon-'));
 const asList = value => Array.isArray(value) ? value : [value];
 const folderName = path => String(path || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
 const settingsText = (tag, attrs, value) => {
@@ -229,6 +233,7 @@ const syncPageOpen = () => { const r = route(); return r.kind === 'settings' || 
 async function syncLoad() {
   if (syncUi.loading || snapshot) return;
   clearTimeout(syncUi.timer); syncUi.timer = null;
+  if (addonChanging()) { syncUi.timer = setTimeout(syncLoad, 3000); return; }  // the server is restarting: look again soon
   if (!syncPageOpen()) return;  // the page was left: it loads again when Settings or the Sync page opens
   syncUi.loading = true;
   try {
@@ -515,7 +520,7 @@ function addonDetailPage(addon) {
   const shown = state.look ? state.look.shared_pages !== false : null;
   const settingsRows = [
     row('Add-on', settingsText('p', {}, addon.description || label),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off'), 'addon-detail-switch'),
+      fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -526,7 +531,7 @@ function addonDetailPage(addon) {
     heading(label, 'Add-on settings', {actions:h('a', {className:'btn ghost sm', href:'#settings/addons', 'data-key':'addon-detail-back'}, '← Installed add-ons')}),
     h('div', {className:'card'}, settingsRows),
     where,
-    snapshot || addon.name === 'dashboard' ? null : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove from this computer')),
+    snapshot || addon.name === 'dashboard' ? null : addon.removable === false ? settingsText('p', {className:'meta', 'data-key':'addon-detail-core'}, rowLabel(addon) + ' is part of orch. You can turn it off, but not remove it.') : h('div', {className:'row'}, h('button', {type:'button', className:'btn outline sm', 'data-action':'addon-remove', 'data-name':addon.name, 'data-key':'addon-detail-remove', disabled:settingsBusy.has('addon-' + addon.name)}, 'Remove from this computer')),
     h('section', {className:'addon-about', 'data-key':'addon-about'}, h('h3', {}, 'About this add-on'),
       settingsText('p', {className:'meta'}, connected && d.address ? 'Connection address: ' + d.address : addon.description || 'No connection address.'))));
 }
@@ -560,6 +565,7 @@ function settingsPage() {
     return h('div', {className:'card-row ad-row', 'data-key':'settings-addon-' + addon.name},
       h('div', {className:'grow'}, settingsText('h3', {}, rowLabel(addon)), settingsText('p', {className:'meta'}, addon.description), status, about),
       h('a', {className:'btn ghost sm', href:'#settings/addons/' + encodeURIComponent(addon.name), 'data-key':'settings-addon-open-' + addon.name, 'aria-label':rowLabel(addon) + ' settings'}, 'Settings →'),
+      switchBusy(addon),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':rowLabel(addon) + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off'));
   };
   const optional = array(settings.addons).filter(a => a.name !== 'dashboard');
@@ -712,29 +718,35 @@ function openAgentForm(control) {
   slot.replaceChildren(form);
   nameIn.focus();
 }
-// The catalogue: add-ons that ship with orch but are not installed here yet (`settings.available`). Add sends the same
-// op as the switch (`addon.set` on), so the person's click is the proof. Nothing is invented: no rows, no cards.
+// The catalogue: add-ons that ship with orch but are not installed here yet (`settings.available`) and the installed
+// ones that are off. "Add" and "Turn on" send the same op as the switch (`addon.set` on), so the person's click is
+// the proof. Nothing is invented: no rows, no cards. It reads the add-ons again when it opens, so an add-on removed
+// or added in the terminal is there at once.
 function addonCatalog() {
   const {d, actions} = dialog('Add an add-on', 'dialog', 'settings-other');
   const list = h('div', {className:'catalog', 'data-key':'catalog-list'});
   const added = new Map(), busy = new Set();
+  const offRows = () => array(state.settings?.addons).filter(r => r && typeof r.name === 'string' && r.name !== 'dashboard' && !r.active && r.installed !== false);
   const card = row => {
-    const done = added.get(row.name);
-    const label = row.label || row.name;
+    const done = added.get(row.name), off = row.turnOn === true;
+    const label = rowLabel(row);
     const body = [settingsText('h3', {}, label), settingsText('p', {className:'meta'}, row.description || '')];
-    if (row.consent) body.push(h('details', {className:'meta'}, settingsText('summary', {}, 'What this does'), settingsText('pre', {className:'preserve-lines consent-details'}, row.consent)));
+    if (row.consent) body.push(h('details', {className:'meta'}, settingsText('summary', {}, 'Details'), settingsText('pre', {className:'preserve-lines consent-details'}, String(row.consent).split('\n').slice(1).join('\n') || row.consent)));
     // its background service (if any) starts with the add: no separate Start step (a stopped page offers Start)
     if (done) body.push(h('div', {className:'catalog-done'}, settingsText('p', {className:'on-dot', 'data-key':'catalog-done-' + row.name}, 'Turned on.')));
     return h('div', {className:'card-row ad-row', 'data-key':'catalog-card-' + row.name},
       h('div', {className:'grow'}, ...body),
-      done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':'Add ' + label, disabled:busy.has(row.name)},
-        busy.has(row.name) ? 'Adding…' : 'Add'));
+      done ? null : h('button', {type:'button', className:'btn primary sm', 'data-key':'catalog-add-' + row.name, 'aria-label':(off ? 'Turn on ' : 'Add ') + label, disabled:busy.has(row.name)},
+        busy.has(row.name) ? (off ? 'Turning on…' : 'Adding…') : off ? 'Turn on' : 'Add'));
+  };
+  const rowsNow = () => {
+    const rows = array(state.settings?.available).filter(r => r && typeof r.name === 'string').concat(offRows().map(r => ({...r, turnOn:true})));
+    return rows.concat([...added.values()].filter(r => !rows.some(x => x.name === r.name)));
   };
   const fill = () => {
-    const rows = array(state.settings?.available).filter(r => r && typeof r.name === 'string');
-    const shown = rows.concat([...added.values()].filter(r => !rows.some(x => x.name === r.name)));
+    const shown = rowsNow();
     list.replaceChildren(...(shown.length ? shown.map(card)
-      : [settingsText('p', {className:'meta', 'data-key':'catalog-empty'}, 'Every add-on that comes with orch is already here.')]));
+      : [settingsText('p', {className:'meta', 'data-key':'catalog-empty'}, 'Every add-on that comes with orch is already here and turned on.')]));
   };
   list.addEventListener('click', async event => {
     const control = event.target.closest('button[data-key]');
@@ -742,11 +754,11 @@ function addonCatalog() {
     const key = control.dataset.key;
     if (!key.startsWith('catalog-add-')) return;
     const name = key.slice('catalog-add-'.length);
-    const row = array(state.settings?.available).find(r => r.name === name);
+    const row = rowsNow().find(r => r.name === name);
     if (!row || busy.has(name)) return;
-    busy.add(name); fill();
+    busy.add(name); settingsBusy.add('addon-' + name); fill();
     const result = await addonSet(name, true);
-    busy.delete(name);
+    busy.delete(name); settingsBusy.delete('addon-' + name);
     if (result.ok) { added.set(name, row); window.orch.toast('Turned on.', 'ok'); } else window.orch.toast(result.text, 'error');
     fill();
     if (result.ok) render();
@@ -754,6 +766,7 @@ function addonCatalog() {
   fill();
   d.append(list, actions);
   window.orch.open(d);
+  if (!snapshot) fetch('/api/state?fresh=1', {cache:'no-store'}).then(res => res.ok ? res.json() : null).then(next => { if (next && d.isConnected) { accept(next); fill(); } }).catch(() => {});
 }
 function settingsConfirm(title, text, cls, label, send) {
   const {d, actions} = dialog(title, 'dialog', 'settings-other');
@@ -771,7 +784,8 @@ function settingsConfirm(title, text, cls, label, send) {
   actions.append(confirm);
   const [lead, ...rest] = String(text).split('\n');
   if (rest.length && cls === 'preserve-lines') {
-    d.append(settingsText('p', {}, lead), settingsText('pre', {className:cls + ' consent-details'}, rest.join('\n')), actions);
+    // one plain sentence first; the technical lines (version, command, where data is kept) behind a small click
+    d.append(settingsText('p', {}, lead), h('details', {className:'meta'}, settingsText('summary', {}, 'Details'), settingsText('pre', {className:cls + ' consent-details'}, rest.join('\n'))), actions);
   } else d.append(settingsText('pre', {className:cls}, text), actions);
   window.orch.open(d);
 }
@@ -944,7 +958,8 @@ function paintAddon(id) {
   window.scrollTo(...scroll);
 }
 async function loadAddon(id, manual = false) {
-  if (addonBusy.has(id)) return;
+  if (addonBusy.has(id) || addonChanging()) return;
+  if (!snapshot && state && !addons().some(a => a.name === id)) return;  // turned off or removed: nothing to ask
   addonBusy.add(id);
   const retry = main.querySelector('[data-action="retry-addon"]');
   if (manual && retry) { retry.disabled = true; retry.textContent = 'Trying…'; }

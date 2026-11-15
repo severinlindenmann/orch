@@ -297,13 +297,39 @@ def test_settings_splits_installed_and_available(ws, monkeypatch):
     assert f["description"] == "Shows the plan." and "Adds a dashboard tab: Factory" in f["consent"]
 
 
+def test_settings_rows_say_what_can_be_removed_and_the_label_is_never_lower_case(ws, monkeypatch):
+    """core refuses `orch addon uninstall` for relay/publish: the row says removable false; a label never falls back to the package name."""
+    from orch_dashboard import data
+
+    rows = [
+        {"name": "relay", "installed": True, "active": False, "description": "R"},
+        {"name": "factory", "installed": True, "active": False, "description": "F"},
+        {"name": "insights", "installed": False, "active": False, "description": "I"},
+    ]
+    monkeypatch.setattr(
+        data, "run_orch", lambda b, args, root: rows if args == ["addon", "list", "--json"] else None
+    )
+    out = data.load_settings(ws, "orch")
+    assert {a["name"]: a["removable"] for a in out["addons"]} == {"relay": False, "factory": True}
+    assert out["available"][0]["label"] == "Insights"
+
+
+def test_a_fresh_state_read_forgets_the_cached_add_on_list():
+    """The catalogue opens with /api/state?fresh=1: an add-on removed in the terminal must not wait for the 10 s cache."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src/orch_dashboard/server.py").read_text(encoding="utf-8")
+    block = src[src.index("if fresh:") :][:200]
+    assert "forget_static()" in block
+
+
 def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
     src = webjs.all_js()
     start = src.index("function addonCatalog()")
     body = src[start : src.index("function settingsConfirm", start)]
     assert "addonSet(name, true)" in body  # same op as the switch (addon.set), recovered after a restart
     assert "act('addon.set', {name, on})" in src[src.index("async function addonSet(") :][:400]
-    assert "'Every add-on that comes with orch is already here.'" in body
+    assert "'Every add-on that comes with orch is already here and turned on.'" in body
     assert (
         "'Turned on.'" in body and "It starts with orch start" not in body
     )  # its service starts with the add
