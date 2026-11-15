@@ -192,6 +192,67 @@ async fn container_idle_app_sleeps_and_wakes_on_request() {
     std::env::remove_var("ORCH_PUBLISH_SANDBOX");
 }
 
+/// The race on the real engine: a container stop takes seconds (PID 1 ignores SIGTERM, so `docker stop` waits for
+/// its timeout). A request that wakes the app while the sweeper is still stopping the old container must get its
+/// answer, and the woken app must still run after the old stop has finished.
+#[tokio::test]
+#[ignore]
+async fn container_request_during_the_sleep_stop_keeps_the_woken_app() {
+    if std::env::var("ORCH_PUBLISH_TEST_ENGINE").is_err() {
+        return;
+    }
+    std::env::set_var("ORCH_PUBLISH_SANDBOX", "container");
+    let t = setup_with(|c| {
+        c.health_secs = 60;
+        c.idle_secs = 1;
+        c.sleep_sweep_secs = 1;
+    });
+    let ws = t.workspace("A", all_rights()).await;
+    let toml = "name = \"race\"\nstack = \"python\"\nstart = \"python main.py\"\nhealth = \"/health\"\npublic = true\n";
+    let r = t
+        .api(
+            &ws,
+            "PUT",
+            "/v1/apps/race",
+            bundle(&[("app.toml", toml), ("main.py", PY)]),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let running = || {
+        let o = std::process::Command::new("docker")
+            .env(
+                "DOCKER_HOST",
+                format!(
+                    "unix://{}",
+                    std::env::var("ORCH_PUBLISH_ENGINE_SOCKET")
+                        .unwrap_or("/run/kiri/docker.sock".into())
+                ),
+            )
+            .args(["ps", "--filter", "label=orch.publish.app=race", "-q"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout)
+            .split_whitespace()
+            .count()
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await; // idle long enough
+    let (_, g) = tokio::join!(orch_publish::apps::sleep_sweep(&t.st), async {
+        // arrive while the sweeper's `docker stop` of the old container is still waiting
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        call(&t.public, "GET", "/a/race/", &[], vec![]).await
+    });
+    assert_eq!(g.status, 200, "request during the sleep stop: {}", g.text());
+    // the old container's stop has finished by now (timeout 5 s); the woken one must still run and answer
+    tokio::time::sleep(std::time::Duration::from_secs(7)).await;
+    assert_eq!(running(), 1, "exactly the woken container runs");
+    let g2 = call(&t.public, "GET", "/a/race/", &[], vec![]).await;
+    assert_eq!(g2.status, 200, "after the old stop: {}", g2.text());
+    let l = t.api(&ws, "GET", "/v1/apps", vec![]).await.json();
+    assert_eq!(l["items"][0]["awake"], true);
+    t.api(&ws, "DELETE", "/v1/apps/race", vec![]).await;
+    std::env::remove_var("ORCH_PUBLISH_SANDBOX");
+}
+
 /// A build step that plants links where the server later cleans up must not make it touch the target.
 #[tokio::test]
 #[ignore]
