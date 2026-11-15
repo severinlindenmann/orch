@@ -4,10 +4,6 @@
   "style": 0
  },
  "mobile/OrchMobile/MockRelay.swift": {
-  "hex": 2,
-  "style": 0
- },
- "mobile/OrchMobile/Views/ChatScreens.swift": {
   "hex": 1,
   "style": 0
  },
@@ -15,27 +11,7 @@
   "hex": 6,
   "style": 0
  },
- "mobile/OrchMobile/Views/MobileModeBanner.swift": {
-  "hex": 1,
-  "style": 0
- },
- "mobile/OrchMobileTests/DoneReviewTests.swift": {
-  "hex": 1,
-  "style": 0
- },
- "mobile/OrchMobileTests/ExtraTakesTests.swift": {
-  "hex": 1,
-  "style": 0
- },
  "mobile/OrchMobileTests/M0Tests.swift": {
-  "hex": 1,
-  "style": 0
- },
- "mobile/OrchMobileTests/TicketTests.swift": {
-  "hex": 2,
-  "style": 0
- },
- "mobile/OrchMobileUITests/ComposerVisibleUITests.swift": {
   "hex": 1,
   "style": 0
  },
@@ -388,7 +364,7 @@
   "style": 0
  },
  "workspace-addons/dashboard/src/orch_dashboard/web/style.css": {
-  "hex": 44,
+  "hex": 34,
   "style": 0
  },
  "workspace-addons/dashboard/tests/blocks/blocks-demo.css": {
@@ -400,10 +376,6 @@
   "style": 1
  },
  "workspace-addons/dashboard/tests/look.test.js": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/tests/route.test.js": {
   "hex": 1,
   "style": 0
  },
