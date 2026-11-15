@@ -78,6 +78,11 @@ pub fn container_mode() -> bool {
     std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "container")
 }
 
+/// Apps with their own Dockerfile: container mode AND ORCH_PUBLISH_DOCKER_APPS=1.
+pub fn docker_apps_enabled() -> bool {
+    container_mode() && crate::config::var("DOCKER_APPS").is_some_and(|v| v == "1")
+}
+
 // ---- container mode (driven with the `docker` CLI; the attached `docker run` is the Child)
 
 /// uid every app container runs as (never the server's own uid); the gid is the server's group.
@@ -116,9 +121,32 @@ pub fn group_writable_dir(p: &Path) {
     let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o2770));
 }
 
-/// One docker network per app, so apps cannot reach each other.
+static INSTANCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Remembers which publish instance (data folder) this server is; the first call wins.
+pub fn set_instance(data_dir: &Path) {
+    let _ =
+        INSTANCE.set(crate::util::sha256_hex(&data_dir.display().to_string())[..12].to_string());
+}
+
+/// First 12 hex of sha256(data dir): scopes labels, networks and images to this server, so a second
+/// instance (staging, tests) on the same engine never touches this one's containers.
+fn instance() -> String {
+    INSTANCE
+        .get_or_init(|| {
+            let d =
+                crate::config::var("DATA_DIR").unwrap_or_else(|| "/var/lib/orch-publish".into());
+            crate::util::sha256_hex(&d)[..12].to_string()
+        })
+        .clone()
+}
+
+/// One docker network per app (and instance), so apps cannot reach each other.
 pub fn network_name(app: &str) -> String {
-    format!("orch-net-{}", &crate::util::sha256_hex(app_of(app))[..24])
+    format!(
+        "orch-net-{}",
+        &crate::util::sha256_hex(&format!("{}:{}", instance(), app_of(app)))[..24]
+    )
 }
 
 fn known_networks() -> &'static Mutex<HashSet<String>> {
@@ -158,8 +186,8 @@ fn pick_subnet(pool: &str, used: &[String]) -> Option<String> {
         .map(|s| format!("{}/28", std::net::Ipv4Addr::from(s as u32)))
 }
 
-/// Subnets of the existing per-app networks.
-fn used_app_subnets() -> Vec<String> {
+/// (network name, subnet) of every existing per-app network (all instances).
+fn app_networks() -> Vec<(String, String)> {
     let names = docker_std()
         .args([
             "network",
@@ -172,57 +200,88 @@ fn used_app_subnets() -> Vec<String> {
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
-    names
-        .lines()
-        .filter(|n| n.starts_with("orch-net-"))
-        .filter_map(|n| {
-            docker_std()
-                .args([
-                    "network",
-                    "inspect",
-                    "-f",
-                    "{{range .IPAM.Config}}{{.Subnet}} {{end}}",
-                    n,
-                ])
-                .output()
-                .ok()
-        })
-        .flat_map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .split_whitespace()
-                .map(String::from)
-                .collect::<Vec<_>>()
-        })
-        .collect()
+    let mut v = Vec::new();
+    for n in names.lines().filter(|n| n.starts_with("orch-net-")) {
+        let Ok(o) = docker_std()
+            .args([
+                "network",
+                "inspect",
+                "-f",
+                "{{range .IPAM.Config}}{{.Subnet}} {{end}}",
+                n,
+            ])
+            .output()
+        else {
+            continue;
+        };
+        for sub in String::from_utf8_lossy(&o.stdout).split_whitespace() {
+            v.push((n.to_string(), sub.to_string()));
+        }
+    }
+    v
 }
 
-/// Creates the app's network once, with its own /28 from the pool (best effort: a real error
-/// shows up when the app starts).
+/// True when another network than `me` overlaps one of `me`'s subnets.
+fn subnet_clash(me: &str, nets: &[(String, String)]) -> bool {
+    let range = |c: &str| {
+        parse_cidr(c).map(|(ip, l)| {
+            let size = 1u64 << (32 - l);
+            let start = ip as u64 & !(size - 1);
+            (start, start + size)
+        })
+    };
+    let mine: Vec<_> = nets
+        .iter()
+        .filter(|(n, _)| n == me)
+        .filter_map(|(_, c)| range(c))
+        .collect();
+    nets.iter()
+        .filter(|(n, _)| n != me)
+        .filter_map(|(_, c)| range(c))
+        .any(|(a, b)| mine.iter().any(|(x, y)| a < *y && *x < b))
+}
+
+fn network_lock() -> &'static Mutex<()> {
+    static L: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+    L.get_or_init(Default::default)
+}
+
+/// Creates the app's network once, with its own /28 from the pool.
 ///
 /// A per-app network is NEVER removed (not when the app is removed either): Kiri 0.2.0 keeps its DNS
 /// listener on the old gateway after `docker network rm`, and a new network with the same subnet
 /// then fails every `docker run` with "dns bind: Address in use". The next deploy of the same app
 /// name reuses the network. (Upstream Kiri issue to be filed.)
-fn ensure_network(app: &str) {
+///
+/// inspect, pick and create run under one process-wide lock (two first deploys must not pick the
+/// same slot); afterwards the network is checked again for an overlap with any other one.
+fn ensure_network(app: &str) -> Result<(), String> {
     let net = network_name(app);
     if known_networks().lock().unwrap().contains(&net) {
-        return;
+        return Ok(());
     }
+    let _g = network_lock().lock().unwrap_or_else(|e| e.into_inner());
     let exists = docker_std()
         .args(["network", "inspect", &net])
         .output()
         .is_ok_and(|o| o.status.success());
-    let pool = crate::config::var("APP_SUBNETS").unwrap_or_else(|| "10.213.0.0/16".into());
-    let created = exists
-        || pick_subnet(&pool, &used_app_subnets()).is_some_and(|subnet| {
-            docker_std()
-                .args(["network", "create", "--subnet", &subnet, &net])
-                .output()
-                .is_ok_and(|o| o.status.success())
-        });
-    if created {
-        known_networks().lock().unwrap().insert(net);
+    if !exists {
+        let pool = crate::config::var("APP_SUBNETS").unwrap_or_else(|| "10.213.0.0/16".into());
+        let used: Vec<String> = app_networks().into_iter().map(|(_, s)| s).collect();
+        let subnet = pick_subnet(&pool, &used).ok_or("no free app network left")?;
+        let ok = docker_std()
+            .args(["network", "create", "--subnet", &subnet, &net])
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !ok {
+            return Err("could not create the app network".into());
+        }
     }
+    if subnet_clash(&net, &app_networks()) {
+        return Err("the app network overlaps another one".into());
+    }
+    known_networks().lock().unwrap().insert(net);
+    Ok(())
 }
 
 fn stack_image(stack: &str) -> &'static str {
@@ -269,6 +328,7 @@ fn container_run_args(o: &RunOpts) -> Vec<String> {
         }};
     }
     kv!("--label", format!("orch.publish.app={}", o.app));
+    kv!("--label", format!("orch.publish.instance={}", instance()));
     if o.step {
         kv!("--label", "orch.publish.step=1".into());
     }
@@ -329,13 +389,19 @@ fn container_run_args(o: &RunOpts) -> Vec<String> {
             .unwrap_or_else(|| stack_image(o.stack).into()),
     );
     if let Some(s) = o.script {
-        if let (false, Some(n)) = (docker, o.timeout_secs) {
-            a.extend(["timeout".into(), n.to_string()]);
+        let mut script = s.to_string();
+        match (docker, o.timeout_secs) {
+            (false, Some(n)) => {
+                a.extend(["timeout".into(), "-k".into(), "5".into(), n.to_string()])
+            }
+            // the image may have no `timeout`: a watchdog in the same shell kills everything
+            (true, Some(n)) => script = format!("(sleep {n}; kill -9 -1) & {s}"),
+            _ => {}
         }
         if !docker {
             a.push("sh".into());
         }
-        a.extend(["-c".into(), s.into()]);
+        a.extend(["-c".into(), script]);
     }
     a
 }
@@ -388,20 +454,26 @@ fn orphan_containers(listed: &str, known: &HashSet<String>) -> Vec<String> {
 /// At server start: removes every leftover step container and every app container whose app
 /// is not in the database.
 pub async fn sweep_containers(known_apps: &HashSet<String>) {
-    let list = |filter: &'static str| async move {
-        Command::from(docker_std())
-            .args([
-                "ps",
-                "-a",
-                "--filter",
-                filter,
-                "--format",
-                "{{.Label \"orch.publish.app\"}}\t{{.Names}}",
-            ])
-            .output()
-            .await
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-            .unwrap_or_default()
+    let inst = format!("label=orch.publish.instance={}", instance());
+    let list = |filter: &'static str| {
+        let inst = inst.clone();
+        async move {
+            Command::from(docker_std())
+                .args([
+                    "ps",
+                    "-a",
+                    "--filter",
+                    filter,
+                    "--filter",
+                    &inst,
+                    "--format",
+                    "{{.Label \"orch.publish.app\"}}\t{{.Names}}",
+                ])
+                .output()
+                .await
+                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                .unwrap_or_default()
+        }
     };
     for l in list("label=orch.publish.step").await.lines() {
         if let Some((_, n)) = l.split_once('\t') {
@@ -447,8 +519,12 @@ pub fn check_dockerfile(text: &str) -> Result<(), &'static str> {
         .flat_map(str::chars)
         .filter(|c| !c.is_ascii_whitespace() && *c != '\\' && *c != '`')
         .collect();
-    if lower.contains("--mount") || squashed.contains("--mount") {
-        return Err("The Dockerfile must not use `--mount=`.");
+    for flag in ["--mount", "--network", "--security", "--device"] {
+        if lower.contains(flag) || squashed.contains(flag) {
+            return Err(
+                "The Dockerfile must not use `--mount`, `--network`, `--security` or `--device`.",
+            );
+        }
     }
     Ok(())
 }
@@ -458,9 +534,45 @@ fn build_gate() -> &'static tokio::sync::Semaphore {
     S.get_or_init(|| tokio::sync::Semaphore::new(1))
 }
 
+/// Repository part of an app's image tags (scoped to this instance).
+fn image_repo(app: &str) -> String {
+    format!("orch-app-{}-{app}", instance())
+}
+
 /// Tag of a new image: unique even after an app name is reused.
 pub fn new_image_tag(app: &str, vdir: &str) -> String {
-    format!("orch-app-{app}:{vdir}-{}", crate::util::rand_id(8))
+    format!("{}:{vdir}-{}", image_repo(app), crate::util::rand_id(8))
+}
+
+/// True when `tag` (the part after `:`) is exactly `<vdir>-<8 lowercase/digit chars>`.
+fn tag_is_version(tag: &str, vdir: &str) -> bool {
+    tag.strip_prefix(vdir)
+        .and_then(|r| r.strip_prefix('-'))
+        .is_some_and(|r| {
+            r.len() == 8
+                && r.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
+/// Refuses an image whose config could re-label a container (`dev.kiri.*`, `orch.*`) or declare
+/// anonymous volumes. Input: `docker image inspect -f '{{json .Config}}'`. Fails closed.
+pub fn check_image_config(json: &str) -> Result<(), &'static str> {
+    let v: serde_json::Value =
+        serde_json::from_str(json.trim()).map_err(|_| "The image could not be inspected.")?;
+    if let Some(l) = v.get("Labels").and_then(|l| l.as_object()) {
+        if l.keys()
+            .any(|k| k.starts_with("dev.kiri.") || k.starts_with("orch."))
+        {
+            return Err("The image has labels that are reserved (dev.kiri.*, orch.*).");
+        }
+    }
+    match v.get("Volumes") {
+        None | Some(serde_json::Value::Null) => {}
+        Some(serde_json::Value::Object(o)) if o.is_empty() => {}
+        _ => return Err("The image declares a VOLUME, which is not allowed."),
+    }
+    Ok(())
 }
 
 /// `docker build` of a docker-stack bundle (one build at a time on this server). Returns (success, output).
@@ -472,7 +584,7 @@ pub async fn build_image(tag: &str, dir: &Path, secs: u64) -> (bool, String) {
         .arg(dir)
         .stdin(Stdio::null())
         .kill_on_drop(true);
-    let r = match tokio::time::timeout(Duration::from_secs(secs), c.output()).await {
+    let mut r = match tokio::time::timeout(Duration::from_secs(secs), c.output()).await {
         Err(_) => (false, format!("timed out after {secs} s")),
         Ok(Err(e)) => (false, e.to_string()),
         Ok(Ok(o)) => {
@@ -481,6 +593,21 @@ pub async fn build_image(tag: &str, dir: &Path, secs: u64) -> (bool, String) {
             (o.status.success(), out)
         }
     };
+    if r.0 {
+        let cfg = Command::from(docker_std())
+            .args(["image", "inspect", "-f", "{{json .Config}}", tag])
+            .output()
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        if let Err(e) = check_image_config(&cfg) {
+            let _ = Command::from(docker_std())
+                .args(["rmi", "-f", tag])
+                .output()
+                .await;
+            r = (false, e.to_string());
+        }
+    }
     let _ = Command::from(docker_std())
         .args(["builder", "prune", "-f", "--keep-storage", "2GB"])
         .output()
@@ -488,19 +615,16 @@ pub async fn build_image(tag: &str, dir: &Path, secs: u64) -> (bool, String) {
     r
 }
 
-/// Images of an app (`vdir` = only that version).
+/// Images of an app (`vdir` = only that version, matched by the exact `<vdir>-<8 chars>` tag).
 async fn find_images(app: &str, vdir: Option<&str>) -> Vec<String> {
-    let pat = match vdir {
-        Some(v) => format!("orch-app-{app}:{v}-*"),
-        None => format!("orch-app-{app}:*"),
-    };
-    Command::from(docker_std())
+    let repo = image_repo(app);
+    let listed: Vec<String> = Command::from(docker_std())
         .args([
             "images",
             "--format",
             "{{.Repository}}:{{.Tag}}",
             "--filter",
-            &format!("reference={pat}"),
+            &format!("reference={repo}"),
         ])
         .output()
         .await
@@ -511,7 +635,14 @@ async fn find_images(app: &str, vdir: Option<&str>) -> Vec<String> {
                 .filter(|l| !l.is_empty())
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    listed
+        .into_iter()
+        .filter(|t| {
+            t.strip_prefix(&format!("{repo}:"))
+                .is_some_and(|tag| vdir.is_none_or(|v| tag_is_version(tag, v)))
+        })
+        .collect()
 }
 
 /// The image of this version, built now if the engine does not have it. None = could not build.
@@ -521,6 +652,20 @@ pub async fn ensure_image(app: &str, vdir: &str, dir: &Path, secs: u64) -> Optio
     }
     let tag = new_image_tag(app, vdir);
     build_image(&tag, dir, secs).await.0.then_some(tag)
+}
+
+/// Container mode: the app owns files as uid 61000 (it may have chmod-ed them away), so the server
+/// could not delete them. Gives that uid back full rights first (best effort).
+pub async fn make_deletable(dir: &Path) {
+    if !dir.exists() {
+        return;
+    }
+    let _ = Command::from(docker_std())
+        .args(["run", "--rm", "--user", "61000", "--network", "none", "-v"])
+        .arg(format!("{}:/x", dir.display()))
+        .args([stack_image("python"), "chmod", "-R", "u+rwX", "/x"])
+        .output()
+        .await;
 }
 
 /// Removes the images of an app: one version (`vdir`) or all of them (best effort).
@@ -693,7 +838,7 @@ impl Runner {
             }
         }
         let mut cmd = if container_mode() {
-            ensure_network(name);
+            ensure_network(name).map_err(std::io::Error::other)?;
             let live: HashSet<String> = self
                 .procs
                 .lock()
@@ -702,8 +847,18 @@ impl Runner {
                 .map(|p| p.unit.clone())
                 .collect();
             let label = format!("label=orch.publish.app={}", app_of(name));
+            let inst = format!("label=orch.publish.instance={}", instance());
             let listed = docker_std()
-                .args(["ps", "-a", "--filter", &label, "--format", "{{.Names}}"])
+                .args([
+                    "ps",
+                    "-a",
+                    "--filter",
+                    &label,
+                    "--filter",
+                    &inst,
+                    "--format",
+                    "{{.Names}}",
+                ])
                 .output()
                 .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
                 .unwrap_or_default();
@@ -831,7 +986,10 @@ pub async fn run_step(
     let container = container_mode();
     let mut c = if container {
         let app = ctx.app.to_string();
-        let _ = tokio::task::spawn_blocking(move || ensure_network(&app)).await;
+        let net = tokio::task::spawn_blocking(move || ensure_network(&app)).await;
+        if let Ok(Err(e)) = net {
+            return (false, e);
+        }
         group_writable_dir(data_dir);
         let script = format!("umask 002; {cmd}");
         let args = container_run_args(&RunOpts {
@@ -878,17 +1036,19 @@ pub async fn run_step(
         }
     };
     let res = tokio::time::timeout(Duration::from_secs(secs), c.output()).await;
-    guard.armed = false;
     match res {
         Err(_) => {
             cleanup(unit).await;
+            guard.armed = false;
             (false, format!("timed out after {secs} s"))
         }
         Ok(Err(e)) => {
             cleanup(unit).await;
+            guard.armed = false;
             (false, e.to_string())
         }
         Ok(Ok(o)) => {
+            guard.armed = false;
             let mut out = String::from_utf8_lossy(&o.stdout).to_string();
             out.push_str(&String::from_utf8_lossy(&o.stderr));
             (o.status.success(), out)
@@ -1060,8 +1220,8 @@ mod tests {
         assert!(!a.iter().any(|x| x.contains("dev.kiri")));
         let n = a.len();
         assert_eq!(
-            &a[n - 6..n - 1],
-            ["node:22-slim", "timeout", "65", "sh", "-c"].map(String::from)
+            &a[n - 8..n - 1],
+            ["node:22-slim", "timeout", "-k", "5", "65", "sh", "-c"].map(String::from)
         );
         assert!(a.contains(&"node:22-slim".to_string()));
         assert!(!a.iter().any(|x| x.starts_with("PATH=")));
@@ -1122,7 +1282,12 @@ mod tests {
         let n = a.len();
         assert_eq!(
             &a[n - 3..],
-            ["orch-app-de:v1-abcd1234", "-c", "./run"].map(String::from)
+            [
+                "orch-app-de:v1-abcd1234",
+                "-c",
+                "(sleep 60; kill -9 -1) & ./run"
+            ]
+            .map(String::from)
         );
         o.script = None;
         assert!(!container_run_args(&o).contains(&"--entrypoint".to_string()));
@@ -1146,6 +1311,17 @@ mod tests {
             "CRLF"
         );
         assert!(check_dockerfile("FROM x\nRUN --MOUNT=type=cache x\n").is_err());
+        for f in [
+            "--network=host",
+            "--security=insecure",
+            "--device=x",
+            "--Net`\nwork=host",
+        ] {
+            assert!(
+                check_dockerfile(&format!("FROM x\nRUN {f} true\n")).is_err(),
+                "{f}"
+            );
+        }
         assert!(
             check_dockerfile("FROM x\nRUN --mo\\  \t\nunt=type=cache x\n").is_err(),
             "blanks after the backslash"
@@ -1190,7 +1366,73 @@ mod tests {
     #[test]
     fn image_tags_are_unique() {
         let a = new_image_tag("demo", "v1abc");
-        assert!(a.starts_with("orch-app-demo:v1abc-"));
+        assert!(a.starts_with(&format!("orch-app-{}-demo:v1abc-", instance())));
         assert_ne!(a, new_image_tag("demo", "v1abc"));
+    }
+
+    #[test]
+    fn instance_scope_in_labels_networks_and_images() {
+        let d = PathBuf::from("/srv/code");
+        let a = container_run_args(&opts("python", None, &d));
+        assert!(pair(
+            &a,
+            "--label",
+            &format!("orch.publish.instance={}", instance())
+        ));
+        assert_eq!(instance().len(), 12);
+        assert!(
+            new_image_tag("demo", "v1").starts_with(&format!("orch-app-{}-demo:v1-", instance()))
+        );
+    }
+
+    #[test]
+    fn exact_version_tags_only() {
+        assert!(tag_is_version("v1abc-ab12cd34", "v1abc"));
+        assert!(!tag_is_version("v1abc-2-ab12cd34", "v1abc"));
+        assert!(!tag_is_version("v1abc-ab12cd3", "v1abc"));
+        assert!(!tag_is_version("v1abc-AB12CD34", "v1abc"));
+        assert!(!tag_is_version("v1abcd-ab12cd34", "v1abc"));
+    }
+
+    #[test]
+    fn image_config_check() {
+        assert!(check_image_config(r#"{"Labels":null,"Volumes":null}"#).is_ok());
+        assert!(check_image_config(r#"{"Labels":{"maintainer":"x"},"Volumes":{}}"#).is_ok());
+        assert!(check_image_config(r#"{"Labels":{"dev.kiri.domain":"x"}}"#).is_err());
+        assert!(check_image_config(r#"{"Labels":{"orch.publish.app":"x"}}"#).is_err());
+        assert!(check_image_config(r#"{"Volumes":{"/data":{}}}"#).is_err());
+        assert!(check_image_config("not json").is_err());
+        assert!(check_image_config("").is_err());
+    }
+
+    #[test]
+    fn subnet_clash_detection() {
+        let n = |a: &str, b: &str| (a.to_string(), b.to_string());
+        let nets = vec![n("a", "10.213.0.0/28"), n("b", "10.213.0.16/28")];
+        assert!(!subnet_clash("a", &nets));
+        let nets = vec![n("a", "10.213.0.0/28"), n("b", "10.213.0.0/28")];
+        assert!(subnet_clash("a", &nets));
+        let nets = vec![n("a", "10.213.0.4/28"), n("b", "10.213.0.0/24")];
+        assert!(subnet_clash("a", &nets));
+    }
+
+    #[test]
+    fn step_backstops() {
+        let d = PathBuf::from("/srv/code");
+        let mut o = opts("python", None, &d);
+        o.step = true;
+        o.timeout_secs = Some(60);
+        let a = container_run_args(&o);
+        let n = a.len();
+        assert_eq!(
+            &a[n - 7..n - 2],
+            ["timeout", "-k", "5", "60", "sh"].map(String::from)
+        );
+        let mut o = opts("docker", Some("img:1"), &d);
+        o.step = true;
+        o.timeout_secs = Some(60);
+        o.script = Some("./t");
+        let a = container_run_args(&o);
+        assert_eq!(a.last().unwrap(), "(sleep 60; kill -9 -1) & ./t");
     }
 }

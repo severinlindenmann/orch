@@ -35,6 +35,7 @@ pub type State = Arc<Inner>;
 
 /// Opens the database and folders under `cfg.data_dir`.
 pub fn new_state(cfg: Config) -> std::io::Result<State> {
+    runner::set_instance(&cfg.data_dir);
     for d in ["files", "logs"] {
         std::fs::create_dir_all(cfg.data_dir.join(d))?;
     }
@@ -113,4 +114,9 @@ pub fn start_background(st: State) {
             sweep::sweep(&st).await;
         }
     });
+}
+
+/// Call before the listeners bind (container mode: removes leftover containers of this instance).
+pub async fn sweep_containers_at_start(st: &State) {
+    apps::startup_sweep(st).await;
 }

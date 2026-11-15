@@ -35,7 +35,7 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
         .map_err(|_| ApiError::invalid("The bundle has no app.toml at its top level."))?;
     let m: Manifest = toml::from_str(&text)
         .map_err(|e| ApiError::invalid(format!("app.toml is not valid: {}", e.message())))?;
-    let docker_ok = container_mode() && crate::config::var("DOCKER_APPS").is_some_and(|v| v == "1");
+    let docker_ok = crate::runner::docker_apps_enabled();
     check_manifest(&m, dir, docker_ok)?;
     Ok(m)
 }
@@ -82,6 +82,14 @@ fn check_manifest(m: &Manifest, dir: &FsPath, docker_ok: bool) -> ApiResult<()> 
         }
     }
     Ok(())
+}
+
+/// Deletes a folder; in container mode the app's uid gets its rights back first.
+async fn rm_tree(p: &FsPath) {
+    if container_mode() {
+        crate::runner::make_deletable(p).await;
+    }
+    let _ = std::fs::remove_dir_all(p);
 }
 
 /// Version folder name of the code in `code_dir` (images are tagged `orch-app-<name>:<vdir>-<random>`).
@@ -238,7 +246,7 @@ pub async fn deploy(
                 crate::runner::remove_images(name, Some(&v)).await;
             }
         }
-        let _ = std::fs::remove_dir_all(&vroot);
+        rm_tree(&vroot).await;
         st.runner.stop(&format!("{name}~new")).await;
     }
     r
@@ -345,7 +353,7 @@ async fn deploy_inner(
             &ctx,
         )
         .await;
-        let _ = std::fs::remove_dir_all(&td);
+        rm_tree(&td).await;
         if !ok {
             return Err(ApiError::new(
                 422,
@@ -407,7 +415,7 @@ async fn deploy_inner(
                         crate::runner::remove_images(name, Some(&v)).await;
                     }
                 }
-                let _ = std::fs::remove_dir_all(v);
+                rm_tree(&v).await;
             }
         }
     }
@@ -488,17 +496,23 @@ pub async fn remove(st: &State, name: &str) {
     if container_mode() {
         crate::runner::remove_images(name, None).await;
     }
-    let _ = std::fs::remove_dir_all(st.cfg.app_root(name));
+    rm_tree(&st.cfg.app_root(name)).await;
     let _ = std::fs::remove_file(st.cfg.log_path(name));
     let _ = db::delete_app(&st.db.lock().unwrap(), name);
 }
 
-pub async fn resume_all(st: &State) {
-    let apps = db::all_apps(&st.db.lock().unwrap()).unwrap_or_default();
+/// Container mode, before the listeners start: removes leftover step containers and containers of
+/// apps that are not in the database (this instance only).
+pub async fn startup_sweep(st: &State) {
     if container_mode() {
+        let apps = db::all_apps(&st.db.lock().unwrap()).unwrap_or_default();
         let known = apps.iter().map(|a| a.name.clone()).collect();
         crate::runner::sweep_containers(&known).await;
     }
+}
+
+pub async fn resume_all(st: &State) {
+    let apps = db::all_apps(&st.db.lock().unwrap()).unwrap_or_default();
     for a in apps
         .into_iter()
         .filter(|a| a.status == "running" && a.stack != "static")
