@@ -53,7 +53,9 @@ def helper(tmp_path):
     )
     orch = tmp_path / "orch"
     orch.write_text(
-        f"#!{sys.executable}\nimport sys\nprint(open({str(state)!r}).read()) if sys.argv[1:3] == ['run', 'status'] else sys.exit(2)\n"
+        f"#!{sys.executable}\nimport json, sys\n"
+        f"state = json.load(open({str(state)!r}))\n"
+        "print(json.dumps({**state, 'runs': {i: state for i in sys.argv[3:-1]}})) if sys.argv[1:3] == ['run', 'status'] else sys.exit(2)\n"
     )
     orch.chmod(0o755)
     time.sleep(0.4)

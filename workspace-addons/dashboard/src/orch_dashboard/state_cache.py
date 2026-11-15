@@ -7,7 +7,10 @@ from pathlib import Path
 
 from .data import load_state
 
-MAX_AGE = 2.0
+MAX_AGE = 2.0  # without a revision watcher the copy is this old at most
+SAFETY_AGE = (
+    30.0  # with one: a poll that changed nothing costs no process; time-based values refresh this often
+)
 
 
 class StateCache:
@@ -51,10 +54,10 @@ class StateCache:
                     self._store(*self._build())
         with self.lock:
             served = self._served()
-            stale = served[1] >= MAX_AGE
+            stale = served[1] >= (MAX_AGE if self.revisions is None else SAFETY_AGE)
             start = not self.busy and not self.closed
             gen = self.gen
-        if self.revisions is not None and not stale and not self.closed and self._signature() != self.sig:
+        if self.revisions is not None and not self.closed and self._signature() != self.sig:
             # A file that matters changed (new question, new helper request): the page asks because it was told so,
             # and a stale copy would be the last answer it gets. Rebuild now, once; others wait for that build.
             return self.fresh()

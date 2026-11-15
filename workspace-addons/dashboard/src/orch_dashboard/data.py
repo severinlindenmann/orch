@@ -941,7 +941,7 @@ def load_services(root: Path, orch_bin: str | None) -> list[dict]:
 
 _RUNS: dict[tuple[str, str], tuple[float, dict | None]] = {}
 _RUN_SIGNATURES = {}
-RUNS_TTL = 5.0
+RUNS_TTL = 30.0  # as the state cache's safety refresh: changes of the run files force a fresh read anyway
 RUNS_MAX = 30
 
 
@@ -968,8 +968,13 @@ def load_runs(root: Path, orch_bin: str | None, tickets: list[dict], fresh: bool
         i for i in ids if fresh or (str(root), i) not in _RUNS or now - _RUNS[(str(root), i)][0] > RUNS_TTL
     ]
     if todo:
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            got = list(pool.map(lambda i: run_orch(orch_bin, ["run", "status", i, "--json"], root), todo))
+        # one process for all tickets (a process per ticket was most of the idle cost of an open page)
+        batch = run_orch(orch_bin, ["run", "status", *todo, "--json"], root, timeout=5.0 + 0.5 * len(todo))
+        rows = batch.get("runs") if isinstance(batch, dict) else None
+        rows = rows if isinstance(rows, dict) else {}
+        got = [
+            rows.get(i) if isinstance(rows.get(i), dict) and "error" not in rows[i] else None for i in todo
+        ]
         for i, r in zip(todo, got, strict=True):
             if isinstance(r, dict) and "hold" in r:  # the core's one-line reason a live run waits: text only
                 r["hold"] = " ".join(r["hold"].split())[:200] if isinstance(r["hold"], str) else None

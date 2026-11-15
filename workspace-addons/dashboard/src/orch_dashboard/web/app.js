@@ -794,15 +794,18 @@ else {
   { const k = String(location.hash || '').split('?')[0].replace(/^#/, '').split('/')[0]; const names = {tickets:'Tickets', ticket:'Ticket', chat:'Chat', settings:'Settings'}; if (names[k]) document.getElementById('crumb').textContent = names[k]; }
   setInterval(paintUpdated, 30000);
   refresh();
-  let poll = setInterval(refresh, 3000), pending;
-  const cadence = up => { clearInterval(poll); poll = setInterval(refresh, up ? 20000 : 3000); };
+  // A hidden tab does not poll (nobody sees the answer); it refreshes once when it is shown again.
+  const whenShown = fn => () => { if (document.visibilityState !== 'hidden') fn(); };
+  let poll = setInterval(whenShown(refresh), 3000), pending;
+  const cadence = up => { clearInterval(poll); poll = setInterval(whenShown(refresh), up ? 20000 : 3000); };
+  document.addEventListener('visibilitychange', whenShown(refresh));
   if (typeof EventSource !== 'undefined') {
     let stream;
     const connect = () => {
       stream = new EventSource('/api/events');
       stream.onopen = () => cadence(true);
       stream.onerror = () => cadence(false);
-      stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(refresh, 50); });
+      stream.addEventListener('rev', () => { clearTimeout(pending); pending = setTimeout(whenShown(refresh), 50); });
     };
     connect();
     window.addEventListener('pagehide', () => { stream.close(); cadence(false); });
