@@ -76,7 +76,7 @@
   }
 
   function weeklySwitch() {
-    const row = node('label', undefined, 'row checkup-weekly');
+    const row = node('label', undefined, 'row check-row');
     const box = node('input', undefined, 'switch');
     box.type = 'checkbox';
     box.setAttribute('role', 'switch');
@@ -89,7 +89,7 @@
   }
 
   function head() {
-    const section = node('div', undefined, 'card-h checkup-head');
+    const section = node('div', undefined, 'card-h card-h-split');
     const title = node('div', undefined, 'grow');
     title.append(node('h2', 'Check-up'), node('p', lastLine(), 'meta'));
     const run = node('button', view.running ? 'Checking…' : 'Run a check-up', 'btn primary');
@@ -157,7 +157,7 @@
   }
 
   function proposal(proposal) {
-    const row = node('div', undefined, 'card-row checkup-row');
+    const row = node('div', undefined, 'card-row row-split');
     row.dataset.state = proposal.status;
     const text = node('div', undefined, 'grow');
     text.append(node('h3', proposal.title));
@@ -176,8 +176,8 @@
   function diffBlock(file) {
     const box = node('div', undefined, 'stack');
     box.append(node('p', file.path, 'meta'));
-    if (file.before_text !== null) box.append(node('pre', file.before_text, 'checkup-code before'));
-    box.append(node('pre', file.after === null ? '(file removed)' : file.after, 'checkup-code after'));
+    if (file.before_text !== null) box.append(node('pre', file.before_text, 'code-block dim'));
+    box.append(node('pre', file.after === null ? '(file removed)' : file.after, 'code-block after'));
     return box;
   }
 
@@ -188,12 +188,12 @@
     const content = node('div', undefined, 'stack checkup-sheet');
     content.append(node('p', shown.plain));
     if (shown.diff.length) {
-      const fold = node('details', undefined, 'checkup-change');
+      const fold = node('details', undefined, 'disclosure');
       fold.append(node('summary', 'Show the change'));
       for (const file of shown.diff) fold.append(diffBlock(file));
       content.append(fold);
     }
-    const buttons = node('div', undefined, 'row checkup-buttons');
+    const buttons = node('div', undefined, 'row actions-end');
     const cancel = node('button', 'Cancel', 'btn ghost');
     const accept = node('button', 'Accept', 'btn primary');
     cancel.type = accept.type = 'button';
