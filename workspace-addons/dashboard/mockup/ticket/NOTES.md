@@ -140,6 +140,7 @@ The current ticket header is the strip in `../sweep/d-ticket-states.html` (all f
 
 ### ticket-answers.html
 
+- A question the helper took back (`orch ask T --take-back q4 "why"`) stays in this list greyed: "Taken back: <reason>", no card, gone from Needs you and Review (16 Nov).
 - No Decisions tab (owner 15 Nov): the card answers sit under the ticket's questions ("Earlier answers"): "What applies now" first, then one record per answer, newest first (kit `UI.appliesNow` / `UI.answerRecord`).
 
 ## Report a problem (diagnostics D3, 15 Nov)
