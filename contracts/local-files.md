@@ -65,6 +65,7 @@ text for everyone) and `AGENTS.md merge=union` in `.gitattributes`. Off removes 
                                   Never trusted alone: a pid is used only when > 1 and its identity is checked (addon-manifest.md, Background)
   record/                         GITIGNORED. What agents did: runs/<run>.jsonl, detail/, jobs/, counts/, proposals/, outbox-usage/
                                   (activity.md). Never committed; syncs with the folder if the folder syncs to a cloud drive
+  diag/                           GITIGNORED. The debug log: <YYYY-MM-DD>.<src>.<part>.jsonl, 7 days / 200 MB (diag.md)
   addons/<name>/                  the add-on's own folder; only it writes here. GITIGNORED. Kept on remove, deleted with --purge
     (scheduler: state.json {"t_…": {"last_run", "next_run"}}, logs/<ticket>-<time>.log)
 received/                         files saved by `orch relay download` (visible, next to the work; ignore line from the relay add-on's manifest)
@@ -73,7 +74,7 @@ received/                         files saved by `orch relay download` (visible,
 ## Local-only lines (`.orch/.gitignore`, written first by `orch init` and before any secret is stored)
 
 ```
-.gitignore  .local-id  secrets/  inbox/  inbox-seen.json  inbox-notes.json  outbox/  addons/  run/  harness/  tickets/*/evidence/  record/  .usage-salt
+.gitignore  .local-id  secrets/  inbox/  inbox-seen.json  inbox-notes.json  outbox/  addons/  run/  harness/  tickets/*/evidence/  record/  diag/  .usage-salt
 ```
 
 The team's `.gitignore` is never edited. An active add-on adds its own lines from its manifest `gitignore` key

@@ -234,6 +234,7 @@ CONTRACT_IGNORE = [
     "harness/",
     "tickets/*/evidence/",
     "record/",
+    "diag/",
     ".usage-salt",
 ]
 ORCH_IGNORE = [

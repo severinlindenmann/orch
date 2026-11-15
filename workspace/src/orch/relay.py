@@ -17,7 +17,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import harness, history, humanproof, keystore, net, runs, skillrender, skills, tickets
+from orch import diag, harness, history, humanproof, keystore, net, runs, skillrender, skills, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -533,19 +533,14 @@ def _set_problem(root: Path, text: str | None) -> None:
 
 
 def log_send_failure(root: Path, what: str, why: object) -> None:
-    """One line in .orch/run/relay-errors.log (machine-local, git-ignored, private; newest 200 kept) for a
-    phone send that failed and was not shown to anybody (the proposal question).
+    """One `relay.send_failed` event in the debug log (diag.md) for a phone send that failed and was
+    not shown to anybody (the proposal question): what, the exception class, its message.
     Never fails the caller, never printed."""
-    try:
-        p = root / ".orch" / "run" / "relay-errors.log"
-        if (root / ".orch").is_symlink() or p.parent.is_symlink() or p.is_symlink():
-            return
-        p.parent.mkdir(parents=True, exist_ok=True)
-        line = f"{tickets.now()} {what}: {' '.join(str(why).split())[:300]}"
-        have = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.is_file() else []
-        net.write_atomic(p, ("\n".join([*have, line][-200:]) + "\n").encode("utf-8"), True)
-    except (OSError, ValueError, Refused):
-        pass
+    reason = type(why).__name__ if isinstance(why, BaseException) else ""
+    diag.log(
+        "relay.send_failed", "warn", root=root, what=" ".join(str(what).split()), reason=reason,
+        why=" ".join(str(why).split()),
+    )  # fmt: skip
 
 
 def outbox_list(root: Path) -> list[dict]:

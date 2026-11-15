@@ -85,11 +85,19 @@ NAMES = [
 def test_writer_blocks_while_live_gate_held_then_proceeds(proj, other, name):
     tid = _ticket(proj)
     w = _writers(proj, tid)[name]
-    before = {p: p.read_bytes() for p in (proj / ".orch").rglob("*") if p.is_file() and "run" not in p.parts}
+    before = {
+        p: p.read_bytes()
+        for p in (proj / ".orch").rglob("*")
+        if p.is_file() and not {"run", "diag"} & set(p.parts)
+    }
     _live_gate(proj, other)
     with pytest.raises(Refused, match="syncing"):
         w()
-    after = {p: p.read_bytes() for p in (proj / ".orch").rglob("*") if p.is_file() and "run" not in p.parts}
+    after = {
+        p: p.read_bytes()
+        for p in (proj / ".orch").rglob("*")
+        if p.is_file() and not {"run", "diag"} & set(p.parts)
+    }
     assert after == before  # nothing written past the gate
     syncgate.gate_path(proj).unlink()
     w()

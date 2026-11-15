@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orch.severin.io/contracts/diag.schema.json",
+  "title": "orch debug log event v1 (orch.diag/1, one line of .orch/diag/<date>.<src>.<part>.jsonl)",
+  "description": "One thing that happened inside orch, structure only (no ticket text, no conversation, no values of keys). See diag.md. Written only by orch.diag, which cuts strings at 300 and hides exact key values first (fail closed). Readers skip unknown events and keep unknown fields.",
+  "$ref": "#/$defs/event",
+  "$defs": {
+    "scalar": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "maxLength": 300
+        }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "v",
+        "at",
+        "mono_ms",
+        "seq",
+        "src",
+        "ver",
+        "lvl",
+        "ev",
+        "trace",
+        "ws",
+        "ticket",
+        "run",
+        "job",
+        "code",
+        "pid",
+        "proc_start",
+        "dur_ms",
+        "kv",
+        "err"
+      ],
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+          "description": "UTC, milliseconds."
+        },
+        "mono_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic clock of this process: orders events of one process even when the wall clock jumps."
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per process, +1 per event; a gap in one process means lost lines (a diag.dropped line says how many)."
+        },
+        "src": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,23}$",
+          "description": "Which program wrote it: cli, run, host, ... (a short lowercase name)"
+        },
+        "ver": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "lvl": {
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "ev": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+          "maxLength": 60,
+          "description": "area.thing_happened (diag.md, Event names)."
+        },
+        "trace": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trace_id",
+            "span_id",
+            "parent_span_id"
+          ],
+          "properties": {
+            "trace_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            },
+            "span_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}$"
+            },
+            "parent_span_id": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{16}$"
+                }
+              ]
+            }
+          }
+        },
+        "ws": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 300
+            }
+          ]
+        },
+        "ticket": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 300
+            }
+          ]
+        },
+        "run": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 300
+            }
+          ]
+        },
+        "job": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "maxLength": 300
+            }
+          ]
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[^:\\s]+:[^:\\s]+:\\d+$",
+          "description": "module:function:line of the call."
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proc_start": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Epoch milliseconds when this process started: pid + proc_start name one process."
+        },
+        "dur_ms": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 0
+            }
+          ]
+        },
+        "kv": {
+          "type": "object",
+          "maxProperties": 24,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,39}$"
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/scalar"
+              },
+              {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "$ref": "#/$defs/scalar"
+                }
+              }
+            ]
+          },
+          "description": "Typed allowlist: a scalar or a list of scalars. No objects, no bytes. A key that names a secret holds '[hidden]'."
+        },
+        "err": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "fingerprint",
+                "frames"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "fingerprint": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{16}$",
+                  "description": "sha256(type + frames without line numbers)[:16]: the same bug has the same fingerprint."
+                },
+                "frames": {
+                  "type": "array",
+                  "maxItems": 12,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[^:\\s]+:[^:\\s]+:\\d+$"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

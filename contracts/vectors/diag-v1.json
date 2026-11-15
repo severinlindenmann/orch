@@ -1,0 +1,484 @@
+{
+ "v": 1,
+ "about": "diag.md reference cases: the schema on whole events, and the event-name rule (_EV in orch.diag).",
+ "events": [
+  {
+   "name": "valid-op-applied",
+   "valid": true,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "ticket.op_applied",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "actor": "human:lume",
+     "op": "patch",
+     "status_from": "open",
+     "status_to": "active",
+     "revision_from": 4,
+     "revision_to": 5,
+     "written": true
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "valid-op-refused",
+   "valid": true,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "ticket.op_refused",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "actor": "agent:claude",
+     "op": "patch",
+     "guard": "conflict",
+     "status": "open",
+     "expected_revision": 4,
+     "actual_revision": 6
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "valid-error",
+   "valid": true,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "error",
+    "ev": "relay.send_failed",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "what": "proposal question m_1 failed"
+    },
+    "err": {
+     "type": "ConnectionError",
+     "fingerprint": "a1b2c3d4e5f60718",
+     "frames": [
+      "relay:send:812",
+      "net:post:77"
+     ]
+    }
+   }
+  },
+  {
+   "name": "valid-span-child",
+   "valid": true,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "cli.command",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "b7ad6b7169203331",
+     "parent_span_id": "00f067aa0ba902b7"
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": 212,
+    "kv": {
+     "command": "ticket",
+     "sub": "list"
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "valid-dropped",
+   "valid": true,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "warn",
+    "ev": "diag.dropped",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "count": 12,
+     "n_source_events": 12
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "invalid-no-trace",
+   "valid": false,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "ticket.op_applied",
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "actor": "human:lume",
+     "op": "patch",
+     "status_from": "open",
+     "status_to": "active",
+     "revision_from": 4,
+     "revision_to": 5,
+     "written": true
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "invalid-object-in-kv",
+   "valid": false,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "ticket.op_applied",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "ticket": {
+      "title": "Q3 invoices"
+     }
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "invalid-long-string",
+   "valid": false,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "ticket.op_applied",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "invalid-event-name",
+   "valid": false,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "TicketApplied",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "actor": "human:lume",
+     "op": "patch",
+     "status_from": "open",
+     "status_to": "active",
+     "revision_from": 4,
+     "revision_to": 5,
+     "written": true
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "invalid-bad-trace-id",
+   "valid": false,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "ticket.op_applied",
+    "trace": {
+     "trace_id": "0123",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "actor": "human:lume",
+     "op": "patch",
+     "status_from": "open",
+     "status_to": "active",
+     "revision_from": 4,
+     "revision_to": 5,
+     "written": true
+    },
+    "err": null
+   }
+  },
+  {
+   "name": "invalid-err-message",
+   "valid": false,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "info",
+    "ev": "ticket.op_applied",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "actor": "human:lume",
+     "op": "patch",
+     "status_from": "open",
+     "status_to": "active",
+     "revision_from": 4,
+     "revision_to": 5,
+     "written": true
+    },
+    "err": {
+     "type": "ValueError",
+     "fingerprint": "a1b2c3d4e5f60718",
+     "frames": [],
+     "message": "Q3 invoices total"
+    }
+   }
+  },
+  {
+   "name": "invalid-level",
+   "valid": false,
+   "event": {
+    "v": 1,
+    "at": "2026-11-14T22:50:01.123Z",
+    "mono_ms": 812345,
+    "seq": 7,
+    "src": "cli",
+    "ver": "0.1.0",
+    "lvl": "trace",
+    "ev": "ticket.op_applied",
+    "trace": {
+     "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+     "span_id": "00f067aa0ba902b7",
+     "parent_span_id": null
+    },
+    "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+    "ticket": "t_k3m9x2",
+    "run": null,
+    "job": null,
+    "code": "tickets:apply_op:545",
+    "pid": 4242,
+    "proc_start": 1794696000000,
+    "dur_ms": null,
+    "kv": {
+     "actor": "human:lume",
+     "op": "patch",
+     "status_from": "open",
+     "status_to": "active",
+     "revision_from": 4,
+     "revision_to": 5,
+     "written": true
+    },
+    "err": null
+   }
+  }
+ ],
+ "names": [
+  {
+   "ev": "ticket.op_applied",
+   "valid": true
+  },
+  {
+   "ev": "cli.command",
+   "valid": true
+  },
+  {
+   "ev": "relay.send_failed",
+   "valid": true
+  },
+  {
+   "ev": "diag.dropped",
+   "valid": true
+  },
+  {
+   "ev": "run.live_submit",
+   "valid": true
+  },
+  {
+   "ev": "ticket",
+   "valid": false
+  },
+  {
+   "ev": "Ticket.applied",
+   "valid": false
+  },
+  {
+   "ev": "ticket.",
+   "valid": false
+  },
+  {
+   "ev": "ticket.op-applied",
+   "valid": false
+  },
+  {
+   "ev": "ticket..x",
+   "valid": false
+  },
+  {
+   "ev": ".x",
+   "valid": false
+  },
+  {
+   "ev": "1a.b",
+   "valid": false
+  },
+  {
+   "ev": "ticket.Op",
+   "valid": false
+  }
+ ]
+}

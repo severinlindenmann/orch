@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from orch import config, runs, runs_live, tickets
+from orch import config, diag, runs, runs_live, tickets
 
 _tmux = pytest.mark.skipif(
     os.name == "nt" or not shutil.which("tmux"), reason="needs tmux (not on Windows, not installed here)"
@@ -169,7 +169,9 @@ def test_an_enter_the_tool_dropped_is_sent_again_and_submits_once(proj, run, tui
     assert runs_live.check_submit(proj, tid, rec["run"], now=_later(proj, tid, 61)) is None
     time.sleep(0.3)
     assert _got(out) == [runs_live.notice_line(tid, False)]
-    assert "Enter again (2)" in (runs.run_dir(proj) / "live-submit.log").read_text()
+    assert any(
+        "Enter again (2)" in e["kv"]["what"] for e in diag.read_events(proj) if e["ev"] == "run.live_submit"
+    )
 
 
 # ---------------------------------------------------------------- the check (fake tmux)
@@ -320,7 +322,9 @@ def test_never_give_up_while_the_pane_changes(proj, run, monkeypatch):
     for sec in (91, 95, 130, 200):
         assert _at(proj, tid, rn, sec, end=lambda: pytest.fail("ended")) is None
     assert runs.read(proj, tid)["submit"]
-    assert "never goes quiet" in (runs.run_dir(proj) / "live-submit.log").read_text()
+    assert any(
+        "never goes quiet" in e["kv"]["what"] for e in diag.read_events(proj) if e["ev"] == "run.live_submit"
+    )
 
 
 def test_reading_the_input_ends_the_check(proj, run, monkeypatch):

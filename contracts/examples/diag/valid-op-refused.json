@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "at": "2026-11-14T22:50:01.123Z",
+  "mono_ms": 812345,
+  "seq": 7,
+  "src": "cli",
+  "ver": "0.1.0",
+  "lvl": "info",
+  "ev": "ticket.op_refused",
+  "trace": {
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "span_id": "00f067aa0ba902b7",
+    "parent_span_id": null
+  },
+  "ws": "3f2a9c0e7d1b4a58b6c1d2e3f4a5b6c7",
+  "ticket": "t_k3m9x2",
+  "run": null,
+  "job": null,
+  "code": "tickets:apply_op:545",
+  "pid": 4242,
+  "proc_start": 1794696000000,
+  "dur_ms": null,
+  "kv": {
+    "actor": "agent:claude",
+    "op": "patch",
+    "guard": "conflict",
+    "status": "open",
+    "expected_revision": 4,
+    "actual_revision": 6
+  },
+  "err": null
+}
