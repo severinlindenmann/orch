@@ -270,6 +270,12 @@ def main() -> int:
         if r.returncode:
             print("orch install failed:", r.stderr[-400:])
             return 1
+        # a dev install: add-on add / update may change this orch's own tool folder (a normal install refuses
+        # another ORCH_HOME, MSG_ENV_CHANGE); the same record the installer writes with ORCH_INSTALL_KIND=dev
+        shim = (e.bin / "orch").resolve().read_text(errors="replace").splitlines()[0]
+        subprocess.run([shim[2:].strip().split()[0], "-c", "import sys; from pathlib import Path; "
+                        "from orch import humanproof as h; h.write_install_record(Path(sys.prefix), 'dev')"],
+                       env=e.env, capture_output=True, text=True)
         needs_servers = any(s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))) for s in ids)
         if needs_servers:
             if a.mode == "local":
