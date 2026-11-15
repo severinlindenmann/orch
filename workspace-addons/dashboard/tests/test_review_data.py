@@ -1,6 +1,5 @@
 """state.review: the cards that wait and the decisions made, from `orch review list [--answered] --json`."""
 
-import json
 import sys
 
 from orch_dashboard.data import load_review, load_state

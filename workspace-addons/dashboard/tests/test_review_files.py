@@ -39,7 +39,7 @@ def test_reviewed_files_are_served_sandboxed_and_inert(rv):
     srv = make_server(rv, 0, orch_bin="")
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        code, body, h = get(srv, "t_other000x", f"{SHA}/after.html")
+        code, _body, h = get(srv, "t_other000x", f"{SHA}/after.html")
         assert code == 200 and h["Content-Type"].startswith("text/html")
         assert "sandbox" in h["Content-Security-Policy"] and "script-src" not in h["Content-Security-Policy"]
         assert (
@@ -63,7 +63,7 @@ def test_reviewed_files_are_served_sandboxed_and_inert(rv):
         f"{SHA}/.hidden.png",
         f"{SHA}\\after.html",
         "after.html",
-        f"ABCDEF012345/after.html",
+        "ABCDEF012345/after.html",
         f"{SHA}/missing.png",
         "../after.html",
         f"{SHA}/after.html\x00.png",
