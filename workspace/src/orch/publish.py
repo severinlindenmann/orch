@@ -540,7 +540,10 @@ def _override(text: str, reach: str | None, auth: bool | None) -> str:
 # the manifest's own switches (`auth = true`) are settings, not secrets: blanked before the scan
 _MANIFEST_FLAGS = re.compile(
     rb'(?m)^[ \t]*(?:(?:auth|public|reach)[ \t]*=[ \t]*(?:true|false|"public"|"private")'
-    rb"|#[ \t]*(?:auth|reach):[ \t]+(?:true|public)\b[^\r\n]*)[ \t]*(?=\r?$)"
+    # the two comment lines of the app templates, word for word: nothing may follow them
+    rb"|# reach: public = on the internet, private = only on the private network"
+    rb"|# auth: true = needs the app's private link, false = open to everyone who can reach it)"
+    rb"[ \t]*(?=\r?$)"
 )
 
 

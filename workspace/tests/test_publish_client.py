@@ -748,3 +748,19 @@ def test_generated_app_templates_pass_the_scan(tmp_path):
         d = tmp_path / stack
         templates.create(stack, "none", d)
         publish.pack(d, None, None, None)
+
+
+def test_a_token_after_a_manifest_comment_or_flag_is_refused(tmp_path):
+    d = tmp_path / "app"
+    d.mkdir()
+    for tail in (
+        "# auth: true " + PLANT,
+        "# auth: true = needs the app's private link, false = open to everyone who can reach it " + PLANT,
+        "auth = true # " + PLANT,
+        "# reach: public " + f"TOKEN={PLANT}",
+    ):
+        (d / "app.toml").write_text(f'name = "x"\n{tail}\n')
+        (d / "index.html").write_text("hi")
+        with pytest.raises(Refused) as e:
+            publish.pack(d, None, None, None)
+        assert PLANT not in str(e.value), tail
