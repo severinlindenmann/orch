@@ -18,3 +18,5 @@
 .custom-interval{display:flex;align-items:center;gap:12px}.custom-interval input{width:100px}
 .repeat-summary{margin-top:20px;padding-top:16px;border-top:1px solid var(--border);color:var(--text-muted)}
 @media(max-width:599px){.frequency-control label{padding:4px 6px;font-size:12px}.schedule-row{grid-template-columns:92px minmax(0,1fr);gap:12px}}
+
+.week-bands{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin-bottom:8px}.week-bands .band{display:flex;gap:8px;align-items:baseline;padding:4px 8px;border-left:2px solid var(--brand);border-radius:4px;background:var(--surface-2);font-size:12px;line-height:16px;color:inherit;text-decoration:none}.week-bands .band-all{grid-column:1/8}.week-bands time{color:var(--text-muted)}@media(max-width:950px){.week-bands{grid-template-columns:1fr}.week-bands .band-all{grid-column:auto}}
