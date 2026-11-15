@@ -2438,6 +2438,10 @@ def answer(
             raise Refused(f"Ticket {tid} has no question {qid}.")
         if q["answer"] is not None:
             raise Refused(f"{qid} is already answered.")
+        if isinstance(q.get("card"), dict) and not str(by).startswith("human:"):
+            raise Refused(
+                "This card waits for the owner. Ask with orch review add and wait with orch review wait."
+            )
         if expected_question_digest is not None and (
             expected_question_digest == QUESTION_UNENCODABLE or question_digest(q) != expected_question_digest
         ):

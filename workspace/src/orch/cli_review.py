@@ -290,7 +290,10 @@ def _answer(args, root: Path) -> None:
         }
     else:
         parts = {"title": humanproof.ticket_name(root, tid)}
-    who = humanproof.person_by(root, args, op, target, parts=parts)
+    who = humanproof.person_by(
+        root, args, op, target, parts=parts,
+        no_handoff="Answer this on the review page: run orch review in your terminal.",
+    )  # fmt: skip
     if not who.startswith("human:"):
         raise ReviewError("needs_person", humanproof.AGENT_REFUSED)
     runs.require_signing(root)  # a person's answer that could not be signed is refused, not half done
@@ -339,7 +342,7 @@ def _wait(args, root: Path) -> None:
         if time.monotonic() >= end:
             raise ReviewError("busy", f"No answer yet on {q0['id']}. Run orch review wait again later.")
         time.sleep(1)
-    who = re.sub(r"^(human|agent):", "", q.get("answered_by") or "someone")
+    who = re.sub(r"^human:", "", q.get("answered_by") or "someone")
     _out(args, q, f"{q['answer']} ({who}, {q.get('via')}, {_when(q.get('at'))})")
 
 

@@ -80,14 +80,11 @@ FILE_TYPES = {
 
 
 def kit_dir() -> Path | None:
-    """orch_ui's static folder, found by path (never imported); None when the kit is not installed."""
-    try:
-        spec = importlib.util.find_spec("orch_ui")
-    except (ImportError, ValueError):
-        return None
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    d = Path(next(iter(spec.submodule_search_locations))) / "static"
+    """orch_ui's static folder, found by path next to the installed orch package (never imported, never
+    searched on sys.path: a planted orch_ui is not used); None when the kit is not installed."""
+    import orch
+
+    d = Path(orch.__file__).resolve().parent.parent / "orch_ui" / "static"
     return d if (d / "review.html").is_file() else None
 
 
