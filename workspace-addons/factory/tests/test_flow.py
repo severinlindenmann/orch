@@ -839,3 +839,14 @@ def test_a_sub_ticket_without_cores_gate_is_no_crew_and_unmeasured_budget_refuse
     refused = run("crew", "start", order, "booking-form", code=2)
     assert refused["code"] == "not_available" and "record" in refused["error"]
     assert not (ws / "runs.jsonl").exists()
+
+
+def test_a_partial_record_is_never_counted_as_the_whole(ws, run, monkeypatch):
+    """Security review: a page with `unavailable` runs, or more pages than measure reads, gives None (unknown)."""
+    from orch_factory import measure
+
+    pages = iter([{"items": [], "next": None, "unavailable": [{"run": "r_x", "status": "tampered"}]}])
+    monkeypatch.setattr(measure.orchcli, "call", lambda *a, **k: next(pages))
+    assert measure.active_minutes(ws, ["t_000001"]) is None
+    monkeypatch.setattr(measure.orchcli, "call", lambda *a, **k: {"items": [], "next": "c_more"})
+    assert measure.active_minutes(ws, ["t_000001"]) is None

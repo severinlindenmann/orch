@@ -9,7 +9,7 @@ from . import orchcli
 from .store import Refused
 
 IDLE_CAP = 300  # seconds: a longer quiet gap counts as 5 minutes of work at most
-PAGES = 20  # 20 x 500 events per ticket at most per reading (older events beyond that are not counted)
+PAGES = 20  # 20 x 500 events per ticket at most; a longer record is not measured (never a partial count)
 
 
 def _when(value):
@@ -29,11 +29,14 @@ def _events(root, tid):
         items = page.get("items") if isinstance(page, dict) else None
         if not isinstance(items, list):
             raise Refused("The activity record could not be read.", "not_available")
+        if page.get("unavailable"):  # a run core could not read (or found changed): the time is unknown
+            raise Refused("Part of the activity record could not be read.", "not_available")
         out.extend(i for i in items if isinstance(i, dict))
         after = page.get("next")
         if not isinstance(after, str) or not after:
-            break
-    return out
+            return out
+    # more than PAGES pages: never count a part as the whole (crew start then refuses: time unknown)
+    raise Refused("The activity record is too long to measure here.", "not_available")
 
 
 def active_minutes(root, ticket_ids):
