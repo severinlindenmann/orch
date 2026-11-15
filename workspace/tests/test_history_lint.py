@@ -20,6 +20,7 @@ ALLOW = {
     ("workspace/src/orch/tickets.py", "attach"): "writer: is the line already there (its text only)",
     ("workspace/src/orch/workcheck.py", "last_event"): "timestamps only",
     ("workspace/src/orch/phone_view.py", "phone_proof"): "evidence files for the phone, no author",
+    ("workspace/src/orch/chat_groups.py", "add"): "writer: is the refusal line already there (its text only)",
     ("workspace/src/orch/tickets.py", "trim_runs"): "writer: caps recorded runs",
     # add-ons that read tickets from orch's CLI JSON (already shown by cli._out -> history.shown_json)
     ("workspace-addons/focus/src/orch_focus/server.py", "_shape"): "CLI JSON (shown); passed to the page",
