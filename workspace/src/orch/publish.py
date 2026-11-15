@@ -444,11 +444,16 @@ def read_manifest(folder: Path) -> dict:
         raise Refused(f"app.toml is not valid: {e}") from None
     _app_name(str(m.get("name", "")))
     stack = m.get("stack")
-    if stack not in ("static", "python", "node"):
-        raise Refused("app.toml needs stack = static, python or node.")
+    if stack not in ("static", "python", "node", "docker"):
+        raise Refused("app.toml needs stack = static, python, node or docker.")
     if stack == "static" and (m.get("start") or m.get("health")):
         raise Refused("A static app has no start or health.")
-    if stack != "static" and not (m.get("start") and m.get("health")):
+    if stack == "docker":
+        if not m.get("health"):
+            raise Refused("A docker app needs health in app.toml.")
+        if not (folder / "Dockerfile").is_file():
+            raise Refused("A docker app needs a Dockerfile at the top of its folder.")
+    elif stack != "static" and not (m.get("start") and m.get("health")):
         raise Refused(f"A {stack} app needs start and health in app.toml.")
     if m.get("store", "none") not in ("none", "json", "markdown", "sqlite"):
         raise Refused("store must be none, json, markdown or sqlite.")

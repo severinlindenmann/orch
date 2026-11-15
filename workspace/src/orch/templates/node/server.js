@@ -62,5 +62,5 @@ export const server = http.createServer(async (req, res) => {
 });
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-  server.listen(PORT, "127.0.0.1");
+  server.listen(PORT, process.env.HOST || "127.0.0.1");
 }

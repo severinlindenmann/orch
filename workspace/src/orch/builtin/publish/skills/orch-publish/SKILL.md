@@ -48,7 +48,7 @@ It prints the full link on its own line (it ends in `#k=...`). Give the user tha
 
 **Put a small app online**
 
-    orch publish new python --store sqlite tracker   # or static|node; store none|json|markdown|sqlite
+    orch publish new python --store sqlite tracker   # or static|node|docker; store none|json|markdown|sqlite
     # edit tracker/, then:
     orch publish app tracker                         # private: the link carries ?token=
 {{#public}}
@@ -57,6 +57,9 @@ It prints the full link on its own line (it ends in `#k=...`). Give the user tha
     orch publish app tracker --new-token             # a new view link; the old one stops working
 
 Static apps take store none or markdown. The folder name is the app name.
+
+A `docker` app brings its own `Dockerfile` (any language) and runs only on a server with the container engine. Every
+server app listens on `$HOST:$PORT`, writes only to `$DATA_DIR` and keeps its links under `$BASE_PATH`.
 {{/apps}}
 
 **Look after what you shared**
