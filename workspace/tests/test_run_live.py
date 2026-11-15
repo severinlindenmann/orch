@@ -720,7 +720,7 @@ def test_a_persons_answer_goes_to_the_agent_that_waits_for_it(proj, run, lab):
         run("ask", tid, "Use CHF?", "--option", "Yes", "--option", "No", "--json", "--by", "agent:fake")[1]
     )["id"]
     code, out, _ = run("answer", tid, qid, "Yes", "--by", "human:anna")
-    assert code == 0 and out.strip() == "Answered: Yes"
+    assert code == 0 and out.splitlines()[0] == "Answered: Yes"
     _until(lambda: len(_lines(lab, "input")) == 2, what="the answer")
     want = f"New input: | - human:anna: |     Answer to your question {qid} (Use CHF?): Yes"
     assert _lines(lab, "input")[1] == want

@@ -71,7 +71,7 @@ def work_on(t: dict | None, fallback: str = "<ticket>") -> str:
     open_ = [c for c in checks if not c.get("done") and not c.get("wont_do")]
     if open_:
         c = open_[0]["id"]
-        return f'do {c}, then record its proof: orch check done {n} {c} --note "<proof>"'
+        return f'do {c}, then record its evidence: orch check done {n} {c} --note "<evidence>"'
     if not t.get("summary"):
         return f'orch ticket summary {n} "<where things stand>"'
     return f"orch ticket status {n} done"
@@ -88,17 +88,17 @@ def _new(data, args) -> str:
 
 def _check_add(data, args) -> str:
     c = (data or {}).get("id", "<task>")
-    return f'do the step, then record its proof: orch check done {_tid(args)} {c} --note "<proof>"'
+    return f'do the step, then record its evidence: orch check done {_tid(args)} {c} --note "<evidence>"'
 
 
 def _start_task(data, args) -> str:
     c = getattr(args, "check", "<task>")
-    return f'do the step, then record its proof: orch check done {_tid(args)} {c} --note "<proof>"'
+    return f'do the step, then record its evidence: orch check done {_tid(args)} {c} --note "<evidence>"'
 
 
 def _record(data, args) -> str:
     c = getattr(args, "check", "<task>")
-    return f'if that is the proof, close the task: orch check done {_tid(args)} {c} --note "<proof>"'
+    return f'if that is the evidence, close the task: orch check done {_tid(args)} {c} --note "<evidence>"'
 
 
 def _init(data, args) -> str:
@@ -129,13 +129,19 @@ def _ask(data, args) -> str:
     return "keep working on the steps that do not need the answer."
 
 
+def _update(data, args) -> str | None:
+    if getattr(args, "project_only", False) or getattr(args, "after_install", False):
+        return None  # the installer's own internal runs: nothing for a person or agent to follow
+    return "orch ticket list"
+
+
 def _status_cmd(data, args) -> str:
     return "orch stop  (when you are done)" if data else "orch ticket list"
 
 
 HINTS = {
     "init": _init,
-    "update": "orch ticket list",
+    "update": _update,
     "start": "keep working; the dashboard link is above. orch ticket list",
     "stop": "orch ticket list",
     "status": _status_cmd,

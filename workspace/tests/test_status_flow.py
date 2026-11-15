@@ -138,7 +138,10 @@ def test_actor_from_environment_and_explicit_override(proj, run, new_ticket, mon
     assert run("ticket", "status", tid, "done")[1].splitlines()[0] == tickets.REVIEW_MESSAGE
     assert tickets.load(proj, tid)["status"] == "review"
     # an agent in the environment counts as an agent whatever --by says
-    assert run("ticket", "status", tid, "done", "--by", "human:tester")[1].splitlines()[0] == tickets.REVIEW_MESSAGE
+    assert (
+        run("ticket", "status", tid, "done", "--by", "human:tester")[1].splitlines()[0]
+        == tickets.REVIEW_MESSAGE
+    )
     assert tickets.load(proj, tid)["status"] == "review"
     monkeypatch.setattr(tickets, "agent_tool", lambda: None)
     assert run("ticket", "status", tid, "done", "--by", "human:tester")[0] == 0
