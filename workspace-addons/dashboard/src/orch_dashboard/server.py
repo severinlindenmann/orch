@@ -183,7 +183,7 @@ def _link_msg(session, name: str) -> bytes:
 
 
 # Ops that reinstall orch's tool env and so restart the running services, this server too (an add-on add/remove).
-RESTARTING_OPS = ("addon.set",)
+RESTARTING_OPS = ("addon.set", "addon.uninstall")
 REOPEN_EVERY = 30  # seconds between two "open the dashboard again" windows
 
 
@@ -578,7 +578,6 @@ class Handler(BaseHTTPRequestHandler):
             "people.js",
             "look.js",
             "look-icons.js",
-            "look.css",
             "look-colors.css",
             "switcher.js",
             "blocks.js",
