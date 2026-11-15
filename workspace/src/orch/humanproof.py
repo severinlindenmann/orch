@@ -3369,8 +3369,8 @@ def restart_armed(root: Path) -> int | None:
     """The expiry (epoch seconds) of a live arm_restart marker, else None. Any error: not armed."""
     try:
         d = key_dir(root, create=False)
-        raw = (d / "restart-armed").read_text(encoding="utf-8").strip()
-    except (Refused, OSError, ValueError):
+        raw = _read_guarded(d / "restart-armed").decode("ascii").strip()
+    except (Refused, OSError, ValueError, winacl.Unknown):
         return None
     if raw.isdigit() and time.time() < int(raw) <= time.time() + RESTART_ARM_LIFE:
         return int(raw)

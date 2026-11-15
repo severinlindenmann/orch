@@ -176,7 +176,7 @@ def _arm_resume(root: Path, session) -> None:
         from orch import humanproof
 
         humanproof.write_resume_cookie(root, session.server, session.cookie, session.secret)
-        humanproof.arm_restart(root)  # the other page server (Focus) hands its tabs over too (#705)
+        humanproof.arm_restart(root)  # the other page server hands its tabs over too (#705)
 
 
 class Handler(BaseHTTPRequestHandler):
