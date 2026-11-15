@@ -554,6 +554,7 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "icon": d["icon"],
                         "order": d.get("order", 50),
                         "panel": d.get("panel") if d.get("panel") in ("repeats", "links", "phone") else None,
+                        "place": "settings" if d.get("place") == "settings" else "nav",
                         "title": str(d["title"])[:40] if isinstance(d.get("title"), str) else None,
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },

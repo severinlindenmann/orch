@@ -788,6 +788,12 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
             value = a["value"]
+        elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
+            value = _text(a["value"], "text").strip()
+            if HIDDEN_CHARS.search(value):
+                raise BadRequest("Use plain text on one line.")
+            if len(value) > 200:
+                raise BadRequest("Write at most 200 characters.")
         else:
             value = _text(a["value"], "time")
             if verb != "repeat" or len(value) > 200:
