@@ -210,12 +210,16 @@
         "status": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9 -]{0,23}$",
-          "description": "Set only by the add-on that owns kind (refresh act); shown only while it is on."
+          "description": "The state last seen: set by `orch ref set` (any web reference) or by the add-on that owns kind (refresh act). Lower-case word; shown for every web reference."
         },
         "thumb": {
           "type": "string",
           "pattern": "^artifacts/[A-Za-z0-9_.-]{1,100}$",
           "description": "A picture in the ticket's artifacts folder (add-on with preview = 'thumb')."
+        },
+        "seen_at": {
+          "$ref": "#/$defs/time",
+          "description": "Optional, web references. When `orch ref set` last recorded the status; `at` and `by` stay who added the reference."
         },
         "at": {
           "$ref": "#/$defs/time"

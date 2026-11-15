@@ -31,7 +31,11 @@ pub fn router(app: AppState) -> Router {
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    include_str!("../web/style.css"),
+                    concat!(
+                        include_str!("../../workspace/src/orch_ui/static/tokens.css"),
+                        "\n",
+                        include_str!("../web/style.css")
+                    ),
                 )
             }),
         )
@@ -107,11 +111,7 @@ pub fn router(app: AppState) -> Router {
             if uri.path().starts_with("/admin/api/") {
                 return not_found("No such route.").into_response();
             }
-            (
-                StatusCode::NOT_FOUND,
-                Html(include_str!("../web/not-available.html")),
-            )
-                .into_response()
+            (StatusCode::NOT_FOUND, Html(crate::api::not_available())).into_response()
         })
         .layer(DefaultBodyLimit::max(21 * 1024 * 1024))
         .with_state(app)

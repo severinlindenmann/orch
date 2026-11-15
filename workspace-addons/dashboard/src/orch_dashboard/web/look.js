@@ -13,7 +13,7 @@
 
   let look = null, name = 'Workspace', owner = null;
   let open = false, more = false, short = [], draft = {icon: null, color: null}, cat = null, light = false;
-  let editing = false, pd = {name: '', description: '', tags: [], tag: ''}, ws = {name: '', description: ''}, busy = false, status = '', statusTone = 'ok';
+  let editing = false, pd = {name: '', description: '', tags: [], tag: ''}, ws = {name: '', description: ''}, busy = false, saving = false, status = '', statusTone = 'ok';
 
   const clean = v => String(v == null ? '' : v).normalize('NFC').trim();
   function hash(text) {
@@ -173,8 +173,8 @@
       n('div', {className: 'grow'},
         look.relay_name ? n('p', {className: 'set-ctl', 'data-testid': 'profile-relay-name'}, 'Name on ' + where + ': ' + look.relay_name + ' — set by the ' + where + ' owner') : null,
         n('p', {className: 'meta lk-pending', 'data-testid': 'profile-relay-state'}, pend ? 'Waiting for ' + where + ' approval' : 'Live on ' + where),
-        pend && look.pending != null ? n('p', {className: 'meta'}, 'Proposed: “' + look.pending + '”') : null,
-        pend && look.pending_tags ? n('p', {className: 'meta'}, 'Proposed tags: ' + look.pending_tags.join(', ')) : null));
+        pend && look.pending != null ? n('p', {className: 'meta'}, look.pending ? 'Proposed: “' + look.pending + '”' : 'Proposed: remove the description') : null,
+        pend && look.pending_tags ? n('p', {className: 'meta'}, look.pending_tags.length ? 'Proposed tags: ' + look.pending_tags.join(', ') : 'Proposed: remove all tags') : null));
   }
   function profileCard() {
     if (!look) return null;
@@ -207,6 +207,11 @@
   }
 
   async function saveProfile() {
+    if (saving) return;  // Enter in a field and the Save button must not send everything twice
+    saving = true;
+    try { await saveProfileNow(); } finally { saving = false; }
+  }
+  async function saveProfileNow() {
     const svc = look.service, sent = [];
     const name2 = clean(pd.name), desc2 = clean(pd.description);
     if (name2 !== clean(ws.name) && (name2 || ws.name)) {

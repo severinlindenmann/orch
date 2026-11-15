@@ -1,0 +1,23 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_104n7e",
+  "key": "FIX-3",
+  "title": "Sub task of export",
+  "status": "open",
+  "created_at": "2026-11-15T16:27:31Z",
+  "updated_at": "2026-11-15T16:27:31Z",
+  "checklist": [],
+  "refs": [],
+  "questions": [],
+  "history": [
+    {
+      "at": "2026-11-15T16:27:31Z",
+      "by": "human:tester",
+      "via": "cli",
+      "text": "Created under t_gkplxn",
+      "chat_message": false
+    }
+  ],
+  "parent": "t_gkplxn",
+  "revision": 1
+}

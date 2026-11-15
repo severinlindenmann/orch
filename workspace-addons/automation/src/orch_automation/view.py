@@ -294,7 +294,7 @@ def _last_result(runs: list[dict], tid: str) -> str | None:
 
 def _started(tickets: list[dict], runs: list[dict]) -> list[tuple[datetime, dict]]:
     """Scheduled tickets whose newest run started after the newest finished run: nothing recorded it yet, but it
-    did start ("Last result" shows it, so "Recent runs" must too)."""
+    did start ("Last result" shows it, so "Recent starts" must too)."""
     out = []
     for t in tickets:
         if not scheduled(t):
@@ -438,7 +438,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
         table = {
             "type": "table",
             "columns": [
-                {"key": "schedule", "label": "Schedule", "type": "text"},
+                {"key": "schedule", "label": "Ticket", "type": "text"},
                 {"key": "repeats", "label": "Repeats", "type": "text"},
                 {"key": "next", "label": "Next time", "type": "text"},
                 {"key": "last", "label": "Last time", "type": "text"},
@@ -560,7 +560,7 @@ def build(root: Path, now: datetime | None = None) -> dict:
         blocks.append(
             {
                 "type": "list",
-                "title": "Recent runs",
+                "title": "Recent starts",
                 "meta": "Latest activity",
                 "above": True,
                 "items": recent,
