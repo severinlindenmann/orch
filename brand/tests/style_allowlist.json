@@ -171,6 +171,34 @@
   "hex": 23,
   "style": 0
  },
+ "workspace-addons/dashboard/mockup/focus/draft-692/a1-session.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/draft-692/a2-dock.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/draft-692/b1-blocks.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/draft-692/b2-queued.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/draft-692/b4-attach.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/draft-692/b5-phone.html": {
+  "hex": 1,
+  "style": 0
+ },
+ "workspace-addons/dashboard/mockup/focus/draft-692/b6-results.html": {
+  "hex": 1,
+  "style": 0
+ },
  "workspace-addons/dashboard/mockup/focus/focus-help.html": {
   "hex": 4,
   "style": 1
@@ -401,38 +429,6 @@
  },
  "workspace/src/orch/templates/static/style.css": {
   "hex": 4,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/a1-session.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/a2-dock.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b1-blocks.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b2-queued.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b4-attach.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b5-phone.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/b6-results.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/focus/draft-692/draft.js": {
-  "hex": 1,
   "style": 0
  }
 }
