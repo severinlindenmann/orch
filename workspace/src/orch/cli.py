@@ -1163,7 +1163,7 @@ def run(args: argparse.Namespace) -> None:
             args,
             q,
             f"Asked {q['id']}" + (f" on {q['check']}" if q.get("check") else "") + f", waiting. {t['title']} "
-            "is now waiting for an answer.",
+            "is now waiting for an answer.\nNext: keep working on the steps that do not need the answer.",
         )
     elif cmd == "answer":
         # a person's answer needs the person's proof (H1); an agent answers as itself, whatever --by says.

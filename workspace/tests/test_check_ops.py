@@ -818,3 +818,10 @@ def test_fresh_prompt_summary_names_writer_and_proof(repo, run, new_ticket):
     assert "Where things stand, written by the last run (proof: 1 check passed;" in prompt
     assert "Half done" in prompt and "how you know it works" in prompt and "orch check record" in prompt
     assert len(prompt) <= 12000
+
+
+def test_ask_says_to_keep_working(proj, run, new_ticket):
+    """R2.6 + R2.7: the ask output names the next step: go on with what does not need the answer."""
+    tid = with_checks(proj, run, new_ticket)
+    code, out, _ = run("ask", tid, "Which date format?", "--option", "A")
+    assert code == 0 and "Next: keep working on the steps that do not need the answer." in out
