@@ -54,6 +54,12 @@ def test_false_positives_pass(tmp_path):
     assert run(tmp_path) == 0
 
 
+def test_login_words_pass():
+    for w in ["Sign in", "sign-in", "signed in", "Sign out", "sign up", "sign_in"]:
+        assert cbw.find_hits(f"+++ b/x\n@@ -0,0 +1 @@\n+{w} to the page\n", []) == [], w
+    assert cbw.find_hits("+++ b/x\n@@ -0,0 +1 @@\n+sign it, then sign in\n", []) != []
+
+
 def test_allowlisted_path_passes(tmp_path):
     diff = "+++ b/brand/tests/test_banned_words.py\n@@ -0,0 +1 @@\n+sign\n"
     assert cbw.find_hits(diff, ["brand/tests/test_banned_words.py"]) == []

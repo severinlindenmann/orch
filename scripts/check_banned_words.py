@@ -18,6 +18,8 @@ from pathlib import Path
 BANNED = re.compile(r"(?<![A-Za-z])(signing|signature|signatures|sign|certificate|certificates|keypair|keypairs|approval|approvals|gate)(?![A-Za-z])", re.I)
 LABEL = "owner-approved"
 ALLOWLIST = Path(__file__).with_name("banned_words_allowlist.txt")
+# "sign in / sign-in / sign out / sign up" is the normal page login (allowed by R4.1), not signing
+LOGIN = re.compile(r"(?<![A-Za-z])sign(?:ed|s)?[ _-]?(?:in|out|up|on)(?![A-Za-z])", re.I)
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)")
 
 
@@ -49,7 +51,7 @@ def find_hits(diff: str, allow: list[str]) -> list[tuple[str, int, str]]:
     for name, lineno, text in added_lines(diff):
         if any(fnmatch.fnmatch(name, p) for p in allow):
             continue
-        for m in BANNED.finditer(text):
+        for m in BANNED.finditer(LOGIN.sub(" ", text)):
             hits.append((name, lineno, m.group(1).lower()))
     return hits
 
