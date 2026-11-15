@@ -33,6 +33,7 @@ MAX_BODY = 16384  # every action but the ones below
 MAX_BIG_BODY = (
     140 * 1024 * 1024
 )  # a new ticket with files: at most 100 MB of files (newticket.js) as base64, plus the text
+LEAN_OPS = ("chat.send_ws", "chat.sync_ws")
 BIG_OPS = ("ticket.new", "ticket.paste", "ticket.attach", "link.share")
 _BIG_READS = threading.BoundedSemaphore(1)
 KIT_NAME = re.compile(r"(?:samples/)?[A-Za-z0-9][A-Za-z0-9._-]*")  # one file name, or one under samples/
@@ -865,8 +866,13 @@ class Handler(BaseHTTPRequestHandler):
         if code != 200:
             hdr = {"X-Revision": str(extra["revision"])} if extra else None
             return self._send(code, text.encode(), "text/plain; charset=utf-8", hdr)
-        state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
-        self.server.state_cache.invalidate(state)  # before the reply's own keys are added
+        if body.get("op") in LEAN_OPS:
+            # A workspace text changes no ticket: answer with the cached state at once (a full rebuild took 10 s on a
+            # big workspace and kept "Sending…" on screen), never as the new cache.
+            state = dict(self.server.state_cache.get()[0])
+        else:
+            state = load_state(self.root, orch_bin=self.orch_bin, fresh=True, with_settings=True)
+            self.server.state_cache.invalidate(state)  # before the reply's own keys are added
         if body.get("op") == "chat.send_ws" and isinstance(extra, dict):
             state["chat_dm_result"] = extra
         if body.get("op") == "config.agent.test" and isinstance(
