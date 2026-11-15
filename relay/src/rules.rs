@@ -451,11 +451,18 @@ fn check_review_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -> 
     let q = get_msg(c, rid)?
         .filter(|q| q.from == sender && q.typ == "question")
         .ok_or_else(|| not_found("The message you reply to does not exist."))?;
-    if open_payload(key, &q).0.get("digest").is_none() {
+    let (qbody, qextra) = open_payload(key, &q);
+    if qbody.get("digest").is_none() {
         return Err(not_allowed("That is not one of your review questions."));
     }
     if msg.get("ticket").and_then(Value::as_str) != q.ticket.as_deref() {
         return Err(invalid("The ticket must be the question's ticket."));
+    }
+    // The display key, when given, is the question's own (a result never relabels the ticket on the phone).
+    if let Some(k) = msg.get("key") {
+        if Some(k) != qextra.get("key") {
+            return Err(invalid("The key must be the question's key."));
+        }
     }
     let answered = c
         .query_row(

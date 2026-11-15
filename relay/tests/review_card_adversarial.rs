@@ -523,3 +523,41 @@ async fn purge_drops_unused_voice_after_a_day_keeps_used_voice_and_closes_old_ca
     assert_eq!(phone_get(&f.t, &f.iphone, b).await, 404);
     assert_eq!(ws_get(&f.t, &f.pil, &used).await, 404);
 }
+
+#[tokio::test]
+async fn review_result_cannot_relabel_the_ticket_key() {
+    let f = fixture().await;
+    let up = up_ws(&f.t, &f.pil, vec![13u8; 100]).await;
+    let mut q = card_q(&f.pil, "phones", &up);
+    q["key"] = json!("DM1-12");
+    assert_eq!(
+        f.t.call(&f.pil, "POST", "/v1/messages", Some(q.clone()))
+            .await
+            .0,
+        201
+    );
+    let ans = verdict_ans(&q, "b1111111-1111-4111-8111-111111111111", "ok", &[]);
+    assert_eq!(
+        f.t.phone(&f.iphone, "POST", "/v1/phone/answer", Some(ans))
+            .await
+            .0,
+        201
+    );
+    let res = |key: &str| {
+        json!({"schema": "orch.msg/1", "id": mid(), "from": f.pil.id, "to": f.iphone.0, "type": "text",
+            "created_at": "2026-11-15T09:02:00Z", "ticket": "t_m2p8xz", "key": key, "reply_to": q["id"],
+            "body": {"text": "Got it", "review_result": {"result": "applied"}}})
+    };
+    assert_eq!(
+        f.t.call(&f.pil, "POST", "/v1/messages", Some(res("DM1-99")))
+            .await
+            .0,
+        422
+    );
+    assert_eq!(
+        f.t.call(&f.pil, "POST", "/v1/messages", Some(res("DM1-12")))
+            .await
+            .0,
+        201
+    );
+}
