@@ -1383,7 +1383,7 @@ function detail(t) {
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
-    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines'}, clean(q.answer)), h('p', {className:'meta'}, ['Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
+    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
   const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),

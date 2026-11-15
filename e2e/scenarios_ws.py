@@ -164,6 +164,23 @@ def w5(e):
     check(tload(ws, t)["status"] == "active", "ticket did not resume")
 
 
+@scenario("W5T")
+def w5t(e):
+    """Take a question back (G3): it leaves `orch needs`, the ticket stops waiting, an answer afterwards is refused."""
+    ws = e.ws("Pilatus")
+    t = e.orchj(ws, "ticket", "new", "W5T question")["id"]
+    e.orch(ws, "ask", t, "Which size?", "--option", "S", "--option", "L", by="agent:claude-code")
+    check(any(r["ticket"] == t for r in e.orchj(ws, "needs")), "the question must be in needs")
+    e.orch(ws, "ask", t, "--take-back", "q1", "no longer needed", by="agent:claude-code")
+    d = tload(ws, t)
+    check(d["questions"][0]["taken_back"]["reason"] == "no longer needed" and d["waiting_on"] is None, f"take back {d}")
+    check(d["history"][-1]["text"] == "Taken back: no longer needed", "history line")
+    check(not any(r["ticket"] == t for r in e.orchj(ws, "needs")), "a taken-back question must leave needs")
+    rc, out, err = e.orch(ws, "review", "answer", t, "q1", "--verdict", "ok", "--picked", "S", by="human:sev", ok=False)
+    check(rc != 0 and "taken back: no longer needed" in (out + err), f"answer must be refused: {out!r} {err!r}")
+    return "taken back: left needs, refused an answer"
+
+
 @scenario("W6")
 def w6(e):
     """3 links (known site, plain, titled) + orch ext set kept; an unknown hand-added field survives the next CLI write."""

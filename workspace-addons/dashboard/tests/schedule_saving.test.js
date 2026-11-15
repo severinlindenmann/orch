@@ -5,8 +5,8 @@ const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/pages/settings.js'), 'utf8');
 
 // owner feedback 14 Nov (W8): saving a schedule takes seconds; the button must say so, not only grey out
-test('Save schedule shows "Saving…" while it works and restores its label after', () => {
-  const i = src.indexOf("const save = button('Save schedule'");
+test('Save repeat shows "Saving…" while it works and restores its label after', () => {
+  const i = src.indexOf("const save = button('Save repeat'");
   const body = src.slice(i, src.indexOf('const refreshSummary', i));
   const on = body.indexOf("'Saving…'"), call = body.indexOf("act('addon.act'"), back = body.indexOf('save.textContent = label');
   assert.ok(on > 0 && on < call, 'the label changes before the request');
@@ -14,8 +14,8 @@ test('Save schedule shows "Saving…" while it works and restores its label afte
 });
 
 // "Saving…" must always end: a lost or very slow answer gives a plain message after 30 s, the button comes back
-test('Save schedule gives up waiting after 30 s and always restores the button', () => {
-  const i = src.indexOf("const save = button('Save schedule'");
+test('Save repeat gives up waiting after 30 s and always restores the button', () => {
+  const i = src.indexOf("const save = button('Save repeat'");
   const body = src.slice(i, src.indexOf('const refreshSummary', i));
   assert.match(body, /Promise\.race\(\[act\('addon\.act'/);
   assert.match(body, /30000/);

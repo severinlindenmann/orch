@@ -1,0 +1,19 @@
+name: rules
+# R4.1 banned-word diff check. Own workflow so a label change re-runs only this check, not the full CI.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+jobs:
+  banned-words:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: added lines must not contain banned words (label owner-approved lifts it)
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE: origin/${{ github.base_ref }}
+        run: python3 scripts/check_banned_words.py --base "$BASE" --labels "$LABELS"
