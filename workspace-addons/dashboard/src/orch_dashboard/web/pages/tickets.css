@@ -88,3 +88,10 @@
 .ticket-table th{white-space:nowrap}.ticket-table .ticket-actions .btn{white-space:nowrap}.ticket-table td:nth-child(4){min-width:96px}
 .ticket-table .group-head{display:flex;align-items:center;gap:8px;padding-right:12px}.ticket-table .group-head .group-toggle{flex:1}
 .ticket-table .group-action{white-space:nowrap}
+/* Owner 15 Nov (fb3): the card's "..." is a small icon button in the top-right corner; the title uses the full width */
+.ticket-card>.row:first-child{flex-wrap:nowrap;align-items:flex-start;gap:4px}
+.ticket-card>.row:first-child>h3{flex:1 1 0;min-width:0;overflow-wrap:anywhere;word-break:normal}
+.ticket-card>.row:first-child>h3 a{min-height:28px}
+.ticket-card>.row:first-child>details.menu{flex:none;margin:-4px -4px 0 0}
+.ticket-card .move-button{width:28px;min-width:28px;min-height:28px;height:28px;padding:0}
+.board .ticket-card .menu-pop{min-width:180px}
