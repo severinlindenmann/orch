@@ -125,3 +125,14 @@ def test_old_files_with_a_mac_still_load(proj, run):
     assert config.insights_share_names(proj) is True
     assert run("config", "get", "insights.share_names", "--json")[0] == 0
     assert keystore.read_profiles(proj) == {}
+
+
+def test_orch_update_runs_at_once_and_queues_nothing(proj, run, monkeypatch):
+    from orch import addons, humanproof
+
+    called = []
+    monkeypatch.setattr(addons, "tool_env_change_ok", lambda: None)
+    monkeypatch.setattr(addons, "update", lambda *a, **k: called.append(1) or [])
+    code, out, err = run("update", "--project-only")
+    _plain(out, err)
+    assert called and humanproof.handoffs(proj) == []
