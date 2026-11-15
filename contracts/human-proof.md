@@ -30,7 +30,7 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    a real workspace never uses an env-chosen home; the nonce store and `human-settings.json` live there too) (32 random bytes, hex, 0600, in the key
    folder of secrets.md, under its rights checks and the agent deny rules). It is never put in argv, in any environment
    variable, in the workspace or in a log.
-2. **Who holds it.** Only the page servers a person starts (Focus, dashboard, Insights) read it, at start, into memory. They refuse
+2. **Who holds it.** Only the page servers a person starts (Focus, dashboard, Insights, the Review page `orch review`) read it, at start, into memory. They refuse
    to start when an agent tool is in their environment, and they never pass it to a child (agent runs, add-on commands
    get a cleaned environment as today).
 3. **Page session.** The session cookie is bootstrapped only from a **one-time launch token**: when a person starts or
@@ -53,14 +53,19 @@ Schema: `human-proof.schema.json` (`$defs/payload`, `$defs/settings_record`). Ve
    **Mint routes exist only on the loopback listener**; every request, GET included, must carry `Host: 127.0.0.1:<port>` or
    `localhost:<port>`; any `X-Forwarded-*` or `Forwarded` header, or a request that arrived through a remote-access path
    (relay or any proxy, even when the peer is 127.0.0.1), never gets a proof: it is watch-only. Origin is checked on POST as today.
-   **Servers that may hold the key:** only the orch-shipped page servers of the Focus, dashboard and Insights add-ons
+   **Servers that may hold the key:** only the orch-shipped page servers of the Focus, dashboard and Insights add-ons and the
+   Review page that the core itself serves (`orch review`, `orch.review_server`, no add-on, always shipped)
    (`workspace-addons/focus`, `workspace-addons/dashboard`, `workspace-addons/insights`, installed from orch's own source;
    the core checks the installed manifest hash against the shipped one before it writes a launch token for them;
    `humanproof.LAUNCH_SERVERS`, `pageproof.SERVERS`). A local or marketplace add-on never gets a launch token. (The key
    file itself is protected only by Level 1, below.) The dashboard is a named proof server for the Focus page it embeds,
    and for the Insights page it embeds (v1: Insights runs embedded under the dashboard); a standalone Insights page server
    keeps its own session and mints `insights.settings` and `record.delete_detail` proofs from it, and ONLY those
-   (`pageproof.SERVER_OPS`, checked at mint time; Focus and dashboard are not limited by it). Its `insights.settings`
+   (`pageproof.SERVER_OPS`, checked at mint time; Focus and dashboard are not limited by it). The Review page keeps its own session the same way and mints `ticket.answer` and `ticket.verdict` proofs from it, and
+   ONLY those (`pageproof.SERVER_OPS["review"]`); it runs `orch review answer ... --via page --proof-stdin` as a child, so the
+   core decides. Its files (a reviewed copy of a card) are read with the cookie alone (a frame or image cannot send the page
+   header) and only through `orch.safefile`; the stack and every answer need cookie AND secret. Its launch token is opened
+   in the browser by `humanproof.launch_url` and never printed. The `insights.settings`
    target is built by `config.insights_target`, the one form the core checks. Until this orch ships the Insights add-on
    (`addons.SHIPPED_ADDONS`), no launch token is written or accepted for `insights`.
 4. **Mint.** For a human-only click the server builds `payload = {op, target, by, iat, exp, nonce}` (`$defs/payload`):

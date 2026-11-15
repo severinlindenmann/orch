@@ -1669,8 +1669,12 @@ def retention(root: Path, setting: str, file_value: int) -> int:
 
 # ------------------------------------------------------------------------------------------- launch token
 
-LAUNCH_SERVERS = ("focus", "dashboard", "insights")
-_ALWAYS_SHIPPED = ("focus", "dashboard")  # every other launch server needs its add-on shipped by this orch
+LAUNCH_SERVERS = ("focus", "dashboard", "insights", "review")
+_ALWAYS_SHIPPED = (
+    "focus",
+    "dashboard",
+    "review",
+)  # every other launch server needs its add-on shipped by this orch
 
 
 def launch_server_ok(server) -> bool:
@@ -2743,9 +2747,14 @@ def read_proof_line() -> str:
 CURRENT_ARGV: list[str] | None = None
 # What a page may run for a hand-off: the command words an op may start with (the proof binds op + target).
 HANDOFF_HEADS = {
-    "ticket.answer": (("answer",),),
+    "ticket.answer": (("answer",), ("review", "answer")),
     "run.human_input": (("run", "send"),),
-    "ticket.verdict": (("ticket", "changes"), ("ticket", "patch"), ("ticket", "status")),
+    "ticket.verdict": (
+        ("ticket", "changes"),
+        ("ticket", "patch"),
+        ("ticket", "status"),
+        ("review", "answer"),
+    ),
     "relay.allow": (("relay", "allow"),),
     "relay.connect": (("relay", "connect"),),
     "update": (("update",),),

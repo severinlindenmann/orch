@@ -28,6 +28,11 @@ def add_parsers(sub, common) -> None:
     r = sub.add_parser(
         "review", parents=[common], help="decisions waiting for a person (cards, answers, the page)"
     )
+    r.add_argument(
+        "--port", type=int, default=review_server.DEFAULT_PORT, help="the page's port (default 8432)"
+    )
+    r.add_argument("--until", metavar="HH:MM", help="stop the page at this time of day (default 23:59)")
+    r.add_argument("--no-open", action="store_true", help="do not open the browser")
     s = r.add_subparsers(dest="sub", metavar="<command>")
     x = s.add_parser("add", parents=[common], help="put a card in the stack and ask the owner to decide")
     x.add_argument("ticket")
@@ -349,6 +354,15 @@ def _dashboard_url(root: Path) -> str | None:
 
 
 def _link(args, root: Path) -> None:
+    now = review_server.running(root)
+    if now:
+        data = {"running": True, "url": now["url"], "until": now["until"], "tunnel": now["tunnel"]}
+        text = (
+            f"The review page runs: {now['url']}   until {now['until']}\n"
+            f"On a server? From your laptop: {now['tunnel']}"
+        )
+        _out(args, data, text)
+        return
     dash = _dashboard_url(root)
     data = {"running": False, "url": f"{dash}/#/review" if dash else None, "until": None, "tunnel": None}
     text = "No review page runs. Start it in your terminal: orch review"

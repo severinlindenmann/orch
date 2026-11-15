@@ -39,10 +39,19 @@ def test_review_is_in_help(run, capsys):
     assert "review" in out and "decisions waiting for a person" in out
 
 
-def test_no_subcommand_is_the_stub(run, capsys):
+def test_no_subcommand_starts_the_page(run, monkeypatch):
+    from orch import review_server
+
+    seen = []
+    monkeypatch.setattr(
+        review_server, "serve", lambda args: seen.append((args.port, args.until, args.no_open)) or 0
+    )
+    assert run("review", "--port", "8500", "--until", "18:30", "--no-open")[0] == 0
+    assert seen == [(8500, "18:30", True)]
+    monkeypatch.setattr(review_server, "serve", lambda args: 2)
     with pytest.raises(SystemExit) as e:
         run("review")
-    assert e.value.code == 2 and "not built yet" in capsys.readouterr().out
+    assert e.value.code == 2
 
 
 def test_add_draft_shows_in_list_and_text(tk, run):
