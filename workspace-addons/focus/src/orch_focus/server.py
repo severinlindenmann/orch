@@ -625,10 +625,10 @@ class Handler(BaseHTTPRequestHandler):
         now = time.monotonic()
         if s is None or s.key is None or now - getattr(srv, "resume_checked", -10.0) < 2:
             return
-        srv.resume_checked = now
         try:
             if not s.authed(self.headers, srv.server_address[1]):
-                return
+                return  # (an unauthenticated request must not use up the 2 s slot of the real tab)
+            srv.resume_checked = now
             from orch import humanproof
 
             exp = humanproof.restart_armed(self.root)

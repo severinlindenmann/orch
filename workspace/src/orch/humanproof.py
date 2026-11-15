@@ -3358,6 +3358,13 @@ def arm_restart(root: Path) -> bool:
         return False
 
 
+def disarm_restart(root: Path) -> None:
+    """A page server that has just (re)started ends the arm window: a later restart (one an agent causes)
+    must not find it still armed and get a session handed over without a click."""
+    with contextlib.suppress(Refused, OSError):
+        (key_dir(root, create=False) / "restart-armed").unlink(missing_ok=True)
+
+
 def restart_armed(root: Path) -> int | None:
     """The expiry (epoch seconds) of a live arm_restart marker, else None. Any error: not armed."""
     try:

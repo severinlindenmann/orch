@@ -356,6 +356,8 @@ def test_open_tab_hands_its_session_over_only_while_a_restart_is_armed(live):
     got = hp.take_resume_session(root, "focus")
     assert got is not None and got[1] == secret and got[0] == ck.split("=", 1)[1]
     assert hp.take_resume_session(root, "focus") is None  # one use
+    hp.disarm_restart(root)
+    assert hp.restart_armed(root) is None  # a (re)started page server ends the window
 
 
 def test_restart_marker_expires(live, monkeypatch):
