@@ -42,3 +42,20 @@ test('the page shows commands and output with textContent only', () => {
   const src = web('live.js');
   assert.doesNotMatch(src.slice(src.indexOf('function cmdBlock'), src.indexOf('function renderFeed')), /innerHTML/);
 });
+
+test('an unchecked (hook) end never joins a checked start, and a checked and an unchecked try are not folded', () => {
+  const hook = e => ({...e, data: {...e.data, source: 'hook'}});
+  const L = live();
+  const items = L.feedItems(view([start('2026-11-15T10:00:00Z', 'a', 'Run tests', 'pytest -q'), hook(end('2026-11-15T10:00:03Z', 'a', true, '3 passed'))]), null);
+  const block = items.find(i => i.command);
+  assert.ok(block && block.ok === undefined && block.out === undefined, 'the checked block is not marked ok by an unchecked end');
+  const folded = L.feedItems(view([
+    start('2026-11-15T10:00:00Z', 'a', 'Run tests', 'pytest -q'), end('2026-11-15T10:00:03Z', 'a', false, '1 failed'),
+    hook(start('2026-11-15T10:01:00Z', 'b', 'Run tests', 'pytest -q')), hook(end('2026-11-15T10:01:03Z', 'b', true, '3 passed'))]), null);
+  assert.equal(folded.filter(i => i.command).length, 2);
+  assert.ok(folded.every(i => !i.tries));
+  const own = L.feedItems(view([hook(start('2026-11-15T10:00:00Z', 'c', 'Run tests', 'pytest -q')), hook(end('2026-11-15T10:00:03Z', 'c', true, 'ok'))]), null)[0];
+  assert.equal(own.unchecked, 'agent');  // the block shows the same "not checked" mark as a plain step
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'orch_focus', 'web', 'live.js'), 'utf8');
+  assert.match(src.slice(src.indexOf('function cmdBlock'), src.indexOf('function marked')), /uncheckedMark\(it\.unchecked\)/);
+});

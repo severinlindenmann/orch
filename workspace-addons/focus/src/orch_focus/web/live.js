@@ -31,7 +31,7 @@
       const unchecked = e.data && e.data.source === 'hook' ? (e.data.before ? 'before' : 'agent') : null;
       const at = e.data && e.data.id ? items.find(i => i.id === e.data.id && i.agent === by) : null;
       if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: plainNames(e.text), used, agent: by, unchecked, id: e.data && e.data.id, command: typeof (e.data && e.data.command) === 'string' && e.data.command ? e.data.command : null});
-      else if (e.kind === 'tool.end' && at && (at.command || e.data.command) && (e.data.command || e.data.output || e.data.ok === false)) { at.command = at.command || e.data.command; at.ok = e.data.ok !== false; at.out = e.data.output || ''; at.ms = e.data.ms; at.endAt = e.at; at.fail = at.ok ? '' : e.text; }  // a command's end joins its block
+      else if (e.kind === 'tool.end' && at && at.unchecked === unchecked && (at.command || e.data.command) && (e.data.command || e.data.output || e.data.ok === false)) { at.command = at.command || e.data.command; at.ok = e.data.ok !== false; at.out = e.data.output || ''; at.ms = e.data.ms; at.endAt = e.at; at.fail = at.ok ? '' : e.text; }  // a command's end joins its block
       else if (e.kind === 'tool.end') items.push({at: e.at, icon: e.data.ok === false ? 'x' : 'check', ok: e.data.ok !== false, text: e.text, used, agent: by, unchecked});
       else if (e.kind === 'helper.start') items.push({at: e.at, icon: 'user', text: 'Helper: ' + e.text, agent: by});
       else if (e.kind === 'helper.end') items.push({at: e.at, icon: 'check', ok: true, text: 'Helper done: ' + e.text, agent: by});
@@ -43,7 +43,7 @@
   function foldRetries(items) {
     const out = [];
     for (const it of items) {
-      const k = out.findIndex(p => p.command && p.ok === false && p.agent === it.agent && it.command && it.ok !== false && (p.command === it.command || p.text === it.text));
+      const k = out.findIndex(p => p.command && p.ok === false && p.agent === it.agent && p.unchecked === it.unchecked && it.command && it.ok !== false && (p.command === it.command || p.text === it.text));
       if (k >= 0) { it.tries = [...(out[k].tries || []), out[k]]; out.splice(k, 1); }
       out.push(it);
     }
@@ -125,7 +125,7 @@
     const cmd = (c, o) => [h('div', {class: 'cmd-block-cmd'}, part('code', {}, c), copyBtn('Copy', c)), o ? part('pre', {class: 'cmd-block-out'}, o) : null];
     const tries = it.tries || [];
     const kids = [h('summary', {},
-      h('span', {class: 'grow'}, h('span', {text: it.text})), h('time', {datetime: it.at, text: hhmm(it.at)}), it.ms != null ? h('span', {class: 'took', text: took(it.ms)}) : null, h('span', {class: 'chev', icon: 'chevron-down'}))];
+      h('span', {class: 'grow'}, h('span', {text: it.text}), uncheckedMark(it.unchecked)), h('time', {datetime: it.at, text: hhmm(it.at)}), it.ms != null ? h('span', {class: 'took', text: took(it.ms)}) : null, h('span', {class: 'chev', icon: 'chevron-down'}))];
     parts.push({el: kids[0].querySelector('.grow span'), raw: it.text});
     for (const t of tries) kids.push(h('p', {class: 'meta cmd-block-foot'}, h('span', {class: 'grow', text: 'First try did not work.'})), ...cmd(t.command, t.out));
     kids.push(...cmd(it.command, it.out));
