@@ -22,6 +22,35 @@ pub use config::Config;
 pub type Http =
     hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>;
 
+/// In-memory state for scale to zero (see apps.rs).
+pub struct SleepState {
+    /// per app: last request time and requests in flight
+    pub activity: Mutex<std::collections::HashMap<String, (std::time::Instant, usize)>>,
+    /// apps stopped for idleness (DB status stays "running"); they wake on the next request
+    pub sleeping: Mutex<std::collections::HashSet<String>>,
+    /// failed wakes: no new try for 30 s
+    pub cooldown: Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// ports picked for a start that is not yet in the DB or the runner (choose_port skips them)
+    pub reserved_ports: Mutex<std::collections::HashSet<u16>>,
+    /// at most 4 apps start for a wake at the same time
+    pub wake_slots: tokio::sync::Semaphore,
+    /// one wake at a time per app
+    pub wake: Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+impl SleepState {
+    fn new() -> Self {
+        SleepState {
+            activity: Default::default(),
+            sleeping: Default::default(),
+            cooldown: Default::default(),
+            reserved_ports: Default::default(),
+            wake_slots: tokio::sync::Semaphore::new(4),
+            wake: Default::default(),
+        }
+    }
+}
+
 pub struct Inner {
     pub cfg: Config,
     pub db: Mutex<rusqlite::Connection>,
@@ -31,6 +60,7 @@ pub struct Inner {
     pub http: Http,
     /// key for private-app capability paths (`/a/<name>/~<cap>/`)
     pub app_key: [u8; 32],
+    pub sleep: SleepState,
 }
 
 pub type State = Arc<Inner>;
@@ -54,6 +84,7 @@ pub fn new_state(cfg: Config) -> std::io::Result<State> {
         app_lock: tokio::sync::Mutex::new(()),
         http,
         app_key,
+        sleep: SleepState::new(),
     }))
 }
 
@@ -113,6 +144,15 @@ pub fn admin_router(st: State) -> Router {
 pub fn start_background(st: State) {
     let s = st.clone();
     tokio::spawn(async move { apps::resume_all(&s).await });
+    if st.cfg.idle_secs > 0 {
+        let s = st.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(s.cfg.sleep_sweep_secs)).await;
+                apps::sleep_sweep(&s).await;
+            }
+        });
+    }
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;

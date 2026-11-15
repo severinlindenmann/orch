@@ -540,3 +540,7 @@ body.mobile-mode-on .sidebar>.mm-toggle{display:none}
 
 /* The add-on page frame stays invisible (but loading) while its skeleton shows */
 iframe.embed.embed-loading{position:absolute;width:1px;height:1px;min-height:0;opacity:0;pointer-events:none}
+/* Owner 15 Nov (fb2): the phone bar is centred: icon, words and button share one centre line */
+.mm-bar.live,body.mobile-mode-on .mm-bar.live{align-items:center}
+.mm-bar.live .grow,body.mobile-mode-on .mm-bar.live .grow{align-items:baseline;align-content:center}
+.mm-bar.live .mm-phone{align-self:center}

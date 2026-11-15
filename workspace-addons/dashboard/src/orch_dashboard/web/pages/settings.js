@@ -643,7 +643,9 @@ function aboutPanel() {
   } else {
     const ready = info.update_available === true && newest;
     body = [
-      !newest ? settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.')
+      // A build from a branch (no release number, a commit) is a normal case, not an error: say what it is, skip the check.
+      !newest && have?.sha && !have.release && info.ref ? settingsText('p', {className:'meta', 'data-key':'update-branch'}, 'This is a build from the \u201c' + clean(info.ref) + '\u201d branch, so there is no release to compare it with. Update checks are skipped.')
+        : !newest ? settingsText('p', {className:'meta', 'data-key':'update-unknown'}, 'Could not check for a newer version right now.')
         : ready ? h('div', {className:'upd-ready'}, settingsText('strong', {}, updNum(newest.release) || newest.label), settingsText('span', {className:'meta'}, ' is ready to install'))
         : settingsText('p', {className:'meta', 'data-key':'update-current'}, 'You have the newest version.'),
       ready && array(info.changes).length ? h('div', {className:'stack', 'data-key':'update-changes'}, h('h3', {}, 'What changed'), h('ul', {className:'upd-changes'}, array(info.changes).map(c => settingsText('li', {}, c)))) : null,
@@ -1232,8 +1234,12 @@ async function sharedLinkAction(control) {
   if (!link) return;
   if (control.dataset.native === 'link-copy') {
     if (!link.copy) return;
-    try { await navigator.clipboard.writeText(link.link); window.orch.toast('Link copied.', 'ok'); }
-    catch (_) { window.orch.toast('Could not copy the link.', 'error'); }
+    if (await window.UI.copyText(link.link)) window.orch.toast('Link copied.', 'ok'); else window.UI.showLink(link.link);
+    return;
+  }
+  if (control.dataset.native === 'link-open') {
+    if (!link.link) return;
+    window.open(link.link, '_blank', 'noopener,noreferrer');
     return;
   }
   const stop = control.dataset.native === 'link-stop';

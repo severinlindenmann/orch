@@ -514,8 +514,8 @@ const fileTitle = fileName => clean(window.DashHelpers.plainFileName(fileName) |
 const fileBadge = fileName => (/\.([^./]+)$/.exec(fileName)?.[1] || 'file').slice(0, 4).toUpperCase();
 const fileMeta = file => [kindWord(file.name), Number.isFinite(file.size) && file.size >= 0 ? sizeText(file.size) : '', file.mtime ? localStamp(file.mtime) : ''].filter(Boolean).join(' · ');
 async function copyFileLink(url) {
-  try { await navigator.clipboard.writeText(new URL(url, location.href).href); window.orch.toast('Link copied', 'ok'); }
-  catch (_) { window.orch.toast('Could not copy the link.', 'error'); }
+  const link = new URL(url, location.href).href;
+  if (await window.UI.copyText(link)) window.orch.toast('Link copied', 'ok'); else window.UI.showLink(link);
 }
 // Every file of a ticket the viewer can step through, with the words the Files tab shows for it.
 // The shared viewer (kit/fileviewer.js) names the kind of a file; without it every file is just a file.

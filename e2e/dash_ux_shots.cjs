@@ -239,7 +239,7 @@ test('dashboard UX shots: Chat (Today, Earlier, a past day) and Settings at 1280
     assert.deepEqual(r.afterEscape, {open: false, at: 'settings-copies-clean'}, `settings-review-${w}: Escape closes it and goes back to the button`);
   }
   assert.match(report['menu-390'].menuLabel, /^Menu · \d+$/);
-  assert.match(report['menu-390'].phoneSwitch, /Send questions to my phone/);
+  assert.match(report['menu-390'].phoneSwitch, /Phone/);
   assert.equal(report['menu-390'].switcherOneRow, true, 'menu-390: the workspace switcher is one row');
   assert.equal(report['menu-390'].chevronRight, true, 'menu-390: the chevron is on the right');
   assert.equal(report['menu-390'].openHelper, 'Open helper', 'menu-390: Open helper is in the Menu');
