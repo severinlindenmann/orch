@@ -18,6 +18,7 @@ from orch import tickets
 # Commands whose whole stdout is read by a program or a hook, so a trailing line would corrupt it.
 EXEMPT = {
     "work-check": "silent unless files changed, and it speaks a tool's hook protocol",
+    "uninstall": "its last line already says how to remove orch itself",
     "ticket artifacts-dir": "its only output is a folder path that scripts capture",
 }
 
@@ -135,6 +136,12 @@ def _update(data, args) -> str | None:
     return "orch ticket list"
 
 
+def _doctor(data, args) -> str:
+    if (data or {}).get("problems"):
+        return "fix the first problem above, then run orch doctor again"
+    return "orch ticket list"
+
+
 def _status_cmd(data, args) -> str:
     return "orch stop  (when you are done)" if data else "orch ticket list"
 
@@ -170,6 +177,7 @@ HINTS = {
     "ticket wait": "keep working on other tickets: orch ticket list",
     "ticket changes": _on_ticket,
     "ticket patch": _on_ticket,
+    "doctor": _doctor,
     "pause": "turn it back on with: orch resume",
     "resume": "orch needs",
     "wait": "keep working on other tickets: orch ticket list",

@@ -524,7 +524,8 @@ function chatDmMessages(ws) {
   return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
 }
 async function chatDmLoad(force = false) {
-  if (snapshot || route().kind !== 'chat' || chatDm.loading) return;
+  if (snapshot || route().kind !== 'chat') return;
+  if (chatDm.loading) return;  // a thread opened meanwhile is picked up when this load ends (see finally)
   const delay = force || (!chatDm.loaded && !chatDm.contacts.length) ? 0 : 5000 - (Date.now() - chatDm.lastFetch);
   if (delay > 0) {
     if (!chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, delay);
@@ -533,22 +534,22 @@ async function chatDmLoad(force = false) {
   if (chatDm.timer) { clearTimeout(chatDm.timer); chatDm.timer = null; }
   chatDm.lastFetch = Date.now();
   chatDm.loading = true;
-  const ws = chatUi.open;
+  let fetched = null;
   try {
-    const synced = await window.orchAct('chat.sync_ws', {});
-    if (!synced?.ok) throw new Error('Sync');
+    // The server imports new messages itself before it answers (no separate slow sync step in front of the read).
     const response = await fetch('/api/chat/contacts');
     if (!response.ok) throw new Error('Contacts');
     const contacts = await response.json();
     if (!Array.isArray(contacts)) throw new Error('Contacts');
     chatDm.contacts = chatObjects(contacts).filter(c => chatDmId(c.ws));
     chatDm.loaded = true;
+    const ws = chatUi.open;  // read now: the person may have opened another thread while the contacts loaded
     if (chatDmId(ws) && chatDmContact(ws)) {
       const response = await fetch('/api/chat/thread/' + ws);
       if (!response.ok) throw new Error('Thread');
       const thread = await response.json();
       if (!Array.isArray(thread?.messages)) throw new Error('Thread');
-      chatDm.threads.set(ws, thread);
+      chatDm.threads.set(ws, thread); fetched = ws;
       const stored = new Set(thread.messages.map(m => m.id));
       chatDm.pending.set(ws, array(chatDm.pending.get(ws)).filter(m => !stored.has(m.id)));
     }
@@ -559,7 +560,9 @@ async function chatDmLoad(force = false) {
     if (chatDm.picker) chatDm.picker();
     if (route().kind === 'chat') {
       render();
-      if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, 5000);
+      // The person opened another thread while this load ran: read that one now, not on the next 5 s tick.
+      if (!chatDm.error && chatDmId(chatUi.open) && chatUi.open !== fetched && chatDmContact(chatUi.open)) chatDmLoad(true);
+      else if (chatDmId(chatUi.open) && !chatDm.timer) chatDm.timer = setTimeout(() => { chatDm.timer = null; chatDmLoad(); }, 5000);
     }
   }
 }
@@ -719,9 +722,10 @@ async function chatDmSend(text, retryId) {
     if (result?.ok && saved?.id) { Object.assign(entry, saved); accepted = true; }
   } catch { /* Reconcile a possibly stored send before reporting failure. */ }
   finally {
-    await chatDmLoad(true);
-    if (!accepted) entry.state = 'failed';
+    // Accepted: show "Delivered" now and refresh in the background. Unknown: read the thread first (it may be stored).
+    if (!accepted) { await chatDmLoad(true); entry.state = 'failed'; }
     chatUi.sending.delete(ws); render();
+    if (accepted) chatDmLoad(true);
   }
 }
 
