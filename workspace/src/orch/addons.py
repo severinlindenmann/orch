@@ -893,6 +893,10 @@ def _reinstall(
             else {}
         )
         running = _running_workspaces(root)
+        if start and str(root.resolve()) not in running:
+            # add-ons just added here: the finisher "starts the services again" in this workspace after
+            # `then` turned them on, like POSIX does with _start_added (#705)
+            running = sorted({*running, str(root.resolve())})
         if (
             running
         ):  # the finisher stops these first (they run from the folder it replaces), starts them after
