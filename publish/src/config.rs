@@ -19,7 +19,7 @@ pub struct Config {
 }
 
 /// ORCH_PUBLISH_<k> first, then PUBLISH_<k>.
-fn var(k: &str) -> Option<String> {
+pub(crate) fn var(k: &str) -> Option<String> {
     std::env::var(format!("ORCH_PUBLISH_{k}"))
         .or_else(|_| std::env::var(format!("PUBLISH_{k}")))
         .ok()

@@ -1,7 +1,7 @@
 //! Apps: deploy a bundle, run it as a child process (runner.rs), serve and proxy /a/<name>/.
 use crate::db::{self, AppRow, Workspace};
 use crate::err::{ApiError, ApiResult};
-use crate::runner::{run_step, Spec};
+use crate::runner::{container_mode, run_step, Spec, StepCtx};
 use crate::{util, State};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Request, State as St};
@@ -35,12 +35,26 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
         .map_err(|_| ApiError::invalid("The bundle has no app.toml at its top level."))?;
     let m: Manifest = toml::from_str(&text)
         .map_err(|e| ApiError::invalid(format!("app.toml is not valid: {}", e.message())))?;
+    check_manifest(&m, dir, container_mode())?;
+    Ok(m)
+}
+
+/// Rules for app.toml; `container` = this server runs apps as containers.
+fn check_manifest(m: &Manifest, dir: &FsPath, container: bool) -> ApiResult<()> {
     let bad = |s: &str| Err(ApiError::invalid(format!("app.toml: {s}")));
     if !util::valid_app_name(&m.name) {
         return bad("name must be 2-40 characters: a-z, 0-9 and -.");
     }
-    if !["static", "python", "node"].contains(&m.stack.as_str()) {
-        return bad("stack must be static, python or node.");
+    if !["static", "python", "node", "docker"].contains(&m.stack.as_str()) {
+        return bad("stack must be static, python, node or docker.");
+    }
+    if m.stack == "docker" {
+        if !container {
+            return bad("This server can't run docker apps.");
+        }
+        if !dir.join("Dockerfile").is_file() {
+            return bad("docker apps need a Dockerfile at the top of the bundle.");
+        }
     }
     if !["none", "json", "markdown", "sqlite"].contains(&m.store.as_str()) {
         return bad("store must be none, json, markdown or sqlite.");
@@ -48,6 +62,10 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
     if m.stack == "static" {
         if m.start.is_some() || m.health.is_some() {
             return bad("static apps must not have start or health.");
+        }
+    } else if m.stack == "docker" {
+        if m.health.as_deref().unwrap_or("").is_empty() {
+            return bad("docker apps need health.");
         }
     } else if m.start.as_deref().unwrap_or("").is_empty()
         || m.health.as_deref().unwrap_or("").is_empty()
@@ -59,7 +77,16 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
             return bad("health must be a path starting with /.");
         }
     }
-    Ok(m)
+    Ok(())
+}
+
+/// Image tag of the docker-stack version in `code_dir`: `orch-app-<name>:<version folder>`.
+fn image_tag(st: &State, name: &str, code_dir: &FsPath) -> Option<String> {
+    let v = version_root(&st.cfg.app_root(name), code_dir)?;
+    Some(format!(
+        "orch-app-{name}:{}",
+        v.file_name()?.to_string_lossy()
+    ))
 }
 
 /// Unpacks the .tar.gz into `dir`; returns the folder that holds app.toml.
@@ -137,7 +164,18 @@ async fn start_and_check(
     m: &Manifest,
     port: u16,
 ) -> Result<(), String> {
+    let image = if m.stack == "docker" {
+        let tag = image_tag(st, name, dir).ok_or("no image tag")?;
+        if !crate::runner::ensure_image(&tag, dir, st.cfg.build_secs).await {
+            return Err("The app's image could not be built.".into());
+        }
+        Some(tag)
+    } else {
+        None
+    };
     let spec = Spec {
+        stack: m.stack.clone(),
+        image,
         dir: dir.to_path_buf(),
         start: m.start.clone().unwrap_or_default(),
         port,
@@ -193,6 +231,11 @@ pub async fn deploy(
     )
     .await;
     if r.is_err() {
+        if container_mode() {
+            if let Some(t) = image_tag(st, name, &vroot) {
+                crate::runner::remove_image(&t).await;
+            }
+        }
         let _ = std::fs::remove_dir_all(&vroot);
         st.runner.stop(&format!("{name}~new")).await;
     }
@@ -229,13 +272,30 @@ async fn deploy_inner(
     let data_dir = st.cfg.app_data_dir(name);
     let test_port = choose_port(st)?;
     // build
+    let container = container_mode();
     let build = match m.stack.as_str() {
-        "python" if dir.join("requirements.txt").is_file() => {
-            Some("uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt")
-        }
+        "python" if dir.join("requirements.txt").is_file() => Some(if container {
+            "python -m venv .venv && .venv/bin/pip install -r requirements.txt"
+        } else {
+            "uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt"
+        }),
         "node" if dir.join("package.json").is_file() => Some("npm ci --omit=dev"),
         _ => None,
     };
+    let mut image = None;
+    if m.stack == "docker" {
+        let tag = image_tag(st, name, &dir).ok_or_else(|| ApiError::internal("no image tag"))?;
+        let (ok, out) = crate::runner::build_image(&tag, &dir, st.cfg.build_secs).await;
+        image = Some(tag);
+        if !ok {
+            return Err(ApiError::new(
+                422,
+                "test_failed",
+                "Building the app's image failed. The old version is still running.",
+            )
+            .with_output(util::tail(&out, 4000)));
+        }
+    }
     if let Some(b) = build {
         let (ok, out) = run_step(
             b,
@@ -245,6 +305,11 @@ async fn deploy_inner(
             &dir.join(".test-data"),
             &m.store,
             st.cfg.build_secs,
+            &StepCtx {
+                stack: &m.stack,
+                image: None,
+                writable: true,
+            },
         )
         .await;
         if !ok {
@@ -259,7 +324,22 @@ async fn deploy_inner(
     // test
     if let Some(t) = &m.test {
         let td = dir.join(".test-data");
-        let (ok, out) = run_step(t, &dir, test_port, &base, &td, &m.store, st.cfg.test_secs).await;
+        let ctx = StepCtx {
+            stack: &m.stack,
+            image: image.as_deref(),
+            writable: false,
+        };
+        let (ok, out) = run_step(
+            t,
+            &dir,
+            test_port,
+            &base,
+            &td,
+            &m.store,
+            st.cfg.test_secs,
+            &ctx,
+        )
+        .await;
         let _ = std::fs::remove_dir_all(&td);
         if !ok {
             return Err(ApiError::new(
@@ -317,6 +397,11 @@ async fn deploy_inner(
         let root = st.cfg.app_root(name);
         if let Some(v) = version_root(&root, FsPath::new(&old.code_dir)) {
             if v != vroot {
+                if container_mode() && old.stack == "docker" {
+                    if let Some(t) = image_tag(st, name, FsPath::new(&old.code_dir)) {
+                        crate::runner::remove_image(&t).await;
+                    }
+                }
                 let _ = std::fs::remove_dir_all(v);
             }
         }
@@ -707,4 +792,38 @@ async fn serve_static(app: &AppRow, rest: &str) -> Response {
         r.headers_mut().insert(header::CONTENT_LENGTH, n.into());
     }
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(stack: &str) -> Manifest {
+        Manifest {
+            name: "demo".into(),
+            about: String::new(),
+            stack: stack.into(),
+            start: None,
+            health: Some("/health".into()),
+            test: None,
+            store: "none".into(),
+            public: false,
+        }
+    }
+
+    #[test]
+    fn docker_stack_needs_container_mode_and_a_dockerfile() {
+        let d = tempfile::tempdir().unwrap();
+        let m = manifest("docker");
+        let e = check_manifest(&m, d.path(), false).unwrap_err();
+        assert!(format!("{e:?}").contains("This server can't run docker apps."));
+        assert!(check_manifest(&m, d.path(), true).is_err(), "no Dockerfile");
+        std::fs::write(d.path().join("Dockerfile"), "FROM scratch\n").unwrap();
+        assert!(check_manifest(&m, d.path(), true).is_ok());
+        let mut no_health = manifest("docker");
+        no_health.health = None;
+        assert!(check_manifest(&no_health, d.path(), true).is_err());
+        // python/node still need start
+        assert!(check_manifest(&manifest("python"), d.path(), false).is_err());
+    }
 }

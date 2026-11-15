@@ -87,8 +87,20 @@ publish/
 `publish-deploy.yml` on push to `main`: build for linux x86_64, copy binary + web + scripts to the VPS over SSH,
 `systemctl restart orch-publish`, check `/health`. First install: `deploy/install.sh` (user, folders, admin token, Caddy route).
 
+## Sandbox (`ORCH_PUBLISH_SANDBOX`)
+- unset: plain child process (development and tests). `systemd`: one transient unit per app (static, python, node).
+- `container`: one container per app on the Kiri engine, driven with the `docker` CLI against
+  `ORCH_PUBLISH_ENGINE_SOCKET` (default `/run/kiri/docker.sock`; CLI path `ORCH_PUBLISH_DOCKER`, default `docker`).
+  Per app: network `orch-apps`, port published on 127.0.0.1 only, 128 MB, 0.5 CPU, 64 processes, read-only root,
+  `/tmp` tmpfs, no capabilities, `no-new-privileges`, the server's uid:gid, code at `/app` (read-only), data at `/data`.
+  Images `python:3.12-slim` / `node:22-slim`; build steps (venv + pip, `npm ci --omit=dev`) and test steps run in the
+  same image (512 MB). Stack `docker` (container mode only, else "This server can't run docker apps."): the bundle has
+  a `Dockerfile`; the host builds `orch-app-<name>:<version>`, runs it, and removes the old image after the switch.
+  Containers carry the labels `orch.publish.app` and `dev.kiri.domain`; leftovers after a server restart are removed.
+  Real-engine test: `ORCH_PUBLISH_TEST_ENGINE=1 cargo test --test container -- --ignored`.
+
 ## Not included
-Several admins, custom domains per app, app logs view, own databases beyond SQLite, Docker.
+Several admins, custom domains per app, app logs view, own databases beyond SQLite.
 
 ## Workspace profile
 
