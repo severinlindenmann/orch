@@ -1,4 +1,4 @@
-/* Demo items for the swipe review draft (15 Nov, revised after the Codex challenge).
+/* Demo items for the swipe review draft (15 Nov, revised after the design challenge).
    Every card says what happens when you approve (then), the approve button names the action (okLabel), and the card
    shows why it waits on you (need). Order: most urgent first. */
 window.SWIPE_KIT='../../../../../workspace/src/orch_ui/static/';
