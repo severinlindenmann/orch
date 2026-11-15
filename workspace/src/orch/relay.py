@@ -1008,7 +1008,7 @@ def send_question(
     the phone'). Each goes into the body only when given, so any other question is byte-identical (RULE A)."""
     body = {
         "question_id": q["id"],
-        "title": ticket["title"],
+        "title": _update_title(root, ticket["id"]) or "Ticket",
         "text": q["text"],
         "options": q["options"],
         "recommended": q["recommended"],
@@ -1041,6 +1041,8 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
     message `mid` the round is bound to. The asked record is written BEFORE the send. A normal question with
     body.review true; the relay does not push it (the Ready-for-review text did). The title is cut, scrubbed
     and value-hidden like every ticket title for a phone (no value hider: "Ticket", fail closed)."""
+    from orch import phone_results, phone_view
+
     qid = f"review-{n}"
     body = {
         "question_id": qid,
@@ -1054,7 +1056,10 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
     try:  # what the person is shown of the Check result; the phone echoes it in a verdict
         body["digest"] = rec["digest"] = review.check_digest(ticket)
         with contextlib.suppress(Refused):  # the Check card; one that fails the wire check goes without it
-            body["card"] = review.wire_card(review.check_card(ticket), {})
+            wire = review.wire_card(review.check_card(ticket), {})
+            h = phone_results.value_hider(root)
+            if h is not None and phone_view.wire_card_clean(wire, h):
+                body["card"] = wire
     except (KeyError, TypeError, ValueError):
         pass  # no digest: the question goes out as before and a verdict on it is refused (fail closed)
     sign_asked(root, mid, rec)
@@ -1351,9 +1356,9 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
     """A phone answer with a `verdict` on a card question (q<n>) or a review question. Checked in the
     contract's order, ticket / question / card only from the MAC'd asked record and the ticket, never from the
     answer: only a paired phone, not group-routed (else nothing at all, no result); already decided ->
-    decided; digest -> changed; ok on a signs card -> needs_signature; then review.decide as the person
-    (by = the stored phone name, via phone, proven by the relay channel). Never review.change. Exactly one
-    review_result goes back to the answering phone."""
+    decided; digest -> changed; ok or talk+picked on a signs card -> needs_signature;
+    then review.decide as the person (by = the stored phone name, via phone, proven by the relay channel).
+    Never review.change. Exactly one review_result goes back to the answering phone."""
     from orch import phone_view
 
     tid, qmid = asked["ticket"], str(msg.get("reply_to"))
@@ -1413,7 +1418,7 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
         return result({"result": "changed"}, f"not applied to {tid}: the card changed")
     if (
         not is_review
-        and v["verdict"] == "ok"
+        and (v["verdict"] == "ok" or (v["verdict"] == "talk" and picked is not None))
         and isinstance(q.get("card"), dict)
         and q["card"].get("signs") is True
     ):
@@ -1802,6 +1807,20 @@ def _journal(root: Path, msgs: list[dict]) -> None:
                 f.write("".join(json.dumps(e) + "\n" for e in new))
 
 
+INBOX_MAC_KIND = "inbox-phone"
+
+
+def _saved_phone_msg(root: Path, m: dict, fresh: dict) -> dict | None:
+    """A message from the inbox folder as the sender's. The copy this pull fetched from the relay wins; a
+    phone message otherwise needs the MAC made in _pull with the human key. A planted file: None."""
+    if m.get("id") in fresh:
+        return fresh[m["id"]]
+    if not str(m.get("from", "")).startswith("ph_"):
+        return m
+    body = {k: v for k, v in m.items() if k != "_inbox_mac"}
+    return body if humanproof.local_ok(root, INBOX_MAC_KIND, body, m.get("_inbox_mac")) else None
+
+
 def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     """Download, save every message first, journal the new ids, then ack. Marks nothing seen."""
     wait = max(0, min(30, wait))
@@ -1812,7 +1831,15 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     for n, m in enumerate(net.items(resp)):
         if not isinstance(m, dict) or not re.fullmatch(r"m_[a-z0-9]{16}", str(m.get("id", ""))):
             continue
-        net.write_json(d / f"{m['id']}.json", m)
+        saved = m
+        if str(m.get("from", "")).startswith("ph_"):
+            # a phone message is applied only fresh from the relay, or from a file this core signed now
+            # (human-proof.md "Phone actions" rule 1): the file keeps the MAC, an agent cannot make one
+            mac = humanproof.local_sign(root, INBOX_MAC_KIND, m)
+            if mac is None and tickets.agent_tool() and m.get("type") == "answer" and _person_asked(root, m):
+                continue  # a person's swipe in an agent session: left unacked for the workspace's own process
+            saved = {**m, "_inbox_mac": mac} if mac else m
+        net.write_json(d / f"{m['id']}.json", saved)
         arrival[m["id"]] = n
         ok.append(m)
     if ok:
@@ -2633,7 +2660,8 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
         apply_allow_answers(root)
     sync_phone_views(root)
     sync_groups(root)
-    _, arrival = _pull(root, wait)
+    got, arrival = _pull(root, wait)
+    fresh = {m["id"]: m for m in got}
     d = root / ".orch" / "inbox"
     pending = []
     for f in d.glob("m_*.json"):  # everything saved and not yet seen, also from earlier pulls
@@ -2644,7 +2672,9 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
             and f.stem not in seen(root)
             and f"{m.get('from')}/{f.stem}" not in seen(root)
         ):
-            pending.append(m)
+            m = _saved_phone_msg(root, m, fresh)
+            if m is not None:
+                pending.append(m)
     out = []
     for m in sorted(
         pending,

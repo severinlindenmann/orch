@@ -1855,11 +1855,14 @@ def _card_files(root: Path, tid: str, card: dict, shown: dict, state: dict) -> t
     refs: dict = {}
     files: list[dict] = []
     total = 0
+    h = phone_results.value_hider(root)
     for src in review.card_files_of(card):
         name = src.rsplit("/", 1)[-1]
         mime = review.MIMES.get(Path(name).suffix.lower())
         data = review.read_reviewed(root, tid, shown, src)  # None: gone or no longer the reviewed bytes
         if data is None or not data or mime is None or not _CARD_NAME.fullmatch(name):
+            refs[src] = "held_back"
+        elif h is None or not _text_clean(name, h):  # a file name is shown to the person: no secret in it
             refs[src] = "held_back"
         elif len(files) >= 20 or total + len(data) > review.MAX_PHONE_CARD:
             refs[src] = "too_large"
@@ -1880,6 +1883,26 @@ def _card_files(root: Path, tid: str, card: dict, shown: dict, state: dict) -> t
                 }
             )
     return refs, files
+
+
+_CARD_NOT_TEXT = {"kind", "type", "id", "src", "signs"}  # enums, ids and file references: not shown as text
+
+
+def _text_clean(t: str, h) -> bool:
+    """True when a text is a fixed point of the value hider and redact: showing it hides nothing."""
+    return h.hide_text(t) == t and redact(t) == t
+
+
+def wire_card_clean(wire, h) -> bool:
+    """Every text of a wire card (title, why, need, then, open, doc, table cells, option texts, alt, note)
+    survives the value hider and redact unchanged. A card with a text that would be hidden is not sent."""
+    if isinstance(wire, str):
+        return _text_clean(wire, h)
+    if isinstance(wire, list):
+        return all(wire_card_clean(x, h) for x in wire)
+    if isinstance(wire, dict):
+        return all(wire_card_clean(v, h) for k, v in wire.items() if k not in _CARD_NOT_TEXT)
+    return True
 
 
 def sync_cards(root: Path) -> list[str]:
@@ -1923,8 +1946,13 @@ def sync_cards(root: Path) -> list[str]:
         state = load_state(root)
         try:
             refs, files = _card_files(root, tid, q["card"], q.get("shown") or {}, state)
+            h = phone_results.value_hider(root)
+            if h is None or not wire_card_clean([q["text"], q["options"]], h):
+                raise Refused("held back: the question text would be hidden or cannot be checked")
             try:
                 wire: dict | None = review.wire_card(q["card"], refs)
+                if not wire_card_clean(wire, h):
+                    wire = None  # a card text with a key or value in it: the question goes without the card
             except Refused:
                 wire = None  # the contract: send the question without the card
             if wire is None:

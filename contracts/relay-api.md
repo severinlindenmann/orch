@@ -287,8 +287,9 @@ Then, in this order:
 2. `verdict.digest` is not the digest of the question as the workspace holds it **now** (and as the asked record says it was
    sent) → `changed`; nothing applied, the question stays open on the computer (the phone shows "This changed"; re-sending the
    new card is later, M4).
-3. `ok` on a card with `signs: true` (the workspace's own stored card) → `refused`, `needs_signature`; the question stays open
-   (M1). `no` and `talk` on it are allowed (they grant nothing).
+3. `ok`, or `talk` **with `picked`** (= use with changes, a chosen option), on a card with `signs: true` (the workspace's own
+   stored card) → `refused`, `needs_signature`; the question stays open (M1). `no` and `talk` without `picked` (send back
+   for changes) on it are allowed (they grant nothing).
 4. Decide with the review rules (`review.decide`; for a review question `_decide_check`: `ok` = Accept, `no`/`talk` = Ask
    for changes with `"; ".join(changes)` or `words.text`, a note is required): attributed `human:<stored phone name>`, via
    `phone`; the decision and summary are exactly review.py's. A verdict review.py refuses (an unknown or missing `picked`,

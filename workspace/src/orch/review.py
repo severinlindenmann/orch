@@ -707,13 +707,9 @@ def _find(ticket: dict, qid: str) -> dict:
 
 
 def check_digest(ticket: dict) -> str:
-    """What a person is shown of a Check result: the ticket, its title and its steps as they stand."""
-    shown = {
-        "id": ticket["id"],
-        "title": ticket.get("title"),
-        "status": ticket.get("status"),
-        "checklist": [[c.get("id"), c.get("text"), bool(c.get("done"))] for c in ticket.get("checklist", [])],
-    }
+    """What a person is shown of a Check result: exactly check_card(ticket) (title, steps with their done and
+    won't-do state), for this ticket id and status. New with Review cards: no stored older value."""
+    shown = {"id": ticket["id"], "status": ticket.get("status"), "card": check_card(ticket)}
     return _sha(_canon(shown).encode())
 
 

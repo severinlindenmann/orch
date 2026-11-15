@@ -173,7 +173,7 @@ inbox`); what it can apply is decided by the relay, not by the caller. Device-ke
 digest of the question as the workspace stores it now (else `changed`, nothing applied). The workspace takes the ticket, the
 question and the card (`signs` included) only from its own MAC'd asked record and its own ticket, never from the answer.
 Face ID on the phone is a phone-side confirm only; it adds no proof the workspace can check. A card with `signs: true`
-needs the computer: a phone `ok` on it is refused (`review_result: refused`, `needs_signature`) and the question stays open
+needs the computer: a phone `ok` (or `talk` with `picked`) on it is refused (`review_result: refused`, `needs_signature`) and the question stays open
 there, until phone verdicts are signed with a device key (Level 2 later). A phone verdict never changes an answer that
 already exists (`decided`); changing a decision is a computer action.
 
