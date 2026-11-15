@@ -10,6 +10,7 @@ enum ChatRoute: Hashable {
     case starting(workspace: String, id: String)   // a topic just sent, not acked yet: opens at once, turns into the ticket in place
     case group(host: String, id: String)
     case groupHistory
+    case review(workspace: String)   // the Review stack of a workspace
     case newChat
     case newTopic(String)
     case info(workspace: String, ticket: String?)
