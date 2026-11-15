@@ -457,7 +457,9 @@ async fn deploy_inner(
     touch(st, name);
     let mut view_token = None;
     let mut hash = existing.and_then(|e| e.view_token_hash.clone());
-    if auth && (hash.is_none() || new_token) {
+    // an app that moves between the private network and the internet gets a new link
+    let moved = existing.is_some_and(|e| e.reach != m.reach);
+    if auth && (hash.is_none() || new_token || moved) {
         let t = util::rand_token("apv_", 16);
         hash = Some(util::sha256_hex(&t));
         view_token = Some(t);
@@ -1275,9 +1277,11 @@ pub fn access_changed(old: &AppRow, new: &AppRow) -> Option<Response> {
             false,
         ));
     }
+    if new.reach != old.reach {
+        return Some(notice_gone());
+    }
     if new.workspace != old.workspace
         || new.public != old.public
-        || new.reach != old.reach
         || new.view_token_hash != old.view_token_hash
         || new.stack != old.stack
     {

@@ -153,8 +153,30 @@ pub fn private_router(st: State) -> Router {
         .route("/_/favicon.svg", get(web::favicon_svg))
         .route("/_/apple-touch-icon.png", get(web::touch_icon))
         .fallback(web::not_found)
+        .layer(axum::middleware::from_fn_with_state(st.clone(), host_guard))
         .layer(axum::Extension(Listener::Private))
         .with_state(st)
+}
+
+/// DNS rebinding guard: the private listener answers only requests whose Host is its own address
+/// (`/health` excepted); anything else gets the usual 404.
+async fn host_guard(
+    axum::extract::State(st): axum::extract::State<State>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if req.uri().path() != "/health" {
+        let want = st.cfg.private_authority();
+        let got = req
+            .headers()
+            .get(axum::http::header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .map(|h| config::split_authority(h, want.as_ref().map_or(80, |w| w.1)));
+        if want.is_none() || got != want {
+            return web::not_found().await;
+        }
+    }
+    next.run(req).await
 }
 
 /// Admin listener (private network only).

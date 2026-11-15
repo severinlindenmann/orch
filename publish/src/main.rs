@@ -26,11 +26,13 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("cannot listen on {admin_listen}: {e}"));
     let private = match &private_listen {
-        Some(l) => Some(
-            tokio::net::TcpListener::bind(l)
-                .await
-                .unwrap_or_else(|e| panic!("cannot listen on {l}: {e}")),
-        ),
+        Some(l) => match tokio::net::TcpListener::bind(l).await {
+            Ok(p) => Some(p),
+            Err(e) => {
+                tracing::error!("cannot listen on {l}: {e}; private-network apps stay hidden");
+                None
+            }
+        },
         None => None,
     };
     tracing::info!("orch-publish: public {listen}, admin {admin_listen}");
