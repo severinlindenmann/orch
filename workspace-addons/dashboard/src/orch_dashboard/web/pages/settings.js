@@ -1204,7 +1204,7 @@ const PROMPT_MAX = 200;
 function promptDialog(control) {
   const id = shownAddon();
   if (snapshot || !id) return;
-  const {verb, target, value = '', promptLabel = 'Edit'} = control.dataset;
+  const {verb, addonPrompt: target, value = '', promptLabel = 'Edit'} = control.dataset;
   const {d, actions} = dialog(promptLabel, 'dialog');
   const input = h('input', {className:'input', type:'text', maxLength:String(PROMPT_MAX + 50), value, 'aria-label':promptLabel});
   const hint = h('p', {className:'meta', role:'status'}), failed = h('p', {className:'meta', role:'alert', hidden:true});
@@ -1230,7 +1230,7 @@ function promptDialog(control) {
   };
   input.addEventListener('input', () => { failed.hidden = true; refresh(); });
   input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save.click(); } });
-  d.append(h('div', {className:'form-fields'}, h('label', {className:'field'}, promptLabel, input), hint, failed), actions);
+  d.append(h('div', {className:'form-fields'}, h('label', {className:'field'}, input), hint, failed), actions);
   actions.append(save);
   refresh();
   window.orch.open(d);

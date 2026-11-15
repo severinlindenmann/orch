@@ -11,6 +11,7 @@ test('the prompt dialog sends the add-on verb with the new text and shows a refu
   const body = settings.slice(i, settings.indexOf('let sharedLinks', i));
   assert.match(body, /value,\s*'aria-label'/);   // prefilled with args.value
   assert.match(body, /act\('addon\.act', \{addon:id, verb, target, value:text\}\)/);
+  assert.match(body, /addonPrompt: target/);   // the target is the one checked id the block put on the button
   assert.match(body, /PROMPT_MAX = 200|n > PROMPT_MAX/);
   assert.match(body, /save\.disabled = n === 0 \|\| n > PROMPT_MAX/);
   assert.match(body, /Write at least one character/);
