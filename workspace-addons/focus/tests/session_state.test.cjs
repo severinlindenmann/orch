@@ -66,3 +66,26 @@ test('the feed draws again when the ticket status flips to review', () => {
   assert.match(draw(v), /^ *Paused/);
   assert.match(draw({...v, ticket: {...v.ticket, status: 'review'}}), /^ *Work so far/);
 });
+
+test('#862: no empty "Before the question" header, and the repeated stop line is not shown', () => {
+  const asking = view('needs', false);
+  asking.ticket.questions = [{id: 'q1', text: 'Which day?', answer: null}];
+  asking.ticket.history = [{at: '2026-11-15T10:00:00Z', text: 'The agent stopped before the work was finished. Continue goes on where it left off.', by: 'orch'}];
+  assert.equal(sessionState(asking).headline, '');
+  const t = feedText(asking);
+  assert.doesNotMatch(t, /Before the question/);
+  assert.doesNotMatch(t, /Continue goes on where it left off/);
+});
+
+test('#862: the run clock reads "since 12:26", never a running 732:20', () => {
+  const els = {time: {textContent: ''}};
+  const S = {state: {view: {run: {first: '2026-11-15T12:26:00'}}, workedBase: 43940, workedAt: 0, clockWorking: false}, views: {}, register: (n, m) => { S.views[n] = m; }, h: () => ({}), TID: null, toast() {}, els, stamp: () => '', hhmm: at => at.slice(11, 16)};
+  const ctx = vm.createContext({window: {FocusStore: S}, performance: {now: () => 0}, setInterval() {}});
+  const file = path.join(__dirname, '../src/orch_focus/web/session.js');
+  vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file});
+  S.views.session.tickTimer();
+  assert.equal(els.time.textContent, 'since 12:26');
+  S.state.view.run.first = null; S.state.workedBase = 720;
+  S.views.session.tickTimer();
+  assert.equal(els.time.textContent, '12 min');
+});

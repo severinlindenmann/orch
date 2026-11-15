@@ -26,7 +26,7 @@ def test_optional_workspace_details_and_safe_text():
 
 def test_switcher_keyboard_and_touch_targets():
     js = (WEB / "switcher.js").read_text()
-    css = (WEB / "look.css").read_text().split("/* v3-pages: switcher + mobile mode */")[1]
+    css = (KIT / "widgets.css").read_text().split("/* v3-pages: switcher + mobile mode */")[1]
     assert "role: 'menuitem'" in js and "row.tabIndex = 0" in js
     assert "menu.querySelector('[role=menuitem]')?.focus()" in js
     assert "e.key === 'Escape' && menu" in js
@@ -39,6 +39,6 @@ def test_switcher_stays_one_row_in_the_open_menu():
     # The kit shows the workspace box as a block in the open Menu (0,3,0); the switcher
     # (icon, name + sub-label, chevron) must win with a more specific flex rule.
     kit = (KIT / "components.css").read_text()
-    look = (WEB / "look.css").read_text()
+    look = (KIT / "widgets.css").read_text()
     assert ".sidebar[data-open=true] .workspace," in kit
     assert ".sidebar[data-open=true] .workspace.ws-switch{display:flex}" in look

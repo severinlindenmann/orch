@@ -35,7 +35,7 @@ def idea(root, title, data, ticket_id=None):
 IDEA_MAX = 500
 # The start text of an idea-box order: the agent reads the ticket's note when it starts. Without it a neutral idea ("a
 # newsletter template") reads like a normal task and gets built (release-22 walk, WLK-15).
-ORDER_NOTE = (  # under 200 characters: a longer note makes core add "write a plan, split it into tasks, then start"
+ORDER_NOTE = (  # the start text; the person's whole idea follows it in the note (core adds no plan line to add-on tickets)
     "This ticket is a Factory order: write a short draft with orch factory draft, ask the open questions, "
     "then wait. Don't build it; the person presses Plan the run."
 )
@@ -63,7 +63,13 @@ def idea_act(root, text, by):
     store = Store(root)
     with store.locked():
         ticket = orchcli.call(
-            root, "ticket", "new", _idea_title(text), f"--note={ORDER_NOTE}", write=True, by=by
+            root,
+            "ticket",
+            "new",
+            _idea_title(text),
+            f"--note={ORDER_NOTE} The person's idea: {text}",
+            write=True,
+            by=by,
         )
         store.write(f"drafts/{ticket['id']}/v1.md", text.encode() + b"\n", frozen=True)
         orchcli.set_ext(root, ticket, by=by, role="order", kind="run", stage="draft", draft=1, idea_box=True)
