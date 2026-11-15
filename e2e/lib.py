@@ -245,18 +245,13 @@ def strip_ansi(s: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", s)
 
 
-# ---- the scripted test human (#815) -----------------------------------------------------------------
-# A person's action (answer, ticket done, relay connect ...) refuses a plain command and queues a hand-off on the page.
-# The harness plays the person who clicks: it reads the queued hand-off, mints the proof the page would send (library
-# call, the workspace's own human key) and runs the same command again with --proof-stdin. (`orch dev-proof` cannot do
-# this for Done: a dev workspace has no human key to sign the Done decision with.)
+# ---- person actions (#815, #799) --------------------------------------------------------------------
+# A person's action (answer, ticket Done, relay connect/allow ...) is refused at the CLI with a hand-off to the dashboard
+# until #799 (R4.1) removes the proof mechanism. The harness does NOT fake the person: such a scenario is an expected
+# failure (XFAIL) and turns green on its own once the action is a plain person action.
 
 HANDOFF_TEXT = "dashboard on this computer"
-
-_QUEUED = ("import json, sys; from pathlib import Path; from orch import humanproof as h; "
-           "print(json.dumps(h.handoffs(Path(sys.argv[1]))))")
-_MINT = ("import sys; from pathlib import Path; from orch import humanproof as h; r = Path(sys.argv[1]); "
-         "print(h.mint(h.human_key(r), h.new_payload(sys.argv[2], sys.argv[3], 'human:e2e')))")
+XFAIL_WHY = "needs a person's action that is still a dashboard hand-off; turns green with #799 (R4.1)"
 
 
 def tool_python(bin_dir: Path) -> str:
@@ -266,27 +261,17 @@ def tool_python(bin_dir: Path) -> str:
     return first[2:].strip().split()[0]
 
 
-def person_run(sh, py: str, root: Path, cmd: list, *, env=None, input=None, timeout: int = 300):
-    """Run `cmd` as the person. `sh(cmd, cwd=, env=, input=, timeout=)` -> (rc, out, err). Returns the last result."""
+class XFail(Exception):
+    pass
+
+
+def person_run(sh, root: Path, cmd: list, *, env=None, input=None, timeout: int = 300):
+    """Run `cmd` as the person (no --by). Raises XFail while the CLI hands the action off to the dashboard."""
     cmd = list(cmd)
-    if "--by" in cmd:  # the person comes from the proof; --by must agree or be absent
+    if "--by" in cmd:
         i = cmd.index("--by")
         del cmd[i:i + 2]
     rc, out, err = sh(cmd, cwd=root, env=env, input=input, timeout=timeout)
-    if rc == 0 or HANDOFF_TEXT not in out + err:
-        return rc, out, err
-    rc2, queued, err2 = sh([py, "-c", _QUEUED, str(root)], cwd=root, env=env)
-    try:
-        items = [i for i in json.loads(queued) if isinstance(i, dict)]
-    except ValueError:
-        items = []
-    check(rc2 == 0 and items, f"no hand-off was queued for {' '.join(map(str, cmd))[:60]}: {(err2 or queued)[-160:]}")
-    item = items[-1]
-    argv = item.get("argv") or []
-    if "--question-digest" in argv and "--question-digest" not in cmd:  # the digest of the question the person saw
-        j = argv.index("--question-digest")
-        cmd += argv[j:j + 2]
-    prc, proof, perr = sh([py, "-c", _MINT, str(root), item["op"], item["target"]], cwd=root, env=env)
-    check(prc == 0 and proof.startswith("hp1."), f"no proof for {item['op']}: {(perr or proof)[-200:]}")
-    pin = proof.strip() + "\n" + (input if isinstance(input, str) else "")
-    return sh([*cmd, "--proof-stdin"], cwd=root, env=env, input=pin, timeout=timeout)
+    if rc != 0 and HANDOFF_TEXT in out + err:
+        raise XFail(f"{' '.join(map(str, cmd[1:4]))}: {XFAIL_WHY}")
+    return rc, out, err

@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import lib  # noqa: E402
-from lib import Admin, Fail, Resp, Skip, check, http  # noqa: E402
+from lib import Admin, Fail, Resp, Skip, XFail, check, http  # noqa: E402
 
 REGISTRY = lib.REGISTRY
 
@@ -79,9 +79,9 @@ class E:
         return rc, out, err
 
     def person(self, ws, *args, ok=True):
-        """A person's action (answer, ticket done, relay connect ...): the scripted test human proves it. No --by."""
+        """A person's action (answer, ticket done, relay connect ...), no --by. XFAIL until #799 (see lib.person_run)."""
         root = self.path_of(ws)
-        rc, out, err = lib.person_run(self.sh, lib.tool_python(self.bin), root, ["orch", *args])
+        rc, out, err = lib.person_run(self.sh, root, ["orch", *args])
         if ok and rc != 0:
             raise Fail(f"orch {' '.join(map(str, args))[:60]} (as the person) exit {rc}: {(err or out).strip()[-200:]}")
         return rc, out, err
@@ -219,6 +219,8 @@ def run_scenarios(e: E, ids: list[str], out_md: Path) -> dict:
             status, reason = "PASS", note or ""
         except Skip as s:
             status, reason = "SKIP", str(s)
+        except XFail as x:
+            status, reason = "XFAIL", str(x)
         except Fail as f:
             status, reason = "FAIL", str(f)
         except Exception as x:  # noqa: BLE001
@@ -321,8 +323,8 @@ def main() -> int:
     if leaked:
         print(f"LEAK: {len(leaked)} add-on server(s) still running in {tmp}; ended: {leaked}")
         res["LEAK"] = "FAIL"
-    n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP")}
-    summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip"
+    n = {k: sum(1 for v in res.values() if v == k) for k in ("PASS", "FAIL", "SKIP", "XFAIL")}
+    summary = f"\nSUMMARY {a.mode}: {n['PASS']} pass, {n['FAIL']} fail, {n['SKIP']} skip, {n['XFAIL']} xfail (#799)"
     print(summary)
     with open(out_md, "a") as f:
         f.write(summary + "\n")

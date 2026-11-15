@@ -90,9 +90,9 @@ class W:
         return self
 
     def person(self, *args, ok=True, env=None, input=None):
-        """A person's action (answer, ticket done, relay connect ...): the scripted test human proves it (no --by)."""
-        from lib import person_run, tool_python
-        rc, out, err = person_run(self.sh, tool_python(self.e.bin), self.root, ["orch", *args], env=env or {}, input=input)
+        """A person's action (answer, ticket done, relay connect ...), no --by. XFAIL until #799 (see lib.person_run)."""
+        from lib import person_run
+        rc, out, err = person_run(self.sh, self.root, ["orch", *args], env=env or {}, input=input)
         if ok and rc != 0:
             raise Fail(f"orch {' '.join(map(str, args))[:70]} (as the person) exit {rc}: {(err or out).strip()[-240:]}")
         return rc, out, err

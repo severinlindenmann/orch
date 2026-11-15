@@ -199,8 +199,6 @@ def w7(e):
     t = e.orchj(home, "ticket", "new", "W7 home")["id"]
     e.orch(home, "check", "add", t, "x")
     e.orch(home, "check", "done", t, "c1", "--evidence", EVID)
-    e.person(home, "ticket", "status", t, "done")
-    check(tload(home, t)["status"] == "done", "Home flow failed")
     rep = e.ws("Reports")
     t2 = e.orchj(rep, "ticket", "new", "W7 reports")["id"]
     # tickets are personal by default (9 Nov): they stay out of the team repo and `git status` stays clean
@@ -221,6 +219,8 @@ def w7(e):
     check(got["title"] == "W7 reports", "ticket not in the remote")
     st = e.sh(["git", "ls-files"], cwd=rep)[1]
     check(".orch/secrets" not in st, "secrets would be committed")
+    e.person(home, "ticket", "status", t, "done")  # last: XFAIL until #799 must not hide the git part
+    check(tload(home, t)["status"] == "done", "Home flow failed")
     return "codex exec part not run (agent)"
 
 
