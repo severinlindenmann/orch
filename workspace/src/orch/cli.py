@@ -1153,6 +1153,8 @@ def run(args: argparse.Namespace) -> None:
         ):
             raise Refused("--take-back goes with the reason only: orch ask <ticket> --take-back q3 'why'.")
         t, q, changed = tickets.take_back(root, args.id, args.take_back, args.text, by())
+        if changed:
+            relay.send_taken_back(root, t["id"], q)  # the phones drop the card (only when it was sent there)
         _out(
             args,
             q,

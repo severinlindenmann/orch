@@ -1305,6 +1305,64 @@ def _send_review_result(root: Path, qmid: str, ticket: str, saved: dict) -> None
         log_send_failure(root, f"review result {saved['id']} failed", exc)
 
 
+TAKEN_BACK_REASON_MAX = 200  # relay-api.md "Question taken back"
+
+
+def _taken_back_asked(root: Path, tid: str, qid: str) -> tuple[str, dict] | None:
+    """(message id, record) of the question we sent to the phones, else None."""
+    for mid, rec in net.read_json(_asked_path(root), {}).items():
+        if (
+            isinstance(rec, dict)
+            and rec.get("ticket") == tid
+            and rec.get("question_id") == qid
+            and rec.get("to") == "phones"
+        ):
+            return mid, rec
+    return None
+
+
+def send_taken_back(root: Path, tid: str, q: dict) -> str | None:
+    """Tell the phones one of our questions was taken back (relay-api.md "Question taken back"): ONE text to
+    `phones`, only when the question was sent there, only while the relay add-on is on. The message id and
+    time are fixed in the asked record first, so a retry (the outbox, or a new try after a crash) sends the
+    same bytes. The relay refusing it (answered first, not ours, already taken back) is only logged. Called
+    by the take-back command alone, when it changed something; never from anything that arrives over the
+    relay. Returns the message id, or None when nothing is sent."""
+    from orch import addons  # addons imports relay
+
+    if "relay" not in addons.active(root) or not isinstance(q.get("taken_back"), dict):
+        return None
+    found = _taken_back_asked(root, tid, q["id"])
+    reason = _one_line(q["taken_back"].get("reason"), TAKEN_BACK_REASON_MAX)
+    if found is None or reason is None:
+        return None
+    qmid = found[0]
+
+    def claim(asked):
+        rec = asked[qmid]
+        if not isinstance(rec.get("taken_back_msg"), dict):
+            rec["taken_back_msg"] = {"id": new_id(), "created_at": tickets.now()}
+        return rec["taken_back_msg"]
+
+    fixed = _asked_edit(root, claim)
+    try:
+        sent = _message(
+            root,
+            "phones",
+            "text",
+            {"text": f"Taken back: {reason}", "taken_back": {"reason": reason}},
+            tid,
+            reply_to=qmid,
+            mid=fixed["id"],
+            created_at=fixed["created_at"],
+        )
+        if not sent.get("sent"):
+            log_send_failure(root, f"taken back {fixed['id']} not sent yet", "kept for the next try")
+    except (Refused, OSError) as exc:
+        log_send_failure(root, f"taken back {fixed['id']} failed", exc)
+    return fixed["id"]
+
+
 def _phone_by(phone: dict, frm: str) -> str:
     name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
     return f"human:{name or frm}"
