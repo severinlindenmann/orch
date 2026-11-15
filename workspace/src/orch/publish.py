@@ -540,7 +540,6 @@ def deploy(
     needs_link = auth if auth is not None else manifest_auth(m)
     res.setdefault("reach", reach or m.get("reach", "public"))
     res["auth"] = needs_link
-    res["private"] = needs_link  # older spelling of auth, kept for callers of the JSON output
     tokens = net.read_json(_tokens_path(root), {})
     if res.get("view_token"):
         tokens[m["name"]] = res["view_token"]
