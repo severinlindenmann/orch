@@ -833,6 +833,41 @@ def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
     return out
 
 
+START_REQUIRES = re.compile(r"(t_[a-z0-9]{6,16}):(q[A-Za-z0-9_-]{0,31})=([^\x00-\x1f\x7f]{1,60})")
+
+
+def parse_start_requires(root: Path, value: str) -> dict:
+    """Parse "<ticket>:<question>=<answer>" into {"ticket", "question", "answer"}; the ticket and its question
+    must exist."""
+    m = START_REQUIRES.fullmatch(value or "")
+    if not m:
+        raise Refused(
+            "--start-requires looks like t_abc123:q1=Start (a ticket, its question and the answer)."
+        )
+    other = load(root, m[1])
+    if not any(q.get("id") == m[2] for q in other.get("questions", [])):
+        raise Refused(f"{m[1]} has no question {m[2]}.")
+    return {"ticket": m[1], "question": m[2], "answer": m[3]}
+
+
+def start_blocked(root: Path, ticket: dict) -> str | None:
+    """Why no run may start on this ticket yet, or None. A ticket made with start_requires starts only once a
+    PERSON (answered_by human:, which core accepts only with the person's proof) answered that question with
+    that answer. Generic: core knows nothing about who set it (Factory sets it on crew tickets)."""
+    req = ticket.get("start_requires")
+    if not req:
+        return None
+    why = f'This ticket starts only after a person answers "{req.get("answer")}" on {req.get("ticket")}.'
+    try:
+        other = load(root, str(req.get("ticket")))
+    except Refused:
+        return why
+    q = next((q for q in other.get("questions", []) if q.get("id") == req.get("question")), None)
+    if q and q.get("answer") == req.get("answer") and str(q.get("answered_by") or "").startswith("human:"):
+        return None
+    return why
+
+
 def create(
     root: Path,
     title: str,
@@ -844,8 +879,11 @@ def create(
     tid: str | None = None,
     title_auto: bool = False,
     plan_first: bool = False,
+    start_requires: str | None = None,
 ) -> dict:
-    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    """`start_requires` ("<ticket>:<question>=<answer>", set at creation only): no run starts on this ticket
+    until a person answered that question with that answer (see start_blocked).
+    `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
     tid lets callers persist a reserved id before this write."""
     if tid is not None:
@@ -879,6 +917,10 @@ def create(
         ticket["title_auto"] = True
     if plan_first:  # "Show plan first": the agent plans, asks "Plan ready", waits (set at creation only)
         ticket["plan_first"] = True
+    if (
+        start_requires is not None
+    ):  # a gate an add-on sets (Factory: a crew task waits for the person's Start)
+        ticket["start_requires"] = parse_start_requires(root, start_requires)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
