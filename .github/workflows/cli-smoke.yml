@@ -13,6 +13,19 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      # orch's per-machine folder is a temp one under the home, never the real ~/.orch-tool (ORCH_HOME_STRICT turns any
+      # fallback into an error). The guard step at the end fails if the real folder changed.
+      - name: Isolate orch's home, snapshot the real one
+        shell: pwsh
+        run: |
+          $h = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+          $oh = Join-Path $h ".orch-test/smoke-home"
+          New-Item -ItemType Directory -Force $oh | Out-Null
+          "ORCH_HOME=$oh" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "ORCH_HOME_STRICT=1" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          $real = Join-Path $h ".orch-tool"
+          $snap = if (Test-Path $real) { Get-ChildItem -Recurse -Force $real | ForEach-Object { "$($_.FullName) $($_.Length) $($_.LastWriteTimeUtc.Ticks)" } | Sort-Object } else { @() }
+          $snap | Set-Content "$env:RUNNER_TEMP/orch-tool.before"
       # ORCH_REPO = this checkout (a local source is honoured on a test install); the installer is the one users run.
       - name: Install with install.ps1
         if: runner.os == 'Windows'
@@ -35,3 +48,13 @@ jobs:
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           bash e2e/ci/cli-smoke.sh focus
+      - name: Guard - the real ~/.orch-tool must be unchanged
+        if: always()
+        shell: pwsh
+        run: |
+          $h = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+          $real = Join-Path $h ".orch-tool"
+          $now = if (Test-Path $real) { Get-ChildItem -Recurse -Force $real | ForEach-Object { "$($_.FullName) $($_.Length) $($_.LastWriteTimeUtc.Ticks)" } | Sort-Object } else { @() }
+          $diff = Compare-Object @(Get-Content "$env:RUNNER_TEMP/orch-tool.before") @($now)
+          if ($diff) { $diff | Out-String | Write-Host; throw "the smoke changed the real $real" }
+          Write-Host "real $real unchanged"

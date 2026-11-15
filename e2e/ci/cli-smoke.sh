@@ -4,6 +4,10 @@
 #   cli-smoke.sh <addon-name>      # the add-on to add and remove again (default: focus)
 set -eu
 ADDON="${1:-focus}"
+# Never the real ~/.orch-tool: orch's per-machine folder is a temp folder under the home, and strict mode makes any
+# fallback to the real one an error. The workflow sets both (so the install is covered too); this is the local default.
+if [ -z "${ORCH_HOME:-}" ]; then ORCH_HOME="$HOME/.orch-test/smoke-home-$$"; mkdir -p "$ORCH_HOME"; fi
+export ORCH_HOME ORCH_HOME_STRICT=1
 BASE="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 D="$BASE/orch smoke Büro $$"
 mkdir -p "$D"; cd "$D"
@@ -12,7 +16,7 @@ step() { printf '\n=== %s\n' "$*"; }
 # has ended (winfinish.py) and print "Log: <file>". Wait for that file's RESULT line (e2e/windows/standard-user-flow.ps1 does too).
 run_wait() {
   # the log is shared by all finishes: only a RESULT line beyond the count before this command is ours
-  base="$(grep -c ' RESULT ' "$HOME/.orch-tool/finish.log" 2>/dev/null || true)"; base="${base:-0}"
+  base="$(grep -c ' RESULT ' "$ORCH_HOME/finish.log" 2>/dev/null || true)"; base="${base:-0}"
   out="$("$@" 2>&1)"; rc=$?; echo "$out"; [ $rc -eq 0 ] || return $rc
   log="$(printf '%s\n' "$out" | sed -n 's/.*Log: \(.*\)$/\1/p' | tail -1)"
   [ -n "$log" ] || return 0
