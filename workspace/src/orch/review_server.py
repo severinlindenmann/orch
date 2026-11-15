@@ -64,7 +64,8 @@ KIT_FILES = (
     "icons.js",
     "widgets.js",
     "review.js",
-)  # fmt: skip  (every file review.html links, except review-boot.js, which this server writes itself)
+    "review-boot.js",
+)  # fmt: skip  (every file review.html links)
 TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -76,27 +77,6 @@ FILE_TYPES = {
     ".htm": "text/html; charset=utf-8", ".md": "text/plain; charset=utf-8",
     ".txt": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8",
 }  # fmt: skip
-
-# The kit's review-boot.js signs in with the token but does not keep the page secret, and the kit's fetches
-# do not send it. This boot (served in its place) does the same and adds the secret to every same-origin
-# request of the page, so the page session is cookie + secret as pageproof requires. No inline script (CSP).
-BOOT_JS = """(()=>{'use strict';
-const host=document.getElementById('review-host');
-const KEY='orch_review_secret';
-const secret=()=>{try{return sessionStorage.getItem(KEY)||''}catch{return ''}};
-const f=window.fetch.bind(window);
-window.fetch=(u,o)=>{o=Object.assign({},o||{});const h=new Headers(o.headers||{});const s=secret();
- if(s&&String(u).startsWith('/'))h.set('X-Orch-Page',s);o.headers=h;
- if(String(u).startsWith('/')&&(o.method||'GET')!=='GET'&&o.credentials===undefined)o.credentials='same-origin';return f(u,o)};
-const start=()=>UI.reviewPage(host,UI.reviewFetchApi(''),{nav:document.getElementById('review-nav'),meta:document.getElementById('review-meta')});
-const m=/[#&](?:t|launch)=([^&]+)/.exec(location.hash);
-if(!m)return start();
-let token='';try{token=decodeURIComponent(m[1])}catch{}
-history.replaceState(null,'',location.pathname+location.search);
-f('/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})})
- .then(r=>r.ok?r.json():null).then(j=>{if(j&&j.secret){try{sessionStorage.setItem(KEY,j.secret)}catch{}}}).catch(()=>{}).then(start);
-})();
-"""  # noqa: E501
 
 
 def kit_dir() -> Path | None:
@@ -217,10 +197,6 @@ class Handler(BaseHTTPRequestHandler):
             if body is None:
                 return self._text(503, NO_KIT)
             return self._send(200, body, TYPES[".html"])
-        if path == "/kit/review-boot.js":
-            if kit_dir() is None:
-                return self._text(503, NO_KIT)
-            return self._send(200, BOOT_JS.encode(), TYPES[".js"])
         if path.startswith("/kit/"):
             name = path[5:]
             if name not in KIT_FILES:
