@@ -587,6 +587,7 @@ class Tracker:
                         "next_step": next_step,
                         "question_count": len(questions),
                         "key": t.get("key"),
+                        "updated_at": t.get("updated_at") or t.get("created_at"),
                         "title": str(t.get("title", ""))[:200],
                         "status": t["status"],
                         "closed_at": (t.get("closed_at") or ((t.get("history") or [{}])[-1] or {}).get("at"))

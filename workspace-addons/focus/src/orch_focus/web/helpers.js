@@ -30,6 +30,13 @@
     const text = parts.join(' and ') + (q + r === 1 ? ' needs' : ' need') + (r ? ' your look.' : ' you.');
     return text[0].toUpperCase() + text.slice(1);
   }
+  /* The ticket Focus opens on: the oldest question first, then the oldest result to check. Null when nothing waits. */
+  function nextNeeding(rows) {
+    const at = t => Date.parse(t.updated_at) || Infinity;
+    const oldest = list => list.map((t, i) => [t, i]).sort((a, b) => at(a[0]) - at(b[0]) || a[1] - b[1]).map(x => x[0])[0];
+    const list = rows || [], q = oldest(list.filter(needsYou)), r = oldest(list.filter(t => t.status === 'review' && !needsYou(t)));
+    return q ? {ticket: q, hash: ''} : r ? {ticket: r, hash: '#results'} : null;
+  }
   /* "2 agents are working. One question needs you." The agent part is left out while no agent works. */
   function pickerLine(agents, attention) {
     const n = Number(agents) || 0;
@@ -99,6 +106,6 @@
     const asking = (t.questions || []).some(q => q.answer == null) || (v && v.state === 'needs');
     return t.status === 'review' && !asking && !(v && v.run && v.run.running);
   }
-  root.FocusHelpers = {reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
+  root.FocusHelpers = {reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, nextNeeding, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);
