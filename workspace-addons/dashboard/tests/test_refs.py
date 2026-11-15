@@ -180,11 +180,14 @@ def test_links_get_one_view_from_the_core_module():
         "merged",
         "Pull request",
     )
-    assert (camp["view"]["label"], camp["view"]["status"]) == ("Reference", "live")  # its add-on is off: the state stays
+    assert (camp["view"]["label"], camp["view"]["status"]) == (
+        "Reference",
+        "live",
+    )  # its add-on is off: the state stays
     assert internal["view"]["label"] == "Reference"
     snap = {"refs": [{"kind": "github-pr", "url": "https://github.com/a/b/pull/4", "status": "merged"}]}
     data.add_link_views([snap], [])  # a shared copy names no add-on
-    assert (snap["refs"][0]["view"]["label"], snap["refs"][0]["view"]["status"]) == ("GitHub", None)
+    assert (snap["refs"][0]["view"]["label"], snap["refs"][0]["view"]["status"]) == ("GitHub", "merged")
 
 
 def test_page_renders_links_with_text_only_and_safe_hrefs():
