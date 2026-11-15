@@ -2258,3 +2258,42 @@ def test_a_refusal_is_printed_with_one_prefix_and_says_what_is_allowed(store, ru
     assert "full path of a file" in str(e.value)
     code, _, err = run("secret", "env", "nope", "--", PY)
     assert code == 2 and err.startswith("Refused: ") and "Refused: Refused:" not in err
+
+
+# ---- orch secret scan -------------------------------------------------------------------------------------
+
+
+def _scan(run, monkeypatch, text, *flags):
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(text.encode()), encoding="utf-8"))
+    return run("secret", "scan", *flags)
+
+
+def test_scan_finds_a_planted_token_with_its_line_and_never_prints_it(ws, run, monkeypatch):
+    planted = "ghp_" + "a1B2" * 8  # built here: no token literal in the repo
+    code, out, err = _scan(run, monkeypatch, f"hello\n{planted}\nbye\n", "--json")
+    assert code == 2 and planted not in out + err
+    answer = json.loads(out)
+    assert answer["code"] == "refused" and answer["found"] == [{"kind": "github-token", "line": 2}]
+    assert "GitHub token on line 2" in answer["error"] and "Remove it and try again." in answer["error"]
+    code, out, err = _scan(run, monkeypatch, f"x\n{planted}\n")
+    assert code == 2 and planted not in out + err and "line 2" in err
+
+
+def test_scan_passes_clean_text(ws, run, monkeypatch):
+    code, out, _ = _scan(run, monkeypatch, "Export invoices as CSV, closes #812.\n", "--json")
+    assert code == 0 and json.loads(out) == {"found": []}
+    code, out, _ = _scan(run, monkeypatch, "fine\n")
+    assert code == 0 and "No secrets found." in out
+
+
+def test_scan_finds_a_stored_key_value_and_a_password_line(ws, run, store, monkeypatch):
+    code, out, err = _scan(run, monkeypatch, f"a\nb\nthe key is {TOKEN}\n", "--json")
+    assert code == 2 and json.loads(out)["found"] == [{"kind": "stored-key", "line": 3}]
+    assert TOKEN not in out + err
+    code, out, _ = _scan(run, monkeypatch, "ok\npassword=hunter2hunter2\n", "--json")
+    assert code == 2 and json.loads(out)["found"] == [{"kind": "secret-value", "line": 2}]
+
+
+def test_scan_refuses_more_than_1_mb(ws, run, monkeypatch):
+    code, out, _ = _scan(run, monkeypatch, "a" * 1_000_001, "--json")
+    assert code == 2 and json.loads(out)["code"] == "too_large"

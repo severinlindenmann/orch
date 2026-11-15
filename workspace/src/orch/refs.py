@@ -154,8 +154,9 @@ def _not_a_site_icon(icon: str) -> str:
 
 def describe(link: dict, kinds: list[dict], root: Path | None = None) -> dict:
     """How a reference is shown: label, short label (the type
-    name, for lists), icon key and monogram, title (stored, else the short address), status (only while
-    the add-on that set it is on), group (Artifacts tab: the add-on label, else "References") and preview."""
+    name, for lists), icon key and monogram, title (stored, else the short address), status (the stored word,
+    for every web reference; readers show it with a capital first letter), group (Artifacts tab: the add-on
+    label, else "References") and preview."""
     if not valid_reference(link, root):
         return dict(
             kind="invalid",
@@ -205,23 +206,23 @@ def describe(link: dict, kinds: list[dict], root: Path | None = None) -> dict:
     title = one_line(link["title"]) if isinstance(link.get("title"), str) else ""
     k = next((x for x in kinds if x["kind"] == kind_of(link)), None)
     s = site(url)
+    st = link.get("status")
+    shown = st if isinstance(st, str) and STATUS_RE.fullmatch(st) else None
     out = {
         "kind": kind_of(link),
         "host": _host_path(url)[0],  # the real host, always shown next to the type
         "title": title or one_line(short_url(url), 300) or "Reference",
         "short": one_line(short_url(url), 300),
-        "status": None,
+        "status": shown,  # the stored lower-case word, for every web reference
         "preview": None,
         "addon": None,
     }
     if k:
-        st = link.get("status")
         out.update(
             label=f"{s['name']} · {k['label']}" if s else k["label"],
             type=k["label"],
             icon=s["icon"] if s else _not_a_site_icon(k["icon"]),
             mono=s["mono"] if s else k["label"][:2],
-            status=st if isinstance(st, str) and STATUS_RE.fullmatch(st) else None,
             group=k["label"],
             preview=k.get("preview"),
             addon=k["addon"],
@@ -231,6 +232,16 @@ def describe(link: dict, kinds: list[dict], root: Path | None = None) -> dict:
     else:
         out.update(label="Reference", type="Reference", icon="link", mono=None, group="References")
     return out
+
+
+def ref_name(link: dict, root: Path | None = None) -> str:
+    """A short name for history lines: the site and the item's own key (`GitHub #812`, `Jira BILL-207`),
+    else the site (or "Reference") and the short address."""
+    d = describe(link, [], root)
+    m = re.search(r"/(?:issues|pull|pulls|merge_requests)/([0-9]+)", _host_path(link.get("url") or "")[1])
+    m2 = re.search(r"/browse/([A-Za-z][A-Za-z0-9]*-[0-9]+)", _host_path(link.get("url") or "")[1])
+    key = f"#{m[1]}" if m else m2[1] if m2 else one_line(d["short"], 60)
+    return f"{d['label']} {key}"
 
 
 def numbered(ticket: dict) -> list[tuple[int, dict]]:

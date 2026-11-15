@@ -230,6 +230,17 @@ an argument), `orch secret remove <name>`, `orch secret profile <name> …`. The
 - Refusals are exit 2 with plain words: `Refused: the profile "billing" does not allow printing keys. Use orch secret env billing -- <command>.`
   The text names keys and profiles, never values.
 
+## `orch secret scan [--json]` (text check before anything leaves the machine)
+
+Text on stdin, at most 1 MB. Looks for token and key patterns, `name=value` secrets, secret flag values and the values
+of this workspace's own stored keys: the same detection as the phone view (`workspace/src/orch/secretscan.py`, one list).
+- Clean: exit 0; `No secrets found.` (`--json`: `{"found": []}`).
+- Found: exit 2, `The text has a GitHub token on line 3. Remove it and try again.`; `--json`:
+  `{"error", "code": "refused", "found": [{"kind", "line"}]}`. Too large: exit 2, `code: "too_large"`.
+- Never prints the matched text or a key's value. Kinds: `private-key`, `orch-token`, `api-key`, `github-token`,
+  `gitlab-or-slack-token`, `aws-key`, `jwt`, `bearer-token`, `api-token`, `password-in-url`, `webhook-token`,
+  `secret-value`, `stored-key`.
+
 ## Hiding (exact values)
 
 The hider knows every value of this workspace's key store (both sources) and runs on every string any writer writes.
