@@ -4,4 +4,7 @@ stack = "docker"
 store = "{{store}}"
 health = "/health"
 test = "python3 -m unittest discover -s tests"
-public = false
+# reach: public = on the internet, private = only on the private network
+reach = "public"
+# auth: true = needs the app's private link, false = open to everyone who can reach it
+auth = true

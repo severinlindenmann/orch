@@ -50,9 +50,10 @@ It prints the full link on its own line (it ends in `#k=...`). Give the user tha
 
     orch publish new python --store sqlite tracker   # or static|node|docker; store none|json|markdown|sqlite
     # edit tracker/, then:
-    orch publish app tracker                         # private: the link carries ?token=
+    orch publish app tracker                         # needs the private link (auth): it carries ?token=
+    orch publish app tracker --private               # only reachable on the private network
 {{#public}}
-    orch publish app tracker --public                # an open link, only when the user asks
+    orch publish app tracker --no-auth               # an open link, only when the user asks
 {{/public}}
     orch publish app tracker --new-token             # a new view link; the old one stops working
 
@@ -63,7 +64,7 @@ server app listens on `$HOST:$PORT`, writes only to `$DATA_DIR` and uses relativ
 
 Apps run sandboxed in the browser: no `localStorage`, `sessionStorage`, IndexedDB or cookies (they throw or stay empty).
 Keep state on the app's backend and identify people by a link token or a typed name. `fetch()` to the app's own paths works
-for public apps. In private apps use relative links (`style.css`, not `/a/<name>/style.css`). The app cannot turn this off.
+for apps without auth. In apps with auth use relative links (`style.css`, not `/a/<name>/style.css`). The app cannot turn this off.
 {{/apps}}
 
 **Look after what you shared**
