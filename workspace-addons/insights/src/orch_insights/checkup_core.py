@@ -641,22 +641,61 @@ def _current(root: Path, doc: dict) -> tuple[str | None, dict]:
     return skill_version(files), files
 
 
+SAY = {
+    "admin_only": "This skill belongs to your admin. Ask your admin.",
+    "not_tested": "Test this proposal first.",
+    "changed": "This proposal was changed after it was tested.",
+    "stale": "The skill changed since this was proposed.",
+    "conflict": "This proposal is not in the right state, or the skill changed again.",
+}
+
+
+def step(c: dict) -> str:
+    """One decision on a proposal (reference `proposal_step`, vectors `steps`): the new status or a refusal code."""
+    act, st = c["action"], c["status"]
+    if act == "skill_changed":
+        return "stale" if st in _OPEN else st
+    if act == "tests_done":
+        return "tested" if st == "proposed" and c["tests"] == "passed" else st
+    if act == "reject":
+        return "rejected" if st in (*_OPEN, "stale") else "conflict"
+    if act == "accept":
+        if c["file"]["target"]["source"] == "admin":
+            return "admin_only"
+        if st != "tested" or c["tests"] != "passed":
+            return "not_tested"
+        if c["tests_hash"] != proposal_hash(c["file"]):
+            return "changed"
+        if c["current_version"] != c["file"]["target"]["version"]:
+            return "stale"
+        return "accepted"
+    if act == "rollback":
+        if st != "accepted":
+            return "conflict"
+        return "rolled_back" if c["current_version"] == c["applied_after"] else "conflict"
+    return "invalid"
+
+
+def _decide(act: str, doc: dict, version, want: str) -> None:
+    got = step({"action": act, "file": doc, "status": doc["status"], "tests": doc["tests"]["state"],
+                "tests_hash": doc["tests"].get("hash"), "current_version": version,
+                "applied_after": (doc.get("applied") or {}).get("version_after")})  # fmt: skip
+    if got != want:
+        raise CheckupError(SAY.get(got, "This cannot be done now."), got if got in SAY else "conflict")
+
+
 def accept(root: Path, pid: str) -> dict:
     with _lock(root):
         doc = load(root, pid)
-        if doc["target"]["source"] == "admin":
-            raise CheckupError("This skill belongs to your admin. Ask your admin.", "admin_only")
-        if doc["status"] != "tested" or doc["tests"]["state"] != "passed" or doc["change"] is None:
-            raise CheckupError("Test this proposal first.", "not_tested")
-        if doc["tests"].get("hash") != proposal_hash(doc):
-            raise CheckupError("This proposal was changed after it was tested.", "changed")
-        name, new = doc["target"]["name"], doc["kind"] == "skill.new"
         version, files = _current(root, doc)
-        if new:
-            if name in skill_names(root):
-                raise CheckupError("A skill with that name exists now.", "conflict")
-        elif version != doc["target"]["version"]:
-            raise CheckupError("The skill changed since this was proposed.", "stale")
+        if doc["kind"] == "skill.new":
+            doc = {**doc, "target": {**doc["target"], "version": None}}
+        _decide("accept", doc, version, "accepted")
+        if doc["change"] is None:
+            raise CheckupError(SAY["not_tested"], "not_tested")
+        name = doc["target"]["name"]
+        if doc["kind"] == "skill.new" and name in skill_names(root):
+            raise CheckupError("A skill with that name exists now.", "conflict")
         folder, kept = skills_dir(root) / name, _kept(root, pid)
         before: dict[str, str | None] = {}
         try:
@@ -698,11 +737,8 @@ def _restore(folder: Path, kept: Path, before: dict) -> None:
 def rollback(root: Path, pid: str) -> dict:
     with _lock(root):
         doc = load(root, pid)
-        if doc["status"] != "accepted":
-            raise CheckupError("Only an applied change can be rolled back.", "conflict")
         version, _ = _current(root, doc)
-        if version != (doc.get("applied") or {}).get("version_after"):
-            raise CheckupError("The skill was changed again since. It is not rolled back.", "conflict")
+        _decide("rollback", doc, version, "rolled_back")
         folder, kept = skills_dir(root) / doc["target"]["name"], _kept(root, pid)
         old = {}
         for rel, h in (doc.get("before") or {}).items():  # the kept copy lives in the workspace: check it
@@ -735,8 +771,7 @@ def rollback(root: Path, pid: str) -> dict:
 def reject(root: Path, pid: str) -> dict:
     with _lock(root):
         doc = load(root, pid)
-        if doc["status"] not in (*_OPEN, "stale"):
-            raise CheckupError("This proposal is not open any more.", "conflict")
+        _decide("reject", doc, None, "rejected")
         doc.update(status="rejected", decided={"op": "reject", "at": _now()})
         save(root, doc)
     return {"id": pid, "status": "rejected"}

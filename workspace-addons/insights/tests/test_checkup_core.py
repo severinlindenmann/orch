@@ -121,14 +121,13 @@ def reference(d, ctx):
         cc.validate_draft(d)
     except cc.CheckupError:
         return "refused:invalid"
-    if ctx.get("profile") != "checkup":
+    if ctx.get("checkup") is None:
         return "refused:not_checkup"
     if d["kind"] == "skill.new" and (
         d["target"]["name"].startswith("orch") or d["target"]["name"] in ctx["existing_names"]
     ):
         return "refused:name_taken"
-    got = cc.from_draft(d, ctx)
-    return {**got, "tests": {k: got["tests"][k] for k in ("state", "cases", "ran_at")}}
+    return cc.from_draft(d, ctx)
 
 
 @pytest.mark.parametrize("case", VEC["from_draft"], ids=lambda c: c["name"])
@@ -137,6 +136,20 @@ def test_vectors_from_draft(case):
     assert got == case["expect"]
     if isinstance(got, dict):
         Draft202012Validator(SCHEMA, format_checker=FormatChecker()).validate(got)
+
+
+@pytest.mark.parametrize("case", VEC["steps"], ids=lambda c: c["name"])
+def test_vectors_steps(case):
+    assert cc.step(case) == case["result"]
+    assert cc.proposal_hash(case["file"]) == cc.proposal_hash(json.loads(json.dumps(case["file"])))
+
+
+def test_vector_commands_match_the_read_only_list():
+    import sys
+
+    sys.path.insert(0, str(CONTRACTS))
+    from_json = VEC["checkup_commands"]
+    assert any(c["command"].startswith("orch insights propose") and c["allowed"] for c in from_json)
 
 
 def test_validate_draft_matches_the_draft_schema():

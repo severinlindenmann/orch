@@ -1679,15 +1679,14 @@ def kind_human():
 
 
 # --- proposals (proposal.md) -----------------------------------------------------------------------------------------
-CHECKUP_ALLOWED = {("record", "query"), ("record", "tail"), ("record", "counts"), ("record", "propose"), ("ticket", "list"),
+CHECKUP_ALLOWED = {("record", "query"), ("record", "tail"), ("record", "counts"), ("insights", "propose"), ("ticket", "list"),
                    ("ticket", "show"), ("conn", "list"), ("log", None), ("check", None)}
 SHELL_META = re.compile(r"[;&|`$<>\\\n(){}*?~]")
 
 
 def checkup_allowed(c):
-    """Layer 1 (the agent tool's own exact allowlist): the whole shell command must be `orch <cmd> [<sub>] ...` from the
-    list, no shell syntax; log/check only on the check-up's own ticket. Layer 2 (core): propose only when the run record
-    says profile checkup. Returns True when both layers allow it."""
+    """The read-only list of a check-up run (an agent without one runs normally): the whole shell command must be
+    `orch <cmd> [<sub>] ...` from the list, no shell syntax; log/check only on the check-up's own ticket."""
     cmd = c["command"]
     if SHELL_META.search(cmd):
         return False
@@ -1705,8 +1704,6 @@ def checkup_allowed(c):
         tick = rest[1] if top == "check" and len(rest) > 1 and rest[0] in ("add", "done", "start") else (rest[0] if rest else None)
         if tick != c["own_ticket"]:
             return False
-    if (top, sub) == ("record", "propose") and c.get("profile") != "checkup":
-        return False
     return True
 
 
@@ -1717,10 +1714,10 @@ def change_sha256(change):
 
 
 def proposal_from_draft(draft, ctx):
-    """The core builds the stored proposal; the agent's draft supplies only its own fields. 'refused:<why>' on a bad draft."""
+    """`orch insights propose` builds the stored proposal; the agent's draft supplies only its own fields. 'refused:<why>'."""
     if _msgs(_w("proposal", "draft"), draft):
         return "refused:invalid"
-    if ctx.get("profile") != "checkup":
+    if ctx.get("checkup") is None:
         return "refused:not_checkup"
     t = draft["target"]
     if draft["kind"] == "skill.new" and (t["name"].startswith("orch") or t["name"] in ctx["existing_names"]):
@@ -1735,48 +1732,40 @@ def proposal_from_draft(draft, ctx):
             "target": {"kind": t["kind"], "name": t["name"], "source": "new" if draft["kind"] == "skill.new" else ctx["source"],
                        "version": None if draft["kind"] == "skill.new" else ctx["version"]},
             "change": change, "change_sha256": change_sha256(change),
-            "tests": {"state": "not_run", "cases": [], "ran_at": None}, "status": "proposed", "decided": None, "applied": None}
+            "tests": {"state": "not_run", "cases": [], "ran_at": None, "hash": None}, "status": "proposed", "decided": None, "applied": None}
 
 
 def proposal_hash(doc):
-    """sha256 over {id, kind, target, change} of a proposal (canonical JSON); kept with the test result in orch home."""
-    core = {k: doc.get(k) for k in ("id", "kind", "target", "change")}
+    """sha256 over what a person reads and what gets written (id, kind, title, plain, likely, evidence, target, change),
+    canonical JSON. The test records it; Accept refuses when the file no longer hashes to it."""
+    core = {k: doc.get(k) for k in ("id", "kind", "title", "plain", "likely", "evidence", "target", "change")}
     return "sha256:" + hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
 def proposal_step(c):
-    """One decision. Status, tests and target come from the record in the guarded orch home (c["record"]); the workspace
-    copy (c["file"]) only has to hash to the recorded value. Returns the new status or a refusal code."""
-    rec, act = c["record"], c["action"]
-    if act in ("accept", "rollback", "send_to_admin", "reject") and c.get("proof") != "ok":
-        return "not_allowed"
-    if rec is None:
-        return "not_found"
-    st = rec["status"]
+    """One decision on the proposal file (c["file"]); c["status"], c["tests"] (state), c["tests_hash"] (what the test saw),
+    c["current_version"] (the skill now), c["applied_after"]. Returns the new status or a refusal code."""
+    act, st = c["action"], c["status"]
     if act == "skill_changed":
         return "stale" if st in ("proposed", "tested") else st
     if act == "tests_done":
         return "tested" if st == "proposed" and c["tests"] == "passed" else st
     if act == "reject":
-        return "rejected" if st in ("proposed", "tested") else "conflict"
-    if proposal_hash(c["file"]) != rec["hash"]:
-        return "changed"
-    if act == "send_to_admin":
-        return "sent_to_admin" if st == "tested" and rec["target"]["source"] == "admin" else "conflict"
+        return "rejected" if st in ("proposed", "tested", "stale") else "conflict"
     if act == "accept":
-        if rec["target"]["source"] == "admin":
+        if c["file"]["target"]["source"] == "admin":
             return "admin_only"
-        if st != "tested" or rec["tests"] != "passed":
+        if st != "tested" or c["tests"] != "passed":
             return "not_tested"
-        if c["current_version"] != rec["target"]["version"]:
-            return "stale"
-        if c["proof_target"] != f"{rec['id']}@{rec['hash'].removeprefix('sha256:')}":
+        if c["tests_hash"] != proposal_hash(c["file"]):
             return "changed"
+        if c["current_version"] != c["file"]["target"]["version"]:
+            return "stale"
         return "accepted"
     if act == "rollback":
         if st != "accepted":
             return "conflict"
-        return "rolled_back" if c["current_version"] == rec["applied_after"] else "conflict"
+        return "rolled_back" if c["current_version"] == c["applied_after"] else "conflict"
     return "invalid"
 
 
