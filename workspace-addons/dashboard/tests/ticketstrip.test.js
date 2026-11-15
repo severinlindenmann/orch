@@ -81,3 +81,11 @@ test('Done: "What the helper did" lists the finished tasks; Properties are compa
   assert.match(text(props), /Finished/);
   assert.doesNotMatch(text(props), /What happens next|Updated/);
 });
+
+test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', () => {
+  const c = ctx({state:{runs:{}}, now:() => new Date('2026-11-14T18:00:00Z')});
+  const tree = c.detail({...base, status:'active', quiet_since:'2026-11-14T10:32:00Z'});
+  const sentence = nodes(tree).find(n => n.attrs?.['data-key'] === 'ticket-sentence');
+  assert.match(text(sentence), /^No news since .+\.$/);
+  assert.doesNotMatch(text(sentence), /Updated/);
+});
