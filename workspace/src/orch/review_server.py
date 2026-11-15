@@ -1,13 +1,13 @@
 """`orch review`: the Review page, served by orch itself (no dashboard needed).
 
-Stdlib HTTP on 127.0.0.1, in the foreground, until a time of day or Ctrl-C. Same fence as Focus: loopback Host
-and Origin (orch_ui.origin), no proxy headers for anything that signs, and a page session (launch token ->
-cookie + page secret, orch.pageproof). Reading the stack needs the session; an answer needs the session AND
-mints a person's proof, then runs `orch review answer ... --proof-stdin` in a child, so the one place that
-decides is the core. The launch token is never printed: the browser is opened with it in the URL fragment
-(humanproof.launch_url). The page files come from orch_ui's static folder (found by path only: the core never
-imports orch_ui) through a fixed allowlist, and the reviewed files from the ticket's own `reviewed/<sha12>/`
-copy through orch.safefile's reader.
+Stdlib HTTP on 127.0.0.1, in the foreground, until a time of day or Ctrl-C. Loopback Host and Origin
+checks (orch_ui.origin), no proxy headers, and a plain localhost session: the server makes a random
+token at start, the browser is opened with it in the URL fragment (`#k=<token>`, never printed,
+never written to the run file), the page posts it once to /session and gets an HttpOnly
+SameSite=Strict cookie that every /api route needs. An answer runs `orch review answer ...` in a
+child, so the one place that decides is the core. The page files come from orch_ui's static folder
+(found by path only: the core never imports orch_ui) through a fixed allowlist, and the reviewed
+files from the ticket's own `reviewed/<sha12>/` copy through orch.safefile's reader.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import socket
 import sys
 import tempfile
@@ -29,12 +30,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from orch import history, humanproof, pageproof, review, runs, safefile
+from orch import history, review, runs, safefile
 from orch.errors import Refused
 
 DEFAULT_PORT = 8432
 PORT_TRIES = 40
 MAX_BODY = 16 * 1024
+COOKIE = "orch_review_{port}"
+AGENT_REFUSED = "Only a human can do this. Ask the human to run it themselves."
 RUN_FILE = "review-page.json"
 NO_KIT = "The review page needs orch's page files. Use: orch review list / orch review answer"
 ID_RE = re.compile(r"core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]+)|review:(t_[a-z0-9]{6,16}))")
@@ -122,6 +125,31 @@ def _err(code: str, message: str) -> dict:
     return {"ok": False, "error": {"code": code, "message": message}}
 
 
+class Session:
+    """The page's session: a random token made at start (single use), swapped for a cookie value."""
+
+    def __init__(self) -> None:
+        self.token: str | None = secrets.token_urlsafe(24)
+        self.cookie: str | None = None
+        self._lock = threading.Lock()
+
+    def launch(self, given) -> str | None:
+        with self._lock:
+            if not isinstance(given, str) or self.token is None or not hmac.compare_digest(given, self.token):
+                return None
+            self.token = None  # used once
+            self.cookie = secrets.token_urlsafe(24)
+            return self.cookie
+
+
+def _host_ok(headers, port: int) -> bool:
+    return (headers.get("Host") or "").strip().lower() in (f"127.0.0.1:{port}", f"localhost:{port}")
+
+
+def _forwarded(headers) -> bool:
+    return any(k.lower().startswith("x-forwarded-") or k.lower() == "forwarded" for k in headers)
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 10
 
@@ -156,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
     def _text(self, code: int, text: str):
         self._send(code, text.encode(), "text/plain; charset=utf-8")
 
-    def _fence(self, method: str, api: bool) -> str | None:
+    def _origin_gate(self, method: str, api: bool) -> str | None:
         """Host + Origin (the kit's origin.py); a POST without Origin is refused too (the page sends one)."""
         check_request = _origin_check()
         if check_request is None:
@@ -166,27 +194,24 @@ class Handler(BaseHTTPRequestHandler):
         return check_request(method, self.headers, self.port, api=api)
 
     def _cookie_ok(self) -> bool:
-        """This server's session cookie on this port, no secret: for the files a frame or <img> loads (they
-        cannot send the page header). Reading only; every proof and every API read needs the secret too."""
+        """This server's session cookie on this port (also what the files a frame or <img> loads send)."""
         s = self.session
-        if s is None or s.key is None or not pageproof.host_ok(self.headers, self.port):
+        if s is None or s.cookie is None or not _host_ok(self.headers, self.port):
             return False
-        if pageproof.forwarded(self.headers):
+        if _forwarded(self.headers):
             return False
         try:
-            c = SimpleCookie(self.headers.get("Cookie") or "").get(s.cookie_name(self.port))
+            c = SimpleCookie(self.headers.get("Cookie") or "").get(COOKIE.format(port=self.port))
         except Exception:  # noqa: BLE001 - a broken cookie header is no session
             return False
         return bool(c and hmac.compare_digest(c.value, s.cookie))
 
-    def _api_authed(self) -> bool:
-        s = self.session
-        return s is not None and s.key is not None and s.authed(self.headers, self.port)
+    _api_authed = _cookie_ok
 
     # ------------------------------------------------------------------ GET
     def do_GET(self):
         path, _, query = self.path.partition("?")
-        why = self._fence("GET", path.startswith("/api/"))
+        why = self._origin_gate("GET", path.startswith("/api/"))
         if why:
             return self._text(403, why)
         if path == "/":
@@ -250,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path not in ("/session", "/api/answer"):
             return self._text(405, "not allowed")
-        why = self._fence("POST", True)
+        why = self._origin_gate("POST", True)
         if why:
             return self._text(403, why)
         if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
@@ -273,35 +298,23 @@ class Handler(BaseHTTPRequestHandler):
         return body if isinstance(body, dict) else None
 
     def _session(self, body: dict | None):
-        if (
-            self.session is None
-            or pageproof.forwarded(self.headers)
-            or not pageproof.host_ok(self.headers, self.port)
-        ):
+        if self.session is None or _forwarded(self.headers) or not _host_ok(self.headers, self.port):
             return self._text(403, "forbidden")
-        token = body.get("token") if body else None
-        cookie = self.session.launch(token)
+        cookie = self.session.launch(body.get("token") if body else None)
         if not cookie:
-            msg = (
-                pageproof.REVOKED_MSG
-                if self.session.revoked
-                else "This link was already used. Run orch review again."
-            )
-            return self._text(403, msg)
+            return self._text(403, "This link was already used. Run orch review again.")
         self._send(
             200,
-            json.dumps({"secret": self.session.secret}).encode(),
+            b"{}",
             "application/json",
-            {"Set-Cookie": self.session.set_cookie(self.port, cookie)},
+            {"Set-Cookie": f"{COOKIE.format(port=self.port)}={cookie}; HttpOnly; SameSite=Strict; Path=/"},
         )
 
     def _answer(self, body: dict | None):
         if body is None or set(body) - ANSWER_FIELDS:
             return self._json(400, _err("refused", "That request could not be read."))
-        s = self.session
-        if s is None or not s.can_mint(self.headers, self.port):
-            msg = pageproof.REVOKED_MSG if s is not None and s.revoked else humanproof.AGENT_REFUSED
-            return self._json(403, _err("needs_person", msg))
+        if not self._cookie_ok():
+            return self._json(403, _err("needs_person", "Sign in first: run orch review in your terminal."))
         m = ID_RE.fullmatch(body.get("id") if isinstance(body.get("id"), str) else "")
         digest, verdict, picked, note = (body.get(k) for k in ("digest", "verdict", "picked", "note"))
         if (
@@ -318,14 +331,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(413, _err("too_large", "A note is at most 8 KB."))
         tid = m.group(1) or m.group(3)
         key = m.group(2) or "review"
-        op, target = ("ticket.answer", f"{tid}:{key}:{digest}") if m.group(2) else ("ticket.verdict", tid)
         argv = ["review", "answer", tid, key, "--verdict", verdict, "--digest", digest, "--via", "page"]
         if picked:
             argv += ["--picked", picked]
         if note_json is not None:
             argv += ["--note", note_json]
-        argv += ["--by", pageproof.actor(), "--json"]
-        _code, out = run_answer(self.root, argv, s.mint(op, target))
+        argv += ["--by", _actor(), "--json"]
+        _code, out = run_answer(self.root, argv)
         err = (out.get("error") or {}).get("code")
         status = (
             200 if out.get("ok") else {"too_large": 413, "needs_person": 403, "changed": 409}.get(err, 422)
@@ -335,9 +347,28 @@ class Handler(BaseHTTPRequestHandler):
     do_PUT = do_DELETE = do_PATCH = lambda self: self._text(405, "not allowed")
 
 
-def run_answer(root: Path, argv: list[str], proof: str) -> tuple[int, dict]:
-    """The core, as `sys.executable -I -m orch`, with the person's proof on stdin and without any agent tool's
-    variables. Returns (0, {"ok": True}) or (1, {"ok": False, "error": {code, message}})."""
+def _actor() -> str:
+    import getpass
+
+    try:
+        who = re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:58]
+    except (OSError, KeyError, ImportError):
+        who = ""
+    return f"human:{who or 'user'}"
+
+
+def _child(argv: list[str], root: Path, env: dict):
+    import subprocess
+
+    return subprocess.run(
+        [sys.executable, "-I", "-P", "-m", "orch", *argv],
+        cwd=root, env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+    )  # fmt: skip
+
+
+def run_answer(root: Path, argv: list[str]) -> tuple[int, dict]:
+    """The core, as `sys.executable -I -m orch`, without any agent tool's variables. Returns (0, {"ok": True})
+    or (1, {"ok": False, "error": {code, message}})."""
     import subprocess
 
     try:
@@ -347,7 +378,7 @@ def run_answer(root: Path, argv: list[str], proof: str) -> tuple[int, dict]:
     except Exception:  # noqa: BLE001 - cannot tell whose environment this is: refuse
         return 1, _err("refused", "orch could not check who is acting here.")
     try:
-        r = pageproof.run_with_proof(argv, proof, orch_bin=pageproof.SELF, cwd=root, env=env, timeout=60)
+        r = _child(argv, root, env)
     except subprocess.TimeoutExpired:
         return 1, _err("busy", "That took too long. Please try again.")
     except OSError:
@@ -360,8 +391,6 @@ def run_answer(root: Path, argv: list[str], proof: str) -> tuple[int, dict]:
         msg = str(e.get("error") or "")
     except (ValueError, AttributeError):
         code, msg = "refused", ""
-    if msg == humanproof.HANDOFF:
-        msg = pageproof.EXPIRED_MSG
     return 1, _err(code, msg[:200] or "orch could not save that answer.")
 
 
@@ -371,16 +400,8 @@ class _Server(ThreadingHTTPServer):
 
 
 def make_server(root: Path, port: int = 0) -> ThreadingHTTPServer:
-    """Bind 127.0.0.1:port (0 = any) and build the page session (after the bind: a busy port must not spend
-    a resume file). The caller runs serve_forever()."""
-    handler = partial(Handler, root=root, session=None)
-    srv = _Server(("127.0.0.1", port), handler)
-    try:
-        handler.keywords["session"] = pageproof.PageSession(root, "review")
-    except BaseException:
-        srv.server_close()
-        raise
-    return srv
+    """Bind 127.0.0.1:port (0 = any) with a new session. The caller runs serve_forever()."""
+    return _Server(("127.0.0.1", port), partial(Handler, root=root, session=Session()))
 
 
 # ------------------------------------------------------------------ run file, command line
@@ -484,15 +505,16 @@ def serve(args) -> int:
     print(f"{n} thing{'' if n == 1 else 's'} wait{'s' if n == 1 else ''} on you.")
     print(f"Open: {url}   works on this computer until {until}")
     print(f"On a server? From your laptop: {tunnel_line(port)}   then open the link.")
-    if srv.RequestHandlerClass.keywords["session"].key is None:
-        print("This page is read-only here: a person has to sign in from their own terminal.")
     sys.stdout.flush()
     write_run_file(root, port, until, until_ts)
     t = threading.Thread(target=srv.serve_forever, daemon=True, name="review-page")
     t.start()
     try:
         if not getattr(args, "no_open", False) and _has_display():
-            humanproof.open_browser(humanproof.launch_url(root, "review", url))
+            import webbrowser
+
+            token = srv.RequestHandlerClass.keywords["session"].token
+            webbrowser.open(f"{url}#k={token}")  # the token only in the fragment: never printed or saved
         while t.is_alive() and time.time() < until_ts:
             time.sleep(0.5)
     except KeyboardInterrupt:

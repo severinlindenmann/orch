@@ -1813,8 +1813,7 @@ def kind_diag():
 
 # --- review cards on the phone (relay-api.md "Review cards on the phone") --------------------------------------------
 RC_CARD_MAX, RC_VERDICT_MAX, RC_FILES_MAX = 65536, 8192, 20 * 1024 * 1024
-RC_RESULT_TEXT = {"applied": "Got it", "changed": "This changed. Look at it again", "decided": "Already decided",
-                  ("refused", "needs_signature"): "Needs your signature on the computer"}
+RC_RESULT_TEXT = {"applied": "Got it", "changed": "This changed. Look at it again", "decided": "Already decided"}
 
 
 def _rc_bytes(o):

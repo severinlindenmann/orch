@@ -138,19 +138,6 @@ def test_workspace_vector_cases(proj, run, new_ticket, conn):
             assert any(want["history"] in h["text"] for h in tickets.load(proj, tid)["history"]), label
 
 
-def test_signs_card_ok_leaves_the_question_open_for_the_computer(proj, run, new_ticket, conn):
-    tid = new_ticket()
-    install(proj, tid)
-    qmsg = send_card(proj, conn, tid, "q5")
-    case = next(c for c in VEC["workspace"] if c["name"] == "signs-ok-refused")
-    put_answer(conn, qmsg, case, 1)
-    run("relay", "inbox")
-    assert question(proj, tid, "q5")["answer"] is None
-    # the computer can still decide it
-    review.decide(proj, tid, "q5", "ok", None, None, by="human:me", via="page")
-    assert question(proj, tid, "q5")["answer"] == "Pay"
-
-
 def test_no_change_from_the_phone_after_a_computer_answer(proj, run, new_ticket, conn, monkeypatch):
     tid = new_ticket()
     install(proj, tid)
@@ -427,7 +414,7 @@ def test_wire_card_from_the_vector_questions():
     for sq in VEC["stored_questions"]:
         refs = {src: i for i, src in enumerate(review.card_files_of(sq["card"]))}
         wire = review.wire_card(sq["card"], refs)
-        name = {"q3": "card-draft", "q4": "card-choice", "q5": "card-signs-no-files"}[sq["id"]]
+        name = {"q3": "card-draft", "q4": "card-choice", "q5": "card-no-files"}[sq["id"]]
         want = next(m["message"]["body"]["card"] for m in VEC["question_shapes"] if m["name"] == name)
         assert wire == want
 

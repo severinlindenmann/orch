@@ -257,14 +257,10 @@ def _show(t: dict, root: Path) -> str:
         out.append("\nChecklist:")
         for c in t["checklist"]:
             out += _check_lines(root, t, c, open_q)
-    answered = [q for q in t["questions"] if q["answer"] is not None]
-    plain = [q for q in answered if not isinstance(q.get("decision"), dict)]
-    if plain:
-        out.append("\nAnswered:")
-        for q in plain:
-            out.append(f"  {q['text']} - {q['answer']} ({q['answered_by']})")
-    if block := review.decisions_block(t, root):
-        out.append("\nDecisions:\n" + block.rstrip("\n"))
+    if block := review.applies_now_block(t, root):
+        out.append("\n" + block.rstrip("\n"))
+    for q in (x for x in t["questions"] if x["answer"] is not None):
+        out.append(f"  Answered {q['id']}: {q['text']} - {q['answer']} ({q['answered_by']})")
     rows = refs.all_refs(root, t)
     if rows:
         kinds = refs.active_kinds(root)
@@ -598,6 +594,23 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--kind", metavar="KIND", help="plain (default) or <add-on>:<name>")
     x.add_argument("--action", metavar="JSON", help="data for the add-on that acts on the answer")
     x.add_argument("--check", metavar="CID", help="the task this question belongs to")
+    g = x.add_argument_group("show it as a card (something to look at and decide)")
+    k = g.add_mutually_exclusive_group()
+    k.add_argument("--draft", metavar="TITLE", help="a draft to approve")
+    k.add_argument("--link", metavar="TITLE", help="a link to approve before it goes public")
+    k.add_argument("--plan", metavar="TITLE", help="a plan that needs a yes")
+    k.add_argument(
+        "--choose", metavar="TITLE", help='options A/B/C to pick from (use --option "ID=Title[:file]")'
+    )
+    g.add_argument("--then", help="what happens after the answer (needed with a card)")
+    g.add_argument("--why", help="why this is asked (one line)")
+    g.add_argument("--need", help="what is needed, e.g. 'before Friday'")
+    g.add_argument("--ok", metavar="LABEL", help="the word on the approve button")
+    g.add_argument("--suggest", metavar="ID", help="the option you suggest (with --choose)")
+    g.add_argument("--before", metavar="FILE", help="the file as it is now (with --after)")
+    g.add_argument("--after", metavar="FILE", help="the file as it would become")
+    g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
+    g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
     x = sub.add_parser("answer", parents=[common], help="answer a question")
     x.add_argument("id")
     x.add_argument("question")
@@ -1117,10 +1130,28 @@ def run(args: argparse.Namespace) -> None:
             raise Refused(addons.not_on_message(root, "relay"))
         if (args.preview or args.scope) and not args.phone:
             raise Refused("--preview and --scope go with --phone.")
-        t, q = tickets.ask(
-            root, args.id, args.text, args.option, args.recommend, by(), args.kind, args.action, args.check
-        )
-        if args.phone:
+        card = cli_review.has_card_flags(args)
+        if card and (args.phone or args.kind or args.action or args.check):
+            raise Refused("A card does not go with --phone, --kind, --action or --check.")
+        if card:  # the card goes where every question goes; a phone shows it from the stack
+            t, q = cli_review.ask_card(
+                args, root, tickets.resolve_cli(root, args.id, json_output=args.json), by()
+            )
+        else:
+            t, q = tickets.ask(
+                root,
+                args.id,
+                args.text,
+                args.option,
+                args.recommend,
+                by(),
+                args.kind,
+                args.action,
+                args.check,
+            )
+        if card:
+            pass
+        elif args.phone:
             cli_clients.send_phone_question(root, t["id"], q, args.preview, args.scope)
         elif mobile_mode.question_to_phone(root, t["id"], os.environ.get("ORCH_TICKET")):
             # Mobile mode, or a ticket from the phone (or one its agent made): also to the phone

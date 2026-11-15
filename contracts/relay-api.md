@@ -287,18 +287,14 @@ Then, in this order:
 2. `verdict.digest` is not the digest of the question as the workspace holds it **now** (and as the asked record says it was
    sent) → `changed`; nothing applied, the question stays open on the computer (the phone shows "This changed"; re-sending the
    new card is later, M4).
-3. `ok`, or `talk` **with `picked`** (= use with changes, a chosen option), on a card with `signs: true` (the workspace's own
-   stored card) → `refused`, `needs_signature`; the question stays open (M1). `no` and `talk` without `picked` (send back
-   for changes) on it are allowed (they grant nothing).
-4. Decide with the review rules (`review.decide`; for a review question `_decide_check`: `ok` = Accept, `no`/`talk` = Ask
+3. Decide with the review rules (`review.decide`; for a review question `_decide_check`: `ok` = Accept, `no`/`talk` = Ask
    for changes with `"; ".join(changes)` or `words.text`, a note is required): attributed `human:<stored phone name>`, via
    `phone`; the decision and summary are exactly review.py's. A verdict review.py refuses (an unknown or missing `picked`,
    `talk` with nothing to change, `picked` on a Check) → `refused`, `invalid`, nothing applied. Any other refusal →
-   `refused`, `unavailable` (`needs_person` when it lacks a person's proof).
-5. Applied → `applied` with the decision's summary.
+   `refused`, `unavailable` (`needs_person` when the answer is not a person's).
+4. Applied → `applied` with the decision's summary.
 An answer **without** `verdict` to a card question (an old phone) keeps today's answer path with one mapping: an answer that is
-exactly an option id of a choice card = `ok` with that `picked`; any other text = `talk` with `words.text` = the text; never an
-`ok` on a card with `signs: true` (there the text is `talk`). No `review_result` is sent for it. Old review answers
+exactly an option id of a choice card = `ok` with that `picked`; any other text = `talk` with `words.text` = the text; No `review_result` is sent for it. Old review answers
 (`accept` / a note) are unchanged.
 All note text (changes, words, pins, transcripts) is the person's words: stored and shown as data, cleaned like every phone
 text (`clean_untrusted`), handed to a helper only quoted as the person's request, never as instructions; a transcript never
@@ -313,7 +309,6 @@ to the answering `ph_…` with `reply_to` = the question, `ticket` (and `key`) =
 |---|---|---|
 | applied | `summary` = the decision's one line (≤ 400, one line) | `Got it` |
 | changed | – | `This changed. Look at it again` |
-| refused | `reason`: `needs_signature` | `Needs your signature on the computer` |
 | refused | `reason`: `needs_person`, `invalid` or `unavailable` | `Couldn't use your answer` |
 | decided | optional `summary` (the answer that stands) | `Already decided` |
 
@@ -326,7 +321,7 @@ question without it); `ticket` equals that question's `ticket`; `to` is the phon
 conflict`, the same id `200 duplicate`). A phone cannot send the field. Never pushed, never in the text push budget, never
 unread; the phone shows it as the card's Received state, an old phone the plain line in the ticket chat.
 
-*Phone.* Cards with `signs: true` show "Needs your signature on the computer" instead of the OK swipe. Face ID before a
+*Phone.* Face ID before a
 send is a phone-side confirm only. The phone checks each downloaded card file against `card_files[].sha256` (a mismatch =
 "Open on the computer"), renders `html` and `svg` only in a sandbox without scripts or network, and handles `card.open` with ONE
 WHATWG-compatible URL parser: it shows the host of THAT parse, and opens the parsed, re-serialised URL (never the raw

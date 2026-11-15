@@ -406,7 +406,6 @@ fn review_result_text(r: &Value) -> Option<&'static str> {
         "changed" => "This changed. Look at it again",
         "decided" => "Already decided",
         "refused" => match r["reason"].as_str()? {
-            "needs_signature" => "Needs your signature on the computer",
             "needs_person" | "invalid" | "unavailable" => "Couldn't use your answer",
             _ => return None,
         },

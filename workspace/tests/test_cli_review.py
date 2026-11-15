@@ -1,5 +1,4 @@
-"""`orch review`: add, list, answer, show, wait, link (people are trusted by --by here; the real proof is
-tested in test_cli_review_proof.py)."""
+"""`orch ask` with a card, and `orch review` list, answer, wait, link (the person is the --by name)."""
 
 import json
 
@@ -18,7 +17,7 @@ def tk(proj, run):
 
 
 def _add(run, tid, *extra, by="agent:x"):
-    return run("review", "add", tid, *extra, "--json", "--by", by)
+    return run("ask", tid, f"Please look: {extra[1]}", *extra, "--json", "--by", by)
 
 
 def _draft(run, tid, title="New block"):
@@ -36,7 +35,7 @@ def test_review_is_in_help(run, capsys):
     with pytest.raises(SystemExit):
         run("--help")
     out = capsys.readouterr().out
-    assert "review" in out and "decisions waiting for a person" in out
+    assert "review" in out and "the page where you answer what waits for you" in out
 
 
 def test_no_subcommand_starts_the_page(run, monkeypatch):
@@ -57,9 +56,9 @@ def test_no_subcommand_starts_the_page(run, monkeypatch):
 def test_add_draft_shows_in_list_and_text(tk, run):
     root, tid = tk
     code, out, _ = run(
-        "review", "add", tid, "--draft", "New block", "--then", "I build it.", "--by", "agent:x"
+        "ask", tid, "New block", "--draft", "New block", "--then", "I build it.", "--by", "agent:x"
     )
-    assert code == 0 and out.startswith("Asked q1 on ") and "New block. Waiting for the owner." in out
+    assert code == 0 and out.startswith("Asked q1, waiting.")
     q = tickets.load(root, tid)["questions"][0]
     assert q["card"]["kind"] == "draft" and q["shown"]["digest"] and q.get("kind") in (None, "plain")
     code, out, _ = run("review", "list", "--json")
@@ -98,11 +97,9 @@ def test_add_before_after_file_link_and_plan(tk, run):
     assert code == 0 and json.loads(out)["card"]["preview"]["type"] == "compare", out + err
     code, out, err = _add(run, tid, "--plan", "Plan", "--file", "p.md", "--then", "x")
     assert code == 0 and json.loads(out)["card"]["preview"]["paras"] == ["First para.", "Second para."]
-    code, out, err = _add(
-        run, tid, "--link", "Site", "--open", "https://example.com/x", "--signs", "--then", "x"
-    )
+    code, out, err = _add(run, tid, "--link", "Site", "--open", "https://example.com/x", "--then", "x")
     assert code == 0, out + err
-    assert json.loads(out)["card"]["signs"] is True
+    assert "signs" not in json.loads(out)["card"]
 
 
 @pytest.mark.parametrize(
@@ -127,10 +124,10 @@ def test_add_refusals(tk, run, extra):
 
 def test_add_needs_then_and_a_ticket(tk, run):
     root, tid = tk
-    with pytest.raises(SystemExit):  # argparse: --then is required
-        run("review", "add", tid, "--draft", "T")
+    code, out, _ = _add(run, tid, "--draft", "T")  # --then is needed with a card
+    assert code == 2 and "--then" in out
     code, out, _ = _add(run, "t_nonexistent", "--draft", "T", "--then", "x")
-    assert code == 2 and json.loads(out)["code"] == "not_found"
+    assert code == 2
 
 
 def test_answer_ok_resumes_helper_and_records(tk, run, monkeypatch):
@@ -256,29 +253,23 @@ def test_answer_check_send_back_needs_note(tk, run):
     assert tickets.load(root, tid)["status"] not in ("review", "done")
 
 
-def test_show_and_ticket_show_print_the_decisions_block(tk, run):
+def test_ticket_show_lists_what_applies_now_and_the_answers(tk, run):
     root, tid = tk
-    code, out, _ = run("review", "show", tid)
-    assert code == 0 and out.startswith("No decisions yet")
     q = _draft(run, tid)
     code, out, _ = run("ticket", "show", tid)
-    assert "Needs an answer" in out and "Decisions:" not in out
+    assert "Needs an answer" in out and "What applies now" not in out
     run("review", "answer", tid, q["id"], "--verdict", "ok", "--by", ME)
-    code, out, _ = run("review", "show", tid)
-    assert "WHAT APPLIES NOW" in out and "Build it" in out and "History (newest first)" in out
-    code, out, _ = run("review", "show", tid, "--json")
-    assert "WHAT APPLIES NOW" in json.loads(out)["decisions"]
     code, out, _ = run("ticket", "show", tid)
-    assert "Decisions:" in out and "WHAT APPLIES NOW" in out
-    assert "Answered:" not in out  # the plain line is replaced for decided cards
+    assert "What applies now" in out and "Build it" in out and "Answered q1:" in out
+    assert "Decisions" not in out and "History (newest first)" not in out
 
 
-def test_ticket_show_keeps_plain_answered_line(tk, run):
+def test_ticket_show_plain_answer_is_listed(tk, run):
     root, tid = tk
     run("ask", tid, "Ship it?", "--by", "agent:x")
     run("answer", tid, "q1", "Yes", "--by", ME)
     code, out, _ = run("ticket", "show", tid)
-    assert "Answered:" in out and "Ship it? - Yes" in out and "Decisions:" not in out
+    assert "Answered q1: Ship it? - Yes" in out and "What applies now" not in out
 
 
 def test_wait_returns_the_answer_and_times_out(tk, run, monkeypatch):
@@ -309,14 +300,8 @@ def test_wait_polls_until_answered(tk, run, monkeypatch):
     assert code == 0 and out.startswith("Yes (pat, cli,") and len(calls) == 2
 
 
-def test_link_without_a_server(tk, run, monkeypatch):
+def test_link_without_a_server(tk, run):
     code, out, _ = run("review", "link")
     assert code == 0 and "No review page runs. Start it in your terminal: orch review" in out
     code, out, _ = run("review", "link", "--json")
     assert json.loads(out)["running"] is False
-    monkeypatch.setattr("orch.cli_review._dashboard_url", lambda root: "http://127.0.0.1:47000")
-    code, out, _ = run("review", "link", "--json")
-    d = json.loads(out)
-    assert d["running"] is False and d["url"] == "http://127.0.0.1:47000/#/review"
-    code, out, _ = run("review", "link")
-    assert "http://127.0.0.1:47000/#/review" in out

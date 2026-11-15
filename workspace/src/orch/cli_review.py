@@ -1,5 +1,6 @@
-"""`orch review`: the Review stack from a terminal. Helpers put a card in (`add`) and wait for the answer
-(`wait`); a person answers (`answer`) with the same proof as any answer. No subcommand starts the page."""
+"""`orch review`: the Review stack from a terminal. A helper puts a card in with `orch ask
+--draft/--choose/...` (ask_card below) and waits for the answer (`wait`); a person answers
+(`answer`) as the person chosen in orch. No subcommand starts the page."""
 
 from __future__ import annotations
 
@@ -8,10 +9,11 @@ import re
 import time
 from pathlib import Path
 
-from orch import history, humanproof, review, review_server, runs, runs_live, safefile, tickets
+from orch import history, review, review_server, runs, runs_live, safefile, tickets
 from orch.errors import Refused
 
-SUBS = ("add", "list", "answer", "show", "wait", "link")
+SUBS = ("list", "answer", "wait", "link")
+CARD_KINDS = ("draft", "link", "plan", "choose")
 KEY_RE = re.compile(r"review|q[0-9]+")
 
 
@@ -26,7 +28,7 @@ class ReviewError(Refused):
 
 def add_parsers(sub, common) -> None:
     r = sub.add_parser(
-        "review", parents=[common], help="decisions waiting for a person (cards, answers, the page)"
+        "review", parents=[common], help="the page where you answer what waits for you (list, answer, link)"
     )
     r.add_argument(
         "--port", type=int, default=review_server.DEFAULT_PORT, help="the page's port (default 8432)"
@@ -34,29 +36,10 @@ def add_parsers(sub, common) -> None:
     r.add_argument("--until", metavar="HH:MM", help="stop the page at this time of day (default 23:59)")
     r.add_argument("--no-open", action="store_true", help="do not open the browser")
     s = r.add_subparsers(dest="sub", metavar="<command>")
-    x = s.add_parser("add", parents=[common], help="put a card in the stack and ask the owner to decide")
-    x.add_argument("ticket")
-    g = x.add_mutually_exclusive_group(required=True)
-    g.add_argument("--draft", metavar="TITLE", help="a draft to approve")
-    g.add_argument("--link", metavar="TITLE", help="a link to approve before it goes public")
-    g.add_argument("--plan", metavar="TITLE", help="a plan that needs a yes")
-    g.add_argument("--choose", metavar="TITLE", help="options A/B/C to pick from (use --option)")
-    x.add_argument("--why", help="why this is asked (one line)")
-    x.add_argument("--need", help="what is needed, e.g. 'before Friday'")
-    x.add_argument("--then", required=True, help="what happens after the answer")
-    x.add_argument("--ok", metavar="LABEL", help="the word on the approve button")
-    x.add_argument("--option", action="append", default=[], metavar="ID=Title[:file]")
-    x.add_argument("--suggest", metavar="ID", help="the option you suggest")
-    x.add_argument("--before", metavar="FILE")
-    x.add_argument("--after", metavar="FILE")
-    x.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
-    x.add_argument("--open", metavar="URL", help="an http(s) address to look at")
-    x.add_argument("--signs", action="store_true", help="the answer also needs a signature")
+    x = s.add_parser("list", parents=[common], help="what waits for an answer (or --answered)")
+    x.add_argument("--answered", action="store_true", help="the answers already given, newest first")
 
-    x = s.add_parser("list", parents=[common], help="what waits for a decision (or --answered)")
-    x.add_argument("--answered", action="store_true", help="the decisions already made, newest first")
-
-    x = s.add_parser("answer", parents=[common], help="a person answers one card")
+    x = s.add_parser("answer", parents=[common], help="answer one card")
     x.add_argument("ticket")
     x.add_argument("key", help="the question (q3) or 'review' for a ticket in Review")
     x.add_argument("--verdict", required=True, choices=review.VERDICTS, help="ok, no or talk (with a note)")
@@ -65,8 +48,6 @@ def add_parsers(sub, common) -> None:
     x.add_argument("--digest", metavar="D", help="the card as it was shown")
     x.add_argument("--via", default="cli", metavar="WORD")
 
-    x = s.add_parser("show", parents=[common], help="the decisions on a ticket, as a helper reads them")
-    x.add_argument("ticket")
     x = s.add_parser("wait", parents=[common], help="wait until a card is answered")
     x.add_argument("ticket")
     x.add_argument("question", nargs="?", help="the question (default: the latest card)")
@@ -88,7 +69,7 @@ def _guard(fn, *a, **kw):
     except ReviewError:
         raise
     except Refused as e:
-        if isinstance(e, humanproof.HandOffPending) or getattr(e, "extra", None):
+        if getattr(e, "extra", None):
             raise
         raise ReviewError("refused", str(e)) from None
 
@@ -103,7 +84,7 @@ def _when(at) -> str:
     return review._when(at)
 
 
-# ------------------------------------------------------------------ add
+# ------------------------------------------------------------------ cards for `orch ask`
 
 
 def _file_preview(root: Path, src: str, where: str) -> dict:
@@ -137,17 +118,13 @@ def _option(root: Path, spec: str) -> dict:
     return out
 
 
-def _build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
-    kind, title = next(
-        (k, getattr(args, k)) for k in ("draft", "link", "plan", "choose") if getattr(args, k) is not None
-    )
+def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
+    kind, title = next((k, getattr(args, k)) for k in CARD_KINDS if getattr(args, k, None) is not None)
     kind = "choice" if kind == "choose" else kind
     card: dict = {"kind": kind, "title": title, "then": args.then}
     for k, v in (("why", args.why), ("need", args.need), ("ok_label", args.ok), ("open", args.open)):
         if v:
             card[k] = v
-    if args.signs:
-        card["signs"] = True
     options: list[str] = []
     if kind == "choice":
         opts = [_option(root, o) for o in args.option]
@@ -156,7 +133,7 @@ def _build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
         card["preview"] = {"type": "options", "options": opts}
         options = [o["id"] for o in opts]
     elif args.option:
-        raise Refused("--option goes with --choose.")
+        raise Refused("A card takes --option only with --choose.")
     elif bool(args.before) != bool(args.after):
         raise Refused("--before and --after go together.")
     elif args.before and args.file:
@@ -178,23 +155,19 @@ def _build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     return card, options, args.suggest, title
 
 
-def _add(args, root: Path) -> None:
-    t = _ticket(root, args)
-    card, options, suggest, title = _guard(_build_card, root, args)
-    card, shown = _guard(review.prepare_card, root, t["id"], card)
-    t, q = _guard(
-        tickets.ask,
-        root,
-        t["id"],
-        title,
-        options,
-        suggest,
-        tickets.current_actor(args.by),
-        card=card,
-        shown=shown,
+def has_card_flags(args) -> bool:
+    return any(getattr(args, k, None) is not None for k in CARD_KINDS)
+
+
+def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
+    """`orch ask TICKET TEXT --draft|--link|--plan|--choose TITLE ...`: the question with a card on it."""
+    if not args.then:
+        raise Refused("A card needs --then: what happens after the answer.")
+    card, options, suggest, _title = _guard(build_card, root, args)
+    card, shown = _guard(review.prepare_card, root, tid, card)
+    return _guard(
+        tickets.ask, root, tid, args.text, options, suggest or args.recommend, by, card=card, shown=shown
     )
-    label = t.get("key") or t["id"]
-    _out(args, q, f"Asked {q['id']} on {label}: {title}. Waiting for the owner.")
 
 
 # ------------------------------------------------------------------ list
@@ -245,7 +218,7 @@ def _list(args, root: Path) -> None:
     text = (
         "\n".join([f"{n} thing{'' if n == 1 else 's'} wait{'s' if n == 1 else ''} on you.", *lines])
         if cards
-        else "Nothing waits for a decision."
+        else "Nothing waits for you."
     )
     _out(args, {"workspace": root.name, "cards": cards}, text)
 
@@ -263,45 +236,29 @@ def _answer(args, root: Path) -> None:
     if key == "review":
         q = None
         current = review.check_digest(t)
-        op, target = "ticket.verdict", tid
     else:
         q = next((x for x in t.get("questions") or [] if x.get("id") == key), None)
         if q is None:
             raise ReviewError("not_found", f"{tid} has no question {key}.")
         current = tickets.question_digest(q)
-        op = "ticket.answer"
     given = args.digest
     if given is not None and not re.fullmatch(r"[0-9a-f]{64}", given):
-        raise ReviewError("changed", "This card changed or can't be checked. Look at it again.")
-    if getattr(args, "proof_stdin", False) and given is None:
         raise ReviewError("changed", "This card changed or can't be checked. Look at it again.")
     if given is not None and given != current:
         raise ReviewError("changed", f"{key} changed after it was shown. Look at it again, then answer.")
     if tickets.agent_tool() or (args.by or "").startswith(
         "agent:"
-    ):  # a decision is a person's, never an agent's
-        raise ReviewError("needs_person", humanproof.AGENT_REFUSED)
+    ):  # an answer on a card is a person's, never an agent's (a label check)
+        raise ReviewError("needs_person", review_server.AGENT_REFUSED)
+    who = tickets.current_actor(
+        args.by
+    )  # the person chosen in orch (--by human:<name>), else the computer's user
     digest = given or current
-    if q is not None:
-        target = f"{tid}:{key}:{digest}"
-        parts = {
-            "title": humanproof.ticket_name(root, tid),
-            "question": humanproof.question_text(root, tid, key, q),
-        }
-    else:
-        parts = {"title": humanproof.ticket_name(root, tid)}
-    who = humanproof.person_by(
-        root, args, op, target, parts=parts,
-        no_handoff="Answer this on the review page: run orch review in your terminal.",
-    )  # fmt: skip
-    if not who.startswith("human:"):
-        raise ReviewError("needs_person", humanproof.AGENT_REFUSED)
-    runs.require_signing(root)  # a person's answer that could not be signed is refused, not half done
+    runs.require_signing(root)  # an answer that could not be passed on is refused, not half done
     fn = review.change if q is not None and q.get("answer") is not None else review.decide
     entry = _guard(
-        fn, root, tid, key, args.verdict, args.picked, args.note, by=who, via=args.via, digest=digest,
-        **({"proven": True} if fn is review.decide else {}),
-    )  # fmt: skip
+        fn, root, tid, key, args.verdict, args.picked, args.note, by=who, via=args.via, digest=digest
+    )
     import contextlib
 
     with contextlib.suppress(Refused):  # saved; a busy run only delays it reaching the agent
@@ -310,16 +267,6 @@ def _answer(args, root: Path) -> None:
 
 
 # ------------------------------------------------------------------ show, wait, link
-
-
-def _show(args, root: Path) -> None:
-    t = _ticket(root, args)
-    block = review.decisions_block(t, root)
-    _out(
-        args,
-        {"ticket": t["id"], "decisions": block},
-        block.rstrip("\n") if block else f"No decisions yet on {t.get('key') or t['id']}.",
-    )
 
 
 def _wait(args, root: Path) -> None:
@@ -340,20 +287,10 @@ def _wait(args, root: Path) -> None:
         if q.get("answer") is not None:
             break
         if time.monotonic() >= end:
-            raise ReviewError("busy", f"No answer yet on {q0['id']}. Run orch review wait again later.")
+            raise ReviewError("busy", f"No answer yet on {q0['id']}. Try again later.")
         time.sleep(1)
     who = re.sub(r"^human:", "", q.get("answered_by") or "someone")
     _out(args, q, f"{q['answer']} ({who}, {q.get('via')}, {_when(q.get('at'))})")
-
-
-def _dashboard_url(root: Path) -> str | None:
-    try:
-        from orch import services
-
-        row = next((r for r in services.workspace_rows(root) if r.get("addon") == "dashboard"), None)
-        return services.local_url(row.get("url")) if row else None
-    except Exception:  # noqa: BLE001 - best effort
-        return None
 
 
 def _link(args, root: Path) -> None:
@@ -366,12 +303,8 @@ def _link(args, root: Path) -> None:
         )
         _out(args, data, text)
         return
-    dash = _dashboard_url(root)
-    data = {"running": False, "url": f"{dash}/#/review" if dash else None, "until": None, "tunnel": None}
-    text = "No review page runs. Start it in your terminal: orch review"
-    if dash:
-        text += f"\nThe dashboard has it too: {dash}/#/review"
-    _out(args, data, text)
+    data = {"running": False, "url": None, "until": None, "tunnel": None}
+    _out(args, data, "No review page runs. Start it in your terminal: orch review")
 
 
 def dispatch(args, root: Path) -> bool:
@@ -382,7 +315,5 @@ def dispatch(args, root: Path) -> bool:
         if rc:
             raise SystemExit(rc)
         return True
-    {"add": _add, "list": _list, "answer": _answer, "show": _show, "wait": _wait, "link": _link}[args.sub](
-        args, root
-    )
+    {"list": _list, "answer": _answer, "wait": _wait, "link": _link}[args.sub](args, root)
     return True

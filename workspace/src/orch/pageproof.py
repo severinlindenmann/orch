@@ -31,15 +31,11 @@ from orch.errors import Refused
 PAGE_HEADER = "X-Orch-Page"  # the header that carries the page secret (the second half of a page session)
 SELF = "orch:self"  # the orch_bin value that means "this Python, `-I -m orch`"
 COOKIE_PREFIX = "orch_page"
-SERVERS = ("focus", "dashboard", "insights", "review")
+SERVERS = ("focus", "dashboard", "insights")
 _SERVER_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 # The ops a page server may mint, enforced in PageSession.mint. A server not named here keeps every op (focus,
-# dashboard: their behaviour before 2.11); Insights mints only its two, Review only the two answer ops
-# (human-proof.md, step 3).
-SERVER_OPS = {
-    "insights": frozenset({"insights.settings", "record.delete_detail"}),
-    "review": frozenset({"ticket.answer", "ticket.verdict"}),
-}
+# dashboard: their behaviour before 2.11); Insights mints only its two (human-proof.md, step 3).
+SERVER_OPS = {"insights": frozenset({"insights.settings", "record.delete_detail"})}
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,64}")
 EXPIRED_MSG = "This request expired. Run the update again."
 RESTARTED_MSG = "orch restarted. Reload this page to keep working."
