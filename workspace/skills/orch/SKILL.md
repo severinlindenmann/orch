@@ -207,6 +207,7 @@ Choose from the list, never invent an id. If a person already chose, `orch look 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.
 - Plans may change. There are no signing or planning gates.
+- Every orch command ends with a Next: line; follow it unless you have a reason not to.
 - Keep unknown fields and other add-ons' keys when you edit a ticket file. Prefer the commands.
 - Credentials live in `.orch/secrets/` (ignored by git). Never put them in a ticket, and never ask a person to give you one in a question or answer.
 - Ask only for what the ask list says ("When to ask", or `.orch/ask-when.md` when it exists).

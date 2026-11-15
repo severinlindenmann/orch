@@ -1124,8 +1124,16 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
     m["background"] = bg
     d = m.get("dashboard")
     if d is not None:
-        if not isinstance(d, dict) or set(d) - {"label", "icon", "order", "panel", "title", "subtitle"}:
-            raise _bad("[dashboard] has label, icon, order, panel, title and subtitle")
+        if not isinstance(d, dict) or set(d) - {
+            "label",
+            "icon",
+            "order",
+            "panel",
+            "place",
+            "title",
+            "subtitle",
+        }:
+            raise _bad("[dashboard] has label, icon, order, panel, place, title and subtitle")
         for key, size in (("title", 40), ("subtitle", 120)):
             if key in d and not _text_ok(d[key], size):
                 raise _bad(f"dashboard {key} is at most {size} plain characters")
@@ -1134,6 +1142,8 @@ def parse_manifest(file: Path, core: bool = False) -> dict:
         # `panel`: an extra native card the dashboard knows how to draw (a fixed set)
         if d.get("panel") not in (None, "repeats", "links", "phone"):
             raise _bad("dashboard panel is repeats, links or phone")
+        if d.get("place") not in (None, "nav", "settings"):
+            raise _bad("dashboard place is nav or settings")
         if d.get("icon") not in ICONS:
             raise _bad("dashboard icon is not in the fixed icon set")
         order = d.get("order", 50)
