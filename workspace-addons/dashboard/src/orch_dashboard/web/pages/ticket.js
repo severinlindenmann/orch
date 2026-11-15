@@ -1462,8 +1462,10 @@ function pickDate(anchor, current, cb, withTime = false) {
       grid.append(b);
     }
     const foot = el('div', 'cal-f');
-    foot.append(button('Clear', 'ghost sm', () => close('')), ...(timeInput ? [timeInput] : []), button('Today', 'outline sm', () => close(withClock(todayIso))));
-    pop.append(head, grid, foot);
+    foot.append(button('Clear', 'ghost sm', () => close('')), button('Today', 'outline sm', () => close(withClock(todayIso))));
+    const clock = timeInput ? el('label', 'row') : null;
+    if (clock) clock.append(el('span', 'meta', 'Time (optional)'), timeInput);
+    pop.append(head, grid, ...(clock ? [clock] : []), foot);
   };
   draw();
   // Inside a dialog the calendar must live in the dialog and in the top layer, or the dialog hides it.
