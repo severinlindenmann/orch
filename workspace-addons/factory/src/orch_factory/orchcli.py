@@ -7,9 +7,8 @@ import subprocess
 from .store import Refused
 
 
-def call(root, *args, write=False, by=None, stdin=None):
-    """`stdin`: text for the command's standard input (e.g. `orch secret scan`).
-    `by`: who a write is recorded as (a person's dashboard click passes `human:<name>`); default the add-on."""
+def call(root, *args, write=False, by=None, data=None):
+    """`by`: who a write is recorded as (a person's dashboard click passes `human:<name>`); default the add-on."""
     cmd = [os.environ.get("ORCH_BIN") or "orch", *args, "--json"]
     if write:
         cmd += ["--by", by or "agent:factory"]
@@ -21,20 +20,23 @@ def call(root, *args, write=False, by=None, stdin=None):
             env=env,
             capture_output=True,
             check=False,
-            text=True,
-            **({"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}),
+            text=data is None,
+            input=data,
+            stdin=subprocess.DEVNULL if data is None else None,
             timeout=120,
         )
     except (OSError, subprocess.TimeoutExpired):
         raise Refused("Orch could not be reached. Try again.", "not_available") from None
     try:
         value = json.loads(result.stdout)
-    except ValueError:
+    except (ValueError, UnicodeError):
         raise Refused("Orch did not return a readable answer.", "not_available") from None
     if result.returncode:
         if not isinstance(value, dict):
             raise Refused("Orch refused the request.", "refused")
-        raise Refused(value.get("error", "Orch refused the request."), value.get("code", "refused"))
+        error = Refused(value.get("error", "Orch refused the request."), value.get("code", "refused"))
+        error.found = value.get("found")  # `orch secret scan`: what it found (kind and line, never the text)
+        raise error
     return value
 
 

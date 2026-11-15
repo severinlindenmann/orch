@@ -40,6 +40,7 @@ TYPES = {
 PREFIX = re.compile(r"/addon/[a-z][a-z0-9-]{1,31}")
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'"
 ORDER_PATH = re.compile(r"/api/order/(t_[a-z0-9]{6,16})(?:/(draft|file)/(.+))?")
+SCAN_PATH = re.compile(r"/api/order/(t_[a-z0-9]{6,16})/stop/([1-9][0-9]{0,3})/scan")
 
 
 def _web(name):
@@ -201,6 +202,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._built("home", lambda: pageapi.home(root))
         if path == "/api/autopilot":
             return self._built("autopilot", lambda: pageapi.autopilot_view(root))
+        if path == "/api/reach":
+            return self._json(pageapi.reach(root))
+        m = SCAN_PATH.fullmatch(path)
+        if m:
+            out = pageapi.scan(root, m[1], int(m[2]))  # read only; runs the core's scan, so no time budget
+            return self._json(out) if out else self._send(404, b"not found")
         m = ORDER_PATH.fullmatch(path)
         if m:
             order, what, rest = m.groups()

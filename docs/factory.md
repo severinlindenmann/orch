@@ -40,6 +40,21 @@ On the Factory tab a decision (Start, Ship it and the other stops) opens the das
 you answer without leaving the page; the page refreshes when you have answered. The Factory page itself never answers: you
 press the option in the card, where orch confirms it is you. Outside the dashboard the button links to the ticket.
 
+## Ask another workspace
+At a stop you can ask a connected workspace for its view first: press **Ask another workspace** on the stop (the button
+only shows when another workspace is connected to yours). You pick who, and the dialog shows exactly what leaves this
+computer: one line about the stop, the items you tick and their pictures. Nothing else goes: no other orders, no crew logs,
+no budget, no chat. orch checks the pictures for passwords and keys when the dialog opens; a picture with a hit stays
+unticked and nothing is sent until you remove it.
+
+Their answer shows on the stop as "Design says: ..." (or "Design's helper says: ..."). **Add to my comments** copies it,
+quoted, so you can paste it into your own comments; it is never sent by itself. An answer is advice: **Ship it** and
+**Send back** are always yours, also while you wait, and a late answer is kept as a note. Autopilot never decides a stop you
+asked about. If the other workspace is offline the row says Queued and the question goes out when it is back; if it could
+not be delivered the row says Failed, with **Send again**. When you answer the stop, the ask is closed.
+
+On the command line: `orch factory ask <order> <stop> <workspace> --item 0 --by human:<name>`.
+
 ## What protects your decisions
 Only your own answers count (the ones you give in the dashboard, Focus, the CLI or on your phone), and
 only for questions Factory itself asked about a frozen proposal. A proposal cannot change after Start; more scope is always

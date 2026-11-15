@@ -14,7 +14,7 @@ import json
 import sys
 import time
 
-from . import authority, autopilot, flow, handover, orchcli
+from . import ask, authority, autopilot, flow, handover, orchcli
 from .store import Refused, Store, clock
 
 INTERVAL = 20
@@ -73,7 +73,9 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
         op = d["open"]
         if op and op["row"]["kind"] == "factory:stop" and f"stop:{op['q']['id']}" not in woken:
             options = list(op["q"].get("options") or [])
-            if any(autopilot.allowed(op, o, granted, clock(), ticket["id"], decided) for o in options):
+            if not ask.has_ask(tickets, ticket["id"], op["n"]) and any(
+                autopilot.allowed(op, o, granted, clock(), ticket["id"], decided) for o in options
+            ):
                 why.append("autopilot may decide a stop")
                 ids.append(f"stop:{op['q']['id']}")
     return why, ids, crew
@@ -93,6 +95,7 @@ def once(root):
     """One pass. Returns [{"order", "why"}] for the runs it started."""
     store = Store(root)
     tickets = orchcli.tickets(root)
+    ask.resume(root, tickets)  # asks that waited for the relay go on
     todo = []
     with store.locked():
         orders = _load(store)

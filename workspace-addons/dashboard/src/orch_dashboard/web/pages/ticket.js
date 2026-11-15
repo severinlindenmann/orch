@@ -1662,6 +1662,34 @@ async function fileEmbedIdea(req) {
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
 
+// Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
+// target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this
+// page's session) and tells the page whether it went out. Same origin and shipped-frame fences as orch.idea.
+const EMBED_ASK_TARGET = /^t_[a-z0-9]{6,16}:s[1-9][0-9]{0,3}:ws_[a-z0-9]{6,32}:(-|[0-9]{1,2}(,[0-9]{1,2}){0,11})$/;
+function embedAskRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.ask') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.target !== 'string' || !EMBED_ASK_TARGET.test(data.target)) return null;
+  return {...shown, id:data.id, target:data.target};
+}
+let embedAskBusy = false;  // one ask at a time: a second click while sending is dropped
+async function fileEmbedAsk(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedAskBusy) return;
+  embedAskBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:'ask', target:req.target});
+    const answer = result.ok ? result.state?.act_answer : null;
+    const state = answer && answer.addon === req.addon ? answer.answer?.state : null;
+    if (state === 'delivered' || state === 'queued') reply({type:'orch.ask.done', state});
+    else if (state === 'partial') reply({type:'orch.ask.done', state, said:String(answer.answer?.said || '').slice(0, 300)});
+    else reply({type:'orch.ask.failed', error:result.ok ? 'orch did not confirm that it was sent.' : String(result.text || '').slice(0, 300)});
+  } finally { embedAskBusy = false; }
+}
+addEventListener('message', e => { const req = embedAskRequest(e); if (req) fileEmbedAsk(req); });
+
 // Plan the run / Ask for changes on a Factory draft: the shown shipped add-on page names a ticket of ITS OWN (one that
 // carries that add-on's data) and the words. The dashboard sends them as the person's message with its own proven op
 // (`run.send`, the same click as writing to the agent on the ticket page) and, when no agent works on it, starts one

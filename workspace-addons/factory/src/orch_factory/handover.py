@@ -258,7 +258,7 @@ def scan_files(root, files):
         if text is None:
             continue
         try:
-            orchcli.call(root, "secret", "scan", stdin=text)
+            orchcli.call(root, "secret", "scan", data=text.encode())
         except Refused as error:
             if error.code == "too_large":
                 continue

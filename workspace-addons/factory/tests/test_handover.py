@@ -312,7 +312,7 @@ def test_secret_in_a_file_stops_before_the_delegate(ws, run, directory):
     (ws / "brief" / "header.md").write_text("token SECRETVALUE here")
     order, tid = handed(ws, run)
     out = run("crew", "start", order, "header-picture", code=2)
-    assert "looks like a secret" in out["error"] and "brief/header.md" in out["error"]
+    assert "has a secret" in out["error"] and "brief/header.md" in out["error"]
     assert calls(ws, "relay", "delegate") == [] and shares(ws) == [] and cache(ws, tid) is None
     assert len(calls(ws, "secret", "scan")) == 1
 

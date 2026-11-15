@@ -48,6 +48,10 @@ if args[:2] == ["ticket", "new"]:
         "parent": flag("--parent") if "--parent" in args else None,
         "history": [],
     }
+    # ---- #816 A (ask another workspace): `--ext factory=<json>` is written with the ticket
+    if "--ext" in args:
+        addon, _, raw = args[args.index("--ext") + 1].partition("=")
+        t["ext"][addon] = json.loads(raw)
     gate = next((a.split("=", 1)[1] for a in args if a.startswith("--start-requires=")), None)
     if gate:  # core's start gate: "<ticket>:<question>=<answer>"
         g_ticket, rest = gate.split(":", 1)
@@ -69,6 +73,102 @@ elif args[:2] == ["ext", "set"]:
     t["revision"] += 1
     save(t)
     result = t
+# ---- #816 A (ask another workspace): the core commands ask.py uses. Part B appends its own block below.
+elif args[:2] == ["secret", "scan"]:
+    data = sys.stdin.buffer.read()
+    if b"SECRET" in data:
+        print(
+            json.dumps(
+                {
+                    "error": "The text has a secret on line 1.",
+                    "code": "refused",
+                    "found": [{"kind": "k", "line": 1}],
+                }
+            )
+        )
+        sys.exit(2)
+    result = {"found": []}
+elif args[:2] == ["ticket", "summary"]:
+    t = load(args[2])
+    t["summary"] = args[3]
+    save(t)
+    result = t
+elif args[:2] == ["check", "add"]:
+    t = load(args[2])
+    t.setdefault("checklist", []).append({"text": args[3], "done": False})
+    save(t)
+    result = t
+elif args[:2] == ["ticket", "attach"]:
+    name = args[3].split("=", 1)[1] if args[3].startswith("--name=") else args[3]
+    target = root / "fake-attach" / args[2]
+    target.mkdir(parents=True, exist_ok=True)
+    (target / name).write_bytes(sys.stdin.buffer.read())
+    result = {"name": name, "size": 1, "path": f"fake-attach/{args[2]}/{name}"}
+elif args[:2] == ["ticket", "status"]:
+    t = load(args[2])
+    t["status"] = args[3]
+    save(t)
+    result = t
+elif (
+    args[:3] == ["relay", "group", "share"] and (root / "groups.json").exists()
+):  # the hand-over groups (#816 B)
+    name = Path(args[4]).name
+    refused = (root / "refuse-share").read_text().split() if (root / "refuse-share").exists() else []
+    if name.startswith(".") or name in refused:
+        print(
+            json.dumps({"error": f"{args[4]} can't be shared (it looks like a secret).", "code": "refused"})
+        )
+        sys.exit(2)
+    with (root / "shares.jsonl").open("a") as stream:
+        stream.write(json.dumps({"ticket": args[3], "file": args[4], "click": "--click" in args}) + "\n")
+    result = {"group": "grp_" + args[3], "errors": []}
+elif args[:3] == ["relay", "group", "add"]:
+    if (root / "fail-group").exists():
+        print(json.dumps({"error": "Design is no longer connected to you.", "code": "refused"}))
+        sys.exit(2)
+    result = {"added": True}
+elif args[:3] == ["relay", "group", "share"]:
+    assert "--click" in args
+    if (root / "offline-share").exists():  # the relay can't be reached (blob upload): core's own words
+        print(
+            json.dumps(
+                {
+                    "error": "Can't reach relay.test right now. Check your internet and try again.",
+                    "code": "refused",
+                }
+            )
+        )
+        sys.exit(2)
+    if (root / "fail-share-after").exists():  # let N shares through, then a clear refusal
+        done = (
+            sum(
+                1
+                for x in (root / "calls.jsonl").read_text().splitlines()
+                if json.loads(x)["args"][:3] == args[:3]
+            )
+            - 1
+        )
+        if done >= int((root / "fail-share-after").read_text()):
+            print(json.dumps({"error": "The relay refused the file.", "code": "refused"}))
+            sys.exit(2)
+    result = {"group": "g1"}
+elif args[:3] == ["relay", "group", "ask"]:
+    if (root / "kept-ask").exists():
+        print(
+            json.dumps(
+                {
+                    "error": "The question could not be sent now. It is kept and goes out with the next relay command.",
+                    "code": "refused",
+                }
+            )
+        )
+        sys.exit(2)
+    result = {"id": "m1"}
+elif args[:2] == ["relay", "outbox"]:
+    result = {
+        "waiting": json.loads((root / "outbox.json").read_text()) if (root / "outbox.json").exists() else []
+    }
+# ---- end #816 A
 elif args[0] == "ask":
     if (root / "fail-ask").exists():
         print(json.dumps({"error": "Ask unavailable.", "code": "not_available"}))
@@ -87,8 +187,8 @@ elif args[0] == "ask":
         result = {
             "id": f"q{len(t['questions']) + 1}",
             "text": args[2],
-            "kind": flag("--kind"),
-            "action": json.loads(flag("--action")),
+            "kind": flag("--kind") if "--kind" in args else None,  # no kind: an information question (#816 A)
+            "action": json.loads(flag("--action")) if "--action" in args else None,
             "options": options,
             "answer": None,
             "answered_by": None,
@@ -171,17 +271,6 @@ elif args[:2] == ["relay", "delegate"]:
         g["tasks"].append({"delegate": mid, "ws": args[2], "status": "waiting_start", "title": args[3]})
         (root / "groups.json").write_text(json.dumps(groups))
     result = {"id": mid, "sent": True}
-elif args[:3] == ["relay", "group", "share"]:
-    name = Path(args[4]).name
-    refused = (root / "refuse-share").read_text().split() if (root / "refuse-share").exists() else []
-    if name.startswith(".") or name in refused:
-        print(
-            json.dumps({"error": f"{args[4]} can't be shared (it looks like a secret).", "code": "refused"})
-        )
-        sys.exit(2)
-    with (root / "shares.jsonl").open("a") as stream:
-        stream.write(json.dumps({"ticket": args[3], "file": args[4], "click": "--click" in args}) + "\n")
-    result = {"group": "grp_" + args[3], "errors": []}
 elif args[:3] == ["relay", "group", "say"]:
     with (root / "says.jsonl").open("a") as stream:
         stream.write(json.dumps({"ticket": args[3], "text": args[4]}) + "\n")
@@ -191,21 +280,6 @@ elif args[:3] == ["relay", "group", "list"]:
         json.loads((root / "groups.json").read_text()) if (root / "groups.json").exists() else {"hosted": []}
     )
     result.setdefault("joined", [])
-elif args[:2] == ["relay", "outbox"]:
-    result = {
-        "waiting": json.loads((root / "outbox.json").read_text()) if (root / "outbox.json").exists() else []
-    }
-elif args[:2] == ["secret", "scan"]:
-    if "SECRETVALUE" in sys.stdin.read():
-        print(json.dumps({"error": "It looks like a secret (an API key, line 1).", "code": "refused"}))
-        sys.exit(2)
-    result = {"found": []}
-elif args[:2] == ["ticket", "status"]:
-    t = load(args[2])
-    t["status"] = args[3]
-    t["revision"] += 1
-    save(t)
-    result = t
 # ---- end of the hand-over block ----
 else:
     raise AssertionError(args)
