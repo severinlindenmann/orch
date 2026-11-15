@@ -135,3 +135,6 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 ## Owner feedback 14 Nov (lane owner-fb-v2)
 The current ticket header is the strip in `../sweep/d-ticket-states.html` (all five states) and `../proposals/f-ticket-check.html` (Check: Looks good / Send back, Result, What the helper did). The product matches them; the older pages here keep their 13 Nov look until they are replaced.
+
+## Report a problem (diagnostics D3, 15 Nov)
+`ticket-report.html` (`?s=page|form|busy|done|copied`): the "Report a problem" button in the top bar and its dialog (what happened, what you expected, a picture of the page, ticket text and helper conversation, Create report, Report ready with the checks, a line to paste, Ask a helper to investigate, Open folder). The button is in the top bar of every page; on a ticket page and in an add-on frame the dialog names that ticket or add-on. Sharing a report with a helper on another computer (share code) is a later step and is not in the product or here. The product's picture of the page is a snapshot of the page text with every typed value masked (no screenshot library).

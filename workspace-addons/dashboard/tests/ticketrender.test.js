@@ -73,7 +73,7 @@ function dom() {
   }
   const doc = {body:new El('body'), activeElement:null, visibilityState:'visible', addEventListener() {},
     createElement:t => new El(t), createElementNS:(_, t) => new El(t), createTextNode:t => new Text(t), createDocumentFragment:() => new El('#document-fragment', 11)};
-  for (const id of ['content', 'side-nav', 'side-settings', 'workspace-name', 'workspace-mode', 'crumb', 'new-ticket', 'open-agent', 'menu-toggle', 'connection']) {
+  for (const id of ['content', 'side-nav', 'side-settings', 'workspace-name', 'workspace-mode', 'crumb', 'new-ticket', 'open-agent', 'report-problem', 'menu-toggle', 'connection']) {
     const n = new El(id === 'content' ? 'main' : 'div'); n.id = id; doc.body.appendChild(n);
   }
   const sidebar = new El('aside'); sidebar.className = 'sidebar'; doc.body.appendChild(sidebar);

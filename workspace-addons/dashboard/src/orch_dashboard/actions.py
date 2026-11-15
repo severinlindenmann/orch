@@ -558,6 +558,22 @@ def _copies_set(a):
     return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
 
 
+def _diag_set(a):
+    """Problem reports (settings): keep the debug log on or off, `orch config set diag.enabled`."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "diag.enabled", "on" if a["on"] else "off"], [], []
+
+
+def _diag_delete(what):
+    def build(a):
+        _only(a, ())
+        return ["diag", "delete", what], [], []
+
+    return build
+
+
 def _copies_clean(a):
     """The Clean up now button (settings): `orch copy clean`, the same sweep every start runs."""
     _only(a, ())
@@ -935,6 +951,8 @@ OPS = {
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
+    "diag.set": _diag_set,
+    "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
     "copies.remove_orphaned": _copies_remove_orphaned,

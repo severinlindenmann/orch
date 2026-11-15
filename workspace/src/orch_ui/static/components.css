@@ -471,6 +471,10 @@ p.ev-missing{padding:var(--s5);border:1px dashed var(--border-strong);border-rad
 .code-block.dim{opacity:.7}
 .disclosure summary{cursor:pointer;color:var(--text-muted);font-size:13px;padding:4px 0}
 .actions-end{justify-content:flex-end;margin-top:16px}
+/* The scrollbar gutter is always reserved, so a long page (Factory, Insights) ends at the same right edge as a short one. */
+html{scrollbar-gutter:stable}
+/* A table's owner column never wraps a name ("Be/n", "Marie-/Louise"). */
+.ticket-table .who{white-space:nowrap}.ticket-table td:nth-child(3){min-width:112px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.skeleton:after{display:none}}
 
 /* Plain editable value (ticket properties, brief): reads as text, a small pencil says it can be changed. */

@@ -29,6 +29,7 @@ SUMMARY_MAX = 20 * 1024
 TIMELINE_MAX = 20_000
 LOG_FILE_MAX = 5 * 1024 * 1024
 CONTENT_CUT = 4000
+PAGE_MAX = 2 * 1024 * 1024
 INCIDENT_MAX = 20
 INCIDENT_BYTES = 50 * 1024 * 1024
 REPORTS = "reports"
@@ -259,6 +260,7 @@ def make(
     window_s=None,
     timeline_cap=TIMELINE_MAX,
     hide=None,
+    page=None,
 ) -> dict:
     """Make a report (`kind` r) or an incident (`kind` i, structure only, a short window). Returns {ref,
     path, ...}."""
@@ -336,6 +338,10 @@ def make(
             w.put_lines(f"record/{_SCOPE.sub('', r)}.jsonl", rows)
         if content and kind == "r":
             _content(root, scope, activity, w)
+        if (
+            page and kind == "r"
+        ):  # the dashboard's page snapshot (inputs masked there; text still hidden here)
+            w.put("screen/page.html", str(page)[:PAGE_MAX])
         w.put_json(
             "manifest.json",
             {
@@ -378,6 +384,21 @@ def _size(p: Path) -> int:
             with contextlib.suppress(OSError):
                 total += (Path(dp) / f).lstat().st_size
     return total
+
+
+def delete_all(root: Path) -> int:
+    """Settings > Delete all: every report folder (r-...) goes, by its exact path; incidents (i-...) stay
+    (they are the log's own safety net). Returns how many went."""
+    rdir = reports_dir(root)
+    gone = 0
+    if rdir.is_symlink() or not rdir.is_dir():
+        return 0
+    for p in list(rdir.iterdir()):
+        if p.name.startswith("r-") and p.is_dir() and not p.is_symlink():
+            shutil.rmtree(p, ignore_errors=True)
+            gone += 1
+    diag.log("diag.reports_deleted", "info", root=root, count=gone)
+    return gone
 
 
 def prune(root: Path) -> list[str]:

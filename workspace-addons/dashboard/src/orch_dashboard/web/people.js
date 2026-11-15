@@ -34,7 +34,7 @@
       : node('button', {type: 'button', className: 'menu-item', 'data-person-add': '', 'data-testid': 'person-add'}, 'Add person');
     const d = node('details', {className: 'menu person-menu', open: open || adding},
       node('summary', {className: 'nav-item', 'aria-label': 'Switch person', 'data-testid': 'person-switch'},
-        avatar(me || 'You'), node('span', {className: 'nav-label'}, 'You: ', node('strong', {}, me || 'Not set')), node('span', {className: 'grow'}), node('span', {className: 'chev', 'aria-hidden': 'true'}, '▾')),
+        avatar(me || 'You'), node('span', {className: 'nav-label'}, 'You: ', node('strong', {}, me || 'Not set')), node('span', {className: 'grow'}), node('span', {className: 'chev', 'aria-hidden': 'true'})),
       node('div', {className: 'menu-pop', role: 'menu'}, node('p', {className: 'eyebrow'}, 'You are'), ...items, add));
     root.append(d);
     if (adding) d.querySelector('input')?.focus();

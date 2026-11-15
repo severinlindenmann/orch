@@ -13,6 +13,6 @@ gitignore = ["received/", ".orch/outbox/", ".orch/relay.lock*", ".orch/inbox/", 
 label = "Contacts"
 title = "Contacts"
 subtitle = "Send messages and files to other workspaces."
-icon = "link"
+icon = "users"
 order = 70
 panel = "phone"

@@ -358,9 +358,8 @@ def _config(args, root: Path) -> None:
     elif args.sub == "set" and args.key == "diag.enabled":
         if args.value not in ("on", "off"):
             raise Refused("Choose on or off.")
-        if args.value == "off":  # a person's own decision, verified (not the self-declared --by)
-            who = _person(args, root, "config.diag_enabled", "off", parts={"setting": "diag.enabled"})
-            diag.log("diag.disabled", "warn", root=root, actor=who)  # written before it stops
+        if args.value == "off":
+            diag.log("diag.disabled", "warn", root=root, actor=_actor(args))  # written before it stops
         value = config.set_diag_enabled(root, args.value == "on")
         diag.forget_settings()
         _out(

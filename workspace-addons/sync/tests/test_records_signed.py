@@ -361,3 +361,15 @@ def test_an_approved_removal_leaves_no_own_value(machines, monkeypatch):
     assert "automation" not in (load(b).get("ext") or {})
     known, ok = approval.local_ext(b)
     assert ok and known["t_abc123"] == {}  # automation: no own value, as for a ticket that never had one
+
+
+def test_the_missing_ticket_notice_names_the_ticket_by_its_title(machines):
+    """The dashboard hides ticket ids, so the notice used to read "A ticket file is missing: . Restored it."."""
+    _a, b, _ = both(machines)
+    state = cli.read(b, "state")
+    state["deleted"] = {"t_abc123": NOW}
+    step.write(b, step.STATE, step.encoded(state))
+    row = next(r for r in needs.rows(b) if r["kind"] == "sync:deleted")
+    title = load(b)["title"]
+    assert f"A ticket file is missing: {title}. Restored it." == row["text"]
+    assert "t_abc123" not in row["text"]
