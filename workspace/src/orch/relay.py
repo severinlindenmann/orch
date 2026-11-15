@@ -26,6 +26,7 @@ from orch import (
     net,
     review,
     runs,
+    secretscan,
     skillrender,
     skills,
     tickets,
@@ -50,7 +51,18 @@ def _cfg(root: Path) -> dict:
     return net.load_service(root, "relay")
 
 
+scan_outgoing = secretscan.refuse_if_secret_in  # one shared check (secretscan.py), also used by publish
+
+
+def scan_blob(data: bytes, root: Path | None = None) -> None:
+    secretscan.refuse_if_secret(data, "file", root)
+
+
 def _api(root: Path, method: str, path: str, body=None, timeout: float = 60):
+    if method.upper() == "POST" and path.split("?")[0].rstrip("/") == "/v1/blobs":
+        if not isinstance(body, (bytes, bytearray)):
+            raise Refused("A file upload has to be plain bytes, so nothing was sent.")
+        scan_blob(bytes(body), root=root)  # every upload to the relay passes the one scanner (R5.2)
     cfg = _cfg(root)
     return net.call_json(method, cfg["url"] + path, net.auth_headers(cfg), body, timeout)
 
@@ -477,6 +489,7 @@ def _message(
             msg["key"] = key  # display key next to the id (relay-api.md): phones show it
     if reply_to:
         msg["reply_to"] = reply_to
+    scan_outgoing(root, body)  # before the outbox: a secret is never even kept on disk for a retry
     raw = json.dumps(msg).encode("utf-8")
     path = _write_outbox(root, msg["id"], raw)
     from orch import relay_view
@@ -715,6 +728,7 @@ def send_text(
     from orch import chat, phone_view
 
     body: dict = {"text": text}
+    scan_outgoing(root, {"text": text})  # also for the paths that only record locally first (proposal)
     to = resolve(root, target)
     if not ticket and not general and reply_to and not update:
         ticket = _topic_of_message(root, reply_to)  # answers a text that started a topic: stays in that topic
