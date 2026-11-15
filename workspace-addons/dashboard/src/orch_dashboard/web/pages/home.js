@@ -201,13 +201,18 @@ function resultGroups(review) {
 function listRow(key, title, meta, action, attrs = {}) {
   return h('div', {className:'card-row', 'data-key':key, ...attrs}, h('div', {className:'grow'}, h('h3', {}, title), meta ? h('p', {className:'meta'}, meta) : null), action);
 }
+// A long add-on question (a whole proposal) shows as its first sentence; the full text is in the question card.
+function shortQuestion(text) {
+  const first = String(text || '').split(/(?<=[?.])\s/)[0].trim();
+  return first.length > 110 ? first.slice(0, 107) + '…' : first;
+}
 // A further question, startable failure or add-on row: the same one button the full card would open.
 function needListRow(row, count, same) {
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row), key = 'need-' + row.id;
   const source = !t && row.source ? addonName(row.source) : '', when = typeof age === 'function' ? age(row.since) : '';
   const meta = [t ? clean(t.title) : source, count > 1 ? count + ' questions' : '', same.length ? 'Asked on ' + (same.length + 1) + ' tickets' : '', when].filter(Boolean).join(' · ');
   const action = snapshot ? null : h('button', {type:'button', className:'btn outline sm', 'data-action':'need', 'data-need':row.id, 'data-key':key + '-answer'}, choice.label);
-  const question = needQuestion(row), title = source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper');
+  const question = shortQuestion(needQuestion(row)), title = source && String(question).trim().toLowerCase() === String(row.source).toLowerCase() ? source : window.DashHelpers.plainWhy(question, 'The helper');
   return listRow(key, clean(title), meta, action, {'data-need-row':row.id});
 }
 // A result to check: same-name results are one row ("3 versions"); the row opens the newest.

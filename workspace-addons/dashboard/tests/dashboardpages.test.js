@@ -550,3 +550,11 @@ test('the Automation page heading is the add-on menu name, not a second name', (
   assert.doesNotMatch(settings, /heading\('Schedules'/);
   assert.match(settings, /heading\(addonTitle\(a\), a\?\.dashboard\?\.subtitle \|\| 'Repeat work on a plan you choose\.'/);
 });
+test('home: a long add-on question is one short title in its row', () => {
+  const long = "Start 'Loyalty card'? ~1 h 30 min · you're needed for ~10 min. Goal: " + 'Regular customers collect stamps. '.repeat(10);
+  const needs = [{id:'f1', source:'factory', kind:'factory:start', ticket:'a', title:'Launch a loyalty card', since:'2026-11-01T00:00:00Z', answer:{question:'q1', digest:'x', options:[]}},
+    {id:'g1', source:'core', kind:'question', ticket:'b', title:'Plain?', since:'2026-11-02T00:00:00Z', answer:{question:'q1', digest:'x', options:['A', 'B']}}];
+  const items = [{id:'a', title:'Launch a loyalty card', status:'waiting', questions:[{id:'q1', text:long}]}, {id:'b', title:'T b', status:'waiting', questions:[{id:'q1', text:'Plain?'}]}];
+  const row = nodes(context(items, {needsList:() => needs, snapshot:false, button:label => ({tag:'button', children:[label]})}).home(), n => n.attrs?.['data-key'] === 'need-f1')[0];
+  assert.ok(row); assert.match(JSON.stringify(row), /Start 'Loyalty card'\?/); assert.doesNotMatch(JSON.stringify(row), /Regular customers/);
+});
