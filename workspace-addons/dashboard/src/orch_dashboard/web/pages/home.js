@@ -230,8 +230,14 @@ function changeRow(t) {
   }
   return listRow('change-' + t.id, 'Apply the changes?', clean(t.title), action);
 }
-function attentionCard(key, badge, cls, body, meta = '') {
-  return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge), h('span', {className:'grow'}), meta ? h('span', {className:'meta'}, meta) : null), body);
+function attentionCard(key, badge, cls, body, meta = '', action = null) {
+  return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge), h('span', {className:'grow'}), meta ? h('span', {className:'meta'}, meta) : null, action), body);
+}
+// "Review all": the cards of the Review page (state.review) in one go. The number is the same set of questions and
+// results Home already counts, so it is never added to Home's own total.
+function reviewAllButton() {
+  const n = typeof reviewCount === 'function' ? reviewCount() : 0;
+  return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
 }
 function attentionSummary(groups, failed, results, changes) {
   const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
@@ -347,7 +353,7 @@ function home() {
   const finishedBody = finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      needCount ? attentionCard('needs-you', 'Needs you · ' + needCount, 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '') : null),
+      needCount ? attentionCard('needs-you', 'Needs you · ' + needCount, 'needs', list, first ? whoAsked(ticketOf(first.row.ticket)) : '', reviewAllButton()) : null),
     h('aside', {className:'stack', 'data-key':'right'},
       working.length ? card('working-now', 'Working now', String(working.length), working.slice(0, 5).map(workingRow)) : null,
       card('finished-today', 'Finished', '', finishedBody))),

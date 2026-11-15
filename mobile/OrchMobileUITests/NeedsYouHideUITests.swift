@@ -10,7 +10,7 @@ final class NeedsYouHideUITests: XCTestCase {
 
     func testSwipeHidesQuestionAndUndoRestoresIt() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES"]
+        app.launchArguments = ["-resetState", "YES", "-relayMode", "mock", "-seedPaired", "YES", "-mockAllow", "YES"]   // plain questions are Review stack cards (M5); a permission ask stays in Needs your OK
         app.launchEnvironment["ORCH_UITEST_TOAST_SECONDS"] = "30"   // a slow CI runner: the toast must still be there to tap Undo
         app.launch()
         let row = firstQuestionRow(app)

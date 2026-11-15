@@ -389,7 +389,11 @@
           "description": "Optional. plain (default) or <add-on>:<name>; the add-on with that prefix acts on the answer. The core only records it."
         },
         "action": { "type": "object", "description": "Optional, opaque to the core: data the asking add-on needs to act on the answer." },
-        "check": { "type": "string", "pattern": "^c[0-9]{1,4}$", "description": "Optional. The checklist item this question belongs to." }
+        "check": { "type": "string", "pattern": "^c[0-9]{1,4}$", "description": "Optional. The checklist item this question belongs to." },
+        "card": { "type": "object", "description": "Optional (Review stack). What the person is shown: kind (draft|check|link|choice|plan), title, why, need, then, ok_label, signs, open, preview (page|img|doc|table|compare|options). File references point into reviewed/<sha12>/.", "required": ["kind", "title"], "properties": { "kind": { "enum": ["draft", "check", "link", "choice", "plan"] }, "title": { "type": "string" } } },
+        "shown": { "type": "object", "description": "Optional (Review stack). A fingerprint of exactly what the card showed: digest, copy (reviewed/<sha12>/, a content-addressed copy under .orch/tickets/<id>/) and files (name to sha256).", "required": ["digest", "copy", "files"], "properties": { "digest": { "type": "string" }, "copy": { "type": "string" }, "files": { "type": "object", "additionalProperties": { "type": "string" } } } },
+        "decision": { "type": "object", "description": "Optional (Review stack), set when answered. action (approve|use|use_with_changes|send_back|dont|none_of_these), picked, allows, changes[], words{text,voice[]}, pins[], summary (the one plain line that is also `answer`), replaces (an earlier entry this one answers again), replaced_by (set later on the old entry; never part of the signed binding).", "required": ["action", "summary"], "properties": { "action": { "enum": ["approve", "use", "use_with_changes", "send_back", "dont", "none_of_these"] }, "picked": { "type": ["string", "null"] }, "allows": { "type": ["string", "null"] }, "changes": { "type": "array", "items": { "type": "string" } }, "words": { "type": "object" }, "pins": { "type": "array", "items": { "type": "object" } }, "summary": { "type": "string" }, "replaces": { "type": ["string", "null"] }, "replaced_by": { "type": ["string", "null"] } } },
+        "at": { "$ref": "#/$defs/time", "description": "Optional (Review stack). When the decision was made." }
       }
     },
     "history": {

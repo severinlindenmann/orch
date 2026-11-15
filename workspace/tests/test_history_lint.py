@@ -62,6 +62,10 @@ PERSON_OK = {
     ): "proof code: the bytes a person's decision MAC covers",
     ("workspace/src/orch/relay.py", "_answer_by"): "a relay message's body (its own rule), not a ticket",
     (
+        "workspace/src/orch/relay.py",
+        "_is_mine",
+    ): "writer-side crash check: compares the raw stored by with what this verdict wrote",
+    (
         "workspace-addons/factory/src/orch_factory/authority.py",
         "who",
     ): "CLI JSON (shown); Factory's one reader of answered_by",
@@ -77,9 +81,18 @@ PERSON_OK = {
 # (file, function) -> readers that take the shown ticket at their entry (history.shown_ticket / shown_json /
 # shown_item, checked below) and read person fields of THAT: the reason says which.
 SHOWN = {
+    (
+        "workspace/src/orch/cli_review.py",
+        "_answered",
+    ): "history.shown_json(root, tickets.list_all(root)) first",
+    ("workspace/src/orch/cli_review.py", "_wait"): "history.shown_ticket(root, tickets.load(...)) each poll",
     ("workspace/src/orch/runs.py", "fresh_prompt"): "ticket = history.shown_ticket(...) first",
     ("workspace/src/orch/cli.py", "_show"): "t = history.shown_ticket(...) first",
     ("workspace/src/orch/tickets.py", "start_blocked"): "other = history.shown_ticket(...) first",
+    (
+        "workspace/src/orch/review.py",
+        "applies_now_block",
+    ): "history.shown_ticket(root, ticket) when root is given",
     (
         "workspace/src/orch/relay.py",
         "apply_allow_answers",

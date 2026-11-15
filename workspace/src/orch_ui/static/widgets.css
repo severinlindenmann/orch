@@ -98,7 +98,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .person-switch .menu-pop{grid-template-columns:minmax(0,1fr)}
 .person-switch .menu-item>.truncate{min-width:0}
 .person-switch .menu-item .ck{margin-left:auto;color:var(--brand)}
-.qr{width:168px;height:168px;border-radius:8px;background:#fff;padding:8px;flex:none}
+.qr{width:168px;height:168px;border-radius:8px;background:var(--paper);padding:8px;flex:none}
 .stepper .done-s{color:var(--success)}
 .stepper .now{color:var(--text)}
 .step-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--border-strong);font-size:12px}
@@ -132,7 +132,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .pop-anchor{position:relative}
 .pop-anchor .menu{top:calc(100% + 8px);left:0;width:272px}
 .menu .eyebrow{padding:8px 12px 4px}
-.modal-back{position:relative;min-height:620px;border-radius:var(--radius-card);background:#0008;display:grid;place-items:start center;padding-top:32px}
+.modal-back{position:relative;min-height:620px;border-radius:var(--radius-card);background:var(--scrim);display:grid;place-items:start center;padding-top:32px}
 .modal-box{width:520px;background:var(--surface);border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow)}
 .modal-box>*{padding:16px 20px}
 .modal-box>*+*{border-top:1px solid var(--border)}
@@ -172,6 +172,284 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .mini-table{border-collapse:collapse;font-size:11px;line-height:16px;color:var(--text-muted);width:calc(100% - 24px);table-layout:fixed}
 .mini-table th{text-align:left;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);padding:2px 6px}
 .mini-table td{padding:2px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Swipe review deck (draft 15 Nov, owner idea): one card at a time; right = Looks good, left = Don't do / Send back,
+   down = Comment (voice or text). Buttons + keys (← ↓ →) always do the same as the swipe. UI.swipeDeck() builds it. */
+.swipe{position:relative;display:flex;flex-direction:column;gap:var(--s4);min-height:0;outline:none;--swipe-card-h:560px}
+.swipe:focus,.swipe:focus-visible{outline:none;box-shadow:none}
+.swipe-top{display:flex;align-items:center;gap:var(--s3);font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-top .progress{flex:1;height:4px}
+.swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:none}
+.swipe-card{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;cursor:grab;user-select:none;will-change:transform;transition:transform var(--dur-slow) var(--ease-move),opacity var(--dur-slow) var(--ease-move);box-shadow:var(--lift-shadow)}
+.swipe-card.dragging{transition:none;cursor:grabbing}
+.swipe-card.leaving{transition:transform var(--dur-slow) var(--ease-exit),opacity var(--dur-slow) var(--ease-exit);opacity:0}
+.swipe-card.under{transform:scale(.96) translateY(10px);box-shadow:none;pointer-events:none}
+.swipe-card.under2{transform:scale(.92) translateY(20px);opacity:.6;box-shadow:none;pointer-events:none}
+.swipe-head{display:grid;gap:var(--s1);padding:var(--s4) var(--s4) var(--s3)}
+.swipe-meta{display:flex;align-items:center;gap:var(--s2);font-size:12px;line-height:16px;color:var(--text-faint)}
+.swipe-kind{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--text-muted);font-size:12px;line-height:16px}
+.swipe-head h3{margin:0;font-size:16px;line-height:24px;font-weight:600}
+.swipe-head p{margin:0;font-size:14px;line-height:20px;color:var(--text-muted)}
+.swipe-preview{position:relative;flex:1;min-height:0;margin:0 var(--s4);border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);overflow:hidden;cursor:zoom-in}
+.swipe-preview>img,.swipe-preview>iframe{display:block;width:100%;height:100%;object-fit:contain;border:0;pointer-events:none;background:var(--paper)}
+.swipe-preview>iframe{width:200%;height:200%;transform:scale(.5);transform-origin:0 0}
+.swipe-preview .doc{padding:var(--s4);font-size:14px;line-height:20px;color:var(--text)}
+.swipe-preview .doc h4{margin:0 0 8px;font-size:16px;line-height:24px}.swipe-preview .doc p{margin:0 0 8px;color:var(--text-muted)}
+.swipe-preview .doc ol{margin:0;padding-left:20px;display:grid;gap:6px}
+.swipe-preview .mini-table{margin:var(--s3);width:calc(100% - 24px);font-size:12px}
+.swipe-expand{position:absolute;right:8px;bottom:8px;background:var(--surface-2)!important;border-color:var(--border)!important}
+.swipe-foot{display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s4);font-size:13px;line-height:18px;color:var(--text-muted);min-height:44px}
+.swipe-foot .grow{flex:1}
+.swipe-stamp{position:absolute;z-index:2;padding:6px 14px;border:2px solid currentColor;border-radius:var(--radius);font-weight:600;font-size:16px;line-height:24px;background:var(--bg);opacity:0;pointer-events:none}
+.swipe-stamp.right{top:20px;left:20px;color:var(--brand);transform:rotate(-8deg)}
+.swipe-stamp.left{top:20px;right:20px;color:var(--danger);transform:rotate(8deg)}
+.swipe-stamp.down{left:50%;bottom:64px;transform:translateX(-50%);color:var(--warning)}
+.swipe-edge{position:absolute;inset:0;border-radius:var(--radius-card);pointer-events:none;opacity:0;z-index:1}
+.swipe-edge.right{box-shadow:inset 0 0 0 2px var(--brand)}.swipe-edge.left{box-shadow:inset 0 0 0 2px var(--danger)}.swipe-edge.down{box-shadow:inset 0 0 0 2px var(--warning)}
+.swipe-actions{display:flex;justify-content:center;align-items:flex-start;gap:var(--s6)}
+.swipe-act{display:grid;justify-items:center;gap:6px;background:none;border:0;color:var(--text-muted);font:inherit;font-size:13px;line-height:18px;cursor:pointer;padding:0}
+.swipe-act .ring{display:grid;place-items:center;width:56px;height:56px;border-radius:999px;border:1px solid var(--border-strong);background:var(--surface);transition:transform var(--dur-fast) var(--ease-out),background var(--dur-fast)}
+.swipe-act:hover .ring{background:var(--surface-2)}.swipe-act:active .ring{transform:scale(.94)}
+.swipe-act:focus-visible{outline:none}.swipe-act:focus-visible .ring{box-shadow:var(--focus-ring)}
+.swipe-act.no .ring{color:var(--danger);border-color:var(--danger)}
+.swipe-act.ok .ring{width:64px;height:64px;background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.swipe-act.ok:hover .ring{background:var(--brand-strong)}
+.swipe-act.talk .ring{color:var(--warning);border-color:var(--warning)}
+.swipe-act kbd{font:12px/16px var(--font-ui);color:var(--text-faint);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:4px}
+.swipe-hide-keys .swipe-act kbd{display:none}
+.swipe-pins{display:inline-flex;align-items:center;gap:4px;color:var(--warning)}
+/* Pins on a preview (comment on a spot) */
+.swipe-pin{position:absolute;z-index:3;display:grid;place-items:center;width:24px;height:24px;margin:-24px 0 0 -12px;border-radius:999px 999px 999px 0;transform:rotate(-45deg);background:var(--warning);color:var(--bg);font-size:12px;font-weight:600;box-shadow:var(--lift-shadow)}
+.swipe-pin>span{transform:rotate(45deg)}
+/* In-deck overlays: comment sheet (bottom) and zoom viewer (full). They live inside the deck so a phone frame keeps them. */
+.swipe-scrim{position:absolute;inset:0;z-index:20;background:var(--scrim);display:flex;align-items:flex-end;justify-content:center;animation:swipe-fade var(--dur-base) var(--ease-out)}
+.swipe-sheet{width:100%;max-width:640px;background:var(--surface);border:1px solid var(--border-strong);border-bottom:0;border-radius:12px 12px 0 0;padding:var(--s4) var(--s4) max(var(--s4),env(safe-area-inset-bottom));display:grid;gap:var(--s3);box-shadow:var(--shadow);animation:swipe-up var(--dur-slow) var(--ease-out)}
+.swipe-desk .swipe-scrim{align-items:center}.swipe-desk .swipe-sheet{border-radius:12px;border-bottom:1px solid var(--border-strong)}
+.swipe-sheet h2{margin:0;font-size:20px;line-height:28px}
+.swipe-sheet .grab{justify-self:center;width:36px;height:4px;border-radius:2px;background:var(--border-strong)}
+.swipe-desk .swipe-sheet .grab{display:none}
+.swipe-sheet textarea{width:100%;min-height:88px;resize:vertical;font:inherit;font-size:14px;line-height:20px;color:var(--text);background:var(--bg);border:1px solid var(--input);border-radius:var(--radius);padding:10px 12px}
+.swipe-sheet textarea:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.swipe-voice{display:flex;align-items:center;gap:var(--s3)}
+.swipe-mic{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border-radius:999px;border:1px solid var(--warning);background:var(--warning-soft);color:var(--warning);font:inherit;font-weight:500;cursor:pointer;touch-action:none;user-select:none}
+.swipe-mic.rec{background:var(--warning);color:var(--bg)}
+.swipe-mic:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.swipe-wave{display:flex;align-items:center;gap:2px;height:24px}
+.swipe-wave i{display:block;width:3px;border-radius:2px;background:var(--warning);height:30%}
+.swipe-mic.rec+.swipe-wave i{animation:swipe-bar .7s ease-in-out infinite alternate}
+.swipe-clip{display:flex;align-items:center;gap:var(--s2);padding:8px 12px;border-radius:var(--radius);background:var(--surface-2);font-size:13px;line-height:18px}
+.swipe-clip q{color:var(--text-muted);quotes:none;flex:1;min-width:0}
+.swipe-sheet-foot{display:flex;justify-content:flex-end;gap:var(--s2)}
+.swipe-viewer{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;background:var(--bg);animation:swipe-fade var(--dur-base) var(--ease-out)}
+.swipe-viewer-bar{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);border-bottom:1px solid var(--border);min-height:52px}
+.swipe-viewer-bar strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.swipe-viewer-bar .btn[aria-pressed="true"]{background:var(--warning-soft);border-color:var(--warning);color:var(--warning)}
+.swipe-viewer-body{position:relative;flex:1;overflow:auto;touch-action:pan-x pan-y}
+.swipe-viewer-body.pinning{cursor:crosshair}
+.swipe-zoomed{position:relative;transform-origin:0 0;transition:transform var(--dur-base) var(--ease-move);margin:var(--s4)}
+.swipe-zoomed>img{display:block;width:100%;height:auto;background:var(--paper);border-radius:var(--radius)}
+.swipe-zoomed>iframe{display:block;width:100%;height:1100px;border:0;background:var(--paper);border-radius:var(--radius);pointer-events:none}
+.swipe-zoomed .doc{padding:var(--s5);background:var(--surface);border-radius:var(--radius);font-size:16px;line-height:24px}
+.swipe-zoomed .mini-table{font-size:14px;line-height:20px;width:100%}
+.swipe-viewer-foot{display:grid;gap:var(--s2);padding:var(--s3);border-top:1px solid var(--border);max-height:40%;overflow:auto}
+.swipe-viewer-foot .row{display:flex;align-items:center;gap:var(--s2);font-size:13px;line-height:18px;color:var(--text-muted)}
+.swipe-pin-note{display:flex;gap:var(--s2);align-items:flex-start;font-size:14px;line-height:20px}
+.swipe-pin-note b{display:grid;place-items:center;flex:none;width:20px;height:20px;border-radius:999px;background:var(--warning);color:var(--bg);font-size:12px}
+.swipe-pin-pop{position:absolute;z-index:4;width:260px;padding:var(--s3);background:var(--surface-2);border:1px solid var(--border-strong);border-radius:var(--radius-card);box-shadow:var(--shadow);display:grid;gap:var(--s2)}
+.swipe-pin-pop input{font:inherit;font-size:14px;color:var(--text);background:var(--bg);border:1px solid var(--input);border-radius:var(--radius);padding:8px 10px;min-height:36px}
+.swipe-done{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:var(--s3);text-align:center;padding:var(--s5)}
+.swipe-done h3{margin:0;font-size:20px;line-height:28px}.swipe-done p{margin:0;color:var(--text-muted)}
+.swipe-done .tally{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s2) var(--s4);font-size:14px}
+.swipe-done .st{width:40px;height:40px;color:var(--done)}
+.swipe-done .tally span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+@keyframes swipe-fade{from{opacity:0}}
+@keyframes swipe-up{from{transform:translateY(40px);opacity:0}}
+@keyframes swipe-bar{from{height:20%}to{height:100%}}
+@media (prefers-reduced-motion:reduce){.swipe-card,.swipe-card.leaving,.swipe-zoomed{transition:none}.swipe-scrim,.swipe-sheet,.swipe-viewer{animation:none}.swipe-mic.rec+.swipe-wave i{animation:none;height:70%}}
+/* Phone frame for mockup and draft pages (shows a phone screen at 390 x 844 inside a desktop page). */
+.device-row{display:flex;flex-wrap:wrap;gap:var(--s6);align-items:flex-start}
+.device-cap{display:grid;gap:var(--s2);width:390px;max-width:100%}
+.device-cap>p{margin:0;font-size:13px;line-height:18px;color:var(--text-muted)}.device-cap>h3{margin:0;font-size:16px;line-height:24px}
+.device-phone{position:relative;width:390px;max-width:100%;height:844px;border-radius:48px;border:10px solid var(--ink);background:var(--bg);overflow:hidden;box-shadow:0 0 0 1px var(--border-strong),var(--shadow);display:flex;flex-direction:column}
+.device-phone .notch{flex:none;height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;font-size:14px;font-weight:600}
+.device-phone .notch::after{content:"";position:absolute;left:50%;top:10px;width:120px;height:32px;margin-left:-60px;border-radius:20px;background:var(--ink)}
+.device-phone .app-bar{flex:none;display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s4);min-height:48px}
+.device-phone .app-bar h2{margin:0;flex:1;font-size:20px;line-height:28px}
+.device-phone .app-body{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;padding:0 var(--s4) var(--s5)}
+.device-phone .swipe{flex:1;--swipe-card-h:0px}
+.device-phone .swipe-actions{gap:var(--s5)}
+.device-phone .swipe-scrim,.device-phone .swipe-viewer{margin:0 calc(var(--s4)*-1) calc(var(--s5)*-1)}
+.phone-row{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;border-bottom:1px solid var(--border);color:inherit;text-decoration:none}
+.phone-row .av{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:13px;background:var(--surface-2);font-weight:600}
+.phone-row .tx{flex:1;min-width:0;display:grid}.phone-row .tx span{font-size:13px;line-height:18px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phone-review{display:flex;align-items:center;gap:var(--s3);padding:var(--s3);margin:var(--s2) 0;border-radius:14px;background:var(--warning-soft);border:1px solid var(--warning);color:var(--text);text-decoration:none}
+.phone-review .stack{position:relative;width:44px;height:44px;flex:none}
+.phone-review .stack i{position:absolute;inset:0;border-radius:8px;background:var(--surface-3);border:1px solid var(--border-strong)}
+.phone-review .stack i:nth-child(1){transform:rotate(-10deg)}.phone-review .stack i:nth-child(2){transform:rotate(6deg)}
+.phone-review .tx{flex:1;display:grid}.phone-review .tx span{font-size:13px;line-height:18px;color:var(--text-muted)}
+.phone-review .go{padding:6px 14px;border-radius:999px;background:var(--warning);color:var(--bg);font-weight:600;font-size:14px}
+/* Before / after inside the swipe card and its viewer */
+.swipe-compare{position:absolute;inset:0;display:flex;gap:2px;background:var(--border)}
+.swipe-compare .cmp-pane{position:relative;flex:1;min-width:0;overflow:hidden;background:var(--bg)}
+.swipe-compare[data-view=before] .cmp-pane.after,.swipe-compare[data-view=after] .cmp-pane.before{display:none}
+.cmp-pane>img{display:block;width:100%;height:100%;object-fit:contain;background:var(--paper);pointer-events:none}
+.cmp-pane>iframe{display:block;border:0;background:var(--paper);pointer-events:none;width:200%;height:200%;transform:scale(.5);transform-origin:0 0}
+.swipe-compare[data-view=both] .cmp-pane>iframe{width:400%;height:400%;transform:scale(.25)}
+.cmp-pane .doc{padding:var(--s4);font-size:14px;line-height:20px}.cmp-pane .doc h4{margin:0 0 8px;font-size:16px;line-height:24px}.cmp-pane .doc p{margin:0 0 8px;color:var(--text-muted)}
+.cmp-tag{position:absolute;left:8px;bottom:8px;z-index:2;padding:2px 10px;border-radius:999px;background:var(--surface-3);color:var(--text);font-size:12px;line-height:16px;font-weight:500;box-shadow:var(--lift-shadow)}
+.cmp-pane.after .cmp-tag{background:var(--brand);color:var(--on-brand)}
+.swipe-cmp-ctl{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:3;padding:2px;background:var(--sidebar);box-shadow:var(--lift-shadow);flex-wrap:nowrap}
+.swipe-cmp-ctl .btn{min-height:28px;padding:2px 10px;font-size:13px;white-space:nowrap}
+.cmp-note{position:absolute;right:8px;top:8px;z-index:2;max-width:40%;padding:2px 8px;border-radius:var(--radius);background:var(--warning-soft);color:var(--warning);font-size:12px;line-height:16px}
+.swipe-zoomed .swipe-compare{position:relative;inset:auto;height:1100px;border-radius:var(--radius);overflow:hidden}
+.swipe-zoomed .cmp-pane>iframe{width:100%;height:100%;transform:none}
+.swipe-zoomed .swipe-compare[data-view=both] .cmp-pane>iframe{width:200%;height:200%;transform:scale(.5)}
+.swipe-zoomed .cmp-pane>img{height:auto;object-fit:initial}
+.swipe-compare[data-view=slide]{display:block}
+.swipe-compare[data-view=slide] .cmp-pane{position:absolute;inset:0}
+.swipe-compare[data-view=slide] .cmp-pane.after{clip-path:inset(0 0 0 var(--cut,50%))}
+.swipe-compare[data-view=slide] .cmp-pane.after .cmp-tag{left:auto;right:8px}
+.cmp-line,.cmp-range{display:none}
+.swipe-compare[data-view=slide] .cmp-line{display:block;position:absolute;top:0;bottom:0;left:var(--cut,50%);width:2px;margin-left:-1px;background:var(--brand);z-index:2;pointer-events:none}
+.swipe-compare[data-view=slide] .cmp-line::after{content:"";position:absolute;top:50%;left:50%;width:32px;height:32px;margin:-16px 0 0 -16px;border-radius:999px;background:var(--brand);box-shadow:var(--lift-shadow)}
+.swipe-compare[data-view=slide] .cmp-range{display:block;position:absolute;inset:0;z-index:3;width:100%;height:100%;margin:0;opacity:0;cursor:ew-resize}
+.swipe-viewer-body.pinning .cmp-range{pointer-events:none}
+/* Options A / B / C inside the swipe card and its viewer */
+.swipe-opts{position:absolute;inset:0;display:grid;grid-template-columns:repeat(var(--n,3),minmax(0,1fr));gap:var(--s2);padding:var(--s2);overflow:auto;cursor:default}
+.swipe-opts.big{position:relative;inset:auto;gap:var(--s4);padding:0}
+.swipe-phone .swipe-opts:not(.big){grid-template-columns:1fr;grid-auto-rows:minmax(0,1fr)}
+.swipe-phone .swipe-opts.big{grid-template-columns:1fr}
+.swipe-opt{position:relative;display:flex;flex-direction:column;gap:6px;min-height:0;padding:var(--s2);text-align:left;font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius);cursor:pointer;transition:border-color var(--dur-fast),box-shadow var(--dur-fast)}
+.swipe-opt:hover{background:var(--surface-2)}
+.swipe-opt:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.swipe-opt[aria-pressed=true]{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
+.swipe-phone .swipe-opts:not(.big) .swipe-opt{flex-direction:row;align-items:stretch}
+.opt-h{display:flex;align-items:center;gap:6px;min-width:0;font-size:13px;line-height:18px;font-weight:600}
+.swipe-phone .swipe-opts:not(.big) .opt-h{flex-direction:column;align-items:flex-start;width:40%;flex:none}
+.opt-letter{display:grid;place-items:center;flex:none;width:22px;height:22px;border-radius:6px;background:var(--surface-3);font-size:12px}
+.swipe-opt[aria-pressed=true] .opt-letter{background:var(--brand);color:var(--on-brand)}
+.opt-title{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.opt-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
+.opt-thumb{position:relative;display:block;flex:1;min-height:80px;border-radius:6px;overflow:hidden;background:var(--bg);border:1px solid var(--border)}
+.swipe-opts.big .opt-thumb{flex:none;height:520px}
+.opt-thumb>img{display:block;width:100%;height:100%;object-fit:contain;background:var(--paper)}
+.opt-thumb>iframe{display:block;border:0;background:var(--paper);pointer-events:none;width:300%;height:300%;transform:scale(.3333);transform-origin:0 0}
+.swipe-opts.big .opt-thumb>iframe{width:200%;height:200%;transform:scale(.5)}
+.swipe-phone .swipe-opts.big .opt-thumb>iframe{width:300%;height:300%;transform:scale(.3333)}
+.opt-thumb .doc{padding:8px;font-size:12px;line-height:16px}.opt-thumb .doc h4{margin:0 0 4px;font-size:13px;line-height:18px}.opt-thumb .doc p{margin:0 0 4px;color:var(--text-muted)}
+.swipe-opts.big .opt-thumb .doc{padding:var(--s4);font-size:14px;line-height:20px}
+.opt-text{font-size:12px;line-height:16px;color:var(--text-muted)}
+.opt-picked{display:none;position:absolute;right:8px;top:8px;align-items:center;gap:4px;padding:0 8px;border-radius:999px;background:var(--brand);color:var(--on-brand);font-size:12px;line-height:20px;font-weight:600}
+.swipe-opt[aria-pressed=true] .opt-picked{display:inline-flex}
+.swipe-card.nudge{animation:swipe-nudge .36s var(--ease-move)}
+@keyframes swipe-nudge{20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(4px)}}
+@media (prefers-reduced-motion:reduce){.swipe-card.nudge{animation:none}}
+/* Overview of all cards in the deck: tiles, waiting first, tap to jump */
+.swipe-ov-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:var(--s3);padding:var(--s4)}
+.swipe-phone .swipe-ov-grid{grid-template-columns:1fr 1fr;gap:var(--s2);padding:var(--s3)}
+.swipe-ov{display:grid;gap:6px;align-content:start;padding:var(--s2);text-align:left;font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);cursor:pointer}
+.swipe-ov:hover{background:var(--surface-2)}.swipe-ov:focus-visible{outline:none;box-shadow:var(--focus-ring)}
+.swipe-ov.current{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
+.swipe-ov.answered .swipe-ov-thumb{opacity:.55}
+.swipe-ov-thumb{position:relative;display:block;height:110px;border-radius:6px;overflow:hidden;background:var(--bg);border:1px solid var(--border)}
+.swipe-ov-thumb>img{display:block;width:100%;height:100%;object-fit:cover;background:var(--paper)}
+.swipe-ov-thumb>iframe{display:block;border:0;background:var(--paper);pointer-events:none;width:400%;height:400%;transform:scale(.25);transform-origin:0 0}
+.swipe-ov-thumb .doc{padding:6px;font-size:11px;line-height:14px}.swipe-ov-thumb .doc h4{margin:0 0 2px;font-size:12px;line-height:16px}.swipe-ov-thumb .doc p{margin:0;color:var(--text-muted)}
+.swipe-ov-thumb .mini-table{font-size:10px;line-height:14px;margin:4px}
+.swipe-ov-title{font-size:13px;line-height:18px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.swipe-ov-state{justify-self:start;font-size:12px;line-height:16px;padding:0 8px;border-radius:999px;background:var(--surface-2);color:var(--text-muted)}
+.swipe-ov-state.ok{background:var(--brand-soft);color:var(--brand)}.swipe-ov-state.no{background:var(--danger-soft);color:var(--danger)}.swipe-ov-state.talk{background:var(--warning-soft);color:var(--warning)}
+.swipe-was{display:inline-flex;align-items:center;gap:4px;color:var(--brand)}
+.swipe-phone .swipe-opts:not(.big) .opt-text{display:none}
+/* Decision record (ticket Decisions tab): what was shown, what you said, your words. One card per answered review card. */
+.decision{display:grid;gap:var(--s3);padding:20px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface)}
+.decision-h{display:flex;align-items:flex-start;gap:var(--s3);flex-wrap:wrap}
+.decision-h h3{margin:0;font-size:16px;line-height:24px;flex:1;min-width:200px}
+.decision-verdict{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:13px;line-height:20px;font-weight:600;white-space:nowrap}
+.decision-verdict.ok{background:var(--brand-soft);color:var(--brand)}.decision-verdict.no{background:var(--danger-soft);color:var(--danger)}.decision-verdict.talk{background:var(--warning-soft);color:var(--warning)}
+.decision-by{font-size:13px;line-height:18px;color:var(--text-muted)}
+.decision-shown{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s2)}
+.decision-shot{position:relative;display:grid;gap:4px;font-size:12px;line-height:16px;color:var(--text-muted);background:none;border:0;padding:0;text-align:left;font-family:inherit;cursor:zoom-in}
+.decision-shot .opt-thumb{height:110px;flex:none}
+.decision-shot.taken .opt-thumb{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand)}
+.decision-shot.dim .opt-thumb{opacity:.45}
+.decision-shot b{color:var(--text)}
+.decision-words{display:grid;gap:var(--s2);padding:var(--s3);border-left:2px solid var(--warning);background:var(--surface-2);border-radius:0 var(--radius) var(--radius) 0}
+.decision-words p{margin:0;font-size:14px;line-height:20px}
+.decision-foot{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;font-size:13px;line-height:18px;color:var(--text-muted)}
+.decision.now{border-color:var(--brand);background:color-mix(in srgb,var(--brand-soft) 35%,var(--surface))}
+/* Review page layout: the deck takes the width, the card list sits right; below 1100 px the list hides (All opens it). */
+.review-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:var(--s5);align-items:start}
+.review-layout #deck,.review-layout .swipe{--swipe-card-h:600px;min-width:0}
+.review-side{padding:var(--s4);display:grid;gap:var(--s3);position:sticky;top:var(--s4)}
+/* the "All cards" list beside the deck (Review page of the dashboard) */
+.review-side h2{margin:0;font-size:16px;line-height:24px}.review-side p{margin:0}
+.review-queue{display:grid;gap:2px}
+.review-queue-row{display:flex;align-items:center;gap:var(--s2);width:100%;min-width:0;justify-content:flex-start;font-weight:400;color:var(--text)}
+.review-queue-row>.review-queue-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.review-queue-row.is-now{font-weight:600;background:var(--surface-2)}.review-queue-row.is-done{color:var(--text-faint)}
+@media (max-width:1100px){.review-layout{grid-template-columns:minmax(0,1fr)}.review-side{display:none}}
+/* Revision after the challenge (15 Nov): consequence line, urgency, Later, handle-only compare line, loading previews,
+   narrow decks use the phone layout for options. */
+.swipe{container-type:inline-size}
+.swipe-need{color:var(--warning);font-weight:500}
+.swipe-foot{flex-direction:column;align-items:stretch;gap:6px}
+.swipe-foot-row{display:flex;align-items:center;gap:var(--s2)}
+.swipe-then{font-size:13px;line-height:18px;color:var(--text)}.swipe-then b{font-weight:600}
+.swipe-was{display:flex;align-items:center;gap:6px;font-size:13px;line-height:18px;color:var(--brand)}
+.swipe-later-row{display:flex;justify-content:center;margin-top:calc(var(--s2)*-1)}
+.swipe-later kbd{font:12px/16px var(--font-ui);color:var(--text-faint);border:1px solid var(--border);border-radius:4px;padding:0 5px;margin-left:4px}
+.swipe-hide-keys .swipe-later kbd{display:none}
+.swipe-act.ok.wait .ring{background:var(--surface);color:var(--text-muted);border-color:var(--border-strong)}
+.swipe-stamp.up{left:50%;top:20px;transform:translateX(-50%);color:var(--text-muted)}
+.swipe-edge.up{box-shadow:inset 0 0 0 2px var(--border-strong)}
+.swipe-ov-state.later{background:var(--surface-3);color:var(--text)}
+.preview-wait{position:absolute;inset:0;display:grid;place-items:center;font-size:13px;color:var(--text-muted)}
+iframe.loading{opacity:0}
+.swipe-compare[data-view=slide] .cmp-line{pointer-events:none}
+.swipe-compare[data-view=slide] .cmp-line::after{display:none}
+.cmp-handle{position:absolute;top:50%;left:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:999px;background:var(--brand);box-shadow:var(--lift-shadow);pointer-events:auto;cursor:ew-resize;touch-action:none}
+.cmp-handle::before{content:"‹ ›";position:absolute;inset:0;display:grid;place-items:center;color:var(--on-brand);font-weight:700;letter-spacing:2px}
+.swipe-compare[data-view=slide] .cmp-range{display:block;position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none}
+.swipe-compare[data-view=slide] .cmp-range:focus-visible+*,.cmp-range:focus-visible{outline:none}
+.swipe-compare:has(.cmp-range:focus-visible) .cmp-handle{box-shadow:var(--focus-ring)}
+.swipe-clips{display:grid;gap:8px}
+.swipe-clip .btn{margin-left:auto}
+.swipe-sheet{transition:transform var(--dur-base) var(--ease-move)}
+.swipe-sheet .grab{cursor:grab;touch-action:none;height:6px;width:48px}
+.swipe-pin.tmp{opacity:.7}
+.swipe-pin-note .btn{margin-left:auto}
+@container (max-width:560px){
+ .swipe-opts:not(.big){grid-template-columns:1fr;grid-auto-rows:minmax(0,1fr)}
+ .swipe-opts:not(.big) .swipe-opt{flex-direction:row;align-items:stretch}
+ .swipe-opts:not(.big) .opt-h{flex-direction:column;align-items:flex-start;width:40%;flex:none}
+ .swipe-opts:not(.big) .opt-text{display:none}
+ .swipe-actions{gap:var(--s5)}
+ .swipe-act kbd{display:none}
+}
+/* Review page served by orch itself (no dashboard): one bar, the deck centred, Answered list. */
+.review-solo-bar{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap;padding:var(--s3) var(--s5);border-bottom:1px solid var(--border);background:var(--sidebar)}
+.review-solo-brand{display:flex;align-items:center;gap:var(--s2)}.review-solo-note{margin-left:auto}
+.review-solo{max-width:880px;margin:0 auto;padding:var(--s5) var(--s4);display:grid;gap:var(--s4)}
+.review-solo #deck{--swipe-card-h:600px}
+#answered{display:grid;gap:var(--s4)}#answered[hidden]{display:none}
+@media (max-width:600px){.review-solo-bar{padding:var(--s2) var(--s4)}.review-solo-note{display:none}.review-solo #deck{--swipe-card-h:520px}}
+.swipe-meta{flex-wrap:wrap;row-gap:2px}.swipe-meta>*{white-space:nowrap}
+.swipe-kind{white-space:nowrap;flex:none}
+.swipe-top{flex-wrap:wrap}.swipe-top>span:first-child{white-space:nowrap}
+.swipe-sheet-foot{flex-wrap:wrap}.swipe-sheet-foot .btn{white-space:nowrap}
+@container (max-width:560px){
+ .swipe-top .progress{order:5;flex-basis:100%}
+ .swipe-sheet-foot .btn:first-child{margin-right:auto}
+ .swipe-sheet-foot .btn:not(:first-child){flex:1}
+}
+@container (max-width:420px){.swipe-sheet-foot .btn{padding-left:10px;padding-right:10px}}
+.about-label{padding:0 8px 0 6px}
+.decision.replaced{opacity:.75}
+
+.review-main{min-width:0}
+.review-layout .review-side:has(.review-queue:empty){display:none}
+
 /* Report a problem (checks list in the dialog) */
 .report-checks{list-style:none;margin:0;padding:0}
 .report-check{display:flex;gap:8px;align-items:flex-start}

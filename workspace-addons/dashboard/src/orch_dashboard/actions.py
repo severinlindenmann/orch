@@ -77,6 +77,7 @@ RESERVED = frozenset(
         "log",
         "ask",
         "answer",
+        "review",
         "ref",
         "ext",
         "wait",
@@ -291,6 +292,57 @@ def _answer(a):
         ["--via", "dashboard", "--question-digest", _question_digest(a)],
         [_text(a.get("answer"), "answer")],
     )
+
+
+REVIEW_KEY = re.compile(r"review|q[0-9]{1,4}")
+REVIEW_VERDICTS = ("ok", "no", "talk")
+MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
+
+
+def _review_answer(a):
+    """`orch review answer <ticket> <key> --verdict v [--picked ID] [--note JSON] --digest D --via dashboard`.
+    The core re-checks the digest and the size of the note; this only keeps the argv plain."""
+    _only(a, ("ticket", "key", "verdict", "picked", "note", "digest"))
+    key = a.get("key")
+    if not (isinstance(key, str) and REVIEW_KEY.fullmatch(key)):
+        raise BadRequest("That is not a card.")
+    verdict = a.get("verdict")
+    if verdict not in REVIEW_VERDICTS:
+        raise BadRequest("The answer must be ok, no or talk.")
+    flags = ["--verdict", verdict]
+    picked = a.get("picked")
+    if picked is not None:
+        if not (isinstance(picked, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,20}", picked)):
+            raise BadRequest("That is not an option.")
+        flags += ["--picked", picked]
+    note = a.get("note")
+    if note is not None:
+        if not isinstance(note, dict):
+            raise BadRequest("The note must be an object.")
+        if (
+            "text" in note and "words" not in note
+        ):  # the page's {text, pins} is the core's {words: {text}, pins}
+            note = {**{k: v for k, v in note.items() if k != "text"}, "words": {"text": note["text"]}}
+        text = json.dumps(note, ensure_ascii=False, separators=(",", ":"))
+        if len(text.encode("utf-8")) > MAX_REVIEW_NOTE:
+            raise BadRequest("A note is at most 8 KB.")
+        if "\x00" in text:
+            raise BadRequest("The note has a character that is not allowed.")
+        flags += ["--note", text]
+    flags += ["--digest", _question_digest(a), "--via", "dashboard"]
+    return ["review", "answer", _tid(a.get("ticket")), key], flags, []
+
+
+def review_error(out, stderr: str, status: int) -> str:
+    """The JSON the Review page reads for a refused card: {"ok": false, "error": {"code", "message"}}. The core's
+    codes (changed, too_large, not_found, needs_person, refused) pass through; anything else is "refused"."""
+    code = out.get("code") if isinstance(out, dict) else None
+    msg = out.get("error") if isinstance(out, dict) else None
+    if not isinstance(msg, str) or not msg:
+        msg = (stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
+    if code not in ("changed", "too_large", "not_found", "needs_person", "refused", "busy"):
+        code = "refused"
+    return json.dumps({"ok": False, "error": {"code": code, "message": msg[:500]}}, ensure_ascii=False)
 
 
 def _ticket_new(a):
@@ -917,6 +969,7 @@ OPS = {
     "link.extend": lambda a: _link(a, True),
     "link.stop": _link,
     "answer": _answer,
+    "review.answer": _review_answer,
     "ticket.new": _ticket_new,
     "ticket.paste": _ticket_paste,
     "ticket.attach": _ticket_attach,
@@ -986,6 +1039,8 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
     words, flags, tail = fn(args)
     if op == "config.agent.test":
         return [*words, "--json"]
+    if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
+        return [*words, *flags, "--json"]
     return [*words, *flags, "--by", actor(root), "--json", *(["--", *tail] if tail else [])]
 
 
@@ -1319,6 +1374,8 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
         if files and isinstance(out, dict) and isinstance(out.get("id"), str) and TID.fullmatch(out["id"]):
             out["attached"] = _attach_all(root, orch_bin, out["id"], files)
         return 200, "", out if isinstance(out, dict) else None
+    if op == "review.answer":  # JSON the page reads: the code decides what it says (changed = look again)
+        return 422, review_error(out, r.stderr, r.returncode), None
     msg = out.get("error") if isinstance(out, dict) else None
     if not msg:
         msg = (r.stderr.strip().splitlines() or ["That did not work."])[0].removeprefix("Refused: ")
