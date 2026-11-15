@@ -729,6 +729,14 @@ def _run_send(a):
     return ["run", "send"], [], [_tid(a.get("ticket")), _text(a.get("text"), "message")]
 
 
+def _run_take_back(a):
+    _only(a, ("ticket", "id"))
+    pid = a.get("id")
+    if not isinstance(pid, str) or not re.fullmatch(r"p_[a-z0-9]{6,32}", pid):
+        raise BadRequest("That is not a message id.")
+    return ["run", "take-back", _tid(a.get("ticket")), pid], [], []
+
+
 def _run_stop(a):
     _only(a, ("ticket",))
     return ["run", "stop", _tid(a.get("ticket"))], [], []
@@ -997,6 +1005,7 @@ OPS = {
     "run.start": _run_start,
     "run.stop": _run_stop,
     "run.send": _run_send,
+    "run.take_back": _run_take_back,
     "addon.start": _addon_start,
     "addon.act": _addon_act,
     "config.agent": _config_agent,
