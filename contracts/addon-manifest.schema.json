@@ -34,7 +34,8 @@
         "order": { "type": "integer", "minimum": 0, "maximum": 99, "default": 50, "description": "Position in the nav after the built-in tabs." },
         "title": { "$ref": "#/$defs/text", "maxLength": 40, "description": "Optional page heading when it differs from the nav label (nav 'Phone & workspaces', heading 'Messages')." },
         "subtitle": { "$ref": "#/$defs/text", "maxLength": 120, "description": "Optional one plain sentence under the page heading." },
-        "panel": { "enum": ["repeats", "links", "phone"], "description": "Optional extra card the dashboard draws on this tab (a fixed set; the page code never matches add-on names)." }
+        "panel": { "enum": ["repeats", "links", "phone"], "description": "Optional extra card the dashboard draws on this tab (a fixed set; the page code never matches add-on names)." },
+        "place": { "enum": ["nav", "settings"], "default": "nav", "description": "nav = an entry in the dashboard nav (default); settings = no nav entry, the page opens from the add-on's row in Settings > Add-ons." }
       },
       "description": "The add-on has a dashboard tab, filled by `orch <name> view --json` (addon-view.schema.json)."
     },
