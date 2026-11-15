@@ -9,6 +9,14 @@ from test_addons_upgrade import _write_registry, github  # noqa: F401
 
 from orch import addons, services
 
+
+def _strip(out):
+    """Every command ends with a Next: line (R2.7); these tests are about what update says before it."""
+    lines = out.splitlines(keepends=True)
+    assert lines[-1].startswith("Next: "), out
+    return "".join(lines[:-1])
+
+
 A40, B40 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 
@@ -43,6 +51,7 @@ def source(proj, github, uv_calls, monkeypatch):  # noqa: F811
 
 def test_versions_and_sha(proj, run, source):  # noqa: F811
     code, out, err = run("update")
+    out = _strip(out)
     assert code == 0, err
     assert out.splitlines() == [
         "Updating orch 0.9.3 → 0.9.4 (main aaaaaaaa → bbbbbbbb)",
@@ -55,6 +64,7 @@ def test_versions_and_sha(proj, run, source):  # noqa: F811
 def test_release_title(proj, run, source):  # noqa: F811
     source["title"] = "Fixes the sign button"
     code, out, err = run("update")
+    out = _strip(out)
     assert code == 0, err
     assert out.splitlines()[-1] == "Fixes the sign button"
     assert out.count("Fixes the sign button") == 1
@@ -64,6 +74,7 @@ def test_unchanged_with_nothing_running_prints_only_up_to_date(proj, run, source
     source["next"] = {}
     monkeypatch.setattr(services, "running", lambda: [])
     code, out, err = run("update")
+    out = _strip(out)
     assert code == 0, err
     assert out == "orch is up to date.\n"
 
@@ -76,6 +87,7 @@ def test_unchanged_versions_still_restart_what_runs(proj, run, source, monkeypat
         addons, "_restart_updated", lambda root=None: called.append(1) or ["Restarted: dashboard (x)"]
     )
     code, out, err = run("update")
+    out = _strip(out)
     assert code == 0, err
     assert out == "orch is up to date.\nRestarted: dashboard (x)\n" and called == [1]
 
@@ -216,6 +228,7 @@ def test_json(proj, run, source, args):  # noqa: F811
 def test_sha_only(proj, run, source):  # noqa: F811
     source["next"] = {"sha": B40}
     code, out, err = run("update")
+    out = _strip(out)
     assert code == 0, err
     assert out == "Updating orch 0.9.3 (main aaaaaaaa → bbbbbbbb)\n"
 
@@ -251,6 +264,7 @@ def test_missing_sha(proj, run, source, old_sha, new_sha, suffix):  # noqa: F811
     source["next"]["sha"] = new_sha
     (addons.home() / "installed.json").write_text(json.dumps({"sha": old_sha}))
     code, out, err = run("update")
+    out = _strip(out)
     assert code == 0, err
     assert out.splitlines()[0] == "Updating orch 0.9.3 → 0.9.4" + suffix
 
@@ -336,6 +350,7 @@ def test_sha_only_change_shows_and_restarts(proj, run, source, monkeypatch):  # 
     source["next"] = {"sha": B40}  # same versions, sha moved
     monkeypatch.setattr(addons, "_restart_updated", lambda root=None: [])
     code, out, err = run("update")
+    out = _strip(out)
     assert code == 0, err
     assert out.startswith("Updating orch 0.9.3 (main")
 

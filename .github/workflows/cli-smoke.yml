@@ -1,0 +1,60 @@
+name: cli-smoke
+# R1.6 / R3.4: the CLI on Windows and macOS, from the repo through the real installer, in a folder with a space and an
+# umlaut: init, ticket, check record, ask, one add-on added and removed, uninstall. Under ~5 min per OS.
+on:
+  workflow_call:
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # orch's per-machine folder is a temp one under the home, never the real ~/.orch-tool (ORCH_HOME_STRICT turns any
+      # fallback into an error). The guard step at the end fails if the real folder changed.
+      - name: Isolate orch's home, snapshot the real one
+        shell: pwsh
+        run: |
+          $h = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+          $oh = Join-Path $h ".orch-test/smoke-home"
+          New-Item -ItemType Directory -Force $oh | Out-Null
+          "ORCH_HOME=$oh" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "ORCH_HOME_STRICT=1" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          $real = Join-Path $h ".orch-tool"
+          $snap = if (Test-Path $real) { Get-ChildItem -Recurse -Force $real | ForEach-Object { "$($_.FullName) $($_.Length) $($_.LastWriteTimeUtc.Ticks)" } | Sort-Object } else { @() }
+          "" | Set-Content "$env:RUNNER_TEMP/orch-tool.before"; $snap | Add-Content "$env:RUNNER_TEMP/orch-tool.before"
+      # ORCH_REPO = this checkout (a local source is honoured on a test install); the installer is the one users run.
+      - name: Install with install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ORCH_REPO: ${{ github.workspace }}
+          ORCH_INSTALL_KIND: test
+        run: .\install.ps1
+      - name: Install with install.sh
+        if: runner.os != 'Windows'
+        env:
+          ORCH_REPO: ${{ github.workspace }}
+          ORCH_INSTALL_KIND: test
+        run: sh install.sh
+      - name: Smoke
+        shell: bash
+        env:
+          ORCH_REPO: ${{ github.workspace }}
+          ORCH_INSTALL_KIND: test
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          bash e2e/ci/cli-smoke.sh focus
+      - name: Guard - the real ~/.orch-tool must be unchanged
+        if: always()
+        shell: pwsh
+        run: |
+          $h = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+          $real = Join-Path $h ".orch-tool"
+          $now = if (Test-Path $real) { Get-ChildItem -Recurse -Force $real | ForEach-Object { "$($_.FullName) $($_.Length) $($_.LastWriteTimeUtc.Ticks)" } | Sort-Object } else { @() }
+          $diff = Compare-Object @(Get-Content "$env:RUNNER_TEMP/orch-tool.before" | Where-Object { $_ }) @($now)
+          if ($diff) { $diff | Out-String | Write-Host; throw "the smoke changed the real $real" }
+          Write-Host "real $real unchanged"

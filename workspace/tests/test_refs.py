@@ -284,7 +284,7 @@ def test_inactive_add_on_link_shows_as_plain_link(proj, run, tid):  # noqa: F811
 def test_ticket_set_fields(proj, run, hello, tid):  # noqa: F811
     install(run, hello)
     code, out, _ = run("ticket", "set", tid, "hello.budget", "2400")
-    assert code == 0 and out.strip().endswith("Campaign · Budget: 2400")
+    assert code == 0 and "Campaign · Budget: 2400" in out.splitlines()[-2]
     run("ticket", "set", tid, "hello.channel", "YouTube")
     run("ticket", "set", tid, "hello.launch_date", "2026-12-01")
     assert tickets.load(proj, tid)["ext"]["hello"] == {
