@@ -5,3 +5,5 @@ scripts/banned_words_allowlist.txt
 brand/tests/test_banned_words.py     # planted samples
 .github/workflows/rules.yml         # names the check
 .github/workflows/ci.yml             # the existing "gate" job
+workspace-addons/sync/tests/test_pause.py  # imports the sync approval module until P3 (#799) replaces it
+workspace/tests/conftest.py  # test helper ensure_signing stays until P4 (#799) removes the Done signing

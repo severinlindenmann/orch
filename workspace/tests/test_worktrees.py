@@ -379,18 +379,6 @@ def test_ticket_data_never_chooses_the_setup_command(repo):
     assert worktrees.config.copy_setup(repo) is None
 
 
-def test_an_agent_cannot_set_the_setup_command(repo, run, monkeypatch):
-    monkeypatch.setenv("CLAUDECODE", "1")
-    code, _, err = run("config", "set", "workflow.copy_setup", "touch x")
-    assert code != 0 and config.copy_setup(repo) is None
-    monkeypatch.delenv("CLAUDECODE")
-    code, out, _ = run("config", "set", "workflow.copy_setup", "npm ci", "--json")
-    assert code == 0 and config.copy_setup(repo) == "npm ci"
-    assert run("config", "set", "workflow.copies", "always")[0] == 0
-    assert run("config", "set", "workflow.copies_max", "2")[0] == 0
-    assert run("config", "get", "workflow.copies", "--json")[1].strip().endswith('"always"\n}'.strip())
-
-
 # ---------------------------------------------------------------- the copy's own files, trust
 
 

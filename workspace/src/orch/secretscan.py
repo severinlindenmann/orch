@@ -8,6 +8,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from orch.errors import Refused
+
 MAX_BYTES = 1_000_000
 
 _RX = [
@@ -111,3 +113,99 @@ def refusal(found: list[dict]) -> str:
         f"The text has {WORDS.get(first['kind'], 'a secret')} on line {first['line']}{more}. "
         "Remove it and try again."
     )
+
+
+# Protocol fields that are ids, hashes or tokens the wire needs: not content. Top-level only, so a nested
+# field called "token" or "key" is still scanned. _ID_FIELDS are ids/hashes, skipped at any depth.
+_TOP_SKIP = {"allow_token", "token", "key", "question_id", "mid", "sig", "mac", "digest"}
+_ID_FIELDS = {"blob_id", "sha256", "id"}
+
+
+def _leaves(doc, path: str = ""):
+    """(field, text) for every string in a message body, nested ones too; protocol fields skipped."""
+    if isinstance(doc, str):
+        if doc:
+            yield path or "text", doc
+    elif isinstance(doc, dict):
+        for k, v in doc.items():
+            if k in _ID_FIELDS or (not path and k in _TOP_SKIP):
+                continue
+            yield from _leaves(v, f"{path}.{k}" if path else str(k))
+    elif isinstance(doc, (list, tuple)):
+        for v in doc:
+            yield from _leaves(v, path)
+
+
+def _stored_root(root: Path | None) -> Path | None:
+    """`root` when this workspace's stored keys can be listed, else None (the token patterns and key=value
+    checks still run)."""
+    if root is None:
+        return None
+    from orch import phone_results
+
+    return root if phone_results.value_hider(root) is not None else None
+
+
+def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
+    """R5.2: nothing leaves this machine (relay, publish) with a secret in it. The one scanner, run on every
+    string of the body. A hit raises Refused with one sentence naming the kind and the field, never the value.
+    Fails closed when the scan itself breaks."""
+    leaves = list(_leaves(body))
+    if not leaves:
+        return
+    starts: list[tuple[int, str]] = []  # (first line in the joined text, field)
+    lines = 1
+    parts = []
+    for field, text in leaves:
+        starts.append((lines, field))
+        parts.append(text)
+        lines += text.count("\n") + 1
+    try:
+        found = find("\n".join(parts), _stored_root(root))
+    except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
+        raise Refused(
+            f"orch could not check the {what} for secrets, so nothing was sent. Try again."
+        ) from None
+    if not found:
+        return
+    first = found[0]
+    field = next(f for ln, f in reversed(starts) if ln <= first["line"])
+    more = f" (and {len(found) - 1} more)" if len(found) > 1 else ""
+    kind = WORDS.get(first["kind"], "a secret")
+    raise Refused(
+        f"The {what} has {kind} in its {field.split('.')[-1]}{more}, so nothing was sent. "
+        "Remove it and send again."
+    )
+
+
+def refuse_if_secret(data: bytes, what: str = "file", root: Path | None = None) -> None:
+    """The same scanner over a file about to be uploaded (text: all checks; binary: the token patterns). The
+    whole file is read, in windows of MAX_BYTES that overlap, so size is no way past it."""
+    step, overlap = MAX_BYTES, 4096
+    try:
+        found: list[dict] = []
+        sroot = _stored_root(root)
+        for start in range(0, max(len(data), 1), step - overlap):
+            chunk = data[start : start + step]
+            if chunk[:2] in (b"\xff\xfe", b"\xfe\xff"):
+                text = chunk.decode("utf-16", "replace")
+            elif b"\0" in chunk[:8192]:
+                text = chunk.decode("latin-1")
+                found = [{"kind": k, "line": 1} for k, rx in PATTERNS if rx.search(text)]
+                if found:
+                    break
+                continue
+            else:
+                text = chunk.decode("utf-8", "replace")
+            found = find(text, sroot)
+            if found or start + step >= len(data):
+                break
+    except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
+        raise Refused(
+            f"orch could not check the {what} for secrets, so nothing was sent. Try again."
+        ) from None
+    if found:
+        raise Refused(
+            f"The {what} has {WORDS.get(found[0]['kind'], 'a secret')}, so nothing was sent. "
+            "Remove it and send again."
+        )
