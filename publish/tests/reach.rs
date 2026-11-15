@@ -65,7 +65,9 @@ async fn four_modes_on_the_right_listener() {
             let go = any_get(right, &format!("{uri}?token={tok}")).await;
             assert_eq!(go.status, 302, "{name}");
         } else {
-            assert_eq!(on.status, 200, "{name}: {}", on.text());
+            // open apps on the private network first move to their secret address
+            let want = if private { 302 } else { 200 };
+            assert_eq!(on.status, want, "{name}: {}", on.text());
             assert!(j["view_token"].is_null());
         }
         // on the other listener the app is missing, exactly like an app that never existed
@@ -257,7 +259,7 @@ async fn list_fields_and_reach_change_on_redeploy() {
             .status,
         404
     );
-    assert_eq!(pget(&t.private, "/a/moves/").await.status, 200);
+    assert_eq!(pget(&t.private, "/a/moves/").await.status, 302);
     let l = t.api(&ws, "GET", "/v1/apps", vec![]).await.json();
     assert_eq!(l["items"][0]["reach"], "private");
     assert_eq!(l["items"][0]["url"], "http://publish.internal/a/moves");
@@ -304,8 +306,8 @@ async fn private_listener_refuses_a_foreign_host() {
         )
         .await,
     );
-    assert_eq!(with_host(r, "publish.internal").await.status, 200);
-    assert_eq!(with_host(r, "Publish.Internal:80").await.status, 200);
+    assert_eq!(with_host(r, "publish.internal").await.status, 302);
+    assert_eq!(with_host(r, "Publish.Internal:80").await.status, 302);
     assert_eq!(with_host(r, "publish.internal:81").await.status, 404);
     assert_eq!(
         call(&t.private, "GET", "/a/priv/", &[], vec![])
@@ -394,5 +396,65 @@ async fn moving_between_reaches_issues_a_new_link() {
         .await
         .status,
         302
+    );
+}
+
+#[tokio::test]
+async fn private_open_app_has_no_cors_but_a_cap_address() {
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    put(&t, &ws, "po", "reach = \"private\"\nauth = false").await;
+    put(&t, &ws, "pu", "reach = \"public\"\nauth = false").await;
+    let hd = [("host", "publish.internal"), ("origin", "null")];
+    // cross-origin fetch of the plain address: redirect, no ACAO
+    let r = call(&t.private, "GET", "/a/po/", &hd, vec![]).await;
+    assert_eq!(r.status, 302);
+    assert!(r.headers.get("access-control-allow-origin").is_none());
+    let loc = r.headers["location"].to_str().unwrap().to_string();
+    assert!(loc.starts_with("/a/po/~"), "{loc}");
+    let pre = call(
+        &t.private,
+        "OPTIONS",
+        "/a/po/x",
+        &[
+            ("host", "publish.internal"),
+            ("origin", "null"),
+            ("access-control-request-method", "GET"),
+        ],
+        vec![],
+    )
+    .await;
+    assert!(pre.headers.get("access-control-allow-origin").is_none());
+    // navigation works, and the app's own fetch under ~cap gets CORS
+    let nav = pget(&t.private, "/a/po/").await;
+    assert_eq!(nav.status, 302);
+    let page = pget(&t.private, &loc).await;
+    assert_eq!(page.status, 200);
+    let own = call(&t.private, "GET", &loc, &hd, vec![]).await;
+    assert_eq!(own.status, 200);
+    assert_eq!(own.headers["access-control-allow-origin"], "null");
+    // public open apps are unchanged
+    let p = call(&t.public, "GET", "/a/pu/", &[("origin", "null")], vec![]).await;
+    assert_eq!(p.status, 200);
+    assert_eq!(p.headers["access-control-allow-origin"], "null");
+}
+
+#[tokio::test]
+async fn moved_app_answers_missing_even_when_stopped() {
+    use orch_publish::db;
+    let t = setup_private();
+    let ws = t.workspace("A", all_rights()).await;
+    put(&t, &ws, "mm", "").await;
+    let old = db::get_app(&t.st.db.lock().unwrap(), "mm")
+        .unwrap()
+        .unwrap();
+    let mut new = old.clone();
+    new.reach = "private".into();
+    new.status = "stopped".into();
+    assert_eq!(
+        orch_publish::apps::access_changed(&old, &new)
+            .unwrap()
+            .status(),
+        404
     );
 }
