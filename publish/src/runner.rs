@@ -359,8 +359,12 @@ fn stack_image(stack: &str) -> &'static str {
 }
 
 /// App name of a runner key / unit name label.
-fn app_of(key: &str) -> &str {
-    key.strip_suffix("~new").unwrap_or(key)
+/// The app name of a runner key: a version being deployed (`~new`) or woken (`~wake`) is the same app,
+/// with the same label, network and unit prefix.
+pub(crate) fn app_of(key: &str) -> &str {
+    key.strip_suffix("~new")
+        .or_else(|| key.strip_suffix("~wake"))
+        .unwrap_or(key)
 }
 
 struct RunOpts<'a> {
@@ -804,9 +808,9 @@ pub async fn remove_images(app: &str, vdir: Option<&str>) {
     }
 }
 
-/// Hex of the app name (the `~new` suffix of a version being deployed is dropped): injective.
+/// Hex of the app name (the `~new` / `~wake` suffix is dropped, see `app_of`): injective.
 fn unit_prefix(key: &str) -> String {
-    let name = key.strip_suffix("~new").unwrap_or(key);
+    let name = app_of(key);
     let hex: String = name.bytes().map(|b| format!("{b:02x}")).collect();
     format!("orch-app-{hex}-")
 }
@@ -1380,6 +1384,8 @@ mod tests {
         let live: HashSet<String> = ["a-1".to_string()].into();
         assert_eq!(leftover_containers("a-1\na-2\n\n", &live), vec!["a-2"]);
         assert_eq!(app_of("demo~new"), "demo");
+        assert_eq!(app_of("demo~wake"), "demo");
+        assert_eq!(unit_prefix("demo~wake"), unit_prefix("demo"));
     }
 
     #[test]
@@ -1398,6 +1404,7 @@ mod tests {
     fn per_app_networks_and_store_none_is_read_only() {
         assert_ne!(network_name("a-b"), network_name("a-c"));
         assert_eq!(network_name("demo"), network_name("demo~new"));
+        assert_eq!(network_name("demo"), network_name("demo~wake"));
         let d = PathBuf::from("/srv/code");
         let mut o = opts("python", None, &d);
         o.store = "none";
