@@ -190,7 +190,7 @@
           "type": "object", "required": ["settings_file", "output"], "additionalProperties": false,
           "properties": {
             "settings_file": { "$ref": "#/$defs/path", "description": "The tool's local (uncommitted) settings file below the project, where `orch init` merges reminder_hooks." },
-            "settings_dir_env": { "type": "string", "description": "Name of the tool's own environment variable that moves its settings folder (e.g. CLAUDE_CONFIG_DIR); when the run sets it, that folder's settings.json is read for disableAllHooks instead of the person's home folder." },
+            "settings_dir_env": { "type": "string", "description": "Name of the tool's own environment variable that moves its settings folder; when the run sets it, that folder's settings.json is read for disableAllHooks instead of the person's home folder." },
             "skip": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$" }, "description": "Names (folders; a name ending .md is a file) the tool's own setup puts in the project: left out of the work-check scan." },
             "input": {
               "type": "object", "additionalProperties": false,
