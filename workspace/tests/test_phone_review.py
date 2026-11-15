@@ -9,7 +9,7 @@ import pytest
 from fakes import WS
 from test_relay_client import msg
 
-from orch import phone_view, runs, tickets
+from orch import phone_view, review, runs, tickets
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 PHONE = "ph_iphone0001"
@@ -58,6 +58,9 @@ def test_review_question_matches_the_contract(proj, run, new_ticket, conn):
     assert phone_view.sync_reviews(proj) == [tid]
     (q,) = review_questions(conn)
     assert q["to"] == "phones" and q["ticket"] == tid
+    digest = q["body"].pop("digest")  # new: what the phone echoes in a verdict
+    card = q["body"].pop("card")  # new: the Check card (kind check)
+    assert digest == review.check_digest(tickets.load(proj, tid)) and card["kind"] == "check"
     assert q["body"] == {
         "question_id": "review-1",
         "title": "Make the html",
@@ -66,6 +69,7 @@ def test_review_question_matches_the_contract(proj, run, new_ticket, conn):
         "recommended": None,
         "review": True,
     }
+    q["body"].update(digest=digest, card=card)
     schema = json.loads((CONTRACTS / "message.schema.json").read_text())
     jsonschema.Draft202012Validator(schema).validate({**q, "schema": "orch.msg/1"})
     assert phone_view.sync_reviews(proj) == [] and len(review_questions(conn)) == 1  # once per review
@@ -338,3 +342,65 @@ def test_a_signed_done_sends_no_review_question(proj, run, new_ticket, conn):
     sign_done(proj, tid)
     assert tickets.load(proj, tid)["status"] == "done"
     assert phone_view.sync_reviews(proj) == [] and not review_questions(conn)
+
+
+def test_verdict_cases(proj, run, new_ticket, conn):
+    """Every verdict case of contracts/vectors/review-question-v1.json (a swipe on the Check card)."""
+    vec = json.loads((CONTRACTS / "vectors" / "review-question-v1.json").read_text())
+    asked_round = int(vec["question"]["body"]["question_id"].split("-")[1])
+    for i, case in enumerate(vec["verdict_cases"]):
+        tid = new_ticket(case["name"])
+        qs = {}
+        for r in range(1, case["state"]["round"] + 1):
+            to_review(proj, tid)
+            phone_view.sync_reviews(proj)
+            qs[r] = review_questions(conn)[-1]
+            if r < case["state"]["round"]:
+                tickets.set_status(proj, tid, "ready", "human:dash")
+                phone_view.sync_reviews(proj)
+        q = qs[asked_round]
+        if case["state"].get("checklist_changed"):
+            _bump_checklist(proj, tid)
+        if case["state"]["status"] != "review":
+            tickets.set_status(proj, tid, case["state"]["status"], "human:dash")
+        before = len([m for m in conn.sent if "review_result" in m["body"]])
+        body = {
+            "question_id": q["body"]["question_id"],
+            "answer": case["answer"],
+            "answered_by": "human:iPhone",
+        }
+        verdict = json.loads(json.dumps(case["verdict"]))
+        verdict["digest"] = q["body"]["digest"]  # the vector's digest is of ITS ticket; ours is this one
+        body["verdict"] = verdict
+        if case.get("group"):
+            body["group"] = {"id": "grp_x", "host": "ws_reports001"}
+        conn.inbox.append(
+            msg(f"m_vq{i:014d}", "answer", body, frm=case["from"], ticket=tid, reply_to=q["id"])
+        )
+        run("relay", "inbox")
+        t = status(run, tid)
+        want = {"accept": "done", "changes": "ready"}.get(case["do"])
+        label = case["name"]
+        if want:
+            assert t["status"] == want, label
+            if case["do"] == "changes":
+                assert t["checklist"][-1]["text"] == case["note"], label
+            assert t["history"][-1]["by"] == case["by"] or any(h["by"] == case["by"] for h in t["history"]), (
+                label
+            )
+        else:
+            assert t["status"] == case["state"]["status"], label
+        got = [m for m in conn.sent if "review_result" in m["body"]][before:]
+        if case["result"] is None:
+            assert got == [], label
+        else:
+            (r,) = got
+            assert r["body"]["review_result"] == case["result"], label
+            assert r["to"] == PHONE and r["reply_to"] == q["id"], label
+
+
+def _bump_checklist(proj, tid):
+    def op(t):
+        t["checklist"].append({"id": "c_new", "text": "Added after it was shown", "done": False})
+
+    tickets.apply_op(proj, tid, op, by="human:dash")

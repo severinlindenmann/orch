@@ -35,6 +35,20 @@ MAX_NOTE_BYTES = 8 * 1024
 REVIEWED = "reviewed"
 _SHA12 = re.compile(r"[0-9a-f]{12}")
 _LINK = re.compile(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|//)")  # any scheme (https:, data:, javascript:) or //host
+# control characters but newline and tab, DEL, bidi embedding/override/isolate (message.schema.json card_text)
+_BAD = re.compile("[\x00-\x08\x0b-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
+# a plain http(s) host (no userinfo, no backslash, no %-encoding in the authority): $defs/review_card open
+_OPEN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\s\\]*)?")
+MIMES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".gif": "image/gif", ".svg": "image/svg+xml", ".html": "text/html", ".htm": "text/html",
+    ".md": "text/markdown", ".txt": "text/plain", ".csv": "text/csv",
+}  # fmt: skip
+MAX_PHONE_CARD = 20 * 1024 * 1024  # reviewed files one card may put on the phones
+
+
+class BadVerdict(Refused):
+    """A verdict or note that does not fit the card (relay-api.md review_result reason `invalid`)."""
 
 
 # ---------------------------------------------------------------- card checks
@@ -49,7 +63,7 @@ def _text(v, name: str, limit: int, *, required: bool = False) -> str | None:
         raise Refused(f"Card {name} must be text.")
     if len(v) > limit:
         raise Refused(f"Card {name} is at most {limit} characters.")
-    if any(ord(c) < 32 and c not in "\n\t" for c in v):
+    if _BAD.search(v):
         raise Refused(f"Card {name} has control characters.")
     return v.strip()
 
@@ -64,6 +78,30 @@ def _file_name(v, where: str) -> str:
     return v
 
 
+_PV_KEYS = {
+    "page": {"type", "src"},
+    "img": {"type", "src", "alt"},
+    "doc": {"type", "heading", "paras", "steps"},
+    "table": {"type", "cols", "rows"},
+    "compare": {"type", "note", "before", "after"},
+    "options": {"type", "options"},
+}
+_OPT_KEYS = {"id", "title", "text", "preview"}
+
+
+def _only(d: dict, allowed: set, where: str) -> None:
+    """No key outside `allowed`: the wire card (message.schema.json $defs/review_card) has none either."""
+    extra = [k for k in d if k not in allowed]
+    if extra:
+        raise Refused(f"{where}: '{str(extra[0])[:40]}' is not part of a card.")
+
+
+def _drop_empty(d: dict, keys: tuple) -> None:
+    for k in keys:  # an optional text given as null or "" is the same as not given
+        if k in d and (d[k] is None or d[k] == ""):
+            del d[k]
+
+
 def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) -> dict:
     """Check one preview; every file reference found is appended to refs as (dict, key)."""
     if depth > 2 or not isinstance(pv, dict):
@@ -71,6 +109,8 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
     t = pv.get("type")
     if t not in PREVIEW_TYPES:
         raise Refused(f"{where}: preview type must be one of {', '.join(PREVIEW_TYPES)}.")
+    _only(pv, _PV_KEYS[t], where)
+    _drop_empty(pv, ("alt", "heading", "note"))
     if t in ("page", "img"):
         _file_name(pv.get("src"), f"{where}.src")
         refs.append((pv, "src"))
@@ -100,8 +140,8 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
             if not isinstance(r, list) or len(r) != len(cols):
                 raise Refused(f"{where}: every table row has one cell per column.")
             for c in r:
-                if not isinstance(c, str) or len(c) > 500:
-                    raise Refused(f"{where}: a table cell is text of at most 500 characters.")
+                if not isinstance(c, str) or len(c) > 500 or _BAD.search(c):
+                    raise Refused(f"{where}: a table cell is plain text of at most 500 characters.")
     elif t == "compare":
         if depth > 0:
             raise Refused(f"{where}: compare cannot be nested.")
@@ -122,6 +162,8 @@ def _walk_preview(pv, where: str, refs: list[tuple[dict, str]], depth: int = 0) 
                 or not re.fullmatch(r"[A-Za-z0-9]{1,8}", o["id"])
             ):
                 raise Refused(f"{where}.options[{i}] needs a short id (letters/digits).")
+            _only(o, _OPT_KEYS, f"{where}.options[{i}]")
+            _drop_empty(o, ("text", "preview"))
             if o["id"] in ids:
                 raise Refused(f"{where}: option ids must differ.")
             ids.add(o["id"])
@@ -138,7 +180,7 @@ def validate_card(card) -> dict:
     if not isinstance(card, dict):
         raise Refused("A card is an object.")
     try:
-        raw = json.dumps(card, ensure_ascii=False, allow_nan=False)
+        raw = json.dumps(card, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     except (TypeError, ValueError) as e:
         raise Refused("A card must be plain JSON.") from e
     if len(raw.encode("utf-8")) > MAX_CARD_JSON:
@@ -158,8 +200,8 @@ def validate_card(card) -> dict:
         out["signs"] = True
     opn = _text(card.get("open"), "open", 500)
     if opn is not None:
-        if not re.match(r"^https?://[^\s/]+", opn):
-            raise Refused("Card open is an http(s) address.")
+        if not _OPEN.fullmatch(opn):
+            raise Refused("Card open is a plain http(s) address (no user name, no backslash, no %).")
         out["open"] = opn
     pv = card.get("preview")
     if pv is not None:
@@ -298,6 +340,189 @@ def changed_files(root: Path, tid: str, shown: dict) -> list[str]:
     return bad
 
 
+# ---------------------------------------------------------------- the card on the phone (wire shape)
+
+_CARD_TOP = {"kind", "title", "why", "need", "then", "ok_label", "signs", "open", "preview"}
+_LIMITS = {"title": 200, "why": 500, "need": 200, "then": 500, "ok_label": 40, "open": 500}
+_WHY = ("too_large", "held_back")
+
+
+def card_files_of(card: dict) -> list[str]:
+    """The stored file references of a card (reviewed/<sha12>/<name>), each once, in the order they appear."""
+    refs: list[tuple[dict, str]] = []
+    if isinstance(card.get("preview"), dict):
+        _walk_preview(json.loads(json.dumps(card["preview"])), "preview", refs)
+    out: list[str] = []
+    for d, k in refs:
+        if d[k] not in out:
+            out.append(d[k])
+    return out
+
+
+def read_reviewed(root: Path, tid: str, shown: dict, src: str) -> bytes | None:
+    """The bytes of one reviewed file when they still hash to shown.files[name], else None (not sent)."""
+    parts = src.split("/")
+    files = shown.get("files") if isinstance(shown, dict) else None
+    copy = shown.get("copy") if isinstance(shown, dict) else None
+    if (
+        len(parts) != 3
+        or parts[0] != REVIEWED
+        or not _SHA12.fullmatch(parts[1])
+        or not isinstance(files, dict)
+        or copy != f"{REVIEWED}/{parts[1]}/"
+        or not isinstance(files.get(parts[2]), str)
+    ):
+        return None
+    try:
+        data = safefile._read_parts(root, [".orch", "tickets", tid, REVIEWED, parts[1]], [parts[2]], MAX_FILE)
+    except (safefile.TooLarge, OSError, Refused):
+        return None
+    return data if data is not None and _sha(data) == files[parts[2]] else None
+
+
+def wire_card(card: dict, refs: dict) -> dict:
+    """The card as it goes to the phones (message.schema.json $defs/review_card): the stored card with every
+    file reference replaced by refs[src] = an index into card_files (int), or "too_large" / "held_back"
+    ({"file": null, "why": ...}); null and empty optional values left out. Checked by check_wire_card; a card
+    that does not pass raises Refused (the question then goes out without `card`)."""
+
+    def src(v):
+        r = refs.get(v)
+        if isinstance(r, int) and not isinstance(r, bool):
+            return {"file": r}
+        return {"file": None, "why": r if r in _WHY else "held_back"}
+
+    def pv(p):
+        o = {}
+        for k, v in p.items():
+            if v is None or v == "":
+                continue
+            if k == "src":
+                o[k] = src(v)
+            elif k in ("before", "after"):
+                o[k] = pv(v)
+            elif k == "preview":
+                o[k] = pv(v)
+            elif k == "options":
+                o[k] = [pv(x) for x in v]
+            else:
+                o[k] = json.loads(json.dumps(v))
+        return o
+
+    out = {k: v for k, v in card.items() if k in _CARD_TOP and v is not None and v != "" and k != "preview"}
+    if isinstance(card.get("preview"), dict):
+        out["preview"] = pv(card["preview"])
+    check_wire_card(out, 20)
+    return out
+
+
+def _wtext(v, where: str, limit: int, empty_ok: bool = False) -> None:
+    if not isinstance(v, str) or len(v) > limit or _BAD.search(v):
+        raise Refused(f"{where}: not plain text of at most {limit} characters.")
+    if not v.strip() and not (empty_ok and v == ""):
+        raise Refused(f"{where}: blank.")
+
+
+def _wleaf(p, where: str, nfiles: int) -> None:
+    if not isinstance(p, dict) or p.get("type") not in ("page", "img", "doc", "table"):
+        raise Refused(f"{where}: not a leaf preview.")
+    t = p["type"]
+    _only(p, _PV_KEYS[t], where)
+    if t in ("page", "img"):
+        s = p.get("src")
+        ok = isinstance(s, dict) and (
+            (set(s) == {"file"} and isinstance(s["file"], int) and not isinstance(s["file"], bool)
+             and 0 <= s["file"] < nfiles)
+            or (set(s) == {"file", "why"} and s["file"] is None and s["why"] in _WHY)
+        )  # fmt: skip
+        if not ok:
+            raise Refused(f"{where}.src: not a file reference.")
+        if "alt" in p:
+            _wtext(p["alt"], f"{where}.alt", 200)
+    elif t == "doc":
+        if "heading" in p:
+            _wtext(p["heading"], f"{where}.heading", 200)
+        for key in ("paras", "steps"):
+            items = p.get(key, [])
+            if not isinstance(items, list) or len(items) > 50:
+                raise Refused(f"{where}.{key}: a list of at most 50 texts.")
+            for it in items:
+                _wtext(it, f"{where}.{key}", 2000)
+    else:
+        cols, rows = p.get("cols"), p.get("rows")
+        if not isinstance(cols, list) or not 1 <= len(cols) <= 12 or not isinstance(rows, list):
+            raise Refused(f"{where}: a table has 1-12 cols.")
+        if len(rows) > 200:
+            raise Refused(f"{where}: a table has at most 200 rows.")
+        for c in cols:
+            _wtext(c, f"{where}.cols", 100)
+        for r in rows:
+            if not isinstance(r, list) or len(r) != len(cols):
+                raise Refused(f"{where}: every table row has one cell per column.")
+            for c in r:
+                _wtext(c, f"{where}.rows", 500, empty_ok=True)
+
+
+def check_wire_card(card, nfiles: int) -> None:
+    """message.schema.json $defs/review_card, by hand (the schema file is not shipped): Refused when the wire
+    card would not pass it. nfiles = how many card_files the question carries."""
+    if not isinstance(card, dict):
+        raise Refused("A card is an object.")
+    _only(card, _CARD_TOP, "card")
+    if card.get("kind") not in KINDS:
+        raise Refused("card.kind is not a kind.")
+    for k in ("title", "then"):
+        if k not in card:
+            raise Refused(f"card.{k} is needed.")
+    for k, n in _LIMITS.items():
+        if k in card:
+            _wtext(card[k], f"card.{k}", n)
+    if "signs" in card and card["signs"] is not True:
+        raise Refused("card.signs is only ever true.")
+    if "open" in card and not _OPEN.fullmatch(card["open"]):
+        raise Refused("card.open is not a plain http(s) address.")
+    pv = card.get("preview")
+    if card["kind"] in ("choice", "link") and pv is None:
+        raise Refused("A choice or link card needs a preview.")
+    if card["kind"] == "choice" and not (isinstance(pv, dict) and pv.get("type") == "options"):
+        raise Refused("A choice card needs an options preview.")
+    if pv is not None:
+        t = pv.get("type") if isinstance(pv, dict) else None
+        if t == "compare":
+            _only(pv, _PV_KEYS["compare"], "preview")
+            if "note" in pv:
+                _wtext(pv["note"], "preview.note", 200)
+            for side in ("before", "after"):
+                _wleaf(pv.get(side), f"preview.{side}", nfiles)
+        elif t == "options":
+            _only(pv, _PV_KEYS["options"], "preview")
+            opts = pv.get("options")
+            if not isinstance(opts, list) or not 2 <= len(opts) <= 8:
+                raise Refused("preview.options has 2 to 8 entries.")
+            ids = set()
+            for i, o in enumerate(opts):
+                w = f"preview.options[{i}]"
+                if not isinstance(o, dict) or not re.fullmatch(r"[A-Za-z0-9]{1,8}", str(o.get("id"))):
+                    raise Refused(f"{w} needs a short id.")
+                _only(o, _OPT_KEYS, w)
+                if o["id"] in ids:
+                    raise Refused("preview: option ids must differ.")
+                ids.add(o["id"])
+                _wtext(o.get("title"), f"{w}.title", 120)
+                if "text" in o:
+                    _wtext(o["text"], f"{w}.text", 500)
+                if "preview" in o:
+                    _wleaf(o["preview"], f"{w}.preview", nfiles)
+        else:
+            _wleaf(pv, "preview", nfiles)
+    try:
+        raw = json.dumps(card, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    except (TypeError, ValueError) as e:
+        raise Refused("A card must be plain JSON.") from e
+    if len(raw.encode("utf-8")) > MAX_CARD_JSON:
+        raise Refused(f"A card is at most {MAX_CARD_JSON // 1024} KB.")
+
+
 # ---------------------------------------------------------------- decisions
 
 
@@ -312,13 +537,13 @@ def _note(note) -> dict:
         return {"changes": [], "words": {"text": "", "voice": []}, "pins": []}
     if isinstance(note, str):
         if len(note.encode("utf-8")) > MAX_NOTE_BYTES:
-            raise Refused("A note is at most 8 KB.")
+            raise BadVerdict("A note is at most 8 KB.")
         try:
             note = json.loads(note)
         except ValueError as e:
-            raise Refused("A note must be JSON.") from e
+            raise BadVerdict("A note must be JSON.") from e
     if not isinstance(note, dict):
-        raise Refused("A note must be an object.")
+        raise BadVerdict("A note must be an object.")
     if isinstance(note.get("text"), str) and note["text"].strip():  # the kit page's shape: {text, pins}
         note = dict(note)
         text = note.pop("text")
@@ -331,25 +556,25 @@ def _note(note) -> dict:
         if not note.get("changes"):
             note["changes"] = [text]
     if len(_canon(note).encode("utf-8")) > MAX_NOTE_BYTES:
-        raise Refused("A note is at most 8 KB.")
+        raise BadVerdict("A note is at most 8 KB.")
     changes = note.get("changes") or []
     if not isinstance(changes, list) or len(changes) > 20:
-        raise Refused("A note has at most 20 changes.")
+        raise BadVerdict("A note has at most 20 changes.")
     changes = [_text(c, "change", 500, required=True) for c in changes]
     words = note.get("words") or {}
     if not isinstance(words, dict):
-        raise Refused("Note words must be an object.")
+        raise BadVerdict("Note words must be an object.")
     wtext = _text(words.get("text"), "words", 2000) or ""
     voice = words.get("voice") or []
     if not isinstance(voice, list) or len(voice) > 10 or not all(isinstance(v, dict) for v in voice):
-        raise Refused("Note voice is a list of at most 10 recordings.")
+        raise BadVerdict("Note voice is a list of at most 10 recordings.")
     pins = note.get("pins") or []
     if not isinstance(pins, list) or len(pins) > 30:
-        raise Refused("A note has at most 30 pins.")
+        raise BadVerdict("A note has at most 30 pins.")
     clean_pins = []
     for p in pins:
         if not isinstance(p, dict) or not isinstance(p.get("n"), int):
-            raise Refused("A pin needs a number n.")
+            raise BadVerdict("A pin needs a number n.")
         clean_pins.append(
             {
                 "n": p["n"],
@@ -360,6 +585,15 @@ def _note(note) -> dict:
             }
         )
     return {"changes": changes, "words": {"text": wtext, "voice": voice}, "pins": clean_pins}
+
+
+def _note_bv(note) -> dict:
+    try:
+        return _note(note)
+    except BadVerdict:
+        raise
+    except Refused as e:  # any text the person's note holds that a card text may not
+        raise BadVerdict(str(e)) from e
 
 
 def _bare(action: str, allows, changes: list[str], n: dict) -> dict:
@@ -422,23 +656,23 @@ def _option_ids(q: dict, card: dict) -> list[str]:
 
 def _decision(q: dict, card: dict, verdict: str, picked, note) -> dict:
     if verdict not in VERDICTS:
-        raise Refused(f"verdict is one of {', '.join(VERDICTS)}.")
-    n = _note(note)
+        raise BadVerdict(f"verdict is one of {', '.join(VERDICTS)}.")
+    n = _note_bv(note)
     ids = _option_ids(q, card)
     choose = bool(ids)
     if picked is not None and picked not in ids:
-        raise Refused(f"'{picked}' is not one of the options.")
+        raise BadVerdict(f"'{picked}' is not one of the options.")
     changes = _what_changes(n)
     if verdict == "ok":
         if choose and picked is None:
-            raise Refused("Pick one of the options.")
+            raise BadVerdict("Pick one of the options.")
         action = "use" if choose else "approve"
         changes = []
     elif verdict == "no":
         action, picked, changes = ("none_of_these" if choose else "dont"), None, []
     else:  # talk: words never approve by themselves; a picked option with changes is "use with changes"
         if not changes and not n["pins"]:
-            raise Refused("Say what should change.")
+            raise BadVerdict("Say what should change.")
         action = "use_with_changes" if picked is not None else "send_back"
     d = {
         "action": action,
@@ -508,12 +742,16 @@ def decide(
     via: str,
     digest: str | None = None,
     proven: bool = False,
+    phone: str | None = None,
+    pid: str | None = None,
 ) -> dict:
     """One swipe. key is a question id (q3) or "review" (a ticket in Review). Returns the decision entry
     (the answered question). The person's own checks (human: author, not an agent) stay in tickets."""
     ticket = tickets.load(root, tid)
     if key == "review":
-        return _decide_check(root, ticket, verdict, note, by, via, digest, proven)
+        if picked is not None:
+            raise BadVerdict("A Check result has no options to pick.")
+        return _decide_check(root, ticket, verdict, note, by, via, digest, proven, phone, pid)
     q = _find(ticket, key)
     if q.get("answer") is not None:
         raise Refused(f"{key} is already answered. Use change to answer again.")
@@ -526,7 +764,16 @@ def decide(
 
 
 def _decide_check(
-    root: Path, ticket: dict, verdict: str, note, by: str, via: str, digest: str | None, proven: bool = False
+    root: Path,
+    ticket: dict,
+    verdict: str,
+    note,
+    by: str,
+    via: str,
+    digest: str | None,
+    proven: bool = False,
+    phone: str | None = None,
+    pid: str | None = None,
 ) -> dict:
     tid = ticket["id"]
     if not proven:  # a verdict on a Check result is a person's, proven by the caller (never assumed here)
@@ -538,16 +785,18 @@ def _decide_check(
     if digest is not None and digest != check_digest(ticket):
         raise Refused("This result changed after it was shown. Look at it again, then answer.")
     card = check_card(ticket)
-    n = _note(note)
+    n = _note_bv(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
         tickets.accept_review(root, tid, by, via, proven=proven)
     else:
         changes = _what_changes(n)
         if not changes:
-            raise Refused("Say what should change.")
+            raise BadVerdict("Say what should change.")
         d = _bare("send_back", None, changes, n)
-        tickets.ask_for_changes(root, tid, "; ".join(changes), by, via=via, proven=proven)
+        tickets.ask_for_changes(
+            root, tid, "; ".join(changes), by, via=via, proven=proven, phone=phone, pid=pid
+        )
     d["summary"] = summary(d, card)
     entry = {
         "text": _clip("Check: " + ticket.get("title", tid), 300),
