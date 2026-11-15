@@ -119,6 +119,11 @@ elif args[:2] == ["run", "status"]:
     load(args[2])
     live = (root / "live-runs").read_text().split() if (root / "live-runs").exists() else []
     result = {"ticket": args[2], "running": args[2] in live}
+    states = json.loads((root / "live-state").read_text()) if (root / "live-state").exists() else {}
+    if (
+        args[2] in live and args[2] in states
+    ):  # a live session and its state (starting, working, idle, attention)
+        result["claim"] = {"mode": "live", "live": {"state": states[args[2]]}}
 else:
     raise AssertionError(args)
 print(json.dumps(result))

@@ -102,8 +102,10 @@ or `{type: "orch.idea.failed", id, error}`; one idea at a time. On failure (or n
 the page keeps the text and offers *Send it to your helper in Chat instead* (`orch.say`, the old hand-off).
 
 **Plan the run / Ask for changes (drafts).** A draft no agent works on (`phase: "draft"`, `working: false`; order summaries
-also carry `draft_v`, the newest version) shows *Plan the run* and *Ask for changes* on the draft page and under *Drafts
-waiting for you* on Factory home. Inside the dashboard they post `{type: "orch.send", id, ticket, text}` (text: `Now plan
+also carry `draft_v`, the newest version) shows *Plan the run* and *Ask for changes* on the draft page, on the order page and
+under *Drafts waiting for you* on Factory home. `working` is core's Working status, except for a draft: there it is false
+when no run is on the ticket, or when its LIVE session's turn ended (`orch run status` claim `live.state` `idle` or
+`attention`), so the draft waits for you right after the helper's turn; the message then goes into that same session. Inside the dashboard they post `{type: "orch.send", id, ticket, text}` (text: `Now plan
 the run: …` or `Change the draft: <the person's words>`, at most 1000 characters typed). The dashboard accepts it only from the
 embedded shipped add-on iframe of its own origin and only for a ticket that carries that add-on's data (`ext.<add-on>`),
 keeps line breaks but drops control, bidi and zero-width characters (at most 2000 characters), sends the text with its own

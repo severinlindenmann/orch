@@ -3,6 +3,7 @@
 import http.client
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -206,8 +207,78 @@ def test_a_draft_says_whether_an_agent_works_on_it_and_its_newest_version(ws, ru
     t = json.loads(path.read_text())
     t["status"] = "active"
     path.write_text(json.dumps(t))
+    (ws / "live-runs").write_text(order)  # a one-step run is on it
     row = next(x for x in get(srv, "/api/home")[1]["orders"] if x["id"] == order)
     assert row["working"] is True
+
+
+def _set_status(ws, order, status):
+    path = ws / "fake-tickets" / f"{order}.json"
+    t = json.loads(path.read_text())
+    t["status"] = status
+    path.write_text(json.dumps(t))
+
+
+def _home_row(srv, order):
+    return next(x for x in get(srv, "/api/home")[1]["orders"] if x["id"] == order)
+
+
+def test_one_click_order_waits_for_you_as_soon_as_the_helpers_turn_ends(ws, srv):
+    """Release-21 walk: the helper filed draft v2, asked its questions and left the ticket Working with its LIVE session idle
+    at the prompt. The draft must wait for you (Plan the run) right after that one turn, on home and on the order."""
+    r = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "orch_factory",
+            "act",
+            "idea",
+            "--by",
+            "human:alex",
+            "--json",
+            "--",
+            "Opening hours page",
+        ],
+        cwd=ws,
+        capture_output=True,
+        check=False,
+        env=os.environ,
+        timeout=30,
+    )
+    order = json.loads(r.stdout)["order"]
+    _set_status(ws, order, "active")  # the run the click started
+    (ws / "live-runs").write_text(order)
+    (ws / "live-state").write_text(json.dumps({order: "working"}))
+    assert _home_row(srv, order)["working"] is True  # the helper is writing
+    subprocess.run(
+        [sys.executable, "-m", "orch_factory", "draft", order, "--file", "-", "--json"],
+        cwd=ws,
+        input=b"v2 with 3 questions",
+        capture_output=True,
+        check=True,
+        env=os.environ,
+        timeout=30,
+    )
+    for state in ("idle", "attention"):  # its turn ended / it asks you: the ticket stays Working
+        (ws / "live-state").write_text(json.dumps({order: state}))
+        row = _home_row(srv, order)
+        assert row["phase"] == "draft" and row["working"] is False and row["draft_v"] == 2, state
+        o = get(srv, f"/api/order/{order}")[1]
+        assert o["working"] is False and o["draft_v"] == 2
+    (ws / "live-state").write_text(json.dumps({order: "starting"}))
+    assert _home_row(srv, order)["working"] is True
+    (ws / "live-runs").write_text("")  # Working but no run on it (core settles it to Ready soon)
+    assert _home_row(srv, order)["working"] is False
+
+
+def test_working_is_only_looked_up_for_drafts(ws, run, srv, proposal):
+    """A proposed or started order keeps core's word (Working = an agent on it): no extra run status call."""
+    order = run("idea", "Idea", "--file", "-", data=b"v1")["order"]
+    run("propose", order, "--file", "-", data=proposal)
+    _set_status(ws, order, "active")
+    before = (ws / "calls.jsonl").read_text().count('"status"')
+    assert _home_row(srv, order)["working"] is True
+    assert (ws / "calls.jsonl").read_text().count('"status"') == before
 
 
 def test_draft_page_and_home_offer_plan_and_changes_inside_the_dashboard_only(srv):
@@ -215,6 +286,7 @@ def test_draft_page_and_home_offer_plan_and_changes_inside_the_dashboard_only(sr
     assert "section(primary, 'Drafts waiting for you', orders.filter(draftWaiting)" in js
     assert "'Plan the run'" in js and "'Ask for changes'" in js
     assert "...(draftWaiting(order) ? [draftActions(order)]" in js  # the draft page
+    assert "card('Your draft is ready'" in js and "if (order.phase === 'draft') {" in js  # the order page
     assert (
         "if (!embedded()) { box.append(" in js
     )  # outside the dashboard: a link to the ticket, nothing is sent
