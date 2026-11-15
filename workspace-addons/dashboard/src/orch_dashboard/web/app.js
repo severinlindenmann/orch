@@ -614,9 +614,8 @@ main.addEventListener('click', async event => {
   // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
-  if (action === 'diag-set') { settingsReviewOpen('diag', control); return; }
-  if (action === 'diag-delete-reports') { await diagDelete('reports'); return; }
-  if (action === 'diag-delete-notes') { await diagDelete('notes'); return; }
+  if (action === 'diag-set') { await diagSwitch(); return; }
+  if (action === 'diag-delete-reports') { await diagDelete(); return; }
   if (action === 'copies-switch') { settingsReviewOpen('copies-switch', control); return; }
   if (action === 'copies-clean') { settingsReviewOpen('copies-clean', control); return; }
   if (action === 'settings-review-ok') { await settingsReviewRun(); return; }

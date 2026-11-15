@@ -89,11 +89,10 @@ of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until
 | `copies.clean` | `line` (one step of the clean-up of separate copies) |
 | `diag.report_pruned` | `ref`, `why` (a report or incident folder removed for the budget) |
 | `diag.incident` | `reason`, `ref` (an incident was frozen; `ticket`, `run` are the event fields) |
-| `diag.disabled` | `actor` (written just before a person switches the log off; an agent cannot) |
+| `diag.disabled` | `actor` (written just before the log is switched off) |
 | `diag.dropped` | `count`, `n_<reason>` |
 | `diag.report_failed` | (error event; `err` has the class) the dashboard could not make a report |
 | `diag.report_made` | `ref`, `scope` (`ticket`, `add-on` or `workspace`), `content`, `page` (a page snapshot was added); written when the dashboard makes a report |
-| `diag.delete_requested` | `actor`, `what` (`reports` or `notes`; written before a person's verified delete) |
 | `diag.reports_deleted` | `count` (Settings > Delete all) |
 | `diag.notes_deleted` | `files` (Settings > Delete notes; the first line of the new log) |
 | `ui.error` | `kind` (`error` or `rejection`), `what` (the error class or name, cut), `file`, `line`, `col` (script file name, no query) |

@@ -258,20 +258,22 @@ def test_settings_ops_build_one_core_command_each():
     assert actions.build_argv("diag.set", {"on": True})[:4] == ["config", "set", "diag.enabled", "on"]
     assert actions.build_argv("diag.set", {"on": False})[3] == "off"
     assert actions.build_argv("diag.delete_reports", {})[:3] == ["diag", "delete", "reports"]
-    assert actions.build_argv("diag.delete_notes", {})[:3] == ["diag", "delete", "notes"]
     for bad in ({}, {"on": "yes"}, {"on": True, "x": 1}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("diag.set", bad)
     with pytest.raises(actions.BadRequest):
-        actions.build_argv("diag.delete_notes", {"x": 1})
+        actions.build_argv("diag.delete_reports", {"x": 1})
 
 
-def test_only_switching_off_needs_the_persons_proof():
-    assert actions.proof_for("diag.set", {"on": False}) == ("config.diag_enabled", "off")
-    assert actions.proof_for("diag.set", {"on": True}) is None
-    for what in ("reports", "notes"):  # deleting evidence is always a person's proof
-        assert actions.proof_for(f"diag.delete_{what}", {}) == (f"diag.delete_{what}", what)
-    assert all(actions.needs_session(o) for o in ("diag.set", "diag.delete_reports", "diag.delete_notes"))
+def test_diag_ops_are_plain_actions_no_proof():
+    for op, args in (
+        ("diag.set", {"on": False}),
+        ("diag.set", {"on": True}),
+        ("diag.delete_reports", {}),
+        ("diag.delete_notes", {}),
+    ):
+        assert actions.proof_for(op, args) is None
+    assert all(actions.needs_session(o) for o in ("diag.set", "diag.delete_reports"))
 
 
 def test_settings_numbers_and_deletes(live):
@@ -294,23 +296,15 @@ def test_settings_numbers_and_deletes(live):
     assert after["files"] == 1 and any(e["ev"] == "diag.notes_deleted" for e in events(root))
 
 
-def test_delete_command_refuses_an_agent(live):
-    root, _ = live
-    diag.log("diag.test_note", "info", root=root)
-    before = diag.stats(root)["notes"]["files"]
-    base = {"PATH": "/usr/bin:/bin", "HOME": str(root)}
-    for extra, env in (
-        (["--by", "agent:claude"], base),  # says it is an agent
-        (["--by", "human:Anna"], base),  # claims to be a person without a proof
-        ([], {**base, "CLAUDECODE": "1"}),  # an agent tool in the environment
-    ):
-        for what in ("notes", "reports"):
-            r = subprocess.run(
-                [sys.executable, "-I", "-m", "orch", "diag", "delete", what, *extra],
-                cwd=root,
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-            assert r.returncode == 2, (extra, what, r.stdout, r.stderr)
-    assert diag.stats(root)["notes"]["files"] == before
+def test_delete_command_deletes_reports_and_notes(proj, run):
+    from orch import diag_report
+
+    run("init")
+    tid = stuck(proj)
+    diag_report.make(proj, ticket=tid)
+    assert diag.stats(proj)["reports"]["count"] == 1
+    code, out, _ = run("diag", "delete", "reports", "--json")
+    assert code == 0 and json.loads(out) == {"deleted": 1, "what": "reports"}
+    assert diag.stats(proj)["reports"]["count"] == 0
+    assert run("diag", "delete", "notes")[0] == 0
+    assert any(e["ev"] == "diag.notes_deleted" for e in diag.read_events(proj))

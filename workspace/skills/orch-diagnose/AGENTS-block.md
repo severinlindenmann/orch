@@ -7,4 +7,4 @@ When told "Investigate orch report <ref>", or when orch looks stuck or broken, r
 3. Check out the commit in `manifest.json` (a separate worktree) before reading the source.
 4. Answer with the cause, the evidence (report line references), a fix proposal and the fixture or check that would have caught it.
 
-Never delete or change anything while investigating.
+Change nothing while investigating; delete saved reports only when asked (`orch diag delete reports`).

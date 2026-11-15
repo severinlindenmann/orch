@@ -84,29 +84,28 @@ function privateCard(settings) {
       settingsText('h3', {}, 'This workspace asks to run a command'),
       settingsText('p', {className:'meta'}, hidden + (hidden === 1 ? " request" : " requests") + " orch can't show safely. Not allowed.")))) : null);
 }
-// Problem reports (diagnostics, D3): the debug log switch, the saved reports and the saved notes. Switching it off
-// shows a review first (a person's decision); the deletes are one click and say what went.
+// Report a problem (diagnostics, D3): the debug log switch (one click) and the saved reports.
 function diagCard(settings) {
-  const on = settings.diag_enabled !== false, dg = settings.diag || {}, reports = dg.reports || {}, notes = dg.notes || {};
+  const on = settings.diag_enabled !== false, reports = settings.diag?.reports || {};
   const off = snapshot || settingsBusy.has('diag');
   const n = Number(reports.count) || 0;
-  const size = syncSize(Number(notes.bytes) || 0);
-  return h('div', {className:'stack', 'data-key':'settings-diag'}, h('h2', {className:'set-sub'}, 'Problem reports'), h('div', {className:'card'},
-    h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Keep a debug log'),
+  return h('div', {className:'stack', 'data-key':'settings-diag'}, h('h2', {className:'set-sub'}, 'Report a problem'), h('div', {className:'card'},
+    h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Debug log'),
       settingsText('p', {}, 'orch notes steps, errors and timings in the background, so a helper can find out what went wrong. It stays on this computer.'),
-      settingsText('p', {className:'meta'}, 'On by default. Keeps the last 7 days, at most 200 MB. Off stops new notes; saved ones stay until you delete them.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Keep a debug log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
-    reviewPanel('diag', settings),
-    h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Reports'),
+      settingsText('p', {className:'meta'}, 'On by default. Keeps the last 7 days. Off stops new notes.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Debug log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
+    h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Saved reports'),
       h('p', {className:'grow set-ctl', 'data-key':'settings-diag-reports'}, n === 1 ? '1 report' : n + ' reports', reports.last ? h('span', {className:'meta'}, ' · last ' + time(reports.last)) : null),
-      snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'diag-delete-reports', 'data-key':'settings-diag-delete-reports', disabled:off || !n}, 'Delete all')),
-    h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Saved notes'),
-      h('p', {className:'grow set-ctl', 'data-key':'settings-diag-notes'}, size, notes.since ? h('span', {className:'meta'}, ' · since ' + date(notes.since)) : null),
-      snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'diag-delete-notes', 'data-key':'settings-diag-delete-notes', disabled:off || !notes.files}, 'Delete notes'))));
+      snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'diag-delete-reports', 'data-key':'settings-diag-delete-reports', disabled:off || !n}, 'Delete all'))));
 }
-async function diagDelete(what) {
-  const result = await settingsSend('diag.delete_' + what, {}, 'diag');
-  if (result.ok) window.orch.toast(what === 'reports' ? 'Reports deleted.' : 'Saved notes deleted.', 'ok');
+async function diagSwitch() {
+  const on = state.settings?.diag_enabled === false;
+  const result = await settingsSend('diag.set', {on}, 'diag');
+  if (result.ok) window.orch.toast(on ? 'Debug log is on.' : 'Debug log is off.', 'ok');
+}
+async function diagDelete() {
+  const result = await settingsSend('diag.delete_reports', {}, 'diag');
+  if (result.ok) window.orch.toast('Reports deleted.', 'ok');
 }
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'},
@@ -126,15 +125,12 @@ let copySetupEditing = false;
 // touches, then [Verb] [Cancel]; never a typed word. It opens in place, in the same look as the command review of
 // "+ Add your own helper" (.cmd-preview with its .acts row). Only its first button makes the change.
 let settingsReview = null, settingsReviewFrom = null;
-const SETTINGS_REVIEW_BUSY = {share:'share', diag:'diag', workflow:'workflow', 'copies-switch':'copies', 'copies-clean':'copies-clean'};
+const SETTINGS_REVIEW_BUSY = {share:'share', workflow:'workflow', 'copies-switch':'copies', 'copies-clean':'copies-clean'};
 const copiesModeOf = settings => ['off', 'together', 'always'].includes(settings.copies) ? settings.copies : 'together';
 function settingsReviewText(id, settings) {
   if (id === 'share') return settings.share === true
     ? {verb:'Stop sharing', what:'Your team will no longer see that this workspace uses orch.', affects:'The short orch entry is taken out of AGENTS.md. Nothing else in your files changes.'}
     : {verb:'Share', what:'Your team will see that this workspace uses orch.', affects:'A short orch entry is added to AGENTS.md in your team’s files. Everything else from orch stays on this computer.'};
-  if (id === 'diag') return settings.diag_enabled !== false
-    ? {verb:'Turn off', what:'orch stops noting steps and errors in the background. A problem report will then have less to show.', affects:'Notes already saved stay until you delete them. You can turn it on again any time.'}
-    : {verb:'Turn on', what:'orch notes steps, errors and timings in the background again, on this computer.', affects:'It keeps the last 7 days, at most 200 MB. Nothing you write is included.'};
   if (id === 'workflow') return settings.agents_may_finish
     ? {verb:'Turn off', what:'Helpers will ask you to check finished work, and you decide when it is Done.', affects:'Only new finished work. Tickets that are already Done stay Done.'}
     : {verb:'Turn on', what:'Helpers will mark their finished work Done themselves.', affects:'You will not be asked to look at it first. Tickets already waiting for your check stay there.'};
@@ -824,8 +820,7 @@ async function settingsReviewRun() {
     const on = settings.share !== true;
     const result = await settingsSend('share.set', {on}, 'share');
     if (result.ok) window.orch.toast(on ? 'Shared. Your team can now see this workspace.' : 'Not shared any more.', 'ok');
-  } else if (id === 'diag') await settingsSend('diag.set', {on:settings.diag_enabled === false}, 'diag');
-  else if (id === 'workflow') await settingsSend('workflow.set', {on:!settings.agents_may_finish}, 'workflow');
+  } else if (id === 'workflow') await settingsSend('workflow.set', {on:!settings.agents_may_finish}, 'workflow');
   else if (id === 'copies-switch') await settingsSend('copies.set', {mode:copiesModeOf(settings) === 'off' ? 'together' : 'off'}, 'copies');
   else await settingsSend('copies.clean', {}, 'copies-clean');
   settingsReviewFocus(from);

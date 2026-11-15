@@ -26,7 +26,7 @@ function reportPageSnapshot() {
 }
 // The checks' own names are ids; the good news line reads them as plain words.
 const REPORT_NAMES = {clock_skew:'Clock', dead_lock_holder:'Locks', diag_dropped:'Debug log', disk_low:'Disk space', hook_lines_missing:'Helper reminders',
-  no_heartbeat:'Helper heartbeat', relay_unreachable:'Relay', run_gone_ticket_working:'Running helper', ticket_op_refused:'Ticket changes', waiting_for_permission:'Permissions'};
+  no_heartbeat:'Helper heartbeat', run_gone_ticket_working:'Running helper', ticket_op_refused:'Ticket changes', waiting_for_permission:'Permissions'};
 const reportName = id => REPORT_NAMES[id] || capitalise(String(id || '').replace(/_/g, ' '));
 function reportCheckRow(c) {
   const problem = c.verdict === 'problem', ok = c.verdict === 'ok';
@@ -61,7 +61,7 @@ function reportOpen() {
     create.disabled = true; actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
     const bar = h('div', {className:'progress', role:'progressbar', 'aria-label':'Collecting'}, h('span', {}));
     bar.firstChild.style.setProperty('--value', '60%');
-    body.replaceChildren(h('p', {role:'status'}, 'Collecting…'), bar, h('p', {className:'meta'}, 'This page, the ticket, the helper, add-ons, the relay'));
+    body.replaceChildren(h('p', {role:'status'}, 'Collecting…'), bar, h('p', {className:'meta'}, 'This page, the ticket, the helper and add-ons'));
     const payload = {ticket:scope.ticket, addon:scope.addon, note:happened.value.trim() || undefined, expected:expected.value.trim() || undefined,
       content:content.checked, page:picture.checked && content.checked ? reportPageSnapshot() : undefined};
     let result = null, failure = 'The report could not be made. Please try again.';
@@ -96,7 +96,7 @@ function reportReady(d, actions, body, result) {
     const ok = window.UI?.copyText ? await window.UI.copyText(line) : false;
     window.orch.toast(ok ? 'Copied. Paste it to a helper.' : 'Could not copy. Select the line and copy it.', ok ? undefined : 'error');
   });
-  body.replaceChildren(h('p', {}, h('strong', {}, 'Checks')), reportChecks(array(result.checks)),
+  body.replaceChildren(reportChecks(array(result.checks)),
     h('p', {className:'report-sub'}, h('strong', {}, 'Give it to a helper')), h('p', {className:'muted'}, 'Paste this into a helper chat:'),
     h('div', {className:'row'}, h('input', {type:'text', className:'input grow', readOnly:true, value:line, 'aria-label':'Line for a helper', 'data-key':'report-line'}), copy),
     h('p', {className:'meta'}, folder));

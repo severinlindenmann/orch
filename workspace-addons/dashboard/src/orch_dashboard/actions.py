@@ -181,10 +181,6 @@ def proof_for(op, args, root=None):
         if isinstance(v, str) and v.strip() not in ("", "none"):
             return "config.copy_setup", hashlib.sha256(v.strip().encode()).hexdigest()
         return None
-    if op == "diag.set":  # the debug log: off is a person's decision (on needs no proof)
-        return ("config.diag_enabled", "off") if args.get("on") is False else None
-    if op in ("diag.delete_reports", "diag.delete_notes"):  # evidence: always a person's proof
-        return op, op.removeprefix("diag.delete_")
     if op == "share.set":  # sharing the orch entry with the team (off needs no proof)
         return ("config.share", "on") if args.get("on") is True else None
     if op == "look.shared":
@@ -944,7 +940,6 @@ OPS = {
     "workflow.set": _workflow_set,
     "diag.set": _diag_set,
     "diag.delete_reports": _diag_delete("reports"),
-    "diag.delete_notes": _diag_delete("notes"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
     "copies.remove_orphaned": _copies_remove_orphaned,

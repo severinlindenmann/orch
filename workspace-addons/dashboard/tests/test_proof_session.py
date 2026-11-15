@@ -551,7 +551,6 @@ ACT_ARGS = {
     "copies.clean": {},
     "diag.set": {"on": False},
     "diag.delete_reports": {},
-    "diag.delete_notes": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},
     "copies.approve": {"ticket": TID, "tip": "a" * 40, "control_paths": 0, "paths_hash": "12345678"},

@@ -42,7 +42,7 @@ Write four parts, short and plain:
 - Check that would have caught it: a test, fixture or health check to add.
 
 ## Rules
-- Read-only: do not delete, edit or re-run anything to "see if it helps". `orch diag delete` is a person's click.
+- Read-only: do not edit or re-run anything to "see if it helps". Delete saved reports or notes (`orch diag delete reports`, `orch diag delete notes`) only when a person asks.
 - Never print or copy secrets. Values the log holds are already hidden; if you still see one, say so and stop.
 - Say what you could not check (the report's gaps) instead of guessing.
 - Do not share a report outside this computer. A person does that.
