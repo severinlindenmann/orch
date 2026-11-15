@@ -342,7 +342,7 @@ def run_group(args, root: Path, out) -> None:
                 args, root, "group.write_as_person", tid,
                 parts={"title": humanproof.ticket_name(root, tid)}, value=args.text,
             )  # fmt: skip
-        r = cg.say(root, tid, args.text, "dashboard" if as_person else "helper", args.to_person, by)
+        r = cg.say(root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by)
         out(args, r, "Written into the group.")
     elif sub == "add":
         r = cg.add_member(root, tid, ws, by)
@@ -403,7 +403,7 @@ def run_group(args, root: Path, out) -> None:
             relay.resolve(root, args.host),
             args.group,
             args.text,
-            "dashboard" if as_person else "helper",
+            tickets.PERSON_VIA if as_person else "helper",
         )
         out(args, m, "Written into the group.")
     elif sub == "answer":
