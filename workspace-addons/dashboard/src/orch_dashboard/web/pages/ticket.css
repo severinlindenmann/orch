@@ -192,7 +192,7 @@
 .ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-layout.wide .ticket-side{display:none}
 .ticket-page .preview-body.live{max-height:none}
 .ticket-page .preview-body.live:after{content:none}
-.ticket-page .preview-live{display:block;width:100%;height:340px;border:0;background:#fff}
+.ticket-page .preview-live{display:block;width:100%;height:340px;border:0;background:var(--paper)}
 .ticket-page .preview-body.live .preview-expand{bottom:12px}
 .ticket-page .skeleton-tile{height:200px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:fv-shimmer 1.4s linear infinite}
 @media(prefers-reduced-motion:reduce){.ticket-page .skeleton-tile{animation:none}}
@@ -210,7 +210,7 @@
 .copy-file{width:100%;display:flex;gap:12px;justify-content:space-between;text-align:left}
 .copy-diff{max-height:320px;overflow:auto;font-size:12px;line-height:18px;padding:12px;border:1px solid var(--border);border-radius:8px;margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .copy-diff .diff-add{color:var(--success)}
-.copy-diff .diff-del{color:var(--danger,var(--error,#e5484d))}
+.copy-diff .diff-del{color:var(--danger)}
 
 /* Header strip (master .strip): title and sentence grow, actions sit right, tabs inside the strip. */
 .ticket-page .ticket-strip{margin-bottom:20px}

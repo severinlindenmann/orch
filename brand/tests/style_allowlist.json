@@ -87,36 +87,12 @@
   "hex": 0,
   "style": 0
  },
- "publish/web/look-bundle.js": {
-  "hex": 26,
-  "style": 0
- },
- "publish/web/look-data.js": {
-  "hex": 26,
-  "style": 0
- },
  "publish/web/look.css": {
   "hex": 0,
   "style": 0
  },
- "publish/web/portal.html": {
-  "hex": 1,
-  "style": 0
- },
- "publish/web/portal.js": {
-  "hex": 1,
-  "style": 0
- },
  "publish/web/style.css": {
   "hex": 0,
-  "style": 0
- },
- "relay/web/look-bundle.js": {
-  "hex": 26,
-  "style": 0
- },
- "relay/web/look-data.js": {
-  "hex": 26,
   "style": 0
  },
  "relay/web/look.css": {
@@ -128,7 +104,7 @@
   "style": 1
  },
  "relay/web/portal.html": {
-  "hex": 4,
+  "hex": 1,
   "style": 0
  },
  "relay/web/style.css": {
@@ -141,18 +117,6 @@
  },
  "workspace-addons/dashboard/mockup/errors/offline.html": {
   "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/previews/assets/catalogue-page.html": {
-  "hex": 1,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/previews/assets/site/style.css": {
-  "hex": 19,
-  "style": 0
- },
- "workspace-addons/dashboard/mockup/previews/viewer-html.html": {
-  "hex": 19,
   "style": 0
  },
  "workspace-addons/dashboard/mockup/publish/publish.html": {
@@ -195,14 +159,6 @@
   "hex": 1,
   "style": 0
  },
- "workspace-addons/dashboard/mockup/ticket/assets/survey-results.html": {
-  "hex": 5,
-  "style": 1
- },
- "workspace-addons/dashboard/src/orch_dashboard/web/look-icons.js": {
-  "hex": 24,
-  "style": 0
- },
  "workspace-addons/dashboard/src/orch_dashboard/web/pages/chat.css": {
   "hex": 0,
   "style": 0
@@ -224,7 +180,7 @@
   "style": 0
  },
  "workspace-addons/dashboard/src/orch_dashboard/web/pages/ticket.css": {
-  "hex": 2,
+  "hex": 0,
   "style": 0
  },
  "workspace-addons/dashboard/src/orch_dashboard/web/pages/tickets.css": {
@@ -233,18 +189,6 @@
  },
  "workspace-addons/dashboard/src/orch_dashboard/web/style.css": {
   "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/tests/blocks/blocks-demo.css": {
-  "hex": 0,
-  "style": 0
- },
- "workspace-addons/dashboard/tests/csp_styles.test.js": {
-  "hex": 0,
-  "style": 1
- },
- "workspace-addons/dashboard/tests/look.test.js": {
-  "hex": 1,
   "style": 0
  },
  "workspace-addons/factory/src/orch_factory/web/factory.css": {
@@ -261,14 +205,6 @@
  },
  "workspace-addons/insights/src/orch_insights/web/insights.css": {
   "hex": 0,
-  "style": 0
- },
- "workspace/src/orch/templates/node/server.js": {
-  "hex": 4,
-  "style": 0
- },
- "workspace/src/orch/templates/static/style.css": {
-  "hex": 4,
   "style": 0
  }
 }
