@@ -75,3 +75,33 @@ def test_checker_own_files_are_allowlisted():
     allow = cbw.allow_patterns()
     for f in ["scripts/check_banned_words.py", "brand/tests/test_banned_words.py"]:
         assert any(__import__("fnmatch").fnmatch(f, p) for p in allow)
+
+
+def test_word_already_on_a_changed_line_passes(tmp_path):
+    # one-line mockup pages: changing a link re-adds words that were already there
+    make_repo(tmp_path, '<link href="a.css"><p>Open the gate</p>\n', '<link href="b.css"><p>Open the gate</p>\n')
+    assert run(tmp_path) == 0
+
+
+def test_extra_copy_of_a_word_still_fails(tmp_path, capsys):
+    make_repo(tmp_path, "<p>Open the gate</p>\n", "<p>Open the gate, then the other gate</p>\n")
+    assert run(tmp_path) == 1
+    assert "doc.md:1: gate" in capsys.readouterr().out
+
+
+def test_word_removed_in_another_file_does_not_cancel(tmp_path):
+    git(tmp_path, "init", "-q", "-b", "main")
+    (tmp_path / "a.md").write_text("the gate\n")
+    (tmp_path / "b.md").write_text("x\n")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-qm", "base")
+    git(tmp_path, "checkout", "-qb", "pr")
+    (tmp_path / "a.md").write_text("x\n")
+    (tmp_path / "b.md").write_text("x\nthe gate\n")
+    git(tmp_path, "commit", "-qam", "pr")
+    assert run(tmp_path) == 1
+
+
+def test_removed_line_starting_with_dashes_is_not_a_header():
+    diff = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n--- gate here\n+++ gate here\n"
+    assert cbw.find_hits(diff, []) == []
