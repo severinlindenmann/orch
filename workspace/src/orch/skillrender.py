@@ -9,6 +9,7 @@ turned-on add-on that has such a skill and writes only what changed.
 from __future__ import annotations
 
 import re
+import sys
 import tomllib
 from pathlib import Path
 
@@ -263,5 +264,5 @@ def refresh_skills(root: Path, say: bool = True) -> list[str]:
     if sync_github(root):
         changed.append(GITHUB_SKILL)
     if changed and say:
-        print(MESSAGE)
+        print(MESSAGE, file=sys.stderr)
     return changed
