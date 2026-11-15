@@ -393,7 +393,12 @@
         "card": { "type": "object", "description": "Optional (Review stack). What the person is shown: kind (draft|check|link|choice|plan), title, why, need, then, ok_label, signs, open, preview (page|img|doc|table|compare|options). File references point into reviewed/<sha12>/.", "required": ["kind", "title"], "properties": { "kind": { "enum": ["draft", "check", "link", "choice", "plan"] }, "title": { "type": "string" } } },
         "shown": { "type": "object", "description": "Optional (Review stack). A fingerprint of exactly what the card showed: digest, copy (reviewed/<sha12>/, a content-addressed copy under .orch/tickets/<id>/) and files (name to sha256).", "required": ["digest", "copy", "files"], "properties": { "digest": { "type": "string" }, "copy": { "type": "string" }, "files": { "type": "object", "additionalProperties": { "type": "string" } } } },
         "decision": { "type": "object", "description": "Optional (Review stack), set when answered. action (approve|use|use_with_changes|send_back|dont|none_of_these), picked, allows, changes[], words{text,voice[]}, pins[], summary (the one plain line that is also `answer`), replaces (an earlier entry this one answers again), replaced_by (set later on the old entry; never part of the signed binding).", "required": ["action", "summary"], "properties": { "action": { "enum": ["approve", "use", "use_with_changes", "send_back", "dont", "none_of_these"] }, "picked": { "type": ["string", "null"] }, "allows": { "type": ["string", "null"] }, "changes": { "type": "array", "items": { "type": "string" } }, "words": { "type": "object" }, "pins": { "type": "array", "items": { "type": "object" } }, "summary": { "type": "string" }, "replaces": { "type": ["string", "null"] }, "replaced_by": { "type": ["string", "null"] } } },
-        "at": { "$ref": "#/$defs/time", "description": "Optional (Review stack). When the decision was made." }
+        "at": { "$ref": "#/$defs/time", "description": "Optional (Review stack). When the decision was made." },
+        "taken_back": {
+          "type": "object", "additionalProperties": false, "required": ["at", "by", "reason"],
+          "properties": { "at": { "$ref": "#/$defs/time" }, "by": { "$ref": "#/$defs/who" }, "reason": { "type": "string", "minLength": 1, "maxLength": 300 } },
+          "description": "Optional (orch ask --take-back). The asker took its own question back: the question stays in the ticket, settled; `answer` is `Taken back: <reason>`. Never set from an incoming message. A person's phone is told with one message (contracts: Question taken back); old ticket files without it keep working."
+        }
       }
     },
     "history": {

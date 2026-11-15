@@ -37,6 +37,7 @@
         { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result", "reason"], "properties": { "result": { "const": "refused" }, "reason": { "enum": ["needs_person", "invalid", "unavailable"] } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Couldn't use your answer" } } } } } },
         { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result"], "properties": { "result": { "const": "decided" } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Already decided" } } } } } }
       ] } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["taken_back"] } } }, "then": { "required": ["reply_to", "ticket"], "properties": { "type": { "const": "text" }, "to": { "const": "phones" }, "body": { "additionalProperties": false, "required": ["text"], "properties": { "text": { "type": "string", "pattern": "^Taken back: [^\\u0000-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]{1,200}$" }, "taken_back": {} } } } } },
     { "if": { "properties": { "type": { "const": "control" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/control" } } } },
     { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
     { "if": { "properties": { "type": { "const": "question" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/question" } }, "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["proposal"] } } }, "then": { "not": { "required": ["ticket"] } }, "else": { "required": ["ticket"] } } },
@@ -108,8 +109,8 @@
     },
     "text": {
       "type": "object",
-      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }, { "required": ["proposal_result"] }, { "required": ["review_result"] }],
-      "description": "A text needs at least one of text, attachments, voice, location, feedback, proposal_result, review_result. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
+      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }, { "required": ["proposal_result"] }, { "required": ["review_result"] }, { "required": ["taken_back"] }],
+      "description": "A text needs at least one of text, attachments, voice, location, feedback, proposal_result, review_result, taken_back. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
       "properties": {
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "client_id": { "$ref": "#/$defs/client_id" },
@@ -160,6 +161,7 @@
         "feedback": { "$ref": "#/$defs/feedback" },
         "proposal_result": { "$ref": "#/$defs/proposal_result" },
         "review_result": { "$ref": "#/$defs/review_result" },
+        "taken_back": { "$ref": "#/$defs/taken_back" },
         "update": {
           "type": "object", "required": ["kind"], "additionalProperties": false,
           "properties": {
@@ -190,6 +192,13 @@
         { "if": { "properties": { "result": { "const": "refused" } } }, "then": { "required": ["reason"], "not": { "required": ["summary"] } }, "else": { "not": { "required": ["reason"] } } },
         { "if": { "properties": { "result": { "const": "changed" } } }, "then": { "not": { "required": ["summary"] } } }
       ]
+    },
+    "taken_back": {
+      "description": "Not chat. The workspace tells the phones that a question it sent to them was taken back (relay-api.md, Question taken back): one text to `phones`, reply_to = the question's message id, ticket (and key) = the question's, body only {text, taken_back}; body.text is exactly `Taken back: <reason>` (the relay checks it; old phones show it as a plain line). Never pushed, never unread; a phone cannot send it. The phone removes the question's card and shows no bubble.",
+      "type": "object", "additionalProperties": false, "required": ["reason"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]*\\S[^\\u0000-\\u001f\\u007f-\\u009f\\u202a-\\u202e\\u2066-\\u2069]*$", "description": "One plain line: why the question no longer matters. No control characters, not blank." }
+      }
     },
     "card_text": { "type": "string", "minLength": 1, "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "pattern": "\\S" }], "description": "review.py _text: not blank, no control characters but newline and tab, no DEL, no bidi embedding/override/isolate characters (U+202A-U+202E, U+2066-U+2069; stricter than review.py today, which must align). Lengths are set where it is used (code points, as Python len)." },
     "card_opt_text": { "type": "string", "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "anyOf": [{ "maxLength": 0 }, { "pattern": "\\S" }] }], "description": "As card_text, but empty is allowed (= not given)." },
