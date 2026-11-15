@@ -160,8 +160,14 @@ elif args[:2] == ["relay", "delegate"]:
         )
         g = next((x for x in groups["hosted"] if x["ticket"] == ticket), None)
         if g is None:
-            g = {"id": "grp_" + ticket, "ticket": ticket, "tasks": []}
+            g = {
+                "id": "grp_" + ticket,
+                "ticket": ticket,
+                "tasks": [],
+                "members": [{"ws": "ws_host000001", "host": True}],
+            }
             groups["hosted"].append(g)
+        g["members"].append({"ws": args[2], "host": False, "left_at": None})
         g["tasks"].append({"delegate": mid, "ws": args[2], "status": "waiting_start", "title": args[3]})
         (root / "groups.json").write_text(json.dumps(groups))
     result = {"id": mid, "sent": True}

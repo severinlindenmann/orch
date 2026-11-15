@@ -137,12 +137,55 @@ def _save(store, data):
 # ---- state from the relay ------------------------------------------------------------------------------------
 
 
-def _group_tasks(root, crew_id):
+def _group(root, crew_id):
     groups = orchcli.call(root, "relay", "group", "list")
     for g in groups.get("hosted", []) if isinstance(groups, dict) else []:
         if g.get("ticket") == crew_id:
-            return [t for t in g.get("tasks", []) if isinstance(t, dict)]
-    return []
+            return g
+    return None
+
+
+def _group_tasks(root, crew_id):
+    g = _group(root, crew_id)
+    return [t for t in (g or {}).get("tasks", []) if isinstance(t, dict)]
+
+
+def _only_member(root, crew_id, ws):
+    """The group holds the receiving workspace and nobody else (besides this one): a file shared into it reaches only
+    the workspace the person saw on the Start screen, and the task found there is the one sent to it."""
+    g = _group(root, crew_id)
+    members = {
+        m.get("ws")
+        for m in (g or {}).get("members", [])
+        if isinstance(m, dict) and not m.get("host") and not m.get("left_at")
+    }
+    tasks = [t for t in (g or {}).get("tasks", []) if isinstance(t, dict)]
+    if members != {ws} or not tasks or any(t.get("ws") != ws for t in tasks):
+        raise Refused(
+            "The group of this task has someone else in it, so no file was shared. "
+            "Ask the owner whether to do it here instead.",
+            "refused",
+        )
+
+
+def _card_clean(root, crew_id, t):
+    """The hand-over card is built from the crew ticket: it must carry only the frozen brief (title; no summary, open
+    question or checklist written since), so nothing an agent added after Start reaches the other workspace."""
+    ticket = orchcli.ticket(root, crew_id)
+    open_question = any(
+        q.get("answer") is None and q.get("kind") is None for q in ticket.get("questions") or []
+    )
+    if (
+        clean(ticket.get("title"), 200) != clean(t["title"], 200)
+        or ticket.get("summary")
+        or ticket.get("checklist")
+        or open_question
+    ):
+        raise Refused(
+            "The task card was changed after you pressed Start (summary, question or checklist). "
+            "Nothing was sent. Ask the manager to reset the card to the plan.",
+            "refused",
+        )
 
 
 def _set_cache(root, crew_id, **fields):
@@ -239,7 +282,14 @@ def start(root, store, d, t, crew, h):
     book = _load(store)
     mine = book.get(crew["id"]) or {}
     first = not mine.get("sent")
+    starter = authority.who(d["start"]["q"]) if d.get("start") else ""
+    if not starter.startswith("human:"):
+        raise Refused(
+            "A person has to press Start on this order before a task goes to another workspace.",
+            "not_allowed",
+        )
     if first:
+        _card_clean(root, crew["id"], t)
         scan_files(root, files)  # nothing is sent when a file looks like a secret
         text, checks = _brief(d, t, h)
         sent = orchcli.call(
@@ -260,7 +310,6 @@ def start(root, store, d, t, crew, h):
         book[crew["id"]] = mine
         _save(store, book)  # before anything else: a second crew start never sends a second delegate
         _set_cache(root, crew["id"], ws=ws, name=clean(entry.get("name") or ws, 64), state="waiting_start")
-    starter = authority.who(d["start"]["q"]) if d.get("start") else None
     todo = [f for f in files if f not in mine["shared"]]
     if todo and not _group_tasks(root, crew["id"]):
         raise Refused(
@@ -269,6 +318,7 @@ def start(root, store, d, t, crew, h):
             "refused",
         )
     for f in todo:
+        _only_member(root, crew["id"], ws)
         # the click was the person's Start: recorded as the person who pressed it (no proof plumbing here)
         orchcli.call(root, "relay", "group", "share", crew["id"], f, "--click", write=True, by=starter)
         mine["shared"].append(f)
@@ -330,7 +380,7 @@ def settle(root, store, d):
                 root,
                 "log",
                 crew["id"],
-                f"Result from {who}: {clean(crew['title'], 120)} is done.",
+                f"{who} reports it done: {clean(crew['title'], 120)}. Check the result before you rely on it.",
                 write=True,
             )
             try:

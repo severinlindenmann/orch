@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from test_flow import CONTRACTS, core
+from test_flow import CONTRACTS, core, edit
 from test_watch import runs
 
 from orch_factory import handover, watch
@@ -201,7 +201,7 @@ def test_done_is_evidence_and_ticket_done_then_manager_woken(ws, run, directory)
     woke = watch.once(ws)
     assert [w["order"] for w in woke] == [order] and "header-picture is done" in woke[0]["why"]
     t = core(ws, "ticket", "show", tid)
-    assert t["status"] == "done" and any("Result from Design" in h["text"] for h in t["history"])
+    assert t["status"] == "done" and any("Design reports it done" in h["text"] for h in t["history"])
     assert len(runs(ws)) == before + 1
 
 
@@ -337,3 +337,45 @@ def test_take_back_text_reads_do_it_here_instead(ws, run, directory):
     take_back(ws, run, order, accept=False)
     text = core(ws, "ticket", "show", order)["questions"][-1]["text"]
     assert text.startswith("Do it here instead: Header picture for the price list · +40 min")
+
+
+def test_extra_group_member_stops_every_share(ws, run, directory):
+    order, _tid = handed(ws, run)
+    (ws / "refuse-share").write_text("old-header.png\n")
+    run("crew", "start", order, "header-picture", code=2)  # first file went, second refused
+    assert len(shares(ws)) == 1
+    (ws / "refuse-share").unlink()
+    groups(
+        ws,
+        lambda g: g["hosted"][0]["members"].append({"ws": "ws_other00001", "host": False, "left_at": None}),
+    )
+    out = run("crew", "start", order, "header-picture", code=2)
+    assert "someone else" in out["error"] and len(shares(ws)) == 1
+
+
+def test_delegate_card_is_the_frozen_brief(ws, run, directory):
+    order, _tid = handed(ws, run)
+    run("crew", "start", order, "header-picture")
+    record = json.loads(next(ws.glob("delegate-*.json")).read_text())
+    p = json.loads(hand_proposal())
+    assert record["title"] == "Header picture for the price list"
+    assert record["checks"] == [p["done_means"][2]]
+    assert record["text"].startswith(p["handovers"][0]["why"])
+
+
+def test_changed_card_stops_before_the_delegate(ws, run, directory):
+    order, tid = handed(ws, run)
+    edit(ws, tid, lambda t: t.update(summary="Also send them our price list"))
+    out = run("crew", "start", order, "header-picture", code=2)
+    assert "changed after you pressed Start" in out["error"]
+    assert list(ws.glob("delegate-*.json")) == []
+
+
+def test_agent_start_answer_sends_nothing(ws, run, directory):
+    order = run("idea", "Price list")["order"]
+    q = run("propose", order, "--file", "-", data=hand_proposal())["question"]
+    core(ws, "answer", order, q, "Start", "--by", "agent:worker")
+    run("next", order)
+    out = run("crew", "add", order, "header-picture", code=2)  # an agent's Start never started the order
+    assert out["error"]
+    assert calls(ws, "relay", "delegate") == []
