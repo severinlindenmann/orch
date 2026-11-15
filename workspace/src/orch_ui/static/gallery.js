@@ -13,7 +13,7 @@ q('#w-loading').append(UI.state({kind:'loading'}));
  UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true});
  const e={id:'core:q:T-1:q4',ticket:'T-1',by:'Severin',via:'phone',at:Date.now()-36e5,card:{kind:'choice',title:'Home: which layout?',preview:{type:'options',options:[{id:'A',title:'As today',preview:pg('A','Cards.')},{id:'B',title:'Recent changes first',preview:pg('B','Changes.')}]}},
   decision:{action:'use_with_changes',picked:'B',changes:['Dates on the left'],summary:'Use B with 1 change',words:{text:'Take B, but dates on the left.'},pins:[{n:1,on:'option B',x:40,y:55,text:'Dates here'}]}};
- q('#w-decision').append(UI.decisionsNow([e]),UI.decisionRecord(e));}
+ q('#w-decision').append(UI.appliesNow([e]),UI.answerRecord(e));}
 q('#w-sheet').onclick=()=>{const p=document.createElement('p');p.textContent='Side sheet over the current page. Escape closes it.';UI.sheet('Summary notes',p)};
 q('#w-toast').onclick=()=>UI.toast('Answered: Newsletter logo',()=>UI.toast('Undone'));q('#w-toast-err').onclick=()=>UI.toast('Could not reach your storage',null,'error')}
 {

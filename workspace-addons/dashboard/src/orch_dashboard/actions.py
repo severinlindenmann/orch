@@ -131,12 +131,6 @@ PROOF_OPS = {
     ),
     "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}:{_question_digest(a)}"),
     "ticket.changes": ("ticket.verdict", lambda a: a.get("ticket")),
-    # A card of the Review page: a question card is an answer, a Check card (key "review") is the verdict on the
-    # ticket (proof_for picks ticket.verdict then). The proof binds the card as it was shown (its digest).
-    "review.answer": (
-        "ticket.answer",
-        lambda a: f"{a.get('ticket')}:{a.get('key')}:{_question_digest(a)}",
-    ),
     "chat.say": ("chat.send", lambda a: "general"),
     "run.send": ("run.human_input", lambda a: a.get("ticket")),  # also used by an embedded add-on page
     "chat.make_ticket": ("chat.make_ticket", lambda a: a.get("id")),
@@ -196,9 +190,6 @@ def proof_for(op, args, root=None):
         return ("config.share", "on") if args.get("on") is True else None
     if op == "look.shared":
         return "look.shared_pages", "on" if args.get("on") is True else "off"
-    if op == "review.answer" and args.get("key") == "review":
-        _question_digest(args)  # no digest, no answer
-        return "ticket.verdict", args.get("ticket")
     hit = PROOF_OPS.get(op)
     return (hit[0], hit[1](args)) if hit else None
 
@@ -315,7 +306,7 @@ MAX_REVIEW_NOTE = 8 * 1024  # the same cap as `orch review answer --note`
 
 def _review_answer(a):
     """`orch review answer <ticket> <key> --verdict v [--picked ID] [--note JSON] --digest D --via dashboard`.
-    The core re-checks the digest, the person's proof and the size of the note; this only keeps the argv plain."""
+    The core re-checks the digest and the size of the note; this only keeps the argv plain."""
     _only(a, ("ticket", "key", "verdict", "picked", "note", "digest"))
     key = a.get("key")
     if not (isinstance(key, str) and REVIEW_KEY.fullmatch(key)):
@@ -1035,6 +1026,8 @@ def build_argv(op, args, root: Path | None = None) -> list[str]:
     words, flags, tail = fn(args)
     if op == "config.agent.test":
         return [*words, "--json"]
+    if op == "review.answer":  # a card answer is the current person's plain answer: no proof, no --by
+        return [*words, *flags, "--json"]
     return [*words, *flags, "--by", actor(root), "--json", *(["--", *tail] if tail else [])]
 
 

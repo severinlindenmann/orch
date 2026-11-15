@@ -1,7 +1,7 @@
 'use strict';
 // Review (#review): everything that waits for a decision, one card at a time (the kit's UI.reviewPage), with the
 // "All cards" list beside it on a wide screen. The cards and the decisions come with the state (state.review, from
-// `orch review list`); an answer goes through the one signing path of the dashboard (op review.answer).
+// `orch review list`); an answer is a plain click (op review.answer).
 const REVIEW_ID = /^core:(?:q:(t_[a-z0-9]{6,16}):(q[0-9]{1,4})|review:(t_[a-z0-9]{6,16}))$/;
 function reviewCards() { return array(state?.review?.cards); }
 function reviewAnswered() { return array(state?.review?.answered); }

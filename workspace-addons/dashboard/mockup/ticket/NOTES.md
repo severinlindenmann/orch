@@ -138,6 +138,6 @@ The current ticket header is the strip in `../sweep/d-ticket-states.html` (all f
 
 ## Review stack (15 Nov 2026)
 
-### ticket-decisions.html
+### ticket-answers.html
 
-- Decisions tab after Steps, shown only when the ticket has decisions: "What applies now" first, then one record per decision, newest first (kit `UI.decisionsNow` / `UI.decisionRecord`).
+- No Decisions tab (owner 15 Nov): the card answers sit under the ticket's questions ("Earlier answers"): "What applies now" first, then one record per answer, newest first (kit `UI.appliesNow` / `UI.answerRecord`).

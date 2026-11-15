@@ -6,15 +6,15 @@
            meta (element whose text becomes "Review · <workspace>" once api.workspace is known),
            poll (ms, default 5000, 0 = off), now (Date, tests),
            onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list)}
-   UI.decisionRecord(entry, o)   one Decision card (Decisions tab and the Answered list). o: {fileUrl, now}
-   UI.decisionsNow(entries, o)   the "What applies now" block (null when nothing was answered yet)
+   UI.answerRecord(entry, o)   one answer record (under the ticket questions and the Answered list). o: {fileUrl, now}
+   UI.appliesNow(entries, o)   the "What applies now" block (null when nothing was answered yet)
    UI.reviewFetchApi(base, f)    the api for pages served by orch itself: same-origin /api/stack, /api/answered,
                                  /api/answer, /api/file (f = fetch, for tests)
    UI.review                     pure helpers (mapCard, verdictWord, fmtTime) for tests
 
    api (what the page needs; the dashboard passes its own):
      stack()    -> Promise<[card]>      card = one row of `orch review list --json`:
-                  {id, ticket, key, card:{kind,title,why,need,then,ok_label,signs,open,preview}, digest, since}
+                  {id, ticket, key, card:{kind,title,why,need,then,ok_label,open,preview}, digest, since}
                   preview refs are "reviewed/<sha12>/<name>" files; the page asks api.fileUrl for them
      answered() -> Promise<[entry]>     entry = {id, ticket, key, card, shown:{digest,copy,files}, at, by, via,
                   decision:{action:approve|use|use_with_changes|send_back|dont|none_of_these, picked, allows,
@@ -46,9 +46,9 @@ const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};cons
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
  return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
-  why:k.why,okLabel:k.ok_label,then:k.then,signs:!!k.signs,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c}};
+  why:k.why,okLabel:k.ok_label,then:k.then,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c}};
 
-/* ---------- Decisions: words, pill, record ---------- */
+/* ---------- Answers: words, pill, record ---------- */
 const verdictWord=e=>{const d=e.decision||{},k=e.card||{},n=(d.changes||[]).length;
  switch(d.action){
   case 'use':return 'Use '+d.picked;
@@ -79,7 +79,7 @@ const thumbs=(e,o)=>{const k=e.card||{},p=k.preview||{},d=e.decision||{},out=[];
   if(!t)return;const s=el('span','swipe-pin');s.style.left=pn.x+'%';s.style.top=pn.y+'%';s.title=pn.text||'';s.append(el('span','',String(pn.n||i+1)));t.w.append(s)});
  return out.map(x=>x.b)};
 
-UI.decisionRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('article','decision');c.dataset.id=e.id||'';
+UI.answerRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('article','decision');c.dataset.id=e.id||'';
  const h=el('div','decision-h'),v=el('span','decision-verdict '+verdictClass(e),verdictWord(e));
  h.append(el('h3','',k.title||'Answered'),v);
  const by=[String(e.by||'').replace(/^human:/,''),e.via,fmtTime(e.at,o.now)].filter(Boolean).join(' · ');
@@ -95,7 +95,7 @@ UI.decisionRecord=(e,o)=>{o=o||{};const d=e.decision||{},k=e.card||{},c=el('arti
  c.append(f);return c};
 
 /* "What applies now": the newest answer that no later one replaced, with its changes. */
-UI.decisionsNow=(entries,o)=>{o=o||{};const live=(entries||[]).filter(e=>e.decision&&!e.decision.replaced_by);if(!live.length)return null;
+UI.appliesNow=(entries,o)=>{o=o||{};const live=(entries||[]).filter(e=>e.decision&&!e.decision.replaced_by);if(!live.length)return null;
  const e=live.slice().sort((a,b)=>(toDate(b.at)||0)-(toDate(a.at)||0))[0],d=e.decision,k=e.card||{},s=el('section','decision now');
  s.setAttribute('aria-label','What applies now');s.append(el('p','eyebrow','What applies now'));
  const h=el('h2','',d.summary||verdictWord(e));h.style.cssText='margin:0;font-size:20px;line-height:28px';s.append(h);
@@ -162,7 +162,7 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
  const load=async force=>{if(loading||!alive)return;loading=true;try{const cards=await api.stack();touchMeta();apply(cards,!!force)}catch(e){if(!deck||isAuth(e))err(e)}finally{loading=false}};
  const drawAnswered=async()=>{try{const list=await api.answered();if(!alive)return;ansEl.replaceChildren();
    if(!list.length){ansEl.append(UI.state({kind:'empty',title:'No answers yet',text:'Your answers appear here and on each ticket.'}));return}
-   list.forEach(e=>ansEl.append(UI.decisionRecord(e,{fileUrl:api.fileUrl,now:o.now})))}
+   list.forEach(e=>ansEl.append(UI.answerRecord(e,{fileUrl:api.fileUrl,now:o.now})))}
   catch(e){ansEl.replaceChildren(isAuth(e)?UI.state({kind:'empty',title:'Sign in',text:'Run orch review in your terminal. It opens this page signed in.'}):UI.state({kind:'error',title:"Can't reach orch",text:'Is the review page still running in your terminal?',action:{label:'Try again',onClick:drawAnswered}}))}};
  bWait.onclick=()=>setView('deck');bAns.onclick=()=>setView('answered');
  deckEl.replaceChildren(UI.state({kind:'loading'}));waitCount(0);setView('deck');

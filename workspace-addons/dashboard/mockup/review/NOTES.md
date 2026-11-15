@@ -4,6 +4,7 @@
   the count, the deck, and the "All cards" list beside it (hidden below 1100 px). Same demo cards as the approved draft
   (`proposals/swipe-review/`, left untouched).
 - Reached from Home: "Review all" in the needs-you block (`home/home.html`). It is not in the sidebar.
-- The topbar "New ticket" is an outline button here; the decision is the primary action.
+- The topbar "New ticket" is an outline button here; the answer is the primary action.
 - The product page also has the Waiting / Answered switch above the deck (kit `UI.reviewPage`); this static page shows the Waiting side only.
-- The ticket page has a Decisions tab only when the ticket has decisions: `../ticket/ticket-decisions.html`.
+- No Decisions tab: the ticket page shows card answers under its questions ("Earlier answers"), with "What applies now" on top: `../ticket/ticket-answers.html`.
+- No sign chip on a card: an answer is a plain click.

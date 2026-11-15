@@ -149,9 +149,9 @@ const entry = (decision, extra = {}) => ({
   decision, ...extra,
 });
 
-test('decisionRecord: title, verdict words, by · via · time, taken option, pins and words', () => {
+test('answerRecord: title, verdict words, by · via · time, taken option, pins and words', () => {
   const {UI} = load();
-  const rec = UI.decisionRecord(entry({action: 'use_with_changes', picked: 'C', changes: ['Put questions on top', 'Show the month'],
+  const rec = UI.answerRecord(entry({action: 'use_with_changes', picked: 'C', changes: ['Put questions on top', 'Show the month'],
     words: {text: 'Take C, but questions on top.', voice: []}, pins: [{n: 1, on: 'option C', x: 30, y: 62, text: 'Show the month here'}]}), {fileUrl: (e, r) => '/f/' + r, now: NOW});
   const t = rec.textContent;
   assert.match(t, /Home: which layout\?/); assert.match(t, /Use C with 2 changes/);
@@ -165,26 +165,26 @@ test('decisionRecord: title, verdict words, by · via · time, taken option, pin
   assert.ok(rec.byClass('decision-verdict')[0].className.includes('ok'));
 });
 
-test('decisionRecord: words per action, text via textContent, relation lines', () => {
+test('answerRecord: words per action, text via textContent, relation lines', () => {
   const {UI} = load();
   const w = (a, k) => UI.review.verdictWord({card: k || {kind: 'draft', ok_label: 'Build it'}, decision: a});
   assert.equal(w({action: 'approve'}), 'Build it'); assert.equal(w({action: 'send_back'}), 'Sent back for changes');
   assert.equal(w({action: 'dont'}), "Don't do"); assert.equal(w({action: 'dont'}, {kind: 'check'}), 'Sent back');
   assert.equal(w({action: 'none_of_these'}), 'None of these'); assert.equal(w({action: 'use', picked: 'B'}), 'Use B');
   const evil = '<img src=x onerror=alert(1)>';
-  const rec = UI.decisionRecord(entry({action: 'send_back', words: {text: evil}, replaced_by: 'q5'}), {now: NOW});
+  const rec = UI.answerRecord(entry({action: 'send_back', words: {text: evil}, replaced_by: 'q5'}), {now: NOW});
   assert.ok(rec.byClass('decision-words')[0].children[0].textContent === evil);
   assert.match(rec.textContent, /Replaced by a later answer\./); assert.ok(rec.classList.contains('replaced'));
   assert.ok(rec.byClass('decision-verdict')[0].className.includes('talk'));
-  assert.match(UI.decisionRecord(entry({action: 'approve', replaces: 'q3'}), {now: NOW}).textContent, /Replaces your earlier answer\./);
+  assert.match(UI.answerRecord(entry({action: 'approve', replaces: 'q3'}), {now: NOW}).textContent, /Replaces your earlier answer\./);
 });
 
-test('decisionsNow: the newest answer nobody replaced, with its changes', () => {
+test('appliesNow: the newest answer nobody replaced, with its changes', () => {
   const {UI} = load();
-  assert.equal(UI.decisionsNow([]), null);
+  assert.equal(UI.appliesNow([]), null);
   const old = entry({action: 'send_back', summary: 'Sent back', replaced_by: 'q5'}, {at: new Date(2026, 10, 14, 9, 0).toISOString()});
   const cur = entry({action: 'use_with_changes', picked: 'C', summary: 'Use “Questions first” (C) with 2 changes', changes: ['One', 'Two']});
-  const s = UI.decisionsNow([old, cur], {});
+  const s = UI.appliesNow([old, cur], {});
   assert.match(s.textContent, /What applies now/); assert.match(s.textContent, /Use “Questions first” \(C\) with 2 changes/);
   assert.match(s.textContent, /One/); assert.doesNotMatch(s.textContent, /Sent back/);
 });

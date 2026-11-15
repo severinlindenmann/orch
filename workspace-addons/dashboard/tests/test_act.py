@@ -1291,7 +1291,6 @@ D64 = "a" * 64
 
 
 def test_review_answer_argv_and_via(act_server, act_orch):
-    me = "human:" + re.sub(r"[^A-Za-z0-9_.@ -]", "_", getpass.getuser())[:64]
     args = {
         "ticket": "t_abcdef",
         "key": "q3",
@@ -1308,7 +1307,7 @@ def test_review_answer_argv_and_via(act_server, act_orch):
     note = json.loads(a[a.index("--note") + 1])  # the core reads words.text, not text
     assert note["words"] == {"text": "darker"} and "text" not in note and note["pins"][0]["n"] == 1
     assert a[a.index("--digest") + 1] == D64 and a[a.index("--via") + 1] == "dashboard"
-    assert a[a.index("--by") + 1] == me and "--proof-stdin" not in a
+    assert "--by" not in a and "--proof-stdin" not in a
 
 
 @pytest.mark.parametrize(
@@ -1330,17 +1329,17 @@ def test_review_answer_is_checked(act_server, act_orch, args):
     assert acts(act_orch) == []
 
 
-def test_review_answer_proof_op_and_target():
+def test_review_answer_has_no_proof_and_no_by():
     q = {"ticket": "t_abcdef", "key": "q3", "verdict": "ok", "digest": D64}
-    assert actions.proof_for("review.answer", q) == ("ticket.answer", f"t_abcdef:q3:{D64}")
-    chk = {**q, "key": "review"}
-    assert actions.proof_for("review.answer", chk) == ("ticket.verdict", "t_abcdef")
-    with pytest.raises(actions.BadRequest):
-        actions.proof_for("review.answer", {**chk, "digest": None})
+    assert actions.proof_for("review.answer", q) is None
+    assert actions.proof_for("review.answer", {**q, "key": "review"}) is None
+    argv = actions.build_argv("review.answer", q)
+    assert "--by" not in argv and "--proof-stdin" not in argv and argv[-1] == "--json"
+    assert argv[:4] == ["review", "answer", "t_abcdef", "q3"] and argv[argv.index("--via") + 1] == "dashboard"
     assert "review" in actions.RESERVED
 
 
-def test_review_answer_is_a_persons_click_with_a_proof(ws, monkeypatch):
+def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
     from orch.pageproof import SELF
 
     seen = {}
@@ -1348,19 +1347,13 @@ def test_review_answer_is_a_persons_click_with_a_proof(ws, monkeypatch):
     class R:
         returncode, stdout, stderr = 0, "{}", ""
 
-    monkeypatch.setattr(
-        actions, "run_with_proof", lambda argv, proof, **k: seen.update(argv=argv, proof=proof) or R()
-    )
+    monkeypatch.setattr(actions, "_run", lambda argv, **k: seen.update(argv=argv) or R())
     args = {"ticket": "t_abcdef", "key": "review", "verdict": "ok", "digest": D64}
     with pytest.raises(actions.NeedsPerson):  # watch-only: no page session, nothing runs
         actions.run_op(ws, SELF, "review.answer", args, mint=None)
     assert seen == {}
-    minted = []
-    code, _, _ = actions.run_op(
-        ws, SELF, "review.answer", args, mint=lambda op, t: minted.append((op, t)) or "hp1.x"
-    )
-    assert code == 200 and minted == [("ticket.verdict", "t_abcdef")]
-    assert seen["argv"][:4] == ["review", "answer", "t_abcdef", "review"]
+    code, _, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: pytest.fail("no proof"))
+    assert code == 200 and "review" in seen["argv"] and "--by" not in seen["argv"]
 
 
 def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):
@@ -1373,7 +1366,7 @@ def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):
             stdout = json.dumps({"error": "It changed.", "code": code_in})
             stderr = "Refused: It changed.\n"
 
-        monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **k: R())
+        monkeypatch.setattr(actions, "_run", lambda argv, **k: R())
         args = {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64}
         status, text, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: "hp1.x")
         assert status == 422

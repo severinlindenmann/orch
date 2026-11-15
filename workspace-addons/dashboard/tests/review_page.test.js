@@ -1,6 +1,6 @@
 'use strict';
 // The Review page of the dashboard: state.review in, one signed click out (review.answer), files through /api/file,
-// the "All cards" list, "Review all" on Home and the Decisions tab of a ticket. The kit's UI.reviewPage has its own tests.
+// the "All cards" list, "Review all" on Home and the card answers on a ticket. The kit's UI.reviewPage has its own tests.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -102,11 +102,11 @@ test('"Review all" is not shown in a shared copy', () => {
   assert.ok(home({review:{cards:[CARD]}}).reviewAllButton());
   const c = home({review:{cards:[CARD]}}); c.snapshot = true; assert.equal(c.reviewAllButton(), null);
 });
-test('Decisions tab: only when the ticket has decisions, newest first, files by /api/file', () => {
+test('Review answers on a ticket: only those with a card answer, newest first', () => {
   const answered = (id, at, extra = {}) => ({id, text:'Q ' + id, answer:'Looks good', answered_by:'human:sev', via:'dashboard', at, card:{kind:'draft', title:'Card ' + id}, decision:{action:'approve', summary:'Looks good'}, ...extra});
   const t = {id:'t_abcdef', questions:[answered('q1', '2026-11-14T09:00:00Z'), {id:'q2', text:'open'}, answered('q3', '2026-11-15T09:00:00Z'), {id:'q4', answer:'x', at:'2026-11-15T10:00:00Z'}]};
   const c = home({review:{cards:[]}}, [t]);
-  const list = vm.runInContext('ticketDecisions', c)(t);
+  const list = vm.runInContext('ticketReviewAnswers', c)(t);
   assert.deepEqual(list.map(e => e.id), ['core:q:t_abcdef:q3', 'core:q:t_abcdef:q1'], 'an answer without a decision is not one');
-  assert.equal(vm.runInContext('ticketDecisions', c)({id:'t_abcdef', questions:[{id:'q4', answer:'x'}]}).length, 0);
+  assert.equal(vm.runInContext('ticketReviewAnswers', c)({id:'t_abcdef', questions:[{id:'q4', answer:'x'}]}).length, 0);
 });

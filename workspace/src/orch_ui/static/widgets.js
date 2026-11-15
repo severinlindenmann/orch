@@ -118,7 +118,6 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const ft=el('footer','swipe-foot');
   if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
   const row=el('div','swipe-foot-row');
-  if(it.signs){const s=el('span','swipe-signs');s.append(ic('shield',14),mode==='phone'?'Face ID when you approve':'You sign when you approve');row.append(s)}
   row.append(el('span','grow'));const pc=(pins[it.id]||[]).length;if(pc){const s=el('span','swipe-pins');s.append(ic('pin',14),pc+(pc===1?' spot marked':' spots marked'));row.append(s)}
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   ft.append(row);
@@ -138,7 +137,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   stage.append(cur);syncWords();wire(cur);change()};
  const summary=()=>{const d=el('div','swipe-done');d.append(UI.statusIcon('done'),el('h3','',"You've answered everything in this review."));
   const t=el('div','tally'),c=v=>Object.values(ans).filter(x=>x.verdict===v).length;[['ok','check','approved'],['no','x','not done'],['talk','mic','sent back for changes']].forEach(([v,i,l])=>{const s=el('span');s.append(ic(i,16),c(v)+' '+l);t.append(s)});
-  d.append(t,el('p','',"Each ticket shows what happens next. Answers are on the ticket under Decisions."));return d};
+  d.append(t,el('p','',"Each ticket shows what happens next. Answers are on the ticket, under its questions."));return d};
  /* drag */
  const dirOf=(dx,dy)=>Math.abs(dy)>Math.abs(dx)*1.1?(dy>0?'down':'up'):dx>0?'right':'left';
  const show=(c,dx,dy)=>{const w=stage.clientWidth||1,hgt=stage.clientHeight||1;c.style.transform=`translate(${dx}px,${dy}px) rotate(${dx/w*12}deg)`;
