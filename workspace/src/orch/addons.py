@@ -69,10 +69,16 @@ def _shipped_names() -> tuple[str, ...]:
     The names come from the generated catalog shipped_addons.json (scripts/gen_shipped_addons.py lists
     workspace-addons/), never from a list in the code."""
     try:
-        data = json.loads((Path(__file__).resolve().parent / "shipped_addons.json").read_text(encoding="utf-8"))
+        data = json.loads(
+            (Path(__file__).resolve().parent / "shipped_addons.json").read_text(encoding="utf-8")
+        )
     except (OSError, ValueError):
         return ()
-    return tuple(sorted(n for n in data if isinstance(n, str) and NAME_RE.match(n))) if isinstance(data, dict) else ()
+    return (
+        tuple(sorted(n for n in data if isinstance(n, str) and NAME_RE.match(n)))
+        if isinstance(data, dict)
+        else ()
+    )
 
 
 SHIPPED_ADDONS = _shipped_names()

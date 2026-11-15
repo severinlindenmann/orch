@@ -1,4 +1,4 @@
-"""AGENTS.md R1.1 / R1.2: the core names no add-on package, and relay/publish are invisible until turned on."""
+"""AGENTS.md R1.1 / R1.2: core names no add-on package; relay/publish stay invisible until turned on."""
 
 import ast
 import re
@@ -21,7 +21,9 @@ ALLOW = {
     "orch/config.py": {"focus": _FOLLOW_UP, "insights": _FOLLOW_UP},
     "orch/history.py": {"sync": _FOLLOW_UP},
     "orch/chat.py": {"automation": _FOLLOW_UP},
-    "orch/tickets.py": {"dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)"},
+    "orch/tickets.py": {
+        "dashboard": "PERSON_VIA: the one named compat constant (wire value of contracts/chat-groups.md)"
+    },
     "orch/humanproof.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/pageproof.py": {"focus": _GONE, "dashboard": _GONE, "insights": _GONE},
     "orch/syncgate.py": {"sync": _GONE},
@@ -52,7 +54,10 @@ def test_core_has_no_addon_name_literals():
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names:
                 if node.value not in ALLOW.get(rel, {}):
                     bad.append(f"{rel}:{node.lineno} {node.value!r}")
-    assert not bad, "core names an add-on (R1.2); move it into the add-on or allowlist it with a reason:\n" + "\n".join(bad)
+    assert not bad, (
+        "core names an add-on (R1.2); move it into the add-on or allowlist it with a reason:\n"
+        + "\n".join(bad)
+    )
 
 
 def test_allowlist_has_no_stale_entries():
@@ -62,7 +67,12 @@ def test_allowlist_has_no_stale_entries():
         for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 seen.setdefault(rel, set()).add(node.value)
-    stale = [(f, n) for f, d in ALLOW.items() for n in d if n not in seen.get(f, set()) and (ROOT / "workspace/src" / f).exists()]
+    stale = [
+        (f, n)
+        for f, d in ALLOW.items()
+        for n in d
+        if n not in seen.get(f, set()) and (ROOT / "workspace/src" / f).exists()
+    ]
     assert not stale, stale
 
 

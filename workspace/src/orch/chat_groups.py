@@ -215,7 +215,11 @@ def message_errors(m: dict, ctx: dict | None = None) -> list[str]:
         if b.get("by") == "you":
             if b.get("via") == "phone" and not (isinstance(o, dict) and o.get("from") == b.get("phone")):
                 out.append("by you via phone: origin.from must be that phone")
-            if b.get("via") == tickets.PERSON_VIA and isinstance(o, dict) and o.get("from") != tickets.PERSON_VIA:
+            if (
+                b.get("via") == tickets.PERSON_VIA
+                and isinstance(o, dict)
+                and o.get("from") != tickets.PERSON_VIA
+            ):
                 out.append("by you via dashboard: origin.from must be dashboard")
         if isinstance(b.get("task"), dict) and b["task"].get("ws") == host:
             out.append("task.ws is the member that got the task, never the host")
@@ -433,7 +437,9 @@ def shown_as(m: dict, ctx: dict) -> str | None:
         return "Other phone"
     o = b.get("origin") or {}
     return (
-        "You" if o.get("from") == tickets.PERSON_VIA or o.get("from") in ctx.get("own_phones", []) else "Other phone"
+        "You"
+        if o.get("from") == tickets.PERSON_VIA or o.get("from") in ctx.get("own_phones", [])
+        else "Other phone"
     )
 
 
@@ -1750,7 +1756,9 @@ def say(
     dashboard)."""
     if not text.strip():
         raise Refused("A group message needs text.")
-    if via == tickets.PERSON_VIA:  # "by you" is the person at this dashboard: an agent can't write as the person
+    if (
+        via == tickets.PERSON_VIA
+    ):  # "by you" is the person at this dashboard: an agent can't write as the person
         tickets.require_human("Write into the group as yourself?", "writing as the person")
     gid = ensure_group(root, tid, by)
     me = _me(root)
