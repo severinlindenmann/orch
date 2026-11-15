@@ -566,7 +566,6 @@ class Handler(BaseHTTPRequestHandler):
             "people.js",
             "look.js",
             "look-icons.js",
-            "look.css",
             "look-colors.css",
             "switcher.js",
             "blocks.js",
