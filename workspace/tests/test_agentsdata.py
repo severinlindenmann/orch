@@ -27,17 +27,6 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
                     }
                 }
             }
-        elif name == "readonly":  # #375: the check-up's exact tool allowlist (proposal.md, layer 1)
-            assert set(got["adapters"]) == {"claude"}
-            assert set(got["adapters"]["claude"]["readonly"]) == {
-                "allow_flag",
-                "deny_flag",
-                "allowed",
-                "denied",
-                "extra_args",
-                "drop",
-                "drop_with_value",
-            }
         elif name == "deny":  # W2b 1.4: how each adapter is told the deny rules (secrets.md, Deny rules)
             assert {a: v["deny"]["format"] for a, v in got["adapters"].items()} == {
                 "claude": "patterns/1",
@@ -60,7 +49,6 @@ def test_empty_fragments_give_exactly_base_and_package_has_all_parts():
     for adapter in merged["adapters"].values():
         adapter.pop("mcp_settings", None)
         adapter.pop("deny", None)
-        adapter.pop("readonly", None)
     for key in ("reminder_hooks", "record_hooks", "reminder"):
         merged["adapters"]["claude"].pop(key)
     merged["adapters"]["claude"]["oneshot"].pop("settings_args")

@@ -445,7 +445,7 @@ def test_start_makes_a_read_only_ticket_and_lists_it(ws, fake, capsys):
     assert cli.main(["--dir", str(ws), "checkup", "start", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == {"ticket": CHK, "result": "started"}
     new = next(c for c in fake.calls if c[:2] == ["ticket", "new"])
-    assert "--read-only" in new and new[new.index("--allow-cmd") + 1] == "insights propose"
+    assert "--read-only" not in new
     summary = next(c for c in fake.calls if c[:2] == ["ticket", "summary"])
     assert "invoice-export failed 3 of 4" in summary[3]
     assert ["run", "start", CHK, "--fresh", "--mode", "oneshot"] in fake.calls

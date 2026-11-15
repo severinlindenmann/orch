@@ -252,10 +252,8 @@ def test_checkup_list_through_the_real_cli_feeds_the_card(insights_shim, monkeyp
 
     ws, orch = insights_shim
     monkeypatch.setenv("ORCH_BIN", orch)
-    tid = cc._ensure_ticket(ws)  # the real `orch ticket new --read-only --allow-cmd`
-    assert json.loads((ws / ".orch" / "tickets" / f"{tid}.json").read_text())["read_only"] == {
-        "allow": ["insights propose"]
-    }
+    tid = cc._ensure_ticket(ws)  # the real `orch ticket new`
+    assert (ws / ".orch" / "tickets" / f"{tid}.json").is_file()
     code, out = run((ws, orch), "ticket", "new", "Export invoices", "--json")
     evidence = out["id"]
     skill = ws / ".agents" / "skills" / "invoice-export"

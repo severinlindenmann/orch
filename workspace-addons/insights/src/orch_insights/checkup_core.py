@@ -29,7 +29,6 @@ PLAIN = "Check-up"
 TITLE = "Workspace check-up"
 SCHEMA = "orch.proposal/1"
 WEEKLY_WHEN = "every monday 07:00"
-ALLOW_CMD = "insights propose"
 MAX_FILE = 1024 * 1024
 MAX_FILES = 200
 MAX_COPY = 20 * 1024 * 1024
@@ -916,7 +915,7 @@ def _ensure_ticket(root: Path, weekly: bool = False) -> str:
     if tid and not _ticket(root, tid):
         tid = None
     if not tid:
-        made = orchcall(root, "ticket", "new", TITLE, "--note", NOTE, "--read-only", "--allow-cmd", ALLOW_CMD)
+        made = orchcall(root, "ticket", "new", TITLE, "--note", NOTE)
         tid = made.get("id") if isinstance(made, dict) else None
         if not _ok(_TICKET, tid):
             raise CheckupError("The check-up ticket could not be made.", "not_available")

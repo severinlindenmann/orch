@@ -223,18 +223,6 @@
             }
           }
         },
-        "readonly": {
-          "type": "object", "required": ["allow_flag", "deny_flag", "allowed", "denied", "extra_args", "drop", "drop_with_value"], "additionalProperties": false,
-          "description": "Optional. The read-only profile of a check-up run (proposal.md, layer 1): an exact allowlist of tools the agent tool is started with. `{ticket}` in an allowed item is the check-up's own ticket. The allowed list replaces the normal one, `denied` is added to the deny flag, `drop` flags and `drop_with_value` flags (with their value) are removed, `extra_args` are added. Absent = the adapter cannot do a check-up.",
-          "properties": {
-            "allow_flag": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" }, "deny_flag": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" },
-            "allowed": { "type": "array", "minItems": 1, "items": { "type": "string", "maxLength": 200 } },
-            "denied": { "type": "array", "items": { "type": "string", "maxLength": 200 } },
-            "extra_args": { "type": "array", "items": { "type": "string", "maxLength": 80 } },
-            "drop": { "type": "array", "items": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" } },
-            "drop_with_value": { "type": "array", "items": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" } }
-          }
-        },
         "capabilities": {
           "type": "object",
           "required": ["resume", "choose_session_id", "interactive_tmux", "hooks", "stream", "permission_retry", "subagents", "usage"],

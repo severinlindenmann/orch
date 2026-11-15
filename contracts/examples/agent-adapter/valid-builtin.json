@@ -49,7 +49,6 @@
         { "file": "{home}/.claude.json", "format": "json", "path": ["projects", "{folder}", "mcpServers"] },
         { "file": "{folder}/.mcp.json", "format": "json", "path": ["mcpServers"] }
       ],
-      "readonly": {"allow_flag": "--allowedTools", "deny_flag": "--disallowedTools", "allowed": ["Bash(orch record query:*)", "Bash(orch record tail:*)", "Bash(orch record counts:*)", "Bash(orch ticket list:*)", "Bash(orch ticket show:*)", "Bash(orch conn list:*)", "Bash(orch log {ticket}:*)", "Bash(orch check add {ticket}:*)", "Bash(orch check done {ticket}:*)", "Bash(orch check start {ticket}:*)", "Read", "Grep", "Glob"], "denied": ["WebFetch", "WebSearch", "Edit", "Write", "NotebookEdit"], "extra_args": ["--strict-mcp-config", "--setting-sources", "", "--permission-mode", "default"], "drop": ["--dangerously-skip-permissions"], "drop_with_value": ["--permission-mode"]},
       "capabilities": { "resume": true, "choose_session_id": true, "interactive_tmux": true, "hooks": true, "stream": true, "permission_retry": true, "subagents": true, "usage": true, "activity": "live" },
       "deny": {"format": "patterns/1"},
       "files": { "instructions_link": { "CLAUDE.local.md": "@AGENTS.md" }, "skills_link": ".claude/skills" }

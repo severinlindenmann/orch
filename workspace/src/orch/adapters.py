@@ -219,51 +219,6 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
     return out
 
 
-READONLY_NEEDS = "Check-up needs Claude as the agent for now."
-
-
-def readonly(name: str, root: Path | None = None) -> dict | None:
-    """The built-in read-only profile of this agent (agents/readonly.json: an exact tool allowlist for a
-    check-up run), or None when its tool cannot be held to one (a user's generic command never can)."""
-    a = load(name, root)
-    r = a.get("readonly")
-    return r if isinstance(r, dict) and a["adapter"] in builtin_names() else None
-
-
-def readonly_argv(
-    name: str, argv: list[str], ticket: str, root: Path | None = None, allow_cmds: tuple[str, ...] = ()
-) -> list[str]:
-    """`argv` held to the read-only profile for a run on `ticket` (`allow_cmds`: more `orch` commands,
-    the words after `orch`, e.g. "ticket new"): its own allowed-tools list replaces the
-    normal one, the denied tools are added, the flags that switch the checks off are dropped, and no MCP
-    server is passed. Only the words before '--' (where the prompt starts) are touched."""
-    r = readonly(name, root)
-    if r is None:
-        raise Refused(READONLY_NEEDS)
-    sep = argv.index("--") if "--" in argv else len(argv)
-    head, out, i = list(argv[:sep]), [], 0
-    drop_value = (r["allow_flag"], *r["drop_with_value"])
-    while i < len(head):
-        if head[i] in r["drop"]:
-            i += 1
-        elif head[i] in drop_value:
-            i += 2
-        else:
-            out.append(head[i])
-            i += 1
-    allowed = ",".join(
-        [*(x.replace("{ticket}", ticket) for x in r["allowed"]), *(f"Bash(orch {c}:*)" for c in allow_cmds)]
-    )
-    denied = ",".join(r["denied"])
-    if r["deny_flag"] in out and out.index(r["deny_flag"]) + 1 < len(out):
-        k = out.index(r["deny_flag"]) + 1
-        out[k] = f"{out[k]},{denied}"
-    else:
-        out += [r["deny_flag"], denied]
-    out += [r["allow_flag"], allowed, *r["extra_args"]]
-    return out + list(argv[sep:])
-
-
 INSTALL_NAME = {"claude": "Claude Code"}  # the program people install, by binary (messages only)
 DENY_MIN_VERSION = (2, 0, 0)  # first build where Bash(*text*) patterns and Read(//path) rules are honoured
 
