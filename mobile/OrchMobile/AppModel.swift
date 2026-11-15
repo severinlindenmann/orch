@@ -45,6 +45,8 @@ final class AppModel {
     private(set) var answeredElsewhere: Set<String> = []
     /// questions the relay refused an answer for with 409 taken_back (this run): their cards are gone
     private(set) var takenBackRefused: Set<String> = []
+    /// When this phone first learned that a question was answered on the computer (shown as its time).
+    private(set) var answeredElsewhereAt: [String: Date] = [:]
     private(set) var isLoading = false
     private(set) var hasLoaded = false
     /// When the last refresh succeeded (drives "Last updated ...").
@@ -450,7 +452,7 @@ final class AppModel {
             if updates != newUpdates { updates = newUpdates }
             if let st = await st, settings != st { settings = st }
             for qid in QuestionClosing.closedByTicket(questions: questions, updates: updates, answers: answers, pending: Set(pendingAnswers.keys)) {
-                answers[qid] = ""; answeredElsewhere.insert(qid)
+                answers[qid] = ""; markAnsweredElsewhere(qid)
             }
             await reloadMessages()
             applyTakenBack()
@@ -623,6 +625,11 @@ final class AppModel {
         Dictionary(outbox.items.compactMap { i in i.kind == .answer && i.sentMessageId == nil ? i.questionMessageId.map { ($0, i.answer ?? "") } : nil }, uniquingKeysWith: { a, _ in a })
     }
 
+    private func markAnsweredElsewhere(_ qid: String) {
+        answeredElsewhere.insert(qid)
+        if answeredElsewhereAt[qid] == nil { answeredElsewhereAt[qid] = Date() }
+    }
+
     func answerTime(for questionId: String) -> Date? {
         if let sent = answerSentAt[questionId] { return sent }
         return outbox.items.first { $0.kind == .answer && $0.questionMessageId == questionId }
@@ -639,7 +646,7 @@ final class AppModel {
                 answers[qid] = opt; answerTick += 1; announcement = "Answer sent: \(shown)"
             case .answerTaken(_, let qid, let text):
                 // Only the answer value is kept; "" = answered elsewhere, value unknown (the card then shows no chip).
-                answers[qid] = Outbox.takenAnswer(from: text) ?? ""; answeredElsewhere.insert(qid); message = nil
+                answers[qid] = Outbox.takenAnswer(from: text) ?? ""; markAnsweredElsewhere(qid); message = nil
                 noticeTick += 1; announcement = "Answered on your computer"
             case .questionTakenBack(_, let qid, let text):
                 takenBackRefused.insert(qid); applyTakenBack()
@@ -658,7 +665,7 @@ final class AppModel {
         if let u = try? await client.updates() {
             updates = u
             for qid in QuestionClosing.closedByTicket(questions: questions, updates: u, answers: answers, pending: Set(pendingAnswers.keys)) {
-                answers[qid] = ""; answeredElsewhere.insert(qid)
+                answers[qid] = ""; markAnsweredElsewhere(qid)
             }
         }
     }
@@ -936,7 +943,7 @@ final class AppModel {
         readState = ReadState(); blobCache = [:]; verifiedCardFiles = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         UserDefaults.standard.removeObject(forKey: HiddenQuestions.defaultsKey); NotificationCenter.default.post(name: .orchPhoneReset, object: nil)
-        credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; takenBackRefused = []; hasLoaded = false
+        credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; answeredElsewhereAt = [:]; takenBackRefused = []; hasLoaded = false
         pairedWorkspaces = []; lastUpdated = nil; message = nil; transportDown = false; tab = .chats; phase = .onboarding
     }
 

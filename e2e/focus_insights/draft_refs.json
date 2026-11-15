@@ -12,6 +12,10 @@
     "image": "img2/used.png",
     "note": "Ticket page, step labels Skill / Tool / Connection, 'All live' back link"
   },
+  "ticket-blocks": {
+    "image": null,
+    "note": "Command blocks + Find in the log: workspace-addons/dashboard/mockup/focus/draft-692/b1-blocks.html (?state=search)"
+  },
   "ticket-used": {
     "image": "img2/used.png",
     "note": "Used tab: What / Name / From / How often / Note (draft/final/index.html, Used tab)"

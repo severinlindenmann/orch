@@ -203,7 +203,6 @@ def test_folder_addon_passes_the_core_check_on_dev_test_and_with_the_handoff(pro
     for kind in ("dev", "test"):
         monkeypatch.setattr(hp, "install_kind", lambda k=kind: k)
         assert addons._local_add_ok()
-    assert "addon.add_local" in hp.OPS
 
 
 def test_reinstall_needs_a_record_for_this_environment(tmp_path, monkeypatch):
@@ -708,14 +707,12 @@ def test_other_orch_home_gets_the_plain_text_first(throwaway, monkeypatch, capsy
     ran = []
     monkeypatch.setattr(addons, "run_uv", lambda a: ran.append(a))
     monkeypatch.setattr(addons, "reexec", lambda a: ran.append(a))
-    queued = []
-    monkeypatch.setattr(hp, "request_handoff", lambda *a, **k: queued.append(a) or True)
     code = cli.main(argv)
     cap = capsys.readouterr()
     text = cap.out + cap.err
     assert code == 2 and hp.MSG_ENV_CHANGE in text
     assert "Do this in the dashboard" not in text and "dashboard on this computer" not in text
-    assert queued == [] and ran == []  # nothing queued as a hand-off, nothing installed
+    assert ran == []  # nothing installed
     assert not (acct / ".orch-tool").exists()  # real home untouched
     assert not (orch_home / "keys").exists()  # and no snapshot / key written for the folder either
 

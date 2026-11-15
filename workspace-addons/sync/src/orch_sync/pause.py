@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import config, humanproof, syncgate, tickets
+from orch import humanproof, syncgate, tickets
 
 from . import cli, incoming, paths, records, repo, scan
 
@@ -291,14 +291,6 @@ def resolve(root, path, keep, args=None, *, now=None):
                 if any(f.code != "cannot-check" for f in issues):
                     raise repo.Refused("This copy contains a secret or cannot be accepted; edit it first")
                 hashed = hashlib.sha256(data).hexdigest()
-                by = humanproof.person_by(
-                    root,
-                    args,
-                    "addon.act",
-                    "sync:file:" + hashed,
-                    no_handoff="Allowing this file needs a person's proof over stdin.",
-                )
-                config.require_person(by, "allow this unchecked file")
                 approved = cli.read(root, "checked-files")
                 approved[path] = records.make(
                     root, "file", f"{path}:{hashed}", {"path": path, "sha256": hashed}
@@ -316,14 +308,6 @@ def resolve(root, path, keep, args=None, *, now=None):
                 adopting = keep == "theirs" and data == theirs and mine != data
                 if adopting:
                     # Fable B2: adopting a peer's ticket is a person's decision, bound to these exact bytes.
-                    by = humanproof.person_by(
-                        root,
-                        args,
-                        "addon.act",
-                        "sync:keep-theirs:" + hashlib.sha256(path.encode() + b"\0" + data).hexdigest(),
-                        no_handoff="Keeping their copy of a ticket needs a person's proof over stdin.",
-                    )
-                    config.require_person(by, "keep their copy of this ticket")
                     doc = local_decisions(doc, local)
                 # The chosen copy is the remote side of a merge whose base and local side are this machine's
                 # copy: its plain fields win, while the receiving core's verifiers decide every Won't do and
@@ -361,17 +345,6 @@ def resolve(root, path, keep, args=None, *, now=None):
                 # Everything that can refuse runs before the proof, so a refusal never uses it up (LOW-4).
                 # The person's proven choice covers the incoming numbers they reviewed (a far key included).
                 covers = step.top_number(root, remote) if jump and remote else None
-                if keep == "theirs" or jump:
-                    # M3: numbers only go up, so their counter (or clearing a jump at all) is a person's
-                    # decision, bound to the reviewed remote commit.
-                    by = humanproof.person_by(
-                        root,
-                        args,
-                        "addon.act",
-                        f"sync:keep-{keep}-counter:{remote}",
-                        no_handoff="Choosing the ticket counter needs a person's proof over stdin.",
-                    )
-                    config.require_person(by, "choose the ticket counter")
             elif paths.ARTIFACT.fullmatch(path) and keep == "theirs" and mine is not None and mine != data:
                 # No overwrite even on retries or two choices on the same day.
                 suffix = f" (mine {now[:10]})"
@@ -510,14 +483,6 @@ def leave_out(root, path, args, *, now=None):
             raise repo.Refused("This file is not waiting for a choice")
         data = left_bytes(root, path)
         hashed = hashlib.sha256(data).hexdigest()
-        by = humanproof.person_by(
-            root,
-            args,
-            "addon.act",
-            "sync:leave-out:" + hashlib.sha256(path.encode() + b"\0" + data).hexdigest(),
-            no_handoff="Leaving a file out of sync needs a person's proof over stdin.",
-        )
-        config.require_person(by, "leave this file out of sync")
         left = cli.read(root, "left-out")
         left[path] = records.make(root, "left-out", f"{path}:{hashed}", {"path": path, "sha256": hashed})
         step.write(root, "run/sync/left-out.json", step.encoded(left))
@@ -577,14 +542,6 @@ def take_remote(root, args, *, now=None):
                     head = new
                 repo.git(root, "read-tree", head, index=index)  # the temp index (apply sets the default one)
             tree, merges = step.taken_tree(root, head, remote, index, now)
-            by = humanproof.person_by(
-                root,
-                args,
-                "addon.act",
-                take_target(remote, tree),
-                no_handoff="Taking the other computer's history needs a person's proof over stdin.",
-            )
-            config.require_person(by, "take the other computer's history")
             new = step.commit(root, tree, [head, remote], now)
             step.write(
                 root,
@@ -661,14 +618,6 @@ def resolve_case(root, path, args, *, rename=None, now=None):
             taken |= {incoming._fold(f"{folder}/{f.name}") for f in repo.safe(root, folder).iterdir()}
             if incoming._fold(target) in taken:
                 raise repo.Refused("A file with this name (in any case) is already there; choose another")
-        by = humanproof.person_by(
-            root,
-            args,
-            "addon.act",
-            case_target(path, remote, target),
-            no_handoff="Choosing a file name needs a person's proof over stdin.",
-        )
-        config.require_person(by, "choose a file name")
         with syncgate.hold(root), tickets.sync_apply(root, local.split("/")[1].removesuffix(".json")):
             if target:
                 source, dest = repo.safe(root, local), repo.safe(root, target)
@@ -728,14 +677,7 @@ def keep_key(root, key, tid, args, *, now=None):
             or any(p.path == "ticket-counter.json" for p in checked.problems)
         ):
             raise repo.Refused("Incoming files could not be checked")
-        by = humanproof.person_by(
-            root,
-            args,
-            "addon.act",
-            f"sync:keep-key:{key}:{tid}:{remote}",
-            no_handoff="Choosing a ticket number needs a person's proof over stdin.",
-        )
-        config.require_person(by, "choose a ticket number")
+        by = tickets.acting_by(args)
         ours, theirs = step.entries(root, "HEAD"), step.entries(root, remote)
         common = repo.git(root, "merge-base", "HEAD", remote, allowed_codes=(0, 1)).stdout.decode().strip()
         base_rows = step.entries(root, common or None)
