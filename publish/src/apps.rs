@@ -84,6 +84,15 @@ fn check_manifest(m: &Manifest, dir: &FsPath, docker_ok: bool) -> ApiResult<()> 
     Ok(())
 }
 
+/// The node install step: `npm ci` only with a lockfile (it refuses without one), else `npm install`.
+fn node_install(dir: &FsPath) -> &'static str {
+    if dir.join("package-lock.json").is_file() || dir.join("npm-shrinkwrap.json").is_file() {
+        "npm ci --omit=dev"
+    } else {
+        "npm install --omit=dev --no-audit --no-fund"
+    }
+}
+
 /// Scratch data folder of the build/test steps of one deploy: next to the version folders, made by the
 /// server, never inside the code the build can write to.
 fn step_dir(st: &State, name: &str, vroot: &FsPath) -> PathBuf {
@@ -270,6 +279,10 @@ pub async fn deploy(
         st.runner.stop(&format!("{name}~new")).await;
         rm_tree(&step_dir(st, name, &vroot)).await;
         rm_tree(&vroot).await;
+        if existing.is_none() {
+            // a failed first deploy leaves no empty app folder behind (fails harmlessly if not empty)
+            let _ = std::fs::remove_dir(&root);
+        }
     }
     r
 }
@@ -311,7 +324,8 @@ async fn deploy_inner(
         } else {
             "uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt"
         }),
-        "node" if dir.join("package.json").is_file() => Some("npm ci --omit=dev"),
+        // `npm ci` needs a lockfile; the node template (and many small apps) ship package.json only
+        "node" if dir.join("package.json").is_file() => Some(node_install(&dir)),
         _ => None,
     };
     let mut image = None;
@@ -865,6 +879,20 @@ async fn serve_static(app: &AppRow, rest: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_install_uses_ci_only_with_a_lockfile() {
+        let d = std::env::temp_dir().join(format!("orch-node-install-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("package.json"), "{}").unwrap();
+        assert_eq!(
+            node_install(&d),
+            "npm install --omit=dev --no-audit --no-fund"
+        );
+        std::fs::write(d.join("package-lock.json"), "{}").unwrap();
+        assert_eq!(node_install(&d), "npm ci --omit=dev");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     fn manifest(stack: &str) -> Manifest {
         Manifest {
