@@ -1837,6 +1837,135 @@ def sync_reviews(root: Path) -> list[str]:
     return sent
 
 
+CARD_TRIES = 3  # a card the relay keeps refusing is given up after this many sends (the plain question stays)
+_CARD_NAME = re.compile(
+    r"[^./\\\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]"
+    r"[^/\\\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]{0,254}"
+)
+
+
+def _card_files(root: Path, tid: str, card: dict, shown: dict, state: dict) -> tuple[dict, list[dict]]:
+    """(refs, card_files) for the reviewed files of a card (relay-api.md 'Review cards on the phone'): every
+    file goes through the secret gate (_gate) and the 20 MB card budget, then is uploaded once (_upload).
+    refs maps a stored src to its card_files index, or to "held_back" (not a sendable type or name, changed
+    since it was reviewed, a secret) / "too_large" (over the budget): never uploaded, the phone says
+    "Open on the computer". Raises Refused when an upload fails (the relay is away: the card is retried)."""
+    from orch import review
+
+    refs: dict = {}
+    files: list[dict] = []
+    total = 0
+    for src in review.card_files_of(card):
+        name = src.rsplit("/", 1)[-1]
+        mime = review.MIMES.get(Path(name).suffix.lower())
+        data = review.read_reviewed(root, tid, shown, src)  # None: gone or no longer the reviewed bytes
+        if data is None or not data or mime is None or not _CARD_NAME.fullmatch(name):
+            refs[src] = "held_back"
+        elif len(files) >= 20 or total + len(data) > review.MAX_PHONE_CARD:
+            refs[src] = "too_large"
+        elif not _gate(root, tid, data, name, state):
+            refs[src] = "held_back"
+        elif (blob := _upload(root, data, state)) is None:
+            raise Refused("A card file could not be uploaded.")
+        else:
+            total += len(data)
+            refs[src] = len(files)
+            files.append(
+                {
+                    "blob_id": blob["blob_id"],
+                    "name": name,
+                    "size": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "mime": mime,
+                }
+            )
+    return refs, files
+
+
+def sync_cards(root: Path) -> list[str]:
+    """Review stack: every open card question (a question with a stored card) of a ticket goes to the paired
+    phones ONCE, as the question with its card, the reviewed files (uploaded through the secret gate) and the
+    digest the phone echoes (relay.send_question). Nothing goes out without a paired phone, and a question
+    already sent to the phones (by `orch ask` or an earlier sync) is not sent again. A card that does not pass
+    the wire check goes out without `card` (a plain question). Returns "<ticket>:<question>" sent."""
+    from orch import relay, review
+
+    if not _paired(root):
+        return []
+    sent: list[str] = []
+    for item in review.stack(root):
+        if item["key"] == "review":
+            continue
+        tid, qid = item["ticket"], item["key"]
+        key = f"{tid}:{qid}"
+        try:
+            ticket = tickets.load(root, tid)
+            q = next(x for x in ticket["questions"] if x["id"] == qid)
+        except (Refused, OSError, ValueError, KeyError, StopIteration):
+            continue
+        if not isinstance(q.get("card"), dict) or q.get("answer") is not None:
+            continue  # a plain question is asked with `orch ask`
+        digest = tickets.question_digest(q)
+        if relay.asked_to_phones(root, tid, qid):
+            continue
+        claimed: list[bool] = []
+
+        def claim(st, key=key, digest=digest, claimed=claimed):
+            rec = st.setdefault("cards", {}).get(key)
+            if rec and (rec.get("digest") == digest or rec.get("tries", 0) >= CARD_TRIES):
+                return  # sent (a changed card is re-sent later, M4) or given up
+            st["cards"][key] = {"digest": digest, "tries": (rec or {}).get("tries", 0) + 1, "done": False}
+            claimed.append(True)
+
+        update_state(root, claim)
+        if not claimed:
+            continue
+        state = load_state(root)
+        try:
+            refs, files = _card_files(root, tid, q["card"], q.get("shown") or {}, state)
+            try:
+                wire: dict | None = review.wire_card(q["card"], refs)
+            except Refused:
+                wire = None  # the contract: send the question without the card
+            if wire is None:
+                files = []
+            relay.send_question(
+                root,
+                ticket,
+                q,
+                card=wire,
+                card_files=files or None,
+                digest=digest if wire else None,
+            )
+        except (Refused, OSError):
+
+            def undo(st, key=key, digest=digest):
+                rec = st.get("cards", {}).get(key)
+                if rec and rec.get("digest") == digest and not rec.get("done"):
+                    rec["digest"] = None  # retried at the next pull (up to CARD_TRIES)
+
+            with contextlib.suppress(Refused):
+                update_state(root, undo)
+            continue
+        finally:
+
+            def merge(st, state=state):
+                st["blobs"].update(state["blobs"])
+                if state.get("secret_skipped") is not None:
+                    st["secret_skipped"] = state["secret_skipped"]
+
+            with contextlib.suppress(Refused, OSError):
+                update_state(root, merge)
+
+        def done(st, key=key):
+            st["cards"][key]["done"] = True
+
+        with contextlib.suppress(Refused, OSError):
+            update_state(root, done)
+        sent.append(key)
+    return sent
+
+
 def close_rounds(root: Path, tid: str) -> None:
     """The ticket left Review: its open review round is stale at once (called by tickets.apply_op under the
     ticket lock, before the new status is written). Reads first: without phones nothing is written."""
