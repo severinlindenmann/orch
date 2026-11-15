@@ -87,6 +87,8 @@ of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until
 | `relay.send_failed` | `what`, `reason` (the exception class), `why` (its message, cut at 300, key values hidden) |
 | `run.live_submit` | `what` (a live run's input hand-over step; `ticket` and `run` are the event fields) |
 | `copies.clean` | `line` (one step of the clean-up of separate copies) |
+| `diag.report_pruned` | `ref`, `why` (a report or incident folder removed for the budget) |
+| `diag.incident` | `reason`, `ref` (an incident was frozen; `ticket`, `run` are the event fields) |
 | `diag.disabled` | `actor` (written just before a person switches the log off; an agent cannot) |
 | `diag.dropped` | `count`, `n_<reason>` |
 
@@ -95,3 +97,31 @@ New events add a row here and keep their `kv` keys stable; readers skip names th
 The log is not product output. What stays as it is: a run's output log (`.orch/run/logs/<ticket>-<run>.log`) and the
 security logs (dev-proof, protection reset). The opt-in `ORCH_TRACE_FALLBACKS` temp file stays too: a developer guard that has no workspace, and the debug log
 resolves the orch home itself (it must not be called from inside that resolution).
+
+
+## Reading it: `orch diag inspect | query | report` (read-only)
+
+Nothing in `orch diag` changes a ticket, run, claim, lock or the record, and nothing repairs: no collector calls
+`runs.settle_orphan` or any helper that fixes things as a side effect (a test hashes `.orch/` before and after).
+`report` writes only into `.orch/diag/reports/`. Nothing uploads anything.
+
+- `inspect [--ticket T] [--run R] [--json]`: collectors (tickets, runs, services, queues, locks, env, disk, diag; 5 s and
+  256 KB each, `{collected_at, revision?, data, gaps[]}`) plus the checks, now. Structure only.
+- `query [--ticket T] [--run R] [--ev 'ticket.*'] [--lvl warn] [--around HH:MM --window 2m] [--since 2h] [--limit N]
+  [--page TOKEN]`: the debug log plus the activity record (ids, kind and time only), oldest first, at most 500 per page;
+  `next` is the token for the following page. A record that could not be read fully says so in `unavailable`.
+- Checks (`orch/diag_checks/<name>.py`, `{name, verdict: problem|ok|cannot_check, fact, evidence[]}`):
+  `run_gone_ticket_working`, `dead_lock_holder` (pid AND process start time), `no_heartbeat` ("progress unknown", never
+  "hung"), `waiting_for_permission`, `ticket_op_refused` (3 times), `hook_lines_missing`, `relay_unreachable`,
+  `clock_skew`, `disk_low`, `diag_dropped`.
+- `report [--ticket T] [--addon A] [--since 2h] [--note ...] [--expected ...] [--content|--no-content]` writes
+  `reports/r-<MMDD-HHMM>-<scope>/`: `SUMMARY.md` (< 20 KB, read first: note, window, checks, top errors, last 50 lines,
+  gaps), `manifest.json` (`orch.diag-report/1`), `checks.json`, `timeline.jsonl` (sources merged by time, each source in
+  its own seq order), `errors.json` (by fingerprint), `state/*.json`, `logs/<src>.jsonl` (cut to the window),
+  `record/<run>.jsonl` (normalized events), `content/` only with content on (default on: that ticket's text and
+  helper excerpts). The window starts at the scoped run's start, else the ticket's last successful change.
+  Every file passes the key hider; without a hider no report is made.
+- Incidents (`reports/i-...`): the same layout, structure only, 15-minute window, frozen BEFORE a recovery runs (in front of
+  `settle_orphan` and the start-failure path), on a crash of a command, on a check turning `problem`, and when the same
+  delivery failure happens 3 times. One per fingerprint per 15 minutes, at most 20 and 50 MB. Reports and incidents count
+  against the 200 MB budget; the oldest go first (`diag.report_pruned`).
