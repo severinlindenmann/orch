@@ -2215,3 +2215,25 @@ def test_view_names_the_real_sender_of_phone_messages(proj, run, rel):
     titles = {i["title"] for i in v["blocks"][0]["items"]}
     assert "Helper → your phone" in titles
     assert not any("the phones" in t or t.startswith("you →") for t in titles)
+
+
+def test_question_times_sent_at_and_answered_at(proj, monkeypatch):
+    """#692.5: a question sent to the phones carries sent_at once; any answer carries answered_at."""
+    from conftest import ensure_signing
+
+    from orch import relay, tickets
+
+    ensure_signing(proj)
+    _stub_send(monkeypatch, "m_q60000000000007")
+    tid = tickets.create(proj, "Deploy", "human:tester")["id"]
+    tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
+    assert "sent_at" not in tickets.load(proj, tid)["questions"][0]
+    relay.send_question(proj, tickets.load(proj, tid), tickets.load(proj, tid)["questions"][0])
+    q = tickets.load(proj, tid)["questions"][0]
+    assert q["sent_at"].endswith("Z") and "answered_at" not in q
+    first = q["sent_at"]
+    relay.send_question(proj, tickets.load(proj, tid), q)  # sent again: the first time stays
+    assert tickets.load(proj, tid)["questions"][0]["sent_at"] == first
+    tickets.answer(proj, tid, "q1", "yes", "human:tester", "phone")
+    q = tickets.load(proj, tid)["questions"][0]
+    assert q["answered_at"].endswith("Z") and q["answered_at"] >= first and q["via"] == "phone"

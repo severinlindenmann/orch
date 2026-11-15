@@ -12,6 +12,7 @@
     const t = v.ticket;
     document.title = t.title + ' · Focus';
     els.title.textContent = t.title || '';
+    S.views.ticket.renderPhoneLine(v);
     els.key.textContent = typeof t.key === 'string' && t.key ? t.key : TID;  /* the short key people use, e.g. DM1-12 */
     document.getElementById('fx-loading')?.remove();  /* the skeleton goes when the first view is there */
     root.dataset.state = v.state;
@@ -81,13 +82,13 @@
      output; in compact it sits in the one column, as before. The same nodes move, so nothing is drawn twice. */
   function placeHuman(terminal) {
     if (INAPP) {  /* the shell: one result panel on the right, the composer under the live session */
-      els.human.replaceChildren(els.resultHead, els.resultEmpty, els.next, els.sent, els.review, els.complete, els.withH);
+      els.human.replaceChildren(els.resultHead, els.resultEmpty, els.next, els.phoneLine, els.sent, els.review, els.complete, els.withH);
       els.help.before(els.compose);
       return;
     }
-    if (terminal) els.human.replaceChildren(els.next, els.sent, els.withH, els.review, els.complete, els.compose);
+    if (terminal) els.human.replaceChildren(els.next, els.phoneLine, els.sent, els.withH, els.review, els.complete, els.compose);
     else {
-      els.paneLive.insertBefore(els.next, els.line); els.paneLive.insertBefore(els.sent, els.line);
+      els.paneLive.insertBefore(els.next, els.line); els.paneLive.insertBefore(els.phoneLine, els.line); els.paneLive.insertBefore(els.sent, els.line);
       els.paneLive.insertBefore(els.withH, els.line);
       els.help.before(els.compose, els.review, els.complete);  /* back in the stage: composer, then the review bar */
     }
