@@ -7,6 +7,13 @@ q('#w-table').append(UI.table([{key:'t',label:'Ticket',sort:true},{key:'o',label
 q('#w-empty').append(UI.state({kind:'empty',title:'Nothing here yet',text:'Finished work shows up here.',action:{label:'Create a ticket'}}));
 q('#w-error').append(UI.state({kind:'error',title:'Could not reach your storage',text:'Check the address or your connection.',action:{label:'Try again'}}));
 q('#w-loading').append(UI.state({kind:'loading'}));
+{const pg=(h,t)=>({type:'doc',heading:h,paras:[t]}),items=[
+ {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',ticket:'DT-41',when:'today 09:12',need:'Blocks the Home update',title:'Home: What changed today block',why:'The helper drew a new block for the top of Home.',okLabel:'Build it',then:'The helper builds it. You check it before anyone sees it.',preview:{type:'compare',before:pg('Home','Cards for questions and work.'),after:pg('Home','A what-changed list on top.')}},
+ {id:'g2',kind:'choice',kindLabel:'Choose',icon:'cards',ticket:'DT-45',when:'today 10:20',title:'Home: which layout?',why:'Tap the one you want.',then:'The helper builds the one you pick.',preview:{type:'options',options:[{id:'A',title:'As today',preview:pg('A','Cards.'),text:'Cards for questions and work.'},{id:'B',title:'Recent changes first',suggested:true,preview:pg('B','Changes.'),text:'Adds a list.'}]}}];
+ UI.swipeDeck(q('#w-swipe'),items,{mode:'desk',quiet:true});
+ const e={id:'core:q:T-1:q4',ticket:'T-1',by:'Severin',via:'phone',at:Date.now()-36e5,card:{kind:'choice',title:'Home: which layout?',preview:{type:'options',options:[{id:'A',title:'As today',preview:pg('A','Cards.')},{id:'B',title:'Recent changes first',preview:pg('B','Changes.')}]}},
+  decision:{action:'use_with_changes',picked:'B',changes:['Dates on the left'],summary:'Use B with 1 change',words:{text:'Take B, but dates on the left.'},pins:[{n:1,on:'option B',x:40,y:55,text:'Dates here'}]}};
+ q('#w-decision').append(UI.decisionsNow([e]),UI.decisionRecord(e));}
 q('#w-sheet').onclick=()=>{const p=document.createElement('p');p.textContent='Side sheet over the current page. Escape closes it.';UI.sheet('Summary notes',p)};
 q('#w-toast').onclick=()=>UI.toast('Answered: Newsletter logo',()=>UI.toast('Undone'));q('#w-toast-err').onclick=()=>UI.toast('Could not reach your storage',null,'error')}
 {

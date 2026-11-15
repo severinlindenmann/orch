@@ -440,3 +440,4 @@ iframe.loading{opacity:0}
 }
 @container (max-width:420px){.swipe-sheet-foot .btn{padding-left:10px;padding-right:10px}}
 .about-label{padding:0 8px 0 6px}
+.decision.replaced{opacity:.75}
