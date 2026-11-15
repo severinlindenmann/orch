@@ -1,4 +1,4 @@
-// The live helper session in the dashboard: its real screen, and typing into it (fb17).
+// The helper's screen in the dashboard: watch it above the message box or in the Screen tab; typing only with "Let me type" (fb17, #692).
 // A small renderer for the screen text tmux hands over (colours, bold, reverse, cursor); textContent only.
 // Reading is open to the dashboard page; typing is for the person's dashboard session (the server decides).
 (function () {
@@ -14,7 +14,7 @@
     const out = [];
     let st = {fg: null, bold: false, rev: false, dim: false};
     lines.forEach((line, y) => {
-      const row = h('div', {class: 't-row'});
+      const row = h('div', {class: 't-ln'});
       let col = 0, buf = '';
       const flush = () => {
         if (!buf) return;
@@ -67,43 +67,145 @@
   }
   const merge = items => items.reduce((acc, it) => { const last = acc[acc.length - 1]; if (it.t && last && last.t && last.t.length + it.t.length <= 2000) last.t += it.t; else acc.push({...it}); return acc; }, []);
 
-  function mount(host) {
-    const dot = h('span', {class: 'dot-ok', 'aria-hidden': 'true'});
-    const body = h('div', {class: 'term-b fx-term-b', 'aria-hidden': 'true'});
-    const hint = h('span', {class: 'meta fx-term-hint', text: 'Click the screen to type into the session · Shift+Tab to leave'});
-    const view = h('div', {class: 'fx-term-view', tabindex: '0', role: 'group', 'data-term': '', 'aria-label': 'Live session of the helper. Press a key to type.'}, body);
-    const badge = h('span', {class: 'badge fx-term-typing', hidden: true, text: 'Typing into the helper’s session'});
-    const IDLE = 'Click the screen to type into the session · Shift+Tab to leave';
-    const card = h('div', {class: 'term fx-term', hidden: true}, h('div', {class: 'term-h'}, dot, h('span', {text: 'Live session of Helper (the real session)'}), h('span', {class: 'grow'}), badge), view, h('div', {class: 'fx-term-foot'}, hint));
-    const setTyping = () => {
-      const on = canType && document.activeElement === view;
-      card.dataset.typing = on ? '1' : '';
-      badge.hidden = !on;
-      hint.textContent = !canType ? 'You can watch here. Open the dashboard from this computer to type.' : on ? 'Your keys go to the helper’s session · Shift+Tab to stop' : IDLE;
+  /* The strip's one line: the screen's last line that says something (not a frame, not a bare prompt). */
+  const stripAnsi = t => String(t || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+  const sayings = text => stripAnsi(text).split('\n').map(l => l.replace(/[│┃║╭╮╰╯─━═┌┐└┘├┤┬┴┼]/g, ' ').replace(/\s+/g, ' ').trim()).filter(l => /[\p{L}\p{N}]/u.test(l));
+  function lastLine(text) {
+    const all = sayings(text), line = all[all.length - 1] || '';
+    return line.length > 160 ? line.slice(0, 159) + '…' : line;
+  }
+  /* what the helper asks on its screen: the newest question-like line of the last few */
+  function questionLine(text) {
+    const tail = sayings(text).slice(-6).reverse();
+    const q = tail.find(l => /\?|\(y\/n\)|\[y\/n\]|press enter|do you want/i.test(l)) || tail[0] || '';
+    return q.length > 160 ? q.slice(0, 159) + '…' : q;
+  }
+
+  /* One screen, two ways in: the dock above the message box (a one-line strip, or a panel) and the Screen tab hold
+     the same element, so there is one poller, one painter and one set of states. */
+  function mount(stage) {
+    const OPEN = 'focus-screen-open', HEIGHT = 'focus-screen-height';
+    const keep = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* not kept */ } };
+    const kept = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+    const last = h('span', {class: 'session-dock-last', text: 'Connecting to the helper’s screen…'});
+    const typingSwitch = h('input', {class: 'switch', type: 'checkbox', role: 'switch', 'aria-label': 'Let me type into the helper’s screen'});
+    const typingLabel = h('label', {hidden: true}, typingSwitch, ' Let me type');
+    const whole = h('button', {class: 'btn ghost icon sm', type: 'button', icon: 'expand', title: 'Use the whole page', 'aria-label': 'Use the whole page'});
+    const chev = h('span', {class: 'dock-chev', 'aria-hidden': 'true', icon: 'chevron-down'});
+    const toggle = h('button', {class: 'btn ghost icon sm', type: 'button', title: 'Show (Ctrl+`)', 'aria-label': 'Show the helper’s screen', 'aria-expanded': 'false'}, chev);
+    const tools = h('span', {class: 'session-dock-tools'}, typingLabel, whole);
+    const head = h('div', {class: 'session-dock-h'}, h('span', {class: 'live-dot', 'aria-hidden': 'true'}), h('b', {text: 'Helper’s screen'}), last, h('span', {class: 'grow'}), tools, toggle);
+    const askText = h('span', {class: 'ask-text'});
+    const ask = h('div', {class: 'ask-line', role: 'status', hidden: true}, askText);
+    const body = h('div', {class: 'session-dock-b', tabindex: '0', role: 'group', 'data-term': '', 'aria-label': 'Live screen of the helper'});
+    const loading = h('div', {class: 'session-dock-state', hidden: true}, h('span', {class: 'skeleton line'}), h('span', {class: 'skeleton line'}), h('span', {class: 'skeleton line short'}));
+    const retry = h('button', {class: 'btn sm', type: 'button', text: 'Try again now'});
+    const failed = h('div', {class: 'session-dock-state', hidden: true}, h('span', {text: 'The screen stopped updating. orch keeps trying; the helper keeps working.'}), h('span', {}, retry));
+    const ended = h('div', {class: 'session-dock-state', hidden: true}, h('span', {text: 'The helper’s screen has closed. Its steps stay in Live.'}));
+    const foot = h('div', {class: 'session-dock-foot'}, h('span', {text: 'Watching. Your messages go through the box below.'}));
+    const dock = h('section', {class: 'session-dock peek', 'aria-label': 'The helper’s screen', hidden: true}, head, ask, body, loading, failed, ended, foot);
+    S.els.dock = dock;
+    /* the Screen tab: the same dock moves in while the tab is open, and back above the message box otherwise */
+    const dot = h('span', {class: 'live-dot', 'aria-hidden': 'true', hidden: true});
+    const tab = h('button', {class: 'fx-tab', role: 'tab', id: 'fx-t-screen', 'aria-controls': 'fx-p-screen', 'aria-selected': 'false', tabindex: '-1', title: 'The helper’s screen', hidden: true}, dot, h('span', {text: 'Screen'}));
+    const pane = h('div', {class: 'fx-pane', id: 'fx-p-screen', role: 'tabpanel', 'aria-labelledby': 'fx-t-screen', hidden: true});
+    S.els.screenTab = tab; S.els.paneScreen = pane;
+    const live = S.els.tabs[0];
+    live.after(tab); S.els.stage.querySelector('.fx-pane').after(pane);
+    stage.insertBefore(dock, S.els.compose);
+
+    let status = 'loading', everLive = false, open = kept(OPEN) === 'open', inTab = false, typing = false, typingAllowed = false, canType = true;
+    let waiting = false, queue = [], timer = null, busy = false, key = '', fails = 0;
+    const rows = h('div');
+    body.append(rows);
+    const setOpen = on => {
+      open = on; keep(OPEN, on ? 'open' : 'peek');
+      layout();
     };
-    const ask = h('div', {class: 'fx-term-ask row', hidden: true}, h('span', {class: 'grow', text: 'Your helper is waiting for an answer in its session.'}), h('button', {class: 'btn sm primary', type: 'button', text: 'Answer in the session', onclick: () => view.focus()}));
-    const note = h('p', {class: 'meta fx-term-note', hidden: true});
-    card.insertBefore(ask, card.firstChild); host.prepend(card, note);
-    let queue = [], timer = null, canType = true, busy = false, last = '';
+    function layout() {
+      const full = inTab || open;
+      dock.classList.toggle('peek', !full);
+      dock.style.height = !inTab && open && kept(HEIGHT) ? kept(HEIGHT) + 'px' : '';
+      toggle.hidden = whole.hidden = inTab;
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-label', open ? 'Hide the helper’s screen' : 'Show the helper’s screen'); toggle.title = open ? 'Hide (Ctrl+`)' : 'Show (Ctrl+`)';
+      key = '';
+      if (status === 'live') paintNow();
+    }
+    function show(next) {
+      status = next;
+      body.hidden = next !== 'live'; loading.hidden = next !== 'loading'; failed.hidden = next !== 'error'; ended.hidden = next !== 'ended';
+      foot.hidden = next !== 'live'; ask.hidden = !(next === 'live' && waiting);
+      typingLabel.hidden = !(next === 'live' && typingAllowed && canType);
+      if (next !== 'live') last.textContent = next === 'loading' ? 'Connecting to the helper’s screen…' : next === 'error' ? 'The screen stopped updating.' : 'The screen has closed.';
+      const visible = next === 'ended' ? everLive : next !== 'none';
+      dock.hidden = !visible;
+      if (S.els.screenTab) {
+        const was = tab.hidden; tab.hidden = !visible;
+        if (!visible && tab.getAttribute('aria-selected') === 'true') S.els.tabs[0].click();
+        if (was && visible && kept('focus-tab') === 'screen') tab.click();
+      }
+    }
+    function setTyping(on) {
+      typing = on && typingAllowed && canType && status === 'live';
+      typingSwitch.checked = typing;
+      dock.classList.toggle('typing', typing);
+      foot.firstChild.textContent = typing ? 'Your keys go straight to the helper’s screen. Turn “Let me type” off or press Shift+Tab to stop.' : 'Watching. Your messages go through the box below.';
+      key = '';
+      if (typing) { if (!inTab && !open) setOpen(true); body.focus(); } else if (document.activeElement === body) S.els.msg.focus();
+      if (status === 'live') paintNow();
+    }
+    let snapNow = null;
+    function paintNow() {
+      if (!snapNow || dock.classList.contains('peek')) return;
+      const k = JSON.stringify([snapNow.screen, snapNow.cx, snapNow.cy, snapNow.cursor, typing && document.activeElement === body]);
+      if (k === key) return;
+      key = k;
+      rows.replaceChildren(...paint(snapNow.screen, snapNow.cx, snapNow.cy, snapNow.cursor && !snapNow.scrolled && typing && document.activeElement === body));
+    }
     const render = snap => {
+      fails = 0;
       if (snap.state === 'live') {
-        card.hidden = false; note.hidden = true;
-        const key = JSON.stringify([snap.screen, snap.cx, snap.cy, snap.cursor, document.activeElement === view]);
-        if (key !== last) { last = key; body.replaceChildren(...paint(snap.screen, snap.cx, snap.cy, snap.cursor && !snap.scrolled && document.activeElement === view)); }
-        view.dataset.readonly = canType ? '' : '1'; setTyping();
-        ask.hidden = !snap.waiting_input;
+        everLive = true; snapNow = snap;
+        typingAllowed = snap.typing_allowed === true;
+        const q = snap.waiting_input ? questionLine(snap.screen) : '';
+        const asks = !!snap.waiting_input;
+        if (asks !== waiting) { waiting = asks; S.state.screenWaiting = asks; if (S.poll) S.poll(); }
+        askText.textContent = asks ? 'Helper asks on its screen: “' + q + '” Answer in the message box below.' : '';
+        last.textContent = lastLine(snap.screen) || 'Working…';
+        if (!typingAllowed && typing) setTyping(false);
+        show('live'); paintNow();
         return;
       }
-      card.hidden = true; last = '';
-      note.hidden = snap.state === 'none';
-      note.textContent = snap.state === 'oneshot' ? 'No live session: the helper works one step at a time. Its steps are below.' : snap.state === 'notmux' ? 'This computer cannot show the live session. The helper’s steps are below.' : '';
+      if (waiting) { waiting = false; S.state.screenWaiting = false; if (S.poll) S.poll(); }
+      setTyping(false); snapNow = null;
+      show(everLive ? 'ended' : 'none');
     };
     async function poll() {
       if (busy || document.hidden || !TID) return;
       busy = true;
-      try { const r = await fetch('/api/term?ticket=' + TID); if (r.ok) render(await r.json()); } catch (e) { /* next poll */ }
+      try {
+        const r = await fetch('/api/term?ticket=' + TID);
+        if (r.ok) render(await r.json()); else throw new Error('status');
+      } catch (e) { fails++; if (status !== 'error' && (everLive || fails > 1)) { setTyping(false); show('error'); } }
       busy = false;
     }
+    retry.addEventListener('click', () => { show('loading'); poll(); });
+    toggle.addEventListener('click', e => { e.stopPropagation(); setOpen(!open); });
+    head.addEventListener('click', e => { if (!inTab && !e.target.closest('button,label,input')) setOpen(!open); });
+    whole.addEventListener('click', e => { e.stopPropagation(); tab.click(); });
+    typingSwitch.addEventListener('change', () => setTyping(typingSwitch.checked));
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '`' || e.code === 'Backquote') && !dock.hidden && !inTab) { e.preventDefault(); setOpen(!open); }
+    });
+    /* drag the top edge of the open panel to change its height; it is remembered */
+    let drag = null;
+    const nearTop = e => !inTab && open && e.clientY - dock.getBoundingClientRect().top < 6;
+    dock.addEventListener('pointermove', e => { if (!drag) dock.style.cursor = nearTop(e) ? 'ns-resize' : ''; });
+    dock.addEventListener('pointerdown', e => { if (nearTop(e)) { drag = {y: e.clientY, h: dock.getBoundingClientRect().height}; dock.setPointerCapture(e.pointerId); e.preventDefault(); } });
+    dock.addEventListener('pointermove', e => { if (drag) { const max = Math.max(160, stage.getBoundingClientRect().height - 160); dock.style.height = Math.round(Math.min(max, Math.max(120, drag.h + drag.y - e.clientY))) + 'px'; } });
+    dock.addEventListener('pointerup', () => { if (drag) { drag = null; keep(HEIGHT, String(Math.round(dock.getBoundingClientRect().height))); } });
+    /* typing: only with the switch on, and only when the setting allows it (the server checks that again) */
     let chain = Promise.resolve();
     const schedule = () => { if (!timer) timer = setTimeout(() => { timer = null; chain = chain.then(flush, flush); }, 25); };
     async function flush() {
@@ -115,34 +217,50 @@
         if (!items.length) items.push(all.shift());
         try {
           const r = await fetch('/api/term/keys', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Orch-Page': secret}, body: JSON.stringify({ticket: TID, items})});
-          if (r.status === 403) { canType = false; setTyping(); S.toast('Open the dashboard from this computer to type here.', 'error'); return; }
-          if (r.status === 409) { S.toast('The live session has ended; those keys were not sent.', 'error'); return; }
-          if (!r.ok) { S.toast((await r.text()).slice(0, 120) || 'The session did not take that.', 'error'); return; }
+          if (r.status === 403) {
+            const text = (await r.text()).slice(0, 200);
+            if (/is off/.test(text)) typingAllowed = false; else canType = false;
+            setTyping(false); show(status); S.toast(text || 'Open the dashboard from this computer to type here.', 'error'); return;
+          }
+          if (r.status === 409) { S.toast('The helper’s screen has closed; those keys were not sent.', 'error'); return; }
+          if (!r.ok) { S.toast((await r.text()).slice(0, 120) || 'The screen did not take that. Try again.', 'error'); return; }
         } catch (e) { return; }
       }
       setTimeout(poll, 120);
     }
-    view.addEventListener('keydown', e => {
-      const it = canType ? toItem(e) : null;
+    body.addEventListener('keydown', e => {
+      if (!typing) return;
+      if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); setTyping(false); return; }  /* Shift+Tab leaves */
+      const it = toItem(e);
       if (!it) return;
       e.preventDefault(); e.stopPropagation();
       queue.push(it);
       schedule();
     });
-    view.addEventListener('paste', e => {
+    body.addEventListener('paste', e => {
       const t = (e.clipboardData && e.clipboardData.getData('text')) || '';
       e.preventDefault();
-      if (!canType || !t) return;
+      if (!typing || !t) return;
       for (let i = 0; i < t.length; i += 2000) queue.push({t: t.slice(i, i + 2000).replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '')});
       schedule();
     });
-    view.addEventListener('focus', () => { last = ''; setTyping(); poll(); });
-    view.addEventListener('blur', () => { last = ''; setTyping(); poll(); });
-    body.addEventListener('click', () => view.focus());
-    setInterval(() => { if (S.state.view && S.state.view.run.running) poll(); }, 1000);
+    body.addEventListener('focus', () => { key = ''; paintNow(); });
+    body.addEventListener('blur', () => { key = ''; paintNow(); });
+    /* where the dock sits: above the message box, or inside the Screen tab */
+    function place(tabOpen) {
+      if (tabOpen === inTab) return;
+      inTab = tabOpen;
+      if (inTab) pane.append(dock); else stage.insertBefore(dock, S.els.compose);
+      layout();
+    }
+    S.subscribe(v => { dot.hidden = !v.run.running; if (!everLive && status === 'none' && v.run.running) poll(); });
+    let tick = 0;  /* a stopped screen is tried again every 3 s, a running helper's every second */
+    setInterval(() => { tick++; if ((S.state.view && S.state.view.run.running) || (status === 'error' && tick % 3 === 0)) poll(); }, 1000);
+    show('loading'); dock.hidden = true; tab.hidden = true;
+    layout();
     poll();
-    return {poll};
+    return {poll, place};
   }
 
-  S.register('term', {mount, paint, toItem, merge});
+  S.register('term', {mount, paint, toItem, merge, lastLine, questionLine});
 })();
