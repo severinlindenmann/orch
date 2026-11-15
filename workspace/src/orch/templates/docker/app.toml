@@ -1,0 +1,7 @@
+name = "{{name}}"
+about = "{{about}}"
+stack = "docker"
+store = "{{store}}"
+health = "/health"
+test = "python3 -m unittest discover -s tests"
+public = false

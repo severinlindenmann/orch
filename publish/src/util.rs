@@ -38,7 +38,10 @@ pub fn ct_eq(a: &str, b: &str) -> bool {
 }
 
 pub fn valid_app_name(n: &str) -> bool {
+    let edge = |c: Option<char>| c.is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
     (2..=40).contains(&n.len())
+        && edge(n.chars().next())
+        && edge(n.chars().last())
         && n.chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
@@ -652,5 +655,16 @@ mod head_tests {
             o,
             "<head><title>a&quot;&gt;&lt;script&gt;x&lt;/script&gt;&amp;</title></head>"
         );
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::valid_app_name;
+
+    #[test]
+    fn app_names_start_and_end_with_a_letter_or_digit() {
+        assert!(valid_app_name("a-b") && valid_app_name("ab") && valid_app_name("a1"));
+        assert!(!valid_app_name("-ab") && !valid_app_name("ab-") && !valid_app_name("a"));
     }
 }

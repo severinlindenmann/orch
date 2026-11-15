@@ -22,7 +22,9 @@ from orch.errors import Refused
 MAGIC = b"OPF1"
 MAX_FILE = 100 * 1024 * 1024
 MAX_APP = 100 * 1024 * 1024
-NAME_RE = re.compile(r"^[a-z0-9-]{2,40}$")
+NAME_RE = re.compile(r"^[a-z0-9-]{2,40}$")  # existing apps (stop, remove, ...)
+# a NEW app name also starts and ends with a letter or digit (it becomes part of a container image name)
+DEPLOY_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".DS_Store"}
 BROKEN = "wrong key or broken file"
 
@@ -421,9 +423,12 @@ def delete(root: Path, ident: str) -> str:
     return "app"
 
 
-def _app_name(name: str) -> str:
-    if not NAME_RE.match(name):
-        raise Refused("An app name has 2 to 40 lowercase letters, digits or dashes.")
+def _app_name(name: str, new: bool = False) -> str:
+    if not (DEPLOY_NAME_RE if new else NAME_RE).match(name):
+        raise Refused(
+            "An app name has 2 to 40 lowercase letters, digits or dashes"
+            + (", and starts and ends with a letter or digit." if new else ".")
+        )
     return name
 
 
@@ -442,13 +447,18 @@ def read_manifest(folder: Path) -> dict:
         m = tomllib.loads(mf.read_text(encoding="utf-8"))
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         raise Refused(f"app.toml is not valid: {e}") from None
-    _app_name(str(m.get("name", "")))
+    _app_name(str(m.get("name", "")), new=True)
     stack = m.get("stack")
-    if stack not in ("static", "python", "node"):
-        raise Refused("app.toml needs stack = static, python or node.")
+    if stack not in ("static", "python", "node", "docker"):
+        raise Refused("app.toml needs stack = static, python, node or docker.")
     if stack == "static" and (m.get("start") or m.get("health")):
         raise Refused("A static app has no start or health.")
-    if stack != "static" and not (m.get("start") and m.get("health")):
+    if stack == "docker":
+        if not m.get("health"):
+            raise Refused("A docker app needs health in app.toml.")
+        if not (folder / "Dockerfile").is_file():
+            raise Refused("A docker app needs a Dockerfile at the top of its folder.")
+    elif stack != "static" and not (m.get("start") and m.get("health")):
         raise Refused(f"A {stack} app needs start and health in app.toml.")
     if m.get("store", "none") not in ("none", "json", "markdown", "sqlite"):
         raise Refused("store must be none, json, markdown or sqlite.")

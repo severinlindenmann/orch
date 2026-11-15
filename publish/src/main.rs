@@ -11,6 +11,7 @@ async fn main() {
         .or_else(|_| std::env::var("PUBLISH_ADMIN_LISTEN"))
         .unwrap_or_else(|_| "127.0.0.1:8411".into());
     let st = new_state(cfg).expect("cannot open the data folder");
+    orch_publish::sweep_containers_at_start(&st).await;
     let public = tokio::net::TcpListener::bind(&listen)
         .await
         .unwrap_or_else(|e| panic!("cannot listen on {listen}: {e}"));

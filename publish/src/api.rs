@@ -268,7 +268,7 @@ pub async fn apps_put(
     }
     if !util::valid_app_name(&name) {
         return Err(ApiError::invalid(
-            "The app name must be 2-40 characters: a-z, 0-9 and -.",
+            "The app name must be 2-40 characters: a-z, 0-9 and -, starting and ending with a letter or digit.",
         ));
     }
     let expires = expiry(&st, &w, &q, "apps")?;

@@ -1,7 +1,7 @@
 //! Apps: deploy a bundle, run it as a child process (runner.rs), serve and proxy /a/<name>/.
 use crate::db::{self, AppRow, Workspace};
 use crate::err::{ApiError, ApiResult};
-use crate::runner::{run_step, Spec};
+use crate::runner::{container_mode, run_step, Spec, StepCtx};
 use crate::{util, State};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Request, State as St};
@@ -35,12 +35,30 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
         .map_err(|_| ApiError::invalid("The bundle has no app.toml at its top level."))?;
     let m: Manifest = toml::from_str(&text)
         .map_err(|e| ApiError::invalid(format!("app.toml is not valid: {}", e.message())))?;
+    let docker_ok = crate::runner::docker_apps_enabled();
+    check_manifest(&m, dir, docker_ok)?;
+    Ok(m)
+}
+
+/// Rules for app.toml; `docker_ok` = container mode AND ORCH_PUBLISH_DOCKER_APPS=1.
+fn check_manifest(m: &Manifest, dir: &FsPath, docker_ok: bool) -> ApiResult<()> {
     let bad = |s: &str| Err(ApiError::invalid(format!("app.toml: {s}")));
     if !util::valid_app_name(&m.name) {
-        return bad("name must be 2-40 characters: a-z, 0-9 and -.");
+        return bad("name must be 2-40 characters: a-z, 0-9 and -, starting and ending with a letter or digit.");
     }
-    if !["static", "python", "node"].contains(&m.stack.as_str()) {
-        return bad("stack must be static, python or node.");
+    if !["static", "python", "node", "docker"].contains(&m.stack.as_str()) {
+        return bad("stack must be static, python, node or docker.");
+    }
+    if m.stack == "docker" {
+        if !docker_ok {
+            return bad("This server doesn't run apps with their own Dockerfile.");
+        }
+        let Ok(text) = std::fs::read_to_string(dir.join("Dockerfile")) else {
+            return bad("docker apps need a Dockerfile at the top of the bundle.");
+        };
+        if let Err(e) = crate::runner::check_dockerfile(&text) {
+            return bad(e);
+        }
     }
     if !["none", "json", "markdown", "sqlite"].contains(&m.store.as_str()) {
         return bad("store must be none, json, markdown or sqlite.");
@@ -48,6 +66,10 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
     if m.stack == "static" {
         if m.start.is_some() || m.health.is_some() {
             return bad("static apps must not have start or health.");
+        }
+    } else if m.stack == "docker" {
+        if m.health.as_deref().unwrap_or("").is_empty() {
+            return bad("docker apps need health.");
         }
     } else if m.start.as_deref().unwrap_or("").is_empty()
         || m.health.as_deref().unwrap_or("").is_empty()
@@ -59,7 +81,39 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
             return bad("health must be a path starting with /.");
         }
     }
-    Ok(m)
+    Ok(())
+}
+
+/// Scratch data folder of the build/test steps of one deploy: next to the version folders, made by the
+/// server, never inside the code the build can write to.
+fn step_dir(st: &State, name: &str, vroot: &FsPath) -> PathBuf {
+    let v = vroot
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    st.cfg.app_root(name).join(format!(".step-{v}"))
+}
+
+/// Deletes a folder; in container mode the app's uid gets its rights back first.
+async fn rm_tree(p: &FsPath) {
+    // a link planted by app code is only unlinked, never followed; folders outside our roots are skipped
+    if std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
+        let _ = std::fs::remove_file(p);
+        return;
+    }
+    if !p.exists() || !crate::runner::guard_dir(p) {
+        return;
+    }
+    if container_mode() {
+        crate::runner::make_deletable(p).await;
+    }
+    let _ = std::fs::remove_dir_all(p);
+}
+
+/// Version folder name of the code in `code_dir` (images are tagged `orch-app-<name>:<vdir>-<random>`).
+fn vdir_of(st: &State, name: &str, code_dir: &FsPath) -> Option<String> {
+    let v = version_root(&st.cfg.app_root(name), code_dir)?;
+    Some(v.file_name()?.to_string_lossy().into_owned())
 }
 
 /// Unpacks the .tar.gz into `dir`; returns the folder that holds app.toml.
@@ -84,7 +138,7 @@ fn extract(bytes: &[u8], dir: &FsPath) -> ApiResult<PathBuf> {
             return Err(ApiError::invalid("The bundle has an unsafe path."));
         }
     }
-    if std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "systemd") {
+    if std::env::var("ORCH_PUBLISH_SANDBOX").is_ok_and(|v| v == "systemd" || v == "container") {
         crate::runner::prep_perms(dir);
     }
     if dir.join("app.toml").is_file() {
@@ -137,7 +191,19 @@ async fn start_and_check(
     m: &Manifest,
     port: u16,
 ) -> Result<(), String> {
+    let image = if m.stack == "docker" {
+        let v = vdir_of(st, name, dir).ok_or("no version folder")?;
+        Some(
+            crate::runner::ensure_image(name, &v, dir, st.cfg.build_secs)
+                .await
+                .ok_or("The app's image could not be built.")?,
+        )
+    } else {
+        None
+    };
     let spec = Spec {
+        stack: m.stack.clone(),
+        image,
         dir: dir.to_path_buf(),
         start: m.start.clone().unwrap_or_default(),
         port,
@@ -146,7 +212,10 @@ async fn start_and_check(
         store: m.store.clone(),
         log: st.cfg.log_path(name),
     };
-    st.runner.spawn(key, &spec).map_err(|e| e.to_string())?;
+    st.runner
+        .spawn(key, &spec)
+        .await
+        .map_err(|e| e.to_string())?;
     let deadline = Instant::now() + Duration::from_secs(st.cfg.health_secs);
     let path = m.health.clone().unwrap_or_else(|| "/".into());
     loop {
@@ -193,8 +262,14 @@ pub async fn deploy(
     )
     .await;
     if r.is_err() {
-        let _ = std::fs::remove_dir_all(&vroot);
+        if container_mode() {
+            if let Some(v) = vdir_of(st, name, &vroot) {
+                crate::runner::remove_images(name, Some(&v)).await;
+            }
+        }
         st.runner.stop(&format!("{name}~new")).await;
+        rm_tree(&step_dir(st, name, &vroot)).await;
+        rm_tree(&vroot).await;
     }
     r
 }
@@ -229,24 +304,50 @@ async fn deploy_inner(
     let data_dir = st.cfg.app_data_dir(name);
     let test_port = choose_port(st)?;
     // build
+    let container = container_mode();
     let build = match m.stack.as_str() {
-        "python" if dir.join("requirements.txt").is_file() => {
-            Some("uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt")
-        }
+        "python" if dir.join("requirements.txt").is_file() => Some(if container {
+            "python -m venv .venv && .venv/bin/pip install --no-cache-dir -r requirements.txt"
+        } else {
+            "uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt"
+        }),
         "node" if dir.join("package.json").is_file() => Some("npm ci --omit=dev"),
         _ => None,
     };
+    let mut image = None;
+    if m.stack == "docker" {
+        let v = vdir_of(st, name, &dir).ok_or_else(|| ApiError::internal("no version folder"))?;
+        let tag = crate::runner::new_image_tag(name, &v);
+        let (ok, out) = crate::runner::build_image(&tag, &dir, st.cfg.build_secs).await;
+        image = Some(tag);
+        if !ok {
+            return Err(ApiError::new(
+                422,
+                "test_failed",
+                "Building the app's image failed. The old version is still running.",
+            )
+            .with_output(util::tail(&out, 4000)));
+        }
+    }
     if let Some(b) = build {
+        let bd = step_dir(st, name, vroot);
         let (ok, out) = run_step(
             b,
             &dir,
-            test_port,
-            &base,
-            &dir.join(".test-data"),
-            &m.store,
-            st.cfg.build_secs,
+            &StepCtx {
+                app: name,
+                stack: &m.stack,
+                image: None,
+                writable: true,
+                port: test_port,
+                base_path: &base,
+                data_dir: &bd,
+                store: &m.store,
+                secs: st.cfg.build_secs,
+            },
         )
         .await;
+
         if !ok {
             return Err(ApiError::new(
                 422,
@@ -258,9 +359,19 @@ async fn deploy_inner(
     }
     // test
     if let Some(t) = &m.test {
-        let td = dir.join(".test-data");
-        let (ok, out) = run_step(t, &dir, test_port, &base, &td, &m.store, st.cfg.test_secs).await;
-        let _ = std::fs::remove_dir_all(&td);
+        let td = step_dir(st, name, vroot);
+        let ctx = StepCtx {
+            app: name,
+            stack: &m.stack,
+            image: image.as_deref(),
+            writable: false,
+            port: test_port,
+            base_path: &base,
+            data_dir: &td,
+            store: &m.store,
+            secs: st.cfg.test_secs,
+        };
+        let (ok, out) = run_step(t, &dir, &ctx).await;
         if !ok {
             return Err(ApiError::new(
                 422,
@@ -270,6 +381,7 @@ async fn deploy_inner(
             .with_output(util::tail(&out, 4000)));
         }
     }
+    rm_tree(&step_dir(st, name, vroot)).await;
     // start the new version next to the old one
     let mut port = 0;
     if m.stack != "static" {
@@ -278,7 +390,11 @@ async fn deploy_inner(
             return Err(ApiError::new(
                 422,
                 "health_failed",
-                "The app did not answer its health check. The old version is still running.",
+                if container_mode() {
+                    "The app did not answer its health check. Does the app listen on $HOST (not 127.0.0.1)? The old version is still running."
+                } else {
+                    "The app did not answer its health check. The old version is still running."
+                },
             )
             .with_output(out));
         }
@@ -317,7 +433,12 @@ async fn deploy_inner(
         let root = st.cfg.app_root(name);
         if let Some(v) = version_root(&root, FsPath::new(&old.code_dir)) {
             if v != vroot {
-                let _ = std::fs::remove_dir_all(v);
+                if container_mode() && old.stack == "docker" {
+                    if let Some(v) = vdir_of(st, name, FsPath::new(&old.code_dir)) {
+                        crate::runner::remove_images(name, Some(&v)).await;
+                    }
+                }
+                rm_tree(&v).await;
             }
         }
     }
@@ -351,6 +472,17 @@ pub fn app_json(st: &State, a: &AppRow) -> Value {
 /// (re)starts the stored version of an app. Caller holds app_lock.
 async fn start_existing(st: &State, a: &AppRow) -> &'static str {
     st.runner.stop(&a.name).await;
+    if a.stack == "docker" && !crate::runner::docker_apps_enabled() {
+        // keep the reason where the owner looks: the app's log
+        let _ = std::fs::write(
+            st.cfg.log_path(&a.name),
+            "This server doesn't run apps with their own Dockerfile.\n",
+        );
+        let mut row = a.clone();
+        row.status = "running".into();
+        let _ = db::put_app(&st.db.lock().unwrap(), &row, &util::now());
+        return "failed";
+    }
     let mut row = a.clone();
     row.status = "running".into();
     if a.stack != "static" {
@@ -394,10 +526,31 @@ pub async fn stop(st: &State, name: &str) -> ApiResult<Value> {
 
 /// Stops and deletes an app with its code and data. Caller holds app_lock.
 pub async fn remove(st: &State, name: &str) {
+    // the name feeds a path: only the plain charset (routes also look the app up first)
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return;
+    }
     st.runner.stop(name).await;
-    let _ = std::fs::remove_dir_all(st.cfg.app_root(name));
+    if container_mode() {
+        crate::runner::remove_images(name, None).await;
+    }
+    rm_tree(&st.cfg.app_root(name)).await;
     let _ = std::fs::remove_file(st.cfg.log_path(name));
     let _ = db::delete_app(&st.db.lock().unwrap(), name);
+}
+
+/// Container mode, before the listeners start: removes leftover step containers and containers of
+/// apps that are not in the database (this instance only).
+pub async fn startup_sweep(st: &State) {
+    if container_mode() {
+        let apps = db::all_apps(&st.db.lock().unwrap()).unwrap_or_default();
+        let known = apps.iter().map(|a| a.name.clone()).collect();
+        crate::runner::sweep_containers(&known).await;
+    }
 }
 
 pub async fn resume_all(st: &State) {
@@ -707,4 +860,51 @@ async fn serve_static(app: &AppRow, rest: &str) -> Response {
         r.headers_mut().insert(header::CONTENT_LENGTH, n.into());
     }
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest(stack: &str) -> Manifest {
+        Manifest {
+            name: "demo".into(),
+            about: String::new(),
+            stack: stack.into(),
+            start: None,
+            health: Some("/health".into()),
+            test: None,
+            store: "none".into(),
+            public: false,
+        }
+    }
+
+    #[test]
+    fn docker_stack_needs_container_mode_and_a_dockerfile() {
+        let d = tempfile::tempdir().unwrap();
+        let m = manifest("docker");
+        let e = check_manifest(&m, d.path(), false).unwrap_err();
+        assert!(
+            format!("{e:?}").contains("This server doesn't run apps with their own Dockerfile.")
+        );
+        assert!(check_manifest(&m, d.path(), true).is_err(), "no Dockerfile");
+        std::fs::write(d.path().join("Dockerfile"), "FROM scratch\n").unwrap();
+        assert!(check_manifest(&m, d.path(), true).is_ok());
+        let mut no_health = manifest("docker");
+        no_health.health = None;
+        assert!(check_manifest(&no_health, d.path(), true).is_err());
+        // python/node still need start
+        assert!(check_manifest(&manifest("python"), d.path(), false).is_err());
+    }
+
+    #[test]
+    fn dockerfile_with_syntax_directive_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("Dockerfile"),
+            "# syntax=evil/x\nFROM scratch\n",
+        )
+        .unwrap();
+        assert!(check_manifest(&manifest("docker"), d.path(), true).is_err());
+    }
 }

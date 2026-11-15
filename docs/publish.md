@@ -87,8 +87,74 @@ publish/
 `publish-deploy.yml` on push to `main`: build for linux x86_64, copy binary + web + scripts to the VPS over SSH,
 `systemctl restart orch-publish`, check `/health`. First install: `deploy/install.sh` (user, folders, admin token, Caddy route).
 
+## Sandbox (`ORCH_PUBLISH_SANDBOX`)
+- unset: plain child process (development and tests). `systemd`: one transient unit per app (static, python, node).
+- `container`: one container per app on the Kiri engine, driven with the `docker` CLI against
+  `ORCH_PUBLISH_ENGINE_SOCKET` (default `/run/kiri/docker.sock`; CLI path `ORCH_PUBLISH_DOCKER`, default `docker`).
+  Per app: its own network (`orch-net-…`, one /28 from 10.213.0.0/16, never removed), port published on 127.0.0.1 only, 128 MB, 0.5 CPU, 64 processes, read-only root,
+  `/tmp` tmpfs, no capabilities, `no-new-privileges`, uid 61000 with the server's group (data and code folders are group-writable, mode 2770), code at `/app` (read-only), data at `/data`.
+  Images `python:3.12-slim` / `node:22-slim`; build steps (venv + pip, `npm ci --omit=dev`) and test steps run in the
+  same image (512 MB). Stack `docker` (needs `ORCH_PUBLISH_SANDBOX=container` AND `ORCH_PUBLISH_DOCKER_APPS=1`, off by default because image builds run in a privileged builder; otherwise "This server doesn't run apps with their own Dockerfile."): the bundle has
+  a `Dockerfile`; the host builds `orch-app-<instance>-<name>:<version>-<random>`, runs it, and removes the old image after the switch.
+  The Dockerfile may not use `--mount`, `--network`, `--security`, `--device` or parser directives; a built image with `dev.kiri.*` / `orch.*` labels or a `VOLUME` is refused. One image build runs at a time.
+  Containers carry the labels `orch.publish.app` and `orch.publish.instance` (a hash of the data folder, so a second server on the same engine never touches them). At server start, before the listeners bind, leftover step containers and containers of unknown apps of this instance are removed.
+  Real-engine test: `ORCH_PUBLISH_TEST_ENGINE=1 cargo test --test container -- --ignored`.
+
+## Container mode: host setup
+
+Run these on the server that runs orch-publish. Apps get the internet; they cannot reach the server itself, the
+private network (VPN), the local network or the cloud metadata address.
+
+1. Install Kiri: download the `kiri` .deb and its `SHA256SUMS` from the Kiri release page, check
+   `sha256sum -c SHA256SUMS --ignore-missing`, then `sudo apt install ./kiri_*.deb`.
+2. Give the publish user access to the engine: `sudo kiri host-access <publish user>`. Caution: this is
+   root-equivalent for that user (whoever controls the engine socket controls the machine). Only the publish user
+   gets it; see the security note of the deploy.
+3. Find the public network interface: `ip route show default` (the name after `dev`, used as `<public interface>`).
+4. If the host uses ufw, add these rules in this order (apps live in 10.213.0.0/16, one /28 per app; change the pool
+   with `ORCH_PUBLISH_APP_SUBNETS`). `<kiri0 gateway>` is the address of `kiri0` (`ip -4 addr show kiri0`). Kiri's
+   image mirror port changes between runs, so the rule allows that one address, not a port:
+
+```
+sudo ufw allow in on kiri0 to <kiri0 gateway> proto tcp   # Kiri's builder reaches Kiri's image mirror only
+sudo ufw route deny in on kiri0 to 169.254.0.0/16
+sudo ufw route deny in on kiri0 to 10.0.0.0/8
+sudo ufw route deny in on kiri0 to 172.16.0.0/12
+sudo ufw route deny in on kiri0 to 192.168.0.0/16
+sudo ufw route deny in on kiri0 to 100.64.0.0/10           # the private network (VPN)
+sudo ufw route allow in on kiri0 out on <public interface>
+sudo ufw route deny from 10.213.0.0/16 to 169.254.0.0/16
+sudo ufw route deny from 10.213.0.0/16 to 10.0.0.0/8
+sudo ufw route deny from 10.213.0.0/16 to 172.16.0.0/12
+sudo ufw route deny from 10.213.0.0/16 to 192.168.0.0/16
+sudo ufw route deny from 10.213.0.0/16 to 100.64.0.0/10   # the private network (VPN)
+sudo ufw route allow from 10.213.0.0/16 out on <public interface>
+sudo ufw allow from 10.213.0.0/16 to 10.213.0.0/16 port 53 proto udp   # app DNS on its gateway only
+sudo ufw allow from 10.213.0.0/16 to 10.213.0.0/16 port 53 proto tcp
+```
+
+The deny rules come first so the final allow only opens the public internet. The `kiri0` denies matter for image
+builds (the builder is not in the app range). Per-app networks are never removed (Kiri 0.2.0 keeps a DNS listener
+on the old gateway after `docker network rm`); a redeploy reuses them. Kiri 0.2.0 also ignores
+`enable_icc=false`, so apps on different networks are separated by the network and the firewall, not by that flag.
+Kiri may add its own forward rules ahead of ufw's, which is why the check below is part of the setup.
+
+### Check once after setup
+
+Deploy a python app, then run each of these inside its container (`docker exec <container> python -c ...`, or
+`docker run --rm --network <app network> python:3.12-slim ...`). Every one of them must FAIL (time out or be refused):
+
+1. Connect to another app's container IP and port.
+2. Connect to another app's published port through the app network's gateway address.
+3. Connect to a private-network (VPN) address, any 100.x.y.z host that is up.
+4. Connect to `169.254.169.254` (cloud metadata).
+5. Connect to a port on the host that is not open to the world (for example the admin port).
+
+Then run `ip -6 addr` (and `ip -6 route`) in the container: there must be no global or ULA IPv6 address.
+Do this on the edge machine before turning container mode on for the shared server.
+
 ## Not included
-Several admins, custom domains per app, app logs view, own databases beyond SQLite, Docker.
+Several admins, custom domains per app, app logs view, own databases beyond SQLite.
 
 ## Workspace profile
 

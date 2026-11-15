@@ -489,3 +489,20 @@ async fn static_html_gets_default_title_and_lang_only_when_missing() {
         panic!("status {st}: {body}");
     }
 }
+
+#[tokio::test]
+async fn apps_delete_with_a_dotdot_name_touches_nothing() {
+    let t = setup();
+    let ws = t.workspace("A", basic_rights()).await;
+    let marker = t.st.cfg.apps_dir.join("marker");
+    std::fs::create_dir_all(&marker).unwrap();
+    for n in ["%2e%2e", "..", "a%2Fb"] {
+        let r = t.api(&ws, "DELETE", &format!("/v1/apps/{n}"), vec![]).await;
+        assert!(
+            r.status.as_u16() == 404 || r.status.as_u16() == 400,
+            "{n}: {}",
+            r.status
+        );
+    }
+    assert!(marker.is_dir());
+}
