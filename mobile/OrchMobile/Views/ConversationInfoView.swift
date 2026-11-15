@@ -300,10 +300,10 @@ struct ConversationInfoView: View {
         case .artifact(_, let name, let item):
             if let item {
                 Button { viewer = item } label: {
-                    artifactCard(item, title: item.title, kindLabel: item.kind == .pdf ? "PDF" : "Artifact")
+                    artifactCard(item, title: item.title, kindLabel: item.kind == .pdf ? "PDF" : "Preview")
                 }.buttonStyle(.plain)
             } else {
-                artifactCard(nil, title: name, kindLabel: "Artifact").opacity(0.5)
+                artifactCard(nil, title: name, kindLabel: "Preview").opacity(0.5)
             }
         case .file(_, let text):
             DisclosureGroup("Details") { Text(text).font(.system(size: 15, design: .monospaced)) }

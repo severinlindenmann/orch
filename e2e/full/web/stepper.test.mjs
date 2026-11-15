@@ -15,14 +15,14 @@ test('a typed orch command in the UI is flagged', () => {
 });
 
 test('wording rules, boundaries, allowances, and purity', () => {
-  for (const text of ['Connected over NetBird', 'Evidence', 'Recommended', 'undefined']) assert.ok(lintText(text).length, text);
-  assert.deepEqual(lintText('Ticket Proof Suggested scheduled requestor'), []);
+  for (const text of ['Connected over NetBird', 'Proof', 'Recommended', 'undefined']) assert.ok(lintText(text).length, text);
+  assert.deepEqual(lintText('Ticket Evidence Suggested scheduled requestor'), []);
   assert.deepEqual(lintText('token', { allow: ['token'] }), []);
   assert.equal(lintText('type DELETE')[0].rule, 'typed-word');
   assert.equal(lintText('[object Object] {{ }}').length, 3);
-  assert.deepEqual(lintText('Evidence'), lintText('Evidence'));
+  assert.deepEqual(lintText('Proof'), lintText('Proof'));
   assert.ok(RULES.length);
-  assert.equal(termTable(['Ticket ticket', 'Proof']).Ticket, 2);
+  assert.equal(termTable(['Ticket ticket', 'Evidence']).Ticket, 2);
 });
 
 test('browser lane continues after failure and covers controls', { timeout: 19500 }, async t => {

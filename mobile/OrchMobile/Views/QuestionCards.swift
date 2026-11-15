@@ -134,7 +134,7 @@ struct QuestionCard: View {
         option.hasPrefix("Version ") ? String(option.dropFirst("Version ".count)) : option
     }
 
-    /// A full-row button; "Recommended" is a small tag above it, never inside it.
+    /// A full-row button; "Suggested" is a small tag above it, never inside it.
     private func optionButton(_ q: Question, option: String, title: String? = nil, primary: Bool = false) -> some View {
         let pending = model.pendingAnswers[q.id]
         let recommended = q.message.body.recommended == option
@@ -142,7 +142,7 @@ struct QuestionCard: View {
         return VStack(alignment: .leading, spacing: 4) {
             if recommended {
                 // VoiceOver hears ", recommended" on the button itself.
-                Text("Recommended").themeFont(13, .medium).foregroundStyle(Theme.brand).accessibilityHidden(true)
+                Text("Suggested").themeFont(13, .medium).foregroundStyle(Theme.brand).accessibilityHidden(true)
             }
             Button { model.chooseAnswer(q, option) } label: {
                 HStack(spacing: 6) {
