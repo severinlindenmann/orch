@@ -388,13 +388,24 @@ def say(root: Path, text: str, by: str | None = None, new: bool = False, proven:
     runs.require_signing(root)  # before ANY line is written: a refusal must leave nothing that looks saved
     gid = tickets.ensure_general(root, who)
     mid = relay.new_id()
-    entry = record(root, mid, "you", "dashboard", text, convo_start=new)
-    tickets.apply_op(root, gid, lambda t: tickets.add_history(t, who, text, "dashboard", chat=True), by=who)
-    runs.pending_add(root, gid, who, "message", text, "dashboard", "p_" + mid[2:], proven=proven)
+    entry = record(root, mid, "you", tickets.PERSON_VIA, text, convo_start=new)
+    tickets.apply_op(
+        root, gid, lambda t: tickets.add_history(t, who, text, tickets.PERSON_VIA, chat=True), by=who
+    )
+    runs.pending_add(root, gid, who, "message", text, tickets.PERSON_VIA, "p_" + mid[2:], proven=proven)
     sent = None
     with contextlib.suppress(Refused, OSError):
         sent = relay.send_text(
-            root, "phones", text, None, None, None, general=True, sender="you", via="dashboard", mid=mid
+            root,
+            "phones",
+            text,
+            None,
+            None,
+            None,
+            general=True,
+            sender="you",
+            via=tickets.PERSON_VIA,
+            mid=mid,
         )
     return {"id": mid, "ticket": gid, "day": entry["day"], "sent": bool(sent)}
 

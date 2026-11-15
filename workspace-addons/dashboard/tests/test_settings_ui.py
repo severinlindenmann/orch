@@ -131,11 +131,11 @@ global.act = async (op, args) => { calls.push({op, args}); return {ok:true}; };
 loadAddon = async () => {};
 (async () => {
   const plan = repeatPlan;
-  assert.deepEqual(plan({freq:'daily', time:'07:30'}), {phrase:'daily 07:30', summary:'Runs every day at 07:30', hint:''});
+  assert.deepEqual(plan({freq:'daily', time:'07:30'}), {phrase:'daily 07:30', summary:'Repeats every day at 07:30', hint:''});
   assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).phrase, 'every monday 08:00');
-  assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).summary, 'Runs every Monday at 08:00');
+  assert.equal(plan({freq:'weekly', days:[1], time:'08:00'}).summary, 'Repeats every Monday at 08:00');
   assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).phrase, '5 8 * * 1,3,5');
-  assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).summary, 'Runs every Monday, Wednesday and Friday at 08:05');
+  assert.equal(plan({freq:'weekly', days:[5, 1, 3], time:'08:05'}).summary, 'Repeats every Monday, Wednesday and Friday at 08:05');
   assert.equal(plan({freq:'weekly', days:[0], time:'09:00'}).phrase, 'every sunday 09:00');
   assert.equal(plan({freq:'weekly', days:[], time:'08:00'}).phrase, null);
   assert.equal(plan({freq:'monthly', monthday:15, time:'09:00'}).phrase, 'monthly 15 09:00');
@@ -145,11 +145,11 @@ loadAddon = async () => {};
   assert.equal(plan({freq:'custom', every:1, time:'06:10'}).phrase, 'daily 06:10');
   assert.equal(plan({freq:'custom', every:0, time:'06:10'}).phrase, null);
   // owner feedback 14 Nov (fb20): custom = every N minutes (5 or more) or hours, no time of day
-  assert.deepEqual(plan({freq:'custom', unit:'minutes', every:5, time:''}), {phrase:'every 5 minutes', summary:'Runs every 5 minutes', hint:''});
+  assert.deepEqual(plan({freq:'custom', unit:'minutes', every:5, time:''}), {phrase:'every 5 minutes', summary:'Repeats every 5 minutes', hint:''});
   assert.equal(plan({freq:'custom', unit:'minutes', every:4}).phrase, null);
   assert.equal(plan({freq:'custom', unit:'minutes', every:60}).phrase, null);
   assert.equal(plan({freq:'custom', unit:'hours', every:2}).phrase, 'every 2 hours');
-  assert.equal(plan({freq:'custom', unit:'hours', every:1}).summary, 'Runs every 1 hour');
+  assert.equal(plan({freq:'custom', unit:'hours', every:1}).summary, 'Repeats every 1 hour');
   assert.equal(plan({freq:'custom', unit:'hours', every:24}).phrase, null);
   assert.deepEqual(cronToChoice('*/10 * * * *'), {freq:'custom', days:[1], monthday:1, time:'08:00', unit:'minutes', every:10});
   assert.equal(cronToChoice('0 */3 * * *').unit, 'hours');

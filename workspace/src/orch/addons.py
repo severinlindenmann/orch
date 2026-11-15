@@ -62,8 +62,26 @@ EXT_SCHEMA_MAX = 32 * 1024
 # off until `orch addon add <name>`; their commands are parsed by the core CLI. No other add-on may take
 # these names (they stay in RESERVED).
 CORE_ADDONS = ("publish", "relay")
-# Separate packages that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
-SHIPPED_ADDONS = ("automation", "dashboard", "factory", "focus", "insights", "lessons", "sync")
+
+
+def _shipped_names() -> tuple[str, ...]:
+    """The add-ons that ship in this repo's workspace-addons/ and are installed on `orch addon add <name>`.
+    The names come from the generated catalog shipped_addons.json (scripts/gen_shipped_addons.py lists
+    workspace-addons/), never from a list in the code."""
+    try:
+        data = json.loads(
+            (Path(__file__).resolve().parent / "shipped_addons.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return ()
+    return (
+        tuple(sorted(n for n in data if isinstance(n, str) and NAME_RE.match(n)))
+        if isinstance(data, dict)
+        else ()
+    )
+
+
+SHIPPED_ADDONS = _shipped_names()
 
 
 # ---------------------------------------------------------------- sources

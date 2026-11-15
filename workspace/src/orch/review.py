@@ -746,6 +746,7 @@ def decide(
             raise BadVerdict("A Check result has no options to pick.")
         return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid)
     q = _find(ticket, key)
+    tickets.refuse_if_taken_back(q)
     if q.get("answer") is not None:
         raise Refused(f"{key} is already answered. Use change to answer again.")
     card = _card_of(q)
@@ -815,6 +816,7 @@ def change(
     entry only gets decision.replaced_by. Nothing is overwritten."""
     ticket = tickets.load(root, tid)
     old = _find(ticket, qid)
+    tickets.refuse_if_taken_back(old)
     if old.get("answer") is None:
         raise Refused(f"{qid} is not answered yet. Answer it first.")
     if (old.get("card") or {}).get("kind") == "check":
