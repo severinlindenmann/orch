@@ -57,7 +57,7 @@ def test_schedule_listed_as_a_table_with_the_week_ahead(ws, monkeypatch):
     check(v)
     assert not blocks(v, "stat")
     (table,) = blocks(v, "table")
-    assert [c["label"] for c in table["columns"]] == ["Schedule", "Repeats", "Next time", "Last time"]
+    assert [c["label"] for c in table["columns"]] == ["Ticket", "Repeats", "Next time", "Last time"]
     (row,) = table["rows"]
     assert row["cells"]["schedule"] == "Weekly breport/b" and row["cells"]["repeats"] == "Mondays at 07:00"
     assert row["cells"]["last"] == "Not yet" and row["link"] == "t_rec00001"
@@ -74,7 +74,7 @@ def test_recent_runs_short_list_with_titles(ws):
     s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
-    (lst,) = blocks(v, "list", "Recent runs")
+    (lst,) = blocks(v, "list", "Recent starts")
     assert (
         lst["items"][0]["title"] == "Bank check"
         and lst["items"][0]["chips"][0] == {"label": "Stopped", "tone": "bad"}
@@ -95,7 +95,7 @@ def test_good_run_has_duration(ws):
     s.tick(T(8, 1))
     v = build(ws, T(9))
     check(v)
-    item = blocks(v, "list", "Recent runs")[0]["items"][0]
+    item = blocks(v, "list", "Recent starts")[0]["items"][0]
     assert item["chips"][0]["label"] == "Done" and "done in" in item["subtitle"]
 
 
@@ -366,7 +366,7 @@ def test_countdown_words_are_written_in_full():
 
 
 def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
-    """Coming up (with the week), Recent runs (heading above its card, empty state) and the incoming-work footnote."""
+    """Coming up (with the week), Recent starts (heading above its card, empty state) and the incoming-work footnote."""
     from orch_automation import service
 
     monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
@@ -382,7 +382,7 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     assert "title" not in table
     (week,) = blocks(v, "calendar")
     assert week["title"] == "Coming up" and "Workspace time" not in week["meta"]
-    (runs,) = blocks(v, "list", "Recent runs")
+    (runs,) = blocks(v, "list", "Recent starts")
     assert runs["above"] is True and runs["meta"] == "Latest activity" and runs["items"] == []
     assert runs["empty"]["title"] == "Nothing has run yet" and "run it now" in runs["empty"]["text"]
     foot = v["blocks"][-1]
@@ -391,7 +391,7 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
 
 
 def test_recent_runs_and_last_result_read_the_same_runs(ws):
-    """A run that started (Last result shows it) is in Recent runs too, never "Nothing has run yet"."""
+    """A run that started (Last result shows it) is in Recent starts too, never "Nothing has run yet"."""
     add_ticket(
         ws,
         "t_rec00009",
@@ -402,7 +402,7 @@ def test_recent_runs_and_last_result_read_the_same_runs(ws):
     check(v)
     (table,) = blocks(v, "table")
     assert table["rows"][0]["cells"]["last"].startswith("Started")
-    (lst,) = blocks(v, "list", "Recent runs")
+    (lst,) = blocks(v, "list", "Recent starts")
     assert [i["title"] for i in lst["items"]] == ["Weekly report"]
     assert lst["items"][0]["chips"] == [{"label": "Started", "tone": "neutral"}]
 
@@ -431,7 +431,7 @@ def test_a_synced_schedule_not_allowed_here_offers_allow_instead_of_run_now(ws, 
     ["daily 08:00", "every monday 08:00", "0 8 * * 1,3", "monthly 5 08:00", "0 8 */3 * *"],
 )
 def test_every_phrase_the_dashboard_sends_is_saved_and_listed(ws, monkeypatch, phrase):
-    """The dashboard's Save schedule sends one of these phrases: after the save the list must show that row."""
+    """The dashboard's Save repeat sends one of these phrases: after the save the list must show that row."""
     from orch_automation import service
     from orch_automation.actions import act
 

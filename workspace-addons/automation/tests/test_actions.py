@@ -188,7 +188,7 @@ def test_repeat_cli_value_is_required_and_success_is_json(ws, capsys):
     assert (
         main(["--dir", str(ws), "act", "repeat", "--value=every day at 9", "--json", "--", "t_plain001"]) == 0
     )
-    assert json.loads(capsys.readouterr().out)["text"] == "Schedule saved."
+    assert json.loads(capsys.readouterr().out)["text"] == "Repeat saved."
 
 
 def test_copy_creates_an_open_ticket_through_core_cli(ws, tmp_path, monkeypatch):
