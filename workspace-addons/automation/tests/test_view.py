@@ -157,7 +157,7 @@ def test_no_notice_row_when_running_with_nothing_planned(ws, monkeypatch):
         ("0 8 * * 1-5", "Weekdays at 08:00"),
         ("0 8 * * 6,0", "Weekends at 08:00"),
         ("0 9 1 * *", "Every month on day 1 at 09:00"),
-        ("0 9 31 * *", "Every month on day 31 at 09:00"),
+        ("0 9 31 * *", "Every month on day 31 (the last day in shorter months) at 09:00"),
         ("0 9 1 1 *", "On a custom plan (0 9 1 1 *)"),
     ],
 )

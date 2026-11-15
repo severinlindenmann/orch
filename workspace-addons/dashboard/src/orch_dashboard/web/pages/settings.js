@@ -1063,8 +1063,8 @@ function repeatPlan(c) {
   }
   if (c.freq === 'monthly') {
     const day = Number(c.monthday);
-    if (!Number.isInteger(day) || day < 1 || day > 28) return {phrase:null, summary:'Choose a day from 1 to 28.', hint:''};
-    return {phrase:'monthly ' + day + ' ' + at, summary:'Runs on day ' + day + ' of every month at ' + at, hint:'Days go up to 28 so every month has them.'};
+    if (!Number.isInteger(day) || day < 1 || day > 31) return {phrase:null, summary:'Choose a day from 1 to 31.', hint:''};
+    return {phrase:'monthly ' + day + ' ' + at, summary:'Runs on day ' + day + ' of every month at ' + at, hint:day > 28 ? 'In shorter months it runs on the last day.' : ''};
   }
   const n = Number(c.every);
   if (!Number.isInteger(n) || n < 1 || n > 30) return {phrase:null, summary:'Choose between 1 and 30 days.', hint:''};
@@ -1081,7 +1081,7 @@ function cronToChoice(cron) {
   const time = String(f[1]).padStart(2, '0') + ':' + String(f[0]).padStart(2, '0'), base = {freq:'weekly', days:[1], monthday:1, every:2, time};
   if (f[2] === '*' && f[4] === '*') return {...base, freq:'daily'};
   if (f[2] === '*' && /^[0-6](,[0-6])*$/.test(f[4])) return {...base, freq:'weekly', days:f[4].split(',').map(Number)};
-  if (/^\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'monthly', monthday:Math.min(28, Number(f[2]))};
+  if (/^\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'monthly', monthday:Math.min(31, Number(f[2]))};
   if (/^\*\/\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'custom', unit:'days', every:Number(f[2].slice(2))};
   return null;
 }
@@ -1152,7 +1152,7 @@ function repeatsDialog(only = null, addonName = null) {
     }
     if (choice.freq === 'monthly') {
       const day = h('select', {className:'input', 'aria-label':'Day of month'});
-      for (let i = 1; i <= 28; i++) day.append(new Option(String(i), String(i)));
+      for (let i = 1; i <= 31; i++) day.append(new Option(i > 28 ? i + ' \u2014 or the last day in shorter months' : String(i), String(i)));
       day.value = String(choice.monthday);
       day.onchange = () => { choice.monthday = Number(day.value); refreshSummary(); };
       kids.push(row('Day of month', h('div', {className:'schedule-value'}, day, plan.hint ? hint : null)));
