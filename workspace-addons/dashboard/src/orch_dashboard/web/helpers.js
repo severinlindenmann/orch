@@ -18,6 +18,31 @@
   const FIELD_WORD = {title: 'the title', owner: 'the owner', due: 'the due day', note: 'the note', summary: 'the summary',
     status: 'the status'};
 
+  /* Due dates (G1). `due` is "YYYY-MM-DD" (a day) or "YYYY-MM-DDTHH:MM" (local wall time, no zone). Only a due with a
+     time gets words here: "Due 18:30" (today), "Due Mon 18:30" (within a week), "Due 14 Nov 2026, 18:30" (further),
+     and "Late since ..." once it has passed on an active ticket. A day-only due returns '' (callers keep their day
+     wording). The same words as orch.tickets.due_label (the CLI). */
+  const DUE_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const DUE_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const dueTime = due => { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(due || '')); return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : null; };
+  const dueKey = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const dueClock = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  function dueWords(due, status, now) {
+    const at = dueTime(due);
+    if (!at) return '';
+    now = now || new Date();
+    const gap = Math.round((new Date(at.getFullYear(), at.getMonth(), at.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+    const when = gap === 0 ? dueClock(at) : Math.abs(gap) < 7 ? DUE_DAYS[at.getDay()] + ' ' + dueClock(at) : at.getDate() + ' ' + DUE_MONTHS[at.getMonth()] + ' ' + at.getFullYear() + ', ' + dueClock(at);
+    return (at < now && status !== 'done' && status !== 'dropped' ? 'Late since ' : 'Due ') + when;
+  }
+  /* Past its day (day-only) or its time (with a time), on a ticket that is not closed. */
+  function dueLate(due, status, now) {
+    if (!due || status === 'done' || status === 'dropped') return false;
+    now = now || new Date();
+    const at = dueTime(due);
+    return at ? at < now : String(due) < dueKey(now);
+  }
+
   /* One plain line for a history entry. The common words the CLI writes become sentences; anything else is shown as
      written (the caller still strips ids). */
   /* The one place a raw actor id inside a line ("agent:<name>", "human:<name>") becomes the name a person reads. */
@@ -498,5 +523,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {dueWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });

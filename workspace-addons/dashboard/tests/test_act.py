@@ -177,6 +177,10 @@ def test_argv_snapshot_per_op(act_server, act_orch):
             ],
         ),
         (
+            {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": "2026-11-30T18:30"}},
+            ["ticket", "edit", "t_abcdef", "--due=2026-11-30T18:30", *common],
+        ),
+        (
             {"op": "ticket.edit", "args": {"ticket": "t_abcdef", "due": ""}},
             ["ticket", "edit", "t_abcdef", "--due=", *common],
         ),
