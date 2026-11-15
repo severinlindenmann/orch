@@ -26,7 +26,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from orch import __version__, diag, procs, runs, services, tickets
+from orch import __version__, diag, history, procs, runs, services, tickets
 
 TIME_LIMIT = 5.0
 CAP_BYTES = 256 * 1024
@@ -86,8 +86,8 @@ def tickets_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
             gaps.append(f"{tid}: {type(e).__name__}")
             continue
         hist = [
-            {"at": h.get("at"), "by": h.get("by"), "via": h.get("via")}
-            for h in (t.get("history") or [])[-HISTORY_LINES:]
+            {"at": h.get("at"), "via": h.get("via")}  # when and how; never who or what was said
+            for h in history.lines(root, t)[-HISTORY_LINES:]
             if isinstance(h, dict)
         ]
         out[tid] = {
@@ -98,7 +98,8 @@ def tickets_data(root: Path, scope: dict, now: float) -> tuple[dict, list[str]]:
             "created_at": t.get("created_at"),
             "age_s": _age(t.get("updated_at"), now),
             "history": hist,
-            "history_total": len(t.get("history") or []),
+            "history_total": history.length(t),
+            "history_last_at": hist[-1]["at"] if hist else None,
         }
     return {"tickets": out}, gaps
 

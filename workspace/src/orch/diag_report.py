@@ -91,9 +91,9 @@ def default_start(root: Path, scope: dict, collected: dict, now: float) -> tuple
         if last:
             return diag_query._epoch(last), "last successful change of the ticket"
         t = (collected["tickets"]["data"].get("tickets") or {}).get(scope["ticket"])
-        if t and t.get("history"):
+        if t and t.get("history_last_at"):
             with contextlib.suppress(ValueError, TypeError):
-                return runs._parse(t["history"][-1]["at"]), "last history line of the ticket"
+                return runs._parse(t["history_last_at"]), "last history line of the ticket"
     return now - 2 * 3600, "2 hours back (nothing narrower is known)"
 
 

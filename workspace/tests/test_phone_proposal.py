@@ -332,7 +332,7 @@ def test_the_failure_log_is_ignored_by_git_and_private(proj, conn):
     relay.send_text(
         proj, "phones", SENTENCE, None, None, None, general=True, refs=[{"kind": "proposal", "title": "T"}]
     )
-    (log,) = (proj / ".orch" / "diag").iterdir()
+    (log,) = (proj / ".orch" / "diag").glob("*.jsonl")
     assert (log.stat().st_mode & 0o077) == 0 and "diag/" in harness.CONTRACT_IGNORE
     out = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"], cwd=proj, capture_output=True, text=True
