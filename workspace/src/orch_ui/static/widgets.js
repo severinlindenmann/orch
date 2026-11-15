@@ -36,7 +36,7 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
  cols.forEach(c=>{const th=el('th','',c.label);th.scope='col';if(c.sort){th.setAttribute('aria-sort','none');th.tabIndex=0;th.append(UI.chevron());const go=()=>{dir=sortKey===c.key?-dir:1;sortKey=c.key;draw()};th.onclick=go;th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}}}tr.append(th)});
  thead.append(tr);table.append(thead,tbody);wrap.append(table);draw();return wrap};
 /* Swipe review deck (draft 15 Nov, revised after the Codex challenge): UI.swipeDeck(host, items, o)
-   o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, quiet, transcript, onDecide(item, verdict, note), onUndo(item), onChange()}
+   o: {mode:'phone'|'desk', start, picked:{itemId:'C'}, voice (false: text only, no mic or clips), answered:{itemId:{verdict,note}}, later:[ids], pins:{itemId:[pin]}, quiet, transcript, onDecide(item, verdict, note), onUndo(item), onChange()}
    Moves: right = approve (button names the action: it.okLabel, "Use C"), left = Don't do / Send back / None of these,
    down = comment sheet whose buttons name the outcome ("Send back for changes" / "Use C with these changes"),
    up = Later (stays unanswered, goes to the end). Buttons and keys (→ ← ↓ ↑, Space bigger, B before/after, O all, Z undo)
@@ -44,7 +44,8 @@ UI.table=(cols,rows,o)=>{o=o||{};const wrap=el('div','table-wrap'),table=el('tab
    system back gesture; a second finger cancels. Every card says what happens when you approve (it.then).
    verdicts: ok | no | talk | later. note: {picked, changes:{text, clips, pins:[{n,on,x,y,text}]}, about} */
 UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const t=document.createElement('template');t.innerHTML=window.icon?window.icon(n,z||20):'';return t.content};
- let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(),picked=Object.assign({},o.picked);
+ let idx=o.start||0,overlay=null,cur=null,busy=false;const done=[],ans={},pins={},drafts={},later=new Set(o.later||[]),picked=Object.assign({},o.picked);
+ Object.assign(pins,o.pins);Object.entries(o.answered||{}).forEach(([id,a])=>{const it=items.find(x=>x.id===id);if(it)ans[id]={verdict:a.verdict,note:a.note||null,item:it}});
  host.classList.add('swipe','swipe-'+mode);host.tabIndex=0;host.setAttribute('role','region');host.setAttribute('aria-label','Review, one item at a time');
  const btn=(cls,children,label)=>{const b=el('button',cls);b.type='button';children.forEach(c=>b.append(c));if(label)b.setAttribute('aria-label',label);return b};
  /* top: progress words, All, Undo */
@@ -126,14 +127,15 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  /* order: waiting cards first (Later ones at the end), then answered */
  const waiting=()=>{const w=items.map((_,i)=>i).filter(i=>!ans[items[i].id]);return w.filter(i=>!later.has(items[i].id)).concat(w.filter(i=>later.has(items[i].id)))};
  const nextIdx=from=>{const w=waiting();const pos=w.indexOf(from);return w.length?(pos>=0?w[pos]:w.find(i=>i>from&&!later.has(items[i].id))??w[0]):items.length};
+ let ready=false;const change=()=>{if(ready&&o.onChange)o.onChange()};/* the first onChange comes after the constructor returns, so a handler may use the deck */
  const render=()=>{stage.replaceChildren();cur=null;const n=items.length,k=Object.keys(ans).length;
   count.textContent=k+' answered · '+(n-k)+' waiting';fill.style.width=(k/n*100)+'%';undoBtn.disabled=!done.length;
-  if(idx>=n){acts.hidden=laterRow.hidden=true;stage.append(summary());o.onChange&&o.onChange();return}acts.hidden=laterRow.hidden=false;
+  if(idx>=n){acts.hidden=laterRow.hidden=true;stage.append(summary());change();return}acts.hidden=laterRow.hidden=false;
   const behind=waiting().filter(i=>i!==idx);
   if(behind[1]!=null)stage.append(card(items[behind[1]],'under2'));if(behind[0]!=null)stage.append(card(items[behind[0]],'under'));
   cur=card(items[idx]);const a=ans[items[idx].id];
   if(a){const t=el('div','swipe-was');t.append(ic('check',14),'You answered: '+ansWord(a)+'. A new answer is added, the old one stays on the ticket.');cur.querySelector('.swipe-foot').prepend(t)}
-  stage.append(cur);syncWords();wire(cur);o.onChange&&o.onChange()};
+  stage.append(cur);syncWords();wire(cur);change()};
  const summary=()=>{const d=el('div','swipe-done');d.append(UI.statusIcon('done'),el('h3','',"You've answered everything in this review."));
   const t=el('div','tally'),c=v=>Object.values(ans).filter(x=>x.verdict===v).length;[['ok','check','approved'],['no','x','not done'],['talk','mic','sent back for changes']].forEach(([v,i,l])=>{const s=el('span');s.append(ic(i,16),c(v)+' '+l);t.append(s)});
   d.append(t,el('p','',"Each ticket shows what happens next. Answers are on the ticket under Decisions."));return d};
@@ -195,9 +197,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const scr=el('div','swipe-scrim'),sh=el('div','swipe-sheet');sh.setAttribute('role','dialog');sh.setAttribute('aria-label','Comment on '+it.title);
   const grab=el('div','grab');grab.title='Pull down to close; your words are kept';
   const ttl=el('h2','','What should change?'),sub=el('p','meta',it.title);sub.style.margin='0';
-  const ta=el('textarea');ta.placeholder='Type, or hold the mic and talk';ta.setAttribute('aria-label','What should change');ta.value=dr.text;
+  const ta=el('textarea');ta.placeholder=o.voice?'Type, or hold the mic and talk':'Type what should change';ta.setAttribute('aria-label','What should change');ta.value=dr.text;
   const voice=el('div','swipe-voice'),mic=btn('swipe-mic',[ic('mic',18),el('span','','Hold or tap to talk')]),wave=el('div','swipe-wave');for(let i=0;i<18;i++){const b=el('i');b.style.animationDelay=(i%6)*0.09+'s';wave.append(b)}
-  voice.append(mic,wave);const clips=el('div','swipe-clips');
+  if(o.voice)voice.append(mic,wave);const clips=el('div','swipe-clips');
   const drawClips=()=>{clips.replaceChildren();dr.clips.forEach((cl,i)=>{const c=el('div','swipe-clip');const rm=btn('btn ghost icon xs',[ic('x',12)],'Remove this recording');rm.onclick=()=>{dr.clips.splice(i,1);drawClips();sync()};
    c.append(ic('play',14),el('span','','0:'+String(cl.secs).padStart(2,'0')),el('q','',cl.text),rm);clips.append(c)})};
   let t0=0,toggled=false;const rec=()=>mic.classList.contains('rec');
@@ -212,7 +214,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    about.append(el('span','meta about-label','About'));[...(it.preview.options||[]).map(x=>[x.id,x.id]),['all','All']].forEach(([v,l])=>{const b=btn('btn sm',[l],v==='all'?'About all options':'About option '+v);b.dataset.v=v;b.onclick=()=>setAbout(v);about.append(b)})}
   const foot=el('div','swipe-sheet-foot'),cancel=btn('btn',['Cancel']),back=btn('btn',['Send back for changes']),use=btn('btn primary',['']);
   const setAbout=v=>{about.v=v;about.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===v)));sync()};
-  const sync=()=>{const has=!!ta.value.trim()||dr.clips.length;dr.text=ta.value;back.disabled=use.disabled=!has;
+  const sync=()=>{const has=!!ta.value.trim()||(o.voice&&dr.clips.length);dr.text=ta.value;back.disabled=use.disabled=!has;
    const opt=about&&about.v!=='all'?about.v:null;use.hidden=!opt;if(opt)use.textContent='Use '+opt+' with these changes';
    back.className=opt?'btn':'btn primary';
    hint.textContent=opt?('“Send back” asks for new versions. “Use '+opt+'” builds '+opt+' with your changes.'):'The helper gets your words and makes a new version. Nothing is approved.'};
@@ -220,14 +222,14 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const close=()=>{closeOverlay();reset(cur)};cancel.onclick=close;
   const leave=(verdict,note)=>{closeOverlay();const c=cur;busy=true;c.classList.add('leaving');show(c,verdict==='ok'?stage.clientWidth*1.4:0,verdict==='ok'?0:stage.clientHeight*1.2);
    setTimeout(()=>{busy=false;delete drafts[it.id];commit(verdict,note)},220)};
-  const words=()=>({text:ta.value.trim(),clips:dr.clips.slice(),pins:(pins[it.id]||[]).slice()});
+  const words=()=>({text:ta.value.trim(),clips:o.voice?dr.clips.slice():[],pins:(pins[it.id]||[]).slice()});
   back.onclick=()=>leave('talk',{changes:words(),about:about?about.v:null});
   use.onclick=()=>{picked[it.id]=about.v;leave('ok',{picked:about.v,changes:words()})};
   foot.append(cancel,back,use);
   /* pull the handle down to close (the words stay) */
   grab.addEventListener('pointerdown',e=>{const y0=e.clientY;grab.setPointerCapture(e.pointerId);const mv=ev=>{sh.style.transform=`translateY(${Math.max(0,ev.clientY-y0)}px)`};
    grab.addEventListener('pointermove',mv);grab.addEventListener('pointerup',ev=>{grab.removeEventListener('pointermove',mv);if(ev.clientY-y0>80)close();else sh.style.transform=''},{once:true})});
-  sh.append(grab,ttl,sub);if(about)sh.append(about);sh.append(hint,voice,clips,ta,foot);scr.append(sh);
+  sh.append(grab,ttl,sub);if(about)sh.append(about);sh.append(hint);if(o.voice)sh.append(voice,clips);sh.append(ta,foot);scr.append(sh);
   scr.addEventListener('pointerdown',e=>{if(e.target===scr)close()});
   if(about)setAbout(picked[it.id]||'all');drawClips();sync();openOverlay(scr,o.state?null:ta);return {mic,start,stop,ta,send:back,use,setAbout,sync}};
  /* Viewer: bigger, zoom, Open, and spots (tap “Spot”, tap the place, say or type what to change; the spot remembers
@@ -257,7 +259,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    const tmp=pinEl({x,y,text:''},(pins[it.id]||[]).length);tmp.classList.add('tmp');zm.append(tmp);
    add.onclick=()=>{if(!inp.value.trim())return;(pins[it.id]=pins[it.id]||[]).push({x,y,on:on||'',text:inp.value.trim()});pop.remove();tmp.classList.remove('tmp');tmp.title=inp.value.trim();pinning(false);drawList()};
    no.onclick=()=>{pop.remove();tmp.remove()};inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();add.click()}});
-   row.append(m,el('span','grow'),no,add);pop.append(inp,row);zm.append(pop);if(!o.state)inp.focus();return pop};
+   if(o.voice)row.append(m);row.append(el('span','grow'),no,add);pop.append(inp,row);zm.append(pop);if(!o.state)inp.focus();return pop};
   (pins[it.id]||[]).forEach((pn,i)=>zm.append(pinEl(pn,i)));
   foot.append(hint,list);drawList();v.append(barEl,body,foot);openOverlay(v,close);return {askPin,pinning,setZ,compare:zm.querySelector('.swipe-compare')}};
  /* keys: only when the deck itself or the card has focus (a focused button keeps its own Space / Enter) */
@@ -268,6 +270,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   const k=e.key;if(k==='ArrowRight'){e.preventDefault();fly('ok')}else if(k==='ArrowLeft'){e.preventDefault();fly('no')}else if(k==='ArrowDown'){e.preventDefault();fly('talk')}else if(k==='ArrowUp'){e.preventDefault();fly('later')}
   else if(k===' '){e.preventDefault();cur&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
- render();
- return {jump,openOverview,answers:ans,items,fly,undo,pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,get index(){return idx}}};
+ if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
+ render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());
+ return {jump,openOverview,answers:ans,items,fly,undo,pick:id=>pick(items[idx],id),openComment,openViewer,show:(dx,dy)=>cur&&show(cur,dx,dy),pins,later,get busy(){return !!overlay||busy},get index(){return idx}}};
 })();
