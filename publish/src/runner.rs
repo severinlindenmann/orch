@@ -438,11 +438,16 @@ pub fn check_dockerfile(text: &str) -> Result<(), &'static str> {
             }
         }
     }
-    let mut joined = lower.clone();
-    for pat in ["\\\r\n", "\\\n", "`\r\n", "`\n"] {
-        joined = joined.replace(pat, "");
-    }
-    if lower.contains("--mount") || joined.contains("--mount") {
+    // Deliberately stricter than BuildKit's own line joining (trailing blanks after `\`, comment and
+    // empty lines inside a continuation): drop comment lines, then every blank and continuation
+    // character, so `--mount` can't be assembled across lines in any way. False alarms are fine.
+    let squashed: String = lower
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .flat_map(str::chars)
+        .filter(|c| !c.is_ascii_whitespace() && *c != '\\' && *c != '`')
+        .collect();
+    if lower.contains("--mount") || squashed.contains("--mount") {
         return Err("The Dockerfile must not use `--mount=`.");
     }
     Ok(())
@@ -1141,6 +1146,15 @@ mod tests {
             "CRLF"
         );
         assert!(check_dockerfile("FROM x\nRUN --MOUNT=type=cache x\n").is_err());
+        assert!(
+            check_dockerfile("FROM x\nRUN --mo\\  \t\nunt=type=cache x\n").is_err(),
+            "blanks after the backslash"
+        );
+        assert!(
+            check_dockerfile("FROM x\nRUN --mo\\\n# note\n\nunt=type=cache x\n").is_err(),
+            "comment and empty line inside a continuation"
+        );
+        assert!(check_dockerfile("FROM x\nRUN - - m o u n t = x\n").is_err());
         assert!(check_dockerfile("FROM x\n  # Check=skip=all\n").is_err());
         assert!(
             check_dockerfile("FROM x\nLABEL a=\"\u{e9}\"\n").is_err(),
