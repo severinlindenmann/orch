@@ -71,3 +71,15 @@ test('a finished update names the new release, or keeps the old text when unknow
   b.c.S();
   assert.deepEqual(b.banners, ['Update finished.']);
 });
+
+test('a finished update names both versions and links what changed', () => {
+  const a = page(1000, {'orch-update-from': '24'}, {state: 'finished', reason: '', release: 25});
+  a.c.S();
+  assert.deepEqual(a.banners, ['Updated orch 24 → 25.']);
+  const store = {'orch-update-from': JSON.stringify('orch 24')};
+  const b = page(1000, store, {state: 'finished', reason: '', release: 25});
+  b.c.S();
+  assert.deepEqual(b.banners, ['Updated orch 24 → 25.']);
+  assert.ok(!('orch-update-from' in store), 'the old version is used once');
+  assert.ok(/banner\(t, s\.state === "finished"\)/.test(src), 'the finished banner carries the What changed link');
+});

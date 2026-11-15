@@ -551,6 +551,23 @@ def test_s3_view_carries_record_notes(server):
     assert json.loads(req(server, "GET", f"/api/t/{TID}")[1])["record_notes"] == []
 
 
+def test_list_carries_the_newest_result_only_for_tickets_in_review(server, ws):
+    from .conftest import ticket
+
+    d = ws / ".orch" / "tickets"
+    ev = {"type": "file", "ref": f".orch/tickets/{TID}/evidence/report.md", "at": "2026-11-15T10:00:00Z"}
+    done = {"id": "c1", "text": "Report", "done": True, "evidence": [ev]}
+    (d / f"{TID}.json").write_text(json.dumps(ticket(status="review", checklist=[done])))
+    other = "t_other0001"
+    (d / f"{other}.json").write_text(json.dumps(ticket(id=other, status="active", checklist=[done])))
+    rows = {r["id"]: r for r in json.loads(req(server, "GET", "/api/tickets")[1])["tickets"]}
+    assert rows[TID]["result"] == {
+        "name": "Report", "kind": "doc", "at": "2026-11-15T10:00:00Z",
+        "preview": f"/api/file?t={TID}&n=report.md&m=view",
+    }  # fmt: skip
+    assert "result" not in rows[other]
+
+
 # --- files added from the composer (ticket.attach) ---------------------------------------------------
 def _files(*named):
     import base64

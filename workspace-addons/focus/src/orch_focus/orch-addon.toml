@@ -21,6 +21,7 @@ order = 20
 [page]
 path = "/"
 label = "Open Focus"
+live_session = true
 
 [[ticket_view]]
 field = "page"
