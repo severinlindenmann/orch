@@ -14,12 +14,13 @@ on:
   # Nightly on develop (the default branch): the mobile suite with UI tests, even when no push ran it to the end.
   schedule:
     - cron: "0 1 * * *"
-# one run per PR: a new push cancels the PR's older run (the newest commit covers it; the merge gate is the PR's own
-# run). Pushes to develop/main are never cancelled: the path filter only sees the newest push, so a cancelled run of a
-# mobile merge would never run the full mobile UI suite (PRs into develop run only a smoke subset). Each push gets its own group.
+# one run per PR: a new push cancels the PR's older run. Pushes to develop/main: one group per branch, a newer push
+# cancels the older run, so only the newest commit is tested and the queue stays short (15 Nov: 24 queued runs). A
+# cancelled push run may have been the one that would have run the mobile UI tests; the nightly schedule run covers
+# that (it runs mobile in full). Schedule and manual runs keep their own group and are never cancelled.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || format('{0}-{1}-{2}', github.event_name, github.ref, github.sha) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 permissions:
   contents: read
 jobs:
@@ -46,7 +47,8 @@ jobs:
             addons: ['workspace-addons/**', 'workspace/**', 'contracts/**', 'e2e/focus_insights*', '.github/workflows/addons.yml']
             publish: ['publish/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', 'workspace/src/orch/templates/**', '.github/workflows/publish.yml']
             relay: ['relay/**', 'contracts/**', 'workspace/src/orch_ui/static/tokens.css', '.github/workflows/relay.yml']
-            mobile: ['mobile/**', 'contracts/**', '.github/workflows/mobile.yml']
+            # only the contracts the phone tests read (blocks, crypto, look, relay-api, message, chat-groups, vectors, examples, review)
+            mobile: ['mobile/**', 'contracts/blocks*', 'contracts/crypto.md', 'contracts/look*/**', 'contracts/look*', 'contracts/relay-api*', 'contracts/message.schema.json', 'contracts/chat-groups*', 'contracts/vectors/**', 'contracts/examples/**', 'contracts/review/**', '.github/workflows/mobile.yml']
             brand: ['brand/**', 'docs/wording.md', 'workspace/**', 'workspace-addons/**', 'mobile/**', 'relay/web/**', 'publish/web/**', '.github/workflows/ci.yml', 'scripts/check_style.py']
   contracts:
     needs: changes
