@@ -230,7 +230,7 @@
             "allow_flag": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" }, "deny_flag": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" },
             "allowed": { "type": "array", "minItems": 1, "items": { "type": "string", "maxLength": 200 } },
             "denied": { "type": "array", "items": { "type": "string", "maxLength": 200 } },
-            "extra_args": { "type": "array", "items": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" } },
+            "extra_args": { "type": "array", "items": { "type": "string", "maxLength": 80 } },
             "drop": { "type": "array", "items": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" } },
             "drop_with_value": { "type": "array", "items": { "type": "string", "pattern": "^--[a-zA-Z-]{1,40}$" } }
           }

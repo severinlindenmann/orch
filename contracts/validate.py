@@ -1739,8 +1739,9 @@ def proposal_from_draft(draft, ctx):
 
 
 def proposal_hash(doc):
-    """sha256 over {id, kind, target, change} of a proposal (canonical JSON); kept with the test result in orch home."""
-    core = {k: doc.get(k) for k in ("id", "kind", "target", "change")}
+    """sha256 over every field a decision depends on (id, kind, title, plain, likely, evidence, target, change) of a
+    proposal (canonical JSON); kept with the test result in orch home."""
+    core = {k: doc.get(k) for k in ("id", "kind", "title", "plain", "likely", "evidence", "target", "change")}
     return "sha256:" + hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
@@ -1758,7 +1759,7 @@ def proposal_step(c):
     if act == "tests_done":
         return "tested" if st == "proposed" and c["tests"] == "passed" else st
     if act == "reject":
-        return "rejected" if st in ("proposed", "tested") else "conflict"
+        return "rejected" if st in ("proposed", "tested", "stale") else "conflict"
     if proposal_hash(c["file"]) != rec["hash"]:
         return "changed"
     if act == "send_to_admin":

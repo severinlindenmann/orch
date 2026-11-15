@@ -97,7 +97,8 @@ def add_parsers(sub, common) -> None:
     r.add_parser("settings", parents=[common], help=argparse.SUPPRESS)
     d = r.add_parser("delete-detail", parents=[common], help=argparse.SUPPRESS)
     d.add_argument("ticket")
-    r.add_parser("propose", parents=[common], help=argparse.SUPPRESS)  # a check-up run's suggestion, on stdin
+    pr = r.add_parser("propose", parents=[common], help=argparse.SUPPRESS)  # a check-up run's suggestion
+    pr.add_argument("--draft")  # the draft as one argument (else on stdin)
     for name in SUBCOMMANDS:
         if name not in _BUILT:
             r.add_parser(name, parents=[common], help=argparse.SUPPRESS).add_argument("rest", nargs="*")
@@ -181,7 +182,7 @@ def dispatch(args, root: Path) -> bool:
         elif args.sub == "delete-detail":
             _emit(delete_detail(root, args))
         elif args.sub == "propose":
-            _emit(propose(root))
+            _emit(propose(root, getattr(args, "draft", None)))
         else:
             _emit(counts(root, args))
     except record.RecordRefused as e:
@@ -775,7 +776,7 @@ def delete_detail(root: Path, args) -> dict:
     }
 
 
-def propose(root: Path) -> dict:
+def propose(root: Path, draft_text: str | None = None) -> dict:
     """`orch record propose --json`: one draft (contracts/proposal.schema.json $defs/draft) on stdin from a
     check-up run. Refused (`not_checkup`) when the caller is not one. The core builds the proposal."""
     from orch import checkup
@@ -783,7 +784,7 @@ def propose(root: Path) -> dict:
     if not checkup.in_checkup_run(root):
         raise RecordError(checkup.NOT_CHECKUP, "not_checkup")
     try:
-        draft = json.loads(sys.stdin.read(1_000_000))
+        draft = json.loads(draft_text if draft_text is not None else sys.stdin.read(1_000_000))
     except ValueError:
         raise RecordError("The suggestion is not valid JSON.") from None
     try:

@@ -54,13 +54,13 @@ a copy of the touched files in `.orch/record/proposals/<id>/before/`.
 
 ```
 proposed --tests passed--> tested --accept--> accepted --rollback--> rolled_back
-proposed|tested --reject--> rejected      tested --send to admin--> sent_to_admin (admin skills)
+proposed|tested|stale --reject--> rejected      tested --send to admin--> sent_to_admin (admin skills)
 any open state --skill changed meanwhile--> stale
 ```
 
 - **The record in orch home decides.** When a proposal is stored and when its tests finish, the core writes
   `<guarded orch home>/keys/<ws>/proposals.json`: per id the status, the test result and cases, and `hash` = sha256 over
-  `{id, kind, target, change}` of the proposal (reference `proposal_hash`). Accept, Send to admin, Rollback and the Accept
+  `{id, kind, title, plain, likely, evidence, target, change}` of the proposal (v1.1: title, plain, likely and evidence were added, so what the person reads on Accept is bound too; the vectors were recomputed) (reference `proposal_hash`). Accept, Send to admin, Rollback and the Accept
   screen read status, tests and target **from that record**; the workspace copy in `.orch/record/proposals/` must hash to the
   recorded value or the action is refused (`changed`): marking tests passed, flipping the source from admin to workspace, or
   pointing the same diff at another skill in the workspace copy all fail. The Accept screen shows the full diff from the

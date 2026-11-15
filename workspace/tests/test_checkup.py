@@ -274,7 +274,7 @@ def test_test_never_writes_the_real_workspace(ws, inrun):
     assert res["status"] == "tested" and res["tests"]["state"] == "passed"
     assert res["tests"]["cases"] == 1 and res["tests"]["cases_passed"] == 1
     assert checkup._entry(ws, pid)["status"] == "tested"
-    assert not (hp.guarded_home(ws) / "checkup-tmp").exists()  # the copy is removed
+    assert not list((hp.guarded_home(ws) / "checkup-tmp").iterdir())  # the copy is removed
     assert json.loads((ws / ".orch/record/proposals" / f"{pid}.json").read_text())["status"] == "tested"
 
 
@@ -559,7 +559,8 @@ def test_run_argv_drops_the_no_questions_flags(ws, inrun, monkeypatch):
         "p",
     ]
     out = adapters.readonly_argv("claude", argv, inrun["ticket"], ws)
-    assert "--dangerously-skip-permissions" not in out and "--permission-mode" not in out
+    assert "--dangerously-skip-permissions" not in out and out.count("--permission-mode") == 1
+    assert out[out.index("--permission-mode") + 1] == "default"
     assert out[-2:] == ["--", "p"]
 
 
@@ -609,3 +610,95 @@ def test_weekly_needs_the_insights_proof(ws, run, monkeypatch):
         run, monkeypatch, proof(ws, "insights.settings", "checkup.weekly=on"), "checkup", "weekly", "off"
     )
     assert code == 2 and answer(out)["code"] == "needs_person"  # a proof for "on" is no proof for "off"
+
+
+# ------------------------------------------------------------------------------------------ fix round
+
+
+def test_hash_covers_title_plain_likely_and_evidence(ws, inrun, run, monkeypatch):
+    pid = make_tested(ws, inrun)
+    p = ws / ".orch/record/proposals" / f"{pid}.json"
+    orig = json.loads(p.read_text())
+    for field, value in (
+        ("title", "other"),
+        ("plain", "Delete everything."),
+        ("likely", True),
+        ("evidence", []),
+    ):
+        p.write_text(json.dumps({**orig, field: value}))
+        code, out, _ = accept_cli(ws, run, monkeypatch, pid)
+        assert code == 2 and answer(out)["code"] == "changed", field
+        with pytest.raises(checkup.CheckupError) as e:
+            checkup.show(ws, pid)
+        assert e.value.code == "changed"
+    p.write_text(json.dumps({**orig, "plain": "x"}))
+    with pytest.raises(checkup.CheckupError) as e:
+        checkup.run_test(ws, pid)  # the test reads the record-checked copy only
+    assert e.value.code == "changed"
+
+
+def test_argv_has_explicit_settings(ws, inrun):
+    out = adapters.readonly_argv(
+        "claude", ["claude", "-p", "--permission-mode", "auto", "--", "p"], inrun["ticket"], ws
+    )
+    head = out[: out.index("--")]
+    assert head[head.index("--setting-sources") + 1] == ""
+    assert head[head.index("--permission-mode") + 1] == "default" and head.count("--permission-mode") == 1
+
+
+def test_draft_as_one_argument(ws, inrun, run):
+    code, out, _ = run("record", "propose", "--json", "--draft", json.dumps(draft(ws)))
+    assert code == 0 and answer(out)["status"] == "proposed"
+
+
+def test_skill_suggestion_needs_real_evidence(ws, inrun):
+    for ev in ([], [{"ticket": "t_nothere1"}]):
+        with pytest.raises(checkup.CheckupError) as e:
+            checkup.propose(ws, draft(ws, evidence=ev))
+        assert e.value.code == "invalid"
+
+
+def test_reject_dismisses_a_stale_suggestion(ws, inrun, run, monkeypatch):
+    pid = propose_one(ws, inrun)
+    (ws / ".agents/skills/invoice-export/SKILL.md").write_text("moved\n")
+    with pytest.raises(checkup.CheckupError):
+        checkup.run_test(ws, pid)
+    assert checkup._entry(ws, pid)["status"] == "stale"
+    code, out, _ = cli(run, monkeypatch, proof(ws, "checkup.reject", pid), "checkup", "reject", pid)
+    assert code == 0 and answer(out)["status"] == "rejected"
+
+
+def test_weekly_checks_support_before_the_proof(ws, run, monkeypatch):
+    from orch import config
+
+    monkeypatch.setattr(checkup, "weekly_state", lambda root: "off")
+    config.set_key(ws, "workspace", "agent", "codex")
+    p = proof(ws, "insights.settings", "checkup.weekly=on")
+    code, out, _ = cli(run, monkeypatch, p, "checkup", "weekly", "on")
+    assert code == 2 and answer(out)["code"] == "not_supported"
+    assert hp._read_json(ws, hp.key_dir(ws) / "proofs-used.json", {}) == {}  # the proof was not spent
+
+
+@pytest.mark.timeout(60) if hasattr(pytest.mark, "timeout") else (lambda f: f)
+def test_whole_flow_with_real_locks(ws, inrun, run, monkeypatch):
+    """propose -> test -> accept -> rollback in one process: the nested keys.lock takes never deadlock."""
+    import signal
+
+    signal.alarm(60)
+    try:
+        pid = make_tested(ws, inrun)
+        assert accept_cli(ws, run, monkeypatch, pid)[0] == 0
+        code, out, _ = cli(run, monkeypatch, proof(ws, "checkup.rollback", pid), "checkup", "rollback", pid)
+        assert code == 0 and answer(out)["status"] == "rolled_back"
+    finally:
+        signal.alarm(0)
+
+
+def test_retention_leaves_the_proposals_alone(ws, inrun):
+    from orch import record
+
+    pid = make_tested(ws, inrun)
+    copy = ws / ".orch/record/proposals" / f"{pid}.json"
+    before = copy.read_bytes()
+    record.apply_retention(ws, "2099-01-01T00:00:00Z", 30, 512, lambda *a, **k: None)
+    assert copy.read_bytes() == before

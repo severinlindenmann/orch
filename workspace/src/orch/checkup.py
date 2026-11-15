@@ -136,7 +136,7 @@ def caller_run(root: Path) -> dict | None:
         return None
     if not rec or rec.get("run") != run or rec.get("profile") != PROFILE or not is_checkup_ticket(root, tid):
         return None
-    return rec
+    return {**rec, "ticket": tid}
 
 
 def in_checkup_run(root: Path) -> bool:
@@ -343,8 +343,9 @@ def change_sha256(change) -> str | None:
 
 
 def proposal_hash(doc: dict) -> str:
-    """sha256 over {id, kind, target, change} (canonical JSON): the value the orch home keeps."""
-    core = {k: doc.get(k) for k in ("id", "kind", "target", "change")}
+    """sha256 over every field a decision depends on (canonical JSON): id, kind, title, plain, likely, evidence,
+    target, change. The value the orch home keeps."""
+    core = {k: doc.get(k) for k in ("id", "kind", "title", "plain", "likely", "evidence", "target", "change")}
     blob = json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return "sha256:" + hashlib.sha256(blob.encode()).hexdigest()
 
@@ -492,6 +493,19 @@ def propose(root: Path, draft) -> dict:
         raise CheckupError(NOT_CHECKUP, "not_checkup")
     validate_draft(draft)
     t = draft["target"]
+    if draft["kind"] in ("skill.fix", "skill.new"):
+        from orch import tickets
+
+        ok_ev = False
+        for e in draft["evidence"]:
+            try:
+                tickets.load(root, e["ticket"])
+                ok_ev = True
+                break
+            except Refused:
+                continue
+        if not ok_ev:
+            _bad("a skill suggestion needs at least one real ticket as evidence")
     names = skill_names(root)
     file_hashes: dict[str, str | None] = {}
     source, version = "workspace", None
@@ -613,8 +627,6 @@ def run_test(root: Path, pid: str) -> dict:
         tests = {"state": "error", "cases": [], "ran_at": _now(), "plain": str(e)}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-        with contextlib.suppress(OSError):
-            home.rmdir()
 
     def put(data):
         e = data["proposals"][pid]
@@ -732,7 +744,7 @@ def step(c: dict) -> str:
     if act == "tests_done":
         return "tested" if st == "proposed" and c["tests"] == "passed" else st
     if act == "reject":
-        return "rejected" if st in _OPEN else "conflict"
+        return "rejected" if st in (*_OPEN, "stale") else "conflict"
     if proposal_hash(c["file"]) != rec["hash"]:
         return "changed"
     if act == "send_to_admin":
@@ -1201,9 +1213,10 @@ def weekly(root: Path, args, on: bool) -> dict:
     proof = _proof_line(args)
     if weekly_state(root) == "unavailable":
         raise CheckupError("Needs the Automation add-on.", "not_available")
-    by = _person(root, args, "insights.settings", f"checkup.weekly={'on' if on else 'off'}", proof)
     if on:
         supported(root)
+    by = _person(root, args, "insights.settings", f"checkup.weekly={'on' if on else 'off'}", proof)
+    if on:
         tid = _ensure_ticket(root, by, weekly=True)
         _automation(root, ["repeat", tid, WEEKLY_WHEN, "--json"])
     else:
