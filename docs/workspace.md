@@ -49,7 +49,7 @@ $ orch check done <id> c1 --file report.csv --title "The export" --role result
 $ orch ticket status <id> done
 ```
 
-When an agent sends a ticket to Review while a step's proof is changed or failed, orch first asks it once to run the checks again and record them with `orch check record`; the second try goes through, with the honest proof line.
+When an agent sends a ticket to Review while a step's proof is changed or failed, the move goes through, with the honest proof line, and the command prints as its next step: run the checks again and record them with `orch check record`.
 
 `--file` copies the file into `.orch/tickets/<id>/evidence/`. Proof files are not committed to git (they stay on this
 computer). On another computer the ticket shows "file on another computer". Roles: `result`, `check`, `support`.
