@@ -1,14 +1,12 @@
 """Sync card and sync Needs rows on the server side: everything goes through the ONE generic op `addon.act`
 (`orch <addon> act <verb> -- <target>`); a signed click mints a proof for exactly the target the add-on names."""
 
-import base64
 import json
 import subprocess
 
 import pytest
 
 pytest.importorskip("orch")
-from orch import humanproof as hp
 
 from orch_dashboard import actions
 from tests.test_proof_session import live, post, session
@@ -145,8 +143,6 @@ REVIEW = {
     "here": "due: 2026-03-31",
     "there": "note: bank fees",
 }
-
-
 
 
 @pytest.mark.parametrize("shown", ["sync:keep-theirs:" + "b" * 64, None, ""])

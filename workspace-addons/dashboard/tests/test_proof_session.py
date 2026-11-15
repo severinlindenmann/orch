@@ -211,8 +211,6 @@ def test_orch_bin_from_the_environment_is_ignored():
     assert argv[1:5] == ["-I", "-P", "-m", "orch"] and argv[0] == pageproof.sys.executable
 
 
-
-
 def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     root, port = live
     tok = hp.write_launch_token(root, "dashboard")
@@ -229,10 +227,6 @@ def test_second_use_of_a_link_ends_the_session_and_says_so(live):
     assert st == 403 and b"Someone else tried" in body  # the first page's cookie no longer mints
 
 
-
-
-
-
 def test_a_sandboxed_addon_page_cannot_use_the_session(live):
     """A page of a local add-on runs in an opaque origin: its requests carry Origin "null" and the fence refuses
     them, even with the person's cookie in the jar."""
@@ -246,8 +240,6 @@ def test_a_sandboxed_addon_page_cannot_use_the_session(live):
             {"Cookie": ck, "Origin": "null", "Sec-Fetch-Site": "cross-site"},
         )
         assert st == 403
-
-
 
 
 def test_resume_cookie_is_one_use_expires_and_only_after_a_click(live, monkeypatch):
@@ -317,10 +309,6 @@ def test_update_result_is_shown_to_a_session_once(live):
     ck = session(root, port)
     assert get(ck) == {"state": "failed", "reason": "The server said no."}
     assert get(ck) == {}  # once
-
-
-
-
 
 
 def test_wont_do_clicks_need_a_proof_on_the_real_server_path():
@@ -589,8 +577,6 @@ def test_group_say_target_is_host_and_group_like_the_cli(tmp_path, monkeypatch):
     assert acts.proof_for("group.say", {"ticket": TID, "text": "x"}) == ("group.write_as_person", TID)
 
 
-
-
 # ---- #539: the cookie alone is never a session (browsers send it to every loopback port) -------------------------
 
 ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "digest": "a" * 64, "answer": "x"}}
@@ -813,8 +799,6 @@ def _restart(live_port, root):
     srv = make_server(root, live_port, orch_bin=pageproof.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
-
-
 
 
 def test_open_tab_keeps_its_session_after_an_addon_change_restart(live, monkeypatch):
