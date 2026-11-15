@@ -11,12 +11,15 @@ step() { printf '\n=== %s\n' "$*"; }
 # Windows cannot replace orch while it runs: add-on installs and removals finish in the background once the command
 # has ended (winfinish.py) and print "Log: <file>". Wait for that file's RESULT line (e2e/windows/standard-user-flow.ps1 does too).
 run_wait() {
+  # the log is shared by all finishes: only a RESULT line beyond the count before this command is ours
+  base="$(grep -c ' RESULT ' "$HOME/.orch-tool/finish.log" 2>/dev/null || true)"; base="${base:-0}"
   out="$("$@" 2>&1)"; rc=$?; echo "$out"; [ $rc -eq 0 ] || return $rc
   log="$(printf '%s\n' "$out" | sed -n 's/.*Log: \(.*\)$/\1/p' | tail -1)"
   [ -n "$log" ] || return 0
   command -v cygpath >/dev/null 2>&1 && log="$(cygpath -u "$log")"
   for _ in $(seq 1 200); do
-    if grep -q ' RESULT ' "$log" 2>/dev/null; then grep ' RESULT ' "$log" | tail -1; grep -q ' RESULT ok' "$log"; return $?; fi
+    n="$(grep -c ' RESULT ' "$log" 2>/dev/null || true)"
+    if [ "${n:-0}" -gt "$base" ]; then last="$(grep ' RESULT ' "$log" | tail -1)"; echo "$last"; case "$last" in *"RESULT ok"*) return 0 ;; *) return 1 ;; esac; fi
     sleep 3
   done
   echo "no RESULT in $log after 10 min"; return 1
