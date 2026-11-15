@@ -17,8 +17,8 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
 
 ## When to use
 - Any request, even a small one: find or make its ticket first.
-- Ask a person only when a step cannot be undone, costs money, touches production, deletes real data or is visible to people outside the connected workspaces. Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then stop. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question (`--choose`, `--draft`, see below) so it shows as a card.
-- You are blocked (a tool or permission is refused): `orch ask` and stop.
+- Ask a person only when a step cannot be undone, costs money, touches production, deletes real data or is visible to people outside the connected workspaces. Never ask "may I do this step". Every question has options and a recommended answer: `orch ask`, then keep working on what does not depend on the answer. For something they must see to decide (a draft, options A/B/C, before/after, a plan, a link before it goes public), put a card on the question (`--choose`, `--draft`, see below) so it shows as a card.
+- You are blocked (a tool or permission is refused): `orch ask`, then go on with the other steps.
 - You are about to say "done": every step needs proof first.
 - The work is big: split it into sub-tickets.
 
@@ -122,8 +122,9 @@ Write the question for a person who has not seen your work, in plain words:
 
 Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
 
-The ticket now waits. Then stop; do not treat silence as an answer. When the answer is in `orch ticket show <id>`,
-set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
+The ticket now waits for the answer (Waiting). Keep working on the steps that do not depend on it; stop only when
+nothing is left that you can do without the answer. Do not treat silence as an answer. On your next run, when the
+answer is in `orch ticket show <id>`, set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
 waits for a person with `orch needs`.
 
 **Wait**
@@ -145,7 +146,7 @@ Read the parent first, work only in yours, keep it at most 3 levels deep. Close 
 **Plan big work**
 
 Big = several steps or several areas, clearly. A small request stays one ticket. For big work:
-1. Ask only if the goal is genuinely unclear: `orch ask <id> "<question>" --option A --option B --recommend A` (one tap answers), then stop.
+1. Ask only if the goal is genuinely unclear: `orch ask <id> "<question>" --option A --option B --recommend A` (one tap answers); plan the parts the answer does not change meanwhile.
 2. Make the parent ticket: the goal in `--note`, and a line "Not included: ..." for what you will not do.
    Show it on the plan: `orch ticket plan <parent> --goal "<goal>" --not-included "<what you will not do>"`.
 3. Make each sub-ticket with its own `--done-when "<one plain line>"`, and add its checks (`orch check add`) so every part of the done line has a step. When `orch check add` has a `--covers` flag, say which done line each step covers.
@@ -162,6 +163,7 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
     orch log <id> "<what changed in the plan>"
     orch ref add <id> <https url> [--title "<name>"]   # PR, wiki page, design, video …
     orch ref list <id>   /   orch ref rm <id> <n>
+    orch ref set <id> <n> --status <word>   # the state you last saw of a web reference: open, closed, merged
     orch ticket set <id> <addon>.<field> <value>   # an add-on field under Details
     orch ticket edit <id> --owner <name> --due YYYY-MM-DD --note "<text>"
     orch ext set <id> <addon> '<json object>'       # data an add-on keeps on the ticket

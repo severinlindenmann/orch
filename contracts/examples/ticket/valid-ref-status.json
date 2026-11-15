@@ -1,0 +1,55 @@
+{
+  "schema": "orch.ticket/1",
+  "id": "t_9q2m7x",
+  "key": "ORD-41",
+  "title": "Export invoices as CSV",
+  "status": "active",
+  "created_at": "2026-11-15T15:02:00Z",
+  "updated_at": "2026-11-15T17:10:00Z",
+  "description": "Add a CSV export of one month of invoices to the billing page, one row per invoice.",
+  "checklist": [],
+  "refs": [
+    {
+      "kind": "url",
+      "url": "https://github.com/severinlindenmann/orch/issues/812",
+      "title": "Export invoices as CSV",
+      "status": "open",
+      "at": "2026-11-15T17:10:00Z",
+      "by": "agent:claude",
+      "seen_at": "2026-11-15T17:40:00Z"
+    },
+    {
+      "kind": "url",
+      "url": "https://github.com/severinlindenmann/orch/pull/815",
+      "title": "Invoice CSV export",
+      "status": "in review",
+      "at": "2026-11-15T17:10:00Z",
+      "by": "agent:claude",
+      "seen_at": "2026-11-15T17:40:00Z"
+    },
+    {
+      "kind": "ticket",
+      "ticket": "t_4h8s2k",
+      "at": "2026-11-15T15:05:00Z",
+      "by": "human:severin"
+    },
+    {
+      "kind": "url",
+      "url": "https://acme.atlassian.net/browse/BILL-207",
+      "title": "Finance needs monthly invoice export",
+      "status": "in progress",
+      "at": "2026-11-15T15:06:00Z",
+      "by": "human:severin",
+      "seen_at": "2026-11-15T17:40:00Z"
+    }
+  ],
+  "questions": [],
+  "history": [
+    {
+      "at": "2026-11-15T15:02:00Z",
+      "by": "agent:claude",
+      "text": "Created"
+    }
+  ],
+  "ext": {}
+}
