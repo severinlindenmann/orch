@@ -287,20 +287,16 @@ def _answer(code, out, timeout_text, clean=None) -> tuple[int, str, dict | None]
     return 422, MESSAGES.get(why, FAILED), None
 
 
-def _with_person(root, orch_bin, argv, mint, need, timeout_text, deadline=None, timeout=None, clean=None):
-    """Run without a proof; only when the core says needs_person: mint (person here) and retry once.
-    `need` is (op, target) or a function returning it (None = the target can not be read: refuse)."""
-    code, stdout, _ = orch(root, orch_bin, argv, timeout=timeout, deadline=deadline)
+def _with_person(root, orch_bin, argv, mint, need, timeout_text, deadline=None):
+    """Run without a proof; only when the core says needs_person: mint (person here) and retry once."""
+    code, stdout, _ = orch(root, orch_bin, argv, deadline=deadline)
     out = _parsed(stdout)
     if code != 0 and code != 124 and _code(out) == "needs_person":
         if mint is None:
             raise NeedsPerson(PERSON)
-        need = need() if callable(need) else need
-        if need is None:
-            return 422, FAILED, None
-        code, stdout, _ = orch(root, orch_bin, argv, proof=mint(*need), timeout=timeout, deadline=deadline)
+        code, stdout, _ = orch(root, orch_bin, argv, proof=mint(*need), deadline=deadline)
         out = _parsed(stdout)
-    return _answer(code, out, timeout_text, clean)
+    return _answer(code, out, timeout_text)
 
 
 def _sharing_refusal(read) -> str | None:
