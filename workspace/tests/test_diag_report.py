@@ -236,3 +236,18 @@ def test_a_crash_in_a_command_freezes_an_incident_and_still_raises(proj, hid, mo
     with pytest.raises(RuntimeError):
         cli.main(["status"])
     assert len(list((proj / ".orch/diag/reports").glob("i-*"))) == 1
+
+
+def test_a_crafted_src_cannot_write_outside_the_report_folder(proj, hid, tmp_path):
+    d = proj / ".orch" / "diag"
+    d.mkdir(parents=True, exist_ok=True)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+    evil = {"v": 1, "at": now, "ev": "test.evil", "lvl": "info", "src": "../../../../evil", "seq": 1}
+    day = now[:10]
+    (d / f"{day}.cli.1.jsonl").write_text(json.dumps(evil) + "\n")
+    f = Path(diag_report.make(proj, since="1h")["path"])
+    assert (f / "logs" / "unknown.jsonl").exists()
+    assert not list(proj.rglob("evil*"))
+    w = diag_report._Writer(proj, f, lambda t: t)
+    with pytest.raises(Exception, match="outside"):
+        w.put("../x.txt", "no")

@@ -51,6 +51,9 @@ class _Writer:
 
     def put(self, rel: str, text: str) -> None:
         p = self.folder / rel
+        base = self.folder.resolve()
+        if not (p.resolve().parent == base or base in p.resolve().parents):
+            raise Refused("A report file would land outside the report folder. No report was made.")
         p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(p, flags, 0o600)
@@ -92,6 +95,10 @@ def default_start(root: Path, scope: dict, collected: dict, now: float) -> tuple
             with contextlib.suppress(ValueError, TypeError):
                 return runs._parse(t["history"][-1]["at"]), "last history line of the ticket"
     return now - 2 * 3600, "2 hours back (nothing narrower is known)"
+
+
+def _safe_src(src) -> str:
+    return src if isinstance(src, str) and diag._SRC.fullmatch(src) else "unknown"
 
 
 def _in_scope(e: dict, scope: dict) -> bool:
@@ -311,7 +318,7 @@ def make(
         by_src: dict[str, list[str]] = {}
         for e in diag_collect.recent_events(root, lo, hi):
             if _in_scope(e, scope):
-                by_src.setdefault(str(e.get("src")), []).append(
+                by_src.setdefault(_safe_src(e.get("src")), []).append(
                     json.dumps(e, ensure_ascii=False, separators=(",", ":"))
                 )
         for src, lines in by_src.items():
