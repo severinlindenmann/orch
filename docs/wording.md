@@ -20,6 +20,7 @@ The same thing has the same name on the dashboard, in Focus, on the phone and on
 | the person | You / first name | `human:<name>` | Human |
 | where it was done | dashboard, phone, terminal | `via` | CLI |
 | another workspace | its name (landing-site) | `ws_...` | Peer, Node |
+| stop all automation | Pause automation / Paused | `orch pause`, `orch resume` | Stop all, Kill switch, Disable |
 | outside item | its tool's name + its own word ("GitHub issue", "Jira issue") | web reference | "Issue" alone |
 | private network | private network (VPN) | - | NetBird (any product name) |
 
