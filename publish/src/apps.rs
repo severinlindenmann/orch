@@ -199,6 +199,7 @@ async fn start_and_check(
     dir: &FsPath,
     m: &Manifest,
     port: u16,
+    poll_ms: u64,
 ) -> Result<(), String> {
     let image = if m.stack == "docker" {
         let v = vdir_of(st, name, dir).ok_or("no version folder")?;
@@ -237,7 +238,7 @@ async fn start_and_check(
         if Instant::now() > deadline {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        tokio::time::sleep(Duration::from_millis(poll_ms)).await;
     }
     st.runner.stop(key).await;
     let log = std::fs::read_to_string(st.cfg.log_path(name)).unwrap_or_default();
@@ -400,7 +401,9 @@ async fn deploy_inner(
     let mut port = 0;
     if m.stack != "static" {
         port = choose_port(st)?;
-        if let Err(out) = start_and_check(st, &format!("{name}~new"), name, &dir, &m, port).await {
+        if let Err(out) =
+            start_and_check(st, &format!("{name}~new"), name, &dir, &m, port, 150).await
+        {
             return Err(ApiError::new(
                 422,
                 "health_failed",
@@ -417,6 +420,8 @@ async fn deploy_inner(
     // switch
     st.runner.stop(name).await;
     st.runner.rename(&format!("{name}~new"), name);
+    st.sleep.sleeping.lock().unwrap().remove(name);
+    touch(st, name);
     let mut view_token = None;
     let mut hash = existing.and_then(|e| e.view_token_hash.clone());
     if !m.public && (hash.is_none() || new_token) {
@@ -468,17 +473,27 @@ async fn deploy_inner(
 pub fn status_of(st: &State, a: &AppRow) -> &'static str {
     if a.status == "stopped" {
         "stopped"
-    } else if a.stack == "static" || st.runner.is_alive(&a.name) {
+    } else if a.stack == "static" || st.runner.is_alive(&a.name) || is_sleeping(st, &a.name) {
         "running"
     } else {
         "failed"
     }
 }
 
+/// Stopped for idleness: the app is available, it starts on the next request.
+pub fn is_sleeping(st: &State, name: &str) -> bool {
+    st.sleep.sleeping.lock().unwrap().contains(name)
+}
+
+/// Static apps are always awake; others while their process runs.
+fn is_awake(st: &State, a: &AppRow) -> bool {
+    a.status != "stopped" && (a.stack == "static" || st.runner.is_alive(&a.name))
+}
+
 pub fn app_json(st: &State, a: &AppRow) -> Value {
     json!({
         "name": a.name, "stack": a.stack, "store": a.store, "public": a.public,
-        "status": status_of(st, a), "url": format!("{}/a/{}", st.cfg.public_url, a.name),
+        "status": status_of(st, a), "awake": is_awake(st, a), "url": format!("{}/a/{}", st.cfg.public_url, a.name),
         "expires_at": a.expires_at, "updated_at": a.updated_at,
     })
 }
@@ -486,6 +501,8 @@ pub fn app_json(st: &State, a: &AppRow) -> Value {
 /// (re)starts the stored version of an app. Caller holds app_lock.
 async fn start_existing(st: &State, a: &AppRow) -> &'static str {
     st.runner.stop(&a.name).await;
+    st.sleep.sleeping.lock().unwrap().remove(&a.name);
+    touch(st, &a.name);
     if a.stack == "docker" && !crate::runner::docker_apps_enabled() {
         // keep the reason where the owner looks: the app's log
         let _ = std::fs::write(
@@ -504,7 +521,7 @@ async fn start_existing(st: &State, a: &AppRow) -> &'static str {
         let ok = match (parse_manifest(&dir), choose_port(st)) {
             (Ok(m), Ok(port)) => {
                 row.port = port;
-                start_and_check(st, &a.name, &a.name, &dir, &m, port)
+                start_and_check(st, &a.name, &a.name, &dir, &m, port, 150)
                     .await
                     .is_ok()
             }
@@ -533,6 +550,7 @@ pub async fn stop(st: &State, name: &str) -> ApiResult<Value> {
     let mut a = db::get_app(&st.db.lock().unwrap(), name)?
         .ok_or_else(|| ApiError::not_found("No such app."))?;
     st.runner.stop(name).await;
+    st.sleep.sleeping.lock().unwrap().remove(name);
     a.status = "stopped".into();
     db::put_app(&st.db.lock().unwrap(), &a, &util::now())?;
     Ok(json!({"name": name, "status": "stopped"}))
@@ -549,6 +567,8 @@ pub async fn remove(st: &State, name: &str) {
         return;
     }
     st.runner.stop(name).await;
+    st.sleep.sleeping.lock().unwrap().remove(name);
+    st.sleep.activity.lock().unwrap().remove(name);
     if container_mode() {
         crate::runner::remove_images(name, None).await;
     }
@@ -573,6 +593,11 @@ pub async fn resume_all(st: &State) {
         .into_iter()
         .filter(|a| a.status == "running" && a.stack != "static")
     {
+        if st.cfg.idle_secs > 0 {
+            // scale to zero: apps start on their first request (saves memory after a restart)
+            st.sleep.sleeping.lock().unwrap().insert(a.name.clone());
+            continue;
+        }
         let _g = st.app_lock.lock().await;
         start_existing(st, &a).await;
     }
@@ -742,6 +767,26 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
 }
 
 async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) -> Response {
+    // count the request first: an app with requests in flight never sleeps
+    let guard = InFlight::new(st, &app.name);
+    let woken;
+    let app = if st.cfg.idle_secs > 0 {
+        // the port changes on every wake: use the row as it is now, not as the caller read it
+        if is_sleeping(st, &app.name) {
+            match wake(st, &app.name).await {
+                Ok(a) => woken = a,
+                Err(r) => return *r,
+            }
+        } else {
+            match db::get_app(&st.db.lock().unwrap(), &app.name) {
+                Ok(Some(a)) => woken = a,
+                _ => return offline_page(),
+            }
+        }
+        &woken
+    } else {
+        app
+    };
     if !st.runner.is_alive(&app.name) {
         return offline_page();
     }
@@ -792,10 +837,166 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
         Ok(resp) => {
             let mut resp = resp.map(Body::new);
             resp.headers_mut().remove("service-worker-allowed");
-            resp
+            // the request stays in flight until the body is done (SSE, long downloads)
+            resp.map(|b| {
+                Body::new(Guarded {
+                    inner: b,
+                    _g: guard,
+                })
+            })
         }
         Err(_) => offline_page(),
     }
+}
+
+/// Marks an app as used now.
+fn touch(st: &State, name: &str) {
+    let mut g = st.sleep.activity.lock().unwrap();
+    g.entry(name.to_string()).or_insert((Instant::now(), 0)).0 = Instant::now();
+}
+
+/// One request in flight to an app; counts down on drop (errors and disconnects too).
+struct InFlight {
+    st: State,
+    name: String,
+}
+
+impl InFlight {
+    fn new(st: &State, name: &str) -> Self {
+        let mut g = st.sleep.activity.lock().unwrap();
+        let e = g.entry(name.to_string()).or_insert((Instant::now(), 0));
+        e.0 = Instant::now();
+        e.1 += 1;
+        InFlight {
+            st: st.clone(),
+            name: name.to_string(),
+        }
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        let mut g = self.st.sleep.activity.lock().unwrap();
+        if let Some(e) = g.get_mut(&self.name) {
+            e.0 = Instant::now();
+            e.1 = e.1.saturating_sub(1);
+        }
+    }
+}
+
+/// Response body that holds the in-flight guard until it is dropped.
+struct Guarded {
+    inner: Body,
+    _g: InFlight,
+}
+
+impl http_body::Body for Guarded {
+    type Data = Bytes;
+    type Error = axum::Error;
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Bytes>, axum::Error>>> {
+        std::pin::Pin::new(&mut self.inner).poll_frame(cx)
+    }
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+/// Stops apps that got no request for `idle_secs` (container mode). Runs every `sleep_sweep_secs`; tests call it.
+pub async fn sleep_sweep(st: &State) {
+    let idle = Duration::from_secs(st.cfg.idle_secs);
+    if st.cfg.idle_secs == 0 {
+        return;
+    }
+    let apps = db::all_apps(&st.db.lock().unwrap()).unwrap_or_default();
+    for a in apps
+        .into_iter()
+        .filter(|a| a.status == "running" && a.stack != "static")
+    {
+        let due = |st: &State| -> bool {
+            if !st.runner.is_alive(&a.name) {
+                return false;
+            }
+            let mut g = st.sleep.activity.lock().unwrap();
+            let e = g.entry(a.name.clone()).or_insert((Instant::now(), 0));
+            e.1 == 0 && e.0.elapsed() > idle
+        };
+        if !due(st) {
+            continue;
+        }
+        let _g = st.app_lock.lock().await;
+        // re-check under the lock: stopped, deleted or redeployed meanwhile
+        let still = matches!(db::get_app(&st.db.lock().unwrap(), &a.name), Ok(Some(r)) if r.status == "running" && r.stack != "static");
+        if !still {
+            continue;
+        }
+        {
+            // decide and mark sleeping in one step: a request that arrives after this wakes the app
+            let act = st.sleep.activity.lock().unwrap();
+            let Some(e) = act.get(&a.name) else { continue };
+            if e.1 != 0 || e.0.elapsed() <= idle || !st.runner.is_alive(&a.name) {
+                continue;
+            }
+            st.sleep.sleeping.lock().unwrap().insert(a.name.clone());
+        }
+        st.runner.stop(&a.name).await;
+        tracing::info!("app {} sleeps (idle)", a.name);
+    }
+}
+
+/// Starts a sleeping app for a request. One wake per app at a time; others wait for it.
+async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
+    let lock = st
+        .sleep
+        .wake
+        .lock()
+        .unwrap()
+        .entry(name.to_string())
+        .or_default()
+        .clone();
+    let _w = lock.lock().await;
+    let t0 = Instant::now();
+    let _g = st.app_lock.lock().await;
+    let row = match db::get_app(&st.db.lock().unwrap(), name) {
+        Ok(Some(r)) => r,
+        _ => return Err(Box::new(offline_page())),
+    };
+    if row.status == "stopped" {
+        return Err(Box::new(paused_page()));
+    }
+    if !is_sleeping(st, name) {
+        return Ok(row); // woken by an earlier request, or restarted
+    }
+    let dir = PathBuf::from(&row.code_dir);
+    // stays sleeping on failure: the next request tries again
+    let failed = |why: String| {
+        tracing::warn!("app {name} could not wake: {}", util::tail(&why, 1500));
+        crate::web::notice(
+            503,
+            "offline",
+            "This app could not start",
+            "Try again in a moment.",
+            true,
+        )
+    };
+    let (m, port) = match (parse_manifest(&dir), choose_port(st)) {
+        (Ok(m), Ok(p)) => (m, p),
+        _ => return Err(Box::new(failed("bad manifest or no free port".into()))),
+    };
+    if let Err(log) = start_and_check(st, name, name, &dir, &m, port, 25).await {
+        return Err(Box::new(failed(log)));
+    }
+    let mut row = row;
+    row.port = port;
+    let _ = db::put_app(&st.db.lock().unwrap(), &row, &row.updated_at.clone());
+    st.sleep.sleeping.lock().unwrap().remove(name);
+    tracing::info!("app {name} woke in {} ms", t0.elapsed().as_millis());
+    Ok(row)
 }
 
 fn content_type(p: &FsPath) -> &'static str {

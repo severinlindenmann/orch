@@ -12,6 +12,10 @@ pub struct Config {
     pub port_lo: u16,
     pub port_hi: u16,
     pub health_secs: u64,
+    /// Seconds without a request before a non-static app sleeps (0 = never). Default 900 in container mode.
+    pub idle_secs: u64,
+    /// How often the sleep sweeper looks for idle apps.
+    pub sleep_sweep_secs: u64,
     pub build_secs: u64,
     pub test_secs: u64,
     pub install_url: String,
@@ -42,6 +46,8 @@ impl Config {
             port_lo: 9100,
             port_hi: 9199,
             health_secs: 20,
+            idle_secs: 0,
+            sleep_sweep_secs: 30,
             build_secs: 300,
             test_secs: 120,
             install_url: "https://raw.githubusercontent.com/severinlindenmann/orch/main/install.sh"
@@ -69,6 +75,13 @@ impl Config {
         c.default_days = env_or("DEFAULT_DAYS", c.default_days);
         c.max_days = env_or("MAX_DAYS", c.max_days);
         c.health_secs = env_or("HEALTH_SECS", c.health_secs);
+        // scale to zero: only in container mode (default 15 min), 0 = never
+        c.idle_secs = if crate::runner::container_mode() {
+            env_or("IDLE_SECS", 900)
+        } else {
+            0
+        };
+        c.sleep_sweep_secs = env_or("SLEEP_SWEEP_SECS", c.sleep_sweep_secs).max(1);
         // ORCH_INSTALL_REF (git ref of the orch repo the onboarding scripts install from)
         if let Ok(r) = std::env::var("ORCH_INSTALL_REF") {
             if !r.is_empty() {

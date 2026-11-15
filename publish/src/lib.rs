@@ -22,6 +22,17 @@ pub use config::Config;
 pub type Http =
     hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>;
 
+/// In-memory state for scale to zero (see apps.rs).
+#[derive(Default)]
+pub struct SleepState {
+    /// per app: last request time and requests in flight
+    pub activity: Mutex<std::collections::HashMap<String, (std::time::Instant, usize)>>,
+    /// apps stopped for idleness (DB status stays "running"); they wake on the next request
+    pub sleeping: Mutex<std::collections::HashSet<String>>,
+    /// one wake at a time per app
+    pub wake: Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
 pub struct Inner {
     pub cfg: Config,
     pub db: Mutex<rusqlite::Connection>,
@@ -29,6 +40,7 @@ pub struct Inner {
     /// deploy, restart, stop and delete of apps run one at a time
     pub app_lock: tokio::sync::Mutex<()>,
     pub http: Http,
+    pub sleep: SleepState,
 }
 
 pub type State = Arc<Inner>;
@@ -50,6 +62,7 @@ pub fn new_state(cfg: Config) -> std::io::Result<State> {
         runner: runner::Runner::default(),
         app_lock: tokio::sync::Mutex::new(()),
         http,
+        sleep: SleepState::default(),
     }))
 }
 
@@ -109,6 +122,15 @@ pub fn admin_router(st: State) -> Router {
 pub fn start_background(st: State) {
     let s = st.clone();
     tokio::spawn(async move { apps::resume_all(&s).await });
+    if st.cfg.idle_secs > 0 {
+        let s = st.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(s.cfg.sleep_sweep_secs)).await;
+                apps::sleep_sweep(&s).await;
+            }
+        });
+    }
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;

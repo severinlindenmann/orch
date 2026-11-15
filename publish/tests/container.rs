@@ -131,6 +131,67 @@ async fn container_python_and_docker_apps_deploy_redeploy_stop() {
     std::env::remove_var("ORCH_PUBLISH_SANDBOX");
 }
 
+/// Scale to zero on the real engine: the idle container is stopped, the next request starts it again.
+#[tokio::test]
+#[ignore]
+async fn container_idle_app_sleeps_and_wakes_on_request() {
+    if std::env::var("ORCH_PUBLISH_TEST_ENGINE").is_err() {
+        eprintln!("ORCH_PUBLISH_TEST_ENGINE not set; skipping");
+        return;
+    }
+    std::env::set_var("ORCH_PUBLISH_SANDBOX", "container");
+    let t = setup_with(|c| {
+        c.health_secs = 60;
+        c.idle_secs = 2;
+        c.sleep_sweep_secs = 1;
+    });
+    let ws = t.workspace("A", basic_rights()).await;
+    let toml = "name = \"nap\"\nstack = \"python\"\nstart = \"python main.py\"\nhealth = \"/health\"\npublic = true\n";
+    let r = t
+        .api(
+            &ws,
+            "PUT",
+            "/v1/apps/nap",
+            bundle(&[("app.toml", toml), ("main.py", PY)]),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let running = || {
+        let o = std::process::Command::new("docker")
+            .env(
+                "DOCKER_HOST",
+                format!(
+                    "unix://{}",
+                    std::env::var("ORCH_PUBLISH_ENGINE_SOCKET")
+                        .unwrap_or("/run/kiri/docker.sock".into())
+                ),
+            )
+            .args(["ps", "--filter", "label=orch.publish.app=nap", "-q"])
+            .output()
+            .unwrap();
+        !String::from_utf8_lossy(&o.stdout).trim().is_empty()
+    };
+    assert!(running());
+    // the fast sweep (the same call the server's background task makes) puts it to sleep
+    let t0 = std::time::Instant::now();
+    while running() {
+        assert!(t0.elapsed().as_secs() < 30, "container still running");
+        orch_publish::apps::sleep_sweep(&t.st).await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    let l = t.api(&ws, "GET", "/v1/apps", vec![]).await.json();
+    assert_eq!(l["items"][0]["status"], "running");
+    assert_eq!(l["items"][0]["awake"], false);
+    let w = std::time::Instant::now();
+    let g = call(&t.public, "GET", "/a/nap/", &[], vec![]).await;
+    println!("wake time: {} ms", w.elapsed().as_millis());
+    assert_eq!(g.status, 200, "{}", g.text());
+    assert!(g.text().contains("hello /a/nap"));
+    assert!(running());
+    t.api(&ws, "DELETE", "/v1/apps/nap", vec![]).await;
+    std::env::remove_var("ORCH_PUBLISH_SANDBOX");
+}
+
 /// A build step that plants links where the server later cleans up must not make it touch the target.
 #[tokio::test]
 #[ignore]

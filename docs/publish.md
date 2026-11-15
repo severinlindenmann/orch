@@ -99,6 +99,13 @@ publish/
   The Dockerfile may not use `--mount`, `--network`, `--security`, `--device` or parser directives; a built image with `dev.kiri.*` / `orch.*` labels or a `VOLUME` is refused. One image build runs at a time.
   Containers carry the labels `orch.publish.app` and `orch.publish.instance` (a hash of the data folder, so a second server on the same engine never touches them). At server start, before the listeners bind, leftover step containers and containers of unknown apps of this instance are removed.
   Real-engine test: `ORCH_PUBLISH_TEST_ENGINE=1 cargo test --test container -- --ignored`.
+  Scale to zero: `ORCH_PUBLISH_IDLE_SECS` (default 900 in container mode, 0 = never; other modes never sleep) stops a python/node/docker
+  app that got no request for that long (the sweeper looks every `ORCH_PUBLISH_SLEEP_SWEEP_SECS`, default 30). The next request starts it
+  again (one start per app, other requests wait for it; health is polled every 25 ms) and is answered when the app is healthy; if it cannot
+  start, the visitor gets a 503 page and the log tail goes to the server log. Measured on the edge machine (Kiri 0.2.0): cold start of a
+  small python app to first 200 = 150-230 ms; an idle app uses about 15 MB. A sleeping app keeps `status: running` and shows `awake: false`
+  (the admin portal says "Sleeping"). Requests still open (SSE, long polls) keep an app awake. After a server restart, apps are not started:
+  they wake on their first request. Apps must keep state in `DATA_DIR`; timers and background work stop while the app sleeps.
 
 ## Container mode: host setup
 
