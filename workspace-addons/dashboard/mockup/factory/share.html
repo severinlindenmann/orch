@@ -7,17 +7,17 @@
 <div class="page-heading"><div><h1>Ask another workspace · hand a task over <span class="badge">Preview</span></h1><p class="meta">Design for 816. Six screens of the Factory page. Demo data only; nothing is sent.</p></div></div>
 
 <section class="f-section" aria-labelledby="s1"><h2 id="s1">1 · A stop: ask another workspace for its view</h2>
-<div class="page-heading"><div><h2>Ship it?</h2><p class="meta">Café opening hours sign · Final stop</p></div><div class="page-heading-actions"><button class="btn outline sm" type="button" data-open-dlg="ask-dialog">Ask another workspace</button></div></div>
+<div class="page-heading"><div><h2>Ship it?</h2><p class="meta">Café opening hours board · Final stop</p></div><div class="page-heading-actions"><button class="btn outline sm" type="button" data-open-dlg="ask-dialog">Ask another workspace</button></div></div>
 <section class="card f-card">
-<div class="row between"><span class="badge review">Item 1 of 2 · Opening hours sign</span><span class="meta">Before / after as today</span></div>
-<div class="grid-2"><div class="stack"><h3>Before</h3><section class="card f-card"><p>Old sign: Monday–Friday 8–5. Saturday 9–4. No line for Sunday.</p></section></div><div class="stack"><h3>After</h3><img src="../../../../workspace/src/orch_ui/static/samples/sample-sign.svg" alt="New opening hours sign" width="100%"></div></div>
+<div class="row between"><span class="badge review">Item 1 of 2 · Opening hours board</span><span class="meta">Before / after as today</span></div>
+<div class="grid-2"><div class="stack"><h3>Before</h3><section class="card f-card"><p>Old board: Monday–Friday 8–5. Saturday 9–4. No line for Sunday.</p></section></div><div class="stack"><h3>After</h3><img src="../../../../workspace/src/orch_ui/static/demo-image.svg" alt="New opening hours board" width="100%"></div></div>
 </section>
 <section class="card f-card"><div class="card-h"><h3>Other views</h3><span class="meta">They advise. You decide.</span></div>
 <div class="list-row"><span class="pill done"><span data-st="done"></span>Answered</span><span class="grow"><strong>Maya at Design says:</strong> Make “Sunday · Closed” as big as the other days.</span><span class="meta">today 14:20</span><button class="btn ghost sm" type="button" id="copy-advice">Add to my comments</button></div>
 <div class="list-row"><span class="pill working"><span data-st="working"></span>Delivered</span><span class="grow">Asked Marketing · they got 2 items and 2 pictures · no answer yet</span><span class="meta">today 14:05</span></div>
 </section>
 <section class="card f-card"><label class="field">Comments for Helper<textarea class="input" id="my-comments" rows="2" placeholder="What should change before we ship?"></textarea></label></section>
-<div class="banner"><p><strong>What Ship does</strong><br>Save the new sign in Demo’s shop folder. Nothing goes to another workspace.</p></div><p>Autopilot waits for you on this stop, because you asked for a view.</p>
+<div class="banner"><p><strong>What Ship does</strong><br>Save the new board in Demo’s shop folder. Nothing goes to another workspace.</p></div><p>Autopilot waits for you on this stop, because you asked for a view.</p>
 <div class="actions"><button class="btn primary" type="button">Ship it</button><button class="btn" type="button">Send back with comments</button></div>
 <p class="meta">Ship it and Send back always work, also while you wait for a view. A later answer is kept as a note.</p>
 </section>
@@ -27,8 +27,8 @@
 <section class="card f-card">
 <label class="field">Who<select class="input"><option>Design · Pictures, layout and brand for Demo</option><option>Marketing · Campaigns, emails and social posts</option></select></label>
 <h3>What leaves this computer</h3>
-<p>“Café opening hours sign · Ship it? What would you change before this ships?”</p>
-<label class="check-label"><input type="checkbox" checked> Opening hours sign · before and after (1 picture)</label>
+<p>“Café opening hours board · Ship it? What would you change before this ships?”</p>
+<label class="check-label"><input type="checkbox" checked> Opening hours board · before and after (1 picture)</label>
 <label class="check-label"><input type="checkbox" checked> Window poster · before and after (2 pictures)</label>
 <p>Not sent: other orders, crew logs, budget, chat, anything you untick.</p><p class="meta">Checked for passwords and keys: nothing found.</p>
 <div class="actions actions-end"><button class="btn" type="button">Cancel</button><button class="btn primary" type="button">Send</button></div>
@@ -60,9 +60,9 @@
 </section>
 
 <section class="f-section" aria-labelledby="s5"><h2 id="s5">5 · On the other side (Design): what exists today</h2>
-<section class="card f-card"><div class="card-h"><h3>From Demo · Your view: Café opening hours sign · Ship it?</h3><span class="meta">read only</span></div>
-<p>Café opening hours sign · Ship it? What would you change before this ships?</p>
-<div class="list-row"><span class="grow">Opening hours sign · before and after</span><span class="meta">1 picture</span></div><div class="list-row"><span class="grow">Window poster · before and after</span><span class="meta">2 pictures</span></div>
+<section class="card f-card"><div class="card-h"><h3>From Demo · Your view: Café opening hours board · Ship it?</h3><span class="meta">read only</span></div>
+<p>Café opening hours board · Ship it? What would you change before this ships?</p>
+<div class="list-row"><span class="grow">Opening hours board · before and after</span><span class="meta">1 picture</span></div><div class="list-row"><span class="grow">Window poster · before and after</span><span class="meta">2 pictures</span></div>
 <p class="meta">Design’s helper or person answers. The answer goes back as a view, never as Ship it.</p></section>
 <section class="card f-card"><div class="card-h"><h3>Task from Demo: Header picture</h3><span class="pill needs"><span data-st="needs"></span>Needs you</span></div>
 <p>Demo wants to give this workspace a task: a spring header picture, about 40 min. You get a brief and 2 pictures. It runs only after you allow it.</p>
@@ -82,8 +82,8 @@
 </main>
 <dialog class="dialog" id="ask-dialog" aria-labelledby="ask-title"><div class="row between"><h2 id="ask-title">Ask another workspace</h2><form method="dialog"><button class="btn ghost icon" aria-label="Close" autofocus>✕</button></form></div>
 <label class="field">Who<select class="input"><option>Design · Pictures, layout and brand for Demo</option><option>Marketing · Campaigns, emails and social posts</option></select></label>
-<h3>What leaves this computer</h3><p>“Café opening hours sign · Ship it? What would you change before this ships?”</p>
-<label class="check-label"><input type="checkbox" checked> Opening hours sign · before and after (1 picture)</label>
+<h3>What leaves this computer</h3><p>“Café opening hours board · Ship it? What would you change before this ships?”</p>
+<label class="check-label"><input type="checkbox" checked> Opening hours board · before and after (1 picture)</label>
 <label class="check-label"><input type="checkbox" checked> Window poster · before and after (2 pictures)</label>
 <p>Not sent: other orders, crew logs, budget, chat, anything you untick.</p><p class="meta">Checked for passwords and keys: nothing found.</p>
 <form method="dialog" class="actions actions-end"><button class="btn">Cancel</button><button class="btn primary" value="send">Send</button></form></dialog>

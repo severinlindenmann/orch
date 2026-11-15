@@ -35,7 +35,7 @@ def stop_with_pictures(ws, run, secret=False):
     tid = run("crew", "add", order, "booking-form")["ticket"]
     edit(ws, tid, lambda t: t.update(status="done"))
     items = [
-        {"title": "Sign layout", "tag": "taste", "before": "before.png", "after": "after.png"},
+        {"title": "Board layout", "tag": "taste", "before": "before.png", "after": "after.png"},
         {"title": "Poster", "tag": "taste", "before": "poster.png"},
     ]
     q = run("stop", order, "--file", "-", data=stop_file("build", *items))["question"]
@@ -70,7 +70,7 @@ def test_ask_sends_only_the_ticked_item(ws, run):
     assert sub["parent"] == order and sub["title"] == "Your view: Online booking page · Build"
     assert sub["ext"]["factory"] == {"role": "ask", "order": order, "stop": 1, "ws": WS}
     assert sub["summary"] == "Online booking page · Build: what would you change before this ships?"
-    assert [c["text"] for c in sub["checklist"]] == ["Sign layout"]  # item 1 was not ticked
+    assert [c["text"] for c in sub["checklist"]] == ["Board layout"]  # item 1 was not ticked
     [question] = sub["questions"]
     assert question["kind"] is None and question["text"] == ask.QUESTION  # an information question
     sent = [c for c in calls(ws) if c[:3] == ["relay", "group", "share"]]
@@ -246,7 +246,7 @@ def test_reach_and_scan_pages(ws, run):
     assert row["ws"] == WS and row["name"] == "Design" and len(row["description"]) <= 120
     scanned = pageapi.scan(ws, order, 1)
     first, second = scanned["items"]
-    assert first["title"] == "Sign layout"
+    assert first["title"] == "Board layout"
     assert {f["name"]: f["ok"] for f in first["files"]} == {"before.png": True, "after.png": False}
     assert "password" in next(f["why"] for f in first["files"] if not f["ok"])
     assert second["files"] == [{"name": "poster.png", "ok": True}]

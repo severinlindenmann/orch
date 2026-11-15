@@ -440,7 +440,7 @@ def _a22(e):
     info = fac("propose", order, data=json.dumps(_proposal(e)))
     person(order, info["question"], "Start")
     check(fac("next", order)["step"] == "start-crew", "next is not start-crew after a person pressed Start")
-    items = [{"title": "Sign layout", "tag": "taste", "before": "before.png"},
+    items = [{"title": "Board layout", "tag": "taste", "before": "before.png"},
              {"title": "Window poster", "tag": "taste"},
              {"title": "Leaflet", "tag": "taste", "before": "leak.png"}]
     stop = fac("stop", order, data=json.dumps({"schema": "orch.factory.proposal/1", "kind": "stop", "stage": "build", "items": items}))
@@ -476,7 +476,7 @@ def _a22(e):
     cards = [m for m in msgs if isinstance(m.get("body"), dict) and m["body"].get("shared_ticket")]
     check(cards, f"no ticket card arrived: {[m['type'] for m in msgs]}")
     card = cards[-1]["body"]["shared_ticket"]
-    check(card["title"].startswith("Your view:") and [c["text"] for c in card["checklist"]] == ["Sign layout"], f"card: {card}")
+    check(card["title"].startswith("Your view:") and [c["text"] for c in card["checklist"]] == ["Board layout"], f"card: {card}")
     check(sum(1 for m in msgs if m["type"] == "file") == 1, "not exactly one picture arrived")
     question = next((m for m in msgs if m["type"] == "question"), None)
     check(question is not None, "no question arrived")
