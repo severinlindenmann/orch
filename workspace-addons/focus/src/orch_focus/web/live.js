@@ -31,7 +31,7 @@
       const unchecked = e.data && e.data.source === 'hook' ? (e.data.before ? 'before' : 'agent') : null;
       const at = e.data && e.data.id ? items.find(i => i.id === e.data.id && i.agent === by) : null;
       if (e.kind === 'tool.start') items.push({at: e.at, icon: 'text', text: plainNames(e.text), used, agent: by, unchecked, id: e.data && e.data.id, command: typeof (e.data && e.data.command) === 'string' && e.data.command ? e.data.command : null});
-      else if (e.kind === 'tool.end' && at && at.command && (e.data.output || e.data.ok === false)) { at.ok = e.data.ok !== false; at.out = e.data.output || ''; at.ms = e.data.ms; at.endAt = e.at; at.fail = at.ok ? '' : e.text; }  // a command's end joins its block
+      else if (e.kind === 'tool.end' && at && (at.command || e.data.command) && (e.data.command || e.data.output || e.data.ok === false)) { at.command = at.command || e.data.command; at.ok = e.data.ok !== false; at.out = e.data.output || ''; at.ms = e.data.ms; at.endAt = e.at; at.fail = at.ok ? '' : e.text; }  // a command's end joins its block
       else if (e.kind === 'tool.end') items.push({at: e.at, icon: e.data.ok === false ? 'x' : 'check', ok: e.data.ok !== false, text: e.text, used, agent: by, unchecked});
       else if (e.kind === 'helper.start') items.push({at: e.at, icon: 'user', text: 'Helper: ' + e.text, agent: by});
       else if (e.kind === 'helper.end') items.push({at: e.at, icon: 'check', ok: true, text: 'Helper done: ' + e.text, agent: by});

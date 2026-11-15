@@ -181,7 +181,9 @@ def for_display(events: list[dict]) -> list[dict]:
         kind, text = e.get("kind"), str(e.get("text") or "")
         if kind == "tool.end":
             d = e.get("data") or {}
-            if d.get("output") and not NOISE.match(text):  # the page folds it into its command's block
+            if (d.get("output") or d.get("command")) and not NOISE.match(
+                text
+            ):  # the page folds it into its command's block
                 out.append(e)
                 last = None
                 continue

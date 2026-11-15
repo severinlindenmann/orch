@@ -77,6 +77,26 @@ for tid, (run, steps) in RUNS.items():
                     "event": event(run, tid, i + 1, text, ago(m), used, files, kind, agent, parent)})
         for i, (text, used, files, kind, agent, parent, m) in enumerate(steps)
     ]  # fmt: skip
+# PIL-1 also has shell steps with their detail file (#692.1): a failed try, then the same command that worked, then
+# one whose output holds a planted token (the page must show [hidden: ...]). Start line, then the end line with
+# the detail pointer; `orch record query --detail` (fake below) answers the detail like the real one.
+DETAILS = {}
+for i, (m, text, cmd, fail, out) in enumerate([
+    (6.0, "Check the days fit", "python3 tools/agenda.py check", True, "Day 1: 4 items\nDay 2: 9 items (too many)\nError: day 2 has more than 6 items"),
+    (5.5, "Check the days fit", "python3 tools/agenda.py check", False, "Day 1: 4 items\nDay 2: 6 items\nAll days fit"),
+    (4.5, "Send the agenda to the team", "python3 tools/agenda.py send --to team", False, "export TOKEN=ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3\nSent to 12 people"),
+]):
+    eid = f"toolu_pilcmd{i}"
+    used = ("tool", "Bash", None, "builtin")
+    start = event("r_pilone01", "t_pil1aaaa", 20 + 2 * i, text, ago(m), used)
+    start["id"] = eid
+    done = dict(start, seq=21 + 2 * i, at=ago(m - 0.2), outcome={"ok": not fail, "error": None, "ms": 12000},
+                detail=f"detail/r_pilone01/{i:032x}.json")
+    lines["t_pil1aaaa"] += [json.dumps({"type": "event", "cursor": f"rc1.cmd{i}a", "event": start}),
+                            json.dumps({"type": "event", "cursor": f"rc1.cmd{i}b", "event": done})]
+    DETAILS[eid] = {"id": eid, "kind": "step", "ticket": "t_pil1aaaa", "input": {"command": cmd},
+                    "output": {"stdout": out, "stderr": ""}, "checked": True}
+(D / "fake" / "details.json").write_text(json.dumps(DETAILS))
 # the second run shows what orch could not check: its last step was only reported by the agent (a hook line,
 # "not checked" mark) and one line was changed outside orch (the quiet run warning)
 _last = json.loads(lines["t_pil2bbbb"][-1])
@@ -106,6 +126,8 @@ elif a[:2] == ["record", "tail"]:
     for line in json.loads((d / "events.json").read_text())[tid]:
         print(line, flush=True)
     time.sleep(600)
+elif a[:2] == ["record", "query"] and "--detail" in a:
+    print(json.dumps(json.loads((d / "details.json").read_text())[a[a.index("--detail") + 1]]))
 elif a[:3] == ["relay", "mobile", "status"]:
     print(json.dumps({{"on": False}}))
 elif a[:1] == ["agents"]:
@@ -122,24 +144,6 @@ else:
     print(json.dumps({{"ok": True}}))
 ''')
 (fake / "orch").chmod(0o755)
-
-# PIL-1 also has command steps from the Claude reader (#692.1): a failed try then the same command that worked, one
-# step with a planted token in its output (it must show as [hidden: ...]), one plain command.
-from orch_focus import events as _ev  # noqa: E402
-from orch_focus.adapters.claude import ClaudeMapper  # noqa: E402
-
-_m = ClaudeMapper("r_pilone01", "t_pil1aaaa", ws)
-_t = lambda m: ago(m)  # noqa: E731
-_cmds = [
-    (6.0, "toolu_cmd1", "Check the days fit", "python3 tools/agenda.py check", True, "Day 1: 4 items\nDay 2: 9 items (too many)\nError: day 2 has more than 6 items"),
-    (5.5, "toolu_cmd2", "Check the days fit", "python3 tools/agenda.py check", False, "Day 1: 4 items\nDay 2: 6 items\nAll days fit"),
-    (4.5, "toolu_cmd3", "Send the agenda to the team", "python3 tools/agenda.py send --to team", False, "export TOKEN=ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3\nSent to 12 people"),
-]
-_out = []
-for m, tid_, text, cmd, fail, result in _cmds:
-    _out += _m.feed({"type": "assistant", "timestamp": _t(m), "message": {"content": [{"type": "tool_use", "id": tid_, "name": "Bash", "input": {"command": cmd, "description": text}}]}})
-    _out += _m.feed({"type": "user", "timestamp": _t(m - 0.2), "message": {"content": [{"type": "tool_result", "tool_use_id": tid_, "content": result, "is_error": fail}]}})
-_ev.EventLog(ws, "r_pilone01").append(*_out)
 
 from orch_focus import areas  # noqa: E402
 from orch_focus.server import make_server  # noqa: E402
