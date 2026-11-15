@@ -441,6 +441,10 @@ def permission_retry(name: str, root: Path | None = None) -> bool:
 REMINDER_TIMEOUT = 5  # seconds; the reminder hook must never hold up a turn
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     """The run's own hooks from agents/reminder.json as ONE settings blob of the tool, or None: the reminder
     hooks (`reminder_hooks`, `orch work-check --hook <tool>`) and the record hooks (`record_hooks`,
@@ -448,16 +452,21 @@ def reminder_doc(name: str, root: Path | None = None) -> dict | None:
     passes it inline (oneshot.settings_args), live merges it into the per-run hooks file (hooks_doc): one
     --settings either way, so no second config can override this one. The data names the orch command; the
     command written is the ABSOLUTE one (reminder_settings: python -I, never `orch` found through a run's
-    PATH). Record hooks only make sense inside a run (ORCH_RUN/ORCH_TICKET), the only place this goes."""
+    PATH). Record hooks only make sense inside a run (ORCH_RUN/ORCH_TICKET), the only place this goes.
+    On Windows (`_is_windows`) the record hooks are left out: the hook proves its caller by process ancestry
+    and there is no Windows reader yet, so each tool call would only start two processes that conclude
+    not_provable (#547); the reminder hooks stay."""
     a = load(name, root)
     rh, rec = a.get("reminder_hooks") or {}, a.get("record_hooks") or {}
+    if _is_windows():
+        rec = {}
     if not rh and not rec:
         return None
     from orch import reminder_settings
 
     try:
         reminder = reminder_settings.hook_command(name)
-        recorder = reminder_settings.record_hook_command()
+        recorder = reminder_settings.record_hook_command() if rec else ""
     except ValueError:
         return None  # an interpreter path no shell can carry safely: no orch hooks, the run goes on
     if not reminder_settings.can_import_cached():

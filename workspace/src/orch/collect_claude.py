@@ -206,17 +206,22 @@ def _small_json(path: Path) -> Any:
         os.close(fd)
 
 
-def hooks_disabled(folder: str | Path, settings_file: str) -> bool:
+def hooks_disabled(folder: str | Path, settings_file: str, config_dir: str | None = None) -> bool:
     """The tool's settings switch its hooks off (`disableAllHooks`): the agent can usually write them, so
     orch's record hooks stop from its next turn on. `settings_file`: the tool's local settings file in the
     agent's folder (agents/reminder.json, reminder.settings_file, e.g. `<dir>/settings.local.json`); the
-    shared `settings.json` next to it and the person's own (`~/<dir>/settings.json`) count too. Not readable
-    or not JSON: False. Not seen here: a settings folder moved by the tool's own environment variable, hooks
-    the agent adds itself (one that answers before orch's), and a file changed and changed back between
-    turns; hooks_missing is the backstop for those."""
+    shared `settings.json` next to it and the person's own (`~/<dir>/settings.json`) count too.
+    `config_dir`: the settings folder the run's own environment names (the tool's variable,
+    agents/reminder.json reminder.settings_dir_env; a relative one is against `folder`); then ITS
+    `settings.json` is the person's file and `~/<dir>` is not read (the tool does not either). Not readable or
+    not JSON: False. Not seen here: hooks the agent adds itself (one that answers before orch's), and a file
+    changed and changed back
+    between turns; hooks_missing is the backstop for those."""
     local = Path(folder) / settings_file
     paths = [local, local.with_name("settings.json")]
-    if Path(settings_file).parent.parts:  # the tool's own settings folder, under the person's home
+    if config_dir:
+        paths.append(Path(folder) / config_dir / "settings.json")  # absolute: the folder part is dropped
+    elif Path(settings_file).parent.parts:  # the tool's own settings folder, under the person's home
         paths.append(Path.home() / Path(settings_file).parent / "settings.json")
     return any(
         isinstance(doc := _small_json(path), dict) and doc.get("disableAllHooks") is True for path in paths
