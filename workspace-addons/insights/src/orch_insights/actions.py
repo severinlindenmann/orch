@@ -39,7 +39,7 @@ MESSAGES = {
     "not_available": NOT_READ,
     "tampered": NOT_READ,
     "not_allowed": "This was refused.",
-    "stale": "The skill changed since this was suggested. Run a new check-up.",
+    "stale": "The skill changed since this was proposed. Run a new check-up.",
     "not_tested": "Test it first.",
     "admin_only": "Shared by your admin: ask your admin.",
     "conflict": "Changed since it was applied. Nothing was rolled back.",
@@ -121,18 +121,18 @@ def _proposal_id(args):
     _only(args, ("id",))
     pid = args.get("id")
     if not isinstance(pid, str) or not PROPOSAL.fullmatch(pid):
-        raise BadRequest("That is not a suggestion.")
+        raise BadRequest("That is not a proposal.")
     return pid
 
 
 def _checkup_start(args):
     _only(args, ())
-    return ["checkup", "start", "--json"]
+    return ["insights", "checkup", "start", "--json"]
 
 
 def _checkup_verb(verb):
     def build(args):
-        return ["checkup", verb, _proposal_id(args), "--json"]
+        return ["insights", "checkup", verb, _proposal_id(args), "--json"]
 
     return build
 
@@ -142,7 +142,7 @@ def _checkup_weekly(args):
     value = args.get("value")
     if value not in ("on", "off"):
         raise BadRequest("That value is not allowed.")
-    return ["checkup", "weekly", value, "--json"]
+    return ["insights", "checkup", "weekly", value, "--json"]
 
 
 OPS = {
@@ -350,30 +350,9 @@ def run_op(
     return _with_person(root, orch_bin, argv, mint, need, DELETE_TIMEOUT, time.monotonic() + TOTAL_BUDGET)
 
 
-def _accept_target(read, pid):
-    """`<id>@<hash hex>`: the hash comes from the core's own `checkup show`, read just before the proof is minted."""
-    shown = read("checkup", "show", pid, "--json")
-    digest = shown.get("hash") if isinstance(shown, dict) else None
-    if not isinstance(digest, str) or not HASH.fullmatch(digest):
-        return None
-    return ("checkup.accept", f"{pid}@{digest}")
-
-
 def _checkup(root, orch_bin, op, args, argv, mint, read):
-    if op == "checkup.start":
-        need = None  # starting a read-only check-up needs no proof
-    elif op == "checkup.weekly":
-        need = ("insights.settings", f"checkup.weekly={args['value']}")
-    elif op == "checkup.accept":
-        need = lambda: _accept_target(read, args["id"])
-    elif op in ("checkup.rollback", "checkup.reject"):
-        need = (op, args["id"])
-    else:  # checkup.test: replays in a throwaway copy, never needs a proof
-        need = None
+    """A check-up click is a plain action: one CLI call (`orch insights checkup ...`), no proof (R4.1)."""
     slow = op == "checkup.test"
     deadline = time.monotonic() + (TEST_TIMEOUT + WRITE_TIMEOUT if slow else TOTAL_BUDGET)
-    timeout = TEST_TIMEOUT if slow else None
-    if need is None:
-        code, stdout, _ = orch(root, orch_bin, argv, timeout=timeout, deadline=deadline)
-        return _answer(code, _parsed(stdout), CHECKUP_TIMEOUT, _clean_checkup)
-    return _with_person(root, orch_bin, argv, mint, need, CHECKUP_TIMEOUT, deadline, timeout, _clean_checkup)
+    code, stdout, _ = orch(root, orch_bin, argv, timeout=TEST_TIMEOUT if slow else None, deadline=deadline)
+    return _answer(code, _parsed(stdout), CHECKUP_TIMEOUT, _clean_checkup)

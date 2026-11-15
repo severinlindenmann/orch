@@ -172,9 +172,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/list/") and path[10:] in KINDS:
             return self._json(build_list(read_counts(self.root, self.orch_bin), path[10:]))
         if path == "/api/checkup":
-            return self._json(build_checkup(self._read("checkup", "list", "--json")))
+            return self._json(build_checkup(self._read("insights", "checkup", "list", "--json")))
         if path.startswith("/api/checkup/") and actions.PROPOSAL.fullmatch(path[13:]):
-            shown = build_show(self._read("checkup", "show", path[13:], "--json"))
+            shown = build_show(self._read("insights", "checkup", "show", path[13:], "--json"))
             return self._json(shown) if shown else self._send(404, b"not found")
         if path == "/api/settings":
             return self._json(self._settings_view())

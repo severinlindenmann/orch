@@ -1,6 +1,6 @@
-/* Insights check-up card: last check-up, Run a check-up, the Monday switch and the suggestions.
+/* Insights check-up card: last check-up, Run a check-up, the Monday switch and the proposals.
    Agent text (titles, plain, files) is data: always inserted as text nodes. A click goes through the page's one
-   act() (settings.js, window.insightsAct); the core asks for the person's proof, never this page. */
+   act() (settings.js, window.insightsAct); a check-up click is one plain action (no proof). */
 'use strict';
 (() => {
   const prefix = document.documentElement.dataset.prefix || '';
@@ -71,7 +71,7 @@
     const bits = [];
     if (last.runs !== null) bits.push(plural(last.runs, 'run'));
     if (last.tickets !== null) bits.push(plural(last.tickets, 'ticket'));
-    if (last.found !== null) bits.push(plural(last.found, 'suggestion'));
+    if (last.found !== null) bits.push(plural(last.found, 'proposal'));
     return [`Last check-up: ${when(last.at)}`, ...bits].join(' · ');
   }
 
@@ -156,7 +156,7 @@
     return button;
   }
 
-  function suggestion(proposal) {
+  function proposal(proposal) {
     const row = node('div', undefined, 'card-row checkup-row');
     row.dataset.state = proposal.status;
     const text = node('div', undefined, 'grow');
@@ -164,7 +164,7 @@
     if (proposal.target.source === 'admin' || proposal.kind === 'key.ask_admin') {
       text.append(node('p', 'Ask your admin', 'meta'));
     } else if (proposal.status === 'stale') {
-      text.append(node('p', 'The skill changed since this was suggested. Run a new check-up.', 'meta'));
+      text.append(node('p', 'The skill changed since this was proposed. Run a new check-up.', 'meta'));
     }
     row.append(text, chips(proposal));
     const dismiss = dismissButton(proposal), main = mainButton(proposal);
@@ -214,9 +214,9 @@
     const card = node('div', undefined, 'card');
     card.append(head());
     if (view.proposals.length) {
-      for (const proposal of view.proposals) card.append(suggestion(proposal));
+      for (const proposal of view.proposals) card.append(proposal(proposal));
     } else {
-      card.append(node('p', view.last ? 'Nothing to suggest right now.' : 'Run a check-up to look for things to improve.',
+      card.append(node('p', view.last ? 'Nothing to propose right now.' : 'Run a check-up to look for things to improve.',
         'muted pad'));
     }
     host.replaceChildren(card, note);

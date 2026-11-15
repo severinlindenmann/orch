@@ -17,7 +17,7 @@ TIME = re.compile(r"\d{4}-\d\d-\d\dT[0-9:.]+Z")
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 SHOWN_STATES = tuple(
     s for s in CHECKUP_STATES if s != "rejected"
-)  # a dismissed suggestion is gone from the page
+)  # a dismissed proposal is gone from the page
 
 
 def _text(value, limit):
@@ -87,7 +87,7 @@ def _diff_row(row):
 
 
 def build_show(raw) -> dict | None:
-    """One suggestion with the file change for the Accept sheet; None when it can not be read."""
+    """One proposal with the file change for the Accept sheet; None when it can not be read."""
     prop = _proposal(raw)
     if prop is None:
         return None

@@ -1,5 +1,5 @@
 """`orch insights needs --json`: rows for `orch needs` (contracts/needs.schema.json). One row while the check-up has
-suggestions nobody has looked at (proposed or tested); nothing otherwise, and nothing when the CLI fails."""
+proposals nobody has looked at (proposed or tested); nothing otherwise, and nothing when the CLI fails."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from .server import read_json
 
 
 def rows(root: Path, orch_bin=None, now: datetime | None = None) -> list[dict]:
-    view = build_checkup(read_json(root, orch_bin, ["checkup", "list", "--json"]))
+    view = build_checkup(read_json(root, orch_bin, ["insights", "checkup", "list", "--json"]))
     if not view["available"]:
         return []
     open_ones = [p for p in view["proposals"] if p["status"] in ("proposed", "tested")]
@@ -27,7 +27,7 @@ def rows(root: Path, orch_bin=None, now: datetime | None = None) -> list[dict]:
             "kind": "insights:checkup",
             "ticket": None,
             "title": "Check-up",
-            "text": f"Check-up has {n} suggestion{'s' if n != 1 else ''} to look at",
+            "text": f"Check-up has {n} proposal{'s' if n != 1 else ''} to look at",
             "tone": "warn",
             "since": since,
             "cli": "orch insights open",

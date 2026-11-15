@@ -222,3 +222,61 @@ def test_delete_detail_needs_the_person_and_reports_kept(core, srv, session):
     assert code == 200 and out.get("deleted") == 0 and out.get("kept") == 0 and out.get("ticket") == tid
     code, text = act(srv, session, "record.delete_detail", {"ticket": "t_nothere1"}, person=True)
     assert code == 422 and "not found" in text.lower()
+
+
+# ------------------------------------------------------------------ the check-up against the real core
+
+
+@pytest.fixture
+def insights_shim(core, tmp_path_factory):
+    """`orch insights ...` runs this add-on's CLI (the real core's add-on dispatch needs an installed entry point);
+    everything else is the real core. ORCH_BIN points at the shim so the add-on's own calls reach the real core."""
+    ws, shim = core
+    both = Path(shim).with_name("orch2")
+    both.write_text(
+        f"#!{sys.executable}\nimport os, subprocess, sys\n"
+        f"core = {shim!r}\n"
+        "if sys.argv[1:2] == ['insights']:\n"
+        f"    env = dict(os.environ, ORCH_BIN={str(both)!r})\n"
+        f"    raise SystemExit(subprocess.run([sys.executable, '-m', 'orch_insights', '--dir', {str(ws)!r}, *sys.argv[2:]], env=env).returncode)\n"
+        "raise SystemExit(subprocess.run([core, *sys.argv[1:]]).returncode)\n"
+    )
+    both.chmod(0o755)
+    return ws, str(both)
+
+
+def test_checkup_list_through_the_real_cli_feeds_the_card(insights_shim, monkeypatch):
+    from orch_insights import checkup_core as cc
+    from orch_insights.checkup import build_checkup
+    from orch_insights.server import read_json
+
+    ws, orch = insights_shim
+    monkeypatch.setenv("ORCH_BIN", orch)
+    tid = cc._ensure_ticket(ws)  # the real `orch ticket new --read-only --allow-cmd`
+    assert json.loads((ws / ".orch" / "tickets" / f"{tid}.json").read_text())["read_only"] == {
+        "allow": ["insights propose"]
+    }
+    code, out = run((ws, orch), "ticket", "new", "Export invoices", "--json")
+    evidence = out["id"]
+    skill = ws / ".agents" / "skills" / "invoice-export"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: invoice-export\ndescription: Export invoices\n---\nBody\n")
+    monkeypatch.setenv("ORCH_TICKET", tid)
+    monkeypatch.setenv("ORCH_RUN", "r_run00001")
+    draft = {
+        "kind": "skill.fix", "title": "Say the date format", "plain": "One line.", "likely": False,
+        "evidence": [{"ticket": evidence}], "target": {"kind": "skill", "name": "invoice-export"},
+        "change": {"files": [{"path": "SKILL.md", "after": "---\nname: invoice-export\ndescription: Export invoices\n---\nBody 2\n"}]},
+    }  # fmt: skip
+    code, out = run((ws, orch), "insights", "propose", "--json", "--draft", json.dumps(draft))
+    assert code == 0 and out["status"] == "proposed", out
+    for k in ("ORCH_TICKET", "ORCH_RUN"):
+        monkeypatch.delenv(k)
+    code, listing = run((ws, orch), "insights", "checkup", "list", "--json")
+    assert code == 0 and listing["proposals"][0]["status"] == "proposed"
+    view = build_checkup(read_json(ws, orch, ["insights", "checkup", "list", "--json"]))
+    assert view["available"] is True and [p["id"] for p in view["proposals"]] == [out["id"]]
+    code, tested = run((ws, orch), "insights", "checkup", "test", out["id"], "--json")
+    assert code == 0 and tested["tests"]["state"] == "passed", tested
+    code, _done = run((ws, orch), "insights", "checkup", "accept", out["id"], "--json")
+    assert code == 0 and "Body 2" in (skill / "SKILL.md").read_text()
