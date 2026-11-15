@@ -174,7 +174,7 @@ def r6(e):
     asking = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("allow_message") == mid]
     check(len(asking) == 1 and asking[0]["status"] == "waiting", f"one waiting allow-question ticket expected: {asking}")
     check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
-    e.orch("Reports", "relay", "allow", mid, "--once")
+    e.person("Reports", "relay", "allow", mid, "--once")
     allow = [m for m in inbox(e, "Pilatus") if m["type"] == "allow"]
     check(allow and allow[-1]["reply_to"] == mid, f"allow message back to Pilatus: {allow}")
     _sched_once(e, "Reports")
@@ -199,7 +199,7 @@ def r7(e):
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "run the weekly report")
     st = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"]["key"] == "weekly-report"]
     check(st and st[-1]["allowed"] is False, "first start must wait for the human")
-    e.orch("Reports", "relay", "allow", st[-1]["id"], "--permanent")
+    e.person("Reports", "relay", "allow", st[-1]["id"], "--permanent")
     inbox(e, "Pilatus")  # stores the received allow token
     _sched_once(e, "Reports")
     # the message that was just allowed runs right away (like --once) ...

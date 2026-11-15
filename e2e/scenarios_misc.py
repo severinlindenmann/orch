@@ -115,7 +115,7 @@ def f1(e):
     f.write_text("# Weekly report\n\nAll good.\n")
     r = e.orchj(ws, "publish", "file", str(f))
     e.orch(ws, "check", "done", t, "c1", "--evidence", json.dumps({"type": "url", "ref": r["link"].split("#")[0]}))
-    e.orch(ws, "ticket", "status", t, "done")
+    e.person(ws, "ticket", "status", t, "done")
     _, fid, key = link_parts(r["link"])
     hdr, body = opf1_decrypt(http("GET", f"{e.pub.url}/f/{fid}/blob").body, key)
     check(body == f.read_bytes(), "published report differs")

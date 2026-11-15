@@ -89,12 +89,29 @@ class W:
         self.o("init", "--yes", by=None)
         return self
 
+    def person(self, *args, ok=True, env=None, input=None):
+        """A person's action (answer, ticket done, relay connect ...): the scripted test human proves it (no --by)."""
+        from lib import person_run, tool_python
+        rc, out, err = person_run(self.sh, tool_python(self.e.bin), self.root, ["orch", *args], env=env or {}, input=input)
+        if ok and rc != 0:
+            raise Fail(f"orch {' '.join(map(str, args))[:70]} (as the person) exit {rc}: {(err or out).strip()[-240:]}")
+        return rc, out, err
+
+    def add_agent(self, name: str, command: str, interactive: str | None = None):
+        """`orch config agent add` and `config set workspace.agent` are a person's actions with no test-human proof:
+        the harness plays the person at the library level (the agent command it types is the one it approves)."""
+        from lib import tool_python
+        code = ("import sys; from pathlib import Path; from orch import config; r = Path(sys.argv[1]); "
+                "config.add_agent(r, sys.argv[2], sys.argv[3], sys.argv[4] or None, approve=True, by='human:e2e'); "
+                "config.select_agent(r, sys.argv[2], 'human:e2e')")
+        rc, out, err = self.sh([tool_python(self.e.bin), "-c", code, str(self.root), name, command, interactive or ""])
+        if rc != 0:
+            raise Fail(f"add agent {name}: {(err or out).strip()[-240:]}")
+
     def agent(self, extra: str = "", name: str = "fake", interactive: bool = False):
         py, ag = shlex.quote(sys.executable), shlex.quote(str(AGENT))
         cmd = f"{py} {ag} {extra} {{prompt}}".replace("  ", " ")
-        flags = ["--interactive", f"{py} {ag} --interactive"] if interactive else []
-        self.o("config", "agent", "add", name, "--command", cmd, *flags, by=None)
-        self.o("config", "set", "workspace.agent", name, by=None)
+        self.add_agent(name, cmd, f"{py} {ag} --interactive" if interactive else None)
 
     def ticket(self, title: str, *checks: str, parent: str | None = None) -> str:
         extra = ["--parent", parent] if parent else []
@@ -230,7 +247,7 @@ def c1(e):
     check(w.load(kid).get("parent") == tid, f"sub-ticket parent: {w.load(kid)}")
     w.o("check", "done", tid, "c3", "--note", "checked")
     w.o("check", "done", tid, "c1", "--note", "checked")
-    rc, out, err = w.o("ticket", "status", tid, "done")
+    rc, out, err = w.person("ticket", "status", tid, "done")
     check("sub-tickets are still open" in err and "Column order" in err, f"no close warning on stderr: {err!r}")
     check(w.load(tid)["status"] == "done", "the parent was not closed (warning only)")
     # needs: nothing, then a question, then nothing again
@@ -239,7 +256,7 @@ def c1(e):
     rows = w.j("needs")
     check(len(rows) == 1 and rows[0]["source"] == "core" and rows[0]["kind"] == "question" and rows[0]["ticket"] == kid, f"needs rows {rows}")
     qid = w.load(kid)["questions"][0]["id"]
-    w.o("answer", kid, qid, "A")
+    w.person("answer", kid, qid, "A")
     check(w.j("needs") == [], "needs still lists an answered question")
 
 
@@ -662,7 +679,7 @@ def p6(e):
     check(not again.get("sent"), f"resend sent something twice: {again}")
     # allow both keys, then the two keys make two tickets
     for mid in saved:
-        e.orch("Reports", "relay", "allow", mid, "--once")
+        e.person("Reports", "relay", "allow", mid, "--once")
     made = {}
     for mid, raw in saved.items():
         done = e.orchj("Reports", "relay", "done", mid)
@@ -712,7 +729,7 @@ def w2(e):
         check(a.status == 201, f"relay admin add: {a}")
         j = a.json()
         w.o("addon", "add", "relay", "--yes", by=None, env={})
-        w.o("relay", "connect", f"http://127.0.0.1:{rp}", "--workspace", j["id"], "--token", j["token"], by=None)
+        w.person("relay", "connect", f"http://127.0.0.1:{rp}", "--workspace", j["id"], "--token", j["token"])
         who = w.j("relay", "whoami", by=None)
         check(who["id"] == j["id"], f"relay whoami {who}")
         act = {a["name"] for a in w.j("addon", "list", by=None) if a.get("active")}
@@ -790,8 +807,7 @@ class Focus:
 
 def focus_agent(w: W, extra: str, name: str = "focusfake"):
     py, ag = shlex.quote(sys.executable), shlex.quote(str(FOCUS_AGENT))
-    w.o("config", "agent", "add", name, "--command", f"{py} {ag} {extra} {{prompt}}", by=None)
-    w.o("config", "set", "workspace.agent", name, by=None)
+    w.add_agent(name, f"{py} {ag} {extra} {{prompt}}")
 
 
 def _until_view(fx: Focus, tid: str, pred, secs: float = 40, what: str = ""):
@@ -1148,7 +1164,7 @@ def g1_clean(e):
     check(len(branches()) == 2, f"branches {branches()}")
     for t in (a, b):
         w.wait_done(t)
-        w.o("ticket", "status", t, "done")
+        w.person("ticket", "status", t, "done")
     check(listed() == [], f"registry after Done: {listed()}")
     check(not any(f.exists() for f in folders), "a copy folder is still there after Done")
     check(branches() == [], f"branches after Done: {branches()}")

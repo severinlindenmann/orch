@@ -17,7 +17,7 @@ from lib import Fail, Skip, check, scenario
 def snapshot(d: Path) -> dict:
     out = {}
     for p in sorted(d.rglob("*")):
-        if ".git" in p.parts:
+        if ".git" in p.parts or "diag" in p.relative_to(d).parts[:2]:  # .orch/diag is the debug log: it grows with every command
             continue
         if p.is_symlink():
             out[str(p.relative_to(d))] = "link:" + os.readlink(p)
@@ -135,15 +135,19 @@ def w4(e):
     d = json.loads(p.read_text())
     d["checklist"][0]["done"] = True  # hand-edited: checked, no evidence
     p.write_text(json.dumps(d))
-    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False)
+    # the agent's finish is what is guarded (a person's Done is their own call)
+    rc, _, err = e.orch(ws, "ticket", "status", t, "done", ok=False, by="agent:claude-code")
     check(rc == 2 and "evidence" in err.lower(), f"expected refusal, got rc={rc} {err!r}")
     d["checklist"][0]["evidence"] = [{"type": "note", "ref": "checked by hand"}]
     p.write_text(json.dumps(d))
-    e.orch(ws, "ticket", "status", t, "done")
+    e.orch(ws, "ticket", "status", t, "done", by="agent:claude-code")  # now it may go to Check
+    check(tload(ws, t)["status"] == "review", f"agent finish should wait for the person: {tload(ws, t)['status']}")
+    e.person(ws, "ticket", "status", t, "done")
+    check(tload(ws, t)["status"] == "done", "the person's Done did not stick")
     # an UNCHECKED item blocks done too; a dropped ticket is not affected
     t2 = e.orchj(ws, "ticket", "new", "W4 unchecked")["id"]
     e.orch(ws, "check", "add", t2, "never done")
-    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False)
+    rc, _, err = e.orch(ws, "ticket", "status", t2, "done", ok=False, by="agent:claude-code")
     check(rc == 2 and "not checked" in err.lower(), f"unchecked item must refuse done, got rc={rc} {err!r}")
     e.orch(ws, "ticket", "status", t2, "dropped")
     return "refusal ok (checked without evidence, and unchecked)"
@@ -158,9 +162,9 @@ def w5(e):
     d = tload(ws, t)
     check(d["status"] == "waiting" and d["waiting_on"] == {"kind": "question", "ref": "q1"}, f"not waiting: {d['status']}")
     # an option matches case-insensitively and is stored in its own spelling; other text is a free answer (#21)
-    e.orch(ws, "answer", t, "q1", "BLUE", by="human:sev")
+    e.person(ws, "answer", t, "q1", "BLUE")
     q = tload(ws, t)["questions"][0]
-    check(q["answer"] == "blue" and q["answered_by"] == "human:sev" and q["via"] == "cli", f"answer fields {q}")
+    check(q["answer"] == "blue" and q["answered_by"].startswith("human:") and q["via"] == "cli", f"answer fields {q}")
     check(tload(ws, t)["status"] == "active", "ticket did not resume")
 
 
@@ -195,18 +199,27 @@ def w7(e):
     t = e.orchj(home, "ticket", "new", "W7 home")["id"]
     e.orch(home, "check", "add", t, "x")
     e.orch(home, "check", "done", t, "c1", "--evidence", EVID)
-    e.orch(home, "ticket", "status", t, "done")
+    e.person(home, "ticket", "status", t, "done")
     check(tload(home, t)["status"] == "done", "Home flow failed")
     rep = e.ws("Reports")
     t2 = e.orchj(rep, "ticket", "new", "W7 reports")["id"]
+    # tickets are personal by default (9 Nov): they stay out of the team repo and `git status` stays clean
+    check(e.sh(["git", "status", "--porcelain"], cwd=rep)[1].strip() == "", "orch left files in `git status`")
+    (rep / "README.md").write_text("team file\n")
     e.sh(["git", "add", "-A"], cwd=rep, check_rc=True)
-    e.sh(["git", "commit", "-qm", "ticket"], cwd=rep, check_rc=True)
+    e.sh(["git", "commit", "-qm", "team file"], cwd=rep, check_rc=True)
     e.sh(["git", "push", "-q", "origin", "main"], cwd=rep, check_rc=True)
     clone = e.tmp / "reports-clone"
     e.sh(["git", "clone", "-q", str(e.tmp / "reports-remote.git"), str(clone)], check_rc=True)
+    check(not (clone / ".orch").exists(), "a personal orch file reached the team remote")
+    # a team that wants shared tickets opts in with git itself: the ticket file travels like any file
+    e.sh(["git", "add", "-f", f".orch/tickets/{t2}.json"], cwd=rep, check_rc=True)
+    e.sh(["git", "commit", "-qm", "ticket"], cwd=rep, check_rc=True)
+    e.sh(["git", "push", "-q", "origin", "main"], cwd=rep, check_rc=True)
+    e.sh(["git", "pull", "-q", "origin", "main"], cwd=clone, check_rc=True)
     got = json.loads((clone / ".orch/tickets" / f"{t2}.json").read_text())
     check(got["title"] == "W7 reports", "ticket not in the remote")
-    st = e.sh(["git", "status", "--porcelain"], cwd=rep)[1]
+    st = e.sh(["git", "ls-files"], cwd=rep)[1]
     check(".orch/secrets" not in st, "secrets would be committed")
     return "codex exec part not run (agent)"
 

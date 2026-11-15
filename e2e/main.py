@@ -78,6 +78,14 @@ class E:
             raise Fail(f"orch {' '.join(a)[:60]} exit {rc}: {(err or out).strip()[-200:]}")
         return rc, out, err
 
+    def person(self, ws, *args, ok=True):
+        """A person's action (answer, ticket done, relay connect ...): the scripted test human proves it. No --by."""
+        root = self.path_of(ws)
+        rc, out, err = lib.person_run(self.sh, lib.tool_python(self.bin), root, ["orch", *args])
+        if ok and rc != 0:
+            raise Fail(f"orch {' '.join(map(str, args))[:60]} (as the person) exit {rc}: {(err or out).strip()[-200:]}")
+        return rc, out, err
+
     def orchj(self, ws, *args, by=None):
         rc, out, err = self.orch(ws, *args, "--json", by=by)
         try:
@@ -155,7 +163,7 @@ class E:
             self.prompts[key] = j.get("prompt", "")
             self.cleanup.append(lambda i=j["id"]: self.rel.admin.call("DELETE", f"/admin/api/workspaces/{i}"))
             self.orch(self.ws(name), "addon", "add", "relay", "--yes")
-            self.orch(self.ws(name), "relay", "connect", self.rel.url, "--workspace", j["id"], "--token", j["token"])
+            self.person(self.ws(name), "relay", "connect", self.rel.url, "--workspace", j["id"], "--token", j["token"])
         return self.creds[key]
 
     def relay_all(self):
@@ -269,6 +277,14 @@ def main() -> int:
         r = subprocess.run(["uv", "tool", "install", str(repo / "workspace")], env=e.env, capture_output=True, text=True)
         if r.returncode:
             print("orch install failed:", r.stderr[-400:])
+            return 1
+        # a TEST install: the install record is what lets the scripted test human (orch dev-proof) act, in workspaces
+        # under <real home>/.orch-test only
+        py = lib.tool_python(e.bin)
+        rc, out, err = e.sh([py, "-c", "import sys; from pathlib import Path; from orch import humanproof as h; "
+                             "h.write_install_record(Path(sys.prefix), 'test')"])
+        if rc:
+            print("install record failed:", (err or out)[-400:])
             return 1
         needs_servers = any(s[0] in "PRMF" or (s in lib.V2_NEEDS_SERVERS or s.startswith(("V3-", "LOOK-"))) for s in ids)
         if needs_servers:
