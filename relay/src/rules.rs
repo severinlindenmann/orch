@@ -105,6 +105,12 @@ pub fn authorize(c: &Connection, key: &Key, sender: &str, mut msg: Value) -> Res
         }
         check_review_result(c, key, sender, &msg)?;
     }
+    if msg["body"].get("taken_back").is_some() {
+        if typ != "text" {
+            return Err(invalid("Invalid taken-back text."));
+        }
+        check_taken_back(c, key, sender, &msg)?;
+    }
     if let Some((idx, label)) = kind_of(&typ) {
         if to == "phones" || valid_id(&to, "ph_", 10) {
             if idx != 0 {
@@ -483,6 +489,90 @@ fn check_review_result(c: &Connection, key: &Key, sender: &str, msg: &Value) -> 
         if b.get("review_result").is_some() {
             return Err(conflict("This question already has a result."));
         }
+    }
+    Ok(())
+}
+
+/// Longest `taken_back.reason` (characters).
+const MAX_TAKEN_BACK_REASON: usize = 200;
+
+/// A character a one-line reason may not contain: controls (C0, DEL, C1) and bidi embedding/override/isolate marks.
+fn bad_reason_char(ch: char) -> bool {
+    ch.is_control() || matches!(ch, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// A workspace's `body.taken_back` text (relay-api.md "Question taken back"): body only {text, taken_back:{reason}},
+/// text exactly `Taken back: <reason>`, `to` exactly `phones`, `reply_to` a plain `q<n>` question of THIS sender (404
+/// for any other id, so no id is confirmed), the question's ticket, no phone answer stored yet, at most one per question.
+/// The caller holds the one database lock from the duplicate check to the insert, so the one-take-back rule cannot race.
+fn check_taken_back(c: &Connection, key: &Key, sender: &str, msg: &Value) -> Res<()> {
+    let body = &msg["body"];
+    let reason = body["taken_back"]["reason"].as_str().unwrap_or("");
+    let n = reason.chars().count();
+    let shape_ok = body["taken_back"].as_object().is_some_and(|o| o.len() == 1)
+        && (1..=MAX_TAKEN_BACK_REASON).contains(&n)
+        && !reason.chars().any(bad_reason_char)
+        && !reason.trim().is_empty()
+        && body["text"].as_str() == Some(format!("Taken back: {reason}").as_str())
+        && body.as_object().is_some_and(|o| o.len() == 2)
+        && msg.as_object().is_some_and(|o| {
+            o.keys().all(|k| {
+                matches!(
+                    k.as_str(),
+                    "schema"
+                        | "id"
+                        | "from"
+                        | "to"
+                        | "type"
+                        | "reply_to"
+                        | "created_at"
+                        | "body"
+                        | "ticket"
+                        | "key"
+                )
+            })
+        })
+        && msg["to"].as_str() == Some("phones")
+        && msg["reply_to"]
+            .as_str()
+            .is_some_and(|id| valid_id(id, "m_", 16));
+    if !shape_ok {
+        return Err(invalid("Invalid taken-back shape, text or destination."));
+    }
+    let rid = msg["reply_to"].as_str().unwrap();
+    let q = get_msg(c, rid)?
+        .filter(|q| q.from == sender && q.typ == "question")
+        .ok_or_else(|| not_found("The message you reply to does not exist."))?;
+    let (qbody, qextra) = open_payload(key, &q);
+    let plain = qbody["question_id"].as_str().is_some_and(|id| {
+        id.strip_prefix('q')
+            .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+    });
+    if !plain || qbody.get("proposal").is_some() || qbody.get("review").is_some() {
+        return Err(not_allowed("Only an ordinary question can be taken back."));
+    }
+    if msg.get("ticket").and_then(Value::as_str) != q.ticket.as_deref() {
+        return Err(invalid("The ticket must be the question's ticket."));
+    }
+    if let Some(k) = msg.get("key") {
+        if Some(k) != qextra.get("key") {
+            return Err(invalid("The key must be the question's key."));
+        }
+    }
+    let answered = c
+        .query_row(
+            "SELECT 1 FROM messages WHERE reply_to=?1 AND type='answer'",
+            [rid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if answered {
+        return Err(already_answered("This question was already answered."));
+    }
+    // The same message id again is caught before this (a duplicate); another id for the same question is a conflict.
+    if store::taken_back_reason(c, key, rid).is_some() {
+        return Err(conflict("This question was already taken back."));
     }
     Ok(())
 }

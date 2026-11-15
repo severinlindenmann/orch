@@ -135,7 +135,8 @@ pub const OPEN_QUESTIONS_SQL: &str = "SELECT seq,id,from_addr,to_addr,type,creat
         UNION ALL
         SELECT m.* FROM json_each(?2) j CROSS JOIN messages m
           WHERE m.type='question' AND m.to_addr=?1 AND m.from_addr=j.value
-     ) m WHERE NOT EXISTS (SELECT 1 FROM messages a WHERE a.reply_to=m.id AND a.type='answer') ORDER BY seq DESC";
+     ) m WHERE NOT EXISTS (SELECT 1 FROM messages a WHERE a.reply_to=m.id AND a.type='answer')
+       AND NOT EXISTS (SELECT 1 FROM question_taken_back t WHERE t.question_id=m.id) ORDER BY seq DESC";
 
 /// Texts for a phone: ?1 phone id, ?2 cursor, ?3 JSON workspace list, ?4 paired-at, ?5 limit.
 pub const MESSAGES_SQL: &str = "SELECT seq,id,from_addr,to_addr,type,created_at,ticket,reply_to,payload,acked_at FROM (
@@ -607,6 +608,12 @@ async fn answer(
             return Err(already_answered(format!(
                 "This question was already answered: {}.",
                 b["answer"].as_str().unwrap_or("")
+            )));
+        }
+        // The workspace took this question back: closed, nothing stored (relay-api.md "Question taken back").
+        if let Some(reason) = store::taken_back_reason(&c, &app.key, qid) {
+            return Err(taken_back(format!(
+                "This question was taken back: {reason}"
             )));
         }
         let (qb, qextra) = store::open_payload(&app.key, &q);
@@ -1254,7 +1261,10 @@ pub async fn push_message(app: &AppState, q: &Value) {
     let to = q["to"].as_str().unwrap_or("").to_string();
     let from = q["from"].as_str().unwrap_or("").to_string();
     let is_text = q["type"] == "text";
-    if q["body"].get("proposal_result").is_some() || q["body"].get("review_result").is_some() {
+    if q["body"].get("proposal_result").is_some()
+        || q["body"].get("review_result").is_some()
+        || q["body"].get("taken_back").is_some()
+    {
         return;
     }
     // Work updates: only result / question / failure / stopped are pushed. ack, working and note stay quiet

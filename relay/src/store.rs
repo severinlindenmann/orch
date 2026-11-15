@@ -31,6 +31,7 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         DROP INDEX IF EXISTS msg_text_from;
         CREATE INDEX IF NOT EXISTS msg_type_to_from ON messages(type, to_addr, from_addr, seq);
         CREATE INDEX IF NOT EXISTS msg_type_from_to ON messages(type, from_addr, to_addr, seq);
+        CREATE TABLE IF NOT EXISTS question_taken_back(question_id TEXT PRIMARY KEY, msg_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS view_blobs(blob_id TEXT NOT NULL, msg_id TEXT NOT NULL, PRIMARY KEY(blob_id, msg_id));
         CREATE TABLE IF NOT EXISTS blobs(id TEXT PRIMARY KEY, uploader TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS webhooks(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, ticket TEXT,
@@ -233,6 +234,16 @@ pub fn insert_message(
             }
         }
     }
+    // The workspace took this question back (relay-api.md "Question taken back"): kept next to the question, so the
+    // phone answer check and the open-question list see it without opening any payload.
+    if msg["type"] == "text" && msg["body"].get("taken_back").is_some() {
+        if let Some(q) = msg["reply_to"].as_str() {
+            c.execute(
+                "INSERT OR IGNORE INTO question_taken_back(question_id,msg_id) VALUES(?1,?2)",
+                params![q, id],
+            )?;
+        }
+    }
     c.execute(
         "INSERT INTO messages(id,from_addr,to_addr,type,created_at,ticket,reply_to,blob_id,digest,payload,stored_at)
          VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -251,6 +262,31 @@ pub fn insert_message(
         ],
     )?;
     Ok(())
+}
+
+/// The reason a question was taken back (None = it was not): read from the stored take-back text.
+pub fn taken_back_reason(c: &Connection, key: &Key, qid: &str) -> Option<String> {
+    let mid: String = c
+        .query_row(
+            "SELECT msg_id FROM question_taken_back WHERE question_id=?1",
+            [qid],
+            |r| r.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()?;
+    // The marker row decides; an unreadable text only loses the reason (fail closed: still taken back).
+    let reason = get_msg(c, &mid)
+        .ok()
+        .flatten()
+        .map(|m| {
+            open_payload(key, &m).0["taken_back"]["reason"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        })
+        .unwrap_or_default();
+    Some(reason)
 }
 
 #[allow(clippy::too_many_arguments)]
