@@ -675,7 +675,14 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
         && req
             .headers()
             .contains_key(header::ACCESS_CONTROL_REQUEST_METHOD);
-    let public = (origin_null || preflight) && is_public_live(&st, &name);
+    let app = db::get_app(&st.db.lock().unwrap(), &name).ok().flatten();
+    let private = app.as_ref().is_some_and(|a| !a.public);
+    // CORS for the opaque-origin page: public apps (readable by anyone), and private apps only
+    // for requests that carry the app's own capability (an attacker app does not know it)
+    let cap_valid = app.as_ref().is_some_and(|a| {
+        !a.public && split_cap(&rest).is_some_and(|(c, _)| util::ct_eq(c, &app_cap(&st, a)))
+    });
+    let public = (origin_null || preflight) && (is_public_live(&st, &name) || cap_valid);
     let mut resp = if preflight && public {
         // answered here, never forwarded to the app; public content is readable by anyone anyway
         let mut r = StatusCode::NO_CONTENT.into_response();
@@ -701,8 +708,32 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
         h.remove(header::ACCESS_CONTROL_ALLOW_CREDENTIALS);
         h.append(header::VARY, "Origin".parse().unwrap());
     }
+    if private {
+        // the capability path must not leak through Referer or caches
+        h.insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
+        h.insert(header::CACHE_CONTROL, "private, no-store".parse().unwrap());
+    }
     h.append(header::CONTENT_SECURITY_POLICY, APP_CSP.parse().unwrap());
     resp
+}
+
+/// Capability for a private app: pages under `/a/<name>/~<cap>/` need no cookie, so the
+/// sandboxed (opaque-origin) page can load its own relative CSS, JS, images and fetch() calls.
+/// A new view token changes the cap.
+fn app_cap(st: &State, app: &AppRow) -> String {
+    let mut m = b"orch-publish-app-cap/1".to_vec();
+    m.extend_from_slice(app.name.as_bytes());
+    m.extend_from_slice(app.view_token_hash.as_deref().unwrap_or("").as_bytes());
+    util::hmac_sha256(&st.app_key, &m)[..16]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// `~<cap>/<inner>` -> (cap, inner)
+fn split_cap(rest: &str) -> Option<(&str, &str)> {
+    let r = rest.strip_prefix('~')?;
+    Some(r.split_once('/').unwrap_or((r, "")))
 }
 
 async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Response {
@@ -719,7 +750,31 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
         }
     };
     let query = req.uri().query().unwrap_or("").to_string();
-    if !req.uri().path().ends_with('/') && rest.is_empty() {
+    // private apps: peel off a `~<cap>/` prefix; the backend and file lookup see the inner path
+    let mut cap_ok = false;
+    let mut had_cap = false;
+    let mut rest = rest;
+    if !app.public {
+        if let Some((cap, inner)) = split_cap(&rest) {
+            cap_ok = util::ct_eq(cap, &app_cap(&st, &app));
+            had_cap = true;
+            rest = inner.to_string();
+        }
+    }
+    if had_cap && rest.is_empty() && !req.uri().path().ends_with('/') {
+        // keep relative links working: /a/x/~cap -> /a/x/~cap/
+        let loc = format!(
+            "{}/{}",
+            req.uri().path(),
+            if query.is_empty() {
+                String::new()
+            } else {
+                format!("?{query}")
+            }
+        );
+        return (StatusCode::PERMANENT_REDIRECT, [(header::LOCATION, loc)]).into_response();
+    }
+    if !req.uri().path().ends_with('/') && rest.is_empty() && !had_cap {
         let loc = format!(
             "/a/{name}/{}",
             if query.is_empty() {
@@ -743,7 +798,8 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
             false,
         );
     }
-    if !app.public {
+    if !app.public && !cap_ok {
+        let cap = app_cap(&st, &app);
         let ok = |t: &str| {
             app.view_token_hash
                 .as_deref()
@@ -762,7 +818,7 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
                 .filter(|p| !p.starts_with("token=") && !p.is_empty())
                 .collect();
             let loc = format!(
-                "/a/{name}/{rest}{}",
+                "/a/{name}/~{cap}/{rest}{}",
                 if rest_q.is_empty() {
                     String::new()
                 } else {
@@ -785,7 +841,23 @@ async fn handle_inner(st: State, name: String, rest: String, req: Request) -> Re
                 .into_response();
         }
         match cookie_value(&req, &cookie_name(&name)) {
-            Some(c) if ok(&c) => {}
+            Some(c) if ok(&c) => {
+                // navigation with the cookie: move to the capability path, where the sandboxed
+                // page's own CSS, JS, images and fetch() calls are authorized without a cookie
+                if req.method() == axum::http::Method::GET
+                    || req.method() == axum::http::Method::HEAD
+                {
+                    let loc = format!(
+                        "/a/{name}/~{cap}/{rest}{}",
+                        if query.is_empty() {
+                            String::new()
+                        } else {
+                            format!("?{query}")
+                        }
+                    );
+                    return (StatusCode::FOUND, [(header::LOCATION, loc)]).into_response();
+                }
+            }
             _ => return private_page(),
         }
     }

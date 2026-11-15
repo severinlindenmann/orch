@@ -52,7 +52,11 @@ async fn apps_static_private_token_flow() {
     )
     .await;
     assert_eq!(r.status, 302);
-    assert_eq!(r.headers["location"], "/a/site/");
+    let loc = r.headers["location"].to_str().unwrap().to_string();
+    assert!(
+        loc.starts_with("/a/site/~") && loc.ends_with('/') && loc.len() == "/a/site/~/".len() + 32
+    );
+    let cap_base = loc.clone();
     let cookie = r.headers["set-cookie"].to_str().unwrap().to_string();
     assert!(
         cookie.contains("HttpOnly")
@@ -60,15 +64,49 @@ async fn apps_static_private_token_flow() {
             && cookie.contains("Path=/a/site/")
     );
     let c = cookie.split(';').next().unwrap().to_string();
-    let ok = call(&t.public, "GET", "/a/site/", &[("cookie", &c)], vec![]).await;
+    // cookie navigation moves to the capability path
+    let nav = call(&t.public, "GET", "/a/site/?x=1", &[("cookie", &c)], vec![]).await;
+    assert_eq!(nav.status, 302);
+    assert_eq!(
+        nav.headers["location"].to_str().unwrap(),
+        format!("{cap_base}?x=1")
+    );
+    // the capability path serves without any cookie
+    let ok = call(&t.public, "GET", &cap_base, &[], vec![]).await;
     assert_eq!(ok.status, 200);
     assert!(ok.text().contains("<h1>hi</h1>"));
+    assert_eq!(ok.headers["referrer-policy"], "no-referrer");
+    assert_eq!(ok.headers["cache-control"], "private, no-store");
+    // no slash after the cap: redirect
+    assert_eq!(
+        call(
+            &t.public,
+            "GET",
+            cap_base.trim_end_matches('/'),
+            &[],
+            vec![]
+        )
+        .await
+        .status,
+        308
+    );
+    // wrong cap, no cookie: private page; wrong cap with cookie: not served from the cap
+    let bad = format!("/a/site/~{}/", "0".repeat(32));
+    let r = call(&t.public, "GET", &bad, &[], vec![]).await;
+    assert_eq!(r.status, 401);
+    assert!(r.text().contains("This app is private"));
+    assert_eq!(
+        call(&t.public, "GET", "/a/site/~/", &[], vec![])
+            .await
+            .status,
+        401
+    );
     // markdown page rendered
     let md = call(
         &t.public,
         "GET",
-        "/a/site/notes.md",
-        &[("cookie", &c)],
+        &format!("{cap_base}notes.md"),
+        &[],
         vec![],
     )
     .await;
@@ -78,8 +116,8 @@ async fn apps_static_private_token_flow() {
         call(
             &t.public,
             "GET",
-            "/a/site/app.toml",
-            &[("cookie", &c)],
+            &format!("{cap_base}app.toml"),
+            &[],
             vec![]
         )
         .await
@@ -106,9 +144,7 @@ async fn apps_static_private_token_flow() {
     .json();
     assert!(r2["view_token"].is_null());
     assert_eq!(
-        call(&t.public, "GET", "/a/site/", &[("cookie", &c)], vec![])
-            .await
-            .text(),
+        call(&t.public, "GET", &cap_base, &[], vec![]).await.text(),
         "<title>site</title>v2"
     );
     let r3 = deploy(
@@ -126,6 +162,27 @@ async fn apps_static_private_token_flow() {
             .await
             .status,
         401
+    );
+    // a rotated token kills the old capability too
+    assert_eq!(
+        call(&t.public, "GET", &cap_base, &[], vec![]).await.status,
+        401
+    );
+    // and the new token yields a different cap
+    let nt = r3["view_token"].as_str().unwrap();
+    let r = call(
+        &t.public,
+        "GET",
+        &format!("/a/site/?token={nt}"),
+        &[],
+        vec![],
+    )
+    .await;
+    let new_loc = r.headers["location"].to_str().unwrap().to_string();
+    assert_ne!(new_loc, cap_base);
+    assert_eq!(
+        call(&t.public, "GET", &new_loc, &[], vec![]).await.text(),
+        "<title>site</title>v3"
     );
 }
 
@@ -602,20 +659,26 @@ async fn apps_static_responses_are_sandboxed() {
         .next()
         .unwrap()
         .to_string();
+    let cap = red.headers["location"].to_str().unwrap().to_string();
     for (path, what) in [
-        ("/a/site/", "html"),
-        ("/a/site/a.css", "css"),
-        ("/a/site/notes.md", "md"),
+        (cap.clone(), "html"),
+        (format!("{cap}a.css"), "css"),
+        (format!("{cap}notes.md"), "md"),
     ] {
-        let r = call(&t.public, "GET", path, &[("cookie", &c)], vec![]).await;
+        let r = call(&t.public, "GET", &path, &[], vec![]).await;
         assert_eq!(r.status, 200, "{what}");
+        assert_eq!(r.headers["referrer-policy"], "no-referrer", "{what}");
         assert_sandboxed(&r, what);
-        // private app: no CORS at all, even for a null origin
+        // private app: a null origin gets CORS only because the path carries the capability
+        let r = call(&t.public, "GET", &path, &[("origin", "null")], vec![]).await;
+        assert_eq!(r.headers["access-control-allow-origin"], "null", "{what}");
+        assert!(r.headers.get("access-control-allow-credentials").is_none());
+        // the same request without the capability (cookie path) gets none
         let r = call(
             &t.public,
             "GET",
-            path,
-            &[("cookie", &c), ("origin", "null")],
+            &path.replacen(&cap, "/a/site/", 1),
+            &[("origin", "null"), ("cookie", &c)],
             vec![],
         )
         .await;
@@ -624,7 +687,20 @@ async fn apps_static_responses_are_sandboxed() {
             "{what}"
         );
     }
-    // private app preflight is not answered with CORS
+    // preflight on the capability path is answered, without it is not
+    let pf = call(
+        &t.public,
+        "OPTIONS",
+        &cap,
+        &[
+            ("origin", "null"),
+            ("access-control-request-method", "POST"),
+        ],
+        vec![],
+    )
+    .await;
+    assert_eq!(pf.status, 204);
+    assert_eq!(pf.headers["access-control-allow-origin"], "null");
     let pf = call(
         &t.public,
         "OPTIONS",
@@ -640,7 +716,7 @@ async fn apps_static_responses_are_sandboxed() {
     assert_sandboxed(&pf, "private preflight");
     // paused
     t.api(&ws, "POST", "/v1/apps/site/stop", vec![]).await;
-    let r = call(&t.public, "GET", "/a/site/", &[("cookie", &c)], vec![]).await;
+    let r = call(&t.public, "GET", &cap, &[], vec![]).await;
     assert_eq!(r.status, 503);
     assert_sandboxed(&r, "paused notice");
     // expired
@@ -739,4 +815,63 @@ async fn apps_public_static_null_origin_gets_cors() {
     )
     .await;
     assert!(r.headers.get("access-control-allow-origin").is_none());
+}
+
+const PATH_APP: &str = r#"import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = self.path.encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+HTTPServer(("127.0.0.1", int(os.environ["PORT"])), H).serve_forever()
+"#;
+
+#[tokio::test]
+async fn apps_private_proxy_strips_the_cap_before_forwarding() {
+    let t = setup();
+    let ws = t.workspace("A", all_rights()).await;
+    let toml = py_toml("priv", "");
+    let r = deploy(
+        &t,
+        &ws,
+        "priv",
+        &[("app.toml", &toml), ("main.py", PATH_APP)],
+        "",
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let tok = r.json()["view_token"].as_str().unwrap().to_string();
+    let red = call(
+        &t.public,
+        "GET",
+        &format!("/a/priv/some/x?token={tok}&a=1"),
+        &[],
+        vec![],
+    )
+    .await;
+    assert_eq!(red.status, 302);
+    let loc = red.headers["location"].to_str().unwrap().to_string();
+    assert!(loc.contains("/~") && loc.ends_with("/some/x?a=1"), "{loc}");
+    let g = call(&t.public, "GET", &loc, &[], vec![]).await;
+    assert_eq!(g.status, 200);
+    assert_eq!(g.text(), "/some/x?a=1");
+    assert_eq!(g.headers["referrer-policy"], "no-referrer");
+    assert!(g.headers.get("access-control-allow-origin").is_none());
+    let gn = call(&t.public, "GET", &loc, &[("origin", "null")], vec![]).await;
+    assert_eq!(gn.headers["access-control-allow-origin"], "null");
+    // wrong cap: private page, nothing forwarded
+    let bad = call(
+        &t.public,
+        "GET",
+        &format!("/a/priv/~{}/x", "1".repeat(32)),
+        &[],
+        vec![],
+    )
+    .await;
+    assert_eq!(bad.status, 401);
 }

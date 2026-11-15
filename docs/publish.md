@@ -44,7 +44,7 @@ new one fails its test.
 that one app can never read another app's pages. Scripts, forms, popups and downloads work. But the page has no origin of its
 own: `localStorage`, `sessionStorage`, IndexedDB and cookies throw or stay empty. Keep state on the app's backend and
 identify people by a link token or a typed name. `fetch()` to the app's own paths works for public apps (the server answers
-the cross-origin check for them); private apps get no such answer. An app cannot switch the sandbox off.
+the cross-origin check for them); private apps get no such answer. Private apps are served under a secret `/a/<name>/~<key>/` path (the server redirects there after the view link or cookie check): use relative links (`style.css`, `data.json`), not root-absolute ones (`/a/<name>/style.css`), or they get no access. An app cannot switch the sandbox off.
 
 ---
 

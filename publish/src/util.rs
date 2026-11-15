@@ -668,3 +668,61 @@ mod name_tests {
         assert!(!valid_app_name("-ab") && !valid_app_name("ab-") && !valid_app_name("a"));
     }
 }
+
+/// HMAC-SHA256 (RFC 2104) with the sha2 crate.
+pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        k[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(k.map(|b| b ^ 0x36));
+    inner.update(msg);
+    let mut outer = Sha256::new();
+    outer.update(k.map(|b| b ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+/// The server's private-app capability key: generated at first start, stored 0600 next to the
+/// other server state, never sent in a response.
+pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
+    use std::io::Write;
+    if let Ok(t) = std::fs::read_to_string(path) {
+        let t = t.trim();
+        if t.len() == 64 {
+            let mut k = [0u8; 32];
+            for (i, b) in k.iter_mut().enumerate() {
+                *b = u8::from_str_radix(&t[2 * i..2 * i + 2], 16)
+                    .map_err(|_| std::io::Error::other("bad app-cap.key"))?;
+            }
+            return Ok(k);
+        }
+        return Err(std::io::Error::other("bad app-cap.key"));
+    }
+    let mut k = [0u8; 32];
+    OsRng.fill_bytes(&mut k);
+    let hex: String = k.iter().map(|b| format!("{b:02x}")).collect();
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(path)?.write_all(hex.as_bytes())?;
+    Ok(k)
+}
+
+#[cfg(test)]
+mod hmac_tests {
+    use super::hmac_sha256;
+    #[test]
+    fn rfc4231_case_2() {
+        let m = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
+        let h: String = m.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            h,
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+}
