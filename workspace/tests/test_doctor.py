@@ -19,7 +19,7 @@ def tools_found(monkeypatch):
 def test_fresh_init_reports_nothing_wrong(proj, run):
     assert run("init")[0] == 0
     code, out, _ = run("doctor")
-    assert code == 0 and out.strip().endswith("Nothing wrong."), out
+    assert code == 0 and "Nothing wrong." in out.splitlines()[-2:-1], out
 
 
 def test_a_missing_skill_link_is_one_problem_with_a_next_step(proj, run):

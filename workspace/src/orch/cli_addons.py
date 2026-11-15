@@ -6,13 +6,14 @@ import argparse
 import json
 from pathlib import Path
 
-from orch import addons, history, humanproof
+from orch import addons, history, humanproof, nextstep
 from orch.errors import Refused
 
 
 def _out(args, data, text: str) -> None:
     if args.json:
         data = history.shown_json(history.args_root(args), data)
+    nextstep.remember(args, data)
     print(json.dumps(data, indent=2, ensure_ascii=False) if args.json else text)
 
 

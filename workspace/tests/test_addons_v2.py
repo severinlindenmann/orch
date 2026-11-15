@@ -127,7 +127,7 @@ def test_exclude_block_is_idempotent_and_keeps_other_lines(proj):
 
 
 def test_shipped_local_addons_are_recommended_and_server_ones_are_not():
-    """`orch init --recommended` only does something when manifests say so: dashboard, automation, focus."""
+    """`orch init --recommended` acts only on manifests that say so (dashboard, focus, lessons...)."""
     import tomllib
     from pathlib import Path
 
@@ -136,8 +136,8 @@ def test_shipped_local_addons_are_recommended_and_server_ones_are_not():
     for f in sorted(base.glob("*/src/*/orch-addon.toml")):
         m = tomllib.loads(f.read_text(encoding="utf-8"))
         got[m["name"]] = m.get("recommended", False)
-    assert got["dashboard"] and got["automation"] and got["focus"], got
-    assert not any(v for k, v in got.items() if k not in ("dashboard", "automation", "focus")), got
+    assert got["dashboard"] and got["automation"] and got["focus"] and got["lessons"], got
+    assert not any(v for k, v in got.items() if k not in ("dashboard", "automation", "focus", "lessons")), got
 
 
 def test_dashboard_title_and_subtitle_are_optional_plain_text(tmp_path):
@@ -157,5 +157,24 @@ def test_dashboard_title_and_subtitle_are_optional_plain_text(tmp_path):
     assert "title" not in addons.folder_manifest(make_addon(tmp_path / "b"))["dashboard"]
     bads = ('title = "<b>x</b>"\n', 'title = ""\n', 'subtitle = "' + "x" * 121 + '"\n', "title = 3\n")
     for n, bad in enumerate(bads):
+        with pytest.raises(Refused):
+            addons.folder_manifest(make_addon(tmp_path / f"c{n}", mutate=with_(bad)))
+
+
+def test_dashboard_place_is_nav_or_settings(tmp_path):
+    """`place = "settings"` keeps the page out of the nav; the dashboard list carries it unchanged."""
+
+    def with_(extra):
+        return lambda t: t.replace("order = 20\n", "order = 20\n" + extra)
+
+    ok = addons.folder_manifest(make_addon(tmp_path / "a", mutate=with_('place = "settings"\n')))
+    assert ok["dashboard"]["place"] == "settings"
+    assert (
+        addons.folder_manifest(make_addon(tmp_path / "n", mutate=with_('place = "nav"\n')))["dashboard"][
+            "place"
+        ]
+        == "nav"
+    )
+    for n, bad in enumerate(('place = "side"\n', "place = 3\n", 'place = ""\n')):
         with pytest.raises(Refused):
             addons.folder_manifest(make_addon(tmp_path / f"c{n}", mutate=with_(bad)))

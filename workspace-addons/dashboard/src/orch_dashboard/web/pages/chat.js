@@ -102,8 +102,16 @@ function chatDmRow(c) {
     h('span', {className:'chat-row-text'}, chatText('strong', '', c.name), chatText('small', '', chatPreview(last?.text))),
     h('span', {className:'chat-row-time'}, time(last?.shown_at || last?.at || c.last_at)));
 }
+const chatGroupTime = g => Date.parse(g.last_at || g.finished || g.started) || 0;
+// Other workspaces keep their place above the groups while the contacts load (or fail), instead of appearing later.
+function chatDmPending() {
+  if (snapshot || chatDm.loaded) return null;
+  return h('div', {className:'chat-dm-pending', 'data-key':'dm-pending'}, h('h2', {}, 'Other workspaces'),
+    chatDm.error ? chatButton('Could not load · Try again', 'retry-dm') : chatText('p', 'chat-muted', 'Loading…'));
+}
 function chatList() {
-  const groups = chatGroups().filter(g => !chatFinished(g)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
+  // Newest group first, so an old group never sits above a fresh one.
+  const groups = chatGroups().filter(g => !chatFinished(g)).sort((a, b) => chatGroupTime(b) - chatGroupTime(a)), query = chatUi.search.toLowerCase(), history = chatUi.open === 'history';
   const dms = chatDm.contacts.filter(c => c.count > 0 || chatDmMessages(c.ws).length || chatUi.open === c.ws)
     .sort((a, b) => (Date.parse(b.last_at) || 0) - (Date.parse(a.last_at) || 0));
   const helperRow = chatListRow(null), dmRows = dms.map(chatDmRow), groupRows = groups.map(chatListRow), rows = [helperRow, ...dmRows, ...groupRows];
@@ -111,7 +119,7 @@ function chatList() {
   const heading = (text, list) => list.length && list.some(row => !row.hidden) ? h('h2', {}, text) : null;
   return h('aside', {className:'chat-list', 'aria-label':'Chats', 'data-key':'chat-list'}, h('h1', {className:'chat-list-title', 'data-key':'chat-list-title'}, 'Chats'),
     snapshot ? null : chatButton('New chat', 'contacts', {'data-key':'new-chat'}), history ? null : chatSearch(),
-    heading('This workspace', [helperRow]), helperRow, heading('Other workspaces', dmRows), dmRows, heading('Groups', groupRows), groupRows,
+    heading('This workspace', [helperRow]), helperRow, heading('Other workspaces', dmRows), dmRows, dmRows.length || history ? null : chatDmPending(), heading('Groups', groupRows), groupRows,
     rows.every(row => row.hidden) ? chatText('p', 'chat-muted', 'No chats match.') : null);
 }
 // The grouped list shows only when there is something besides the helper chat (a live group or a workspace chat); an open
@@ -667,7 +675,7 @@ chatClick = async function (event) {
   const action = control.dataset.chatAction;
   if (action === 'contacts') { chatDmContacts(); return chatDmLoad(true); }
   if (action === 'select-dm') return chatDmSelect(control.dataset.id);
-  if (action === 'retry-dm') return chatDmLoad();
+  if (action === 'retry-dm') { chatDm.error = false; return chatDmLoad(true); }
   if (action === 'retry-send') {
     const message = chatDmMessages(chatUi.open).find(m => m.id === control.dataset.id);
     if (message?.state === 'failed') return chatDmSend(message.text, message.id);
