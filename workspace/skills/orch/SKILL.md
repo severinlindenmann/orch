@@ -150,6 +150,7 @@ Plans may change: update the tickets and `orch log <id> "<what changed>"`. No on
     orch log <id> "<what changed in the plan>"
     orch ref add <id> <https url> [--title "<name>"]   # PR, wiki page, design, video …
     orch ref list <id>   /   orch ref rm <id> <n>
+    orch ref set <id> <n> --status <word>   # the state you last saw of a web reference: open, closed, merged
     orch ticket set <id> <addon>.<field> <value>   # an add-on field under Details
     orch ticket edit <id> --owner <name> --due YYYY-MM-DD --note "<text>"
     orch ext set <id> <addon> '<json object>'       # data an add-on keeps on the ticket
