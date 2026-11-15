@@ -357,10 +357,10 @@ def test_act_idea_files_the_order_as_the_person_and_starts_the_agent(ws):
         for c in map(json.loads, (ws / "calls.jsonl").read_text().splitlines())
         if c["args"][:2] == ["ticket", "new"]
     )
-    assert f"--note={commands.ORDER_NOTE}" in new["args"]
     assert (
-        len(commands.ORDER_NOTE) < 200
-    )  # core adds "write a plan, split it into tasks, then start" above 200
+        f"--note={commands.ORDER_NOTE} The person's idea: A page with our opening hours and a map"
+        in new["args"]
+    )
     for words in ("Factory order", "orch factory draft", "Don't build it", "Plan the run"):
         assert words in commands.ORDER_NOTE
 
@@ -421,3 +421,18 @@ def test_store_read_of_a_fifo_is_refused_without_hanging(ws):
     os.mkfifo(store.base / "drafts" / "t_000001" / "v2.md")
     with pytest.raises(Refused, match="not a regular file"):
         store.read("drafts/t_000001/v2.md")
+
+
+def test_act_idea_keeps_a_three_sentence_idea_whole_in_the_note(ws):
+    idea = (
+        "We want a booking page for our studio. It shows free slots for the next four weeks and "
+        "lets a visitor pick one with a name and email. The owner gets a mail for every booking, "
+        "and a visitor can cancel with a link."
+    )
+    assert len(idea) > 200
+    code, r = _act(ws, "idea", "--by", "human:alex", "--json", "--", idea)
+    assert code == 0
+    t = json.loads((ws / "fake-tickets" / f"{r['order']}.json").read_text())
+    assert len(t["title"]) <= 81 and t["title"] != idea
+    assert idea in t["note"] and "Factory order" in t["note"]
+    assert Store(ws).path(f"drafts/{r['order']}/v1.md").read_text() == idea + "\n"
