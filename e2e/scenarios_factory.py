@@ -1,8 +1,7 @@
 """Factory add-on scenarios A18-A23: the real core, the real `orch factory`, the scripted test human.
 
-A person's answer needs the person's proof (H1): the proofs come from the scripted test human of a TEST install
-(the driver writes the install record into this run's own tool environment, like the installer does, and the
-workspaces live under <real home>/.orch-test). Never a real person, never a real home.
+A person's answer is a plain `orch answer --by human:test`: the scripted test human. The workspaces live under
+<real home>/.orch-test. Never a real person, never a real home.
 """
 from __future__ import annotations
 
@@ -56,7 +55,6 @@ class F:
         check(rc == 0, f"install record: {(err or out)[-200:]}")
         self.w = W(e, sid, root=self.base / "ws", env=env)
         self.w.o("init", "--yes", by=None)
-        self.w.o("dev-mark", by=None)
         # core's [workspace] agent, as the harness writes it (`orch config agent add` is a person's action here)
         py, ag = shlex.quote(sys.executable), shlex.quote(str(Path(__file__).parent / "fixtures" / "generic-agent" / "agent.py"))
         (self.w.root / ".orch" / "config.toml").write_text(
@@ -109,15 +107,7 @@ class F:
 
     # -- the scripted test human --
     def human(self, tid: str, qid: str, answer: str):
-        q = next(x for x in self.ticket(tid)["questions"] if x["id"] == qid)
-        code = ("import sys, json; from pathlib import Path; from orch import humanproof as h, tickets; "
-                "q = json.loads(sys.argv[3]); d = tickets.question_digest(q); print(d); "
-                "print(h.mint_dev(Path(sys.argv[1]), 'ticket.answer', f'{sys.argv[2]}:{q[\"id\"]}:{d}'))")
-        rc, out, err = self.w.sh([self.py, "-c", code, str(self.w.root), tid, json.dumps(q)])
-        lines = out.split()
-        check(rc == 0 and len(lines) == 2 and lines[1].startswith("hp1."), f"no test-human proof: {(err or out)[-200:]}")
-        rc, out, err = self.w.sh(["orch", "answer", tid, qid, answer, "--question-digest", lines[0], "--proof-stdin", "--json"],
-                                 input=lines[1] + "\n")
+        rc, out, err = self.w.sh(["orch", "answer", tid, qid, answer, "--by", "human:test", "--json"])
         check(rc == 0, f"human answer {answer!r}: {(err or out)[-300:]}")
         got = next(x for x in self.ticket(tid)["questions"] if x["id"] == qid)
         check(str(got.get("answered_by", "")).startswith("human:") and got["answer"] == answer,
@@ -520,6 +510,25 @@ def a23(e):
     from lib import Skip
 
     host, member = "Pilatus", "Reports"
+    # a TEST install: the core keystore (and so `orch secret scan`) only works for workspaces and an ORCH_HOME under
+    # <real home>/.orch-test, like F above; the run's workspaces and tool home are moved there for this scenario
+    real = Path(os.environ.get("E2E_REAL_HOME") or Path.home())
+    base = real / ".orch-test" / f"e2e-a23-{os.getpid()}"
+    (base / "home").mkdir(parents=True)
+    e.cleanup.append(lambda: shutil.rmtree(base, ignore_errors=True))
+    old_env, old_dir = dict(e.env), e.ws_dir
+    e.env = {**e.env, "ORCH_HOME": str(base / "home"), "ORCH_HOME_STRICT": "1"}
+    e.ws_dir = base / "ws"
+    e.ws_dir.mkdir()
+    py = _tool_python(e)
+    prefix = Path(e.sh([py, "-c", "import os, sys; print(os.path.realpath(sys.prefix))"])[1].strip())
+    record = prefix / "orch-install.json"
+    was = record.read_bytes() if record.exists() else None
+    e.cleanup.append(lambda: record.write_bytes(was) if was is not None else record.unlink(missing_ok=True))
+    rc, out, err = e.sh([py, "-c", "import sys; from pathlib import Path; from orch import humanproof as h; "
+                         "h.write_install_record(Path(sys.prefix), 'test')"])
+    check(rc == 0, f"install record: {(err or out)[-200:]}")
+    e.cleanup.append(lambda: (setattr(e, "env", old_env), setattr(e, "ws_dir", old_dir)))
     try:
         ids = e.relay_all()
     except Fail as error:  # core still asks for a person's proof to connect a workspace to the relay
@@ -569,8 +578,17 @@ def a23(e):
                            "minutes": 40, "sends": {"files": files}}]
         return order, p
 
+    seen = []  # inbox pulls messages once: keep everything this scenario has pulled
+
     def inbox():
-        return e.orchj(member, "relay", "inbox")
+        rc, out, err = e.orch(member, "relay", "inbox", "--json")
+        start = out.find("[\n") if "[\n" in out else out.find("[]")  # an update notice may come first
+        try:
+            rows = json.loads(out[start:]) if start >= 0 else []
+        except ValueError:
+            rows = []
+        seen.extend(m for m in rows if m["id"] not in {x["id"] for x in seen})
+        return list(seen)
 
     # test 5: a workspace that does not exist is refused at freeze, in plain words
     order, p = order_with("Spring header", ["brief/header.md"])
@@ -587,21 +605,22 @@ def a23(e):
     out = fac("crew", "start", order, "header-picture")
     check(out["handover"]["sent"] is True, f"crew start did not send: {out}")
     check(fac("crew", "start", order, "header-picture")["handover"]["sent"] is False, "a second crew start sent again")
-    msgs = inbox()[before:] if len(inbox()) >= before else inbox()
+    msgs = inbox()
     delegates = [m for m in msgs if m["type"] == "delegate"]
     check(len(delegates) == 1, f"expected one delegate, got {[m['type'] for m in msgs]}")
-    check(sum(1 for m in msgs if m["type"] == "file") == 1, "not exactly one file arrived")
+    check(sum(1 for m in msgs if m["type"] == "file") == 1, f"not exactly one file arrived: {[m['type'] for m in msgs]}")
     # the other side allows it once and finishes; the result comes back
     e.orch(member, "relay", "allow", delegates[0]["id"], "--once", by="human:tester")
     done = e.orchj(member, "relay", "done", delegates[0]["id"])
     tid = done.get("ticket") or done.get("id")
     check(tid, f"no ticket for the allowed task: {done}")
-    e.orch(member, "relay", "send", ids[host], "Header done", "--update", "result", "--ticket", tid)
+    e.orch(member, "ticket", "status", tid, "done", by="human:tester")  # their person accepts the result
+    inbox()  # the member's next relay pull reports the task as done to the host
     e.orch(host, "relay", "inbox")
     step = fac("next", order)
     crew = next(c for c in e.orchj(host, "ticket", "list", "--all") if (c.get("ext") or {}).get("factory", {}).get("role") == "crew"
                 and c["ext"]["factory"]["task"] == "header-picture")
-    check(crew["ext"]["factory"]["handover"]["state"] in ("working", "done"), f"state not from the relay: {crew['ext']['factory']}")
+    check(crew["ext"]["factory"]["handover"]["state"] == "done" and crew["status"] in ("done", "review"), f"done did not come back: {crew['status']} {crew['ext']['factory']}")
     # test 4: a second order, taken back before the other side did anything
     order2, p2 = order_with("Autumn header", ["brief/header.md"])
     info = fac("propose", order2, data=json.dumps(p2))

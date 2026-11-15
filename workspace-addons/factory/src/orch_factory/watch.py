@@ -4,7 +4,7 @@ Wake reasons (all decided through authority/flow, never from the ext cache or ra
   a) a person answered a question Factory asked and `next` has not consumed it yet;
   b) a crew sub-ticket of a started order became done or failed since the last pass;
   c) autopilot: a live grant covers an open stop the manager could decide (once per stop);
-  d) a task handed to another workspace was denied or failed there (once per task and reason, no timer).
+  d) a task handed to another workspace was denied, failed or done there (once per task and reason, no timer).
 Agent answers never wake anything. A run is started only through `orch run start` and only when none is live.
 State in .orch/addons/factory/watch.json: per order the crew statuses seen and the ids already woken for."""
 
@@ -66,8 +66,8 @@ def _reasons(root, store, ticket, tickets, entry, granted, decided):
         for (
             task,
             state,
-        ) in states.items():  # d) a hand-over was said no to or failed: once per task and reason
-            if state in ("denied", "failed") and f"handover:{task}:{state}" not in woken:
+        ) in states.items():  # d) a hand-over was said no to, failed or came back done (core leaves the crew ticket in review for the person): once per task and reason
+            if state in ("denied", "failed", "done") and f"handover:{task}:{state}" not in woken:
                 why.append(f"handover task {task} is {state}")
                 ids.append(f"handover:{task}:{state}")
         op = d["open"]
