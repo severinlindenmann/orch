@@ -283,7 +283,12 @@ def _file_sha(root: Path, path: str) -> str:
 
     from orch import chat_groups as cg
 
-    return hashlib.sha256(cg.read_shared(Path(path), root, confined=False)).hexdigest()
+    data = cg.read_shared(Path(path), root, confined=False)  # path rule (secret name, hidden folder, size)
+    try:
+        cg.check_file(data, Path(path).name)  # a secret / wrong type / too big: refused BEFORE any click card
+    except cg.Unchecked:
+        pass  # unreadable content: the person's own confirm comes later inside share_file
+    return hashlib.sha256(data).hexdigest()
 
 
 def _group_title(root: Path, group: str, host: str | None = None) -> str:

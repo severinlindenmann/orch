@@ -1853,6 +1853,37 @@ def test_group_person_acts_need_the_proof_and_an_agent_keeps_its_own_path(ws, ru
     assert any(str(f.resolve()) in h["argv"] for h in stored)  # a relative name is stored as the full path
 
 
+def test_group_share_refuses_secret_big_and_hidden_files_before_any_click_card(ws, run, monkeypatch):
+    from conftest import turn_on
+
+    from orch import relay
+
+    turn_on(ws, "relay")
+    monkeypatch.setattr(relay, "resolve", lambda root, name: "ws_peer00001")
+    monkeypatch.setattr(relay, "name_of", lambda root, w: "Peer")
+    tid, _ = _ticket_with_step(ws, run)
+    secret = ws / "notes.txt"
+    secret.write_text("user=a\npassword=hunter2\n")
+    big = ws / "big.txt"
+    big.write_bytes(b"a" * (26 * 1024 * 1024))
+    hidden = ws / ".ssh" / "config.txt"
+    hidden.parent.mkdir()
+    hidden.write_text("hello")
+    named = ws / "id_rsa"
+    named.write_text("hello")
+    for f in (secret, big, hidden, named):
+        for sub in (("share", tid), ("send-file", "ws_peer00001", tid)):
+            code, out, err = run("relay", "group", sub[0], *sub[1:], str(f), "--click", "--by", "human:pat")
+            assert code == 2 and "Refused:" in err, (f.name, sub, code, err)  # a refusal, not a pending click
+            assert "Waiting for your click" not in out + err
+    assert "password" in run("relay", "group", "share", tid, str(secret), "--click", "--by", "human:pat")[2]
+    assert not [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
+    ok = ws / "plain.txt"
+    ok.write_text("fine")
+    assert run("relay", "group", "share", tid, str(ok), "--click", "--by", "human:pat", "--json")[0] == 2
+    assert [h for h in hp.handoffs(ws) if h["op"] == "group.share_file"]
+
+
 # ------------------------------------------- group acts: an agent claim is downgraded, bytes are bound
 
 
