@@ -147,6 +147,8 @@ questions and answers, history. Relay and publish ship in the same package as bu
 | `orch ask` / `answer` / `needs` | Questions and the list of what needs a person |
 | `orch ref add\|list\|rm`, `orch ticket set`, `orch log`, `orch ext set\|unset` | References (URLs, tickets, artifacts and files; kind from the active add-ons, else the known-sites table, else Reference), add-on fields, history, add-on data (`ext.<addon>`; `ext unset <id> <addon>[.<key>] [--if-revision N]` removes it) |
 | `orch agents`, `orch config`, `orch run ...` | Agents and runs: [agents.md](agents.md) |
+| `orch doctor` | Shows what is wrong with orch here (read-only): PATH, git, uv, this folder's skill link, instruction file and reminder, plus the run checks of `orch diag inspect`. Each problem names the next step; ends with "Nothing wrong." or "N things to fix." |
+| `orch uninstall` | Takes orch out of this folder: add-ons, background processes, skills and links, orch's lines in `CLAUDE.local.md` / `.claude/settings.local.json` / `.git/info/exclude`, this folder's entries in the orch home, `.orch/harness`, `.orch/run`. Keeps `.orch/tickets`, `.orch/config.toml`, `.orch/secrets`. Safe to run twice; removing orch itself: `uv tool uninstall orch-workspace` |
 | `orch addon add\|list\|remove\|uninstall`, `orch start\|stop\|status`, `orch update` | Add-ons: [addons.md](addons.md) |
 | `orch pause` / `orch resume` | The runaway brake: pause stops all automation in this workspace (nothing starts on its own), resume turns it back on |
 
@@ -173,6 +175,7 @@ The core never names an add-on: no scheduler/dashboard words in core code or cor
 One line from GitHub (public repo): `install.sh` / `install.ps1` in the repo root install `uv` if missing, then
 `uv tool install https://github.com/severinlindenmann/orch/archive/<ref>.zip#subdirectory=workspace` (a zip download:
 no git needed). Then `orch init` per project. Add-ons and `orch update` install from the same place.
+Leave: `orch uninstall` in a project, then `uv tool uninstall orch-workspace` to remove orch itself.
 
 Windows: works for a standard user (no admin rights), without git and with the default execution policy (the uv
 installer runs with a bypass for that one process only). On Windows on ARM the installer picks an x64 Python
