@@ -45,11 +45,6 @@ def _write_asked(proj, data):
 # ---- forged phone verdicts --------------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F1: a verdict read back from a file planted in .orch/inbox/ is applied as the person "
-    "(human-proof.md 'Phone actions' rule 1: never from a file read back from .orch/inbox/)",
-)
 def test_a_verdict_planted_in_the_inbox_folder_is_not_applied(proj, run, new_ticket, conn):
     tid = new_ticket()
     install(proj, tid)
@@ -248,12 +243,6 @@ def test_forged_vresults_cannot_make_an_applied_or_block_application(proj, run, 
 SECRET = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="F2: card texts (title/why/doc/table/options) and the question title/text go to the phones "
-    "without the value hider / redact that every other ticket text for a phone gets; sync_cards sends "
-    "them automatically",
-)
 @pytest.mark.parametrize("where", ["why", "table"])
 def test_a_secret_in_card_text_never_reaches_the_phone(proj, new_ticket, conn, where):
     tid = new_ticket()
@@ -349,3 +338,15 @@ def test_note_text_is_cleaned_before_it_is_stored(proj, run, new_ticket, conn):
     for bad in ("‮", "‬", "⁦", "\x07"):
         assert bad not in blob
     assert question(proj, tid, "q3")["answered_by"] == "human:iPhone"
+
+
+def test_check_digest_covers_wont_do_like_the_check_card():
+    t = {
+        "id": "t_x",
+        "title": "T",
+        "status": "review",
+        "checklist": [{"id": "c1", "text": "Step", "done": False}],
+    }
+    before = review.check_digest(t)
+    t["checklist"][0]["wont_do"] = True  # check_card shows it as Done
+    assert review.check_digest(t) != before
