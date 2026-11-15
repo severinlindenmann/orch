@@ -308,7 +308,7 @@ _HINT_PLAIN = {"39", "0", "", "22"}  # codes around a hint that change nothing v
 
 def _is_hint(raw_row: str) -> bool | None:
     """True: every visible character of the row is drawn in the hint style, nothing else. False: some visible
-    character is not. None: an escape other than the exact hint style (any doubt). Claude Code 2.1.325 draws
+    character is not. None: an escape other than the exact hint style (any doubt). The tool's 2.1.325 build draws
     its placeholder with the cursor block on the first character (`ESC[7m` T `ESC[0;2m` ry ...): that one
     first character may be inverse; the caller checks that the cursor really sits on it."""
     dim = inv = False
