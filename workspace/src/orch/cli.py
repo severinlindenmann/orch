@@ -738,7 +738,7 @@ def _is_verdict(root: Path, args, tid: str, status) -> bool:
 
 def _verdict_who(root: Path, args, tid: str, data: str, by: str, shown: str = "") -> tuple[str, bool]:
     """(actor, proven): the person for a verdict, or the plain actor when the change is no verdict.
-    `proven` is True when a person made this verdict (it lets tickets.set_status / patch sign a Done)."""
+    `proven` is True when a person made this verdict (it lets tickets.set_status / patch close the ticket)."""
     try:
         status = json.loads(data).get("status")
     except (ValueError, AttributeError):
