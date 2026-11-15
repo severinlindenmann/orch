@@ -291,8 +291,8 @@ test('UI.pastedFiles gives pasted image.png a readable unique name and leaves ot
 test('b4: Save without starting says Saving… at once, then the ticket opens', async () => {
   const s = setup();
   s.form.requestSubmit = () => s.form.fire('submit');
-  let release; const gate = new Promise(r => { release = r; });
-  const base = s.c.act; s.c.act = async (op, args) => { if (op === 'ticket.new') await gate; return base(op, args); };
+  let release; const hold = new Promise(r => { release = r; });
+  const base = s.c.act; s.c.act = async (op, args) => { if (op === 'ticket.new') await hold; return base(op, args); };
   s.input.value = 'Work'; await s.input.fire('input');
   const node = walk(s.d).find(n => n.textContent === 'Save without starting');
   const pending = node.click();
