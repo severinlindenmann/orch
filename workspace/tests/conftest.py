@@ -323,7 +323,9 @@ def _legacy_trust(request, monkeypatch):
         who = real_by(args)
         root = getattr(args, "orch_root", None)
         if who.startswith("human:") and root is not None:
-            ensure_signing(root)  # the key and the local id of a person's Done exist
+            ensure_signing(
+                root
+            )  # a person's Done is signed: the key and the local id exist, as after a real proof
         return who
 
     def test_home(root):
