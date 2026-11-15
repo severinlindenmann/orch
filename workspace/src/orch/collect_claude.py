@@ -212,9 +212,10 @@ def hooks_disabled(folder: str | Path, settings_file: str, config_dir: str | Non
     agent's folder (agents/reminder.json, reminder.settings_file, e.g. `<dir>/settings.local.json`); the
     shared `settings.json` next to it and the person's own (`~/<dir>/settings.json`) count too.
     `config_dir`: the settings folder the run's own environment names (the tool's variable,
-    agents/reminder.json reminder.settings_dir_env; a relative one is against
-    `folder`); then ITS `settings.json` is the person's file and
-    `~/<dir>` is not read (the tool does not either). Not readable or not JSON: False. Not seen here: hooks the agent adds itself (one that answers before orch's), and a file changed and changed back
+    agents/reminder.json reminder.settings_dir_env; a relative one is against `folder`); then ITS
+    `settings.json` is the person's file and `~/<dir>` is not read (the tool does not either). Not readable or
+    not JSON: False. Not seen here: hooks the agent adds itself (one that answers before orch's), and a file
+    changed and changed back
     between turns; hooks_missing is the backstop for those."""
     local = Path(folder) / settings_file
     paths = [local, local.with_name("settings.json")]
