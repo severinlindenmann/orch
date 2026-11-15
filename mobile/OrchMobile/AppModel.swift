@@ -583,10 +583,13 @@ final class AppModel {
 
     /// A card file of the stack (size and sha256 are checked by the client); nil = open it on the computer.
     func cardFile(_ file: CardFile) async -> Data? {
-        if let d = blobCache[file.blobId] { return d }
+        // Only bytes that passed the size + sha256 check for exactly this card file; never the raw blobCache (filled without hashes).
+        let key = "\(file.blobId)|\(file.sha256)|\(file.size)"
+        if let d = verifiedCardFiles[key] { return d }
         guard let d = try? await client.cardFile(file) else { return nil }
-        blobCache[file.blobId] = d; return d
+        verifiedCardFiles[key] = d; return d
     }
+    private var verifiedCardFiles: [String: Data] = [:]
 
     /// Take a swipe back (only while it is still on this phone, M4).
     func undoVerdict(_ questionId: String) {
@@ -915,7 +918,7 @@ final class AppModel {
         undoTimers = [:]; pendingAnswers = [:]; pendingAnswerAt = [:]; sendingAnswers = []
         outbox.wipe(); speech.reset(); settings = PhoneSettings(); messagesNext = nil; olderFailed = false
         UserDefaults.standard.removeObject(forKey: "chatOutbox"); UserDefaults.standard.removeObject(forKey: "chatRead")
-        readState = ReadState(); blobCache = [:]
+        readState = ReadState(); blobCache = [:]; verifiedCardFiles = [:]
         archive = ArchiveStore(); UserDefaults.standard.removeObject(forKey: ArchiveStore.defaultsKey)
         UserDefaults.standard.removeObject(forKey: HiddenQuestions.defaultsKey); NotificationCenter.default.post(name: .orchPhoneReset, object: nil)
         credentials = nil; invite = nil; inviteState = .none; inviteNeedsReplacement = false; workspaces = []; questions = []; questionLog = [:]; path = []; messages = []; updates = []; answers = [:]; answerSentAt = [:]; answeredElsewhere = []; hasLoaded = false

@@ -324,3 +324,20 @@ final class ReviewVerdictOutboxTests: XCTestCase {
         do { _ = try await relay.blob(id: "b_nope") ; XCTFail() } catch RelayError.api(let s, _, _) { XCTAssertEqual(s, 404) }
     }
 }
+
+@MainActor
+final class CardFileCacheTests: XCTestCase {
+    /// A blob already in the plain blob cache (no hash check) is never served as a card file with another hash.
+    func testCachedBlobWithDifferentHashIsNotReturnedAsCardFile() async throws {
+        let model = AppModel(useMock: true)
+        let good = try XCTUnwrap(MockReviewStack.questions[0].message.body.cardFiles?.first)
+        _ = await model.blob(good.blobId)                         // fills blobCache without a hash check
+        let forged = CardFile(blobId: good.blobId, name: good.name, size: good.size, sha256: String(repeating: "0", count: 64), mime: good.mime)
+        let bad = await model.cardFile(forged)
+        XCTAssertNil(bad)
+        let ok = await model.cardFile(good)
+        XCTAssertNotNil(ok)
+        let again = await model.cardFile(forged)                  // a verified cache hit for another hash does not leak either
+        XCTAssertNil(again)
+    }
+}
