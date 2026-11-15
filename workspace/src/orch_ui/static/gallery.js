@@ -1,5 +1,5 @@
 /* gallery.html page code: new widgets, then the component and motion demos moved from mockup/system/components.html and motion.html. */
-{const q=s=>document.querySelector(s);document.querySelectorAll('[data-st]').forEach(n=>n.replaceWith(UI.statusIcon(n.dataset.st)));
+{const q=s=>document.querySelector(s);const wi=q('#w-icons');if(wi&&window.iconNames)window.iconNames().forEach(n=>{const s=document.createElement('span');s.className='row';s.innerHTML=window.icon(n,20)+' '+n;wi.append(s)});document.querySelectorAll('[data-st]').forEach(n=>n.replaceWith(UI.statusIcon(n.dataset.st)));
 const ws=q('#w-status');['todo','working','needs','check','done'].forEach(k=>{const s=document.createElement('span');s.className='row';s.append(UI.statusIcon(k),document.createTextNode(' '+k));ws.append(s)});
 const st=q('#w-stat');st.append(UI.stat('Done this week','12',{delta:'+3 vs last week',dir:'up'}),UI.stat('Needs you','2'),UI.stat('Working now','4'));
 q('#w-progress').append(UI.progress(3,5,'steps'),UI.progress(0,4,'steps'));

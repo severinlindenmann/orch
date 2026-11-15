@@ -39,8 +39,9 @@ def _events(root, tid):
     raise Refused("The activity record is too long to measure here.", "not_available")
 
 
-def active_minutes(root, ticket_ids):
-    """Whole minutes of measured agent work on these tickets (rounded up), or None when the record can't be read."""
+def active_minutes(root, ticket_ids, since=None):
+    """Whole minutes of measured agent work on these tickets (rounded up), or None when the record can't be read.
+    With `since` (an aware datetime) only gaps that end at or after it count (work done today)."""
     seconds = 0.0
     try:
         for tid in ticket_ids:
@@ -51,7 +52,11 @@ def active_minutes(root, ticket_ids):
                     runs.setdefault(e["run"], []).append(at)
             for times in runs.values():
                 times.sort()
-                seconds += sum(min((b - a).total_seconds(), IDLE_CAP) for a, b in pairwise(times))
+                seconds += sum(
+                    min((b - a).total_seconds(), IDLE_CAP)
+                    for a, b in pairwise(times)
+                    if since is None or b >= since
+                )
     except Refused:
         return None
     return int(-(-seconds // 60))

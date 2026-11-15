@@ -170,3 +170,6 @@
 .upd-changes{margin:0;padding-left:20px;display:grid;gap:4px}
 
 .settings .relay-steps{margin:0;padding-left:20px}
+.settings .ws-edit{display:grid;gap:8px}
+.settings .ws-view{gap:8px;align-items:center;flex-wrap:nowrap}
+.settings .ws-input{width:100%;max-width:420px;font-size:14px;min-height:36px;padding:5px 10px}
