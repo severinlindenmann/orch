@@ -74,6 +74,13 @@ const SCREENS = [
     await p.waitForSelector('dialog[open]');
   } },
   { name: 'ticket-steps', url: '/t/t_pil2bbbb', wait: '.fx-history', async setup(p) { await settle(p); await p.waitForSelector('.fx-history .fx-step'); } },
+  // #692.1: a command step is a block (one open, exact command + last lines + Copy) and "Find in the log" is active
+  { name: 'ticket-blocks', url: '/t/t_pil1aaaa', wait: '.fx-history .cmd-block', async setup(p) {
+    await settle(p);
+    await p.locator('.fx-history .cmd-block summary').nth(1).click();
+    await p.fill('.fx-history .log-find input', 'agenda');
+    await p.locator('.fx-history').scrollIntoViewIfNeeded();
+  } },
   { name: 'ticket-used', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-used'); } },
   { name: 'ticket-results', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await settle(p); await p.evaluate(() => { document.querySelector('button[data-act=mode]').click(); }); await p.waitForSelector('#fx-t-proof', { state: 'attached' }); await p.evaluate(() => document.getElementById('fx-t-proof').click()); await p.waitForSelector('.fx-results .fx-ptile'); } }, // Results tab: the Command tile
   { name: 'ticket-files', url: '/t/t_pil2bbbb', wait: '.fx-top', async setup(p) { await terminal(p); await p.click('#fx-t-files'); } },

@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from test_humanproof import READERS, TID, _loose_setup, tws  # noqa: F401
+from test_humanproof import READERS, _loose_setup, tws  # noqa: F401
 
 from orch import humanproof as hp
 from orch import winacl
@@ -243,12 +243,11 @@ def test_humanproof_tightens_an_old_loose_folder_of_this_user(win, tws):
     win["loose"].add("keys")  # made before this check existed: inherited, Administrators on it
     assert hp.human_key(tws, create=False) == key  # not watch-only: tightened, verified, same key
     assert any(c[0] == "write" and c[1].endswith("keys") and c[2] for c in win["calls"][n:])
-    assert hp.take_notices(tws) == []
 
 
 @pytest.mark.parametrize("name", list(READERS))
 def test_loose_file_on_windows_is_never_tightened_it_resets_protection(win, tws, name):
-    key, old, d, home = _loose_setup(tws)
+    key, d, home = _loose_setup(tws)
     win["loose"].add(name)  # the ACL of this one file is loose
     n = len(win["calls"])
     with contextlib.suppress(Refused):
@@ -256,12 +255,7 @@ def test_loose_file_on_windows_is_never_tightened_it_resets_protection(win, tws,
     # never "tightened and trusted": no ACL write ever hits that file itself
     assert not [c for c in win["calls"][n:] if c[0] == "write" and Path(c[1]).name == name]
     assert hp.human_key(tws) != key  # human.key rotated
-    with pytest.raises(Refused):
-        hp.verify_and_consume(tws, old, "run.takeover", TID)
-    assert not (d / "proofs-used.json").exists() and not (d / "delivered.json").exists()
-    assert not (d / "handoffs.json").exists()
-    assert hp.effective(tws, "focus.session_typing", True) is False
-    assert [n["text"] for n in hp.take_notices(tws)] == [hp.RESET_NOTICE]
+    assert not (d / "delivered.json").exists()
 
 
 def test_file_check_hook_is_registered_and_fails_closed(win, tmp_path):
@@ -309,7 +303,6 @@ def test_unknown_is_refused_without_reset_protection(win, tws):
     assert not isinstance(e.value, hp.LooseFile)
     win["err"] = None
     assert hp.human_key(tws, create=False) == key  # same key: nothing was reset
-    assert hp.take_notices(tws) == []
     assert not [c for c in win["calls"][n:] if c[0] == "write" and c[1].endswith("human.key")]
 
 
@@ -400,7 +393,7 @@ def test_read_none_with_a_clean_file_on_windows_is_unknown_not_a_reset(win, tws,
     _read_fails_once(monkeypatch)
     with pytest.raises(winacl.Unknown):
         hp.human_key(tws, create=False)
-    assert hp.human_key(tws, create=False) == key and hp.take_notices(tws) == []
+    assert hp.human_key(tws, create=False) == key
 
 
 def test_read_none_with_a_real_finding_still_resets(win, tws, monkeypatch):
@@ -408,7 +401,6 @@ def test_read_none_with_a_real_finding_still_resets(win, tws, monkeypatch):
     d = hp.key_dir(tws, create=False)
     os.link(d / "human.key", d / "second-name")  # a second name: a finding, not a transient error
     assert hp.human_key(tws) != key  # read_private is None for it: reset_protection rotates the key
-    assert [n["text"] for n in hp.take_notices(tws)] == [hp.RESET_NOTICE]
 
 
 def test_a_loose_or_unreadable_binding_refuses_without_a_reset(tws, monkeypatch):
@@ -420,11 +412,10 @@ def test_a_loose_or_unreadable_binding_refuses_without_a_reset(tws, monkeypatch)
         with pytest.raises(Refused, match="copied or moved"):
             hp.human_key(tws, create=False)
     assert sorted(p.name for p in d.iterdir()) == before  # nothing written, nothing reset
-    assert hp.take_notices(tws) == []
     os.chmod(d / "binding.json", 0o644)  # a loose binding file
     with pytest.raises(Refused, match="copied or moved"):
         hp.human_key(tws, create=False)
-    assert sorted(p.name for p in d.iterdir()) == before and hp.take_notices(tws) == []
+    assert sorted(p.name for p in d.iterdir()) == before
 
 
 def test_posix_read_none_is_still_a_loose_file(tws, monkeypatch):

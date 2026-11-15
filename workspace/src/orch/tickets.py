@@ -122,6 +122,15 @@ def current_actor(explicit: str | None = None) -> str:
     return who
 
 
+def acting_by(args) -> str:
+    """Who runs this command: the agent tool seen in the environment, else --by, else human:<os user>.
+    Plain: no op is human-only, an agent's command just runs and is recorded as agent:<tool>."""
+    tool = agent_tool()
+    if tool:
+        return "agent:" + str(tool)
+    return current_actor(getattr(args, "by", None))
+
+
 def tickets_dir(root: Path) -> Path:
     return root / ".orch" / "tickets"
 
@@ -2643,6 +2652,7 @@ def answer(
                 ans = opt
                 break
         q["answer"], q["answered_by"], q["via"] = ans, by, via
+        q["answered_at"] = now()  # when, whatever `via` says (a page shows "Answered on your phone 12:34")
         if decision is not None:
             q["decision"], q["at"] = dict(decision), now()
         _release_wait(root, tid, ticket, qid)
@@ -2651,6 +2661,20 @@ def answer(
         return q
 
     return apply_op(root, tid, op, by=by)
+
+
+def mark_question_sent(root: Path, tid: str, qid: str, by: str = "orch") -> None:
+    """Record when a question went to the person's phones (questions[].sent_at, once): one quiet write under
+    the ticket lock; a question that is gone or already marked changes nothing."""
+
+    def op(ticket):
+        q = next((x for x in ticket["questions"] if x["id"] == qid), None)
+        if q is None or q.get("sent_at"):
+            return NO_WRITE
+        q["sent_at"] = now()
+        return q
+
+    apply_op(root, tid, op, by=by)
 
 
 def record_answered(
@@ -2684,6 +2708,7 @@ def record_answered(
         }
         q = {"id": _next_id(ticket["questions"], "q"), **q}
         q["answer"], q["answered_by"], q["via"], q["at"] = entry["answer"], by, via, now()
+        q["answered_at"] = q["at"]
         if replaces is not None:
             q["decision"] = {**(q.get("decision") or {}), "replaces": replaces, "replaced_by": None}
             old["decision"] = {**(old.get("decision") or {}), "replaced_by": q["id"]}

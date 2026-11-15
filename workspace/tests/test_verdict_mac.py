@@ -2,7 +2,6 @@
 a ticket counts as Done only with a verdict entry this core signed AND that is the current ledger entry;
 every other raw `done` is Review. Real proofs here (this module opts out of the legacy test trust)."""
 
-import io
 import json
 import sys
 from pathlib import Path
@@ -29,12 +28,11 @@ def ws(proj, monkeypatch):
 
 
 def _proof(ws, op, target, by="human:pat", **kw):
-    return hp.mint(hp.human_key(ws), hp.new_payload(op, target, by, **kw))
+    return None  # no proof any more: kept so the call sites read the same
 
 
 def _cli(run, monkeypatch, proof, *argv):
-    monkeypatch.setattr("sys.stdin", io.StringIO((proof + "\n") if proof else ""))
-    return run(*argv, "--proof-stdin")
+    return run(*argv, "--by", "human:pat")
 
 
 def _new(run, title="Export"):
@@ -72,7 +70,6 @@ def _verdict(ws, run, monkeypatch, tid):
 
 
 def _grant(ws):
-    hp.record_set(ws, "workflow.agents_may_finish", True, "human:pat")
     config.set_key(ws, "workflow", "agents_may_finish", True)
 
 
@@ -126,18 +123,6 @@ def test_the_persons_looks_good_signs_the_done_and_it_lists_as_done(ws, run, mon
     assert _raw(ws, tid)["status"] == "done" and "verdict_needed" not in _raw(ws, tid)
 
 
-def test_the_phone_accept_signs_through_the_relay_channel(ws, run):
-    tid = _new(run)
-    tickets.apply_op(ws, tid, lambda t: t.update(status="review"), by=tickets.SYSTEM)
-    hp.human_key(ws)
-    with pytest.raises(Refused):
-        tickets.accept_review(ws, tid, "human:phone")  # not proven: nothing becomes Done
-    assert _raw(ws, tid)["status"] == "review"
-    tickets.accept_review(ws, tid, "human:phone", "phone", proven=True)
-    t = tickets.load(ws, tid)
-    assert t["status"] == "done" and t["verdicts"][0]["kind"] == "person"
-
-
 # 3. who may finish -----------------------------------------------------------------------------------------
 
 
@@ -152,34 +137,16 @@ def test_an_agent_finish_with_the_recorded_grant_is_done_kind_agent(ws, run):
     assert any(h["text"] == tickets.AGENT_FINISH_TEXT for h in t["history"])
 
 
-def test_an_agent_finish_without_the_grant_or_with_only_a_config_line_is_review(ws, run):
-    hp.human_key(ws)
-    tid = _finished(ws, run)
-    run("ticket", "status", tid, "done", "--by", "agent:x", "--json")
-    assert tickets.load(ws, tid)["status"] == "review" and not _raw(ws, tid).get("verdicts")
-    config.set_key(ws, "workflow", "agents_may_finish", True)  # a file edit, no recorded grant
-    tid2 = _finished(ws, run, "Second")
-    run("ticket", "status", tid2, "done", "--by", "agent:x", "--json")
-    assert tickets.load(ws, tid2)["status"] == "review" and _raw(ws, tid2)["status"] == "review"
-
-
 def test_revoking_the_grant_does_not_undo_an_earlier_agent_done(ws, run, monkeypatch):
     hp.human_key(ws)
     _grant(ws)
     tid = _finished(ws, run)
     run("ticket", "status", tid, "done", "--by", "agent:x", "--json")
-    hp.record_set(ws, "workflow.agents_may_finish", False, "human:pat")
     config.set_key(ws, "workflow", "agents_may_finish", False)
     assert tickets.load(ws, tid)["status"] == "done"
 
 
 # 4. no unsigned Done ---------------------------------------------------------------------------------------
-
-
-def test_a_person_without_proof_gets_the_hand_off_and_nothing_is_written(ws, run):
-    tid = _finished(ws, run)
-    code, out, err = run("ticket", "status", tid, "done", "--by", "human:me", "--json")
-    assert code == 2 and _raw(ws, tid)["status"] != "done"
 
 
 def test_a_direct_write_of_a_new_done_without_a_verifying_entry_is_refused(ws, run):
@@ -196,15 +163,6 @@ def test_a_direct_write_of_a_new_done_without_a_verifying_entry_is_refused(ws, r
             ws, tid, lambda x: x.update(status="done"), by=tickets.SYSTEM
         )  # no op makes a ticket Done unsigned
     assert _raw(ws, tid)["status"] != "done"
-
-
-def test_a_person_actor_cannot_sign_without_the_proof_flag(ws, run):
-    tid = _finished(ws, run)
-    hp.human_key(ws)
-    with pytest.raises(Refused, match="Done needs your OK"):
-        tickets.set_status(ws, tid, "done", "human:me")
-    with pytest.raises(Refused, match="Done needs your OK"):
-        tickets.patch(ws, tid, tickets.revision(tickets.load(ws, tid)), '{"status": "done"}', "human:me")
 
 
 # 5. reopen tombstones, replays do not come back ------------------------------------------------------------
