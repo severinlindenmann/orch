@@ -2385,11 +2385,14 @@ def note_answer_refused(root: Path, asked: dict, m: dict, why: str) -> None:
         who = "agent:relay"
         line = f"Answer from {_line(frm, 60)} to {_line(str(asked['question_id']), 20)} not applied: {short}"
 
+        from orch import history
+
+        if any(h.get("text") == line for h in history.lines(root, tickets.load(root, asked["ticket"]))):
+            return  # once per question and sender
+
         def add(t):
             q2 = next((x for x in t["questions"] if x["id"] == asked["question_id"]), None)
             if q2 is None or q2.get("answer") is not None:  # answered meanwhile: nothing to say
-                return
-            if any(h.get("text") == line for h in t.get("history", [])):  # once per question and sender
                 return
             tickets.add_history(t, who, line, "relay")
 
