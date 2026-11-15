@@ -234,3 +234,33 @@ def test_a_persons_done_and_wont_do_are_plain(proj, run):
     done = tickets.set_status(proj, tid, "done", "human:tester")
     assert done["status"] == "done" and "verdicts" not in done and "verdict_needed" not in done
     assert done["history"][-1]["by"] == "human:tester"
+
+
+def test_fresh_workspace_without_a_key_folder_lets_a_person_finish_from_the_cli(proj):
+    """A fresh process, a fresh orch home (no key folder): a person marks an item Done and the ticket Done
+    from the CLI; both are recorded as human:<name>."""
+    src = Path(__file__).resolve().parents[1] / "src"
+    home = proj.parent / f"{proj.name}_fresh_home" / "orchhome"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX_", "ORCH_"))}
+    env.update(PYTHONPATH=str(src), ORCH_HOME=str(home))
+
+    def orch(*argv):
+        r = subprocess.run(
+            [sys.executable, "-m", "orch", *argv],
+            cwd=proj, env=env, capture_output=True, text=True, timeout=120,
+        )  # fmt: skip
+        assert r.returncode == 0, f"orch {' '.join(argv)}: {r.stderr or r.stdout}"
+        return r.stdout
+
+    assert not home.exists()
+    tid = json.loads(orch("ticket", "new", "Fresh", "--by", "human:pat", "--json"))["id"]
+    orch("check", "add", tid, "One step", "--by", "human:pat")
+    orch("check", "done", tid, "c1", "--note", "seen", "--by", "human:pat")
+    orch("ticket", "status", tid, "done", "--by", "human:pat")
+    t = json.loads((proj / ".orch" / "tickets" / f"{tid}.json").read_text(encoding="utf-8"))
+    assert t["status"] == "done" and "verdicts" not in t
+    assert t["checklist"][0]["done"] is True and t["checklist"][0]["evidence"][0]["by"] == "human:pat"
+    assert any(h["by"] == "human:pat" and h["text"] == "Status active -> done" for h in t["history"]) or any(
+        h["by"] == "human:pat" and h["text"].endswith("-> done") for h in t["history"]
+    )
+    assert not (home / "keys").exists()
