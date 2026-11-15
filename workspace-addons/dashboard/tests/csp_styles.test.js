@@ -34,3 +34,9 @@ test('dashboard sources do not create CSP-blocked inline styles', () => {
   }
   assert.deepEqual(violations, [], 'Move static styles to CSS classes; use CSSOM for dynamic values');
 });
+
+test('sync() copies the style attribute through the style object, not setAttribute', () => {
+  const source = fs.readFileSync(path.join(WEB, 'app.js'), 'utf8');
+  const sync = source.slice(source.indexOf('function sync('), source.indexOf('function sync(') + 1500);
+  assert.match(sync, /attr\.name === 'style'\) target\.style\.cssText = attr\.value/);
+});

@@ -27,6 +27,9 @@ from Chat for a Factory run (you are working on it), turn that ticket into the o
 
     orch factory idea --ticket <id> [--file draft.md]            # its Chat note becomes draft v1 without --file
 
+The owner may also file it with one click on the Factory page (the idea box): you are started on that order and draft v1
+is the owner's own words. Then write the real first draft as v2 with `orch factory draft`.
+
 The draft is one short page in plain words: what it is, for whom, 3 rough parts or screens, open questions. Answer in the
 chat with 3–5 lines and say where the draft is. Keep it small: the goal is that you and the owner mean the same thing.
 
@@ -35,7 +38,9 @@ Every owner reply that changes the idea → a new version with "what changed" at
 
     orch factory draft <order> --file draft.md
 
-Ask only what you cannot decide yourself. When the owner says "good, now plan it" (or similar), go to 3.
+Ask only what you cannot decide yourself. When the owner says "good, now plan it" (or similar), go to 3. The Factory
+page sends the same as the owner's own message on the order: "Now plan the run: …" (button Plan the run) → go to 3;
+"Change the draft: <what>" (button Ask for changes) → a new draft version.
 
 ### 3. Run proposal
 Write the proposal (contract: `orch factory schema proposal`, schema `orch.factory.proposal/1`; `orch factory schema

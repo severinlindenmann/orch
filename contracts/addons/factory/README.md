@@ -101,9 +101,19 @@ request or a foreign frame's. It answers `{type: "orch.idea.done", id, order}` (
 or `{type: "orch.idea.failed", id, error}`; one idea at a time. On failure (or no answer in 30 s, or outside the dashboard)
 the page keeps the text and offers *Send it to your helper in Chat instead* (`orch.say`, the old hand-off).
 
+**Plan the run / Ask for changes (drafts).** A draft no agent works on (`phase: "draft"`, `working: false`; order summaries
+also carry `draft_v`, the newest version) shows *Plan the run* and *Ask for changes* on the draft page and under *Drafts
+waiting for you* on Factory home. Inside the dashboard they post `{type: "orch.send", id, ticket, text}` (text: `Now plan
+the run: …` or `Change the draft: <the person's words>`, at most 1000 characters typed). The dashboard accepts it only from the
+embedded shipped add-on iframe of its own origin and only for a ticket that carries that add-on's data (`ext.<add-on>`),
+keeps line breaks but drops control, bidi and zero-width characters (at most 2000 characters), sends the text with its own
+op `run.send` (the person's message, proven like writing to the agent on the ticket page) and, when no agent works on the
+ticket, `run.start`. It answers `{type: "orch.send.done", id, ticket, started}` or `{type: "orch.send.failed", id, error}`;
+one at a time. Outside the dashboard the page shows a link to the ticket instead.
+
 | GET | Answer (JSON) |
 |---|---|
-| `/api/home` | `{"generated_at", "orders": [order summary], "autopilot": {"on", "until", "decided_today"} \| null, "watcher": true}` |
+| `/api/home` | `{"generated_at", "orders": [order summary], "autopilot": {"on", "until", "decided_today"} \| null, "watcher": true}`; an order summary also has `working` and `draft_v` |
 | `/api/order/<id>` | order summary + `proposal` (frozen data of the started or newest proposal), `drafts` `[{"v", "at"}]`, `crew` `[{"ticket", "title", "role", "agent", "status"}]`, `changes` `[{"n", "title", "adds_min", "state": "open"\|"accepted"\|"edit"\|"later"}]`, `tiny` `[{"what", "minutes"}]`, `stops` `[{"n", "stage", "data", "state", "answer", "by"}]`, `activity` `[{"at", "text"}]` (Factory lines of the order history) |
 | `/api/order/<id>/draft/<v>` | `{"v", "text"}` (markdown as plain text; the page renders it as text) |
 | `/api/order/<id>/file/<name>` | an image of a stop round (`png`, `jpg`, `webp`, `gif` only, from `stops/<id>/`; no other path) |
