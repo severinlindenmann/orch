@@ -122,6 +122,18 @@ svg.ic:not([width]){width:18px;height:18px;fill:none;stroke:currentColor;stroke-
 .breadcrumb a{text-decoration:none}
 .breadcrumb a:hover{text-decoration:underline}
 .btn.mobile-menu{display:none}
+/* Top-bar chip with a small menu (phone mode while on): outlined chip after the breadcrumb, its menu opens below. */
+.topbar-chip{position:relative;padding:0;border:0;background:none;box-shadow:none;min-width:0;margin:0 auto 0 0}
+.topbar-chip[hidden]{display:none}
+.topbar-chip>summary{cursor:pointer;list-style:none;gap:6px;padding:4px 10px;color:var(--text)}
+.topbar-chip>summary::-webkit-details-marker{display:none}
+.topbar-chip>summary.attn{color:var(--warning);border-color:var(--warning)}
+.topbar-chip .chip-ic{display:inline-flex}
+.topbar-chip>.menu-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:60;min-width:340px;padding:8px}
+.topbar-chip .menu-title{padding:4px 8px 0;font-weight:500;color:var(--text)}
+.topbar-chip .menu-pop .meta{padding:0 8px 8px}
+.topbar-chip .menu-item{display:flex;width:100%;justify-content:flex-start}
+.topbar>.topbar-chip:not([hidden])~.topbar-wait,.topbar>.topbar-chip:not([hidden])~.topbar-actions{margin-left:0}
 /* Page frame (one for every page): content starts at the same y, the heading is title + one muted line on the left and the
    actions on the right, flush to ONE right edge. Two widths only: full (the default) and .form-width (a narrower form page). */
 .page{width:100%;max-width:none;margin:0;padding:32px var(--page-gutter);display:flex;flex-direction:column;gap:24px}

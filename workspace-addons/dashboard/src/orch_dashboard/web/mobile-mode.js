@@ -45,7 +45,7 @@
     return choices.find(n => !Number.isFinite(t) || Date.now() + n * 3600000 > t + 1800000) || null;
   };
   const phoneIcon = () => {
-    const s = node('span', {className: 'mm-chip-ic', 'aria-hidden': 'true'});
+    const s = node('span', {className: 'chip-ic', 'aria-hidden': 'true'});
     try { if (typeof window.icon === 'function') s.innerHTML = window.icon('phone', 14); } catch (_) { /* no icon: the words are enough */ }
     return s;
   };
@@ -60,8 +60,8 @@
     const more = longer();
     chip.replaceChildren(
       node('summary', {className: 'chip outline' + (warn ? ' attn' : ''), 'data-testid': 'mobile-mode-chip', 'aria-label': 'Phone mode is on'}, phoneIcon(), 'Phone' + (ends ? ' until ' + ends : ' on')),
-      node('div', {className: 'menu-pop mm-chip-pop'},
-        node('p', {className: 'mm-chip-title'}, 'Questions go to your phone' + (ends ? ' until ' + ends : '')),
+      node('div', {className: 'menu-pop'},
+        node('p', {className: 'menu-title'}, 'Questions go to your phone' + (ends ? ' until ' + ends : '')),
         node('p', {className: 'meta mm-desc'}, warn ? 'Could not keep this computer awake. Questions may stop reaching your phone when it sleeps.' : 'This computer stays awake meanwhile.'),
         more ? btn('Keep on for ' + more + (more === 1 ? ' hour' : ' hours'), 'menu-item', 'extend', 'mobile-mode-extend', {'data-hours': more}) : null,
         btn('Turn off', 'menu-item', 'off', 'mobile-mode-bar-off')));

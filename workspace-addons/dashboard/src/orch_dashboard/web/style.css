@@ -541,20 +541,8 @@ iframe.embed.embed-loading{position:absolute;width:1px;height:1px;min-height:0;o
 .mm-bar.live .grow,body.mobile-mode-on .mm-bar.live .grow{align-items:baseline;align-content:center}
 .mm-bar.live .mm-phone{align-self:center}
 
-/* Phone mode (UX round 15 Nov): an outlined chip in the top bar, right after the breadcrumb; its menu holds the details.
-   The banner is only for the first-click ask, the ended notice and the last five minutes, and is centred. */
-.mm-chip{position:relative;padding:0;border:0;background:none;box-shadow:none;min-width:0;margin:0 auto 0 0}
-.mm-chip[hidden]{display:none}
-.mm-chip>summary{cursor:pointer;list-style:none;gap:6px;padding:4px 10px;color:var(--text)}
-.mm-chip>summary::-webkit-details-marker{display:none}
-.mm-chip>summary.attn{color:var(--warning);border-color:var(--warning)}
-.mm-chip-ic{display:inline-flex}
-.mm-chip-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:60;min-width:340px;padding:8px}
-.mm-chip-pop .mm-chip-title{padding:4px 8px 0;font-weight:500;color:var(--text)}
-.mm-chip-pop .mm-desc{padding:0 8px 8px}
-.mm-chip-pop .menu-item{display:flex;width:100%;justify-content:flex-start}
-.topbar>.mm-chip:not([hidden])~.topbar-wait,.topbar>.mm-chip:not([hidden])~.topbar-actions{margin-left:0}
+/* Phone mode banner (UX round 15 Nov): only for the first-click ask, the ended notice and the last five minutes; centred.
+   While phone mode is on, the chip in the top bar (master .topbar-chip) says so. */
 .mm-bar.banner{text-align:center;justify-content:center}
 .mm-bar .mm-actions{justify-content:center}
-body.mobile-mode-on .mm-bar.live{justify-content:center}
-body.mobile-mode-on .mm-bar.live .grow,.mm-bar.live .grow{justify-content:center;text-align:center}
+body.mobile-mode-on .mm-bar.live,body.mobile-mode-on .mm-bar.live .grow,.mm-bar.live .grow{justify-content:center;text-align:center}
