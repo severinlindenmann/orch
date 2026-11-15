@@ -951,3 +951,13 @@ def test_view_carries_wont_do_and_counts_it(proj, run, new_ticket):
         3,
     )  # never "2 of 3 done" for a declined step
     assert_valid(view)
+
+
+def test_a_ticket_without_tasks_never_sends_an_empty_tasks_line(proj, run, new_ticket, conn, monkeypatch):
+    tid = new_ticket("No steps yet")
+    run("relay", "send", "phones", "On it", "--ticket", tid, "--update", "ack")
+    st = phone_view.load_state(proj)["tickets"][tid]
+    monkeypatch.setattr(phone_view.tickets, "progress_text", lambda *_a, **_k: "")
+    run("check", "add", tid, "one")
+    phone_view.sync(proj, now=st["at"] + 100)
+    assert all(m["body"]["text"] != "Tasks: " for m in conn.sent)

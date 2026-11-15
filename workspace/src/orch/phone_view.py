@@ -1728,7 +1728,8 @@ def sync(root: Path, now: float | None = None) -> list[str]:
                 sent.append(tid)
             continue
         try:
-            relay.send_text(root, to, f"Tasks: {tickets.progress_text(shown)}", tid, "note", view=True)
+            progress = tickets.progress_text(shown)
+            relay.send_text(root, to, f"Tasks: {progress}" if progress else NEW_TEXT, tid, "note", view=True)
             sent.append(tid)
         except Refused:  # not sent: undo the claim (also the status, so it is sent again next pull)
 

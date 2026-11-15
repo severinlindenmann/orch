@@ -34,7 +34,7 @@ def test_attachments_and_safe_preview():
     assert "maxLength = 20000" not in js
     assert "button('＋ Add files or drop them here', 'new-ticket-attach'" in js
     assert "At most" not in js  # no file-count limit
-    assert "up to 2 MB each" in js and "100 MB" not in js  # the real per-file limit
+    assert "up to 25 MB each" in js  # the real per-file limit
     assert "for (const target of [form])" in js  # drops land on the whole form
     assert "pre.textContent = file.text.slice(0, 200000)" in js
     assert "innerHTML" not in js

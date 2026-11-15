@@ -22,6 +22,7 @@ EXPECTED = {
         ("do_POST", "mint"),  # the callable handed down ONLY when can_mint passed
         ("_session_post", "launch"),
         ("_term_keys", "can_mint"),  # POST /api/term/keys: typing into the live helper session (person only)
+        ("_diag_post", "can_mint"),  # POST /api/diag/report, /api/diag/open: a report holds ticket text
     },
     "focus": {
         ("_area_op", "can_mint"),  # area.accept / area.remove

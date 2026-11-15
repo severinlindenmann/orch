@@ -57,7 +57,7 @@ def test_schedule_listed_as_a_table_with_the_week_ahead(ws, monkeypatch):
     check(v)
     assert not blocks(v, "stat")
     (table,) = blocks(v, "table")
-    assert [c["label"] for c in table["columns"]] == ["Schedule", "Repeats", "Next run", "Last result"]
+    assert [c["label"] for c in table["columns"]] == ["Schedule", "Repeats", "Next time", "Last time"]
     (row,) = table["rows"]
     assert row["cells"]["schedule"] == "Weekly breport/b" and row["cells"]["repeats"] == "Mondays at 07:00"
     assert row["cells"]["last"] == "Not yet" and row["link"] == "t_rec00001"
@@ -157,7 +157,7 @@ def test_no_notice_row_when_running_with_nothing_planned(ws, monkeypatch):
         ("0 8 * * 1-5", "Weekdays at 08:00"),
         ("0 8 * * 6,0", "Weekends at 08:00"),
         ("0 9 1 * *", "Every month on day 1 at 09:00"),
-        ("0 9 31 * *", "Every month on day 31 at 09:00"),
+        ("0 9 31 * *", "Every month on day 31 (the last day in shorter months) at 09:00"),
         ("0 9 1 1 *", "On a custom plan (0 9 1 1 *)"),
     ],
 )
@@ -258,7 +258,7 @@ def test_listen_section_shows_state_and_arrivals(ws):
     (arr,) = blocks(v, "list", "Incoming work")
     (relay,) = arr["items"]
     assert relay["title"] == "Phone and other workspaces"
-    assert [r.split(" · ")[-1] for r in relay["detail"][0]["lines"]] == ["Waiting for you", "Started a run"]
+    assert [r.split(" · ")[-1] for r in relay["detail"][0]["lines"]] == ["Waiting for you", "Started"]
 
 
 def test_schedule_row_has_a_switch_and_buttons(ws):
@@ -280,7 +280,7 @@ def test_schedule_row_has_a_switch_and_buttons(ws):
         "args": {"verb": "toggle", "target": "t_rec00001"},
     }
     assert row["subtitle"] == "claude"
-    assert [a["label"] for a in row["actions"]] == ["Run now", "Edit"]
+    assert [a["label"] for a in row["actions"]] == ["Start now", "Edit"]
     assert row["actions"][1]["action"] == {"op": "addon.edit", "args": {"target": "t_rec00001"}}
 
 
@@ -381,7 +381,7 @@ def test_page_has_the_accepted_headings_and_footnote(ws, monkeypatch):
     (table,) = blocks(v, "table")
     assert "title" not in table
     (week,) = blocks(v, "calendar")
-    assert week["title"] == "Coming up" and week["meta"].endswith("Workspace time")
+    assert week["title"] == "Coming up" and "Workspace time" not in week["meta"]
     (runs,) = blocks(v, "list", "Recent runs")
     assert runs["above"] is True and runs["meta"] == "Latest activity" and runs["items"] == []
     assert runs["empty"]["title"] == "Nothing has run yet" and "run it now" in runs["empty"]["text"]
@@ -477,4 +477,33 @@ def test_a_repeat_every_few_hours_is_one_item_a_day(ws, monkeypatch):
     _two(ws, monkeypatch, cron_a="0 */4 * * *")
     (week,) = blocks(build(ws, T(7)), "calendar")
     today = [i for i in week["days"][1]["items"] if i["title"] == "Weekly"]
-    assert len(today) == 1 and today[0]["every"] == "Every 4 h" and "6 runs/day" in today[0]["note"]
+    assert len(today) == 1 and today[0]["every"] == "Every 4 hours" and "6 times a day" in today[0]["note"]
+
+
+def test_plain_words_in_the_week_strip_and_the_notice(ws, monkeypatch):
+    """UX round 6: no ticket codes in the week strip, 'Every 2 hours', 'times a day', 'today' for the same day."""
+    from orch_automation import service
+    from orch_automation.view import _every
+
+    assert _every(7200) == "Every 2 hours" and _every(3600) == "Every hour" and _every(300) == "Every 5 min"
+    monkeypatch.setattr(service, "running_pid", lambda root, clean=False: 1)
+    add_ticket(
+        ws,
+        "t_wk000010",
+        key="DEM-3",
+        title="Answer mail",
+        ext={"automation": {"recurring": True, "cron": "0 */2 * * *"}},
+    )
+    add_ticket(
+        ws,
+        "t_wk000011",
+        key="DEM-4",
+        title="Weekly",
+        ext={"automation": {"recurring": True, "cron": "0 8 * * 1"}},
+    )
+    v = build(ws, T(7))
+    (week,) = blocks(v, "calendar")
+    titles = [i["title"] for d in week["days"] for i in d["items"]]
+    assert titles and not any("DEM-" in x for x in titles)
+    assert "times a day" in json.dumps(week) and "runs" not in json.dumps(week)
+    assert ' h"' not in json.dumps(week)

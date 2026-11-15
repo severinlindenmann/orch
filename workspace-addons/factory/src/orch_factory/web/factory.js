@@ -281,8 +281,8 @@
     const needing = orders.filter(o => o.open || draftWaiting(o));
     const minutes = needing.reduce((sum, o) => sum + (o.open && Number.isFinite(Number(o.owner_min)) && o.owner_min !== null ? Number(o.owner_min) : 0), 0);
     view.append(heading('Factory', needing.length
-      ? plural(needing.length, 'thing needs you', 'things need you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
-      : 'Nothing needs you right now. Your ideas and planned runs are below.'));
+      ? plural(needing.length, 'Factory item waits for you', 'Factory items wait for you') + (minutes ? ' · about ' + minutes + ' min of your time' : '')
+      : 'Nothing in Factory waits for you right now. Your ideas and planned runs are below.'));
     view.append(ideaBox(), askRow(auto));
     if (auto?.on) {
       const days = Math.max(0, Math.ceil((Date.parse(auto.until) - Date.now()) / 864e5));
@@ -308,7 +308,7 @@
       const c = card(o.title, ...(need ? [meta(capital(need))] : []), tail(orderLink(o, 'Read proposal', '/proposal')));
       c.classList.add('f-attention'); return c;
     }, 'No proposals waiting for Start.');
-    section(primary, 'Needs you · stops', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
+    section(primary, 'Factory stops waiting for you', orders.filter(o => o.open && o.phase !== 'proposed'), o => {
       const c = card(o.title, node('h3', openTitle(o, o.open)), ...openBody(o, o.open, false), rawDetails(o.open),
         tail(decide(o, 'Answer', true), orderLink(o, 'Review order')));
       c.classList.add('f-attention'); return c;
@@ -341,7 +341,7 @@
     const rows = [];
     if (data.days != null) rows.push('Runs for ' + plural(Number(data.days), 'day', 'days') + '. Then your agent stops and asks you to renew.');
     if (data.max_orders != null) rows.push('At most ' + plural(Number(data.max_orders), 'order', 'orders') + ' at once.');
-    if (data.active_min_per_day != null) rows.push('Target: ' + duration(data.active_min_per_day) + ' of active work a day · not enforced yet');
+    if (data.active_min_per_day != null) rows.push('Target: ' + duration(data.active_min_per_day) + ' of active work a day. You get a heads-up when it is reached; Autopilot keeps going.');
     if (data.api_usd_per_day != null) rows.push('Target: $' + text(data.api_usd_per_day) + ' of API spend a day · not enforced yet');
     return list(rows);
   }
@@ -501,6 +501,7 @@
   let request = 0, controller;
   function showNotices(homeData, ...data) {
     notices.replaceChildren();
+    if (homeData.day_limit?.warning) notices.append(node('p', homeData.day_limit.warning, 'f-banner'));
     if (homeData.watcher === false) notices.append(node('p', 'Factory watcher is off. Runs will not be picked up automatically until it is restarted.', 'f-banner'));
     if ([homeData, ...data].some(d => d?.stale === true)) notices.append(node('p', 'This record is stale. It may not include the latest changes.', 'f-banner'));
   }

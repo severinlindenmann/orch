@@ -6,7 +6,7 @@ Open `factory.html` directly. Shared assets resolve through `../system/` and `..
 
 `chat-idea.html`, `edit.html`, and `defaults.html` show phase 2b+ (in-page Start via the dashboard question card, chat integration, defaults) and carry a visible **Preview** tag.
 
-These owner-reviewed mockups preserve their local, simulated interactions and sample content. They are a design reference, not the live read-only page. The phase 2a page uses API data, renders draft markdown as plain text, and sends all answers to the dashboard ticket with `target="_top"`. No mockup interaction grants authority or changes real workspace data. Autopilot's live per-day limits are labelled targets, not enforced yet.
+These owner-reviewed mockups preserve their local, simulated interactions and sample content. They are a design reference, not the live read-only page. The phase 2a page uses API data, renders draft markdown as plain text, and sends all answers to the dashboard ticket with `target="_top"`. No mockup interaction grants authority or changes real workspace data. Autopilot's live per-day active-time limit is a warning only (owner 15 Nov): when it is reached the page and the needs view show a plain heads-up, "It keeps going. Stop it if you want it to rest.", and nothing is blocked. The money-per-day figure stays a target until cost reporting exists.
 
 Preview controls offer loading and empty states; Reset Factory demo clears only `orch-factory-demo` local storage. The comparison slider and pins here are simulated; live-page pins are view-only.
 

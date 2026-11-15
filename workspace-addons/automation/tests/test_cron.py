@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from conftest import T
 
-from orch_automation.cron import is_due, next_after, valid
+from orch_automation.cron import is_due, last_due, next_after, valid
 
 
 def test_valid():
@@ -68,7 +68,7 @@ def test_one_off_is_read_in_the_zone():
         "whenever",
         "every 70 minutes",
         "every funday 08:00",
-        "monthly 31 09:00",
+        "monthly 32 09:00",
         "every 0 hours",
         "daily 25:00",
         "0 7 * * 1 *",
@@ -224,3 +224,30 @@ def test_interval_is_at_least_five_minutes():
     for text in ("every 1 minute", "every 4 minutes"):
         with pytest.raises(plain.Plain, match="every 5 minutes"):
             plain.parse(text, "UTC")
+
+
+@pytest.mark.parametrize(
+    ("day", "after", "want"),
+    [
+        (31, (2026, 1, 31, 10), (2026, 2, 28, 9)),  # Feb, non-leap
+        (31, (2028, 1, 31, 10), (2028, 2, 29, 9)),  # Feb, leap
+        (31, (2026, 3, 31, 10), (2026, 4, 30, 9)),  # Apr
+        (31, (2026, 12, 31, 10), (2027, 1, 31, 9)),  # Dec -> Jan
+        (30, (2026, 1, 30, 10), (2026, 2, 28, 9)),
+        (30, (2028, 1, 30, 10), (2028, 2, 29, 9)),
+        (30, (2026, 3, 30, 10), (2026, 4, 30, 9)),
+        (30, (2026, 12, 30, 10), (2027, 1, 30, 9)),
+        (29, (2026, 1, 29, 10), (2026, 2, 28, 9)),
+        (29, (2028, 1, 29, 10), (2028, 2, 29, 9)),
+        (29, (2026, 3, 29, 10), (2026, 4, 29, 9)),
+        (29, (2026, 12, 29, 10), (2027, 1, 29, 9)),
+    ],
+)
+def test_month_end_days_clamp_to_the_last_day(day, after, want):
+    assert next_after(f"0 9 {day} * *", datetime(*after, tzinfo=UTC)) == datetime(*want, tzinfo=UTC)
+
+
+def test_month_end_last_due_and_plain():
+    assert last_due("0 9 31 * *", datetime(2026, 3, 15, tzinfo=UTC)) == datetime(2026, 2, 28, 9, tzinfo=UTC)
+    assert last_due("0 9 31 * *", datetime(2026, 5, 15, tzinfo=UTC)) == datetime(2026, 4, 30, 9, tzinfo=UTC)
+    assert plain.parse("monthly 31 09:00", "UTC").cron == "0 9 31 * *"

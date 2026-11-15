@@ -60,6 +60,7 @@ _enabled_cache: dict[str, tuple[float, bool]] = {}
 _hider_cache: dict[str, tuple[float, object]] = {}
 _ws_cache: dict[str, str | None] = {}
 _trace: ContextVar[tuple[str, str, str | None] | None] = ContextVar("orch_diag_trace", default=None)
+_src_as: ContextVar[str | None] = ContextVar("orch_diag_src_as", default=None)
 
 
 # --- trace (W3C traceparent) ----------------------------------------
@@ -334,7 +335,7 @@ def _emit(
     hide = _hider(root)
     if hide is None:
         return _drop("hider_off")
-    src = _state["src"]
+    src = _src_as.get() or _state["src"]
     minute = int(time.time() // 60)
     with _lock:
         for k in [k for k in _rate if k[1] != minute]:
@@ -449,6 +450,66 @@ def log(ev: str, lvl: str = "debug", *, root: Path | None = None, **kv) -> None:
 def error(ev: str, exc: BaseException, *, root: Path | None = None, **kv) -> None:
     """One error event: the exception's type, a fingerprint and the code places (no message, no locals)."""
     _safe(root, ev, "error", kv, exc, None, 3)
+
+
+def log_as(src: str, ev: str, lvl: str = "debug", *, root: Path | None = None, **kv) -> None:
+    """One event written for another program of this workspace (the dashboard's page writes `ui`): same rules,
+    same budgets, counted under `src` (a name that is not a plain short one is written as `cli`)."""
+    token = _src_as.set(src if isinstance(src, str) and _SRC.fullmatch(src) else "cli")
+    try:
+        _safe(root, ev, lvl, kv, None, None, 3)
+    finally:
+        _src_as.reset(token)
+
+
+def stats(root: Path) -> dict:
+    """What Settings shows: the saved notes (bytes, since when) and the reports (count, newest). Read only."""
+    notes = {"bytes": 0, "files": 0, "since": None}
+    d = root / ".orch" / "diag"
+    if d.is_symlink() or not d.is_dir():
+        return {"notes": notes, "reports": {"count": 0, "last": None}}
+    for p in d.iterdir():
+        m = _FILE.fullmatch(p.name)
+        if not m or p.is_symlink() or not p.is_file():
+            continue
+        with contextlib.suppress(OSError):
+            notes["bytes"] += p.stat().st_size
+            notes["files"] += 1
+            if notes["since"] is None or m[1] < notes["since"]:
+                notes["since"] = m[1]
+    count, last = 0, None
+    r = d / "reports"
+    if not r.is_symlink() and r.is_dir():
+        for p in r.iterdir():
+            if p.is_symlink() or not p.is_dir() or not p.name.startswith("r-"):
+                continue
+            with contextlib.suppress(OSError):
+                count += 1
+                m_ = p.stat().st_mtime
+                last = m_ if last is None or m_ > last else last
+    return {
+        "notes": notes,
+        "reports": {
+            "count": count,
+            "last": datetime.fromtimestamp(last, UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if last else None,
+        },
+    }
+
+
+def delete_notes(root: Path) -> int:
+    """Delete the saved notes (the log files; reports stay). Returns how many files went. One
+    `diag.notes_deleted` line is written after, so the log is never empty of its own history."""
+    d = root / ".orch" / "diag"
+    gone = 0
+    if d.is_symlink() or not d.is_dir():
+        return 0
+    for p in list(d.iterdir()):
+        if _FILE.fullmatch(p.name) and not p.is_symlink() and p.is_file():
+            with contextlib.suppress(OSError):
+                p.unlink()
+                gone += 1
+    log("diag.notes_deleted", "info", root=root, files=gone)
+    return gone
 
 
 @contextlib.contextmanager

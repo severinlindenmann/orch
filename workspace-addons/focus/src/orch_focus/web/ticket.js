@@ -12,23 +12,30 @@
       h('main', {class: 'fx-pick'}, h('h1', {text: 'Focus'}), h('p', {class: 'meta fx-sub', text: 'Loading your tickets…'}), skeleton()));
     fetch(P + '/api/tickets').then(r => { if (!r.ok) throw Error(); return r.json(); }).then(payload => {
       const list = payload.tickets;
+      /* inside the dashboard Focus opens straight on the next ticket that needs the person; Home keeps the whole list.
+         "?all=1" (from the links beside the ticket) shows this start page: Live now, areas and jobs. */
+      const next = INAPP ? window.FocusHelpers.nextNeeding(list) : null;
+      if (next && !/[?&]all=1/.test(location.search)) { location.replace(P + '/t/' + next.ticket.id + next.hash); return; }
       const crumb = root.querySelector('.fx-workspace'); if (crumb) crumb.textContent = payload.workspace + ' / Focus';
-      S.state.pickAttention = window.FocusHelpers.attentionText(list);
+      S.state.pickAttention = window.FocusHelpers.attentionText(list) + (INAPP && list.some(window.FocusHelpers.needsYou) ? ' They are on Home too.' : '');
       pickerSub();
       const box = root.querySelector('.fx-pick');
       box.querySelector('.fx-skel')?.remove();
       if (!list.some(t => t.status !== 'done')) box.append(emptyState());
-      const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Sent back to you', 'Check'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
-      /* one line: key, title, the actual next step only when it says more, and a real action chip */
+      const groups = [['waiting', 'Needs you', 'Answer'], ['review', 'Sent back to you', 'Check result'], ['active', 'Working', 'Watch'], ['ready', 'Ready to start', 'Start'], ['open', 'To do', 'Start']];
+      /* one line: key, title, the actual next step only when it says more, and a real action button */
       const rowFor = (t, status, action) => {
         const next = window.FocusHelpers.nextStepText(t, action);
         const finished = status === 'done' && t.closed_at ? stamp(t.closed_at) : '';
         return h('a', {class: 'fx-pick-row', href: P + '/t/' + t.id + (status === 'review' ? '#results' : '')},
           /^t_/.test(t.key || t.id) ? null : h('span', {class: 'mono key', text: t.key}), h('strong', {class: 'grow', text: t.title}),
           next ? h('small', {text: next}) : null, finished ? h('small', {text: 'Finished ' + finished}) : null,
-          h('span', {class: 'chip fx-row-chip', text: action}));
+          h('span', {class: 'btn outline sm', text: action}));  /* a real 32 px button from the master, not a chip */
       };
+      if (next) box.append(h('div', {class: 'row'}, h('a', {class: 'btn outline sm', href: P + '/t/' + next.ticket.id + next.hash, text: 'Open the next ticket that needs you'}),
+        h('a', {class: 'btn ghost sm', href: '/#home', target: '_top', text: 'See everything on Home'})));
       for (const [status, label, action] of groups) {
+        if (INAPP && (status === 'waiting' || status === 'review')) continue;  /* Home lists these; not twice */
         const needsYou = window.FocusHelpers.needsYou;
         const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status);
         if (!rows.length) continue;
@@ -184,7 +191,9 @@
     try { parent.postMessage({orch: 'embed-shell', path: location.pathname}, location.origin); } catch (e) { /* not framed */ }
     els.ticketList = h('div', {class: 'fx-tickets', role: 'list', 'aria-label': 'Tickets in focus'});
     const left = h('aside', {class: 'focus-list fx-left', 'aria-label': 'Tickets in focus'},
-      h('div', {class: 'card-h'}, h('h3', {text: 'Tickets in focus'})), els.ticketList, rail);
+      h('div', {class: 'card-h'}, h('h3', {text: 'Tickets in focus'})), els.ticketList,
+      h('div', {class: 'row'}, h('a', {class: 'btn ghost sm', href: '/#home', target: '_top', text: 'See everything on Home'}),
+        h('a', {class: 'btn ghost sm', href: P + '/?all=1', text: 'Live now and areas'})), rail);
     const head = h('div', {class: 'fx-chead'}, h('div', {class: 'grow'}, h('span', {class: 'eyebrow'}, els.key), h('h1', {}, els.title)),
       els.liveWrap, els.stop, els.more);
     stage.prepend(head);

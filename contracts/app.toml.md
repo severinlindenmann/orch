@@ -39,9 +39,19 @@ public = false                    # false = needs ?token=<view token> (default),
 |---|---|---|
 | `HOST` | `127.0.0.1` | Listen on `$HOST:$PORT`. `0.0.0.0` when the app runs in a container (only the host can reach that port) |
 | `PORT` | `9104` | The port to listen on |
-| `BASE_PATH` | `/a/weekly-report` | The app is served under this path; links must start with it |
+| `BASE_PATH` | `/a/weekly-report` | The app is served under this path. Use relative links (`style.css`, not `/a/<name>/style.css`): private apps are served under a secret address and root-absolute links get no access. Use `BASE_PATH` only where an absolute path is unavoidable, e.g. server-side redirects |
 | `DATA_DIR` | `/var/lib/orch-publish/apps/weekly-report/data` (`/data` in a container) | The only writable folder; kept across deploys. Empty and read-only when `store = "none"` |
 | `STORE` | `sqlite` | The store from app.toml. The app picks file names itself (`data.json`, `*.md`, `app.db`) |
+
+## Browser sandbox
+**Apps run sandboxed.** Every page an app serves is sandboxed by the server (`Content-Security-Policy: sandbox ...`), so
+that one app can never read another app's pages. Scripts, forms, popups and downloads work. But the page has no origin of its
+own: `localStorage`, `sessionStorage`, IndexedDB and cookies throw or stay empty. Keep state on the app's backend and
+identify people by a link token or a typed name. `fetch()` to the app's own paths works: the server answers the cross-origin
+check for public apps, and for private apps only under their own private address. A private app is served under a secret
+`/a/<name>/~<key>/` address (the server redirects there after the view link or cookie check). That private link, and the address
+it opens, is the key to the app, as before; both change when the link is reset. The server keeps its key for these addresses in `app-cap.key` in the data folder; it must stay private to the publish user. Use relative links (`style.css`, `data.json`),
+not root-absolute ones (`/a/<name>/style.css`), or they get no access. An app cannot switch the sandbox off.
 
 ## Sandbox
 

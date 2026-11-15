@@ -6,8 +6,8 @@ function ticketFileType(name) {
 }
 function ticketFileError(file, files) {
   if (!ticketFileType(file.name)) return file.name + ': only text files and pictures';
-  if (file.size > 2 * 1024 * 1024) return file.name + ' is over 2 MB';
-  if (files.reduce((sum, item) => sum + item.size, file.size) > 3.5 * 1024 * 1024) return 'Files are over 3.5 MB';
+  if (file.size > 25 * 1024 * 1024) return file.name + ' is over 25 MB';
+  if (files.reduce((sum, item) => sum + item.size, file.size) > 100 * 1024 * 1024) return 'Files are over 100 MB';
   return '';
 }
 function ticketTextTitle(text, limit) {
@@ -41,7 +41,7 @@ function ticketHelpers(settings) {
 function ticketForm(t) {
   const {d, actions} = dialog(t ? 'Edit ticket' : 'New ticket', t ? 'sheet' : 'dialog', t ? 'ticket-meta' : 'new-ticket');
   const form = el('form'), fields = el('div', 'form-fields'), inputs = {};
-  if (!t) { d.className = (d.className ? d.className + ' ' : '') + 'new-ticket'; d.querySelector?.('h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
+  if (!t) { d.className = (d.className ? d.className + ' ' : '') + 'new-ticket ui-bottom-close'; d.querySelector?.('h2')?.after?.(el('p', 'meta new-ticket-sub', 'Give your helper something to work on.')); }
   // The window closes with its Close button, Esc and a click on the backdrop (kit/overlay.js); dialog() puts the cursor back where it was.
   let helpers = [], helperSelect = null, doneWrap = null;
   let pastedText = '', files = [], reading = Promise.resolve(), closed = false;
@@ -68,7 +68,7 @@ function ticketForm(t) {
     label.htmlFor = input.id; label.append(input); fields.append(label); inputs.text = input;
     const zone = el('div', 'new-ticket-drop');
     const attach = button('＋ Add files or drop them here', 'new-ticket-attach', () => picker.click());
-    zone.append(attach, el('p', 'meta new-ticket-file-hint', 'Add as many files as you need · text files and pictures, up to 2 MB each'));
+    zone.append(attach, el('p', 'meta new-ticket-file-hint', 'Add as many files as you need · text files and pictures, up to 25 MB each'));
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
     picker.accept = '.txt,.md,.csv,.tsv,.json,.log,.yml,.yaml,.toml,.ini,.png,.jpg,.jpeg,.gif,.webp';
     const fileError = el('p', 'bad new-ticket-file-error'); fileError.setAttribute('role', 'alert');
@@ -155,6 +155,7 @@ function ticketForm(t) {
     // FOLLOW-UP: move to kit (shared custom select from the foundation PR); a native select until then.
     helpers = ticketHelpers(typeof state !== 'undefined' && state ? state.settings : null);
     const helperBox = el('div', 'new-ticket-helper');
+    const noHelperRow = helpers.length === 1 && /^helper$/i.test(helpers[0].label) && !helpers[0].description;
     if (helpers.length > 1) {
       const helperLabel = el('label', '', 'Helper');
       helperSelect = el('select', 'input'); helperSelect.name = 'helper'; helperSelect.id = 'field-' + serial + '-helper';
@@ -164,6 +165,8 @@ function ticketForm(t) {
       const describe = () => { about.textContent = helpers.find(h => h.name === helperSelect.value)?.description || ''; about.hidden = !about.textContent; };
       helperSelect.addEventListener('change', describe); describe();
       helperLabel.htmlFor = helperSelect.id; helperLabel.append(helperSelect); helperBox.append(helperLabel, about);
+    } else if (noHelperRow) {
+      // one helper that is just called "Helper": a "Helper / Helper" row says nothing
     } else {
       helperBox.append(el('span', 'new-ticket-label', 'Helper'));
       if (helpers.length) {
@@ -176,7 +179,7 @@ function ticketForm(t) {
     const dueLabel = el('label', '', 'Due date (optional)'); dueLabel.htmlFor = dueToggle.id;
     const dueBox = el('div', 'new-ticket-due'); dueBox.append(dueLabel, dueToggle, dueInput);
     if (window.UI?.date) window.UI.date(dueInput, dueToggle);
-    const options = el('div', 'new-ticket-options'); options.append(helperBox, dueBox); fields.append(options);
+    const options = el('div', 'new-ticket-options'); options.append(...(noHelperRow ? [] : [helperBox]), dueBox); fields.append(options);
     const doneLabel = el('label', '', 'Done when (optional)');
     const done = el('textarea', 'input'); done.name = 'done_when'; done.id = 'field-' + serial + '-done_when';
     done.rows = 2; done.maxLength = 2000; done.placeholder = 'What should be true when it is done? Say it in your own words.';

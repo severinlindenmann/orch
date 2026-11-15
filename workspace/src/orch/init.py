@@ -30,6 +30,10 @@ def init(root: Path, code: str | None = None) -> list[str]:
     src = skills.packaged_skills_dir() / "orch"
     skills.install_skill(root, "orch", src)
     skills.set_block(root, "orch", skills.read_block(src, "orch"))
+    diag_src = skills.packaged_skills_dir() / "orch-diagnose"
+    if diag_src.is_dir():  # how an agent reads a problem report (read-only)
+        skills.install_skill(root, "orch-diagnose", diag_src)
+        skills.set_block(root, "orch-diagnose", skills.read_block(diag_src, "orch-diagnose"))
     linked = skills.apply_agent_files(root)
     # the reminder hooks, merged into the agent tool's local settings (only for a tool that has them)
     reminders = reminder_settings.ensure_each(root)

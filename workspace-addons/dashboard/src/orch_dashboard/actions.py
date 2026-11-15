@@ -59,7 +59,7 @@ ATTACH_EXT = frozenset(
         "webp",
     }
 )
-ATTACH_MAX = 2 * 1024 * 1024
+ATTACH_MAX = 25 * 1024 * 1024
 LONG_NOTE = (
     "The full text is attached as note.md. Read it, then give this ticket a short title and description."
 )
@@ -205,7 +205,6 @@ FREE_OPS = frozenset(
         "check.add",
         "ref.add",
         "ref.rm",
-        "look.description",
         "config.agent.test",
     }
 )
@@ -370,7 +369,7 @@ def attachments(op, args) -> list[tuple[str, bytes]]:
         if ext not in ATTACH_EXT:
             raise BadRequest(f"{f['name'][:60]}: only text files and pictures can be added.")
         if len(raw) > ATTACH_MAX:
-            raise BadRequest(f"{f['name'][:60]} is over 2 MB.")
+            raise BadRequest(f"{f['name'][:60]} is over 25 MB. Choose a smaller file.")
         out.append((f["name"], raw))
     return out
 
@@ -557,6 +556,22 @@ def _copies_set(a):
     if not isinstance(v, str) or len(v) > 500 or any(c in v for c in "\r\n\x00"):
         raise BadRequest("Write the command on one line, at most 500 characters.")
     return ["config", "set", "workflow.copy_setup"], [], [v.strip() or "none"]
+
+
+def _diag_set(a):
+    """Problem reports (settings): keep the debug log on or off, `orch config set diag.enabled`."""
+    _only(a, ("on",))
+    if type(a.get("on")) is not bool:
+        raise BadRequest("Say on or off.")
+    return ["config", "set", "diag.enabled", "on" if a["on"] else "off"], [], []
+
+
+def _diag_delete(what):
+    def build(a):
+        _only(a, ())
+        return ["diag", "delete", what], [], []
+
+    return build
 
 
 def _copies_clean(a):
@@ -806,6 +821,19 @@ def _config_permissions(a):
     return ["config", "set", "workspace.permissions", mode], [], []
 
 
+def _workspace_set(a):
+    """The workspace name or description (settings): `orch config set workspace.<field> <text>`; the text
+    travels after `--` as one value. Empty clears it. A person's click only (signed)."""
+    _only(a, ("field", "text"))
+    field, v = a.get("field"), a.get("text", "")
+    if field not in ("name", "description"):
+        raise BadRequest("Pick the name or the description.")
+    limit = 60 if field == "name" else 280
+    if not isinstance(v, str) or len(v.strip()) > limit or any(c in v for c in "\r\n\x00"):
+        raise BadRequest(f"Write one line of at most {limit} characters.")
+    return ["config", "set", f"workspace.{field}"], [], [v.strip()]
+
+
 def _share_set(a):
     """Share with team: `orch share on|off` (AGENTS.md entry + merge=union; off removes both)."""
     _only(a, ("on",))
@@ -913,6 +941,7 @@ OPS = {
     "config.agent.add": _config_agent_add,
     "config.agent.test": _config_agent_test,
     "config.permissions": _config_permissions,
+    "workspace.set": _workspace_set,
     "addon.set": _addon_set,
     "share.set": _share_set,
     "private.move": _private_move,
@@ -922,6 +951,8 @@ OPS = {
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
+    "diag.set": _diag_set,
+    "diag.delete_reports": _diag_delete("reports"),
     "copies.set": _copies_set,
     "copies.clean": _copies_clean,
     "copies.remove_orphaned": _copies_remove_orphaned,
@@ -1268,6 +1299,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, 
             "addon.set",
             "config.agent",
             "config.permissions",
+            "workspace.set",
             "workflow.set",
             "copies.set",
             "copies.clean",

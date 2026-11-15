@@ -83,8 +83,8 @@ def test_home_lists_orders_in_every_phase(ws, run, srv, proposal):
     order, _ = started(ws, run)
     code, home, r = get(srv, "/api/home")
     assert code == 200 and r.getheader("Cache-Control") == "no-store"
-    assert set(home) == {"generated_at", "orders", "autopilot", "watcher"}
-    assert home["autopilot"] is None and home["watcher"] is False
+    assert set(home) == {"generated_at", "orders", "autopilot", "day_limit", "watcher"}
+    assert home["autopilot"] is None and home["day_limit"] is None and home["watcher"] is False
     by = {o["id"]: o for o in home["orders"]}
     assert all(ORDER_KEYS <= set(o) for o in by.values())
     assert by[draft]["phase"] == "draft" and by[draft]["open"] is None and by[draft]["line"] == []

@@ -137,9 +137,9 @@ const statusControl = (t, scope) => {
   if (snapshot) return statusChip(t);
   return h('details', {className:'menu status-menu', 'data-key':'status-menu-' + scope + '-' + t.id}, h('summary', {className:'btn outline xs status-sum', 'aria-label':'Move to… ' + clean(t.title) + ' (now ' + statusWord(shown(t)) + ')'}, 'Move to', iconEl('down')), h('div', {className:'menu-pop', role:'menu', 'aria-label':'Move to'}, statusItems(t, scope)));
 };
-// Page header: (eyebrow) title + one line under it; an optional actions slot at the end.
-const heading = (title, sub = '', {eyebrow = '', actions = null} = {}) => h('header', {className:'page-heading', 'data-key':'heading'},
-  h('div', {}, eyebrow ? h('p', {className:'eyebrow'}, eyebrow) : null, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
+// Page header (the one frame): title + one muted line under it, no eyebrow; an optional actions slot at the end.
+const heading = (title, sub = '', {actions = null} = {}) => h('header', {className:'page-heading', 'data-key':'heading'},
+  h('div', {}, h('h1', {}, clean(title)), sub ? h('p', {className:'muted'}, sub) : null),
   actions ? h('div', {className:'page-heading-actions'}, actions) : null);
 // Loading shapes that match the page they stand in for; `section` is a part of a page (add-on body, chat history ...).
 function skeletonFor(kind) {
@@ -291,7 +291,7 @@ function render(arrived = new Set()) {
   const active = document.activeElement;
   const activeKey = nodeKey(active);
   const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'notfound' ? 'Page not found' : 'Home';
-  document.getElementById('workspace-name').textContent = clean(state.workspace || 'Workspace');
+  document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
   let title = pageName;
@@ -452,6 +452,7 @@ async function refresh() {
     lastOk = Date.now();
     paintUpdated();
     // rev is the server's hash of the whole state (every ticket field, runs, needs ...); without one, always take it.
+    window.DiagTrail?.install(window).state(state?.rev, next.rev, res.headers.get('X-State-Age-Ms'));  // client vs server revision, cache age
     if (!state || !next.rev || next.rev !== state.rev) accept(next);
   } catch (_) {
     connectionNotice(connection, !!state);
@@ -486,6 +487,8 @@ document.getElementById('new-ticket').hidden = snapshot;
 document.getElementById('new-ticket').addEventListener('click', () => ticketForm());
 document.getElementById('open-agent').hidden = snapshot;
 document.getElementById('open-agent').addEventListener('click', () => chatOpenAgent());
+document.getElementById('report-problem').hidden = snapshot;
+document.getElementById('report-problem').addEventListener('click', () => reportOpen());
 const toggle = document.getElementById('menu-toggle');
 toggle.addEventListener('click', () => {
   const open = toggle.getAttribute('aria-expanded') !== 'true';
@@ -611,6 +614,8 @@ main.addEventListener('click', async event => {
   // Share, the copies switch, Clean up now and "Helpers may mark tickets Done" first show a review (settings.js).
   if (action === 'settings-share') { settingsReviewOpen('share', control); return; }
   if (action === 'workflow-set') { settingsReviewOpen('workflow', control); return; }
+  if (action === 'diag-set') { await diagSwitch(); return; }
+  if (action === 'diag-delete-reports') { await diagDelete(); return; }
   if (action === 'copies-switch') { settingsReviewOpen('copies-switch', control); return; }
   if (action === 'copies-clean') { settingsReviewOpen('copies-clean', control); return; }
   if (action === 'settings-review-ok') { await settingsReviewRun(); return; }
@@ -638,7 +643,6 @@ main.addEventListener('click', async event => {
     return;
   }
   if (action === 'addon-catalog') { if (!snapshot) addonCatalog(); return; }
-  if (action === 'phone-pair') { phonePairDialog(); return; }
   if (action === 'relay-reconnect') { await relayReconnect(control); return; }
   if (action === 'addon-shared') { if (!settingsBusy.has('shared')) await settingsSend('look.shared', {on:control.dataset.on === 'true'}, 'shared'); return; }
   if (action === 'settings-addon') {

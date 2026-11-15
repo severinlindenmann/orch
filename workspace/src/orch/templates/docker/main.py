@@ -1,7 +1,7 @@
 """{{name}}: a mini app on orch-apps (docker, store {{store}}).
 
 The host gives every app HOST, PORT, BASE_PATH (/{{slug}}), DATA_DIR (kept across deploys) and APP_ENV. Requests arrive
-without the /{{slug}} prefix; links in pages must start with BASE_PATH or be relative.
+without the /{{slug}} prefix; use relative links in pages (style.css, items), not BASE_PATH: private apps are served under a secret address.
 """
 
 import html
@@ -21,12 +21,12 @@ button{padding:8px 14px;font:inherit}li{padding:4px 0}
 
 
 def page(items) -> str:
-    form = (f'<form method="post" action="{BASE}/items"><input name="text" required maxlength="200" '
+    form = (f'<form method="post" action="items"><input name="text" required maxlength="200" '
             f'aria-label="New entry"><button>Add</button></form>') if STORE.writable else ""
     rows = "".join(f"<li>{html.escape(i['text'])}</li>" for i in items)
     return (f'<!doctype html><html lang="en"><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{{name}}</title>'
-            f'<link rel="stylesheet" href="{BASE}/style.css"><main><h1>{{name}}</h1>{form}<ul>{rows}</ul></main></html>')
+            f'<link rel="stylesheet" href="style.css"><main><h1>{{name}}</h1>{form}<ul>{rows}</ul></main></html>')
 
 
 class App(BaseHTTPRequestHandler):
@@ -61,7 +61,7 @@ class App(BaseHTTPRequestHandler):
         text = urllib.parse.parse_qs(self.rfile.read(length).decode()).get("text", [""])[0].strip()
         if text:
             STORE.add(text[:200])
-        self.send(303, headers={"Location": f"{BASE}/"})
+        self.send(303, headers={"Location": "./"})
 
 
 class _Server(ThreadingHTTPServer):

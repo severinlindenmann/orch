@@ -17,7 +17,7 @@ label = "Open Factory"
 
 [dashboard]
 label = "Factory"
-icon = "box"
+icon = "hammer"
 order = 15
 
 [[ticket_view]]

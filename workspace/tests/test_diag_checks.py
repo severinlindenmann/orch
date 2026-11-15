@@ -46,7 +46,9 @@ def test_a_check_that_raises_is_cannot_check_and_the_rest_still_run(proj, monkey
     mod = next(iter(diag_checks.modules()))
     monkeypatch.setattr(mod, "check", lambda s: 1 / 0)
     out = diag_checks.run_all(snap(proj))
-    assert [c for c in out if c["name"] == mod.NAME][0]["verdict"] == "cannot_check" and len(out) == 10
+    assert [c for c in out if c["name"] == mod.NAME][0]["verdict"] == "cannot_check" and len(
+        out
+    ) == 9  # relay is off: its check has nothing to say
 
 
 def test_run_gone_ticket_working(proj):
@@ -128,7 +130,8 @@ def test_hook_lines_missing(proj):
     assert c["verdict"] == "problem" and "hooks_missing" in c["evidence"][0]
 
 
-def test_relay_unreachable(proj):
+def test_relay_unreachable(proj, monkeypatch):
+    monkeypatch.setattr(diag_collect, "addon_on", lambda root, name: name == "relay")
     assert one(proj, "relay_unreachable")["verdict"] == "ok"
     box = proj / ".orch" / "outbox"
     box.mkdir()
@@ -139,7 +142,8 @@ def test_relay_unreachable(proj):
     assert c["verdict"] == "problem" and "oldest for 60 min" in c["evidence"][0]
 
 
-def test_relay_send_failures_in_the_log(proj):
+def test_relay_send_failures_in_the_log(proj, monkeypatch):
+    monkeypatch.setattr(diag_collect, "addon_on", lambda root, name: name == "relay")
     for _ in range(3):
         diag.log("relay.send_failed", "warn", root=proj, what="proposal", reason="URLError")
     assert one(proj, "relay_unreachable")["verdict"] == "problem"
@@ -165,3 +169,26 @@ def test_diag_dropped(proj):
     diag._drop("write")
     c = one(proj, "diag_dropped")
     assert c["verdict"] == "problem" and "1 dropped" in c["evidence"][0]
+
+
+def test_optional_parts_stay_invisible_while_off(proj, run):
+    """R1.1: with the relay off nothing of `orch diag` names an optional part: not the checks, the state, the
+    report files, the text of `inspect`, nor the skill an agent reads."""
+    import json as _json
+    from pathlib import Path
+
+    from orch import cli_diag, diag_report, skills
+
+    tid = stuck(proj)
+    (proj / ".orch" / "outbox").mkdir()  # even leftovers of a relay that was once on are not looked at
+    (proj / ".orch" / "outbox" / "m_1.json").write_text("{}")
+    texts = [_json.dumps(cli_diag.inspect(proj, tid)), cli_diag._text_inspect(cli_diag.inspect(proj, tid))]
+    folder = Path(diag_report.make(proj, ticket=tid)["path"])
+    texts += [p.read_text(encoding="utf-8") for p in folder.rglob("*") if p.is_file()]
+    src = skills.packaged_skills_dir() / "orch-diagnose"
+    texts += [p.read_text(encoding="utf-8") for p in src.rglob("*") if p.is_file()]
+    for t in texts:
+        low = t.lower()
+        assert not any(w in low for w in ("relay", "phone", "publish")), [
+            w for w in ("relay", "phone", "publish") if w in low
+        ]

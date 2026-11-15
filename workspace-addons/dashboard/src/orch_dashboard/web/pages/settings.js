@@ -84,6 +84,29 @@ function privateCard(settings) {
       settingsText('h3', {}, 'This workspace asks to run a command'),
       settingsText('p', {className:'meta'}, hidden + (hidden === 1 ? " request" : " requests") + " orch can't show safely. Not allowed.")))) : null);
 }
+// Report a problem (diagnostics, D3): the debug log switch (one click) and the saved reports.
+function diagCard(settings) {
+  const on = settings.diag_enabled !== false, reports = settings.diag?.reports || {};
+  const off = snapshot || settingsBusy.has('diag');
+  const n = Number(reports.count) || 0;
+  return h('div', {className:'stack', 'data-key':'settings-diag'}, h('h2', {className:'set-sub'}, 'Report a problem'), h('div', {className:'card'},
+    h('div', {className:'card-row'}, h('div', {className:'grow'}, settingsText('h3', {}, 'Debug log'),
+      settingsText('p', {}, 'orch notes steps, errors and timings in the background, so a helper can find out what went wrong. It stays on this computer.'),
+      settingsText('p', {className:'meta'}, 'On by default. Keeps the last 7 days. Off stops new notes.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-label':'Debug log', 'aria-checked':on, 'data-key':'settings-switch-diag', 'data-action':'diag-set', disabled:off})),
+    h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Saved reports'),
+      h('p', {className:'grow set-ctl', 'data-key':'settings-diag-reports'}, n === 1 ? '1 report' : n + ' reports', reports.last ? h('span', {className:'meta'}, ' · last ' + time(reports.last)) : null),
+      snapshot ? null : h('button', {type:'button', className:'btn ghost sm', 'data-action':'diag-delete-reports', 'data-key':'settings-diag-delete-reports', disabled:off || !n}, 'Delete all'))));
+}
+async function diagSwitch() {
+  const on = state.settings?.diag_enabled === false;
+  const result = await settingsSend('diag.set', {on}, 'diag');
+  if (result.ok) window.orch.toast(on ? 'Debug log is on.' : 'Debug log is off.', 'ok');
+}
+async function diagDelete() {
+  const result = await settingsSend('diag.delete_reports', {}, 'diag');
+  if (result.ok) window.orch.toast('Reports deleted.', 'ok');
+}
 function workflowCard(settings) {
   return h('div', {className:'stack', 'data-key':'settings-workflow'},
     h('div', {className:'card'}, h('div', {className:'card-row'},
@@ -437,9 +460,9 @@ function everydayCard(settings, phoneAddon) {
   const row = (label, value, action, key) => h('div', {className:'card-row name-row', 'data-key':key}, h('span', {className:'set-label'}, label), settingsText('p', {className:'grow set-ctl'}, value), snapshot ? null : action);
   return h('div', {className:'stack', 'data-key':'settings-everyday'}, h('h2', {className:'set-sub'}, 'Everyday settings'), h('div', {className:'card'},
     row('Helper', chosen ? chosen.label : 'No helper chosen yet', go('agent', 'Manage', 'settings-everyday-helper'), 'settings-everyday-helper-row'),
-    phoneAddon ? row('Phone questions', state.mobile_mode ? (state.mobile_mode.on ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Pair a phone and choose which workspaces may reach this one.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
+    phoneAddon ? row('Phone questions', state.mobile_mode ? (state.mobile_mode.on ? 'On' : 'Off') + ' · switch off after ' + state.mobile_mode.default_hours + ' h' : 'Phones are paired on your relay’s admin page.', go('phone', 'Change', 'settings-everyday-phone'), 'settings-everyday-phone-row') : null));
 }
-// Phone & workspaces (drafts settings-phone / settings-phone-pair): 1. the relay connection, 2. pairing + delivery,
+// Phone & workspaces (draft settings-phone): 1. the relay connection, 2. phones (paired on the relay admin page) + delivery,
 // then the workspaces this one may talk to. Everything comes from the relay add-on's saved connection (no network).
 function relayInfo(phoneAddon) {
   const row = array(state.settings?.addons).find(a => a.name === phoneAddon.name), d = row?.detail;
@@ -460,9 +483,11 @@ function phonePanel(phoneAddon, settings) {
       h('li', {}, 'Paste that line into a terminal in this workspace’s folder and press Enter. It starts with “orch relay connect”.'),
       h('li', {}, 'Come back here and press Check again.'))),
     settingsText('p', {className:'card-row meta'}, 'Your phone talks to this workspace through your relay.')));
-  const pair = h('div', {className:'stack', 'data-key':'phone-pair'}, h('h2', {className:'set-sub'}, '2. Pair a phone'), h('div', {className:'card'},
-    rowOf('Pairing', [settingsText('p', {}, 'Link a phone to this workspace'), connected ? null : settingsText('p', {className:'meta', 'data-key':'phone-relay-hint'}, 'First connect your relay (step 1 above). Then you can pair a phone here.')],
-      connected ? btn('Pair a phone', 'primary', 'phone-pair') : null, 'phone-pairing-row'),
+  // Phones are paired on the relay's own admin page (owner 15 Nov, prototype): no pairing from the workspace.
+  const adminHref = connected && /^https?:\/\//.test(address) ? address.replace(/\/+$/, '') + '/admin' : '';
+  const pair = h('div', {className:'stack', 'data-key':'phone-phones'}, h('h2', {className:'set-sub'}, '2. Phones'), h('div', {className:'card'},
+    rowOf('Pairing', [settingsText('p', {'data-key':'phone-pair-line'}, 'Phones are paired on your relay’s admin page.')],
+      adminHref && !snapshot ? h('a', {className:'btn sm outline', href:adminHref, target:'_blank', rel:'noopener', 'data-key':'phone-relay-admin'}, 'Open the relay admin page') : null, 'phone-pairing-row'),
     mm));
   const allowed = h('div', {className:'stack', 'data-key':'phone-allowed'}, h('div', {className:'row between'}, h('h2', {className:'set-sub'}, 'Allowed workspaces'),
     settingsText('span', {className:'meta'}, (connected ? workspaces.length : 0) + ' allowed')),
@@ -470,19 +495,6 @@ function phonePanel(phoneAddon, settings) {
       : h('div', {className:'card pad empty-note', 'data-key':'phone-allowed-empty'}, settingsText('h3', {}, 'No other workspaces yet'), settingsText('p', {className:'meta'}, 'Allow a workspace to send it messages and files.')));
   return h('div', {className:'stack', 'data-key':'settings-phone'}, relay, pair, allowed,
     h('div', {className:'row'}, h('a', {className:'btn ghost sm', href:'#addon/' + encodeURIComponent(phoneAddon.name), 'data-key':'phone-open-messages'}, 'Open messages →')));
-}
-// The pairing dialog stays inside Settings. A pairing code comes from the relay and this page has no way to ask
-// for one yet, so it shows no code (never a made-up QR), only the relay the phone would go through.
-function phonePairDialog() {
-  const phoneAddon = addons().find(a => a.dashboard?.panel === 'phone');
-  const info = phoneAddon ? relayInfo(phoneAddon) : null;
-  if (!info?.connected) return;
-  const {d, actions} = dialog('Pair a phone', 'dialog', 'settings-other');
-  actions.firstChild.textContent = 'Close';
-  d.append(settingsText('p', {className:'meta', 'data-key':'phone-pair-relay'}, 'Through your relay: ' + (info.address || 'your relay')),
-    settingsText('p', {className:'meta'}, 'Next step: open orch on your phone and choose "Add a workspace". Your relay shows the one-time code or QR code there.'),
-    settingsText('p', {className:'meta'}, 'Your phone talks to this workspace through your relay.'), actions);
-  window.orch.open(d);
 }
 async function relayReconnect(control) {
   if (control.disabled) return;
@@ -558,10 +570,9 @@ function settingsPage() {
     null);
   const detailAddon = settingsTab === 'addons' && settingsAddon ? array(settings.addons).find(a => a.name === settingsAddon && a.name !== 'dashboard') : null;
   if (detailAddon) return addonDetailPage(detailAddon);
-  return fragment(h('div', {className:'settings stack', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
+  return fragment(h('div', {className:'settings stack form-width', 'data-key':'settings-root'}, heading('Settings', 'Make ' + clean(state.workspace || 'this workspace') + ' work your way.'),
     h('div', {className:'settings-layout'}, h('nav', {className:'tabs settings-nav', role:'tablist', 'aria-label':'Settings'}, [['general', 'General'], ['agent', 'Helper'], ...(phoneAddon ? [['phone', phoneAddon.dashboard.label]] : []), ['addons', 'Add-ons'], ['about', 'About & updates']].map(([id, label]) => h('button', {type:'button', id:'settings-tab-' + id, role:'tab', 'aria-selected':settingsTab === id, 'aria-controls':'settings-panel-' + id, tabindex:settingsTab === id ? '0' : '-1', 'data-action':'settings-tab', 'data-tab':id}, label))), h('div', {className:'settings-content'},
-    panel('general', [privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
-      h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Name'), settingsText('p', {className:'grow set-ctl'}, state.workspace)),
+    panel('general', [snapshot ? null : window.OrchLook?.profileCard(), privateCard(settings), h('div', {className:'stack', 'data-key':'settings-workspace'}, h('h2', {className:'set-sub'}, 'Workspace'), h('div', {className:'card'},
       // Folder: its name plainly, Copy path, and the full path as quiet text beside it (no Details toggle).
       h('div', {className:'card-row name-row folder-row'}, h('span', {className:'set-label'}, 'Folder'), h('div', {className:'grow set-ctl'},
         settingsText('strong', {'data-key':'settings-folder-name'}, folderName(settings.folder) || state.workspace),
@@ -572,7 +583,7 @@ function settingsPage() {
       everydayCard(settings, phoneAddon),
       snapshot ? null : h('div', {className:'stack', 'data-key':'settings-about'}, h('h2', {className:'set-sub'}, 'About'), h('div', {className:'card'},
         h('div', {className:'card-row name-row'}, h('span', {className:'set-label'}, 'Style guide'), h('div', {className:'grow set-ctl'}, h('a', {className:'btn outline sm', href:'kit/gallery.html', target:'_blank', rel:'noopener', 'data-key':'settings-style-guide'}, 'Open the style guide'))))),
-      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings))]),
+      h('div', {className:'stack', 'data-key':'settings-sharing'}, h('h2', {className:'set-sub'}, 'Sharing and finished work'), shareCard(settings), workflowCard(settings), copiesCard(settings)), diagCard(settings)]),
     panel('agent', [h('p', {className:'meta'}, 'Pick the helper tool to use. It is saved right away.'), h('div', {className:'stack'}, h('div', {className:'agent-cards', role:'radiogroup', 'aria-label':'Helper tool'}, agents),
       snapshot ? null : h('div', {className:'agent-foot', 'data-key':'settings-add-slot'}, h('button', {type:'button', className:'btn ghost sm', 'data-key':'settings-add-agent', 'data-action':'agent-add'}, '+ Add your own helper'))),
       permissionsCard(settings)]),
@@ -828,6 +839,7 @@ function pageFrame(r) {
   if (skeleton) { skeleton.dataset.key = 'embed-skeleton'; frame.addEventListener('load', done, {once:true}); frame.classList.add('embed-loading'); frame.addEventListener('load', () => frame.classList.remove('embed-loading'), {once:true}); }
   // an add-on that orch did not ship gets an opaque origin: it cannot use the dashboard's session
   if (!addons().find(a => a.name === r.id)?.shipped) frame.setAttribute('sandbox', 'allow-scripts');
+  else window.DiagTrail?.watchFrame(window, frame);  // a same-origin add-on page joins the action trail
   return fragment(skeleton, frame);
 }
 const framesLoaded = new Set();
@@ -1051,8 +1063,8 @@ function repeatPlan(c) {
   }
   if (c.freq === 'monthly') {
     const day = Number(c.monthday);
-    if (!Number.isInteger(day) || day < 1 || day > 28) return {phrase:null, summary:'Choose a day from 1 to 28.', hint:''};
-    return {phrase:'monthly ' + day + ' ' + at, summary:'Runs on day ' + day + ' of every month at ' + at, hint:'Days go up to 28 so every month has them.'};
+    if (!Number.isInteger(day) || day < 1 || day > 31) return {phrase:null, summary:'Choose a day from 1 to 31.', hint:''};
+    return {phrase:'monthly ' + day + ' ' + at, summary:'Runs on day ' + day + ' of every month at ' + at, hint:day > 28 ? 'In shorter months it runs on the last day.' : ''};
   }
   const n = Number(c.every);
   if (!Number.isInteger(n) || n < 1 || n > 30) return {phrase:null, summary:'Choose between 1 and 30 days.', hint:''};
@@ -1069,7 +1081,7 @@ function cronToChoice(cron) {
   const time = String(f[1]).padStart(2, '0') + ':' + String(f[0]).padStart(2, '0'), base = {freq:'weekly', days:[1], monthday:1, every:2, time};
   if (f[2] === '*' && f[4] === '*') return {...base, freq:'daily'};
   if (f[2] === '*' && /^[0-6](,[0-6])*$/.test(f[4])) return {...base, freq:'weekly', days:f[4].split(',').map(Number)};
-  if (/^\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'monthly', monthday:Math.min(28, Number(f[2]))};
+  if (/^\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'monthly', monthday:Math.min(31, Number(f[2]))};
   if (/^\*\/\d+$/.test(f[2]) && f[4] === '*') return {...base, freq:'custom', unit:'days', every:Number(f[2].slice(2))};
   return null;
 }
@@ -1140,7 +1152,7 @@ function repeatsDialog(only = null, addonName = null) {
     }
     if (choice.freq === 'monthly') {
       const day = h('select', {className:'input', 'aria-label':'Day of month'});
-      for (let i = 1; i <= 28; i++) day.append(new Option(String(i), String(i)));
+      for (let i = 1; i <= 31; i++) day.append(new Option(i > 28 ? i + ' \u2014 or the last day in shorter months' : String(i), String(i)));
       day.value = String(choice.monthday);
       day.onchange = () => { choice.monthday = Number(day.value); refreshSummary(); };
       kids.push(row('Day of month', h('div', {className:'schedule-value'}, day, plan.hint ? hint : null)));

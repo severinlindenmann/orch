@@ -2,7 +2,7 @@
 
 ## settings.html — General
 
-- Workspace name, description and appearance come first; folder paths sit behind Details (SN-08, SN-15, SN-17; BP-49, BP-79).
+- One "Workspace profile" card comes first: name, one description (the same text goes to the relay as a proposal), tags, icon and colour; the relay rows (name on relay, waiting for relay approval / live on relay) appear only when the relay is on; folder paths sit behind Details (SN-08, SN-15, SN-17; BP-49, BP-79).
 - Phone, helper, shared links and sync are compact summaries with direct destinations (SN-08, SN-13, SN-16).
 - Advanced groups team sharing, finished-work policy and copies; edits save locally with visible feedback (SN-18; BP-48).
 - Product data: Needs rename, appearance and policy write endpoints, current helper label, share count and cache timestamps.
@@ -243,3 +243,10 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 - New tab "About & updates": installed release, newest release, "What changed" (max 5 plain lines), one Update button, steps (Downloading / Installing / Restarting / Done) and "Updated 16 → 17". Click the button to see the steps.
 
 - Owner 14 Nov (fb11/fb24): Set up relay is no longer a button/dialog; when no relay is connected the card lists the 3 plain steps (admin page, paste the orch relay connect line, Check again); Pair a phone shows only once connected.
+
+## Update 15 Nov (owner): no phone pairing from the workspace
+- Settings › Phone no longer pairs a phone or shows a QR: one line says phones are paired on the relay's admin page, with an "Open the relay admin page" link (relay address + /admin, only when connected). settings-phone-pair.html and its QR picture are removed; the pairing dialog is gone from every page copy.
+- Settings › General: Name and Description are edited in place (Edit, then Save / Cancel); each Save is one signed click.
+
+## Report a problem (diagnostics D3, 15 Nov)
+`settings.html` (General): card "Report a problem": the row "Debug log" (one switch, on by default, one click, no review) and "Saved reports" (number and time, Delete all, one click). Interim wording until the owner answers on the new noun (R4.2).

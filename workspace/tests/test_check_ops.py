@@ -765,18 +765,26 @@ def test_prompt_names_declined_steps_and_cli_strips_control_chars(proj, run, new
     assert "\x1b" not in out and "\x07" not in out
 
 
-def test_review_asks_agent_to_recheck_once_on_changed_or_failed(repo, run, new_ticket, monkeypatch):
+def test_review_on_changed_proof_goes_through_and_hints(repo, run, new_ticket, monkeypatch):
     tid = new_ticket("Export")
     run("check", "add", tid, "tests pass")
     _done_with_record(repo, run, tid, 0)
     monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
     tickets.set_status(repo, tid, "active", "agent:claude")
     (repo / "a.txt").write_text("edited\n", encoding="utf-8")  # proof is changed now
-    with pytest.raises(tickets.Refused, match="run the checks again and record them with orch check record"):
-        tickets.set_status(repo, tid, "review", "agent:claude")
-    assert tickets.load(repo, tid)["status"] == "active"
-    t = tickets.set_status(repo, tid, "review", "agent:claude")  # once: the second try goes through
+    assert tickets.recheck_hint(repo, tid, "review", "agent:claude") == tickets.RECHECK_HINT
+    t = tickets.set_status(repo, tid, "review", "agent:claude")  # no refusal
     assert t["status"] == "review" and "recheck_asked" not in t
+
+
+def test_cli_status_review_prints_the_recheck_hint(repo, run, new_ticket, monkeypatch):
+    tid = new_ticket("Export")
+    run("check", "add", tid, "tests pass")
+    _done_with_record(repo, run, tid, 1)  # failed
+    monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
+    monkeypatch.setenv("ORCH_BY", "agent:claude")
+    code, out, _ = run("ticket", "status", tid, "review")
+    assert code == 0 and "Next: Run the checks again and record them with orch check record." in out
 
 
 def test_review_recheck_also_on_failed_and_not_on_green(repo, run, new_ticket, monkeypatch):
@@ -784,18 +792,19 @@ def test_review_recheck_also_on_failed_and_not_on_green(repo, run, new_ticket, m
     run("check", "add", tid, "tests pass")
     _done_with_record(repo, run, tid, 1)  # failed
     monkeypatch.setattr(tickets, "agent_tool", lambda: "claude")
-    with pytest.raises(tickets.Refused, match="checks again"):
-        tickets.set_status(repo, tid, "review", "agent:claude")
+    assert "checks again" in tickets.recheck_hint(repo, tid, "review", "agent:claude")
     assert tickets.set_status(repo, tid, "review", "agent:claude")["status"] == "review"
     green = new_ticket("Green")
     run("check", "add", green, "ok")
     _done_with_record(repo, run, green, 0)
-    assert tickets.set_status(repo, green, "review", "agent:claude")["status"] == "review"  # no ask
+    assert tickets.set_status(repo, green, "review", "agent:claude")["status"] == "review"
+    assert tickets.recheck_hint(repo, green, "review", "agent:claude") is None  # no hint on green
     person = new_ticket("Person")
     run("check", "add", person, "ok")
     _done_with_record(repo, run, person, 1)
     monkeypatch.setattr(tickets, "agent_tool", lambda: None)
     assert tickets.set_status(repo, person, "review", "human:me")["status"] == "review"  # people never asked
+    assert tickets.recheck_hint(repo, person, "review", "human:me") is None
 
 
 def test_fresh_prompt_summary_names_writer_and_proof(repo, run, new_ticket):

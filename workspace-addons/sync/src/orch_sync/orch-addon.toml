@@ -15,4 +15,4 @@ background = true
 [dashboard]
 label = "Sync"
 subtitle = "Keep another copy of tickets and their files."
-icon = "link"
+icon = "cloud"
