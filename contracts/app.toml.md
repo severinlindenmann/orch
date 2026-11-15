@@ -4,7 +4,7 @@ Every app folder has one `app.toml` at its root. `orch publish app <folder> [--d
 Apps are temporary (default 7 days, max 90) or permanent, like files; lifetime is set at deploy, not in app.toml.
 
 ```toml
-name   = "weekly-report"          # ^[a-z0-9-]{2,40}$, becomes /a/weekly-report
+name   = "weekly-report"          # ^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$ (2-40, starts and ends with a letter or digit), becomes /a/weekly-report
 about  = "Weekly ticket report"   # one line, shown in the admin portal
 stack  = "python"                 # static | python | node | docker
 start  = "python3 main.py"         # python/node: command that starts the server; docker: optional, overrides the image CMD
@@ -53,10 +53,11 @@ The server picks one of three modes with `ORCH_PUBLISH_SANDBOX`:
 | `systemd` | One transient unit per app: own dynamic user, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `NoNewPrivileges`, `MemoryMax=256M`. Stacks static, python, node |
 | `container` | One container per app on the container engine (Kiri, Docker Engine API on `ORCH_PUBLISH_ENGINE_SOCKET`, default `/run/kiri/docker.sock`). All four stacks |
 
-Container mode, per app: own network `orch-apps`, port published on `127.0.0.1` only, memory 128 MB, 0.5 CPU, 64
-processes, read-only root with a `/tmp` tmpfs, no capabilities, `no-new-privileges`, runs as the publish server's
-user. Code at `/app` (read-only while running), data at `/data` (the only writable folder). python uses
+Container mode, per app: its own network (one per app, so apps cannot reach each other), port published on `127.0.0.1` only, memory 128 MB, 0.5 CPU, 64
+processes, read-only root with a `/tmp` tmpfs, no capabilities, `no-new-privileges`, runs as uid 61000 with the
+publish server's group. Code at `/app` (read-only while running), data at `/data` (the only writable folder). python uses
 `python:3.12-slim`, node `node:22-slim`; requirements are installed in a build step with network. Static apps run
-no process in any mode.
+no process in any mode. Listen on `$HOST`, not on a fixed `127.0.0.1`: in a container `$HOST` is `0.0.0.0` and a
+loopback-only app fails its health check.
 
 Templates to start from: `orch publish new <name> --stack static|python|node|docker --store …`.

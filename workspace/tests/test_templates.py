@@ -162,3 +162,12 @@ def test_python_template_respects_host(tmp_path, monkeypatch):
         server.server_close()
         sys.modules.pop("main", None)
         sys.modules.pop("store", None)
+
+
+def test_new_app_names_start_and_end_with_a_letter_or_digit(tmp_path):
+    for bad in ("foo-", "-foo", "a"):
+        with pytest.raises(Refused):
+            templates.create("static", "none", tmp_path / bad)
+    assert publish.DEPLOY_NAME_RE.match("a-b") and publish.DEPLOY_NAME_RE.match("ab")
+    # existing apps keep the looser rule (stop / remove still work)
+    assert publish.NAME_RE.match("foo-")

@@ -44,7 +44,7 @@ fn parse_manifest(dir: &FsPath) -> ApiResult<Manifest> {
 fn check_manifest(m: &Manifest, dir: &FsPath, docker_ok: bool) -> ApiResult<()> {
     let bad = |s: &str| Err(ApiError::invalid(format!("app.toml: {s}")));
     if !util::valid_app_name(&m.name) {
-        return bad("name must be 2-40 characters: a-z, 0-9 and -.");
+        return bad("name must be 2-40 characters: a-z, 0-9 and -, starting and ending with a letter or digit.");
     }
     if !["static", "python", "node", "docker"].contains(&m.stack.as_str()) {
         return bad("stack must be static, python, node or docker.");
@@ -194,7 +194,10 @@ async fn start_and_check(
         store: m.store.clone(),
         log: st.cfg.log_path(name),
     };
-    st.runner.spawn(key, &spec).map_err(|e| e.to_string())?;
+    st.runner
+        .spawn(key, &spec)
+        .await
+        .map_err(|e| e.to_string())?;
     let deadline = Instant::now() + Duration::from_secs(st.cfg.health_secs);
     let path = m.health.clone().unwrap_or_else(|| "/".into());
     loop {
@@ -246,8 +249,8 @@ pub async fn deploy(
                 crate::runner::remove_images(name, Some(&v)).await;
             }
         }
-        rm_tree(&vroot).await;
         st.runner.stop(&format!("{name}~new")).await;
+        rm_tree(&vroot).await;
     }
     r
 }
@@ -285,7 +288,7 @@ async fn deploy_inner(
     let container = container_mode();
     let build = match m.stack.as_str() {
         "python" if dir.join("requirements.txt").is_file() => Some(if container {
-            "python -m venv .venv && .venv/bin/pip install -r requirements.txt"
+            "python -m venv .venv && .venv/bin/pip install --no-cache-dir -r requirements.txt"
         } else {
             "uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt"
         }),
@@ -308,22 +311,26 @@ async fn deploy_inner(
         }
     }
     if let Some(b) = build {
+        let bd = dir.join(".test-data");
         let (ok, out) = run_step(
             b,
             &dir,
-            test_port,
-            &base,
-            &dir.join(".test-data"),
-            &m.store,
-            st.cfg.build_secs,
             &StepCtx {
                 app: name,
                 stack: &m.stack,
                 image: None,
                 writable: true,
+                port: test_port,
+                base_path: &base,
+                data_dir: &bd,
+                store: &m.store,
+                secs: st.cfg.build_secs,
             },
         )
         .await;
+        if m.test.is_none() {
+            rm_tree(&bd).await;
+        }
         if !ok {
             return Err(ApiError::new(
                 422,
@@ -341,18 +348,13 @@ async fn deploy_inner(
             stack: &m.stack,
             image: image.as_deref(),
             writable: false,
+            port: test_port,
+            base_path: &base,
+            data_dir: &td,
+            store: &m.store,
+            secs: st.cfg.test_secs,
         };
-        let (ok, out) = run_step(
-            t,
-            &dir,
-            test_port,
-            &base,
-            &td,
-            &m.store,
-            st.cfg.test_secs,
-            &ctx,
-        )
-        .await;
+        let (ok, out) = run_step(t, &dir, &ctx).await;
         rm_tree(&td).await;
         if !ok {
             return Err(ApiError::new(
@@ -371,7 +373,11 @@ async fn deploy_inner(
             return Err(ApiError::new(
                 422,
                 "health_failed",
-                "The app did not answer its health check. The old version is still running.",
+                if container_mode() {
+                    "The app did not answer its health check. Does the app listen on $HOST (not 127.0.0.1)? The old version is still running."
+                } else {
+                    "The app did not answer its health check. The old version is still running."
+                },
             )
             .with_output(out));
         }
@@ -449,6 +455,17 @@ pub fn app_json(st: &State, a: &AppRow) -> Value {
 /// (re)starts the stored version of an app. Caller holds app_lock.
 async fn start_existing(st: &State, a: &AppRow) -> &'static str {
     st.runner.stop(&a.name).await;
+    if a.stack == "docker" && !crate::runner::docker_apps_enabled() {
+        // keep the reason where the owner looks: the app's log
+        let _ = std::fs::write(
+            st.cfg.log_path(&a.name),
+            "This server doesn't run apps with their own Dockerfile.\n",
+        );
+        let mut row = a.clone();
+        row.status = "running".into();
+        let _ = db::put_app(&st.db.lock().unwrap(), &row, &util::now());
+        return "failed";
+    }
     let mut row = a.clone();
     row.status = "running".into();
     if a.stack != "static" {
@@ -856,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn dockerfile_with_syntax_directive_is_refused_and_names_need_alnum_edges() {
+    fn dockerfile_with_syntax_directive_is_refused() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(
             d.path().join("Dockerfile"),
@@ -864,7 +881,5 @@ mod tests {
         )
         .unwrap();
         assert!(check_manifest(&manifest("docker"), d.path(), true).is_err());
-        assert!(util::valid_app_name("a-b"));
-        assert!(!util::valid_app_name("-ab") && !util::valid_app_name("ab-"));
     }
 }

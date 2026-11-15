@@ -29,6 +29,11 @@ pub struct StepCtx<'a> {
     pub image: Option<&'a str>,
     /// code folder mounted read-write (the build step), else read-only
     pub writable: bool,
+    pub port: u16,
+    pub base_path: &'a str,
+    pub data_dir: &'a Path,
+    pub store: &'a str,
+    pub secs: u64,
 }
 
 struct Proc {
@@ -186,6 +191,13 @@ fn pick_subnet(pool: &str, used: &[String]) -> Option<String> {
         .map(|s| format!("{}/28", std::net::Ipv4Addr::from(s as u32)))
 }
 
+/// True when more than 80% of the /28 slots of `pool` are taken by `count` networks.
+fn pool_use_high(pool: &str, count: usize) -> bool {
+    parse_cidr(pool)
+        .filter(|(_, l)| *l <= 28)
+        .is_none_or(|(_, l)| count as u64 * 5 > (1u64 << (28 - l)) * 4)
+}
+
 /// (network name, subnet) of every existing per-app network (all instances).
 fn app_networks() -> Vec<(String, String)> {
     let names = docker_std()
@@ -267,7 +279,15 @@ fn ensure_network(app: &str) -> Result<(), String> {
         .is_ok_and(|o| o.status.success());
     if !exists {
         let pool = crate::config::var("APP_SUBNETS").unwrap_or_else(|| "10.213.0.0/16".into());
-        let used: Vec<String> = app_networks().into_iter().map(|(_, s)| s).collect();
+        let nets = app_networks();
+        if pool_use_high(&pool, nets.len()) {
+            tracing::warn!(
+                "orch-publish: more than 80% of the app network pool {pool} is used ({} networks); \
+                 networks are never removed (Kiri DNS bug), widen ORCH_PUBLISH_APP_SUBNETS",
+                nets.len()
+            );
+        }
+        let used: Vec<String> = nets.into_iter().map(|(_, s)| s).collect();
         let subnet = pick_subnet(&pool, &used).ok_or("no free app network left")?;
         let ok = docker_std()
             .args(["network", "create", "--subnet", &subnet, &net])
@@ -340,7 +360,16 @@ fn container_run_args(o: &RunOpts) -> Vec<String> {
     kv!("--cpus", if o.step { "1" } else { "0.5" }.into());
     kv!("--pids-limit", if o.step { "256" } else { "64" }.into());
     a.push("--read-only".into());
-    kv!("--tmpfs", "/tmp:size=32m".into());
+    // build steps compile things (sdists, node-gyp): bigger and executable
+    kv!(
+        "--tmpfs",
+        if o.step {
+            "/tmp:size=256m,exec"
+        } else {
+            "/tmp:size=32m"
+        }
+        .into()
+    );
     kv!("--cap-drop", "ALL".into());
     kv!("--security-opt", "no-new-privileges".into());
     kv!("--user", o.user.into());
@@ -519,10 +548,11 @@ pub fn check_dockerfile(text: &str) -> Result<(), &'static str> {
         .flat_map(str::chars)
         .filter(|c| !c.is_ascii_whitespace() && *c != '\\' && *c != '`')
         .collect();
-    for flag in ["--mount", "--network", "--security", "--device"] {
+    // BuildKit flags always carry `=` (so `yarn --network-timeout 600000` is fine)
+    for flag in ["--mount=", "--network=", "--security=", "--device="] {
         if lower.contains(flag) || squashed.contains(flag) {
             return Err(
-                "The Dockerfile must not use `--mount`, `--network`, `--security` or `--device`.",
+                "The Dockerfile must not use `--mount=`, `--network=`, `--security=` or `--device=`.",
             );
         }
     }
@@ -661,9 +691,23 @@ pub async fn make_deletable(dir: &Path) {
         return;
     }
     let _ = Command::from(docker_std())
-        .args(["run", "--rm", "--user", "61000", "--network", "none", "-v"])
+        .args([
+            "run",
+            "--rm",
+            "--user",
+            &app_user(),
+            "--network",
+            "none",
+            "-v",
+        ])
         .arg(format!("{}:/x", dir.display()))
-        .args([stack_image("python"), "chmod", "-R", "u+rwX", "/x"])
+        .args([
+            stack_image("python"),
+            "sh",
+            "-c",
+            // give the server's group its rights back, then delete the contents inside
+            "chmod -R ug+rwX /x; rm -rf /x/* /x/.[!.]* /x/..?*",
+        ])
         .output()
         .await;
 }
@@ -801,7 +845,7 @@ fn make_cmd(
 }
 
 impl Runner {
-    pub fn spawn(&self, name: &str, s: &Spec) -> std::io::Result<()> {
+    pub async fn spawn(&self, name: &str, s: &Spec) -> std::io::Result<()> {
         if let Some(p) = s.log.parent() {
             std::fs::create_dir_all(p)?;
         }
@@ -838,7 +882,6 @@ impl Runner {
             }
         }
         let mut cmd = if container_mode() {
-            ensure_network(name).map_err(std::io::Error::other)?;
             let live: HashSet<String> = self
                 .procs
                 .lock()
@@ -846,26 +889,34 @@ impl Runner {
                 .values()
                 .map(|p| p.unit.clone())
                 .collect();
-            let label = format!("label=orch.publish.app={}", app_of(name));
-            let inst = format!("label=orch.publish.instance={}", instance());
-            let listed = docker_std()
-                .args([
-                    "ps",
-                    "-a",
-                    "--filter",
-                    &label,
-                    "--filter",
-                    &inst,
-                    "--format",
-                    "{{.Names}}",
-                ])
-                .output()
-                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                .unwrap_or_default();
-            for n in leftover_containers(&listed, &live) {
-                let _ = docker_std().args(["rm", "-f", &n]).output();
-            }
-            group_writable_dir(&s.data_dir);
+            let (key, data) = (name.to_string(), s.data_dir.clone());
+            // blocking docker calls (network, leftovers) stay off the async workers
+            tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+                ensure_network(&key).map_err(std::io::Error::other)?;
+                let label = format!("label=orch.publish.app={}", app_of(&key));
+                let inst = format!("label=orch.publish.instance={}", instance());
+                let listed = docker_std()
+                    .args([
+                        "ps",
+                        "-a",
+                        "--filter",
+                        &label,
+                        "--filter",
+                        &inst,
+                        "--format",
+                        "{{.Names}}",
+                    ])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .unwrap_or_default();
+                for n in leftover_containers(&listed, &live) {
+                    let _ = docker_std().args(["rm", "-f", &n]).output();
+                }
+                group_writable_dir(&data);
+                Ok(())
+            })
+            .await
+            .map_err(std::io::Error::other)??;
             let script = (!s.start.is_empty()).then(|| format!("umask 002; exec {}", s.start));
             let args = container_run_args(&RunOpts {
                 name: &unit,
@@ -970,17 +1021,9 @@ async fn stop_unit(unit: &str) {
 }
 
 /// Runs `sh -c <cmd>` in `dir` and waits (build and test steps). Returns (success, output).
-#[allow(clippy::too_many_arguments)]
-pub async fn run_step(
-    cmd: &str,
-    dir: &Path,
-    port: u16,
-    base_path: &str,
-    data_dir: &Path,
-    store: &str,
-    secs: u64,
-    ctx: &StepCtx<'_>,
-) -> (bool, String) {
+pub async fn run_step(cmd: &str, dir: &Path, ctx: &StepCtx<'_>) -> (bool, String) {
+    let (port, base_path, data_dir, store, secs) =
+        (ctx.port, ctx.base_path, ctx.data_dir, ctx.store, ctx.secs);
     let _ = std::fs::create_dir_all(data_dir);
     let unit = format!("orch-step-{}", crate::util::rand_id(8));
     let container = container_mode();
@@ -1434,5 +1477,62 @@ mod tests {
         o.script = Some("./t");
         let a = container_run_args(&o);
         assert_eq!(a.last().unwrap(), "(sleep 60; kill -9 -1) & ./t");
+    }
+
+    #[test]
+    fn dockerfile_flags_need_the_equals_sign_and_the_template_passes() {
+        assert!(check_dockerfile("FROM x\nRUN yarn install --network-timeout 600000\n").is_ok());
+        assert!(check_dockerfile("FROM x\n# no --network needed\n").is_ok());
+        assert!(check_dockerfile("FROM x\nRUN --network=none true\n").is_err());
+        let t = include_str!("../../workspace/src/orch/templates/docker/Dockerfile");
+        assert!(check_dockerfile(t).is_ok());
+    }
+
+    #[test]
+    fn pool_use_warning_threshold() {
+        assert!(!pool_use_high("10.213.0.0/16", 100));
+        assert!(!pool_use_high("10.213.0.0/16", 3276));
+        assert!(pool_use_high("10.213.0.0/16", 3278));
+    }
+
+    #[test]
+    fn build_steps_get_a_big_exec_tmp() {
+        let d = PathBuf::from("/srv/code");
+        let mut o = opts("python", None, &d);
+        assert!(pair(&container_run_args(&o), "--tmpfs", "/tmp:size=32m"));
+        o.step = true;
+        assert!(pair(
+            &container_run_args(&o),
+            "--tmpfs",
+            "/tmp:size=256m,exec"
+        ));
+    }
+
+    /// Real engine: `ORCH_PUBLISH_TEST_ENGINE=1 cargo test --lib make_deletable -- --ignored`
+    #[tokio::test]
+    #[ignore]
+    async fn make_deletable_frees_trees_the_app_locked() {
+        if std::env::var("ORCH_PUBLISH_TEST_ENGINE").is_err() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        group_writable_dir(d.path());
+        let ok = Command::from(docker_std())
+            .args(["run", "--rm", "--user", &app_user(), "-v"])
+            .arg(format!("{}:/x", d.path().display()))
+            .args([
+                stack_image("python"),
+                "sh",
+                "-c",
+                "mkdir -p /x/a/b && touch /x/a/b/f && chmod 000 /x/a/b/f && chmod 500 /x/a/b /x/a",
+            ])
+            .output()
+            .await
+            .unwrap()
+            .status
+            .success();
+        assert!(ok);
+        make_deletable(d.path()).await;
+        std::fs::remove_dir_all(d.path()).unwrap();
     }
 }

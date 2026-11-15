@@ -657,3 +657,14 @@ mod head_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod name_tests {
+    use super::valid_app_name;
+
+    #[test]
+    fn app_names_start_and_end_with_a_letter_or_digit() {
+        assert!(valid_app_name("a-b") && valid_app_name("ab") && valid_app_name("a1"));
+        assert!(!valid_app_name("-ab") && !valid_app_name("ab-") && !valid_app_name("a"));
+    }
+}

@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 from orch.errors import Refused
-from orch.publish import NAME_RE
+from orch.publish import DEPLOY_NAME_RE
 
 HERE = Path(__file__).resolve().parent / "templates"
 STACKS = ("static", "python", "node", "docker")
@@ -24,8 +24,11 @@ def create(stack: str, store: str, folder: Path, name: str | None = None) -> dic
     if stack == "static" and store not in ("none", "markdown"):
         raise Refused("A static app has no server, so its store is none or markdown.")
     name = name or folder.resolve().name
-    if not NAME_RE.match(name):
-        raise Refused("The folder name becomes the app name: 2 to 40 lowercase letters, digits or dashes.")
+    if not DEPLOY_NAME_RE.match(name):
+        raise Refused(
+            "The folder name becomes the app name: 2 to 40 lowercase letters, digits or dashes, "
+            "starting and ending with a letter or digit."
+        )
     if folder.exists() and (not folder.is_dir() or any(folder.iterdir())):
         raise Refused(f"{folder} is not empty.")
     subs = {"{{name}}": name, "{{slug}}": name, "{{about}}": ABOUT, "{{store}}": store}
