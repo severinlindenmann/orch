@@ -302,7 +302,7 @@ def list_all(root: Path) -> dict:
     apps = net.items(_api(root, "GET", "/v1/apps"))
     tokens = net.read_json(_tokens_path(root), {})
     for a in apps:
-        if not a.get("public") and a["name"] in tokens:
+        if ("auth" in a and a["auth"] or "auth" not in a and not a.get("public")) and a["name"] in tokens:
             a["link"] = f"{a['url']}/?token={tokens[a['name']]}"
     return {"files": files, "apps": apps}
 
@@ -373,9 +373,7 @@ def view(root: Path) -> dict:
     apps = [
         {
             "title": _plain(a["name"]),
-            "subtitle": _plain(
-                f"{a['status']}, {'public' if a['public'] else 'private'}, {_exp(a['expires_at'])}"
-            ),
+            "subtitle": _plain(f"{a['status']}, {describe(a)}, {_exp(a['expires_at'])}"),
             **({"link": a["url"]} if str(a.get("url", "")).startswith("https://") else {}),
         }
         for a in r["apps"]
@@ -465,8 +463,26 @@ def read_manifest(folder: Path) -> dict:
     return m
 
 
-def pack(folder: Path, public: bool | None) -> bytes:
-    """tar.gz of the folder. `public` overrides the public line of app.toml (None keeps it)."""
+def _set_line(text: str, key: str, value: str) -> str:
+    """Replace the `key = ...` line of a manifest, else add one."""
+    line = f"{key} = {value}"
+    if re.search(rf"(?m)^{key}\s*=", text):
+        return re.sub(rf"(?m)^{key}\s*=.*$", line, text)
+    return text.rstrip("\n") + "\n" + line + "\n"
+
+
+def _override(text: str, reach: str | None, auth: bool | None) -> str:
+    if reach is not None:
+        text = _set_line(text, "reach", f'"{reach}"')
+    if auth is not None:
+        # the server refuses `public` together with `auth`: the older line goes
+        text = re.sub(r"(?m)^public\s*=.*\n?", "", text)
+        text = _set_line(text, "auth", "true" if auth else "false")
+    return text
+
+
+def pack(folder: Path, reach: str | None = None, auth: bool | None = None) -> bytes:
+    """tar.gz of the folder. `reach` ("public" | "private") and `auth` override app.toml (None keeps it)."""
     if (folder / ".orch").exists():
         raise Refused("This folder is the workspace root. Publish an app folder inside it.")
     buf = io.BytesIO()
@@ -478,15 +494,8 @@ def pack(folder: Path, public: bool | None) -> bytes:
                 rel = p.relative_to(folder).as_posix()
                 if p.is_symlink() or f in SKIP_DIRS or f.startswith(".") or not p.is_file():
                     continue
-                if rel == "app.toml" and public is not None:
-                    text = p.read_text(encoding="utf-8")
-                    line = f"public = {'true' if public else 'false'}"
-                    text = (
-                        re.sub(r"(?m)^public\s*=.*$", line, text)
-                        if re.search(r"(?m)^public\s*=", text)
-                        else text.rstrip("\n") + "\n" + line + "\n"
-                    )
-                    raw = text.encode("utf-8")
+                if rel == "app.toml" and (reach is not None or auth is not None):
+                    raw = _override(p.read_text(encoding="utf-8"), reach, auth).encode("utf-8")
                     info = tarfile.TarInfo(rel)
                     info.size = len(raw)
                     tar.addfile(info, io.BytesIO(raw))
@@ -498,19 +507,44 @@ def pack(folder: Path, public: bool | None) -> bytes:
     return data
 
 
+def manifest_auth(m: dict) -> bool:
+    """auth of a manifest: `auth`, else the older `public` (public = no auth), else true."""
+    if "auth" in m:
+        return bool(m["auth"])
+    return not m["public"] if "public" in m else True
+
+
+def describe(a: dict) -> str:
+    """Plain words for an app: where it can be reached and whether it needs the link.
+
+    An older server sends only `public`: that means reach public, auth = not public."""
+    private = a.get("reach") == "private"
+    auth = bool(a["auth"]) if "auth" in a else not a.get("public", False)
+    return f"{'private network' if private else 'public'}, {'needs link' if auth else 'open'}"
+
+
 def deploy(
-    root: Path, folder: Path, days: int | None, permanent: bool, public: bool | None, new_token: bool
+    root: Path,
+    folder: Path,
+    days: int | None,
+    permanent: bool,
+    reach: str | None,
+    auth: bool | None,
+    new_token: bool,
 ) -> dict:
     m = read_manifest(folder)
     q = [x for x in (_life(days, permanent), "new_token=1" if new_token else "") if x]
-    res = _api(root, "PUT", f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""), pack(folder, public))
-    is_public = public if public is not None else bool(m.get("public", False))
-    res["private"] = not is_public
+    res = _api(
+        root, "PUT", f"/v1/apps/{m['name']}" + (f"?{'&'.join(q)}" if q else ""), pack(folder, reach, auth)
+    )
+    needs_link = auth if auth is not None else manifest_auth(m)
+    res.setdefault("reach", reach or m.get("reach", "public"))
+    res["auth"] = needs_link
     tokens = net.read_json(_tokens_path(root), {})
     if res.get("view_token"):
         tokens[m["name"]] = res["view_token"]
         net.write_json(_tokens_path(root), tokens, True)
-    if is_public:
+    if not needs_link:
         res["link"] = res["url"]
     elif tokens.get(m["name"]):
         res["link"] = f"{res['url']}/?token={tokens[m['name']]}"

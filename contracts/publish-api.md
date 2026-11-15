@@ -11,7 +11,7 @@ Authorization: Bearer orp_<43 chars>
 ```
 
 Wrong or missing → `401`. Right token but no right for this action → `403`. A workspace only sees and changes its own files and apps (others → `404`).
-Rights per workspace (set by the admin): `files` (temporary files), `apps` (temporary apps), `permanent` (may make files and apps permanent), `public` (may make public apps; without it apps are private only).
+Rights per workspace (set by the admin): `files` (temporary files), `apps` (temporary apps), `permanent` (may make files and apps permanent), `public` (may make apps with `reach = "public"` and `auth = false`, i.e. open on the internet; without it such apps are refused. Private-network apps without auth need no extra right).
 
 ## Workspace API
 
@@ -25,14 +25,22 @@ Rights per workspace (set by the admin): `files` (temporary files), `apps` (temp
 | DELETE | `/v1/files/<id>` | – | `204` |
 | PATCH | `/v1/files/<id>` | `{days}` (1–90) | `200 {id, expires_at\|null}`. New expiry = now + days, never earlier than the current one; a permanent file stays permanent. Needs the `files` right. An expired file → `410` (never revived); other workspace's file → `404`. Bad `days` → `422` |
 | PUT | `/v1/files/<id>` | body = encrypted blob (as POST) | `200 {id, url, size, expires_at\|null}`. Swaps the blob behind the same id and expiry (same OPF1 check and size cap). Needs the `files` right. Expired → `410`; other workspace's file → `404` |
-| PUT | `/v1/apps/<name>?days=7` or `?permanent=1` | body = `.tar.gz` of the app folder (has `app.toml`), max 100 MB | `200 {name, url, status, expires_at\|null, view_token\|null}`. Runs `test`, starts, checks `health`. On failure the old version keeps running: `422 test_failed\|health_failed` with `output`. A redeploy keeps the existing `view_token` unless `?new_token=1` |
-| GET | `/v1/apps` | – | list of `{name, stack, store, public, status: running\|stopped\|failed, awake: bool, url, expires_at, updated_at}`; `awake` is false while an idle app sleeps (container mode, status stays `running`, it starts on the next request) |
+| PUT | `/v1/apps/<name>?days=7` or `?permanent=1` | body = `.tar.gz` of the app folder (has `app.toml`), max 100 MB | `200 {name, url, status, expires_at\|null, view_token\|null}` (`url` on the private-network address when `reach = "private"`). Runs `test`, starts, checks `health`. On failure the old version keeps running: `422 test_failed\|health_failed` with `output`. A redeploy keeps the existing `view_token` unless `?new_token=1` |
+| GET | `/v1/apps` | – | list of `{name, stack, store, reach: public\|private, auth: bool, public, status: running\|stopped\|failed, awake: bool, url, expires_at, updated_at}`; `public` = `!auth` (kept for older clients); `url` is on the private-network address when `reach = "private"`; `awake` is false while an idle app sleeps (container mode, status stays `running`, it starts on the next request) |
 | POST | `/v1/apps/<name>/restart` | – | `200 {name, status}` |
 | POST | `/v1/apps/<name>/stop` | – | `200 {name, status}` |
 | DELETE | `/v1/apps/<name>` | – | `204` (code and data are removed) |
 
-`<name>`: `^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$` (2-40, starts and ends with a letter or digit; checked on deploy only), unique on the server (first workspace wins). `view_token` is set when `public = false`.
+`<name>`: `^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$` (2-40, starts and ends with a letter or digit; checked on deploy only), unique on the server (first workspace wins). `view_token` is set when `auth = true`.
 Expired apps are stopped and removed by the hourly sweep, like files.
+
+## Private-network listener
+
+Optional third listener `ORCH_PUBLISH_PRIVATE_LISTEN` (e.g. `<private-network IP>:80`) with its address
+`ORCH_PUBLISH_PRIVATE_URL` (e.g. `http://publish-vps.office.internal`). It must have no public proxy route. It serves only
+`/a/<name>/...` of apps with `reach = "private"` (same auth rules as below, cookie without `Secure` when the URL is `http`),
+the page assets under `/_/` and `/health`. Everything else, including public-reach apps, answers `404` there. Both settings
+are set together or not at all.
 
 ## Public routes (no workspace auth)
 
@@ -43,7 +51,7 @@ Expired apps are stopped and removed by the hourly sweep, like files.
 | GET | `/_/favicon.svg`, `/_/apple-touch-icon.png` | The blue orch publish icon (also on the admin listener) |
 | GET | `/f/<id>/meta` | `{workspace: {name, icon, color} \| null}` for the file page header: the sharing workspace's name and look while its `show_on_shared_pages` is on, else `workspace: null` (and the page shows only the orch logo). `404` / `410` as for the blob. Headers `Cache-Control: no-store`, `Referrer-Policy: no-referrer`. The page inserts `name` as text on the client (`textContent`); the server never renders it into the HTML, the title or preview/meta tags (vectors/look-v1.json `meta`) |
 | GET | `/f/<id>/blob` | The encrypted blob (`application/octet-stream`). `404` / `410` when gone |
-| ANY | `/a/<name>/...` | The app. Private apps need `?token=<view_token>` once; the server sets a cookie (HttpOnly, SameSite=Lax, path `/a/<name>/`) and redirects without the token. No token → small "This app is private" page (`401`) |
+| ANY | `/a/<name>/...` | The app (only apps with `reach = "public"`; a private-reach app answers here exactly like a missing app). Apps with `auth = true` need `?token=<view_token>` once; the server sets a cookie (HttpOnly, SameSite=Lax, path `/a/<name>/`) and redirects without the token. No token → small "This app is private" page (`401`) |
 | GET | `/onboarding.sh`, `/onboarding.ps1` | Small scripts: install orch if missing, then `orch addon add publish --yes` and `orch publish connect` (below) |
 | GET | `/health` | `200 ok` |
 
