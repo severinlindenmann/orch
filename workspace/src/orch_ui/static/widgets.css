@@ -474,9 +474,6 @@ dialog.report-dialog .actions{margin-top:12px}
 .bar-row .progress{height:8px}
 .bar-row .progress span{background:var(--brand)}
 .bar-row.secondary .progress span{background:var(--info)}
-.data-table td{padding-top:12px;padding-bottom:12px}
-.data-table td .subline{margin-top:2px}
-.subline{display:block;font-size:12px;line-height:16px;color:var(--text-faint);margin-top:4px}
 .footnote{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;color:var(--text-faint);font-size:12px}
 .note{font-size:12px;color:var(--text-muted)}
 .locked{color:var(--text-muted)}
@@ -497,8 +494,5 @@ dialog.report-dialog .actions{margin-top:12px}
 .context-card h2{font-size:14px;line-height:20px}
 .context-card hr{width:100%;border:0;border-top:1px solid var(--border);margin:0}
 .set-block{padding:24px;display:grid;gap:12px}
-.ticket-line{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:12px 24px;border-top:1px solid var(--border)}
-.ticket-line .name{font-weight:500}
 @media(min-width:1600px){.chart-stage{height:220px}.metric{padding:24px}}
-@media(max-width:950px){.data-table{font-size:12px}}
 @media(max-width:600px){.settings-row{flex-direction:column;align-items:flex-start;gap:12px;padding:16px}}
