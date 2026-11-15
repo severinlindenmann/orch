@@ -48,6 +48,10 @@ if args[:2] == ["ticket", "new"]:
         "parent": flag("--parent") if "--parent" in args else None,
         "history": [],
     }
+    # ---- #816 A (ask another workspace): `--ext factory=<json>` is written with the ticket
+    if "--ext" in args:
+        addon, _, raw = args[args.index("--ext") + 1].partition("=")
+        t["ext"][addon] = json.loads(raw)
     gate = next((a.split("=", 1)[1] for a in args if a.startswith("--start-requires=")), None)
     if gate:  # core's start gate: "<ticket>:<question>=<answer>"
         g_ticket, rest = gate.split(":", 1)
@@ -69,6 +73,67 @@ elif args[:2] == ["ext", "set"]:
     t["revision"] += 1
     save(t)
     result = t
+# ---- #816 A (ask another workspace): the core commands ask.py uses. Part B appends its own block below.
+elif args[:2] == ["secret", "scan"]:
+    data = sys.stdin.buffer.read()
+    if b"SECRET" in data:
+        print(
+            json.dumps(
+                {
+                    "error": "The text has a secret on line 1.",
+                    "code": "refused",
+                    "found": [{"kind": "k", "line": 1}],
+                }
+            )
+        )
+        sys.exit(2)
+    result = {"found": []}
+elif args[:2] == ["ticket", "summary"]:
+    t = load(args[2])
+    t["summary"] = args[3]
+    save(t)
+    result = t
+elif args[:2] == ["check", "add"]:
+    t = load(args[2])
+    t.setdefault("checklist", []).append({"text": args[3], "done": False})
+    save(t)
+    result = t
+elif args[:2] == ["ticket", "attach"]:
+    name = args[3].split("=", 1)[1] if args[3].startswith("--name=") else args[3]
+    target = root / "fake-attach" / args[2]
+    target.mkdir(parents=True, exist_ok=True)
+    (target / name).write_bytes(sys.stdin.buffer.read())
+    result = {"name": name, "size": 1, "path": f"fake-attach/{args[2]}/{name}"}
+elif args[:2] == ["ticket", "status"]:
+    t = load(args[2])
+    t["status"] = args[3]
+    save(t)
+    result = t
+elif args[:3] == ["relay", "group", "add"]:
+    if (root / "fail-group").exists():
+        print(json.dumps({"error": "Design is no longer connected to you.", "code": "refused"}))
+        sys.exit(2)
+    result = {"added": True}
+elif args[:3] == ["relay", "group", "share"]:
+    assert "--click" in args
+    result = {"group": "g1"}
+elif args[:3] == ["relay", "group", "ask"]:
+    if (root / "kept-ask").exists():
+        print(
+            json.dumps(
+                {
+                    "error": "The question could not be sent now. It is kept and goes out with the next relay command.",
+                    "code": "refused",
+                }
+            )
+        )
+        sys.exit(2)
+    result = {"id": "m1"}
+elif args[:2] == ["relay", "outbox"]:
+    result = {
+        "waiting": json.loads((root / "outbox.json").read_text()) if (root / "outbox.json").exists() else []
+    }
+# ---- end #816 A
 elif args[0] == "ask":
     if (root / "fail-ask").exists():
         print(json.dumps({"error": "Ask unavailable.", "code": "not_available"}))
@@ -87,8 +152,8 @@ elif args[0] == "ask":
         result = {
             "id": f"q{len(t['questions']) + 1}",
             "text": args[2],
-            "kind": flag("--kind"),
-            "action": json.loads(flag("--action")),
+            "kind": flag("--kind") if "--kind" in args else None,  # no kind: an information question (#816 A)
+            "action": json.loads(flag("--action")) if "--action" in args else None,
             "options": options,
             "answer": None,
             "answered_by": None,

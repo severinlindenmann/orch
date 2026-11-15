@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime
 
-from . import authority, autopilot, commands, irreversible, measure, orchcli
+from . import ask, authority, autopilot, commands, irreversible, measure, orchcli
 from .render import clean
 from .store import Refused, Store, clock, digest, validate
 
@@ -444,6 +444,7 @@ def next_step(root, order):
                 store.journal_append(
                     {"type": "stop-answered", "order": order, "q": q["id"], "answer": answer, "by": by}
                 )
+                ask.close_for_stop(root, tickets, order, e["n"])
         d["rows"] = [r for r in store.journal_read() if r["order"] == order]
         if d["kind"] == "autopilot":
             d["grant_valid"] = any(clock() < g["until"] for g in autopilot.grants_of(store, ticket))
@@ -665,7 +666,7 @@ def reconcile(root):
                 item["problems"].append("The cache says started but no person pressed Start.")
             known = {x["id"] for x in d["crew"].values()}
             for c in tickets:
-                if c.get("parent") == t["id"] and c["id"] not in known:
+                if c.get("parent") == t["id"] and c["id"] not in known and ask._x(c).get("role") != "ask":
                     item["problems"].append(
                         f"Sub-ticket {c['id']} is not a crew ticket of the approved tasks."
                     )

@@ -9,7 +9,7 @@ import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import authority, autopilot, flow, orchcli, service
+from . import ask, authority, autopilot, flow, orchcli, service
 from .render import clean
 from .store import Refused, Store, clock, no_links
 
@@ -305,8 +305,10 @@ def _tiny(d):
     return out
 
 
-def _stops(d):
+def _stops(d, root=None, tickets=()):
     out = []
+    outbox = None
+    named = ask.names(root) if root is not None else {}
     for e in sorted((e for e in d["ents"] if e["row"]["kind"] == "factory:stop"), key=lambda e: e["n"]):
         eff = d["effective"](e)
         if eff:
@@ -315,6 +317,10 @@ def _stops(d):
             state, answer, by = "ignored", None, authority.who(e["q"]) or None
         else:
             state, answer, by = "open", None, None
+        asks = ask.view(root, tickets, d["tid"], e["n"], named, outbox) if root is not None else []
+        if any(a["state"] == "queued" for a in asks) and outbox is None:
+            outbox = _outbox(root)  # one look at what waits to be sent, only when an ask says it is queued
+            asks = ask.view(root, tickets, d["tid"], e["n"], named, outbox)
         out.append(
             {
                 "n": e["n"],
@@ -323,9 +329,33 @@ def _stops(d):
                 "state": state,
                 "answer": answer,
                 "by": by,
+                "asks": asks,
+                "autopilot_waits": state == "open"
+                and any(a["state"] != "failed" and a["state"] != "closed" for a in asks),
             }
         )
     return out
+
+
+def _outbox(root):
+    try:
+        return orchcli.call(root, "relay", "outbox").get("waiting") or []
+    except Refused:
+        return []
+
+
+def reach(root):
+    """Workspaces a stop may be shared with (empty when the relay is off, so the page shows no button)."""
+    return ask.reach(root)
+
+
+def scan(root, order_id, n):
+    if not ORDER_ID.fullmatch(order_id):
+        return None
+    try:
+        return ask.scan_stop(root, order_id, n)
+    except Refused:
+        return None
 
 
 def _changes(d):
@@ -393,7 +423,7 @@ def order(root, order_id):
         "crew": _crew(d),
         "changes": _changes(d),
         "tiny": _tiny(d),
-        "stops": _stops(d),
+        "stops": _stops(d, root, tickets),
         "activity": _activity(ticket),
     }
 
