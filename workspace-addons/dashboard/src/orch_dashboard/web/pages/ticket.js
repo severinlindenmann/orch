@@ -556,7 +556,7 @@ function ticketFileEntries(t) {
 }
 function fileEntry(t, group, file) {
   const kind = viewerKind(file.name);
-  const role = group.kind === 'evidence' ? 'Evidence' : 'Result', task = group.kind === 'evidence' ? group.label : '';
+  const role = group.kind === 'evidence' ? 'Proof' : 'Result', task = group.kind === 'evidence' ? group.label : '';
   const at = file.mtime ? createdText(file.mtime) : '';
   return {tid:t.id, kind:group.kind, name:file.name, size:file.size, mtime:file.mtime || '', fileKind:kind, role, task, created:at,
     title:fileTitle(file.name),
@@ -923,7 +923,7 @@ function ticketBringBackRow(t) {
     render();
   }) : null;
   return h('section', {className:'card attention decision bring-back-card', 'data-key':'bring-back'},
-    h('p', {className:'meta'}, 'Approval needed'), h('h2', {}, 'Changes to add'), h('p', {className:'muted'}, clean(b.reason)),
+    h('p', {className:'meta'}, 'Needs you'), h('h2', {}, 'Changes to add'), h('p', {className:'muted'}, clean(b.reason)),
     h('div', {className:'actions'}, add, review, keep, ask));
 }
 const ticketHistoryTechnical = false;

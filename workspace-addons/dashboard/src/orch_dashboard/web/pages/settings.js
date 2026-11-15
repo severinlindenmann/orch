@@ -1120,7 +1120,7 @@ function repeatsDialog(only = null, addonName = null) {
     try { result = await Promise.race([act('addon.act', {addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase}), late]); }
     catch (err) { result = {ok:false, text:'That did not work. Try again.'}; }
     finally { clearTimeout(timer); save.disabled = false; save.textContent = label; }
-    window.orch.toast(result.ok ? 'Schedule saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Repeat saved.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     if (result.ok) await window.orch.close(d);  // close first: the list below refreshes right after
     if (route().kind === 'addon') await loadAddon(route().id);
   });
@@ -1190,7 +1190,7 @@ function repeatsDialog(only = null, addonName = null) {
     remove.disabled = true;
     const label = remove.textContent; remove.textContent = 'Removing…';
     const result = await act('addon.act', {addon:addonName || route().id, verb:'delete', target:only});
-    window.orch.toast(result.ok ? 'Schedule removed. Its tickets stay.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
+    window.orch.toast(result.ok ? 'Repeat removed. Its tickets stay.' : result.text || 'That did not work.', result.ok ? 'ok' : 'error');
     remove.disabled = false; remove.textContent = label;
     if (result.ok) await window.orch.close(d);
     if (route().kind === 'addon') await loadAddon(route().id);
