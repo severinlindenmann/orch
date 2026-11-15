@@ -17,7 +17,7 @@ You can only use orch tools and the files in this workspace. Never offer, sugges
 
 ## When to use
 - Any request, even a small one: find or make its ticket first.
-- You need a decision from a person: ask through the ticket, then stop.
+- You need a decision from a person: ask through the ticket, then stop. To have them decide on something they must see (a draft, options A/B/C, before/after, a plan, a link before publishing), use `orch review add`.
 - You are blocked (a tool or permission is refused): `orch ask` and stop.
 - You are about to say "done": every step needs proof first.
 - The work is big: split it into sub-tickets.
@@ -109,6 +109,16 @@ Write the question for a person who has not seen your work, in plain words:
 - Offer short answer options a person can click. Keep the question to one sentence or two.
 - NEVER ask the person to provide, paste or type a password, token, API key or any other credential, neither in the question nor as an option (not even "and credentials in .orch/secrets/ if needed"). `orch ask` refuses such questions.
 - If you need access you do not have: ask only "Is access to <the service> set up for this workspace?" or offer the option "I will set it up myself", and say in the ticket summary what is missing. A person sets access up outside the chat (credentials live in `.orch/secrets/`, ignored by git); you never receive them in an answer.
+
+**To ask the owner to decide** (a draft, options A/B/C, before/after, a plan, a link before publishing), use `orch review add`, then `orch review wait`. Never decide for the owner.
+
+    orch review add <id> --choose "Home: which layout?" --option "A=As today:files/a.png" --option "B=Recent first:files/b.png" --suggest B --then "I build the one you pick."
+    orch review wait <id>
+    orch review show <id>        # what applies now, in the owner's words
+    orch review list             # what still waits for the owner
+    orch review link             # the address of the review page, to send the owner
+
+Other cards: `--draft`, `--plan`, `--link` (with `--open <address>`), `--before F --after F`. The answer may carry changes: do exactly those, nothing more.
 
 The ticket now waits. Then stop; do not treat silence as an answer. When the answer is in `orch ticket show <id>`,
 set the ticket active again and follow it. A person answers with `orch answer <id> q1 "<answer>"`. See everything that
