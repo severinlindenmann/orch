@@ -1,4 +1,4 @@
-// The helper's screen in the dashboard: watch it above the message box or in the Screen tab; typing only with "Let me type" (fb17, #692).
+// The helper's screen in the dashboard: watch it above the message box or in the Screen tab; typing only with "Let me type" (fb17).
 // A small renderer for the screen text tmux hands over (colours, bold, reverse, cursor); textContent only.
 // Reading is open to the dashboard page; typing is for the person's dashboard session (the server decides).
 (function () {

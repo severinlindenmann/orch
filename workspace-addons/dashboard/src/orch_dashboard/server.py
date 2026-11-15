@@ -170,10 +170,7 @@ def _typing_allowed(root) -> bool:
     """[focus] session_typing, a plain setting (off unless the workspace turned it on)."""
     from orch import config
 
-    try:
-        return bool(config.focus_session_typing(root))
-    except Exception:  # an unreadable config counts as off
-        return False
+    return bool(config.focus_session_typing(root))  # an unreadable config file counts as off (the default)
 
 
 def _link_msg(session, name: str) -> bytes:

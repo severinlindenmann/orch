@@ -255,7 +255,10 @@ def test_typing_is_refused_server_side_when_the_setting_is_off(helper, tmp_path)
         assert code == 200 and json.loads(body)["typing_allowed"] is False
         code, text = post(base, [{"t": "nope"}, {"k": "Enter"}])
         assert code == 403
-        assert text.decode() == "Typing into the helper's screen is off. Turn on 'Let me type' in Settings to allow it."
+        assert (
+            text.decode()
+            == "Typing into the helper's screen is off. Turn on 'Let me type' in Settings to allow it."
+        )
         typing_on(tmp_path, False)
         assert post(base, [{"k": "Enter"}])[0] == 403
         typing_on(tmp_path)  # turned on: the same call goes through, and the answer says so
