@@ -541,8 +541,3 @@ iframe.embed.embed-loading{position:absolute;width:1px;height:1px;min-height:0;o
 .mm-bar.live .grow,body.mobile-mode-on .mm-bar.live .grow{align-items:baseline;align-content:center}
 .mm-bar.live .mm-phone{align-self:center}
 
-/* Phone mode banner (UX round 15 Nov): only for the first-click ask, the ended notice and the last five minutes; centred.
-   While phone mode is on, the chip in the top bar (master .topbar-chip) says so. */
-.mm-bar.banner{text-align:center;justify-content:center}
-.mm-bar .mm-actions{justify-content:center}
-body.mobile-mode-on .mm-bar.live,body.mobile-mode-on .mm-bar.live .grow,.mm-bar.live .grow{justify-content:center;text-align:center}

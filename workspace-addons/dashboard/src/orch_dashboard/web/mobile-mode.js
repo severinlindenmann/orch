@@ -73,7 +73,7 @@
     if (mm.on) {
       // Only the last five minutes bring the banner back; otherwise the chip is all there is.
       if (endsSoon()) {
-        bar.className = 'mm-bar banner live attn';
+        bar.className = 'mm-bar banner live attn center';
         bar.setAttribute('data-testid', 'mobile-mode-soon');
         const more = longer();
         bar.append(node('div', {className: 'grow'}, node('b', {}, 'Phone mode ends in 5 minutes'), node('span', {className: 'mm-desc'}, 'Questions then stay on this computer.')),
@@ -81,17 +81,17 @@
         bar.hidden = false;
       } else bar.hidden = true;
     } else if (asking) {
-      bar.className = 'mm-bar banner';
+      bar.className = 'mm-bar banner center';
       bar.setAttribute('data-testid', 'mobile-mode-ask');
       const dont = node('input', {type: 'checkbox', id: 'mm-dont', 'data-testid': 'mobile-mode-dont-ask'});
       bar.append(node('div', {className: 'grow'},
         node('h3', {}, 'Send questions to your phone?'),
         node('p', {className: 'meta'}, 'Questions from your helpers also go to your phone, and this computer stays awake until you turn it off. Closing the lid of a laptop still puts it to sleep.'),
-        node('div', {className: 'mm-actions'}, btn('Turn on', 'primary sm', 'confirm', 'mobile-mode-confirm'), btn('Cancel', 'ghost sm', 'cancel', 'mobile-mode-cancel'),
+        node('div', {className: 'mm-actions actions'}, btn('Turn on', 'primary sm', 'confirm', 'mobile-mode-confirm'), btn('Cancel', 'ghost sm', 'cancel', 'mobile-mode-cancel'),
           node('label', {className: 'mm-chk', for: 'mm-dont'}, dont, "Don't ask again"))));
       bar.hidden = false;
     } else if (mm.ended && mm.ended.text) {
-      bar.className = 'mm-bar banner';
+      bar.className = 'mm-bar banner center';
       bar.setAttribute('data-testid', 'mobile-mode-ended');
       bar.append(node('div', {className: 'grow'}, mm.ended.text), btn('OK', 'outline sm', 'ack', 'mobile-mode-ended-ok'));
       bar.hidden = false;

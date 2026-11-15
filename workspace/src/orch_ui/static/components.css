@@ -286,6 +286,7 @@ progress::-moz-progress-bar{background:var(--brand)}
 .banner.error{border-left:2px solid var(--danger)}
 .banner.success{border-left:2px solid var(--success)}
 .banner.info{border-left:2px solid var(--info)}
+.banner.center,.banner.center .grow,.banner.center .actions{justify-content:center;text-align:center}
 .banner p{color:var(--text-muted)}
 .banner h3+p,.banner b+p,.banner strong+p{margin-top:4px}
 .skeleton{display:block;position:relative;overflow:hidden;background:var(--surface-3);border-radius:4px;min-height:16px}
