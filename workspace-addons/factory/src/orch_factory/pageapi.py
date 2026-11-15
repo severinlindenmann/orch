@@ -127,7 +127,16 @@ def _summary(ticket, d):
         "due": (proposal or {}).get("due"),
         "open": open_,
         "owner_min": ((proposal or {}).get("time") or {}).get("owner_min"),
+        # an agent works on the order now (core: Working while a run is on it, Ready again when it ends)
+        "working": ticket.get("status") == "active",
+        "draft_v": _draft_v(ticket),
     }
+
+
+def _draft_v(ticket):
+    """The newest draft version (from the ext cache; only used for a link, the draft itself is read from its file)."""
+    v = ((ticket.get("ext") or {}).get("factory") or {}).get("draft")
+    return v if type(v) is int and v > 0 else None
 
 
 def _broken(ticket, error):
@@ -143,6 +152,8 @@ def _broken(ticket, error):
         "due": None,
         "open": None,
         "owner_min": None,
+        "working": False,
+        "draft_v": None,
         "problem": _text(str(error), 200),
     }
 
