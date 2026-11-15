@@ -193,7 +193,12 @@ class Handler(BaseHTTPRequestHandler):
         if not diag:
             return
         diag.new_trace(self.headers.get("traceparent"))
-        diag.log("dashboard.request", "debug", method=getattr(self, "command", ""), path=self.path.split("?", 1)[0][:200])
+        diag.log(
+            "dashboard.request",
+            "debug",
+            method=getattr(self, "command", ""),
+            path=self.path.split("?", 1)[0][:200],
+        )
 
     def log_message(self, *a):  # quiet
         pass
