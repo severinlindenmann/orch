@@ -2369,7 +2369,7 @@ def note_answer_refused(root: Path, asked: dict, m: dict, why: str) -> None:
     from orch import diag
 
     frm = str(m.get("from"))
-    short = clean_untrusted(why, 200)
+    short = clean_untrusted(why.removeprefix("not applied: "), 200)
     with contextlib.suppress(Refused, OSError, KeyError, TypeError, ValueError):
         g = _load(root)["hosted"].get(asked.get("group"))
         ok = g is not None and not g["closed"] and frm in _active(g)
@@ -2386,6 +2386,9 @@ def note_answer_refused(root: Path, asked: dict, m: dict, why: str) -> None:
         line = f"Answer from {_line(frm, 60)} to {_line(str(asked['question_id']), 20)} not applied: {short}"
 
         def add(t):
+            q2 = next((x for x in t["questions"] if x["id"] == asked["question_id"]), None)
+            if q2 is None or q2.get("answer") is not None:  # answered meanwhile: nothing to say
+                return
             if any(h.get("text") == line for h in t.get("history", [])):  # once per question and sender
                 return
             tickets.add_history(t, who, line, "relay")
