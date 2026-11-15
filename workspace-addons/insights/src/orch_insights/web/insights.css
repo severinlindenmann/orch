@@ -40,6 +40,16 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .loading-mask .progress,.loading-mask .chart-message{visibility:hidden}
 .loading-mask .chart-stage{background:var(--surface-3)}
 .loading-mask td{border-color:transparent}
+/* Check-up card (master card, card-h, card-row, badge, chip, switch; only the row layout is local) */
+.checkup-head{gap:16px}
+.checkup-head .grow{display:grid;gap:2px}
+.checkup-weekly{gap:8px;font-size:13px;cursor:pointer}
+.checkup-row .grow h3{font-size:14px}
+.checkup-row .grow p{margin-top:2px}
+.checkup-code{margin:0;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);font-size:12px;line-height:16px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+.checkup-code.before{opacity:.7}
+.checkup-change summary{cursor:pointer;color:var(--text-muted);font-size:13px;padding:4px 0}
+.checkup-buttons{justify-content:flex-end;margin-top:16px}
 /* Settings */
 .settings-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:24px;align-items:start}
 .settings-row{display:flex;gap:32px;align-items:center;justify-content:space-between;padding:24px;border-bottom:1px solid var(--border)}

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -38,7 +39,18 @@ MESSAGES = {
     "not_available": NOT_READ,
     "tampered": NOT_READ,
     "not_allowed": "This was refused.",
+    "stale": "The skill changed since this was suggested. Run a new check-up.",
+    "not_tested": "Test it first.",
+    "admin_only": "Shared by your admin: ask your admin.",
+    "conflict": "Changed since it was applied. Nothing was rolled back.",
+    "not_supported": "Check-up needs Claude as the agent for now.",
 }
+PROPOSAL = re.compile(r"pr_[a-z0-9]{8,16}")  # contracts/proposal.schema.json `id`
+HASH = re.compile(r"[0-9a-f]{64}")  # `hash` of `checkup show`: sha256 hex
+CHECKUP_STATES = ("proposed", "tested", "accepted", "rolled_back", "rejected", "sent_to_admin", "stale")
+CHECKUP_TIMEOUT = "That took too long. Reload to see where it stands."
+TEST_TIMEOUT = 45  # a test replays a few cases in a copy; one overall deadline covers the retry
+
 SHARING_LOCKS = {
     "off_by_admin": "Switched off by your admin.",
     "not_connected": "Not connected to an admin.",
@@ -106,7 +118,44 @@ def _delete_detail(args):
     return ["record", "delete-detail", ticket, "--json"]
 
 
-OPS = {"settings.set": _settings_set, "record.delete_detail": _delete_detail}
+def _proposal_id(args):
+    _only(args, ("id",))
+    pid = args.get("id")
+    if not isinstance(pid, str) or not PROPOSAL.fullmatch(pid):
+        raise BadRequest("That is not a suggestion.")
+    return pid
+
+
+def _checkup_start(args):
+    _only(args, ())
+    return ["checkup", "start", "--json"]
+
+
+def _checkup_verb(verb):
+    def build(args):
+        return ["checkup", verb, _proposal_id(args), "--json"]
+
+    return build
+
+
+def _checkup_weekly(args):
+    _only(args, ("value",))
+    value = args.get("value")
+    if value not in ("on", "off"):
+        raise BadRequest("That value is not allowed.")
+    return ["checkup", "weekly", value, "--json"]
+
+
+OPS = {
+    "settings.set": _settings_set,
+    "record.delete_detail": _delete_detail,
+    "checkup.start": _checkup_start,
+    "checkup.test": _checkup_verb("test"),
+    "checkup.accept": _checkup_verb("accept"),
+    "checkup.rollback": _checkup_verb("rollback"),
+    "checkup.reject": _checkup_verb("reject"),
+    "checkup.weekly": _checkup_weekly,
+}
 
 
 def build_argv(op, args) -> list[str]:
@@ -203,12 +252,34 @@ def _clean_success(out) -> dict | None:
     return clean
 
 
-def _answer(code, out, timeout_text) -> tuple[int, str, dict | None]:
+def _clean_checkup(out) -> dict | None:
+    """The few expected fields of a check-up answer; never the core's own text."""
+    if not isinstance(out, dict):
+        return None
+    clean: dict = {}
+    pid, ticket = out.get("id"), out.get("ticket")
+    if isinstance(pid, str) and PROPOSAL.fullmatch(pid):
+        clean["id"] = pid
+    if isinstance(ticket, str) and TID.fullmatch(ticket):
+        clean["ticket"] = ticket
+    if out.get("status") in CHECKUP_STATES:
+        clean["status"] = out["status"]
+    if out.get("result") in ("started", "busy"):
+        clean["result"] = out["result"]
+    if out.get("weekly") in ("on", "off"):
+        clean["weekly"] = out["weekly"]
+    tests = out.get("tests")
+    if isinstance(tests, dict) and tests.get("state") in ("not_run", "passed", "failed", "error"):
+        clean["tests"] = {"state": tests["state"]}
+    return clean
+
+
+def _answer(code, out, timeout_text, clean=None) -> tuple[int, str, dict | None]:
     """The HTTP answer for one core exit: fixed texts only, never the core's own words or its stderr (L7)."""
     if code == 124:
         return 504, timeout_text, None  # the write may or may not have happened: say nothing about it (L8)
     if code == 0:
-        return 200, "", _clean_success(out)
+        return 200, "", (clean or _clean_success)(out)
     why = _code(out)
     if why == "changed":
         return 409, CHANGED, None
@@ -217,16 +288,20 @@ def _answer(code, out, timeout_text) -> tuple[int, str, dict | None]:
     return 422, MESSAGES.get(why, FAILED), None
 
 
-def _with_person(root, orch_bin, argv, mint, need, timeout_text, deadline=None):
-    """Run without a proof; only when the core says needs_person: mint (person here) and retry once."""
-    code, stdout, _ = orch(root, orch_bin, argv, deadline=deadline)
+def _with_person(root, orch_bin, argv, mint, need, timeout_text, deadline=None, timeout=None, clean=None):
+    """Run without a proof; only when the core says needs_person: mint (person here) and retry once.
+    `need` is (op, target) or a function returning it (None = the target can not be read: refuse)."""
+    code, stdout, _ = orch(root, orch_bin, argv, timeout=timeout, deadline=deadline)
     out = _parsed(stdout)
     if code != 0 and code != 124 and _code(out) == "needs_person":
         if mint is None:
             raise NeedsPerson(PERSON)
-        code, stdout, _ = orch(root, orch_bin, argv, proof=mint(*need), deadline=deadline)
+        need = need() if callable(need) else need
+        if need is None:
+            return 422, FAILED, None
+        code, stdout, _ = orch(root, orch_bin, argv, proof=mint(*need), timeout=timeout, deadline=deadline)
         out = _parsed(stdout)
-    return _answer(code, out, timeout_text)
+    return _answer(code, out, timeout_text, clean)
 
 
 def _sharing_refusal(read) -> str | None:
@@ -270,5 +345,36 @@ def run_op(
             return _set(root, orch_bin, args, argv, mint, read, deadline)
         finally:
             _LOCK.release()
+    if op.startswith("checkup."):
+        return _checkup(root, orch_bin, op, args, argv, mint, read)
     need = ("record.delete_detail", args["ticket"])
     return _with_person(root, orch_bin, argv, mint, need, DELETE_TIMEOUT, time.monotonic() + TOTAL_BUDGET)
+
+
+def _accept_target(read, pid):
+    """`<id>@<hash hex>`: the hash comes from the core's own `checkup show`, read just before the proof is minted."""
+    shown = read("checkup", "show", pid, "--json")
+    digest = shown.get("hash") if isinstance(shown, dict) else None
+    if not isinstance(digest, str) or not HASH.fullmatch(digest):
+        return None
+    return ("checkup.accept", f"{pid}@{digest}")
+
+
+def _checkup(root, orch_bin, op, args, argv, mint, read):
+    if op == "checkup.start":
+        need = None  # starting a read-only check-up needs no proof
+    elif op == "checkup.weekly":
+        need = ("insights.settings", f"checkup.weekly={args['value']}")
+    elif op == "checkup.accept":
+        need = lambda: _accept_target(read, args["id"])
+    elif op in ("checkup.rollback", "checkup.reject"):
+        need = (op, args["id"])
+    else:  # checkup.test: replays in a throwaway copy, never needs a proof
+        need = None
+    slow = op == "checkup.test"
+    deadline = time.monotonic() + (TEST_TIMEOUT + WRITE_TIMEOUT if slow else TOTAL_BUDGET)
+    timeout = TEST_TIMEOUT if slow else None
+    if need is None:
+        code, stdout, _ = orch(root, orch_bin, argv, timeout=timeout, deadline=deadline)
+        return _answer(code, _parsed(stdout), CHECKUP_TIMEOUT, _clean_checkup)
+    return _with_person(root, orch_bin, argv, mint, need, CHECKUP_TIMEOUT, deadline, timeout, _clean_checkup)
