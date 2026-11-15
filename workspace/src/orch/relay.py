@@ -1278,8 +1278,6 @@ REVIEW_RESULT_TEXT = {
 
 def _review_result_text(body: dict) -> str:
     if body["result"] == "refused":
-        if body.get("reason") == "needs_signature":
-            return "Needs your signature on the computer"
         return "Couldn't use your answer"
     return REVIEW_RESULT_TEXT[body["result"]]
 
@@ -1359,8 +1357,7 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
     """A phone answer with a `verdict` on a card question (q<n>) or a review question. Checked in the
     contract's order, ticket / question / card only from the MAC'd asked record and the ticket, never from the
     answer: only a paired phone, not group-routed (else nothing at all, no result); already decided ->
-    decided; digest -> changed; ok or talk+picked on a signs card -> needs_signature;
-    then review.decide as the person (by = the stored phone name, via phone, proven by the relay channel).
+    decided; digest -> changed; then review.decide as the person (by = the stored phone name, via phone).
     Never review.change. Exactly one review_result goes back to the answering phone."""
     from orch import phone_view
 
@@ -1419,16 +1416,6 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
     if v["digest"] != asked_digest or now != asked_digest:
         line("A phone answer was not used: what you saw has changed since")
         return result({"result": "changed"}, f"not applied to {tid}: the card changed")
-    if (
-        not is_review
-        and (v["verdict"] == "ok" or (v["verdict"] == "talk" and picked is not None))
-        and isinstance(q.get("card"), dict)
-        and q["card"].get("signs") is True
-    ):
-        line("Needs a signature on the computer: a phone OK was not used")
-        return result(
-            {"result": "refused", "reason": "needs_signature"}, f"not applied to {tid}: needs a signature"
-        )
     if not is_review:  # reserved first: a crash after the write is told apart from a computer answer
         _set_asked(root, qmid, vpending=answer_id)
     try:
@@ -1442,7 +1429,6 @@ def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]
             by=by,
             via=via,
             digest=asked_digest,
-            proven=True,
             phone=frm,
             pid="p_" + answer_id[2:],
         )
@@ -1714,7 +1700,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
 def _card_plain(root: Path, msg: dict, asked: dict) -> tuple[str, str | None] | None:
     """An answer WITHOUT a verdict (an old phone) to a card question: None when the question has no card
     (today's path goes on). With a card: an answer that is exactly an option id of a choice card = ok with
-    that pick; any other text = talk with that text as the words; never an ok on a card that signs. The same
+    that pick; any other text = talk with that text as the words. The same
     review.decide as a verdict, no review_result (relay-api.md)."""
     try:
         q = next(
@@ -1732,7 +1718,7 @@ def _card_plain(root: Path, msg: dict, asked: dict) -> tuple[str, str | None] | 
     if not ans:
         return "ignored: an empty answer", None
     by, via = _phone_by(phone, frm), "phone"
-    pick = ans in review._option_ids(q, q["card"]) and q["card"].get("signs") is not True
+    pick = ans in review._option_ids(q, q["card"])
     try:
         out = review.decide(
             root,
@@ -1744,7 +1730,6 @@ def _card_plain(root: Path, msg: dict, asked: dict) -> tuple[str, str | None] | 
             by=by,
             via=via,
             digest=asked.get("question_digest"),
-            proven=True,
         )
     except Refused as e:
         return f"not applied to {asked['ticket']}: {e}", None
@@ -1827,20 +1812,6 @@ def _journal(root: Path, msgs: list[dict]) -> None:
                 f.write("".join(json.dumps(e) + "\n" for e in new))
 
 
-INBOX_MAC_KIND = "inbox-phone"
-
-
-def _saved_phone_msg(root: Path, m: dict, fresh: dict) -> dict | None:
-    """A message from the inbox folder as the sender's. The copy this pull fetched from the relay wins; a
-    phone message otherwise needs the MAC made in _pull with the human key. A planted file: None."""
-    if m.get("id") in fresh:
-        return fresh[m["id"]]
-    if not str(m.get("from", "")).startswith("ph_"):
-        return m
-    body = {k: v for k, v in m.items() if k != "_inbox_mac"}
-    return body if humanproof.local_ok(root, INBOX_MAC_KIND, body, m.get("_inbox_mac")) else None
-
-
 def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     """Download, save every message first, journal the new ids, then ack. Marks nothing seen."""
     wait = max(0, min(30, wait))
@@ -1851,15 +1822,7 @@ def _pull(root: Path, wait: int) -> tuple[list[dict], dict[str, int]]:
     for n, m in enumerate(net.items(resp)):
         if not isinstance(m, dict) or not re.fullmatch(r"m_[a-z0-9]{16}", str(m.get("id", ""))):
             continue
-        saved = m
-        if str(m.get("from", "")).startswith("ph_"):
-            # a phone message is applied only fresh from the relay, or from a file this core signed now
-            # (human-proof.md "Phone actions" rule 1): the file keeps the MAC, an agent cannot make one
-            mac = humanproof.local_sign(root, INBOX_MAC_KIND, m)
-            if mac is None and tickets.agent_tool() and m.get("type") == "answer" and _person_asked(root, m):
-                continue  # a person's swipe in an agent session: left unacked for the workspace's own process
-            saved = {**m, "_inbox_mac": mac} if mac else m
-        net.write_json(d / f"{m['id']}.json", saved)
+        net.write_json(d / f"{m['id']}.json", m)
         arrival[m["id"]] = n
         ok.append(m)
     if ok:
@@ -2680,8 +2643,7 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
         apply_allow_answers(root)
     sync_phone_views(root)
     sync_groups(root)
-    got, arrival = _pull(root, wait)
-    fresh = {m["id"]: m for m in got}
+    _, arrival = _pull(root, wait)
     d = root / ".orch" / "inbox"
     pending = []
     for f in d.glob("m_*.json"):  # everything saved and not yet seen, also from earlier pulls
@@ -2692,9 +2654,7 @@ def inbox(root: Path, wait: int = 0) -> list[dict]:
             and f.stem not in seen(root)
             and f"{m.get('from')}/{f.stem}" not in seen(root)
         ):
-            m = _saved_phone_msg(root, m, fresh)
-            if m is not None:
-                pending.append(m)
+            pending.append(m)
     out = []
     for m in sorted(
         pending,

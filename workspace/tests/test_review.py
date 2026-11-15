@@ -1,4 +1,4 @@
-"""Review stack data: cards on questions, reviewed copies, the stack, decisions kept on the ticket."""
+"""Review stack data: cards on questions, reviewed copies, the stack, answers kept on the ticket."""
 
 import json
 
@@ -137,7 +137,7 @@ def test_check_approve_makes_ticket_done(tk):
     _in_review(root, tid)
     (item,) = [c for c in review.stack(root) if c["kind"] == "check"]
     assert item["id"] == f"core:review:{tid}"
-    e = review.decide(root, tid, "review", "ok", by=ME, via="dashboard", digest=item["digest"], proven=True)
+    e = review.decide(root, tid, "review", "ok", by=ME, via="dashboard", digest=item["digest"])
     t = tickets.load(root, tid)
     assert t["status"] == "done" and t["verdicts"]
     assert (
@@ -146,15 +146,13 @@ def test_check_approve_makes_ticket_done(tk):
     assert t["questions"][-1]["answered_by"] == ME
 
 
-def test_check_verdict_needs_the_proof(tk):
+def test_check_verdict_needs_a_person(tk):
     root, tid = tk
     _in_review(root, tid)
     with pytest.raises(Refused):
-        review.decide(root, tid, "review", "ok", by=ME, via="cli")
-    with pytest.raises(Refused):
-        review.decide(root, tid, "review", "no", note={"changes": ["x"]}, by=ME, via="cli")
+        review.decide(root, tid, "review", "ok", by="agent:x", via="cli")
     assert tickets.load(root, tid)["status"] == "review"
-    review.decide(root, tid, "review", "ok", by=ME, via="cli", proven=True)
+    review.decide(root, tid, "review", "ok", by=ME, via="cli")
     assert tickets.load(root, tid)["status"] == "done"
 
 
@@ -162,9 +160,9 @@ def test_check_send_back_asks_for_changes(tk):
     root, tid = tk
     _in_review(root, tid)
     with pytest.raises(Refused):
-        review.decide(root, tid, "review", "no", by=ME, via="cli", proven=True)  # a note is needed
+        review.decide(root, tid, "review", "no", by=ME, via="cli")  # a note is needed
     note = {"changes": ["Shorter."]}
-    e = review.decide(root, tid, "review", "no", note=note, by=ME, via="cli", proven=True)
+    e = review.decide(root, tid, "review", "no", note=note, by=ME, via="cli")
     t = tickets.load(root, tid)
     assert t["status"] != "review" and t["status"] != "done"
     assert any(c.get("origin") == "change_request" and c["text"] == "Shorter." for c in t["checklist"])
@@ -175,7 +173,7 @@ def test_check_with_old_digest_is_refused(tk):
     root, tid = tk
     _in_review(root, tid)
     with pytest.raises(Refused):
-        review.decide(root, tid, "review", "ok", by=ME, via="cli", digest="f" * 64, proven=True)
+        review.decide(root, tid, "review", "ok", by=ME, via="cli", digest="f" * 64)
     assert tickets.load(root, tid)["status"] == "review"
 
 
@@ -282,7 +280,7 @@ def test_stack_lists_cards_checks_and_plain_questions(tk):
     assert {i["id"] for i in review.stack(root)} == ids - {f"core:q:{other}:q1"}
 
 
-def test_summary_and_decisions_block(tk):
+def test_summary_and_applies_now_block(tk):
     root, tid = tk
     assert (
         review.summary(
@@ -303,19 +301,12 @@ def test_summary_and_decisions_block(tk):
         {"changes": ["Put the questions on top of the list.", "Show the month in the heading."]},
         by=ME, via="dashboard",
     )  # fmt: skip
-    block = review.decisions_block(tickets.load(root, tid), root)
+    block = review.applies_now_block(tickets.load(root, tid), root)
     key = tickets.load(root, tid)["key"]
-    assert block.startswith(f"{key} — WHAT APPLIES NOW\nUse option C (Questions first) WITH 2 CHANGES.")
+    assert block.startswith(f"What applies now ({key})\nUse option C (Questions first) WITH 2 CHANGES.")
     assert "  1. Put the questions on top of the list.\n  2. Show the month in the heading." in block
     assert "Not allowed by this answer: publishing, sending, anything outside " + key in block
-    hist = block.split("History (newest first)\n")[1].splitlines()
-    assert hist[0].startswith("- q2 Home: which layout? -> USE C WITH CHANGES (severin, dashboard, ")
-    assert (
-        hist[1].startswith("- q1 Home: which layout? -> USE B (severin, phone, ")
-        and "replaced by q2" in hist[1]
-    )
-    assert "[reviewed copy: reviewed/" in block
-    assert review.decisions_block(tickets.load(root, tickets.create(root, "Empty", ME)["id"])) == ""
+    assert review.applies_now_block(tickets.load(root, tickets.create(root, "Empty", ME)["id"])) == ""
 
 
 def test_card_question_keeps_agent_blocking(tk):

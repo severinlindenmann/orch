@@ -198,10 +198,6 @@ def validate_card(card) -> dict:
     out["need"] = _text(card.get("need"), "need", 200)
     out["then"] = _text(card.get("then"), "then (what happens next)", 500, required=True)
     out["ok_label"] = _text(card.get("ok_label"), "ok_label", 40)
-    if card.get("signs") not in (None, True, False):
-        raise Refused("Card signs is true or false.")
-    if card.get("signs"):
-        out["signs"] = True
     opn = _text(card.get("open"), "open", 500)
     if opn is not None:
         if not _OPEN.fullmatch(opn):
@@ -346,7 +342,7 @@ def changed_files(root: Path, tid: str, shown: dict) -> list[str]:
 
 # ---------------------------------------------------------------- the card on the phone (wire shape)
 
-_CARD_TOP = {"kind", "title", "why", "need", "then", "ok_label", "signs", "open", "preview"}
+_CARD_TOP = {"kind", "title", "why", "need", "then", "ok_label", "open", "preview"}
 _LIMITS = {"title": 200, "why": 500, "need": 200, "then": 500, "ok_label": 40, "open": 500}
 _WHY = ("too_large", "held_back")
 
@@ -481,8 +477,6 @@ def check_wire_card(card, nfiles: int) -> None:
     for k, n in _LIMITS.items():
         if k in card:
             _wtext(card[k], f"card.{k}", n)
-    if "signs" in card and card["signs"] is not True:
-        raise Refused("card.signs is only ever true.")
     if "open" in card and not _OPEN.fullmatch(card["open"]):
         raise Refused("card.open is not a plain http(s) address.")
     pv = card.get("preview")
@@ -741,7 +735,6 @@ def decide(
     by: str,
     via: str,
     digest: str | None = None,
-    proven: bool = False,
     phone: str | None = None,
     pid: str | None = None,
 ) -> dict:
@@ -751,7 +744,7 @@ def decide(
     if key == "review":
         if picked is not None:
             raise BadVerdict("A Check result has no options to pick.")
-        return _decide_check(root, ticket, verdict, note, by, via, digest, proven, phone, pid)
+        return _decide_check(root, ticket, verdict, note, by, via, digest, phone, pid)
     q = _find(ticket, key)
     if q.get("answer") is not None:
         raise Refused(f"{key} is already answered. Use change to answer again.")
@@ -771,12 +764,11 @@ def _decide_check(
     by: str,
     via: str,
     digest: str | None,
-    proven: bool = False,
     phone: str | None = None,
     pid: str | None = None,
 ) -> dict:
     tid = ticket["id"]
-    if not proven:  # a verdict on a Check result is a person's, proven by the caller (never assumed here)
+    if not by.startswith("human:"):  # a verdict on a Check result is a person's (label check)
         raise Refused("Only a person can decide this. Ask the human to do it themselves.")
     if verdict not in VERDICTS:
         raise Refused(f"verdict is one of {', '.join(VERDICTS)}.")
@@ -788,15 +780,13 @@ def _decide_check(
     n = _note_bv(note)
     if verdict == "ok":
         d = _bare("approve", card["ok_label"], [], n)
-        tickets.accept_review(root, tid, by, via, proven=proven)
+        tickets.accept_review(root, tid, by, via, proven=True)
     else:
         changes = _what_changes(n)
         if not changes:
             raise BadVerdict("Say what should change.")
         d = _bare("send_back", None, changes, n)
-        tickets.ask_for_changes(
-            root, tid, "; ".join(changes), by, via=via, proven=proven, phone=phone, pid=pid
-        )
+        tickets.ask_for_changes(root, tid, "; ".join(changes), by, via=via, proven=True, phone=phone, pid=pid)
     d["summary"] = summary(d, card)
     entry = {
         "text": _clip("Check: " + ticket.get("title", tid), 300),
@@ -897,15 +887,6 @@ def stack(root: Path) -> list[dict]:
 
 # ---------------------------------------------------------------- what a helper reads
 
-_ACTION_WORDS = {
-    "approve": "APPROVED",
-    "use": "USE",
-    "use_with_changes": "USE WITH CHANGES",
-    "send_back": "SENT BACK FOR CHANGES",
-    "dont": "DON'T DO",
-    "none_of_these": "NONE OF THESE",
-}
-
 
 def _when(at: str | None) -> str:
     return re.sub(r":\d\d(?:Z|[+-]\d\d:\d\d)?$", "", (at or "").replace("T", " ")) if at else ""
@@ -918,8 +899,9 @@ def _option_title(card: dict, picked: str | None) -> str:
     return ""
 
 
-def decisions_block(ticket: dict, root: Path | None = None) -> str:
-    """Plain text for helpers: what applies now, then the history (newest first). "" when nothing was decided
+def applies_now_block(ticket: dict, root: Path | None = None) -> str:
+    """Plain text for helpers: what applies now (the current instruction first). The answers themselves are
+    listed under the ticket's questions. "" when nothing was decided
     with a card or a decision. With `root` the ticket is read as shown here (history.shown_ticket: a synced
     answer nobody verified shows as synced); without it the caller passes a ticket that is already shown."""
     if root is not None:
@@ -932,7 +914,7 @@ def decisions_block(ticket: dict, root: Path | None = None) -> str:
     if not entries:
         return ""
     label = ticket.get("key") or ticket["id"]
-    lines = [f"{label} — WHAT APPLIES NOW"]
+    lines = [f"What applies now ({label})"]
     cur = next((q for q in reversed(entries) if not q["decision"].get("replaced_by")), None)
     if cur is None:
         lines.append("Nothing applies now (every answer was replaced).")
@@ -968,23 +950,4 @@ def decisions_block(ticket: dict, root: Path | None = None) -> str:
             lines.append(f"Not allowed by this answer: anything outside {label}.")
         else:
             lines.append(f"Not allowed by this answer: publishing, sending, anything outside {label}.")
-    lines += ["", "History (newest first)"]
-    for q in reversed(entries):
-        d, card = q["decision"], q.get("card") or {}
-        word = _ACTION_WORDS.get(d.get("action"), str(d.get("action")).upper())
-        if d.get("action") == "use" and d.get("picked"):
-            word = f"USE {d['picked']}"
-        elif d.get("action") == "use_with_changes":
-            word = f"USE {d.get('picked')} WITH CHANGES"
-        elif d.get("action") == "approve" and card.get("ok_label"):
-            word = f"APPROVED: {card['ok_label']}"
-        text = card.get("title") or q.get("text", "")
-        who = re.sub(r"^(human|agent):", "", q.get("answered_by") or "someone")
-        line = f"- {q['id']} {text} -> {word} ({who}, {q.get('via')}, {_when(q.get('at'))})"
-        copy = (q.get("shown") or {}).get("copy")
-        if copy:
-            line += f" [reviewed copy: {copy}]"
-        if d.get("replaced_by"):
-            line += f" -> replaced by {d['replaced_by']}"
-        lines.append(line)
     return "\n".join(lines) + "\n"

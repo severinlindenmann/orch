@@ -91,7 +91,7 @@ SHOWN = {
     ("workspace/src/orch/tickets.py", "start_blocked"): "other = history.shown_ticket(...) first",
     (
         "workspace/src/orch/review.py",
-        "decisions_block",
+        "applies_now_block",
     ): "history.shown_ticket(root, ticket) when root is given",
     (
         "workspace/src/orch/relay.py",

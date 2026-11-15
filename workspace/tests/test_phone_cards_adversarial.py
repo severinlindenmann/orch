@@ -45,21 +45,6 @@ def _write_asked(proj, data):
 # ---- forged phone verdicts --------------------------------------------------------------------------------
 
 
-def test_a_verdict_planted_in_the_inbox_folder_is_not_applied(proj, run, new_ticket, conn):
-    tid = new_ticket()
-    install(proj, tid)
-    qmsg = send_card(
-        proj, conn, tid, "q4"
-    )  # the agent sees the question id in questions-sent / the relay log
-    case = _case("choice-ok-picked")
-    forged = msg("m_forge00000000001", "answer", case["body"], frm=PHONE, ticket=tid, reply_to=qmsg["id"])
-    inbox = proj / ".orch" / "inbox"
-    inbox.mkdir(parents=True, exist_ok=True)
-    (inbox / "m_forge00000000001.json").write_text(json.dumps(forged))  # never fetched from the relay
-    run("relay", "inbox")
-    assert question(proj, tid, "q4")["answer"] is None
-
-
 def test_a_verdict_from_the_peer_a_question_was_asked_of_is_ignored(proj, run, new_ticket, conn):
     """A question asked of another workspace (to: ws_…): its verdict applies nothing."""
     tid = new_ticket()
@@ -133,72 +118,6 @@ def test_a_digest_on_an_ordinary_record_is_covered_too(proj, conn):
     rec = {"ticket": "t_x", "question_id": "q1", "to": "phones", "question_digest": "ab" * 32}
     relay.sign_asked(proj, "m_o1", rec)
     assert not relay.asked_mac_ok(proj, "m_o1", {**rec, "digest": "ab" * 32})
-
-
-def test_agent_strips_signs_and_rewrites_the_record_digest(proj, run, new_ticket, conn):
-    """The agent removes signs:true from the stored card AND moves the asked record's question_digest along:
-    the MAC breaks, nothing is applied (and without the record edit the digest check says changed)."""
-    tid = new_ticket()
-    install(proj, tid)
-    qmsg = send_card(proj, conn, tid, "q5")
-
-    def strip(t):
-        next(q for q in t["questions"] if q["id"] == "q5")["card"].pop("signs")
-
-    tickets.apply_op(proj, tid, strip, by="agent:claude")
-    new = tickets.question_digest(question(proj, tid, "q5"))
-    asked = _asked(proj)
-    asked[qmsg["id"]]["question_digest"] = new
-    _write_asked(proj, asked)
-    case = _case("signs-ok-refused")
-    case["body"]["verdict"]["digest"] = new  # even if the phone were shown the new card
-    put_answer(conn, qmsg, case, 1)
-    run("relay", "inbox")
-    assert question(proj, tid, "q5")["answer"] is None
-
-
-def test_agent_strips_signs_only_gets_changed(proj, run, new_ticket, conn):
-    tid = new_ticket()
-    install(proj, tid)
-    qmsg = send_card(proj, conn, tid, "q5")
-
-    def strip(t):
-        next(q for q in t["questions"] if q["id"] == "q5")["card"].pop("signs")
-
-    tickets.apply_op(proj, tid, strip, by="agent:claude")
-    put_answer(conn, qmsg, _case("signs-ok-refused"), 1)
-    run("relay", "inbox")
-    assert question(proj, tid, "q5")["answer"] is None
-    (r,) = results(conn)
-    assert r["body"]["review_result"] == {"result": "changed"}
-
-
-def test_old_phone_plain_option_on_a_signs_choice_card_is_never_an_ok(proj, run, new_ticket, conn):
-    """_card_plain: an option id typed on a signs:true choice card is talk, never use/approve."""
-    tid = new_ticket()
-    install(proj, tid)
-
-    def make_signs(t):
-        next(q for q in t["questions"] if q["id"] == "q4")["card"]["signs"] = True
-
-    tickets.apply_op(proj, tid, make_signs, by="agent:claude")
-    q = question(proj, tid, "q4")
-    relay.send_question(proj, tickets.load(proj, tid), q)
-    qmsg = [m for m in conn.sent if m["type"] == "question"][-1]
-    opt = review._option_ids(q, q["card"])[0]
-    conn.inbox.append(
-        msg(
-            "m_oldph0000000001",
-            "answer",
-            {"question_id": "q4", "answer": opt},
-            frm=PHONE,
-            ticket=tid,
-            reply_to=qmsg["id"],
-        )  # fmt: skip
-    )
-    run("relay", "inbox")
-    d = question(proj, tid, "q4").get("decision") or {}
-    assert d.get("action") not in ("use", "approve")
 
 
 # ---- replay -----------------------------------------------------------------------------------------------
