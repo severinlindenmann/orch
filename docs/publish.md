@@ -106,7 +106,7 @@ publish/
   small python app to first 200 = 150-230 ms; an idle app uses about 15 MB. A sleeping app keeps `status: running` and shows `awake: false`
   (the admin portal says "Sleeping"). Requests still open (SSE, long polls) keep an app awake. After a server restart, apps are not started:
   they wake on their first request. Apps must keep state in `DATA_DIR`; timers and background work stop while the app sleeps.
-  After a wake the first requests arrive together: use a normal listen backlog (Python's `http.server` default of 5 is small; the templates' `ThreadingHTTPServer` is fine, or set `request_queue_size`). A failed wake is not retried for 30 s (visitors get the 503 page at once); a restart clears that.
+  After a wake the first requests arrive together: use a normal listen backlog (Python's `http.server` default of 5 is small; the templates' `ThreadingHTTPServer` is fine, or set `request_queue_size`). Requests are proxied as plain HTTP: WebSocket upgrades are not forwarded, so they do not work through `/a/<name>/` and do not keep an app awake (SSE and long polls do). At most 4 apps start at the same time. A failed wake is not retried for 30 s (visitors get the 503 page at once); a restart clears that.
 
 ## Container mode: host setup
 

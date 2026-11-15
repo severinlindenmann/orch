@@ -13,6 +13,14 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/slow":
             time.sleep(2.2)
+        if self.path == "/stream":
+            self.send_response(200)
+            self.send_header("Content-Length", "4")
+            self.end_headers()
+            self.wfile.flush()
+            time.sleep(2.5)
+            self.wfile.write(b"done")
+            return
         body = b"hi"
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
@@ -363,4 +371,137 @@ async fn sleep_resume_all_leaves_apps_asleep() {
     let g = call(&pub2, "GET", "/a/back/", &[], vec![]).await;
     assert_eq!(g.status, 200, "{}", g.text());
     assert_eq!(starts(&t, "back"), 2);
+}
+
+/// The body of a streaming answer keeps the app awake after the headers are out.
+#[tokio::test]
+async fn sleep_streaming_body_keeps_app_awake() {
+    use tower::ServiceExt;
+    let t = setup_with(|c| c.idle_secs = 1);
+    let ws = t.workspace("A", all_rights()).await;
+    deploy_py(&t, &ws, "strm").await;
+    let req = axum::http::Request::get("/a/strm/stream")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let resp = t.public.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 200);
+    idle_for(1.5).await; // headers are out, the body is still coming
+    apps::sleep_sweep(&t.st).await;
+    assert_eq!(row(&t, "strm")["awake"], true);
+    let b = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert_eq!(&b[..], b"done");
+    idle_for(1.3).await;
+    apps::sleep_sweep(&t.st).await;
+    assert_eq!(row(&t, "strm")["awake"], false);
+}
+
+/// Five sleeping apps woken at once each answer with their own content (no shared ports).
+#[tokio::test]
+async fn sleep_five_apps_wake_together_each_own_body() {
+    let t = setup_with(|c| {
+        c.idle_secs = 1;
+        c.port_hi = c.port_lo + 4;
+    });
+    let ws = t.workspace("A", all_rights()).await;
+    for i in 0..5 {
+        let name = format!("multi{i}");
+        let src = app_src("0.1").replace("b\"hi\"", &format!("b\"app{i}\""));
+        let toml = py_toml(&name, "public = true\nstore = \"json\"");
+        let r = t
+            .api(
+                &ws,
+                "PUT",
+                &format!("/v1/apps/{name}?days=7"),
+                bundle(&[("app.toml", &toml), ("main.py", &src)]),
+            )
+            .await;
+        assert_eq!(r.status, 200, "{}", r.text());
+    }
+    idle_for(1.3).await;
+    apps::sleep_sweep(&t.st).await;
+    let mut hs = vec![];
+    for i in 0..5 {
+        let r = t.public.clone();
+        hs.push(tokio::spawn(async move {
+            (
+                i,
+                call(&r, "GET", &format!("/a/multi{i}/"), &[], vec![]).await,
+            )
+        }));
+    }
+    for h in hs {
+        let (i, r) = h.await.unwrap();
+        assert_eq!(r.status, 200, "{}", r.text());
+        assert_eq!(r.text(), format!("app{i}"));
+    }
+}
+
+/// A sleeping private app is never woken without a valid token (GET, HEAD, OPTIONS).
+#[tokio::test]
+async fn sleep_private_app_not_woken_without_access() {
+    let t = setup_with(|c| c.idle_secs = 1);
+    let ws = t.workspace("A", all_rights()).await;
+    let toml = py_toml("priv", "store = \"json\"");
+    let src = app_src("0.1");
+    let r = t
+        .api(
+            &ws,
+            "PUT",
+            "/v1/apps/priv?days=7",
+            bundle(&[("app.toml", &toml), ("main.py", &src)]),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let tok = r.json()["view_token"].as_str().unwrap().to_string();
+    idle_for(1.3).await;
+    apps::sleep_sweep(&t.st).await;
+    assert_eq!(row(&t, "priv")["awake"], false);
+    for m in ["GET", "HEAD", "OPTIONS"] {
+        for (uri, h) in [
+            ("/a/priv/", vec![]),
+            ("/a/priv/x", vec![]),
+            ("/a/priv/?token=apv_wrong", vec![]),
+            ("/a/priv/", vec![("cookie", "orch_app_priv=apv_wrong")]),
+        ] {
+            let g = call(&t.public, m, uri, &h, vec![]).await;
+            assert!(
+                g.status == 401 || g.status == 308,
+                "{m} {uri}: {}",
+                g.status
+            );
+            assert_eq!(starts(&t, "priv"), 1, "{m} {uri} woke the app");
+            assert_eq!(row(&t, "priv")["awake"], false);
+        }
+    }
+    // an expired app is not woken either
+    let mut a = db_row(&t, "priv");
+    a.expires_at = Some("2000-01-01T00:00:00Z".into());
+    orch_publish::db::put_app(&t.st.db.lock().unwrap(), &a, &a.updated_at).unwrap();
+    let c = format!("orch_app_priv={tok}");
+    let g = call(&t.public, "GET", "/a/priv/", &[("cookie", &c)], vec![]).await;
+    assert_eq!(g.status, 410);
+    assert_eq!(starts(&t, "priv"), 1);
+    // the valid token wakes it
+    a.expires_at = None;
+    orch_publish::db::put_app(&t.st.db.lock().unwrap(), &a, &a.updated_at).unwrap();
+    let g = call(&t.public, "GET", "/a/priv/", &[("cookie", &c)], vec![]).await;
+    assert_eq!(g.status, 200, "{}", g.text());
+    assert_eq!(starts(&t, "priv"), 2);
+}
+
+/// A redeploy that lands during a wake is served instead of a 503.
+#[tokio::test]
+async fn sleep_redeploy_during_wake_is_served() {
+    let t = setup_with(|c| c.idle_secs = 1);
+    let ws = t.workspace("A", all_rights()).await;
+    sleep_app(&t, &ws, "redo", "1.5").await;
+    let r = t.public.clone();
+    let h = tokio::spawn(async move { call(&r, "GET", "/a/redo/", &[], vec![]).await });
+    idle_for(0.3).await;
+    deploy_py_slow(&t, &ws, "redo", "0.1").await;
+    let g = h.await.unwrap();
+    assert_eq!(g.status, 200, "{}", g.text());
+    assert_eq!(g.text(), "hi");
 }

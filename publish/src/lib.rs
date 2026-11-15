@@ -23,7 +23,6 @@ pub type Http =
     hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>;
 
 /// In-memory state for scale to zero (see apps.rs).
-#[derive(Default)]
 pub struct SleepState {
     /// per app: last request time and requests in flight
     pub activity: Mutex<std::collections::HashMap<String, (std::time::Instant, usize)>>,
@@ -31,8 +30,25 @@ pub struct SleepState {
     pub sleeping: Mutex<std::collections::HashSet<String>>,
     /// failed wakes: no new try for 30 s
     pub cooldown: Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// ports picked for a start that is not yet in the DB or the runner (choose_port skips them)
+    pub reserved_ports: Mutex<std::collections::HashSet<u16>>,
+    /// at most 4 apps start for a wake at the same time
+    pub wake_slots: tokio::sync::Semaphore,
     /// one wake at a time per app
     pub wake: Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+impl SleepState {
+    fn new() -> Self {
+        SleepState {
+            activity: Default::default(),
+            sleeping: Default::default(),
+            cooldown: Default::default(),
+            reserved_ports: Default::default(),
+            wake_slots: tokio::sync::Semaphore::new(4),
+            wake: Default::default(),
+        }
+    }
 }
 
 pub struct Inner {
@@ -64,7 +80,7 @@ pub fn new_state(cfg: Config) -> std::io::Result<State> {
         runner: runner::Runner::default(),
         app_lock: tokio::sync::Mutex::new(()),
         http,
-        sleep: SleepState::default(),
+        sleep: SleepState::new(),
     }))
 }
 

@@ -173,6 +173,7 @@ fn version_root(root: &FsPath, code_dir: &FsPath) -> Option<PathBuf> {
 
 fn choose_port(st: &State) -> ApiResult<u16> {
     let mut used = st.runner.used_ports();
+    used.extend(st.sleep.reserved_ports.lock().unwrap().iter());
     for a in db::all_apps(&st.db.lock().unwrap())? {
         used.insert(a.port);
     }
@@ -571,6 +572,8 @@ pub async fn remove(st: &State, name: &str) {
     st.runner.stop(name).await;
     st.sleep.sleeping.lock().unwrap().remove(name);
     st.sleep.activity.lock().unwrap().remove(name);
+    st.sleep.cooldown.lock().unwrap().remove(name);
+    st.sleep.wake.lock().unwrap().remove(name);
     if container_mode() {
         crate::runner::remove_images(name, None).await;
     }
@@ -595,7 +598,7 @@ pub async fn resume_all(st: &State) {
         .into_iter()
         .filter(|a| a.status == "running" && a.stack != "static")
     {
-        if st.cfg.idle_secs > 0 {
+        if st.cfg.idle_secs > 0 && (a.stack != "docker" || crate::runner::docker_apps_enabled()) {
             // scale to zero: apps start on their first request (saves memory after a restart)
             st.sleep.sleeping.lock().unwrap().insert(a.name.clone());
             continue;
@@ -769,21 +772,13 @@ async fn handle(st: State, name: String, rest: String, req: Request) -> Response
 }
 
 async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) -> Response {
-    // count the request first: an app with requests in flight never sleeps
-    let guard = InFlight::new(st, &app.name);
+    // count the request first: an app with requests in flight never sleeps (only where apps sleep)
+    let guard = (st.cfg.idle_secs > 0).then(|| InFlight::new(st, &app.name));
     let woken;
-    let app = if st.cfg.idle_secs > 0 {
-        // the port changes on every wake: use the row as it is now, not as the caller read it
-        let fresh = if is_sleeping(st, &app.name) {
-            match wake(st, &app.name).await {
-                Ok(a) => a,
-                Err(r) => return *r,
-            }
-        } else {
-            match db::get_app(&st.db.lock().unwrap(), &app.name) {
-                Ok(Some(a)) => a,
-                _ => return notice_gone(),
-            }
+    let app = if st.cfg.idle_secs > 0 && is_sleeping(st, &app.name) {
+        let fresh = match wake(st, &app.name).await {
+            Ok(a) => a,
+            Err(r) => return *r,
         };
         // the caller was authorized for the OLD row: refuse if access changed meanwhile
         if let Some(r) = access_changed(app, &fresh) {
@@ -845,12 +840,10 @@ async fn proxy(st: &State, app: &AppRow, rest: &str, query: &str, req: Request) 
             let mut resp = resp.map(Body::new);
             resp.headers_mut().remove("service-worker-allowed");
             // the request stays in flight until the body is done (SSE, long downloads)
-            resp.map(|b| {
-                Body::new(Guarded {
-                    inner: b,
-                    _g: guard,
-                })
-            })
+            match guard {
+                Some(g) => resp.map(|b| Body::new(Guarded { inner: b, _g: g })),
+                None => resp,
+            }
         }
         Err(_) => offline_page(),
     }
@@ -936,13 +929,13 @@ pub async fn sleep_sweep(st: &State) {
         if !due(st) {
             continue;
         }
-        let _g = st.app_lock.lock().await;
-        // re-check under the lock: stopped, deleted or redeployed meanwhile
-        let still = matches!(db::get_app(&st.db.lock().unwrap(), &a.name), Ok(Some(r)) if r.status == "running" && r.stack != "static");
-        if !still {
-            continue;
-        }
         {
+            let _g = st.app_lock.lock().await;
+            // re-check under the lock: stopped, deleted or redeployed meanwhile
+            let found = db::get_app(&st.db.lock().unwrap(), &a.name);
+            if !matches!(found, Ok(Some(r)) if r.status == "running" && r.stack != "static") {
+                continue;
+            }
             // decide and mark sleeping in one step: a request that arrives after this wakes the app
             let act = st.sleep.activity.lock().unwrap();
             let Some(e) = act.get(&a.name) else { continue };
@@ -951,6 +944,7 @@ pub async fn sleep_sweep(st: &State) {
             }
             st.sleep.sleeping.lock().unwrap().insert(a.name.clone());
         }
+        // the (slow) container stop runs outside the global lock
         st.runner.stop(&a.name).await;
         tracing::info!("app {} sleeps (idle)", a.name);
     }
@@ -1006,7 +1000,21 @@ fn wake_503() -> Box<Response> {
     ))
 }
 
-/// Starts a sleeping app for a request. One wake per app at a time (others wait for it).
+/// Frees a reserved port when dropped.
+struct Reserved {
+    st: State,
+    port: Option<u16>,
+}
+
+impl Drop for Reserved {
+    fn drop(&mut self) {
+        if let Some(p) = self.port {
+            self.st.sleep.reserved_ports.lock().unwrap().remove(&p);
+        }
+    }
+}
+
+/// Starts a sleeping app for a request. One wake per app at a time (others wait for it), at most 4 wakes at once.
 /// The global app_lock is only taken briefly (re-check before, commit after), never during the start.
 async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
     let lock = st
@@ -1030,9 +1038,11 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
     {
         return Err(wake_503());
     }
-    let (row, m, port) = {
+    let _slot = st.sleep.wake_slots.acquire().await;
+    let (row, m, port, _reserved) = {
         let _g = st.app_lock.lock().await;
-        let row = match db::get_app(&st.db.lock().unwrap(), name) {
+        let found = db::get_app(&st.db.lock().unwrap(), name);
+        let row = match found {
             Ok(Some(r)) => r,
             _ => return Err(Box::new(notice_gone())),
         };
@@ -1042,11 +1052,34 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
         if !is_sleeping(st, name) {
             return Ok(row); // woken by an earlier request, or restarted
         }
-        let dir = PathBuf::from(&row.code_dir);
-        match (parse_manifest(&dir), choose_port(st)) {
-            (Ok(m), Ok(p)) => (row, m, p),
-            _ => return Err(wake_fail(st, name, "bad manifest or no free port".into())),
+        if row.stack == "docker" && !crate::runner::docker_apps_enabled() {
+            return Err(wake_fail(st, name, "docker apps are disabled".into()));
         }
+        let dir = PathBuf::from(&row.code_dir);
+        let Ok(m) = parse_manifest(&dir) else {
+            return Err(wake_fail(st, name, "bad manifest".into()));
+        };
+        // leftovers of an earlier run (e.g. before a server restart)
+        st.runner.stop(name).await;
+        let mut reserved = Reserved {
+            st: st.clone(),
+            port: None,
+        };
+        // the stored port is reserved by the DB row (choose_port skips it): reuse it
+        let port = if row.port != 0 && std::net::TcpListener::bind(("127.0.0.1", row.port)).is_ok()
+        {
+            row.port
+        } else {
+            match choose_port(st) {
+                Ok(p) => {
+                    st.sleep.reserved_ports.lock().unwrap().insert(p);
+                    reserved.port = Some(p);
+                    p
+                }
+                Err(_) => return Err(wake_fail(st, name, "no free app port".into())),
+            }
+        };
+        (row, m, port, reserved)
     };
     let dir = PathBuf::from(&row.code_dir);
     let key = format!("{name}~wake");
@@ -1056,7 +1089,7 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
     // commit: still the same app, still asleep, not stopped/deleted/redeployed meanwhile
     let _g = st.app_lock.lock().await;
     let found = db::get_app(&st.db.lock().unwrap(), name);
-    let cur = match found {
+    let mut cur = match found {
         Ok(Some(r)) if r.code_dir == row.code_dir && is_sleeping(st, name) => r,
         Ok(None) => {
             st.runner.stop(&key).await;
@@ -1066,8 +1099,8 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
             st.runner.stop(&key).await;
             return Err(Box::new(paused_page()));
         }
-        Ok(Some(r)) if r.code_dir == row.code_dir => {
-            // restarted by someone else meanwhile: use theirs
+        // restarted or redeployed by someone else meanwhile: serve theirs if it runs
+        Ok(Some(r)) if r.status == "running" && st.runner.is_alive(name) => {
             st.runner.stop(&key).await;
             return Ok(r);
         }
@@ -1077,9 +1110,11 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
         }
     };
     st.runner.rename(&key, name);
-    let mut cur = cur;
-    cur.port = port;
-    let _ = db::put_app(&st.db.lock().unwrap(), &cur, &cur.updated_at.clone());
+    if cur.port != port {
+        // fallback port (the stored one was not free); `_reserved` is released after this
+        cur.port = port;
+        let _ = db::put_app(&st.db.lock().unwrap(), &cur, &cur.updated_at.clone());
+    }
     st.sleep.sleeping.lock().unwrap().remove(name);
     st.sleep.cooldown.lock().unwrap().remove(name);
     tracing::info!("app {name} woke in {} ms", t0.elapsed().as_millis());
@@ -1088,10 +1123,8 @@ async fn wake(st: &State, name: &str) -> Result<AppRow, Box<Response>> {
 
 /// Failed wake: log once, start the cooldown. The app stays asleep (not failed).
 fn wake_fail(st: &State, name: &str, why: String) -> Box<Response> {
-    tracing::warn!(
-        "app {name} could not wake (no new try for 30 s): {}",
-        util::tail(&why, 1500)
-    );
+    // the app's output is data: logged as an escaped field, never as raw lines
+    tracing::warn!(app = %name, log = ?util::tail(&why, 1500), "app could not wake (no new try for 30 s)");
     st.sleep
         .cooldown
         .lock()
