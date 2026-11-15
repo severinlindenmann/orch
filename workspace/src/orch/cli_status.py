@@ -153,12 +153,13 @@ def _services_cmd(args, root: Path) -> None:
                     w = {"workspace": key, "name": root.resolve().name, "addons": []}
                     ws = sorted([*ws, w], key=lambda x: (x["name"].lower(), x["workspace"]))
                 w["addons"] = here
+        ws = _with_known(ws)
         for w in ws:  # the workspace switcher draws each one with its badge
             w.update({k: look.read(Path(w["workspace"]))[k] for k in ("icon", "color")})
         lines = []
         for w in ws:
             lines.append(f"{w['name']}  ({_home_path(w['workspace'])})")
-            lines += [_service_line(a) for a in w["addons"]]
+            lines += [_service_line(a) for a in w["addons"]] or ["  nothing running"]
         if (root / ".orch").is_dir() and not args.json:  # git notes for this workspace (a plain line each)
             from orch import cli_config
 
@@ -193,6 +194,25 @@ def _services_cmd(args, root: Path) -> None:
                 f"Stopped in {Path(d['workspace']).name}: " + (", ".join(names) or "nothing was running")
             )
         _out(args, done, "\n".join(lines) or "Nothing was stopped.")
+
+
+def _with_known(ws: list) -> list:
+    """Add the person's other known workspaces (consent records) that run nothing, so the switcher can list
+    them as "Not running". Only folders that still exist and hold .orch; de-duplicated by resolved path."""
+    from orch import addons
+
+    try:
+        known = addons._registered_workspaces(None)
+    except Exception:
+        return ws
+    seen = {str(Path(w["workspace"]).resolve()) for w in ws}
+    extra = []
+    for p in known:
+        if str(p) in seen or not (p / ".orch").is_dir():
+            continue
+        seen.add(str(p))
+        extra.append({"workspace": str(p), "name": p.name, "addons": []})
+    return sorted([*ws, *extra], key=lambda x: (x["name"].lower(), x["workspace"])) if extra else ws
 
 
 def _copy_clean(args, root: Path) -> None:

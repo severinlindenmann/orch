@@ -238,6 +238,6 @@ def test_workspace_needs_are_local_and_cached(ws, tmp_path, monkeypatch):
     look.forget(ws)
     rows = look.load_look(ws, "orch")["workspaces"]
     assert [r["needs"] for r in rows] == [2, None, None]
-    assert seen == [ws, other]
+    assert seen == [ws]  # a workspace that runs nothing ("Not running") is not asked: stays fast
     look.load_look(ws, "orch")
-    assert seen == [ws, other]
+    assert seen == [ws]

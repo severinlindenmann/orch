@@ -153,7 +153,8 @@ def test_stop_by_name_path_and_all(svc, proj, run, tmp_path, monkeypatch):
     assert code == 0 and [d["workspace"] for d in json.loads(out)] == [str(proj.resolve())]
     assert not (proj / "svc.txt").exists() and services.status() == []
     code, out, _ = run("status")
-    assert "Nothing runs in the background" in out
+    # known workspaces (consent records) are still listed, as "nothing running" (#268)
+    assert "nothing running" in out and "hello" not in out
 
 
 def test_stop_outside_asks_which(svc, proj, run, tmp_path, monkeypatch):
@@ -363,3 +364,20 @@ def test_bad_port_file_is_ignored(svc, proj, run):
     assert services.last_port(proj, "hello") is None
     assert run("start")[0] == 0
     assert (proj / "pref.txt").read_text() == "-"
+
+
+def test_status_lists_known_workspaces_that_run_nothing(svc, proj, run, tmp_path):
+    # #268: the switcher lists the person's known workspaces, not only running ones
+    known = tmp_path / "Known"
+    (known / ".orch").mkdir(parents=True)
+    plain = tmp_path / "NoOrch"
+    plain.mkdir()
+    gone = tmp_path / "Gone"
+    addons._write_consents([{"workspace": str(p)} for p in (known, plain, gone, known)])
+    rows = json.loads(run("status", "--json")[1])
+    by = {r["name"]: r for r in rows}
+    assert by["Known"]["addons"] == [] and by["Known"]["workspace"] == str(known.resolve())
+    assert [r["name"] for r in rows].count("Known") == 1
+    assert "NoOrch" not in by and "Gone" not in by
+    assert rows == sorted(rows, key=lambda r: (r["name"].lower(), r["workspace"]))
+    assert "Known" in run("status")[1] and "nothing running" in run("status")[1]
