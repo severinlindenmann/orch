@@ -470,7 +470,12 @@ def r16(e):
 def r17(e):
     """#865 F1: a workspace text arrives, the receiver's Chat thread (what the dashboard shows) holds the peer's
     message under the peer's workspace id, and the reply reaches the sender's thread. Scripted, no agent."""
-    i = ids(e)
+    try:
+        i = ids(e)
+    except Fail as exc:  # expected-fail until #799 makes `orch relay connect` a plain CLI action
+        if "Do this in the dashboard" in str(exc):
+            raise Skip(f"xfail #799: relay connect from the CLI is refused ({str(exc)[:80]})") from None
+        raise
     me = "human:e2e"
     for n in ("Pilatus", "Reports"):
         e.orch(n, "relay", "refresh")
