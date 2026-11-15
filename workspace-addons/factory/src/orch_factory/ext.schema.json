@@ -81,7 +81,7 @@
       "properties": {
         "ws": { "type": "string", "pattern": "^ws_[a-z0-9]{6,32}$" },
         "name": { "type": "string", "maxLength": 64, "description": "The workspace's display name at hand-over time." },
-        "state": { "enum": ["waiting_start", "waiting_approval", "queued", "working", "review", "done", "failed", "denied", "not_needed"], "description": "Relay task status; review = ready for review at the other workspace; not_needed = the owner accepted 'Do it here instead' and the other side was told." }
+        "state": { "enum": ["waiting_start", "waiting_allow", "queued", "working", "review", "done", "failed", "denied", "not_needed"], "description": "Relay task status in plain states (waiting_allow = their person has not allowed it yet); review = ready for review at the other workspace; not_needed = the owner accepted 'Do it here instead' and the other side was told." }
       }
     }
   },
