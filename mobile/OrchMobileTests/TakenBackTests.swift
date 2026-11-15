@@ -96,7 +96,7 @@ final class TakenBackTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let relay = MockRelay(latency: .zero), ob = Outbox(directory: dir, phone: "ph_iphone0001")
         let q = try await relay.questions()[0]
-        relay.takeBack(q.id, reason: "plans changed", sendText: false)
+        await relay.takeBack(q.id, reason: "plans changed", sendText: false)
         let item = ob.enqueueAnswer(question: q, answer: "Yes")
         let events = await ob.flush(using: relay)
         XCTAssertEqual(events, [.questionTakenBack(clientId: item.clientId, questionMessageId: q.id,
