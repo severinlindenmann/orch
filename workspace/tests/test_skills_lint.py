@@ -361,3 +361,13 @@ def test_orch_block_is_five_numbered_rules():
     assert "orch check done" in numbered[2] and "orch ask" in numbered[3]
     assert "orch ticket summary" in numbered[4]
     assert "There are no signing or planning gates" in block
+
+
+def test_asking_keeps_the_agent_working():
+    """R2.6: after `orch ask` the agent keeps working on what does not need the answer; never stops there."""
+    block = (SKILLS["orch"] / "AGENTS-block.md").read_text(encoding="utf-8")
+    text = (SKILLS["orch"] / "SKILL.md").read_text(encoding="utf-8")
+    for where, t in (("AGENTS block", block), ("SKILL.md", text)):
+        flat = " ".join(t.split())
+        assert not re.search(r"orch ask[^.]*(then|and) stop\b", flat), f"{where}: asking must not mean stop"
+        assert "keep working" in flat.lower(), f"{where}: say to keep working while the ticket waits"
