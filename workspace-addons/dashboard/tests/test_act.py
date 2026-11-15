@@ -46,6 +46,7 @@ def acts(act_orch):
             ["ticket", "list"],
             ["config", "get"],
             ["look", "show"],
+            ["review", "list"],
             ["chat", "status"],
         )
         and c[:2] != ["private", "--json"]
@@ -490,7 +491,7 @@ def test_settings_ops_argv_and_checks(act_orch, ws):
                 for c in calls(act_orch)
                 if c[:2] not in (["addon", "list"], ["run", "status"], ["ticket", "list"])
                 and c[0] not in ("needs", "status", "agents")
-                and c[:2] not in (["config", "get"], ["chat", "status"])
+                and c[:2] not in (["config", "get"], ["chat", "status"], ["review", "list"])
                 and c[:3] not in (["relay", "mobile", "status"], ["relay", "group", "list"])
                 and c[0] != "look"
                 and c[:2] != ["private", "--json"]

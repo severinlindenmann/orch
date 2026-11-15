@@ -135,3 +135,9 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 ## Owner feedback 14 Nov (lane owner-fb-v2)
 The current ticket header is the strip in `../sweep/d-ticket-states.html` (all five states) and `../proposals/f-ticket-check.html` (Check: Looks good / Send back, Result, What the helper did). The product matches them; the older pages here keep their 13 Nov look until they are replaced.
+
+## Review stack (15 Nov 2026)
+
+### ticket-decisions.html
+
+- Decisions tab after Steps, shown only when the ticket has decisions: "What applies now" first, then one record per decision, newest first (kit `UI.decisionsNow` / `UI.decisionRecord`).

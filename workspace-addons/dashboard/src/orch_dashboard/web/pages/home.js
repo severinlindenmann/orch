@@ -243,8 +243,14 @@ function changeRow(t) {
   return h('div', {className:'card-row home-change', 'data-key':'change-' + t.id}, h('span', {className:'badge needs'}, '↗ Changes to add'),
     h('div', {className:'grow'}, h('h3', {}, 'Add the changes from ‘' + clean(t.title) + '’ to your files?'), h('a', {className:'meta', href:href(t.id)}, 'See what changed')), add);
 }
-function attentionCard(key, badge, cls, body, meta = '') {
-  return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge), h('span', {className:'grow'}), meta ? h('span', {className:'meta'}, meta) : null), body);
+function attentionCard(key, badge, cls, body, meta = '', action = null) {
+  return h('section', {className:'card home-card', 'data-key':key, id:key}, h('header', {className:'card-h'}, h('span', {className:'badge ' + cls}, badge), h('span', {className:'grow'}), meta ? h('span', {className:'meta'}, meta) : null, action), body);
+}
+// "Review all": the cards of the Review page (state.review) in one go. The number is the same set of questions and
+// results Home already counts, so it is never added to Home's own total.
+function reviewAllButton() {
+  const n = typeof reviewCount === 'function' ? reviewCount() : 0;
+  return n && !snapshot ? h('a', {className:'btn primary sm', href:'#review', 'data-key':'review-all'}, 'Review all', h('span', {className:'count'}, String(n))) : null;
 }
 function attentionSummary(groups, failed, results, changes) {
   const questionsAsked = groups.filter(g => g.row.answer?.question).length, other = groups.length - questionsAsked + failed.length;
@@ -348,12 +354,12 @@ function home() {
   const needsBody = rowsShown >= 3 && !needsOpen ? needsFold(groupedNeeds, failed, newest) : [...groupedNeeds.map(({row, count, same}) => needRow(row, newest, count, same)), ...failed.map(([t, sf]) => startFailedRow(t, sf)), rowsShown >= 3 ? h('div', {className:'card-row', 'data-key':'needs-hide'}, button('Hide', 'ghost sm', () => { needsOpen = false; render(); })) : null];
   return fragment(head, banner,
     h('div', {className:'columns home-columns', 'data-key':'columns'}, h('div', {className:'stack', 'data-key':'left'},
-      asked ? attentionCard('needs-you', (allQuestions ? '! Question · ' : '! Needs you · ') + asked, 'needs', needsBody, groupedNeeds.length ? whoAsked(ticketOf(groupedNeeds[0].row.ticket)) : '') : null,
+      asked ? attentionCard('needs-you', (allQuestions ? '! Question · ' : '! Needs you · ') + asked, 'needs', needsBody, groupedNeeds.length ? whoAsked(ticketOf(groupedNeeds[0].row.ticket)) : '', reviewAllButton()) : null,
       results.length ? attentionCard('check-result', '◇ Check · ' + review.length, 'review', [...results.slice(0, 3).map(resultRow),
         results.length > 3 ? h('div', {className:'card-row', 'data-key':'results-all'}, h('a', {className:'btn ghost sm', href:'#tickets'}, 'Show all (' + review.length + ')')) : null], (() => {
         const newestResult = results[0][results[0].length - 1], at = finishedAt(newestResult) || parse(newestResult.updated_at);
         return [whoAsked(newestResult), at ? time(at) : ''].filter(Boolean).join(' · ');
-      })()) : null,
+      })(), asked ? null : reviewAllButton()) : null,
       changes.length ? h('section', {className:'card home-card home-changes', 'data-key':'changes', id:'changes'}, changes.map(changeRow)) : null,
       working.length ? homeSection('working-now', 'Working now', working.map(workingRow), working.length, h('a', {className:'btn ghost xs', href:'#tickets?view=working', 'data-key':'working-all'}, 'View all →')) : null),
     h('aside', {className:'stack', 'data-key':'right'}, finishedCard,

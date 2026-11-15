@@ -4,7 +4,8 @@
    UI.reviewPage(host, api, o)   the page body: Waiting deck + Answered list. Returns {reload, destroy, show}.
        o: {nav (element that receives the Waiting / Answered buttons, else they sit above the deck),
            meta (element whose text becomes "Review · <workspace>" once api.workspace is known),
-           poll (ms, default 5000, 0 = off), now (Date, tests)}
+           poll (ms, default 5000, 0 = off), now (Date, tests),
+           onChange (deck: called when the deck is built and after every move or answer; the dashboard's "All cards" list)}
    UI.decisionRecord(entry, o)   one Decision card (Decisions tab and the Answered list). o: {fileUrl, now}
    UI.decisionsNow(entries, o)   the "What applies now" block (null when nothing was answered yet)
    UI.reviewFetchApi(base, f)    the api for pages served by orch itself: same-origin /api/stack, /api/answered,
@@ -44,7 +45,7 @@ const mapPreview=(p,c,api)=>{if(!p||typeof p!=='object')return {type:'doc'};cons
  return q};
 const safeOpen=u=>typeof u==='string'&&/^https?:\/\//i.test(u)?u:undefined;
 const mapCard=(c,api,now)=>{const k=c.card||{},kd=KIND[k.kind]||[k.kind||'Review','file'];
- return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.key||c.ticket,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
+ return {id:c.id,kind:k.kind,kindLabel:kd[0],icon:kd[1],ticket:c.ticket_key||(/^(q[0-9]+|review)$/.test(c.key||'')?c.ticket:c.key)||c.ticket,when:fmtTime(c.since,now),need:k.need,title:k.title||'Review',
   why:k.why,okLabel:k.ok_label,then:k.then,signs:!!k.signs,open:safeOpen(k.open),preview:mapPreview(k.preview,c,api),digest:c.digest,raw:c}};
 
 /* ---------- Decisions: words, pill, record ---------- */
@@ -146,8 +147,8 @@ UI.reviewPage=(host,api,o)=>{o=o||{};const pollMs=o.poll==null?5000:o.poll;
    else UI.toast((res&&res.error&&res.error.message)||'Could not save your answer. It is waiting again.',null,'error');
    dirty=true;load(true)})};
  const build=(items,start,later,pins)=>{deckEl.replaceChildren();
-  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onChange:()=>{if(deck)waitCount(deck.items.length-Object.keys(deck.answers).length)}});
-  waitCount(items.length-Object.keys(deck.answers).length);
+  deck=UI.swipeDeck(deckEl,items,{mode:'desk',voice:false,start,later,pins,onDecide:send,onChange:()=>{if(deck){waitCount(deck.items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck)}}});
+  waitCount(items.length-Object.keys(deck.answers).length);if(o.onChange)o.onChange(deck);
   const ae=document.activeElement;if(view==='deck'&&(!ae||ae===document.body))deckEl.focus()};
  const apply=(cards,force)=>{const items=cards.map(c=>mapCard(c,api,o.now)).filter(it=>!gone.has(sig(it)));
   if(!items.length&&!(deck&&Object.keys(deck.answers).length)){deck=null;deckEl.replaceChildren(UI.state({kind:'empty',title:'Nothing waits for you',text:'New cards appear here when a helper needs you.'}));waitCount(0);return}

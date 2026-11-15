@@ -526,6 +526,7 @@ ACT_ARGS = {
     "link.extend": {"id": "f_abc", "days": 3},
     "link.stop": {"id": "f_abc"},
     "answer": {"ticket": TID, "question": "q1", "digest": "a" * 64, "answer": "x"},
+    "review.answer": {"ticket": TID, "key": "q1", "verdict": "ok", "digest": "a" * 64},
     "ticket.changes": {"ticket": TID, "text": "more"},
     "chat.say": {"text": "hi"},
     "chat.make_ticket": {"id": "m_abcdefghijkl"},
