@@ -858,12 +858,12 @@ def start_blocked(root: Path, ticket: dict) -> str | None:
     if not req:
         return None
     why = f'This ticket starts only after a person answers "{req.get("answer")}" on {req.get("ticket")}.'
-    try:
-        other = load(root, str(req.get("ticket")))
+    try:  # shown: a synced answer core cannot prove here is not a person's (history.shown_ticket)
+        other = history.shown_ticket(root, load(root, str(req.get("ticket"))))
     except Refused:
         return why
     q = next((q for q in other.get("questions", []) if q.get("id") == req.get("question")), None)
-    if q and q.get("answer") == req.get("answer") and str(q.get("answered_by") or "").startswith("human:"):
+    if q and q.get("answer") == req.get("answer") and history.is_person_line({"by": q.get("answered_by")}):
         return None
     return why
 
