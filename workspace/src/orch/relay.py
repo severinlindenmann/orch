@@ -888,7 +888,6 @@ def _send_proposal(
     with contextlib.suppress(Refused, OSError):
         _record_general(root, local, text, general_body, reply_to, refs)
     rec = {"ticket": None, "question_id": body["question_id"], "to": to, "proposal": True, "title": title}
-    sign_asked(root, mid, rec)
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     # The caller (the helper's command) always gets "sent": relay trouble is not its business; a message that
     # is only waiting offline goes out later from the outbox, the same bytes.
@@ -1027,7 +1026,6 @@ def send_question(
         "to": "phones",
         "question_digest": tickets.question_digest(q),  # the question as the phones were shown it
     }
-    sign_asked(root, msg["id"], rec)
     _asked_edit(root, lambda asked: asked.__setitem__(msg["id"], rec))
     # the ticket chat gets the snapshot too (a question carries none): quietly, never pushed
     with contextlib.suppress(Refused):
@@ -1065,7 +1063,6 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
                 body["card"] = wire
     except (KeyError, TypeError, ValueError):
         pass  # no digest: the question goes out as before and a verdict on it is refused (fail closed)
-    sign_asked(root, mid, rec)
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     try:
         return _message(root, "phones", "question", body, ticket["id"], mid=mid)
@@ -1355,7 +1352,7 @@ def _verdict_summary(q: dict) -> str | None:
 
 def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
     """A phone answer with a `verdict` on a card question (q<n>) or a review question. Checked in the
-    contract's order, ticket / question / card only from the MAC'd asked record and the ticket, never from the
+    contract's order, ticket / question / card only from the asked record and the ticket, never from the
     answer: only a paired phone, not group-routed (else nothing at all, no result); already decided ->
     decided; digest -> changed; then review.decide as the person (by = the stored phone name, via phone).
     Never review.change. Exactly one review_result goes back to the answering phone."""
@@ -1525,6 +1522,8 @@ def _answer_asked(root: Path, msg: dict) -> tuple[dict | None, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
     if not isinstance(asked, dict):
         return None, "ignored: not an answer to a question this workspace sent"
+    if not all(isinstance(asked.get(k), str) for k in ("to", "question_id")):
+        return None, "ignored: unreadable record of the question"  # fail closed, never a KeyError
     # Questions to the phones: answered by a phone, or by a relay subscriber allowed to answer (sub_).
     if not (frm.startswith(("ph_", "sub_")) if asked["to"] == "phones" else frm == asked["to"]):
         return None, f"ignored: {frm} was not asked"
@@ -1545,7 +1544,7 @@ def msg_group(msg: dict) -> bool:
     return isinstance(msg.get("body"), dict) and isinstance(msg["body"].get("group"), dict)
 
 
-def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
+def _answer_by(msg: dict, asked: dict | None = None, root: Path | None = None) -> tuple[str, str]:
     frm, b = str(msg.get("from", "")), msg.get("body", {})
     by = b.get("answered_by")
     if isinstance(by, str):  # untrusted: it is pasted to the agent as "From <by>: ..."
@@ -1556,7 +1555,9 @@ def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
     if not (isinstance(by, str) and by.startswith(ok_prefix)) or (
         asked is not None and asked.get("group") and not frm.startswith("ph_")
     ):  # we asked a group member: recorded by its id from the asked record, whatever the answer says
-        by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{frm}"
+        shown = _shown_name(root, frm, frm) if root is not None and frm.startswith("ws_") else frm
+        who = frm if shown == frm else f"{shown} ({frm})"  # the name to read, the id keeps it unique
+        by = f"human:{frm}" if frm.startswith("ph_") else f"agent:{who}"
     via = "phone" if frm.startswith("ph_") else "subscriber" if frm.startswith("sub_") else "relay"
     return by, via
 
@@ -1564,9 +1565,9 @@ def _answer_by(msg: dict, asked: dict | None = None) -> tuple[str, str]:
 def _applied_ticket(root: Path, msg: dict) -> str | None:
     """The ticket this answer was written into (by this message), else None. Read-only."""
     asked, _ = _answer_asked(root, msg)
-    if not asked or not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # unsigned: never "answered"
+    if not asked:
         return None
-    by, via = _answer_by(msg, asked)
+    by, via = _answer_by(msg, asked, root)
     try:
         q = next(
             x for x in tickets.load(root, asked["ticket"])["questions"] if x["id"] == asked["question_id"]
@@ -1585,62 +1586,7 @@ def _applied_ticket(root: Path, msg: dict) -> str | None:
     )
 
 
-QUESTION_UNCHECKABLE = "This question changed or can't be checked. Ask again."
-
-# questions-sent.json lives in the workspace, so an agent can rewrite a record's question_digest together with
-# the ticket's question, or mark an ordinary record as a review (round) or proposal one. Every record kind
-# counts only with question_mac: the local1 MAC (human key, which the agent cannot read) over the message id,
-# the record's kind (ordinary / review / proposal, the raw flags), round, title and the other fields. It is
-# checked BEFORE any dispatch. No key at send time: the question still goes out, but its record carries no
-# MAC and any answer to it is refused (fail closed, never unchecked). Older records without a MAC: refused.
-QUESTION_MAC_KIND = "question-sent"
-
-
-def _asked_kind(rec: dict) -> str:
-    return (
-        "review" if rec.get("review") is True else "proposal" if rec.get("proposal") is True else "ordinary"
-    )
-
-
-def _asked_signed_fields(mid: str, rec: dict) -> list:
-    fields = [
-        mid,
-        _asked_kind(rec),
-        rec.get("review"),
-        rec.get("proposal"),
-        rec.get("round"),
-        rec.get("title"),
-        rec.get("ticket"),
-        rec.get("question_id"),
-        rec.get("to"),
-        rec.get("group"),
-        rec.get("question_digest"),
-    ]
-    if (
-        rec.get("digest") is not None
-    ):  # RULE A: only a review question that carries one; old MACs still verify
-        fields.append(rec["digest"])
-    return fields
-
-
-def sign_asked(root: Path, mid: str, rec: dict) -> dict:
-    """Adds question_mac to the record of an answerable question sent as `mid` (when it can be signed)."""
-    mac = humanproof.local_sign(root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec))
-    if not mac:  # no key yet: made now (first use), else the answer to this question could never count
-        with contextlib.suppress(Refused, OSError, ValueError):
-            humanproof.human_key(root, create=True)
-        mac = humanproof.local_sign(root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec))
-    if mac:
-        rec["question_mac"] = mac
-    else:
-        rec.pop("question_mac", None)
-    return rec
-
-
-def asked_mac_ok(root: Path, mid: str, rec: dict) -> bool:
-    return humanproof.local_ok(
-        root, QUESTION_MAC_KIND, _asked_signed_fields(str(mid), rec), rec.get("question_mac")
-    )
+QUESTION_UNCHECKABLE = "This question was changed after it was sent; answer the new version."
 
 
 def _note_group_refusal(root: Path, msg: dict, why: str, asked: dict | None = None) -> None:
@@ -1659,10 +1605,8 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
     """(note, ticket id when the answer was applied). Only for a question this workspace sent."""
     asked, why = _answer_asked(root, msg)
     if not asked:
+        _note_group_refusal(root, msg, why)
         return why, None
-    if not asked_mac_ok(root, str(msg.get("reply_to")), asked):  # first: kind, round, digest provably ours
-        _note_group_refusal(root, msg, f"not applied: {QUESTION_UNCHECKABLE}", asked)
-        return f"not applied: {QUESTION_UNCHECKABLE}", None
     if asked.get("review") is True:
         return _apply_review_answer(root, msg, asked)
     if asked.get("proposal") is True:
@@ -1671,7 +1615,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         return _apply_verdict(root, msg, asked)
     if (card := _card_plain(root, msg, asked)) is not None:
         return card
-    by, via = _answer_by(msg, asked)
+    by, via = _answer_by(msg, asked, root)
     try:
         digest = asked.get("question_digest")
         if not isinstance(digest, str) or not digest:  # no digest of the question as sent: never unchecked
@@ -1691,6 +1635,7 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         if asked.get("group"):
             from orch import chat_groups
 
+            _note_group_refusal(root, msg, f"not applied: {e}", asked)  # a first answer that fails a check
             chat_groups.note_answer_kept(root, asked, msg)  # a later answer is kept as a note
         return f"not applied to {asked['ticket']}: {e}", None
     _to_waiting_agent(root, t["id"], q, by)

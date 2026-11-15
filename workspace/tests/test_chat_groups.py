@@ -630,30 +630,57 @@ def test_info_question_and_answer_flow(proj, run, rel, host):
     del q
 
 
-def test_group_answer_needs_the_question_mac_of_the_question_as_sent(proj, run, rel, host):
-    """#580: an agent that rewrites the question and the record's digest cannot forge question_mac."""
-    import json
-
+def test_group_answer_to_a_question_changed_since_sent_is_refused(proj, run, rel, host):
+    """Plain digest check: the ticket's question changed after it was sent, the answer is not applied."""
     from orch import relay
 
     tickets.ask(proj, host, "Which account paid the 2025 car tax?", [], None, "agent:t")
     assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
     qm = sent(rel, type="question")[0]
-    rec = json.loads(relay._asked_path(proj).read_text())[qm["id"]]
-    assert relay.asked_mac_ok(proj, qm["id"], rec)
-    path = tickets.ticket_path(proj, host)
-    raw = json.loads(path.read_text())
-    raw["questions"][0]["text"] = "Which account should pay the fine?"
-    path.write_text(json.dumps(raw))
-    rec["question_digest"] = tickets.question_digest(tickets.load(proj, host)["questions"][0])
-    relay._asked_path(proj).write_text(json.dumps({qm["id"]: rec}))
+    _change_question(proj, host)
     body = {"question_id": "q1", "answer": "Household account.", "answered_by": "human:owner"}
     body |= {"group": {**qm["body"]["group"]}, "by": HOME, "via": "helper"}
     ans = {"schema": "orch.msg/1", "id": mid("ans9"), "from": HOME, "to": WS, "type": "answer"}
     ans |= {"created_at": "2026-11-08T10:06:00Z", "reply_to": qm["id"], "ticket": host, "body": body}
     note, applied = relay._apply_answer(proj, ans)
-    assert applied is None and relay.QUESTION_UNCHECKABLE in note
+    assert applied is None and "not applied" in note
     assert tickets.load(proj, host)["questions"][0]["answer"] is None
+
+
+def test_group_answer_applies_from_another_orch_home_and_shows_the_peer_name(
+    proj, run, rel, host, monkeypatch, tmp_path
+):
+    """Asker and answerer on one machine with different ORCH_HOME: nothing home-bound is checked, the answer
+    is applied and answered_by shows the answering workspace's name, not its raw id."""
+    tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
+    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
+    qm = sent(rel, type="question")[0]
+    other = tmp_path / "other-orch-home"
+    other.mkdir()
+    monkeypatch.setenv("ORCH_HOME", str(other))
+    from orch import relay
+
+    note, applied = relay._apply_answer(proj, _answer_msg(qm, "anshome"))
+    assert note.startswith("answered q1") and applied == host, note
+    q = tickets.load(proj, host)["questions"][0]
+    assert q["answer"] == "Tuesday works"
+    assert q["answered_by"] == f"agent:Home ({HOME})", q["answered_by"]
+
+
+def test_group_answer_with_an_old_question_mac_field_still_applies(proj, run, rel, host):
+    import json
+
+    from orch import relay
+
+    tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
+    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
+    qm = sent(rel, type="question")[0]
+    recs = json.loads(relay._asked_path(proj).read_text())
+    assert "question_mac" not in recs[qm["id"]]
+    recs[qm["id"]]["question_mac"] = "A" * 43
+    relay._asked_path(proj).write_text(json.dumps(recs))
+    out = inbox(run, rel, _answer_msg(qm, "ansold"))
+    assert out[0]["note"].startswith("answered q1")
 
 
 def test_permission_and_approval_questions_are_never_sent(proj, run, rel, host):
@@ -2884,6 +2911,16 @@ def test_mixed_case_orch_folder_is_refused_even_on_a_case_insensitive_disk(proj,
     assert cg.secret_path(proj / ".ORCH" / "Tickets" / host / "ARTIFACTS" / "ok.txt", proj, artifacts_ok=True)
 
 
+def _change_question(proj, host, text="Which account should pay the fine?"):
+    """The ticket's question changed after it was sent: the plain digest check refuses the answer."""
+    import json
+
+    path = tickets.ticket_path(proj, host)
+    raw = json.loads(path.read_text())
+    raw["questions"][0]["text"] = text
+    path.write_text(json.dumps(raw))
+
+
 def _answer_msg(qm, n, text="Tuesday works"):
     body = {"question_id": "q1", "answer": text, "answered_by": "human:test"}
     body |= {"group": {**qm["body"]["group"]}, "by": HOME, "via": "helper"}
@@ -2900,29 +2937,12 @@ def _answer_msg(qm, n, text="Tuesday works"):
     }
 
 
-def test_group_answer_applies_when_the_key_did_not_exist_at_ask_time(proj, run, rel, host):
-    """Lane C P4.2: the question was asked before the workspace had a human key; the answer was dropped."""
-    import json
-
-    from orch import humanproof, relay
-
-    humanproof.key_dir(proj, create=False).joinpath("human.key").unlink()
-    tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
-    assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
-    qm = sent(rel, type="question")[0]
-    assert "question_mac" in json.loads(relay._asked_path(proj).read_text())[qm["id"]]
-    out = inbox(run, rel, _answer_msg(qm, "ansk"))
-    assert out[0]["note"].startswith("answered q1")
-    assert tickets.load(proj, host)["questions"][0]["answer"] == "Tuesday works"
-
-
 def test_refused_group_answer_is_visible_in_the_ticket(proj, run, rel, host, monkeypatch):
-    from orch import relay
 
-    monkeypatch.setattr(relay, "asked_mac_ok", lambda *a, **k: False)
     tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
     assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
     qm = sent(rel, type="question")[0]
+    _change_question(proj, host)
     out = inbox(run, rel, _answer_msg(qm, "ansv"))
     assert "not applied" in out[0]["note"]
     t = tickets.load(proj, host)
@@ -2935,7 +2955,6 @@ def test_refused_answer_for_a_vanished_question_is_not_a_poison_message(proj, ru
 
     from orch import relay
 
-    monkeypatch.setattr(relay, "asked_mac_ok", lambda *a, **k: False)
     tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
     assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
     qm = sent(rel, type="question")[0]
@@ -2949,12 +2968,11 @@ def test_refused_answer_for_a_vanished_question_is_not_a_poison_message(proj, ru
 
 
 def test_refused_answer_history_note_only_for_a_member_and_only_once(proj, run, rel, host, monkeypatch):
-    from orch import relay
 
-    monkeypatch.setattr(relay, "asked_mac_ok", lambda *a, **k: False)
     tickets.ask(proj, host, "Does Tuesday work for lunch?", [], None, "agent:t")
     assert run("relay", "group", "ask", host, "Home", "q1")[0] == 0
     qm = sent(rel, type="question")[0]
+    _change_question(proj, host)
     inbox(run, rel, _answer_msg(qm, "ansn1"))
     inbox(run, rel, _answer_msg(qm, "ansn2"))  # the same refusal again: no second line
     lines = [h for h in tickets.load(proj, host)["history"] if "not applied" in h["text"]]

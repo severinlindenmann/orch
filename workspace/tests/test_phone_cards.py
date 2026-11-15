@@ -214,29 +214,8 @@ def test_old_phone_without_a_verdict_keeps_working_on_plain_questions(proj, run,
 # ---- RULE A: asked records and bodies of old questions stay as they were --------------------------------
 
 
-def test_old_asked_records_keep_their_mac(proj, conn):
-    ensure_signing(proj)
-    rec = {
-        "ticket": "t_x",
-        "question_id": "q1",
-        "to": "phones",
-        "question_digest": "ab" * 32,
-    }
-    assert relay._asked_signed_fields("m_1", rec)[-1] == "ab" * 32  # no digest field appended
-    relay.sign_asked(proj, "m_1", rec)
-    assert relay.asked_mac_ok(proj, "m_1", rec)
-    rev = {"ticket": "t_x", "question_id": "review-1", "to": "phones", "review": True, "round": 1}
-    old_fields = relay._asked_signed_fields("m_2", rev)
-    relay.sign_asked(proj, "m_2", rev)
-    assert relay.asked_mac_ok(proj, "m_2", rev)
-    # a record with a digest is signed over it: changing it breaks the MAC
-    rev2 = {**rev, "digest": "cd" * 32}
-    relay.sign_asked(proj, "m_3", rev2)
-    assert relay.asked_mac_ok(proj, "m_3", rev2)
-    assert relay._asked_signed_fields("m_3", rev2) == [*relay._asked_signed_fields("m_3", rev), "cd" * 32]
-    assert old_fields == relay._asked_signed_fields("m_2", rev)
-    rev2["digest"] = "ee" * 32
-    assert not relay.asked_mac_ok(proj, "m_3", rev2)
+def test_asked_records_carry_no_mac(proj, conn):
+    assert not hasattr(relay, "sign_asked") and not hasattr(relay, "asked_mac_ok")
 
 
 def test_question_without_card_fields_is_byte_identical(proj, new_ticket, conn):
@@ -296,7 +275,7 @@ def test_sync_cards_sends_once_with_files_and_digest(proj, new_ticket, conn):
     MSG_V.validate({**m, "schema": "orch.msg/1"})
     assert phone_view.sync_cards(proj) == [] and len(card_questions(conn)) == 1  # idempotent
     rec = relay.net.read_json(relay._asked_path(proj), {})[m["id"]]
-    assert rec["question_digest"] == b["digest"] and relay.asked_mac_ok(proj, m["id"], rec)
+    assert rec["question_digest"] == b["digest"] and "question_mac" not in rec
 
 
 def test_sync_cards_needs_a_phone(proj, run, new_ticket, rel):
@@ -384,7 +363,7 @@ def test_review_question_carries_the_digest(proj, new_ticket, conn):
     assert m["body"]["digest"] == review.check_digest(tickets.load(proj, tid))
     MSG_V.validate({**m, "schema": "orch.msg/1"})
     rec = relay.net.read_json(relay._asked_path(proj), {})[m["id"]]
-    assert rec["digest"] == m["body"]["digest"] and relay.asked_mac_ok(proj, m["id"], rec)
+    assert rec["digest"] == m["body"]["digest"] and "question_mac" not in rec
 
 
 # ---- review.py: the wire card ---------------------------------------------------------------------------
