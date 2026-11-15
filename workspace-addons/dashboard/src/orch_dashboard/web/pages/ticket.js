@@ -1226,9 +1226,24 @@ function ticketRequestCard(t) {
 const TAB_ALIAS = {questions:'overview', history:'activity', artifacts:'files'};
 function ticketSelectedTab(t) {
   const raw = ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
-  return ['overview', 'tasks', 'files', 'activity'].includes(tab) ? tab : 'overview';
+  return ['overview', 'tasks', 'decisions', 'files', 'activity'].includes(tab) && (tab !== 'decisions' || ticketDecisions(t).length) ? tab : 'overview';
 }
-const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
+// The decisions made on this ticket (questions answered through the Review stack carry a `decision`), newest first,
+// in the shape of the kit's Decision card.
+function ticketDecisions(t) {
+  return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+}
+function ticketDecisionsPanel(t) {
+  const list = ticketDecisions(t), api = typeof reviewApi === 'function' ? reviewApi() : null;
+  if (!window.UI?.decisionRecord || !list.length) return null;
+  const o = {fileUrl:api ? api.fileUrl : () => '', now:now()};
+  return [window.UI.decisionsNow(list, o), ...list.map(e => window.UI.decisionRecord(e, o))].filter(Boolean);
+}
+const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length],
+  ...(ticketDecisions(t).length ? [['decisions', 'Decisions', ticketDecisions(t).length]] : []),
+  ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
 function ticketProperties(t, parent, agent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
   const done = t.status === 'done', ev = done ? ticketDoneEvent(t) : null, finished = ev?.at || t.done_at || t.updated_at;
@@ -1333,6 +1348,7 @@ function detail(t) {
       h('div', {className:'stack story'},
         panel('overview', 'Overview', overview),
         panel('tasks', 'Steps', card('tasks', 'Steps', total ? done + ' of ' + total + ' done' : '', [total ? taskRows(t) : emptyRow('No steps yet.'), t.status === 'done' ? null : addTaskRow(t, 'tasks')])),
+        ticketDecisions(t).length ? panel('decisions', 'Decisions', ticketDecisionsPanel(t)) : null,
         panel('files', 'Files', artifactsPanel(t)),
         panel('activity', 'Activity', ticketHistoryPanel(t))),
       h('div', {className:'stack ticket-side'}, ticketProperties(t, parent, agent), fieldSections(t)))));

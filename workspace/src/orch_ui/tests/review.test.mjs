@@ -211,3 +211,11 @@ test('review.html has no inline script, inline handler or external url', () => {
   assert.ok(!/\son[a-z]+\s*=/.test(read('review.html')), 'no inline handlers');
   assert.ok(!/https?:\/\//.test(h.replace(/http:\/\/www\.w3\.org\/2000\/svg/g, '')), 'no external url');
 });
+
+test('onChange: called with the deck when it is built and after every move or answer (the dashboard side list)', async () => {
+  const seen = [];
+  const {decks} = await mount(fakeApi([[card('a'), card('b')]]), {onChange: d => seen.push(d.items.length)});
+  assert.deepEqual(seen, [2]);
+  decks[0].o.onChange();
+  assert.deepEqual(seen, [2, 2]);
+});
