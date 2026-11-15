@@ -111,7 +111,8 @@
       "additionalProperties": false,
       "properties": {
         "path": { "type": "string", "pattern": "^/[A-Za-z0-9_./-]{0,200}$", "not": { "pattern": "\\.\\.|^//" }, "description": "Path on the add-on's own local page; the base url is the checked url of `orch <name> status --json` (http://127.0.0.1:<port>)." },
-        "label": { "$ref": "#/$defs/text", "maxLength": 24, "description": "Button text, default 'Open'." }
+        "label": { "$ref": "#/$defs/text", "maxLength": 24, "description": "Button text, default 'Open'." },
+        "live_session": { "type": "boolean", "description": "true: this page shows one ticket's live session. The dashboard's Watch live opens the page of the add-on that says so, never just the first add-on with a page." }
       },
       "description": "The add-on serves its own local page (needs background = true). The dashboard shows a button that opens it in a new tab."
     }

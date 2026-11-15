@@ -4,6 +4,29 @@
   const S = window.FocusStore;
   const {root, ic, TID, P, INAPP, h, toast, helpPanel, els, act, proof, keyOf, stamp, evText} = S;
 
+  const KIND_LABEL = {image: 'Picture', pdf: 'PDF', table: 'Table', page: 'Page', doc: 'Document', code: 'Code', text: 'Note', command: 'Command', commit: 'Change', link: 'Link', missing: 'File', other: 'File'};
+
+  /* A ticket that waits for review, as a result card (master result-card): preview, result name, ticket name, kind,
+     local time and one button. The preview is a picture or the first lines of a text file; no preview = a kind label. */
+  function resultCard(t) {
+    const r = t.result || null;
+    const kind = KIND_LABEL[r && r.kind] || 'Result';
+    const thumb = h('span', {class: 'thumb', text: kind});
+    if (r && typeof r.preview === 'string' && r.preview.startsWith('/api/file?')) {
+      const src = P + r.preview;
+      if (r.kind === 'image') {
+        const img = h('img', {alt: '', loading: 'lazy'}); img.src = src; thumb.replaceChildren(img);
+      } else {
+        fetch(src).then(x => x.ok && (x.headers.get('Content-Type') || '').startsWith('text/plain') ? x.text() : null)
+          .then(txt => { if (txt) thumb.replaceChildren(h('pre', {text: txt.slice(0, 600).split('\n').slice(0, 8).join('\n')})); }).catch(() => {});
+      }
+    }
+    const when = r && r.at ? stamp(r.at) : '';
+    return h('a', {class: 'result-card', href: P + '/t/' + t.id + '#results'}, thumb,
+      h('span', {class: 'body'}, h('strong', {text: (r && r.name) || t.title}), h('span', {class: 'meta', text: t.title}),
+        h('span', {class: 'row'}, h('span', {class: 'chip', text: kind}), h('span', {class: 'meta grow', text: when}), h('span', {class: 'btn outline sm', text: 'Check result'}))));
+  }
+
   function picker() {
     document.title = 'Focus · orch';
     root.classList.add('fx-picker');
@@ -40,9 +63,11 @@
         const rows = list.filter(t => status === 'waiting' ? needsYou(t) : t.status === status);
         if (!rows.length) continue;
         const {shown, more} = window.FocusHelpers.limitGroup(rows);
-        const card = h('div', {class: 'card'}, shown.map(t => rowFor(t, status, action)));
+        const cards = status === 'review';  /* results are cards, every other group stays a row */
+        const one = t => cards ? resultCard(t) : rowFor(t, status, action);
+        const card = h('div', {class: cards ? 'result-grid' : 'card'}, shown.map(one));
         const all = more ? h('button', {class: 'btn ghost sm fx-show-all', type: 'button', text: 'Show all (' + rows.length + ')'}) : null;
-        if (all) all.addEventListener('click', () => { card.replaceChildren(...rows.map(t => rowFor(t, status, action))); all.remove(); });
+        if (all) all.addEventListener('click', () => { card.replaceChildren(...rows.map(one)); all.remove(); });
         box.append(h('section', {class: 'fx-pick-group fx-group-' + status}, h('h2', {}, label + ' ', h('span', {class: 'meta', text: '(' + rows.length + ')'})), card, all));
       }
       const done = list.filter(t => t.status === 'done').sort((a, b) => String(b.closed_at || '').localeCompare(String(a.closed_at || '')));
@@ -319,5 +344,5 @@
     if (!on && tab.getAttribute('aria-selected') === 'true') els.tabs[0].click();
   }
 
-  S.register('ticket', {showTab, refreshTickets, picker, pickerSub, build, renderTasks, taskTools, renderHelpers, renderProof});
+  S.register('ticket', {resultCard, showTab, refreshTickets, picker, pickerSub, build, renderTasks, taskTools, renderHelpers, renderProof});
 })();
