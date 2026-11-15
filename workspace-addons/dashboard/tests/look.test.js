@@ -181,3 +181,23 @@ test('without a relay Save changes only the local description', async () => {
   await new Promise(r => setTimeout(r, 10));
   assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['workspace.set', {field: 'description', text: 'New'}]]);
 });
+
+test('a second Save while the first is still sending does nothing', async () => {
+  const {L, click, type, acts} = cardEnv({service: 'relay', tags: [], waiting: false}, {ws_name: 'Finance', ws_description: 'Old'});
+  click('pf-edit'); type('description', 'New');
+  const first = click('pf-save');
+  await Promise.resolve(); await Promise.resolve();  // the first Save is between two of its sends
+  const second = click('pf-save');
+  await Promise.all([first, second]);
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(acts)).map(a => a[0]), ['workspace.set', 'look.profile']);
+});
+
+test('a pending clear says what is proposed in words, not empty quotes', () => {
+  const {L} = cardEnv({service: 'relay', tags: ['a'], waiting: true, pending: '', pending_tags: []}, {ws_name: 'Finance', ws_description: ''});
+  const text = textOf(L.profileCard());
+  assert.match(text, /Proposed: remove the description/);
+  assert.match(text, /Proposed: remove all tags/);
+  assert.equal(text.includes('“”'), false);
+  assert.equal(/Proposed tags: *$/.test(text), false);
+});

@@ -14,7 +14,7 @@ import unicodedata
 from pathlib import Path
 
 ID = re.compile(r"[a-z0-9-]{1,32}")
-SERVICES = ("relay", "publish")  # the description proposal goes to the first one that is connected
+SERVICES = ("relay", "publish")  # the description proposal goes to the first one that is connected, only (contracts/look.md)
 MAX_DESCRIPTION = 280
 _CACHE: dict[str, tuple[float, dict | None]] = {}
 TTL = 10.0  # `orch look show` asks the services; the 3 s page poll must not
