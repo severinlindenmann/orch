@@ -37,6 +37,8 @@ _SHA12 = re.compile(r"[0-9a-f]{12}")
 _LINK = re.compile(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|//)")  # any scheme (https:, data:, javascript:) or //host
 # control characters but newline and tab, DEL, bidi embedding/override/isolate (message.schema.json card_text)
 _BAD = re.compile("[\x00-\x08\x0b-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
+# a file name is shown to a person: also no direction marks (U+200E, U+200F, U+061C) that spoof a name
+_NAME_BAD = re.compile("[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]")
 # a plain http(s) host (no userinfo, no backslash, no %-encoding in the authority): $defs/review_card open
 _OPEN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\s\\]*)?")
 MIMES = {
@@ -71,6 +73,8 @@ def _text(v, name: str, limit: int, *, required: bool = False) -> str | None:
 def _file_name(v, where: str) -> str:
     if not isinstance(v, str) or not v:
         raise Refused(f"{where}: a file name is needed.")
+    if _NAME_BAD.search(v):
+        raise Refused(f"{where}: a file name has control or direction characters.")
     if _LINK.match(v):
         raise Refused(f"{where}: links are not allowed in a card, only files ({v[:40]}).")
     if safefile._parts(v) is None:

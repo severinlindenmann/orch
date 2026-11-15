@@ -513,3 +513,22 @@ def test_wire_card_without_a_file_leaves_why(proj):
         review.check_wire_card({**w, "kind": "check", "extra": 1}, 0)
     with pytest.raises(Refused):
         review.check_wire_card({**w, "preview": {"type": "img", "src": {"file": 3}}}, 1)
+
+
+SPOOF = ["invoice‮gnp.exe", "a‎.png", "a‏.png", "a؜.png", "a⁦.png", "a⁩.png"]
+
+
+@pytest.mark.parametrize("name", SPOOF)
+def test_file_names_with_bidi_or_marks_are_refused_at_prepare(proj, new_ticket, name):
+    tid = new_ticket()
+    (proj / name).write_bytes(png())
+    with pytest.raises(Refused):
+        review.prepare_card(proj, tid, img_card(name))
+    with pytest.raises(Refused):
+        review.copy_reviewed(proj, tid, [name])
+
+
+@pytest.mark.parametrize("name", SPOOF)
+def test_card_name_pattern_holds_back_spoofed_names(name):
+    assert phone_view._CARD_NAME.fullmatch(name) is None
+    assert phone_view._CARD_NAME.fullmatch("invoice.png")

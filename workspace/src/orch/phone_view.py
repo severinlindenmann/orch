@@ -1838,7 +1838,10 @@ def sync_reviews(root: Path) -> list[str]:
 
 
 CARD_TRIES = 3  # a card the relay keeps refusing is given up after this many sends (the plain question stays)
-_CARD_NAME = re.compile(r"[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]{0,254}")
+_CARD_NAME = re.compile(
+    r"[^./\\\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]"
+    r"[^/\\\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]{0,254}"
+)
 
 
 def _card_files(root: Path, tid: str, card: dict, shown: dict, state: dict) -> tuple[dict, list[dict]]:
