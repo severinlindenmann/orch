@@ -184,7 +184,7 @@
       "properties": {
         "result": { "enum": ["applied", "changed", "refused", "decided"], "description": "applied = the verdict was used; changed = what the phone showed is not what the workspace holds now (digest), nothing applied; refused = not used (reason); decided = the question was already answered (the computer first)." },
         "summary": { "allOf": [{ "$ref": "#/$defs/card_text" }, { "pattern": "^[^\u0000-\u001f\u007f]*$" }], "maxLength": 400, "description": "Only with applied or decided: the decision's one plain line (review.summary). Plain text, shown as data." },
-        "reason": { "enum": ["needs_person", "invalid", "unavailable"], "description": "Only with refused, then required. needs_person = the action needs a person's proof the phone answer did not carry; invalid = the verdict does not fit the card (an unknown picked option, talk without words, a note the workspace refuses); unavailable = any other refusal." }
+        "reason": { "enum": ["needs_person", "invalid", "unavailable"], "description": "Only with refused, then required. needs_person = the action needs a person at the computer; invalid = the verdict does not fit the card (an unknown picked option, talk without words, a note the workspace refuses); unavailable = any other refusal." }
       },
       "allOf": [
         { "if": { "properties": { "result": { "const": "refused" } } }, "then": { "required": ["reason"], "not": { "required": ["summary"] } }, "else": { "not": { "required": ["reason"] } } },
