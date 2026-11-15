@@ -1006,6 +1006,23 @@ def add_warmth(root: Path, tickets: list[dict], statuses: dict) -> None:
         t["warmth"] = {"seconds_left": max(0, int(limit - (now - since)))}
 
 
+def load_review(root: Path, orch_bin: str | None) -> dict:
+    """The Review page's data: what waits (`orch review list --json`) and what was decided
+    (`orch review list --answered --json`). Empty lists when orch cannot say."""
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_cards = pool.submit(run_orch, orch_bin, ["review", "list", "--json"], root)
+        f_done = pool.submit(run_orch, orch_bin, ["review", "list", "--answered", "--json"], root)
+    cards, done = f_cards.result(), f_done.result()
+    if isinstance(cards, dict):  # {workspace, cards}
+        cards = cards.get("cards")
+    if isinstance(done, dict):
+        done = done.get("answered", done.get("entries"))
+    return {
+        "cards": [c for c in cards if isinstance(c, dict)] if isinstance(cards, list) else [],
+        "answered": [c for c in done if isinstance(c, dict)] if isinstance(done, list) else [],
+    }
+
+
 def load_state(
     root: Path,
     orch_bin: str | None = None,
@@ -1021,6 +1038,8 @@ def load_state(
         f_tickets = pool.submit(load_tickets, root, orch_bin)
         f_raw = pool.submit(run_orch, orch_bin, ["addon", "list", "--json"], root)
         f_needs = pool.submit(run_orch, orch_bin, ["needs", "--json"], root) if with_addons else None
+        # the cards and decisions are for the live page only (a snapshot is shared and carries none)
+        f_review = pool.submit(load_review, root, orch_bin) if with_settings else None
         f_general = pool.submit(load_general, root) if with_addons else None
         f_chat = pool.submit(load_chat, root, orch_bin) if with_addons else None
         f_services = pool.submit(load_services, root, orch_bin) if with_addons else None
@@ -1081,6 +1100,7 @@ def load_state(
         # Chat (former General): helper name, today's texts with cards, the strip counts, the History list.
         "chat": chat,
         "needs": needs if isinstance(needs, list) else [],
+        "review": f_review.result() if f_review else {"cards": [], "answered": []},
         "services": services,  # snapshots name no add-on
         "runs": runs,
         "groups": groups,  # group chats; snapshots carry none

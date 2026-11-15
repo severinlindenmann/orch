@@ -1242,6 +1242,21 @@ function ticketSelectedTab(t) {
   const raw = ticketTabs.get(t.id), tab = TAB_ALIAS[raw] || raw;
   return ['overview', 'tasks', 'files', 'activity'].includes(tab) ? tab : 'overview';
 }
+// The answers given through the Review stack (a question answered there carries a `decision`), newest first, in the
+// shape of the kit's answer record. They show under the ticket's questions, not on a tab of their own.
+function ticketReviewAnswers(t) {
+  return array(t.questions).filter(q => q.answer != null && q.decision && typeof q.decision === 'object')
+    .map(q => ({id:'core:q:' + t.id + ':' + q.id, ticket:t.id, key:q.id, by:q.answered_by, via:q.via, at:q.at, card:q.card || {}, shown:q.shown, decision:q.decision}))
+    .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+}
+// "What applies now" on top (when a card answer exists), then each card answer as a record; plain answers stay rows.
+function ticketAnswerNodes(t, plainRow) {
+  const list = ticketReviewAnswers(t), api = typeof reviewApi === 'function' ? reviewApi() : null;
+  const o = {fileUrl:api ? api.fileUrl : () => '', now:new Date()}, byId = new Map(list.map(e => [e.key, e]));
+  const rows = array(t.questions).filter(q => q.answer != null).slice().reverse()
+    .map(q => byId.has(q.id) && window.UI?.answerRecord ? window.UI.answerRecord(byId.get(q.id), o) : plainRow(q));
+  return [window.UI?.appliesNow && list.length ? window.UI.appliesNow(list, o) : null, ...rows].filter(Boolean);
+}
 const ticketTabList = t => [['overview', 'Overview', null], ['tasks', 'Steps', array(t.checklist).length], ['files', 'Files', ticketFileCount(t)], ['activity', 'Activity', ticketHistoryEntries(t).length]];
 function ticketProperties(t, parent) {
   const field = (label, value) => h('div', {}, h('dt', {}, label), h('dd', {}, value));
@@ -1310,8 +1325,9 @@ function detail(t) {
   const planQ = t.status !== 'done' && t.plan_first && openQuestions[0] && String(openQuestions[0].text || '').startsWith('Plan ready') ? openQuestions[0] : null;
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
-  const answered = array(t.questions).filter(q => q.answer != null).slice().reverse().map(q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
-    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines'}, clean(q.answer)), h('p', {className:'meta'}, ['Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · ')))));
+  const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
+    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines'}, clean(q.answer)), h('p', {className:'meta'}, ['Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
+  const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),
     h('div', {className:'menu-pop', role:'menu'}, t.status === 'done' ? null : MOVE_CHOICES.map(([status, label]) => ticketButton(label, 'menu-item', () => moveTicket(t.id, status), {role:'menuitem', 'data-key':'ticket-move-' + status})),

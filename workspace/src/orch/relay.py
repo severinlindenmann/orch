@@ -17,7 +17,19 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from orch import diag, harness, history, humanproof, keystore, net, runs, skillrender, skills, tickets
+from orch import (
+    diag,
+    harness,
+    history,
+    humanproof,
+    keystore,
+    net,
+    review,
+    runs,
+    skillrender,
+    skills,
+    tickets,
+)
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -985,16 +997,29 @@ def question_extras(q: dict, previews: list[str] | None, scope: str | None) -> d
 
 
 def send_question(
-    root: Path, ticket: dict, q: dict, previews: list[str] | None = None, scope: str | None = None
+    root: Path,
+    ticket: dict,
+    q: dict,
+    previews: list[str] | None = None,
+    scope: str | None = None,
+    *,
+    card: dict | None = None,
+    card_files: list[dict] | None = None,
+    digest: str | None = None,
 ) -> dict:
+    """card / card_files / digest: a Review stack card (phone_view.sync_cards; relay-api.md 'Review cards on
+    the phone'). Each goes into the body only when given, so any other question is byte-identical (RULE A)."""
     body = {
         "question_id": q["id"],
-        "title": ticket["title"],
+        "title": _update_title(root, ticket["id"]) or "Ticket",
         "text": q["text"],
         "options": q["options"],
         "recommended": q["recommended"],
         **question_extras(q, previews, scope),
     }
+    for key, val in (("digest", digest), ("card", card), ("card_files", card_files)):
+        if val is not None:
+            body[key] = val
     msg = _message(root, "phones", "question", body, ticket["id"])
     rec = {
         "ticket": ticket["id"],
@@ -1019,6 +1044,8 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
     message `mid` the round is bound to. The asked record is written BEFORE the send. A normal question with
     body.review true; the relay does not push it (the Ready-for-review text did). The title is cut, scrubbed
     and value-hidden like every ticket title for a phone (no value hider: "Ticket", fail closed)."""
+    from orch import phone_results, phone_view
+
     qid = f"review-{n}"
     body = {
         "question_id": qid,
@@ -1029,6 +1056,15 @@ def send_review_question(root: Path, ticket: dict, n: int, mid: str) -> dict:
         "review": True,
     }
     rec = {"ticket": ticket["id"], "question_id": qid, "to": "phones", "review": True, "round": n}
+    try:  # what the person is shown of the Check result; the phone echoes it in a verdict
+        body["digest"] = rec["digest"] = review.check_digest(ticket)
+        with contextlib.suppress(Refused):  # the Check card; one that fails the wire check goes without it
+            wire = review.wire_card(review.check_card(ticket), {})
+            h = phone_results.value_hider(root)
+            if h is not None and phone_view.wire_card_clean(wire, h):
+                body["card"] = wire
+    except (KeyError, TypeError, ValueError):
+        pass  # no digest: the question goes out as before and a verdict on it is refused (fail closed)
     sign_asked(root, mid, rec)
     _asked_edit(root, lambda asked: asked.__setitem__(mid, rec))
     try:
@@ -1058,7 +1094,12 @@ def _proposal_asked(root: Path, msg: dict) -> dict | None:
 
 def _person_asked(root: Path, msg: dict) -> bool:
     """A question only a person decides (review, ticket proposal): never applied from an agent session."""
-    return _review_asked(root, msg) is not None or _proposal_asked(root, msg) is not None
+    body = msg.get("body")
+    return (
+        _review_asked(root, msg) is not None
+        or _proposal_asked(root, msg) is not None
+        or (isinstance(body, dict) and "verdict" in body)  # a card verdict is a person's swipe too
+    )
 
 
 def _asked_edit(root: Path, fn):
@@ -1226,6 +1267,191 @@ def _apply_proposal_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str
     return f"made {made['key']} from a ticket proposal (via {via})", made["ticket"]
 
 
+# ---- verdicts on cards (relay-api.md 'Review cards on the phone') ------------------------------------
+
+REVIEW_RESULT_TEXT = {
+    "applied": "Got it",
+    "changed": "This changed. Look at it again",
+    "decided": "Already decided",
+}
+
+
+def _review_result_text(body: dict) -> str:
+    if body["result"] == "refused":
+        return "Couldn't use your answer"
+    return REVIEW_RESULT_TEXT[body["result"]]
+
+
+def _one_line(text, limit: int = 400) -> str | None:
+    line = " ".join(clean_untrusted(str(text), limit).split())
+    return line or None
+
+
+def _send_review_result(root: Path, qmid: str, ticket: str, saved: dict) -> None:
+    try:
+        sent = _message(
+            root,
+            saved["to"],
+            "text",
+            {"text": _review_result_text(saved["body"]), "review_result": saved["body"]},
+            ticket,
+            reply_to=qmid,
+            mid=saved["id"],
+            created_at=saved["created_at"],
+        )
+        if not sent.get("sent"):
+            log_send_failure(root, f"review result {saved['id']} failed", "not sent")
+    except (Refused, OSError) as exc:
+        log_send_failure(root, f"review result {saved['id']} failed", exc)
+
+
+def _phone_by(phone: dict, frm: str) -> str:
+    name = re.sub(r"[^A-Za-z0-9_.@ -]", "_", str(phone.get("name") or "")).strip()[:64]
+    return f"human:{name or frm}"
+
+
+def _clean_note(v):
+    """The person's words from the phone, cleaned like every phone text (strings only; shape untouched)."""
+    if isinstance(v, str):
+        return clean_untrusted(v, 2000)
+    if isinstance(v, list):
+        return [_clean_note(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _clean_note(x) for k, x in v.items()}
+    return v
+
+
+def _verdict_result(root: Path, qmid: str, asked: dict, msg: dict, body: dict) -> None:
+    """The ONE review_result of this question: reserved in the asked record before it is sent (same message
+    id and time on a retry), never a second one for another answer of the same question."""
+    answer_id, frm = str(msg["id"]), str(msg["from"])
+
+    def reserve(asked_all):
+        rec = asked_all.get(qmid)
+        if not isinstance(rec, dict):
+            return None
+        results = rec.setdefault("vresults", {})
+        if answer_id in results:
+            return results[answer_id]
+        if results:  # one per question
+            return None
+        results[answer_id] = {"to": frm, "id": new_id(), "created_at": tickets.now(), "body": body}
+        return results[answer_id]
+
+    if (saved := _asked_edit(root, reserve)) is not None:
+        _send_review_result(root, qmid, asked["ticket"], saved)
+
+
+def _is_mine(rec: dict, q: dict, answer_id: str, by: str) -> bool:
+    """The question was answered by THIS verdict (a crash between the write and the result): reserved in the
+    asked record and written as this phone person."""
+    return rec.get("vpending") == answer_id and q.get("answered_by") == by and q.get("via") == "phone"
+
+
+def _verdict_summary(q: dict) -> str | None:
+    dec = q.get("decision")
+    return _one_line(dec["summary"]) if isinstance(dec, dict) and dec.get("summary") else None
+
+
+def _apply_verdict(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
+    """A phone answer with a `verdict` on a card question (q<n>) or a review question. Checked in the
+    contract's order, ticket / question / card only from the MAC'd asked record and the ticket, never from the
+    answer: only a paired phone, not group-routed (else nothing at all, no result); already decided ->
+    decided; digest -> changed; then review.decide as the person (by = the stored phone name, via phone).
+    Never review.change. Exactly one review_result goes back to the answering phone."""
+    from orch import phone_view
+
+    tid, qmid = asked["ticket"], str(msg.get("reply_to"))
+    frm, answer_id = str(msg.get("from", "")), str(msg["id"])
+    phone = _paired_phone(root, frm) if frm.startswith("ph_") else None
+    if phone is None or msg_group(msg):
+        return "ignored: only a phone paired with this workspace answers a card", None
+    by, via = _phone_by(phone, frm), "phone"
+    is_review = asked.get("review") is True
+    rec = _asked_edit(root, lambda records: records.get(qmid) or {})
+    if answer_id in rec.get("vresults", {}):  # a retry: the same result again, nothing applied twice
+        _verdict_result(root, qmid, asked, msg, {})
+        return "card verdict: result resent", None
+
+    def result(body: dict, note: str, applied: str | None = None):
+        _verdict_result(root, qmid, asked, msg, body)
+        return note, applied
+
+    def line(text: str) -> None:
+        with contextlib.suppress(Refused, OSError):
+            tickets.note_history(root, tid, by, text, via)
+
+    v = msg["body"].get("verdict")
+    note = _clean_note(v.get("note")) if isinstance(v, dict) else None
+    if not (isinstance(v, dict) and v.get("verdict") in review.VERDICTS and isinstance(v.get("digest"), str)):
+        return result({"result": "refused", "reason": "invalid"}, "not applied: not a verdict")
+    picked = v.get("picked")
+    if picked is not None and not isinstance(picked, str):
+        return result({"result": "refused", "reason": "invalid"}, "not applied: not a verdict")
+    asked_digest = asked.get("digest") if is_review else asked.get("question_digest")
+    try:
+        ticket = tickets.load(root, tid)
+        q = None if is_review else next(x for x in ticket["questions"] if x["id"] == asked["question_id"])
+    except (Refused, OSError, ValueError, KeyError, StopIteration):
+        return result(
+            {"result": "refused", "reason": "unavailable"}, f"not applied: no such question on {tid}"
+        )
+    if not isinstance(asked_digest, str) or not asked_digest:
+        return result({"result": "refused", "reason": "unavailable"}, f"not applied: {QUESTION_UNCHECKABLE}")
+
+    if is_review:
+        n = asked.get("round")
+        # the round is closed by exactly one answer (compare and set); a closed, older or other round is stale
+        if not phone_view.close_review(root, tid, n, qmid) or ticket.get("status") != "review":
+            line("A review answer from the phone came too late and was ignored")
+            return result({"result": "decided"}, f"not applied to {tid}: not the current review")
+        now = review.check_digest(ticket)
+    else:
+        if q.get("answer") is not None:
+            body = {"result": "applied" if _is_mine(rec, q, answer_id, by) else "decided"}
+            if s := _verdict_summary(q):
+                body["summary"] = s
+            return result(body, f"not applied to {tid}: {q['id']} is already answered")
+        now = tickets.question_digest(q)
+    if v["digest"] != asked_digest or now != asked_digest:
+        line("A phone answer was not used: what you saw has changed since")
+        return result({"result": "changed"}, f"not applied to {tid}: the card changed")
+    if not is_review:  # reserved first: a crash after the write is told apart from a computer answer
+        _set_asked(root, qmid, vpending=answer_id)
+    try:
+        out = review.decide(
+            root,
+            tid,
+            "review" if is_review else q["id"],
+            v["verdict"],
+            picked,
+            note,
+            by=by,
+            via=via,
+            digest=asked_digest,
+            phone=frm,
+            pid="p_" + answer_id[2:],
+        )
+    except review.BadVerdict as e:
+        line("A phone answer was not used: " + str(e)[:120])
+        return result({"result": "refused", "reason": "invalid"}, f"not applied to {tid}: {e}")
+    except Refused as e:
+        line("A phone answer was not used: " + str(e)[:120])
+        return result({"result": "refused", "reason": _refusal_reason(e)}, f"not applied to {tid}: {e}")
+    except BaseException:
+        if is_review:
+            phone_view.reopen_review(root, tid, asked.get("round"), qmid)
+        raise
+    body = {"result": "applied"}
+    if s := _verdict_summary(out):
+        body["summary"] = s
+    if not is_review:
+        _to_waiting_agent(root, tid, out, by)
+    return result(
+        body, f"{'accepted' if is_review and v['verdict'] == 'ok' else 'decided'} {tid} (via {via})", tid
+    )
+
+
 def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str | None]:
     """An answer to a review question. It acts only when ALL hold: it comes from a phone paired with this
     workspace (the relay-authenticated `from`, not a group-routed message), it answers THIS question message
@@ -1235,6 +1461,10 @@ def _apply_review_answer(root: Path, msg: dict, asked: dict) -> tuple[str, str |
     only. The actor is human:<stored phone name>, never taken from the body. Never an agent."""
     from orch import phone_view
 
+    if "verdict" in msg.get(
+        "body", {}
+    ):  # a new phone's swipe: the contract's order (Review cards on the phone)
+        return _apply_verdict(root, msg, asked)
     tid, n = asked["ticket"], asked.get("round")
     frm = str(msg.get("from", ""))
     phone = _paired_phone(root, frm) if frm.startswith("ph_") else None
@@ -1373,7 +1603,7 @@ def _asked_kind(rec: dict) -> str:
 
 
 def _asked_signed_fields(mid: str, rec: dict) -> list:
-    return [
+    fields = [
         mid,
         _asked_kind(rec),
         rec.get("review"),
@@ -1386,6 +1616,11 @@ def _asked_signed_fields(mid: str, rec: dict) -> list:
         rec.get("group"),
         rec.get("question_digest"),
     ]
+    if (
+        rec.get("digest") is not None
+    ):  # RULE A: only a review question that carries one; old MACs still verify
+        fields.append(rec["digest"])
+    return fields
 
 
 def sign_asked(root: Path, mid: str, rec: dict) -> dict:
@@ -1432,6 +1667,10 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         return _apply_review_answer(root, msg, asked)
     if asked.get("proposal") is True:
         return _apply_proposal_answer(root, msg, asked)
+    if "verdict" in msg.get("body", {}):
+        return _apply_verdict(root, msg, asked)
+    if (card := _card_plain(root, msg, asked)) is not None:
+        return card
     by, via = _answer_by(msg, asked)
     try:
         digest = asked.get("question_digest")
@@ -1456,6 +1695,46 @@ def _apply_answer(root: Path, msg: dict) -> tuple[str, str | None]:
         return f"not applied to {asked['ticket']}: {e}", None
     _to_waiting_agent(root, t["id"], q, by)
     return f"answered {asked['question_id']} on {asked['ticket']} (via {via})", asked["ticket"]
+
+
+def _card_plain(root: Path, msg: dict, asked: dict) -> tuple[str, str | None] | None:
+    """An answer WITHOUT a verdict (an old phone) to a card question: None when the question has no card
+    (today's path goes on). With a card: an answer that is exactly an option id of a choice card = ok with
+    that pick; any other text = talk with that text as the words. The same
+    review.decide as a verdict, no review_result (relay-api.md)."""
+    try:
+        q = next(
+            x for x in tickets.load(root, asked["ticket"])["questions"] if x["id"] == asked["question_id"]
+        )
+    except (Refused, OSError, ValueError, KeyError, StopIteration):
+        return None
+    if not isinstance(q.get("card"), dict):
+        return None
+    frm = str(msg.get("from", ""))
+    phone = _paired_phone(root, frm) if frm.startswith("ph_") else None
+    if phone is None or msg_group(msg):
+        return "ignored: only a phone paired with this workspace answers a card", None
+    ans = clean_untrusted(str(msg.get("body", {}).get("answer")), 2000).strip()
+    if not ans:
+        return "ignored: an empty answer", None
+    by, via = _phone_by(phone, frm), "phone"
+    pick = ans in review._option_ids(q, q["card"])
+    try:
+        out = review.decide(
+            root,
+            asked["ticket"],
+            q["id"],
+            "ok" if pick else "talk",
+            ans if pick else None,
+            None if pick else {"words": {"text": ans}},
+            by=by,
+            via=via,
+            digest=asked.get("question_digest"),
+        )
+    except Refused as e:
+        return f"not applied to {asked['ticket']}: {e}", None
+    _to_waiting_agent(root, asked["ticket"], out, by)
+    return f"answered {q['id']} on {asked['ticket']} (via {via})", asked["ticket"]
 
 
 def _to_waiting_agent(root: Path, tid: str, q: dict, by: str) -> None:
@@ -2321,6 +2600,7 @@ def sync_phone_views(root: Path) -> None:
         phone_view.sync(root)
         phone_view.sync_light(root)
         phone_view.sync_reviews(root)
+        phone_view.sync_cards(root)
     with contextlib.suppress(Refused, OSError, ValueError, TimeoutError):
         send_working(root)
 

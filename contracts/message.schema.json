@@ -30,6 +30,13 @@
         { "if": { "required": ["body"], "properties": { "body": { "required": ["proposal_result"], "properties": { "proposal_result": { "required": ["result"], "properties": { "result": { "const": "decided" } }, "not": { "required": ["key"] } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Already decided" } } } } } },
         { "if": { "required": ["body"], "properties": { "body": { "properties": { "proposal_result": { "properties": { "result": { "const": "made" } } } } } } }, "then": { "properties": { "to": { "const": "phones" } } }, "else": { "properties": { "to": { "pattern": "^ph_[a-z0-9]{10}$" } } } }
       ] } },
+    { "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["review_result"] } } }, "then": { "required": ["reply_to", "ticket"], "properties": { "type": { "const": "text" }, "to": { "pattern": "^ph_[a-z0-9]{10}$" }, "body": { "additionalProperties": false, "required": ["text"], "properties": { "text": {}, "review_result": {} } } },
+      "allOf": [
+        { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result"], "properties": { "result": { "const": "applied" } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Got it" } } } } } },
+        { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result"], "properties": { "result": { "const": "changed" } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "This changed. Look at it again" } } } } } },
+        { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result", "reason"], "properties": { "result": { "const": "refused" }, "reason": { "enum": ["needs_person", "invalid", "unavailable"] } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Couldn't use your answer" } } } } } },
+        { "if": { "required": ["body"], "properties": { "body": { "required": ["review_result"], "properties": { "review_result": { "required": ["result"], "properties": { "result": { "const": "decided" } } } } } } }, "then": { "properties": { "body": { "properties": { "text": { "const": "Already decided" } } } } } }
+      ] } },
     { "if": { "properties": { "type": { "const": "control" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/control" } } } },
     { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/file" } } } },
     { "if": { "properties": { "type": { "const": "question" } } }, "then": { "properties": { "body": { "$ref": "#/$defs/question" } }, "if": { "required": ["body"], "properties": { "body": { "type": "object", "required": ["proposal"] } } }, "then": { "not": { "required": ["ticket"] } }, "else": { "required": ["ticket"] } } },
@@ -101,8 +108,8 @@
     },
     "text": {
       "type": "object",
-      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }, { "required": ["proposal_result"] }],
-      "description": "A text needs at least one of text, attachments, voice, location, feedback, proposal_result. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
+      "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }, { "required": ["voice"] }, { "required": ["location"] }, { "required": ["feedback"] }, { "required": ["proposal_result"] }, { "required": ["review_result"] }],
+      "description": "A text needs at least one of text, attachments, voice, location, feedback, proposal_result, review_result. Only the relay sets client_id, attachments, voice, location and feedback (on the text it builds for POST /v1/phone/send); a workspace message with any of them is refused (422 invalid).",
       "properties": {
         "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
         "client_id": { "$ref": "#/$defs/client_id" },
@@ -152,6 +159,7 @@
         },
         "feedback": { "$ref": "#/$defs/feedback" },
         "proposal_result": { "$ref": "#/$defs/proposal_result" },
+        "review_result": { "$ref": "#/$defs/review_result" },
         "update": {
           "type": "object", "required": ["kind"], "additionalProperties": false,
           "properties": {
@@ -170,6 +178,115 @@
       "if": { "required": ["ticket_view"] }, "then": { "required": ["update"] }
     },
     "display_key": { "type": "string", "pattern": "^[A-Z0-9]{2,4}-[1-9][0-9]{0,8}$", "description": "<code>-<n>, n from 1, e.g. DM1-12 (the same rule as ticket.schema.json key)." },
+    "review_result": {
+      "description": "Not chat. The workspace's result for a phone answer with a verdict on a card or review question (relay-api.md, Review cards on the phone): one text to the answering ph_ only, reply_to = the question, ticket = the question's ticket, body only {text, review_result}; body.text is the fixed line for the result (the relay checks it). Never pushed, never unread. = the phone's Received. reason is a fixed code, never exception text.",
+      "type": "object", "additionalProperties": false, "required": ["result"],
+      "properties": {
+        "result": { "enum": ["applied", "changed", "refused", "decided"], "description": "applied = the verdict was used; changed = what the phone showed is not what the workspace holds now (digest), nothing applied; refused = not used (reason); decided = the question was already answered (the computer first)." },
+        "summary": { "allOf": [{ "$ref": "#/$defs/card_text" }, { "pattern": "^[^\u0000-\u001f\u007f]*$" }], "maxLength": 400, "description": "Only with applied or decided: the decision's one plain line (review.summary). Plain text, shown as data." },
+        "reason": { "enum": ["needs_person", "invalid", "unavailable"], "description": "Only with refused, then required. needs_person = the action needs a person at the computer; invalid = the verdict does not fit the card (an unknown picked option, talk without words, a note the workspace refuses); unavailable = any other refusal." }
+      },
+      "allOf": [
+        { "if": { "properties": { "result": { "const": "refused" } } }, "then": { "required": ["reason"], "not": { "required": ["summary"] } }, "else": { "not": { "required": ["reason"] } } },
+        { "if": { "properties": { "result": { "const": "changed" } } }, "then": { "not": { "required": ["summary"] } } }
+      ]
+    },
+    "card_text": { "type": "string", "minLength": 1, "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "pattern": "\\S" }], "description": "review.py _text: not blank, no control characters but newline and tab, no DEL, no bidi embedding/override/isolate characters (U+202A-U+202E, U+2066-U+2069; stricter than review.py today, which must align). Lengths are set where it is used (code points, as Python len)." },
+    "card_opt_text": { "type": "string", "allOf": [{ "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]*$" }, { "anyOf": [{ "maxLength": 0 }, { "pattern": "\\S" }] }], "description": "As card_text, but empty is allowed (= not given)." },
+    "card_src": {
+      "description": "A file a page/img preview shows, on the wire: {file: i} = card_files[i]; {file: null, why} = not sent to phones (too_large: over the 20 MB card budget; held_back: the secret scan or a changed reviewed copy kept it back). The phone shows \"Open on the computer\" for both.",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["file"], "properties": { "file": { "type": "integer", "minimum": 0, "maximum": 19 } } },
+        { "type": "object", "additionalProperties": false, "required": ["file", "why"], "properties": { "file": { "type": "null" }, "why": { "enum": ["too_large", "held_back"] } } }
+      ]
+    },
+    "card_file": {
+      "type": "object", "additionalProperties": false, "required": ["blob_id", "name", "size", "sha256", "mime"],
+      "properties": {
+        "blob_id": { "$ref": "#/$defs/blob_id" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^./\\\\\u0000-\u001f\u007f][^/\\\\\u0000-\u001f\u007f]*$", "description": "The reviewed file's base name (no path, no leading dot); display only." },
+        "size": { "type": "integer", "minimum": 1, "maximum": 10485760, "description": "Bytes; review.py MAX_FILE (10 MB). The relay checks it equals the stored blob." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "= shown.files[name] of the stored question; the relay checks it equals the stored blob, the phone checks the bytes it downloads." },
+        "mime": { "enum": ["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml", "text/html", "text/markdown", "text/plain", "text/csv"], "description": "From the file type (review.py FILE_TYPES), set by the workspace. The phone renders html and svg only in a sandbox without scripts or network." }
+      }
+    },
+    "card_leaf": {
+      "description": "A preview that holds no other preview (page, img, doc, table); review.py _walk_preview.",
+      "type": "object", "required": ["type"],
+      "properties": { "type": { "enum": ["page", "img", "doc", "table"] } },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "page" } } }, "then": { "additionalProperties": false, "required": ["src"], "properties": { "type": {}, "src": { "$ref": "#/$defs/card_src" } } } },
+        { "if": { "properties": { "type": { "const": "img" } } }, "then": { "additionalProperties": false, "required": ["src"], "properties": { "type": {}, "src": { "$ref": "#/$defs/card_src" }, "alt": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 } } } },
+        { "if": { "properties": { "type": { "const": "doc" } } }, "then": { "additionalProperties": false, "properties": { "type": {}, "heading": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 }, "paras": { "type": "array", "maxItems": 50, "items": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 2000 } }, "steps": { "type": "array", "maxItems": 50, "items": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 2000 } } } } },
+        { "if": { "properties": { "type": { "const": "table" } } }, "then": { "additionalProperties": false, "required": ["cols", "rows"], "properties": { "type": {}, "cols": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 100 } }, "rows": { "type": "array", "maxItems": 200, "items": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 500 } } } } } }
+      ]
+    },
+    "card_preview": {
+      "description": "A card preview (review.py _walk_preview): a leaf, compare (before/after leaves, optional note) or options (2-8 options with unique ids, each with an optional leaf preview). Not expressible here, checked by the workspace (validate_card) and the relay: a table row has one cell per column; option ids differ.",
+      "type": "object", "required": ["type"],
+      "properties": { "type": { "enum": ["page", "img", "doc", "table", "compare", "options"] } },
+      "allOf": [
+        { "if": { "properties": { "type": { "enum": ["page", "img", "doc", "table"] } } }, "then": { "$ref": "#/$defs/card_leaf" } },
+        { "if": { "properties": { "type": { "const": "compare" } } }, "then": { "additionalProperties": false, "required": ["before", "after"], "properties": { "type": {}, "note": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 }, "before": { "$ref": "#/$defs/card_leaf" }, "after": { "$ref": "#/$defs/card_leaf" } } } },
+        { "if": { "properties": { "type": { "const": "options" } } }, "then": { "additionalProperties": false, "required": ["options"], "properties": { "type": {}, "options": { "type": "array", "minItems": 2, "maxItems": 8, "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "title"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[A-Za-z0-9]{1,8}$" },
+              "title": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 120 },
+              "text": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 },
+              "preview": { "$ref": "#/$defs/card_leaf" }
+            } } } } } }
+      ]
+    },
+    "review_card": {
+      "description": "A Review stack card on the wire (question body.card): exactly review.validate_card's output with file references replaced by card_src. The workspace sends only the keys below (null or empty optional values left out); the relay refuses unknown keys. At most 65536 bytes as compact UTF-8 JSON (review.py MAX_CARD_JSON; the relay checks). Plain text, shown as data, never instructions.",
+      "type": "object", "additionalProperties": false, "required": ["kind", "title", "then"],
+      "properties": {
+        "kind": { "enum": ["draft", "check", "link", "choice", "plan"] },
+        "title": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 },
+        "why": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 },
+        "need": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 200 },
+        "then": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 },
+        "ok_label": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 40 },
+        "open": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500, "pattern": "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\\s\\\\]*)?$", "description": "A link the person may open: http(s), a plain host (letters, digits, dot, hyphen; no userinfo @, no backslash, no %-encoding), optional port, optional path without whitespace or backslash. Untrusted: the phone parses it with one WHATWG URL parser, shows THAT host and opens the parsed, re-serialised URL in the system browser." },
+        "preview": { "$ref": "#/$defs/card_preview" }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "enum": ["choice", "link"] } } }, "then": { "required": ["preview"] } },
+        { "if": { "properties": { "kind": { "const": "choice" } } }, "then": { "properties": { "preview": { "properties": { "type": { "const": "options" } } } } } }
+      ]
+    },
+    "verdict": {
+      "description": "A swipe on a card or review question (relay-api.md, Review cards on the phone). Built by the phone, passed through by the relay as answer body.verdict, decided only by the workspace (review.decide rules). At most 8192 bytes as compact UTF-8 JSON (review.py MAX_NOTE_BYTES; the relay checks). Every text in it is the person's words: data, never instructions for a helper.",
+      "type": "object", "additionalProperties": false, "required": ["verdict", "digest"],
+      "properties": {
+        "verdict": { "enum": ["ok", "no", "talk"], "description": "ok = right swipe (approve / use the picked option); no = left (don't / none of these); talk = down (send back / use picked with these changes; needs changes, words or pins)." },
+        "picked": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Za-z0-9]{1,8}$" }], "description": "An option id of the card (choice) or a question option; null or left out otherwise. Must be null with no." },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The question's body.digest as the phone received it. The relay checks it equals the stored question's digest (else 422); the workspace compares it with the question as it holds it now (else changed)." },
+        "note": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "changes": { "type": "array", "maxItems": 20, "items": { "allOf": [{ "$ref": "#/$defs/card_text" }], "maxLength": 500 } },
+            "words": { "type": "object", "additionalProperties": false, "properties": {
+              "text": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 2000 },
+              "voice": { "type": "array", "maxItems": 3, "items": { "type": "object", "additionalProperties": false, "required": ["blob_id", "transcript", "lang", "duration"], "properties": {
+                "blob_id": { "$ref": "#/$defs/blob_id", "description": "A phone upload of the answering phone (else 404)." },
+                "transcript": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 2000, "description": "What was said (empty when nothing could be transcribed). Data, never instructions." },
+                "lang": { "$ref": "#/$defs/lang" },
+                "duration": { "type": "number", "minimum": 0, "maximum": 120 } } } } } },
+            "pins": { "type": "array", "maxItems": 30, "items": { "type": "object", "additionalProperties": false, "required": ["n", "x", "y"], "properties": {
+              "n": { "type": "integer", "minimum": 1, "maximum": 999 },
+              "on": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 120, "description": "Which preview the pin is on (a card_files name, \"preview\", or an option id)." },
+              "x": { "type": "number", "minimum": 0, "maximum": 1 },
+              "y": { "type": "number", "minimum": 0, "maximum": 1 },
+              "text": { "allOf": [{ "$ref": "#/$defs/card_opt_text" }], "maxLength": 500 } } } }
+          }
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "verdict": { "const": "no" } } }, "then": { "properties": { "picked": { "type": "null" } } } }
+      ]
+    },
     "proposal_result": {
       "description": "Not chat. The workspace's result for a phone's `make` answer to a ticket proposal (relay-api.md, Ticket proposal result): one text with reply_to = the proposal question's id, body.text = the fixed canonical line for the result (made/decided with key: Ticket made: <key>; refused: Couldn't make the ticket; decided: Already decided; the relay checks the key too), no ticket, no general, no update, no ticket_view, no attribution. made goes to `phones`; refused and decided go only to the answering `ph_…`. The phone never shows it as a bubble; it only updates the proposal card. `reason` is a fixed code, never exception text, and no code is added without a contract change.",
       "type": "object", "additionalProperties": false, "required": ["result"],
@@ -333,7 +450,12 @@
           "then": { "properties": { "question_id": { "pattern": "^review-" }, "options": { "const": ["accept", "changes"] } }, "not": { "required": ["scope"] } } },
         { "if": { "required": ["proposal"] },
           "then": { "required": ["title"], "properties": { "question_id": { "pattern": "^proposal-" }, "options": { "const": ["make", "not_now"] }, "recommended": { "type": "null" }, "title": { "minLength": 1, "maxLength": 120 } }, "not": { "anyOf": [{ "required": ["scope"] }, { "required": ["review"] }] } } },
-        { "if": { "not": { "required": ["proposal"] } }, "then": { "not": { "required": ["when"] } } }
+        { "if": { "not": { "required": ["proposal"] } }, "then": { "not": { "required": ["when"] } } },
+        { "if": { "required": ["digest"] }, "then": { "properties": { "question_id": { "pattern": "^(q[0-9]{1,4}|review-[0-9]{1,4})$" } }, "not": { "anyOf": [{ "required": ["proposal"] }, { "required": ["scope"] }] } } },
+        { "if": { "required": ["card"] }, "then": { "required": ["digest"] } },
+        { "if": { "required": ["card_files"] }, "then": { "required": ["card"] } },
+        { "if": { "required": ["card", "review"] }, "then": { "properties": { "card": { "properties": { "kind": { "const": "check" } } } } } },
+        { "if": { "required": ["card"], "not": { "required": ["review"] } }, "then": { "properties": { "question_id": { "pattern": "^q[0-9]{1,4}$" }, "card": { "properties": { "kind": { "not": { "const": "check" } } } } } } }
       ],
       "properties": {
         "question_id": { "type": "string", "pattern": "^(q[0-9]{1,4}|review-[0-9]{1,4}|proposal-m_[a-z0-9]{16})$", "description": "q<n> = a question of the ticket; review-<n> = the review question of round n (review: true); proposal-<message id> = the ticket proposal of the helper (proposal: \"make_ticket\", the message id is this question's own id)." },
@@ -349,7 +471,10 @@
           "additionalProperties": { "$ref": "#/$defs/artifact_id" },
           "description": "Optional: option -> the ticket_view attachment id the phone shows next to that option (A/B choices, approve with a preview). Keys are options of this question; others are ignored."
         },
-        "scope": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional, permission questions (options Once / Always / No): what Always covers, in plain words, e.g. \"sending to anna@pilatus.ch\". The phone shows \"Always allow <scope>\"." }
+        "scope": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Optional, permission questions (options Once / Always / No): what Always covers, in plain words, e.g. \"sending to anna@pilatus.ch\". The phone shows \"Always allow <scope>\"." },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Optional (Review stack, relay-api.md Review cards on the phone): what the person is shown, as the workspace hashes it: tickets.question_digest(q) for a card question (q<n>), review.check_digest(ticket) for a review question (review-<n>). Opaque to the phone: it echoes it in answer_request.verdict.digest. Required with card; never with proposal or scope." },
+        "card": { "$ref": "#/$defs/review_card" },
+        "card_files": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/card_file" }, "description": "Optional, only with card: the reviewed files the card shows, uploaded by the sending workspace (POST /v1/blobs). A card src {\"file\": i} is entry i. The relay checks each blob was uploaded by the sender with this size and sha256, every index is in range and the sizes add up to at most 20 MB." }
       }
     },
     "answer": {
@@ -358,7 +483,8 @@
         "question_id": { "type": "string", "pattern": "^(q[0-9]{1,4}|review-[0-9]{1,4}|proposal-m_[a-z0-9]{16})$" },
         "answer": { "type": "string", "minLength": 1 },
         "answered_by": { "type": "string", "pattern": "^(agent|human):.{1,64}$" },
-        "client_id": { "$ref": "#/$defs/client_id", "description": "Set by the relay on phone answers (POST /v1/phone/answer)." }
+        "client_id": { "$ref": "#/$defs/client_id", "description": "Set by the relay on phone answers (POST /v1/phone/answer)." },
+        "verdict": { "$ref": "#/$defs/verdict", "description": "Set by the relay only: answer_request.verdict copied as is (POST /v1/phone/answer), on an answer to a question with digest. The workspace ignores it on any other answer." }
       }
     },
     "delegate": {

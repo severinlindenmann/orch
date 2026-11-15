@@ -260,6 +260,8 @@ function route() {
   // #new (linked from the one-ticket view) opens the new-ticket form on Home.
   // The Notes page is gone: its "What changed" is on Home, and old note links land there.
   if (hash === '#notes' || hash.startsWith('#note/')) { history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
+  // `orch review link` prints .../#/review: the same page
+  if (hash === '#/review') { history.replaceState(null, '', '#review'); return {kind:'review', hash:'#review'}; }
   if (hash === '#new') { if (!snapshot) setTimeout(() => ticketForm(), 0); history.replaceState(null, '', '#home'); return {kind:'home', hash:'#home'}; }
   // #settings is General; #settings/<tab> opens that tab (r.hash stays #settings so switching tabs is not a page change).
   const settingsHash = /^#settings(?:\/(general|agent|phone|about|addons(?:\/[a-z][a-z0-9-]{1,31})?))?$/.exec(hash);
@@ -279,7 +281,7 @@ function route() {
     }
   } catch (_) { /* Malformed links show Page not found. */ }
   // a known page this workspace does not offer (no chat, a shared copy's settings) stays Home, as before
-  const kind = {'#home':'home', '#tickets':'tickets', '#settings':'home', '#chat':'home', '#general':'home'}[hash] || (hash.startsWith('#chat/') ? 'home' : '');
+  const kind = {'#home':'home', '#tickets':'tickets', '#review':'review', '#settings':'home', '#chat':'home', '#general':'home'}[hash] || (hash.startsWith('#chat/') ? 'home' : '');
   return kind ? {kind, hash:full} : {kind:'notfound', hash:full};
 }
 function render(arrived = new Set()) {
@@ -290,7 +292,7 @@ function render(arrived = new Set()) {
   const scroll = [window.scrollX, window.scrollY];
   const active = document.activeElement;
   const activeKey = nodeKey(active);
-  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'notfound' ? 'Page not found' : 'Home';
+  const pageName = r.kind === 'settings' ? 'Settings' : (r.kind === 'addon' || r.kind === 'page') ? addonLabel(addons().find(a => a.name === r.id)) : r.kind === 'ticket' ? 'Ticket' : r.kind === 'chat' ? 'Chat' : r.kind === 'tickets' ? 'Tickets' : r.kind === 'review' ? 'Review' : r.kind === 'notfound' ? 'Page not found' : 'Home';
   document.getElementById('workspace-name').textContent = clean(state.settings?.ws_name || state.workspace || 'Workspace');
   document.getElementById('workspace-mode').textContent = window.DashHelpers.footerState(state, snapshot);
   const crumb = document.getElementById('crumb');
@@ -316,6 +318,9 @@ function render(arrived = new Set()) {
     const line = needCount ? window.DashHelpers.needsYou(needCount) + (ages.length ? ' · oldest ' + window.DashHelpers.ago(new Date(Math.min(...ages)).toISOString(), Date.now()) : '') : '';
     wait.hidden = !line; if (wait.textContent !== line) wait.textContent = line;
   }
+  // On Review the decision is the one primary action: New ticket steps back to an outline
+  const newTicket = document.querySelector('#new-ticket'), newCls = 'btn ' + (r.kind === 'review' ? 'outline' : 'primary') + ' sm';
+  if (newTicket && newTicket.className !== newCls) newTicket.className = newCls;
   const wsIcon = document.getElementById('topbar-ws'), lookKey = JSON.stringify([state.look?.icon, state.look?.color, state.workspace]);
   if (window.OrchLook && state.look && wsIcon.dataset.look !== lookKey) { wsIcon.dataset.look = lookKey; wsIcon.replaceChildren(window.OrchLook.badge(state.look, clean(state.workspace) || 'Workspace', 26)); }
   const here = r.kind === 'notfound' ? '' : r.kind === 'ticket' ? '#tickets' : r.kind === 'home' ? '#home' : r.kind === 'page' ? '#addon/' + encodeURIComponent(r.id) : r.hash.split('?')[0];
@@ -334,8 +339,9 @@ function render(arrived = new Set()) {
     for (const [host, mounted] of mounts) { if (main.contains(host)) { mounted.destroy(); mounts.delete(host); } }
     main.replaceChildren();
   }
-  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
+  reconcile(main, r.kind === 'settings' ? settingsPage() : r.kind === 'home' ? home() : r.kind === 'tickets' ? list() : r.kind === 'review' ? reviewPage() : r.kind === 'chat' ? chatPage() : r.kind === 'ticket' ? detail(ticketOf(r.id)) : r.kind === 'page' ? pageFrame(r) : r.kind === 'notfound' ? notFoundPage() : addonTab(r.id));
   for (const [host, mounted] of mounts) if (!host.isConnected) { mounted.destroy(); mounts.delete(host); }
+  if (r.kind === 'review') mountReview(main);
   main.querySelectorAll('[data-question]').forEach(host => {
     if (!mounts.has(host)) {
       const t = ticketOf(host.dataset.ticket), q = array(t?.questions).find(q => q.id === host.dataset.question);
