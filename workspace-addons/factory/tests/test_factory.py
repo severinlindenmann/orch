@@ -9,7 +9,7 @@ import jsonschema
 import pytest
 from conftest import CONTRACTS
 
-from orch_factory import authority
+from orch_factory import authority, commands
 from orch_factory.store import Refused, Store, digest
 
 
@@ -351,6 +351,18 @@ def test_act_idea_files_the_order_as_the_person_and_starts_the_agent(ws):
     writes = [c for c in map(json.loads, (ws / "calls.jsonl").read_text().splitlines()) if c["by"]]
     assert writes and {c["by"] for c in writes} == {"human:alex"}  # ticket, ext and run: all the person's
     assert json.loads((ws / "runs.jsonl").read_text())["ticket"] == r["order"]
+    # the start text: a neutral idea must read as a Factory order (draft, ask, wait), not as a task to build
+    new = next(
+        c
+        for c in map(json.loads, (ws / "calls.jsonl").read_text().splitlines())
+        if c["args"][:2] == ["ticket", "new"]
+    )
+    assert f"--note={commands.ORDER_NOTE}" in new["args"]
+    assert (
+        len(commands.ORDER_NOTE) < 200
+    )  # core adds "write a plan, split it into tasks, then start" above 200
+    for words in ("Factory order", "orch factory draft", "Don't build it", "Plan the run"):
+        assert words in commands.ORDER_NOTE
 
 
 def test_act_idea_is_saved_when_no_agent_can_start_and_titles_are_cut(ws):

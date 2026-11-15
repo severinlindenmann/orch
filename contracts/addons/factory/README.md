@@ -18,7 +18,7 @@ autopilot, change, stop, journal line). Examples: `contracts/examples/factory-*/
 | Command | Does |
 |---|---|
 | `orch factory idea "<title>" [--file draft.md]` / `idea --ticket <id> [--file …]` | Creates the order (stage `draft`) and stores draft v1 — or turns an existing ticket (open, ready, waiting or active; not a sub-ticket) into the order, its note becoming draft v1 (e.g. the ticket the owner made from Chat); idempotent. `orch factory draft <order> --file -` adds v<N+1> |
-| `orch factory act idea --by human:<name> --json -- "<text>"` | The page's idea box, run by the dashboard for the person's click (`addon.act`, manifest `[acts.idea]`, `who = "people"`): one order (title = the first words, at most 80 characters; draft v1 = the text, one line, at most 500 characters), every write recorded `--by` that person, then `orch run start <order> --by <person>` so the agent writes the first real draft. `{"order", "started", "text"}`; `started: false` when no agent could start (the idea is still saved). Refused without a `human:` actor: agents use `idea` as themselves |
+| `orch factory act idea --by human:<name> --json -- "<text>"` | The page's idea box, run by the dashboard for the person's click (`addon.act`, manifest `[acts.idea]`, `who = "people"`): one order (note = a short start text under 200 characters: a Factory order, draft with `orch factory draft`, ask, wait, don't build; title = the first words, at most 80 characters; draft v1 = the text, one line, at most 500 characters), every write recorded `--by` that person, then `orch run start <order> --by <person>` so the agent writes the first real draft. `{"order", "started", "text"}`; `started: false` when no agent could start (the idea is still saved). Refused without a `human:` actor: agents use `idea` as themselves |
 | `orch factory propose <order> --file -` | Validates `$defs/proposal`, freezes p<N>, supersedes the open start question, asks `factory:start` (text rendered by the add-on), stage `proposed`. Refused once the order has started |
 | `orch factory autopilot <order> --file -` | Same for `$defs/autopilot`; asks `factory:autopilot` |
 | `orch factory next <order>` | For the manager run: consumes newly answered `factory:*` questions once (journal `consumed`), returns `{"step": "wait" \| "start-crew" \| "work" \| "stop" \| "ship" \| "edit" \| "parked" \| "resume" \| "done", …}` |
@@ -90,7 +90,8 @@ question `open.q`) to the parent window; the dashboard accepts it only from the 
 origin, opens its own native question card for that ticket's question in a dialog (text and options come from the
 dashboard's data, the person presses the option and the proof path is the ticket page's), then posts
 `{type: "orch.question.done", ticket, question}` back and the page refreshes. Outside the dashboard (or with no open
-question) the button stays a link `target="_top"` to `/#ticket/<order>`. The Factory server stays read only.
+question) the button stays a link `target="_top"` to `/#ticket/<order>`. The Factory server stays read only. An open page re-reads `/api/home` every 15 s while visible and redraws only when it changed and the person is not
+typing or waiting for an answer (every API answer is read fresh from the workspace; nothing is cached).
 
 **Idea box (one click).** Inside the dashboard, *Start with this idea* posts `{type: "orch.idea", id, text}` (`id` = 8–32
 lowercase letters/digits, a random request id) to the parent. The dashboard accepts it only from the embedded shipped
