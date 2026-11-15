@@ -12,6 +12,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST = Path(__file__).with_name("wording_allowlist.json")
+# TODO(owner question, 15 Nov): "Evidence" in ticket.js stays allowlisted (1 hit) until the owner decides whether docs/wording.md
+# "Proof" or AGENTS.md R2.2 "evidence" wins; then rename it or drop the table row, and empty the allowlist.
 
 NEVER = [
     "Request", "Requests", "Job", "Issue", "Todo", "Subtask", "Epic", "Inbox", "Over to you", "Approval",
