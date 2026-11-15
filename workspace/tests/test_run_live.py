@@ -737,7 +737,7 @@ def test_an_answer_without_a_run_sends_nothing(proj, run):
 @needs_tmux
 def test_stop_closes_a_finished_session_that_has_no_claim(proj, run, lab):
     """A session whose run ended (claim released) but whose tmux session and idle agent are still there:
-    `orch run stop` closes exactly that ticket's session, never the neighbour's.
+    `orch run stop` closes exactly that ticket's session, never the neighbour's."""
     tid, other = _ticket(run), _ticket(run)
     for name in (tid, other):
         r = runs_live.tmux(proj, "new-session", "-d", "-s", name, "--", "sleep", "300")
