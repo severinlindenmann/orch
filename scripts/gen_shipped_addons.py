@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate workspace/src/orch/shipped_addons.json: the parsed manifest of every shipped add-on
-(addons.SHIPPED_ADDONS), read from workspace-addons/<name>/src/<pkg>/orch-addon.toml with the same parser orch
+(every folder of workspace-addons/), read from workspace-addons/<name>/src/<pkg>/orch-addon.toml with the same parser orch
 uses. It lets `orch addon list` show what orch ships on a normal install (no source folder, no network).
 Run it after any change to a shipped add-on's manifest:  python3 scripts/gen_shipped_addons.py
 `--check` only compares and exits 1 when the committed file is out of date."""
@@ -18,7 +18,7 @@ def build() -> dict:
     from orch import addons, fields
 
     out = {}
-    for name in addons.SHIPPED_ADDONS:
+    for name in sorted(d.name for d in (ROOT / "workspace-addons").iterdir() if (d / "src").is_dir()):
         m = addons.folder_manifest(ROOT / "workspace-addons" / name)
         m = dict(m)
         m.pop("dir")
