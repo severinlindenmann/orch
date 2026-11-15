@@ -153,3 +153,17 @@ def test_nested_token_field_is_scanned_top_level_one_is_not(proj, on):
     relay.scan_outgoing(proj, {"text": "hi", "token": TOKEN})  # the protocol's own field
     with pytest.raises(Refused):
         relay.scan_outgoing(proj, {"text": "hi", "meta": {"token": TOKEN}})
+
+
+def test_hidden_value_is_exempt_but_a_real_one_on_the_same_line_is_not(proj, on):
+    from orch import relay
+
+    relay.scan_outgoing(proj, {"text": "password=[hidden] on the box"})  # a scrubbed pair: fine
+    relay.scan_outgoing(proj, {"text": "https://ci.example.ch/run/7?token=%5Bhidden%5D"})
+    for text in (
+        "note=[hidden] api_key=" + "R3alSecretValue99",
+        "password=[hidden], password=hunter2hunter2",
+    ):
+        with pytest.raises(Refused) as e:
+            relay.scan_outgoing(proj, {"text": text})
+        assert "R3alSecretValue99" not in str(e.value) and "hunter2" not in str(e.value)

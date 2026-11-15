@@ -166,14 +166,25 @@ def refuse_if_secret_in(root: Path | None, body, what: str = "message") -> None:
 
         joined = "\n".join(parts)
         found = find(joined, _stored_root(root))
-        # a line the phone view already scrubbed (it carries its "[hidden]" marker) is not flagged for a
-        # key=value shape again; token patterns and stored keys still hit on it
+        # A value the phone view already hid is no secret: only a "name=[hidden]" pair itself is exempt
+        # (also url-encoded). A flagged line is checked again without those pairs, so any other key=value
+        # on the same line still hits. Token patterns and stored keys never take part in this.
         rows = joined.split("\n")
-        marks = (phone_view.HIDDEN, urllib.parse.quote(phone_view.HIDDEN, safe=""))
+        hidden = re.compile(
+            r"[\w.-]+\s*[=:]\s*(?:"
+            + re.escape(phone_view.HIDDEN)
+            + "|"
+            + re.escape(urllib.parse.quote(phone_view.HIDDEN, safe=""))
+            + ")"
+        )
         found = [
             f
             for f in found
-            if not (f["kind"] == "secret-value" and any(m in rows[f["line"] - 1] for m in marks))
+            if not (
+                f["kind"] == "secret-value"
+                and not any(g["kind"] == "secret-value" for g in find(hidden.sub("", rows[f["line"] - 1])))
+                and f["line"] - 1 < len(rows)
+            )
         ]
     except Exception:  # noqa: BLE001 - a scan that cannot run is never a pass
         raise Refused(
