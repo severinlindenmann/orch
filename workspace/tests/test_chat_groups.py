@@ -1754,7 +1754,7 @@ def test_member_card_seen_and_leave(proj, run, rel, member, monkeypatch):
     )
 
 
-def test_member_answer_is_redacted_and_goes_to_the_host(proj, run, rel, member):
+def test_member_answer_with_a_secret_is_refused_and_a_clean_one_goes_to_the_host(proj, run, rel, member):
     q = from_host(
         "question",
         {"question_id": "q1", "text": "Which account?", "options": [], "question_kind": "info"},
@@ -1762,9 +1762,13 @@ def test_member_answer_is_redacted_and_goes_to_the_host(proj, run, rel, member):
     )
     inbox(run, rel, q)
     assert "untrusted data" in run("relay", "inbox")[1]
-    assert run("relay", "group", "answer", q["id"], "The household one, password=hunter22222")[0] == 0
+    # R5.2: a hit blocks the send and names the kind (not sent with the secret hidden), never the value
+    code, out, err = run("relay", "group", "answer", q["id"], "The household one, password=hunter22222")
+    assert code != 0 and "answer" in err and "hunter2" not in out + err
+    assert not sent(rel, type="answer")
+    assert run("relay", "group", "answer", q["id"], "The household one")[0] == 0
     a = sent(rel, type="answer")[0]
-    assert a["to"] == FIN and a["reply_to"] == q["id"] and "hunter2" not in a["body"]["answer"]
+    assert a["to"] == FIN and a["reply_to"] == q["id"] and a["body"]["answer"] == "The household one"
     assert a["body"]["answered_by"].startswith("agent:") and a["body"]["group"]["host"] == FIN
     assert contract_errors(a) == []
 

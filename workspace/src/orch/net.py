@@ -256,6 +256,9 @@ def profile(root: Path, name: str, description: str | None, tags: list[str] | No
         if len(tags) > 8 or any(len(t) > 24 for t in tags):
             raise Refused("Too many or too long tags: use at most 8 tags, each up to 24 characters.")
         body["tags"] = tags
+    from orch import secretscan  # R5.2: the description and tags leave this machine; the one scanner first
+
+    secretscan.refuse_if_secret_in(root, body, "profile")
     return call_json("PATCH", cfg["url"] + "/v1/me", auth_headers(cfg), body, timeout=30)[1]
 
 
