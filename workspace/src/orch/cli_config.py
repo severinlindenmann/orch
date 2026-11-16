@@ -14,7 +14,7 @@ import time
 import uuid
 from pathlib import Path
 
-from orch import adapters, autoupdate, config, diag, history, logins, net, nextstep, tickets
+from orch import adapters, autoupdate, config, diag, history, nextstep, tickets
 from orch.errors import Refused
 
 KEYS = (
@@ -44,7 +44,6 @@ def add_parsers(sub, common) -> None:
     ag = sub.add_parser("agents", parents=[common], help=argparse.SUPPRESS).add_subparsers(dest="sub")
     t = ag.add_parser("test", parents=[common], help="run an agent once with a trivial prompt")
     t.add_argument("name")
-    ag.add_parser("login", parents=[common], help="when each agent tool's login here runs out")
     sh = sub.add_parser("share", parents=[common], help=argparse.SUPPRESS)
     sh.add_argument("state", nargs="?", choices=("on", "off", "status"), default="status")
     pv = sub.add_parser("private", parents=[common], help=argparse.SUPPRESS)
@@ -140,30 +139,6 @@ def _agents(args, root: Path) -> None:
     else:
         lines.append("No agent chosen here. Pick one: orch config set workspace.agent <name>")
     _out(args, rows, "\n".join(lines))
-
-
-def login_line(r: dict) -> str:
-    """One plain sentence per tool for `orch agents login` (rows of logins.overview)."""
-    name = f"The {r['label']} login"
-    when = net.when(r["ends_at"]) if r["ends_at"] else ""
-    n = len(r["stops"])
-    on = "; ".join(f"{t['key']} {t['title']}".strip() for t in r["stops"])
-    work = f"{n} ticket{'' if n == 1 else 's'}: {on}"
-    if r["state"] == "out":
-        line = f"{name} ran out {when}." if when else f"{r['label']} is logged out."
-        line += f" The helper cannot go on with {work}." if n else ""
-        return line + (" No new work starts until it is renewed." if r["chosen"] else "")
-    if r["state"] == "soon":
-        return f"{name} runs out {when}." + (f" The helper then stops on {work}." if n else "")
-    if r["state"] == "ok":
-        return f"{name} is good until {when}." if when else f"{name} is good; the tool tells no end date."
-    return f"{r['label']} did not say whether its login is good."
-
-
-def _login(args, root: Path) -> None:
-    rows = logins.overview(root)
-    text = "\n".join(login_line(r) for r in rows) or "No agent tool here tells when its login runs out."
-    _out(args, rows, text)
 
 
 def test_agent(root: Path, name: str) -> dict:
@@ -530,9 +505,6 @@ def dispatch(args, root: Path) -> bool:
     if args.cmd == "agents":
         if getattr(args, "sub", None) == "test":
             raise SystemExit(_test(args, root))
-        if getattr(args, "sub", None) == "login":
-            _login(args, root)
-            return True
         _agents(args, root)
     elif args.cmd == "config":
         _config(args, root)
