@@ -8,9 +8,8 @@ from pathlib import Path
 from .data import load_state
 
 MAX_AGE = 2.0  # without a revision watcher the copy is this old at most
-SAFETY_AGE = (
-    30.0  # with one: a poll that changed nothing costs no process; time-based values refresh this often
-)
+# with a watcher: a poll that changed nothing costs no process; time-based values refresh this often
+SAFETY_AGE = 120.0
 
 
 class StateCache:
