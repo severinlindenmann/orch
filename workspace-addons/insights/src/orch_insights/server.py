@@ -148,13 +148,13 @@ class Handler(BaseHTTPRequestHandler):
         tickets = self._read("ticket", "list", "--all", "--json")
         return build_settings(settings, counts, tickets, self._can_act())
 
-    def _fence(self, method, api, signing_in=False):
+    def _fence(self, method, api, at_login=False):
         try:
             from orch_ui.origin import check_request
         except ImportError:
             return "Insights is not available in this install."
         port = self.server.server_address[1]
-        signed_in = signing_in or bool(
+        signed_in = at_login or bool(
             self.session is not None and self.session.cookie_ok(self.headers, port)
         )
         why = check_request(method, self.headers, port, api=api, signed_in=signed_in)
@@ -212,7 +212,7 @@ class Handler(BaseHTTPRequestHandler):
     def _session_refusal(self):
         """Why POST /session is refused: the action fence, plus Sec-Fetch-Site same-origin/none (absent is
         refused too) and a JSON body (M5). From any computer: the one-time token is the proof."""
-        why = self._fence("POST", True, signing_in=True)
+        why = self._fence("POST", True, at_login=True)
         if why:
             return why
         why = self._site_refusal()

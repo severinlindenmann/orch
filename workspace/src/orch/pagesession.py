@@ -1,6 +1,6 @@
 """The login of the orch-shipped page servers (Focus, dashboard, Insights).
 
-The login is the ONLY gate (owner rule, 16 Nov): once a person signed in with a one-time sign-in link, every
+The login is the ONLY check (owner rule, 16 Nov): once a person signed in with a one-time sign-in link, every
 action of the page works from any computer: the same one, another one through a proxy, a headless server.
 Nothing here looks at where a request comes from (no loopback Host, no proxy-header check).
 
@@ -113,7 +113,7 @@ def load_kept_session(root: Path, server: str, port: int) -> tuple[str, str] | N
 
 
 def keep_session(root: Path, server: str, port: int | None, cookie: str, secret: str) -> None:
-    """Keep the session in the private key folder (0600): a restart or an update signs nobody out."""
+    """Keep the session in the private key folder (0600): a restart or an update logs nobody out."""
     from orch import home as orch_home
 
     if port is None:  # a server that does not keep its session (Insights: its secret lives in memory only)
@@ -162,7 +162,7 @@ class PageSession:
 
     def __init__(self, root: Path, server: str, port: int | None = None):
         """`port`: the bound port of the server. With it, the session is kept for SESSION_LIFE in the key
-        folder (per server and port, like the cookie name), so a restart or an update signs nobody out."""
+        folder (per server and port, like the cookie name), so a restart or an update logs nobody out."""
         if server not in SERVERS:
             raise ValueError("not a page server")
         self.root, self.server, self.port = root, server, port
@@ -272,7 +272,7 @@ class PageSession:
 
     def can_act(self, headers, port: int) -> bool:
         """The person's session: cookie + page secret, or the dashboard's word for it. Where the request comes
-        from (this computer, a proxy, another computer) does not matter: the sign-in is the only gate."""
+        from (this computer, a proxy, another computer) does not matter: the sign-in is the ONLY check."""
         return self.active and (self.authed(headers, port) or self.vouched(headers))
 
 

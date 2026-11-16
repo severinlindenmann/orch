@@ -95,7 +95,7 @@ def test_launch_token_bootstraps_the_cookie_once(live):
 
 
 def test_sign_in_and_click_through_a_proxy_from_another_computer(live, monkeypatch):
-    """Owner rule (16 Nov): the sign-in is the only gate, wherever the browser is."""
+    """Owner rule (16 Nov): the sign-in is the ONLY check, wherever the browser is."""
     root, port = live
     ran = []
 

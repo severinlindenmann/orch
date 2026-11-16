@@ -663,7 +663,7 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code, data):
         self._send(code, json.dumps(data).encode(), "application/json")
 
-    def _fence(self, method: str, api: bool, signing_in: bool = False) -> str | None:
+    def _fence(self, method: str, api: bool, at_login: bool = False) -> str | None:
         """Host + Origin check of orch_ui.origin. A POST without Origin is refused too: the page always sends one.
         Any host name passes once signed in (session cookie), or for the sign-in itself: where the browser is
         does not matter."""
@@ -674,7 +674,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST" and self.headers.get("Origin") is None:
             return "This request was refused (no origin)."
         port = self.server.server_address[1]
-        signed_in = signing_in or bool(
+        signed_in = at_login or bool(
             self.session is not None and self.session.cookie_ok(self.headers, port)
         )
         return check_request(method, self.headers, port, api=api, signed_in=signed_in)
@@ -833,7 +833,7 @@ class Handler(BaseHTTPRequestHandler):
     def _session_post(self):
         """POST /session: the page hands over the one-time launch token from its URL fragment; the server spends
         it and sets the session cookie (H1). Same fence as an action, from any computer."""
-        why = self._fence("POST", True, signing_in=True)
+        why = self._fence("POST", True, at_login=True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):

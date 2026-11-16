@@ -660,7 +660,7 @@ def test_cookie_parsing_matches_the_core(real_session, session_kind):
     for cookie in bad:
         assert not session.can_act(cookie_headers(8431, cookie), 8431), cookie
     good_cookie = f"{name}={value}"
-    # the sign-in is the only gate (owner rule, 16 Nov): any Host, proxy headers or not
+    # the sign-in is the ONLY check (owner rule, 16 Nov): any Host, proxy headers or not
     assert session.can_act(cookie_headers(8432, good_cookie), 8431)
     assert session.can_act({**cookie_headers(8431, good_cookie), "Host": "insights.example.org"}, 8431)
     for proxy in ({"X-Forwarded-For": "10.0.0.1"}, {"X-Forwarded-Host": "x"}, {"Forwarded": "for=x"}):

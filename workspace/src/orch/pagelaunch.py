@@ -56,7 +56,7 @@ def is_test_workspace(root: Path) -> bool:
 
 def printable_launch_url(root: Path, server: str, base_url: str) -> str:
     """`orch start --print-launch-url`: a one-time sign-in link printed for a person, so they can sign in from
-    another computer (a headless server, a proxy in front). Never under an agent tool (an agent must not sign
+    another computer (a headless server, a proxy in front). Never under an agent tool (an agent must not log
     in as the person); a test install in a test folder may (the Playwright lane). Single use, PRINTED_LIFE."""
     from orch import tickets
 

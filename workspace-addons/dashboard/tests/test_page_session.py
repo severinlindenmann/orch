@@ -118,7 +118,7 @@ def remote(cookie=None, **extra):
 
 
 def test_sign_in_and_every_click_work_through_a_proxy_from_another_computer(live, monkeypatch):
-    """Owner rule (16 Nov): the sign-in is the only gate. Through a proxy, under a host name that is not this
+    """Owner rule (16 Nov): the sign-in is the ONLY check. Through a proxy, under a host name that is not this
     computer's, with proxy headers: the sign-in works, a person's click runs, reads work."""
     root, port = live
     ran = []
@@ -488,7 +488,7 @@ def test_every_person_op_is_refused_without_a_session_and_starts_no_child(live, 
 def test_every_person_op_runs_after_sign_in_through_a_proxy_from_another_computer(live, monkeypatch):
     """Owner rule (16 Nov): after the sign-in, NO action is limited to the computer orch runs on. Every person
     op of the table, sent through a proxy (a host name that is not this computer's, proxy headers), passes the
-    gate: none is refused for the session or for where the browser is."""
+    check: none is refused for the session or for where the browser is."""
     import subprocess
 
     from orch_dashboard import actions as acts
@@ -508,9 +508,9 @@ def test_every_person_op_runs_after_sign_in_through_a_proxy_from_another_compute
     tok = pagelaunch.write_launch_token(root, "dashboard")
     st, ck, body = post(port, "/session", {"token": tok}, remote())
     assert st == 200, body
-    signed = remote(ck.split(";")[0], **{"X-Orch-Page": json.loads(body)["secret"]})
+    person = remote(ck.split(";")[0], **{"X-Orch-Page": json.loads(body)["secret"]})
     for op, args in ACT_ARGS.items():
-        st, _, body = post(port, "/api/act", {"op": op, "args": args}, signed)
+        st, _, body = post(port, "/api/act", {"op": op, "args": args}, person)
         assert st != 403 and not body.decode(errors="replace").startswith("Sign in to "), (op, st, body)
 
 

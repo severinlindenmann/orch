@@ -3,7 +3,7 @@
 // posted once and removed from the address bar. The answer carries the page secret: it is kept in localStorage (per
 // origin, so a page on another port or host never sees it; every tab of this browser shares it, so a second window
 // works too) and sent as X-Orch-Page on every same-origin request. The session cookie alone is never enough (browsers
-// send it to every port of the host). Then the page reloads. The sign-in is the only gate: where the browser is (this
+// send it to every port of the host). Then the page reloads. The sign-in is the ONLY check: where the browser is (this
 // computer, another one, behind a proxy) does not matter.
 (function () {
   var KEY = "orch_page_secret", HEADER = "X-Orch-Page";

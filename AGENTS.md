@@ -88,7 +88,7 @@ again.
   fences inside the workspace, permission matrices per action. Normal TLS, tokens and the publish link key are not
   banned.
 - **R4.1a No "same computer only"** (owner, 16 Nov): inside a logged-in workspace no action may be limited to the
-  computer orch runs on. The only gate is the sign-in (a one-time sign-in link, then the session the browser keeps).
+  computer orch runs on. the ONLY check is the sign-in (a one-time sign-in link, then the session the browser keeps).
   No check of a loopback address or Host, of proxy headers, or of a session that only counts on this machine; no
   text that sends the person to "this computer". A workspace is used from anywhere: another computer, behind a
   proxy, on a headless server. Relay and publish exposure from outside stay strict (R5).

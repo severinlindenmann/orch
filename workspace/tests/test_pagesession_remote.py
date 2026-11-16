@@ -1,4 +1,4 @@
-"""Owner rule (16 Nov): after the sign-in, everything works from any computer. The only gate of a page
+"""Owner rule (16 Nov): after the sign-in, everything works from any computer. The only check of a page
 server is the sign-in (cookie + page secret, or the dashboard's word for an add-on page behind it); nothing
 checks where the browser is, and no code tells a person to come to "this computer"."""
 
@@ -27,7 +27,7 @@ def tws(tmp_path, monkeypatch):
     return ws
 
 
-def _signed(s, port, **extra):
+def _person(s, port, **extra):
     return {"Cookie": f"{s.cookie_name(port)}={s.cookie}", pagesession.PAGE_HEADER: s.secret, **extra}
 
 
@@ -40,11 +40,11 @@ def test_the_session_acts_from_any_host_and_through_any_proxy(tws):
         {"Host": "10.0.0.5:8791", "X-Forwarded-For": "203.0.113.7", "X-Forwarded-Proto": "https"},
         {"Host": "127.0.0.1:8420", "Forwarded": "for=203.0.113.7", "X-Forwarded-Prefix": "/x"},
     ):
-        assert s.can_act(_signed(s, 8420, **extra), 8420), extra
+        assert s.can_act(_person(s, 8420, **extra), 8420), extra
     # still the login: the cookie alone, the secret alone or another port's name is no session
     assert not s.can_act({"Cookie": f"{s.cookie_name(8420)}={s.cookie}"}, 8420)
     assert not s.can_act({pagesession.PAGE_HEADER: s.secret}, 8420)
-    assert not s.can_act(_signed(s, 8420), 8421)
+    assert not s.can_act(_person(s, 8420), 8421)
     assert s.cookie_ok({"Cookie": f"{s.cookie_name(8420)}={s.cookie}"}, 8420)
     assert not s.cookie_ok({"Cookie": f"{s.cookie_name(8420)}=x{s.cookie}"}, 8420)
 

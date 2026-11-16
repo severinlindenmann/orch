@@ -1,6 +1,6 @@
 # Human-only actions: proof from the human channel (invariant H1)
 
-> **Page sessions, owner rule 16 Nov (AGENTS.md R4.1a):** the sign-in is the only gate of a page server. The loopback
+> **Page sessions, owner rule 16 Nov (AGENTS.md R4.1a):** the sign-in is the only check of a page server. The loopback
 > Host and "no `X-Forwarded-*`" requirements below no longer apply: a signed-in session (cookie + page secret, now kept in
 > the browser's localStorage and in the key folder for 30 days) acts from any computer, through any proxy. The dashboard
 > vouches for the person to an add-on page behind it (`X-Orch-Person`, a private key in the key folder). A person prints a

@@ -375,7 +375,7 @@ def _attach_all(root: Path, orch_bin: str | None, tid: str, files: list[tuple[st
     return {"saved": saved, "failed": failed}
 
 
-# The only gate is the sign-in (owner rule, 16 Nov); equal to orch.pagesession.SIGNIN_MSG.
+# the ONLY check is the sign-in (owner rule, 16 Nov); equal to orch.pagesession.SIGNIN_MSG.
 SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
 
 

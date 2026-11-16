@@ -675,7 +675,7 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_DELETE = do_PATCH = _refuse
 
-    def _fence(self, signing_in: bool = False) -> str | None:
+    def _fence(self, at_login: bool = False) -> str | None:
         """Host + Origin check of orch_ui.origin on every POST. A missing Origin is refused too: the
         dashboard page always sends one, so only a script outside the browser lacks it. Any host name passes
         with the session cookie (or for the sign-in itself, whose one-time token is the proof)."""
@@ -692,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
             self.headers,
             self.server.server_address[1],
             api=True,
-            signed_in=signing_in or self._signed_in(),
+            signed_in=at_login or self._signed_in(),
         )
 
     def _diag_post(self, path: str):
@@ -762,7 +762,7 @@ class Handler(BaseHTTPRequestHandler):
     def _session_post(self):
         """POST /session: the page hands over the one-time sign-in token it got in the URL fragment; the server
         spends it and sets the session cookie (H1). Same fence as an action, from any computer."""
-        why = self._fence(signing_in=True)
+        why = self._fence(at_login=True)
         if why:
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if self.session is None:

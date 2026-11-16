@@ -115,7 +115,7 @@ class NeedsPerson(Exception):
     """A human-only click without a page session (HTTP 403): the browser has not signed in."""
 
 
-# The only gate is the sign-in (owner rule, 16 Nov): never a same-computer refusal, never a check of where the
+# the ONLY check is the sign-in (owner rule, 16 Nov): never a same-computer refusal, never a check of where the
 # browser is. Kept equal to orch.pagesession.SIGNIN_MSG (the page shows the sign-in notice for it).
 SIGNIN = "Sign in to do this: open the dashboard with a sign-in link from orch."
 
