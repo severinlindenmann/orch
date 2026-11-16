@@ -1102,8 +1102,9 @@ function ticketQuestion(t, q, next = false) {
 // A step is named by its title only; the ticket key is a quiet line under Properties.
 const partName = p => clean(p.title);
 function ticketAddStep(t) {
-  const {d, actions} = dialog('What is this step about?');
-  const input = h('input', {className:'input', 'aria-label':'What is this step about?', maxlength:200});
+  const ask = t.epic ? 'What needs doing in this ticket?' : 'What is this step about?';  // an epic holds tickets (ORCH-14)
+  const {d, actions} = dialog(ask);
+  const input = h('input', {className:'input', 'aria-label':ask, maxlength:200});
   const send = ticketButton('Add', 'primary', async () => {
     const title = input.value.trim(); if (!title || send.disabled) return;
     send.disabled = true;
@@ -1114,10 +1115,10 @@ function ticketAddStep(t) {
   actions.append(send); d.append(input, actions); window.orch.open(d); input.focus();
 }
 function ticketParts(t, children) {
-  const add = snapshot ? null : ticketButton('+ Add a step', 'ghost add-row', () => ticketAddStep(t));
+  const add = snapshot ? null : ticketButton(t.epic ? '+ Add a ticket' : '+ Add a step', 'ghost add-row', () => ticketAddStep(t));
   // No steps yet: only the add button, so a top-level ticket can get its first step (a step itself gets none).
   if (!children.length) return add && !window.DashHelpers.parentOf(tickets(), t) ? h('div', {className:'row', 'data-key':'parts-add'}, add) : null;
-  return card('parts', 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
+  return card('parts', t.epic ? 'Tickets in this epic' : 'Steps', children.filter(c => c.status === 'done').length + ' of ' + children.length + ' done', [children.map(child => h('a', {className:'card-row ticket-part', href:href(child.id)}, h('span', {className:'grow'}, clean(child.title)), statusChip(child), h('span', {'aria-hidden':'true'}, '›'))), add]);
 }
 const ticketPlanEditing = new Set();
 function ticketRenameStep(child) {
@@ -1433,7 +1434,7 @@ function detail(t) {
     addonRows(t), ticketLinks(t),
     answered.length ? h('section', {className:'card answered', 'data-key':'answered'}, h('h2', {}, 'Earlier answers'), answered) : null];
   return fragment(h('div', {className:'ticket-page', 'data-key':'ticket-page-' + t.id},
-    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, 'Step of ' + partName(parent)) : null,
+    parent ? h('a', {href:href(parent.id), className:'muted ticket-parent'}, (parent.epic ? 'Part of the epic ' : 'Step of ') + partName(parent)) : null,
     ticketStrip(t, run, fresh, planQ, menu, snapshot ? null : h('div', {className:'tabs ticket-tabs', role:'tablist', 'aria-label':'Ticket'}, tabs.map(([id, label, count]) =>
       ticketButton([label, count != null ? ' ' : null, count != null ? h('span', {className:'tab-count'}, String(count)) : null], 'ghost', null,
         {id:'ticket-tab-' + id, role:'tab', 'aria-selected':String(selected === id), 'aria-controls':'ticket-panel-' + id, tabindex:selected === id ? '0' : '-1', 'data-action':'ticket-tab', 'data-ticket':t.id, 'data-tab':id, 'data-key':'ticket-tab-' + id}))), selected),

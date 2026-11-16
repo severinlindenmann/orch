@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -1244,6 +1245,30 @@ def test_copies_set_builds_one_config_set_argv_and_refuses_odd_values():
             build_argv("copies.set", bad)
 
 
+def test_live_set_builds_the_helpers_at_once_argv_and_refuses_odd_values():
+    """ORCH-16: Settings > Helper > Helpers at once: null = no limit, 2 to 10 a number."""
+    from orch_dashboard.actions import BadRequest, build_argv
+
+    assert build_argv("live.set", {"max": None})[:4] == ["config", "set", "workspace.live_max", "none"]
+    for n in (2, 5, 10):
+        assert build_argv("live.set", {"max": n})[:4] == ["config", "set", "workspace.live_max", str(n)]
+    for bad in ({"max": 1}, {"max": 11}, {"max": "3"}, {"max": True}, {}, {"max": 3, "extra": 1}):
+        with pytest.raises(BadRequest):
+            build_argv("live.set", bad)
+
+
+def test_helpers_at_once_survives_load_settings(tmp_path):
+    from orch import config
+
+    from orch_dashboard.data import load_settings
+
+    ws = tmp_path / "ws"
+    (ws / ".orch").mkdir(parents=True)
+    assert load_settings(ws, None)["live_max"] is None  # no limit by default
+    config.set_live_max(ws, "3")
+    assert load_settings(ws, None)["live_max"] == 3
+
+
 def test_check_wont_do_argv():
     common = ["--by", actions.actor(), "--json"]
     args = {"ticket": "t_abcdef", "check": "c1"}
@@ -1300,6 +1325,15 @@ def test_ticket_new_plan_first(value):
 def test_ticket_new_plan_first_requires_boolean(value):
     with pytest.raises(actions.BadRequest):
         actions._ticket_new({"title": "Plan", "plan_first": value})
+
+
+@pytest.mark.parametrize("value", [True, False, None])
+def test_ticket_new_epic(value):
+    # ORCH-14: New ticket makes an epic; the tickets inside it come as ticket.new with parent
+    _, flags, _ = actions._ticket_new({"title": "Dashboard fixes", "epic": value})
+    assert ("--epic" in flags) is (value is True)
+    with pytest.raises(actions.BadRequest):
+        actions._ticket_new({"title": "Dashboard fixes", "epic": "true"})
 
 
 def test_copies_clean_is_one_fixed_argv_and_takes_no_arguments():
@@ -1469,6 +1503,36 @@ def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
         {"field": "description", "text": "x" * 281},
         {"field": "name", "text": 5},
         {"field": "name", "text": "x", "extra": 1},
+        {"field": "tags", "text": "Bad Tag"},
+        {"field": "tags", "text": ["a"]},
     ):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("workspace.set", bad)
+    argv = actions.build_argv("workspace.set", {"field": "tags", "text": "web,shop"})
+    assert argv[:3] == ["config", "set", "workspace.tags"] and argv[-2:] == ["--", "web,shop"]
+
+
+def test_ticket_new_reply_names_the_new_ticket(ws, act_orch):
+    """The New ticket window opens the new ticket by the id in the reply. Matching by title failed when the typed
+    text was cut to 80 characters right after a space: orch keeps the title without it (ORCH-8)."""
+    from orch_dashboard.server import make_server
+
+    act_orch.write_text(
+        act_orch.read_text().replace(
+            'print(json.dumps({"ok": True}))',
+            'print(json.dumps({"id": "t_new123"} if a[:2] == ["ticket", "new"] else {"ok": True}))',
+        )
+    )
+    srv = make_server(ws, 0, orch_bin=str(act_orch))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        code, text, _ = post(base, {"op": "ticket.new", "args": {"title": "Work"}})
+        assert code == 200, text
+        assert json.loads(text)["created"] == {"id": "t_new123"}
+        code, text, _ = post(base, {"op": "log", "args": {"ticket": "t_abcdef", "text": "x"}})
+        assert code == 200, text
+        assert "created" not in json.loads(text)
+    finally:
+        srv.shutdown()
+        srv.server_close()

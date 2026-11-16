@@ -267,6 +267,7 @@ def _ticket_new(a):
             "files",
             "title_auto",
             "plan_first",
+            "epic",
         ),
     )
     flags = [f"--parent={_tid(a['parent'])}"] if a.get("parent") else []
@@ -274,6 +275,10 @@ def _ticket_new(a):
         flags.append("--title-auto")
     if _flag(a.get("plan_first")):
         flags.append("--plan-first")
+    if _flag(
+        a.get("epic")
+    ):  # several tickets at once: this one holds them (they come as ticket.new with parent)
+        flags.append("--epic")
     long_text = a.get("long_text")
     if long_text is not None:
         _text(long_text, "text", limit=MAX_LONG)
@@ -490,6 +495,19 @@ def _workflow_set(a):
     if type(a.get("on")) is not bool:
         raise BadRequest("Say on or off.")
     return ["config", "set", "workflow.agents_may_finish", "on" if a["on"] else "off"], [], []
+
+
+def _live_set(a):
+    """Settings > Helper > Helpers at once: null = no limit, else 2 to 10; `orch config set workspace.live_max`."""
+    _only(a, ("max",))
+    if "max" not in a:
+        raise BadRequest("Pick No limit or a number from 2 to 10.")
+    v = a["max"]
+    if v is None:
+        return ["config", "set", "workspace.live_max", "none"], [], []
+    if type(v) is not int or not 2 <= v <= 10:
+        raise BadRequest("Pick No limit or a number from 2 to 10.")
+    return ["config", "set", "workspace.live_max", str(v)], [], []
 
 
 COPY_MODES = ("off", "together", "always")
@@ -809,8 +827,12 @@ def _workspace_set(a):
     travels after `--` as one value. Empty clears it. A person's click only (signed)."""
     _only(a, ("field", "text"))
     field, v = a.get("field"), a.get("text", "")
-    if field not in ("name", "description"):
-        raise BadRequest("Pick the name or the description.")
+    if field not in ("name", "description", "tags"):
+        raise BadRequest("Pick the name, the description or the tags.")
+    if field == "tags":  # "a,b": the core checks each tag
+        if not isinstance(v, str) or not re.fullmatch(r"[a-z0-9,-]{0,103}", v.strip()):
+            raise BadRequest("Use up to 4 tags: lowercase letters, digits and hyphens.")
+        return ["config", "set", "workspace.tags"], [], [v.strip()]
     limit = 60 if field == "name" else 280
     if not isinstance(v, str) or len(v.strip()) > limit or any(c in v for c in "\r\n\x00"):
         raise BadRequest(f"Write one line of at most {limit} characters.")
@@ -946,6 +968,7 @@ OPS = {
     "ref.add": _ref_add,
     "ref.rm": _ref_rm,
     "workflow.set": _workflow_set,
+    "live.set": _live_set,
     "diag.set": _diag_set,
     "typing.set": _typing_set,
     "diag.delete_reports": _diag_delete("reports"),
@@ -1287,6 +1310,7 @@ def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) ->
             "config.permissions",
             "workspace.set",
             "workflow.set",
+            "live.set",
             "copies.set",
             "copies.clean",
             "copies.remove_orphaned",

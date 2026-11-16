@@ -47,7 +47,7 @@ function ticketGroups(items) {
 }
 function boardParentLine(t) {
   const parent = boardParent(tickets(), t);
-  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, 'Step of ' + clean(parent.title))) : null;
+  return parent ? h('p', {className:'meta board-parent'}, h('a', {href:href(parent.id)}, (parent.epic ? 'Part of the epic ' : 'Step of ') + clean(parent.title))) : null;
 }
 // `section`: the group or column the row sits in; its own status chip is left out there. Done shows when it finished.
 function ticketAttentionChip(t, section) {
@@ -199,7 +199,7 @@ function boardCard(t, nested = false, column = '') {
     ticketAttentionChip(t, column),
     !nested ? boardParentLine(t) : null,
     parts.length ? h('div', {className:'board-parts'},
-      h('p', {className:'meta'}, 'Steps · ' + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
+      h('p', {className:'meta'}, (t.epic ? 'Epic · ' : 'Steps · ') + parts.filter(c => c.status === 'done').length + ' of ' + parts.length + ' done'),
       parts.map(part => h('a', {className:'board-part', href:href(part.id)}, h('span', {className:'part-title'}, clean(part.title)), ticketAttentionChip(part)))) : null,
     changesLine(t),
     tasks.length ? h('div', {className:'task-progress'}, h('div', {className:'progress', role:'progressbar', 'aria-valuemin':0, 'aria-valuemax':tasks.length, 'aria-valuenow':done, 'aria-label':'Steps done'}, widthSpan(Math.round(done / tasks.length * 100))), h('span', {className:'meta'}, window.DashHelpers.stepsText(done, tasks.length))) : null,

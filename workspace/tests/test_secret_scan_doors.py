@@ -78,10 +78,6 @@ def test_the_samples_are_real_kinds_of_the_scanner(proj):
     assert [f["kind"] for f in secretscan.find(f"x {STORED}", proj)] == ["stored-key"]
 
 
-PROFILE_ISSUE = "#944"
-NOTE_ISSUE = "#943"
-
-
 # ---- relay doors -----------------------------------------------------------------------------------------
 
 
@@ -195,7 +191,6 @@ def test_relay_api_is_the_choke_point_for_dicts_and_bytes(proj, on, planted):
     _nothing_left(proj, on)
 
 
-@pytest.mark.xfail(strict=True, reason=PROFILE_ISSUE)
 def test_relay_profile_description_is_scanned(proj, run, on, planted):
     kind, value = planted
     n = len(on.calls)
@@ -256,7 +251,6 @@ def test_publish_app_bundle(proj, run, pub, planted):
     assert "config.py" in err
 
 
-@pytest.mark.xfail(strict=True, reason=NOTE_ISSUE)
 def test_publish_note_is_scanned(proj, run, pub, planted):
     """The note travels inside the encrypted file header, but it is still text the person did not review."""
     kind, value = planted
@@ -267,7 +261,6 @@ def test_publish_note_is_scanned(proj, run, pub, planted):
     _publish_clean(pub, n, kind, value, code, out, err)
 
 
-@pytest.mark.xfail(strict=True, reason=PROFILE_ISSUE)
 def test_publish_profile_description_is_scanned(proj, run, pub, planted):
     kind, value = planted
     pub_connect(run, pub)
@@ -374,6 +367,7 @@ OUTBOUND = {
     ("publish.py", "bundle"): {"scan_files"},
     ("publish.py", "pack"): {"scan_files"},
     ("publish.py", "share_file"): {"scan_files", "bundle"},
+    ("net.py", "profile"): {"refuse_if_secret_in"},  # relay and publish profile description and tags
     ("secretscan.py", "refuse_if_secret"): {"find"},
     ("secretscan.py", "refuse_if_secret_in"): {"find"},
 }
@@ -382,7 +376,7 @@ OUTBOUND = {
 WIRE_CALLERS = {
     ("relay.py", "_api"): "scans itself",
     ("publish.py", "_api"): "its bodies are scanned by share_file (scan_files) and deploy (pack)",
-    ("publish.py", "profile"): "net.profile",  # see PROFILE_ISSUE: not scanned yet
+    ("publish.py", "profile"): "net.profile scans the body (refuse_if_secret_in) before the PATCH",
     ("relay.py", "_post_message"): "posts the outbox bytes after _message / resend_outbox scanned them",
 }
 
@@ -418,6 +412,7 @@ def test_publish_upload_callers_scan_before_sending():
     fns = _funcs("publish.py")
     assert _called(fns["deploy"]) & {"pack"}
     assert _called(fns["share_file"]) & {"scan_files"}
+    assert _called(fns["share_file"]) & {"refuse_if_secret_in"}  # the note in the file header
 
 
 def test_no_new_http_door_in_relay_or_publish():

@@ -47,6 +47,9 @@ the temp folder: the agent could then change orch's own settings.
 
 Live sessions close by themselves after an hour of waiting (or an hour after the ticket is Done); Continue picks the
 conversation up again. Change the hour: `orch config set workspace.live_idle_minutes 120`.
+Any number of helpers may work at once. To allow fewer, pick a number in Settings > Helper > Helpers at
+once (or `orch config set workspace.live_max 3`; `none` is no limit again): the next start waits in line
+until one is finished.
 
 ## Start, watch and stop work
 

@@ -3194,9 +3194,11 @@ def leave(root: Path, host: str, gid: str) -> dict:
 
 
 def answer(root: Path, message_id: str, text: str) -> dict:
-    """Member: answer an information question of a group (existing `answer`). The text is redacted first."""
-    from orch import relay
+    """Member: answer an information question of a group (existing `answer`). R5.2: an answer with a secret
+    is refused (the person is told the kind), not sent with the secret hidden; redact stays a second net."""
+    from orch import relay, secretscan
 
+    secretscan.refuse_if_secret_in(root, {"answer": text}, "answer")
     q = relay.load_message(root, message_id)
     gw = (q.get("body") or {}).get("group")
     if q.get("type") != "question" or not isinstance(gw, dict):

@@ -196,13 +196,17 @@ When the ticket reaches Review, orch sends its summary and files to the person b
 
 If work remains, leave it visible (open steps, a log line).
 
-**Pick the workspace icon and colour** (once; when `orch look show` says nobody has)
+**Fill in the workspace profile** (the starter task of a new workspace does this; else once, when nobody has)
 
-    orch look show                        # who chose, if anyone
+    orch config get workspace.name                # also workspace.description, workspace.tags
+    orch config set workspace.name "<2 to 4 words>"
+    orch config set workspace.description "<one line: what this workspace is for>"
+    orch config set workspace.tags "<tag>,<tag>"  # 2 to 4 lowercase words
+    orch look show                        # who chose the icon, if anyone
     orch look list                        # 100 icons, 12 colours
     orch look set --icon <id> --color <token>     # fit the folder name and what the work is about
 
-Choose from the list, never invent an id. If a person already chose, `orch look set` is refused: leave it. The icon is optional: if `orch look` is refused or fails, skip it; it is never a blocker for the work.
+Base it on what is in the folder (never `.orch/secrets/`). Choose icons and colours from the list, never invent an id. If a person already chose a field, orch refuses it: leave it. All of it is optional: if one is refused or fails, skip it; it is never a blocker for the work.
 
 ## Rules
 - orch's permission mode (ask, auto, full) never widens Codex beyond writing in this workspace; a stricter personal Codex setting (read-only) stays.

@@ -6,10 +6,12 @@ orch owns that tmux server (own socket), so a person's own tmux is never touched
 process (the wrapper). Input waits in the pending file and is pasted (bracketed paste, then a separate Enter)
 only when the agent says it is idle (the wrapper then checks that it was submitted: watch_submit): the tool's
 own hooks call `orch run event --kind idle`, a generic agent calls
-`orch run done`. At most 4 live sessions per workspace. A session idle (or waiting for a person) for an
-hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review, Done or Dropped, and such a
-session does not count toward the limit), or on a ticket Done for that long, is closed on the next
-`orch run` call (there is no daemon); its session id stays on the ticket, so the next start continues it.
+`orch run done`. Any number of live sessions per workspace, unless Settings > Helper > Helpers at
+once (workspace.live_max) sets a limit; then a start waits in line for a slot. A session idle (or
+waiting for a person) for an hour (workspace.live_idle_minutes; 10 minutes once the ticket is in Review,
+Done or Dropped, and such a session does not count toward the limit), or on a ticket Done for that long,
+is closed on the next `orch run` call (there is no daemon); its session id stays on the ticket, so the next
+start continues it.
 Nothing here reads the screen to decide anything, with one exception: a run still "starting" (no hook has
 fired) is checked against the adapter's live.screens (a screen the tool shows before it is up). The run's
 own wrapper passes the harmless first-run ones (theme, notes, trust of the `orch init` folder) with the
@@ -34,10 +36,11 @@ from pathlib import Path
 from orch import adapters, brake, diag, history, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
-MAX_LIVE = 4
+CROWDED_AT = 4  # with no limit set: this many open sessions make idle ones on finished tickets close early
 IDLE_SECONDS = 60 * 60
 FINISHED_IDLE_SECONDS = 10 * 60  # a session on a ticket in Review, Done or Dropped closes after this
-HARD_EXTRA = 4  # most sessions over the limit that finished tickets may keep open
+HARD_EXTRA = 4  # most sessions over a set limit that finished tickets may keep open
+WHERE_TO_CHANGE = "Settings > Helper > Helpers at once"
 FINISHED = ("review", "done", "dropped")
 PASTE_DELAY = 0.3
 STARTUP_SECONDS = 60
@@ -134,7 +137,7 @@ def live_all(root: Path) -> list[dict]:
 
 
 def live_alive(root: Path) -> list[dict]:
-    """Live runs that count against MAX_LIVE. A session that is idle or waiting for a person on a ticket in
+    """Live runs that count against the limit. A session that is idle or waiting for a person on a ticket in
     Review, Done or Dropped does not (it closes by itself after FINISHED_IDLE_SECONDS); a working or starting
     one does."""
     return [
@@ -144,13 +147,36 @@ def live_alive(root: Path) -> list[dict]:
     ]
 
 
+def max_live(root: Path) -> int | None:
+    """How many helpers may work at once (Settings > Helper): None is no limit, the default."""
+    from orch import config
+
+    return config.live_max(root)
+
+
 def _crowded(root: Path) -> bool:
     """So many live sessions are open that idle ones on finished tickets should make room."""
-    return len(live_all(root)) >= MAX_LIVE
+    return len(live_all(root)) >= (max_live(root) or CROWDED_AT)
 
 
-def _full(root: Path) -> bool:
-    return len(live_alive(root)) >= MAX_LIVE or len(live_all(root)) >= MAX_LIVE + HARD_EXTRA
+def _full(root: Path) -> int | None:
+    """The limit that was hit (a set limit, or that plus HARD_EXTRA for sessions on finished tickets), else
+    None."""
+    n = max_live(root)
+    if n is None:
+        return None
+    if len(live_alive(root)) >= n:
+        return n
+    if len(live_all(root)) >= n + HARD_EXTRA:
+        return n + HARD_EXTRA
+    return None
+
+
+def busy_words(n: int, ticket: str) -> str:
+    return (
+        f"{n} helpers are working at once, the most you allowed. {ticket} waits in line and starts when one "
+        f"is finished. To allow more: {WHERE_TO_CHANGE}."
+    )
 
 
 # ---------------------------------------------------------------- start
@@ -166,16 +192,11 @@ def start_live(
 ) -> dict:
     cur = runs.read(root, tid)
     mine = cur is not None and runs.state(cur) == "alive"
-    if not mine and _full(root):
+    hit = None if mine else _full(root)
+    if hit:
         _queue_for_slot(root, tid, by, busy_text)
-        n = (
-            MAX_LIVE if len(live_alive(root)) >= MAX_LIVE else MAX_LIVE + HARD_EXTRA
-        )  # name the limit that was really hit
-        raise runs.Busy(
-            f"{n} live sessions are open here, the most at once. Your request for {tid} is saved and "
-            f"starts when one closes. To close one: orch run stop <ticket>",
-            {"pending": True, "limit": n},
-        )
+        extra = {"pending": True, "limit": hit, "change": WHERE_TO_CHANGE}
+        raise runs.Busy(busy_words(hit, ref(root, tid)), extra)
     if not mine and session_exists(root, tid):
         tmux(root, "kill-session", "-t", target(tid))  # left over from a crash: the claim is gone
     rec, copy_notes = runs.claim_routed(root, tid, by, name, "live", take_over=take_over, busy_text=busy_text)

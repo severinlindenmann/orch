@@ -274,6 +274,8 @@ def share_file(
     replace: str | None = None,
 ) -> dict:
     note = _note(note)
+    if note:  # R5.2: the note leaves inside the file header; the one scanner first, like the file itself
+        secretscan.refuse_if_secret_in(root, {"text": note}, "note")
     key = None
     if replace:
         _file_id(replace)

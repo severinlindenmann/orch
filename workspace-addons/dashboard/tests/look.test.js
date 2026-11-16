@@ -150,8 +150,18 @@ test('the profile card shows name, one description, icon and colour; no relay wo
   assert.equal(textOf(tree.find(x => x.attrs['data-key'] === 'pf-name-value')), 'Finance HQ');
   assert.equal(textOf(tree.find(x => x.attrs['data-key'] === 'pf-description-value')), 'Bills and taxes');
   assert.ok(tree.some(x => x.attrs['data-lk'] === 'open'), 'icon and colour live in the card');
-  assert.equal(tree.some(x => x.attrs['data-key'] === 'pf-tags-row'), false);
+  assert.equal(tree.some(x => x.attrs['data-key'] === 'pf-tags-row'), true, 'tags live in the workspace too');
   assert.equal(/relay|publish/i.test(textOf(L.profileCard())), false);
+});
+
+test('without a relay the card shows and saves the workspace tags', async () => {
+  const {L, click, type, acts} = cardEnv({}, {ws_name: 'Finance', ws_description: 'Old', ws_tags: ['money', 'BAD TAG']});
+  const row = all(L.profileCard()).find(x => x.attrs['data-key'] === 'pf-tags-row');
+  assert.match(textOf(row), /money/);
+  click('pf-edit'); type('tag', 'Taxes'); click('tag-add');
+  await click('pf-save');
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(acts)), [['workspace.set', {field: 'tags', text: 'money,bad-tag,taxes'}]]);
 });
 
 test('Save sends the local fields, then proposes description and tags to the relay', async () => {
@@ -167,6 +177,7 @@ test('Save sends the local fields, then proposes description and tags to the rel
   assert.deepEqual(JSON.parse(JSON.stringify(acts)), [
     ['workspace.set', {field: 'name', text: 'Finance 2'}],
     ['workspace.set', {field: 'description', text: 'New line'}],
+    ['workspace.set', {field: 'tags', text: 'a,money-stuff'}],
     ['look.profile', {service: 'relay', description: 'New line', tags: ['a', 'money-stuff']}],
   ]);
   text = textOf(L.profileCard());

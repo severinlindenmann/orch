@@ -577,7 +577,14 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
                     "ticket_view": tv,
-                    "page": pg and {"path": pg["path"], "label": str(pg.get("label") or "")[:40]},
+                    # live_session: this add-on's page shows a ticket's live session; the ticket's
+                    # "Watch live" button looks for it, so it must reach the page (ORCH-15)
+                    "page": pg
+                    and {
+                        "path": pg["path"],
+                        "label": str(pg.get("label") or "")[:40],
+                        **({"live_session": True} if pg.get("live_session") is True else {}),
+                    },
                     "ticket_fields": tf,
                     "acts": acts,
                     "link_kinds": kinds,
@@ -830,6 +837,14 @@ def copies_disk_forget(root: Path) -> None:
         _DISK.pop(str(root), None)
 
 
+def _ws_tags(root: Path) -> list[str]:
+    """The workspace's own tags; [] with an older core that has none."""
+    from orch import config
+
+    get = getattr(config, "workspace_tags", None)
+    return list(get(root))[:4] if get else []
+
+
 def load_settings(root: Path, orch_bin: str | None) -> dict:
     """What the Settings page shows: agents from `orch agents --json`, every installed add-on from `orch addon list --json`."""
     agents, rows = (
@@ -874,6 +889,7 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         copy_setup,
         diag_enabled,
         focus_session_typing,
+        live_max,
         workspace_description,
         workspace_name,
     )
@@ -891,9 +907,11 @@ def load_settings(root: Path, orch_bin: str | None) -> dict:
         "agents_may_finish": agents_may_finish(root),
         "copies": copies_mode(root),
         "copies_max": copies_max(root),
+        "live_max": live_max(root),  # Settings > Helper > Helpers at once: None = no limit (the default)
         "copy_setup": copy_setup(root) or "",
         "ws_name": workspace_name(root) or "",
         "ws_description": workspace_description(root) or "",
+        "ws_tags": _ws_tags(root),  # the workspace's own tags (Settings > Workspace profile)
         "typing_on": focus_session_typing(root),  # Settings > Add-ons: "Let me type into the helper's screen"
         "diag_enabled": diag_enabled(root),  # the debug log switch (Settings > Report a problem)
         "diag": _diag_stats(root),

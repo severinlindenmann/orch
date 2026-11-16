@@ -59,6 +59,44 @@ def init(root: Path, code: str | None = None) -> list[str]:
     return lines
 
 
+STARTER_TITLE = "Set up this workspace"
+STARTER_STEPS = (
+    "Look through the folder and work out what this workspace is about",
+    "Give the workspace a short name and a one-line description",
+    "Add two to four tags",
+    "Pick an icon and a colour that fit",
+    "Suggest up to three first tasks for the work found here",
+)
+STARTER_NOTE = """\
+orch added this task when the workspace was set up. Start it to let your helper fill in the workspace profile.
+You can change everything later in the dashboard (Settings > General > Workspace profile), or drop this task.
+
+For the helper:
+- Read the folder (README, file names, a few files; never .orch/secrets/) to see what the work is about.
+- Name: orch config set workspace.name "<2 to 4 words>"
+- Description: orch config set workspace.description "<one line, what this workspace is for>"
+- Tags: orch config set workspace.tags "<tag>,<tag>" (2 to 4 lowercase words)
+- Icon and colour: orch look list, then orch look set --icon <id> --color <token>
+- If orch says the person already chose one of these, leave it as it is.
+- First tasks: name up to three in the summary; do not create them.
+- Prove each step with what you set (orch config get workspace.name, orch look show)."""
+
+
+def is_new(root: Path) -> bool:
+    """No orch here yet: `orch init` is the first one (asked before anything is written)."""
+    return not (root / ".orch").exists()
+
+
+def starter(root: Path, by: str) -> dict:
+    """The starter task on a new workspace: the helper fills in the workspace profile. Returns the ticket."""
+    from orch import tickets
+
+    t = tickets.create(root, STARTER_TITLE, by, fields={"note": STARTER_NOTE})
+    for step in STARTER_STEPS:
+        t, _ = tickets.check_add(root, t["id"], step, by)
+    return t
+
+
 def has_recommended(root: Path) -> bool:
     from orch import addons
 

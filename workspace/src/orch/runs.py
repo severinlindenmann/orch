@@ -1030,6 +1030,36 @@ def _plan_first_plan(ticket: dict) -> list[str]:
     ]
 
 
+def _epic_plan(ticket: dict, root: Path) -> list[str]:
+    """An epic (several tickets made at once in New ticket): its tickets are the work. One run goes through
+    them in order, each finished with its own evidence, so every ticket keeps its own text, files and
+    result."""
+    if not ticket.get("epic"):
+        return []
+    tid = ticket["id"]
+    kids = sorted(
+        (t for t in tickets.list_all(root) if t.get("parent") == tid),
+        key=lambda t: (str(t.get("created_at", "")), str(t.get("key", ""))),
+    )
+    todo = [t for t in kids if t.get("status") not in ("review", "done", "dropped")]
+    if not todo:
+        return [
+            "This ticket is an epic: the tickets inside it are the work, and none is left open. Check them "
+            f"(orch ticket tree {tid}) and finish the epic with a summary of what each one gave."
+        ]
+    listed = "\n".join(
+        f"- {t.get('key') or t['id']} [{t['id']}]: {_clip(t.get('title', ''), 200)}" for t in todo[:30]
+    )
+    return [
+        "This ticket is an epic: the person made it together with the tickets inside it, each with its own "
+        "text, screenshots and files. Those tickets are the work. On this epic add one task per ticket. Then "
+        "go through them in this order, one at a time: read the ticket (orch ticket show <id>, its files in "
+        ".orch/tickets/<id>/artifacts/), set it active, add its own tasks on it, do the work, finish it with "
+        "evidence, its summary and orch ticket status <id> done, tick its task on the epic, then take the "
+        "next. Ask on the ticket a question is about. Tickets still open:\n" + listed
+    ]
+
+
 def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
     """`root`: the ticket's workspace (required: never looked up, a lookup can find another workspace)."""
     ticket = history.shown_ticket(root, ticket)  # person fields as this machine can prove them
@@ -1071,7 +1101,9 @@ def fresh_prompt(ticket: dict, items: list[dict], root: Path) -> str:
             '[--done-when "<one plain line>"]. Their original title stays in the history. '
             "Do this before you add tasks.",
         )
-    out[1:1] = _plan_first_plan(ticket) + _done_when_plan(ticket)  # the plan instruction comes first
+    out[1:1] = (
+        _plan_first_plan(ticket) + _epic_plan(ticket, root) + _done_when_plan(ticket)
+    )  # the plan instruction comes first
     if ticket.get("note"):  # what the person asked for, in their words (not only in `orch ticket show`)
         out.insert(1, f"The person's note on this ticket: {_clip(ticket['note'], 2000)}")
     if ticket.get("description"):  # written by an agent, from the person's text: not the person's words

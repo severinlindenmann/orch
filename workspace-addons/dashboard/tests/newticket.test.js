@@ -302,3 +302,108 @@ test('b4: Save without starting says Saving… at once, then the ticket opens', 
   release(); await pending; await new Promise(resolve => setImmediate(resolve));
   assert.equal(s.c.location.hash, '#ticket/new');
 });
+test('ORCH-8: the new ticket opens by the id in the reply, even when orch changed its title', async () => {
+  const s = setup();
+  // Cut to 80 characters right after a space, with a file: the dialog used to look for "… this " and find nothing.
+  s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') s.c.tickets().push({id:'t_new123', title:args.title.trim() + ' (renamed)'}); return {ok:true, state:{created:{id:'t_new123'}}}; };
+  await s.drop([{name:'Screenshot 08-19.png',size:1}]);
+  s.input.value = 'add a option that when a user does first orch init it adds a default task, this default task'; await s.input.fire('input');
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.calls[0].args.title, 'add a option that when a user does first orch init it adds a default task, this');
+  assert.equal(s.c.location.hash, '#ticket/t_new123');
+  assert.ok(!walk(s.d).some(n => /could not be found/.test(n.textContent)));
+});
+test('ORCH-8: an older reply without the id still finds the ticket by its title (no trailing space)', async () => {
+  const s = setup();
+  s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') s.c.tickets().push({id:'t_old1', title:args.title}); return {ok:true, state:{}}; };
+  await s.drop([{name:'photo.png',size:1}]);
+  s.input.value = 'x'.repeat(79) + ' and more words after the cut'; await s.input.fire('input');
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.calls[0].args.title, 'x'.repeat(79));
+  assert.equal(s.c.location.hash, '#ticket/t_old1');
+});
+
+// ORCH-14: several tickets at once. The box is the main ticket; each step becomes a ticket under it with its own files.
+const stepBoxes = s => walk(s.d).filter(n => n.className.split(' ').includes('new-ticket-step'));
+const addStepButton = s => walk(s.d).find(n => n.className.includes('new-ticket-add-step'));
+test('ORCH-14: Make it an epic adds numbered ticket boxes; Remove takes one out and renumbers', async () => {
+  const s = setup();
+  const help = walk(s.d).find(n => /This ticket becomes an epic/.test(n.textContent));
+  assert.equal(stepBoxes(s).length, 0); assert.equal(help.hidden, true);
+  assert.equal(addStepButton(s).textContent, '＋ Make it an epic with several tickets');
+  await addStepButton(s).click(); await addStepButton(s).click(); await addStepButton(s).click();
+  assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'strong').textContent), ['Ticket 1', 'Ticket 2', 'Ticket 3']);
+  assert.equal(help.hidden, false); assert.equal(addStepButton(s).textContent, '＋ Add another ticket');
+  await walk(stepBoxes(s)[0]).find(n => n['aria-label'] === 'Remove ticket 1').click();
+  assert.deepEqual(stepBoxes(s).map(b => walk(b).find(n => n.tag === 'textarea')['aria-label']), ['Ticket 1: what needs doing?', 'Ticket 2: what needs doing?']);
+});
+test('ORCH-14: Start makes the epic, then one ticket inside it per box with its own files; only the epic starts', async () => {
+  const s = setupWith(null, {UI:{pastedFiles:e => Array.from(e.clipboardData.files || [])}});
+  s.c.act = async (op, args) => { s.calls.push({op, args}); if (op === 'ticket.new') { const id = 't_' + s.calls.length; s.c.tickets().push({id, title:args.title}); return {ok:true, state:{created:{id}}}; } return {ok:true}; };
+  s.input.value = 'Dashboard fixes'; await s.input.fire('input');
+  await addStepButton(s).click(); await addStepButton(s).click(); await addStepButton(s).click();
+  const [one, two, empty] = stepBoxes(s);
+  walk(one).find(n => n.tag === 'textarea').value = 'Fix the header\nIt overlaps the menu';
+  await one.fire('drop', {dataTransfer:{files:[{name:'header.png', size:1}]}, stopPropagation() { this.stopped = true; }});
+  const twoText = walk(two).find(n => n.tag === 'textarea'); twoText.value = 'Larger buttons';
+  assert.equal((await twoText.fire('paste', {clipboardData:{files:[{name:'Screenshot 09-13.png', size:1}], getData:() => ''}})).prevented, true);
+  assert.equal(walk(empty).find(n => n.tag === 'textarea').value, '');
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'ticket.new', 'ticket.new', 'run.start']);
+  assert.equal(s.calls[0].args.title, 'Dashboard fixes'); assert.equal(s.calls[0].args.epic, true); assert.equal(s.calls[0].args.parent, undefined); assert.equal(s.calls[0].args.files, undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.calls[1].args)), {title:'Fix the header', title_auto:false, note:'Fix the header\nIt overlaps the menu', files:[{name:'header.png', data:'YQ=='}], parent:'t_1'});
+  assert.deepEqual(JSON.parse(JSON.stringify(s.calls[2].args)), {title:'Larger buttons', title_auto:false, files:[{name:'Screenshot 09-13.png', data:'YQ=='}], parent:'t_1'});
+  assert.equal(s.calls[3].args.ticket, 't_1');
+  assert.equal(s.c.location.hash, '#ticket/t_1');
+  assert.ok(s.toasts.some(x => x[0] === 'Epic created'));
+});
+test('ORCH-14: a long ticket text is kept as its note.md; a ticket over 4.9 MB is refused before anything is made', async () => {
+  const s = setup();
+  s.input.value = 'Main'; await s.input.fire('input');
+  await addStepButton(s).click();
+  walk(stepBoxes(s)[0]).find(n => n.tag === 'textarea').value = 'z'.repeat(2000);
+  await s.form.fire('submit');
+  assert.equal(s.calls[1].args.long_text, 'z'.repeat(2000)); assert.equal(s.calls[1].args.note, undefined); assert.equal(s.calls[1].args.title_auto, true);
+  const big = setup();
+  big.input.value = 'Main'; await big.input.fire('input');
+  await addStepButton(big).click(); await addStepButton(big).click();
+  walk(stepBoxes(big)[1]).find(n => n.tag === 'textarea').value = 'y'.repeat(5000000);
+  await big.form.fire('submit');
+  assert.equal(big.calls.length, 0);
+  assert.match(walk(big.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /^Ticket 2 is too big/);
+});
+test('ORCH-14: a ticket that fails keeps the window open; pressing again sends only that one, not the epic twice', async () => {
+  const s = setup();
+  let failOnce = true;
+  s.c.act = async (op, args) => {
+    s.calls.push({op, args});
+    if (op === 'ticket.new' && args.title === 'Second' && failOnce) { failOnce = false; return {ok:false, text:'busy'}; }
+    if (op === 'ticket.new') { const id = 't_' + s.calls.length; s.c.tickets().push({id, title:args.title}); return {ok:true, state:{created:{id}}}; }
+    return {ok:true};
+  };
+  s.input.value = 'Main'; await s.input.fire('input');
+  await addStepButton(s).click(); await addStepButton(s).click();
+  walk(stepBoxes(s)[0]).find(n => n.tag === 'textarea').value = 'First';
+  walk(stepBoxes(s)[1]).find(n => n.tag === 'textarea').value = 'Second';
+  await s.form.fire('submit');
+  assert.equal(s.d.open, true);
+  assert.match(walk(s.d).find(n => n.role === 'alert' && n.className === 'bad').textContent, /not every ticket in it\. Ticket 1: busy/);
+  assert.equal(stepBoxes(s).length, 1, 'the step that was made left the list');
+  assert.equal(walk(s.d).find(n => n.type === 'submit').textContent, 'Send the rest');
+  await s.form.fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(s.calls.map(c => c.op + ':' + (c.args.title || c.args.ticket)), ['ticket.new:Main', 'ticket.new:First', 'ticket.new:Second', 'ticket.new:Second', 'run.start:t_1']);
+  assert.equal(s.calls[3].args.parent, 't_1');
+  assert.equal(s.d.open, false);
+});
+test('ORCH-14: empty ticket boxes make no epic; a plain ticket is sent as before', async () => {
+  const s = setup();
+  s.input.value = 'Just one'; await s.input.fire('input');
+  await addStepButton(s).click();
+  await s.form.fire('submit');
+  assert.equal(s.calls[0].args.epic, undefined);
+  assert.deepEqual(s.calls.map(c => c.op), ['ticket.new', 'run.start']);
+});
