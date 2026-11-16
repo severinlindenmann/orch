@@ -577,7 +577,7 @@ def load_addons(root: Path, orch_bin: str | None, raw=None) -> list[dict]:
                         "subtitle": str(d["subtitle"])[:120] if isinstance(d.get("subtitle"), str) else None,
                     },
                     "ticket_view": tv,
-                    # live_session: this add-on's page shows a ticket's live session (Focus); the ticket's
+                    # live_session: this add-on's page shows a ticket's live session; the ticket's
                     # "Watch live" button looks for it, so it must reach the page (ORCH-15)
                     "page": pg
                     and {
