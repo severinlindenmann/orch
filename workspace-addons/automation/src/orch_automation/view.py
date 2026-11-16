@@ -341,7 +341,12 @@ def _schedules(
                         or (f"Started \u00b7 {last.astimezone():%a %H:%M}" if last else "Not yet"),
                     },
                     "link": t["id"],
-                    "subtitle": clean(sched.get("agent") or "Your helper", 60),
+                    "subtitle": clean(
+                        f"Runs {sched['script']}"
+                        if sched.get("script")
+                        else sched.get("agent") or "Your helper",
+                        60,
+                    ),
                     "toggle": {
                         "on": not paused,
                         "label": clean(t["title"], 40) + " on or off",

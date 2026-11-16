@@ -1,0 +1,1 @@
+{ "recurring": true, "cron": "*/5 * * * *", "script": "report-watch", "agent": "claude" }

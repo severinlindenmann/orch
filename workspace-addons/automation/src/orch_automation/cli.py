@@ -11,7 +11,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import actions, orchcli, plain, service
+from . import actions, orchcli, plain, scripts, service
 from .cron import fmt, next_after, valid
 from .listen import NOT_LISTENING
 from .loop import OPEN, Scheduler
@@ -108,6 +108,7 @@ def repeat(
     tz: str | None = None,
     each_run: bool = False,
     by: str | None = None,
+    script: str | None = None,
 ) -> dict:
     want = tid.strip().upper()  # the ticket id, or its key (DM1-12, any case)
     t = next(
@@ -141,13 +142,28 @@ def repeat(
     changes = {"recurring": True, "cron": plan.cron, "tz": zone_name}
     if each_run and not plain.daily_or_slower(plan.cron):
         raise Refused('Each run as its own ticket needs a repeat daily or slower, like "daily 07:30".')
+    remove = [] if each_run else ["each_run"]
+    if script is not None:
+        if agent or each_run:
+            raise Refused(
+                "A repeat runs either a script or an agent, and a script never gets its own sub-tickets."
+            )
+        if not scripts.NAME_RE.match(script):
+            raise Refused(
+                "A script name may only have a-z, 0-9 and -. It names a script (orch automation script list)."
+            )
+        if not scripts.defined(root, script):
+            why = scripts.missing(root, script)
+            raise Refused(why[0].upper() + why[1:] + ".")
+        changes["script"] = script
     if agent:
+        remove.append("script")  # an agent again instead of a script
         if not orchcli.AGENT_RE.match(agent):
             raise Refused("The agent name may only have a-z, 0-9 and -. It names an agent (orch agents).")
         changes["agent"] = agent
     if each_run:
         changes["each_run"] = "sub-ticket"
-    if not orchcli.set_ext(root, t, remove=() if each_run else ("each_run",), by=by, **changes):
+    if not orchcli.set_ext(root, t, remove=tuple(remove), by=by, **changes):
         raise Refused("The ticket changed or the change was not accepted. Try again.")
     return {"ticket": tid, **changes}
 
@@ -182,7 +198,27 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument(
         "--each-run", choices=("sub-ticket",), help="give every run its own sub-ticket (daily or slower)"
     )
+    rp.add_argument("--script", help="run this script (orch automation script list) instead of an agent")
     rp.add_argument("--off", action="store_true")
+    sc = sub.add_parser(
+        "script", parents=[common], help="commands a repeat can run instead of an agent (this computer only)"
+    )
+    scs = sc.add_subparsers(dest="script_cmd", required=True)
+    sa = scs.add_parser(
+        "add", parents=[common], help="add a script: orch automation script add <name> -- <command>"
+    )
+    sa.add_argument("name")
+    sa.add_argument("command", nargs=argparse.REMAINDER)
+    scs.add_parser("list", parents=[common], help="the scripts on this computer")
+    sw = scs.add_parser("allow", parents=[common], help="a person allows a script on this computer")
+    sw.add_argument("name")
+    sw.add_argument("--key", required=True, help="the key orch automation script list shows")
+    sr = scs.add_parser("remove", parents=[common], help="remove a script")
+    sr.add_argument("name")
+    sx = scs.add_parser(
+        "run", parents=[common], help="run a ticket's script now and wait (what a repeat does)"
+    )
+    sx.add_argument("ticket")
     ac = sub.add_parser(
         "act",
         parents=[common],
@@ -275,12 +311,25 @@ def _run(args, root: Path) -> int:
         except actions.Bad as e:
             raise Refused(str(e)) from None
         out(res, res["text"])
+    elif args.cmd == "script":
+        return _script(args, root, out)
     elif args.cmd == "repeat":
-        res = repeat(root, args.ticket, args.when, args.off, args.agent, args.tz, bool(args.each_run))
+        res = repeat(
+            root,
+            args.ticket,
+            args.when,
+            args.off,
+            args.agent,
+            args.tz,
+            bool(args.each_run),
+            script=args.script,
+        )
         if res.get("until"):
             text = f"{args.ticket} wakes once at {res['until']}."
         elif res["recurring"]:
             text = f"{args.ticket} repeats: {cron_human(res['cron'], plain.zone(res['tz']), local=plain.zone(res['tz']))} ({res['tz']})."
+            if res.get("script"):
+                text += f" Each time it runs the script {res['script']}, no agent."
         else:
             text = f"{args.ticket} no longer repeats."
         running = bool(service.running_pid(root))
@@ -288,6 +337,101 @@ def _run(args, root: Path) -> int:
         if not running and not args.off:
             text += "\nRepeating work isn't running here. Start it: orch start"
         out(res, text)
+    return 0
+
+
+def _script(args, root: Path, out) -> int:
+    from .loop import ask_failure, script_of
+
+    if args.script_cmd == "add":
+        cmd = list(args.command)
+        if "--" in cmd:  # options before -- (only --json) belong to orch; everything after it is the command
+            cut = cmd.index("--")
+            args.json = args.json or "--json" in cmd[:cut]
+            cmd = cmd[cut + 1 :]
+        try:
+            scripts.add(root, args.name, cmd)
+        except scripts.ScriptError as e:
+            raise Refused(str(e)) from None
+        ok = scripts.command(root, args.name) is not None
+        text = f"Script {args.name} added on this computer. Use it: orch automation repeat <ticket> " + (
+            f'"every 15 minutes" --script {args.name}'
+        )
+        if not ok:
+            text += (
+                f"\nIt runs only after a person allows it: orch automation script allow {args.name} "
+                f"--key {scripts.key(root, args.name, cmd)}"
+            )
+        out({"script": args.name, "command": cmd, "allowed": ok}, text)
+    elif args.script_cmd == "list":
+        rows = []
+        for n, c in sorted(scripts.load(root).items()):
+            ok = scripts.approved(root, n, c)
+            rows.append(
+                {"script": n, "command": c, "allowed": ok, **({} if ok else {"key": scripts.key(root, n, c)})}
+            )
+        out(
+            rows,
+            "\n".join(
+                f"{r['script']}  {' '.join(r['command'])}"
+                + (
+                    ""
+                    if r["allowed"]
+                    else f"\n  not allowed yet: orch automation script allow {r['script']} --key {r['key']}"
+                )
+                for r in rows
+            )
+            or "No scripts on this computer.",
+        )
+    elif args.script_cmd == "allow":
+        try:
+            scripts.allow(root, args.name, args.key)
+        except scripts.ScriptError as e:
+            raise Refused(str(e)) from None
+        out({"script": args.name, "allowed": True}, f"Script {args.name} allowed on this computer.")
+    elif args.script_cmd == "remove":
+        try:
+            gone = scripts.remove(root, args.name)
+        except scripts.ScriptError as e:
+            raise Refused(str(e)) from None
+        if not gone:
+            raise Refused(f"There is no script named {args.name} on this computer.")
+        out(
+            {"script": args.name, "removed": True},
+            f"Script {args.name} removed. Repeats that name it stop with a question.",
+        )
+    elif args.script_cmd == "run":
+        want = args.ticket.strip().upper()
+        t = next(
+            (
+                x
+                for x in orchcli.tickets(root)
+                if x["id"] == args.ticket or str(x.get("key") or "").upper() == want
+            ),
+            None,
+        )
+        if t is None:
+            raise Refused(f"There is no ticket {args.ticket}.")
+        name = script_of(t)
+        if not name:
+            raise Refused(
+                f"{args.ticket} runs no script. Set one: orch automation repeat {args.ticket} <when> --script <name>"
+            )
+        refused = orchcli.sync_refusal(root, t["id"])
+        if refused:
+            raise Refused(refused)
+        code = scripts.run(
+            root,
+            t["id"],
+            name,
+            fmt(datetime.now(UTC)),
+            lambda why: ask_failure(root, t["id"], f"The script did not work: {why}"),
+        )
+        if code == 75:
+            out({"ticket": t["id"], "running": True}, "It is still running from before.")
+            return 0
+        out({"ticket": t["id"], "exit": code}, f"Script {name} ended with exit code {code}.")
+        return 0 if code == 0 else 1
     return 0
 
 
