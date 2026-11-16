@@ -193,6 +193,8 @@ def render(name: str, kind: str, mode: str, v: Mapping, root: Path | None = None
 
     out = [fill(i) for i in items]
     extra: list[str] = permission_args(name, root, v.get("permissions"), v.get("person"))
+    if v.get("model") and a.get("model_args") and not user:  # the ticket's model (Sonnet or Opus)
+        extra += [x.replace("{model}", str(v["model"])) for x in a["model_args"]]
     if mode == "oneshot":
         if v.get("stream") and sect.get("stream_args"):
             extra += sect["stream_args"]

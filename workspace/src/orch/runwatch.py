@@ -13,7 +13,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from orch import runs, runs_live, tickets
+from orch import modelpick, runs, runs_live, tickets
 
 SCREEN_LINES = 40
 SCREEN_MAX_LINES = 500
@@ -261,12 +261,16 @@ def list_runs(root: Path) -> list[dict]:
         if tickets.is_general(root, tid):
             continue
         info = describe(root, tid, rec, table)
+        model = None
+        with contextlib.suppress(Exception):
+            model = (modelpick.chosen(tickets.load(root, tid)) or {}).get("name")
         out.append(
             {
                 "ticket": tid,
                 "key": runs_live.ref(root, tid),
                 "run": rec["run"],
                 "agent": rec.get("agent"),
+                "model": model,
                 "mode": rec.get("mode"),
                 "by": rec.get("by"),
                 "state": runs.state(rec),
@@ -282,11 +286,12 @@ def list_runs(root: Path) -> list[dict]:
 def list_text(rows: list[dict]) -> str:
     if not rows:
         return "No runs right now."
-    head = ("TICKET", "RUN", "AGE", "SIGNAL", "IDLE", "WAITING ON")
+    head = ("TICKET", "RUN", "MODEL", "AGE", "SIGNAL", "IDLE", "WAITING ON")
     body = [
         (
             r["key"],
             r["run"],
+            modelpick.LABELS.get(r.get("model") or "", "-"),
             span(r["age_seconds"]),
             r["signal"],
             span(r["idle_seconds"]) if r["idle_seconds"] is not None else "-",

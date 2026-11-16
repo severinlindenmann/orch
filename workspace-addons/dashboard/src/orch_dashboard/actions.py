@@ -408,6 +408,17 @@ def _ticket_edit(a):
     return ["ticket", "edit", _tid(a.get("ticket"))], flags, []
 
 
+MODELS = ("sonnet", "opus", "auto")
+
+
+def _ticket_model(a):
+    """A person picks the helper's model for this ticket (or lets orch pick again): `orch ticket model`."""
+    _only(a, ("ticket", "model"))
+    if a.get("model") not in MODELS:
+        raise BadRequest("Pick Sonnet, Opus or let orch pick.")
+    return ["ticket", "model", _tid(a.get("ticket")), a["model"]], [], []
+
+
 def _check_add(a):
     """Add a task: `orch check add <ticket> --by ... -- <text>` (text up to 500 characters)."""
     _only(a, ("ticket", "text"))
@@ -965,6 +976,7 @@ OPS = {
     "ticket.patch": _ticket_patch,
     "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
+    "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,
     "chat.make_ticket": _chat_make_ticket,

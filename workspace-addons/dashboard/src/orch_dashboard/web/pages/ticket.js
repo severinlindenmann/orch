@@ -1344,7 +1344,7 @@ function ticketProperties(t, parent) {
   return h('aside', {className:'side-panel properties' + (done ? ' compact' : ''), 'aria-labelledby':'ticket-properties-' + t.id, 'data-key':'properties-' + t.id},
     h('h2', {id:'ticket-properties-' + t.id}, 'Properties'),
     h('dl', {className:'ticket-details ed-list'}, parent ? field('Step of', h('a', {href:href(parent.id)}, partName(parent))) : null,
-      field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t),
+      field('Owner', inlineField(t, 'owner')), field('Due', inlineField(t, 'due')), field('Done when', inlineField(t, 'done_when')), addonPropertyRows(t), field('Model', modelField(t)),
       t.created_at ? field('Created', localStamp(t.created_at)) : null,
       done ? (finished ? field('Finished', localStamp(finished)) : null) : (t.updated_at ? field('Updated', localStamp(t.updated_at)) : null)),
     linksCard(t),
@@ -1450,6 +1450,27 @@ function detail(t) {
 const MULTILINE = ['note', 'done_when'];
 const FIELD_HINT = {title:'Untitled', owner:'Not chosen yet', due:'Not set', note:'Add a note', done_when:'Say what should be true when it is done'};
 // A value on the ticket page: a plain click turns it into a field; Enter or leaving it saves, Esc cancels.
+// The model this ticket's helper runs on (ORCH-49): orch picks Sonnet or Opus before each start until a person
+// chooses one here; "Let orch pick" hands it back. Applies from the next start.
+const MODEL_NAMES = {sonnet:'Sonnet', opus:'Opus'};
+function modelChoice(t) {
+  const m = t.model && MODEL_NAMES[t.model.name] ? t.model : null;
+  return m ? {name:m.name, auto:m.by === 'orch', why:m.why ? clean(String(m.why)) : ''} : null;
+}
+function modelField(t) {
+  const m = modelChoice(t);
+  const said = m ? MODEL_NAMES[m.name] + (m.auto ? ' (picked by orch' + (m.why ? ': ' + m.why : '') + ')' : '') : 'orch picks it when work starts';
+  if (snapshot) return el('span', 'ed-ro', said);
+  const select = h('select', {'aria-label':'Model', 'data-key':'model-' + t.id, title:said},
+    h('option', {value:'auto'}, m && m.auto ? 'Let orch pick (' + MODEL_NAMES[m.name] + ')' : 'Let orch pick'),
+    h('option', {value:'sonnet'}, 'Sonnet'), h('option', {value:'opus'}, 'Opus'));
+  select.value = m && !m.auto ? m.name : 'auto';
+  select.onchange = async () => {
+    const result = await act('ticket.model', {ticket:t.id, model:select.value});
+    if (!result.ok) { window.orch.toast(changeError(result), 'error'); select.value = m && !m.auto ? m.name : 'auto'; }
+  };
+  return select;
+}
 function inlineField(t, field) {
   const raw = t[field] == null ? '' : String(t[field]);
   const shown = field === 'due' ? dueText(t) : field === 'owner' ? name(raw) : clean(raw);
