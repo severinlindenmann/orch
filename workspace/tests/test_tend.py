@@ -307,3 +307,11 @@ def test_start_priority_queues_when_every_slot_is_taken(proj, run, new_ticket, m
     code, out, err = run("run", "tend", "--json")
     assert code == 0, err
     assert json.loads(out)["queue"] == [{"ticket": tid, "key": runs_live.ref(proj, tid), "priority": "high"}]
+
+
+def test_a_time_wait_names_the_time(proj, run, new_ticket):
+    tid = new_ticket()
+    assert run("wait", tid, "--until", "2030-01-02T08:00:00Z")[0] == 0
+    waits = runwatch.waiting_on(proj, None, tickets.load(proj, tid))
+    assert waits[0]["kind"] == "time" and waits[0]["ref"] == "2030-01-02T08:00:00Z"
+    assert waits[0]["what"] != "until "
