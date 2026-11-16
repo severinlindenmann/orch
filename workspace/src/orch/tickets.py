@@ -1768,7 +1768,9 @@ _PROOF_REF_WORDS = {
     "file": "file name",
 }
 _PROOF_FIELD_WORDS = {"output_tail": "output", "summary": "summary", "title": "title", "text": "text"}
-_PROOF_NOT_SCANNED = {"type", "by", "at", "ran_at", "files_sig", "exit", "role"}  # orch's own fields
+# fields parse_evidence checks against a fixed shape (a list, an int, a time, hex), so they hold no free text.
+# `by` and `at` are NOT here: a caller can set them (--evidence JSON) and nothing checks their shape.
+_PROOF_NOT_SCANNED = {"type", "role", "exit", "ran_at", "files_sig"}
 
 
 def refuse_secret_in_proof(root: Path, evidence: list) -> None:
@@ -1796,7 +1798,10 @@ def refuse_secret_in_proof(root: Path, evidence: list) -> None:
                 if k == "ref"
                 else _PROOF_FIELD_WORDS.get(k, k)
             )
-            body[f"{word} " if word in body else word] = v
+            key = word
+            while key in body:  # never overwrite a field already in the body: every value is scanned
+                key += " "
+            body[key] = v
         secretscan.refuse_if_secret_in(root, body, "proof", verb="saved")
 
 
