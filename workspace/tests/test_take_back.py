@@ -148,9 +148,9 @@ def test_old_ticket_files_without_the_field_keep_working(tk, run):
 
 
 def _asked_question(proj):
-    from conftest import ensure_signing
+    from conftest import ensure_keys
 
-    ensure_signing(proj)
+    ensure_keys(proj)
     tid = tickets.create(proj, "Deploy", "human:tester")["id"]
     tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
     rec = {

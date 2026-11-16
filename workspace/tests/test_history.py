@@ -6,7 +6,7 @@ import types
 from pathlib import Path
 
 import pytest
-from conftest import ensure_signing
+from conftest import ensure_keys
 
 from orch import cli, history, humanproof, needs, phone_view, runs, runs_live, tickets
 from orch.errors import Refused
@@ -37,7 +37,7 @@ def _plant(root, tid, fn):
 
 @pytest.fixture
 def synced(proj):
-    ensure_signing(proj)
+    ensure_keys(proj)
     t = tickets.create(proj, "Synced work", "human:tester")
     tickets.check_add(proj, t["id"], "Step one", "agent:claude")
     history.enable_sync(proj, adopt=True)  # as the sync add-on does for a workspace that never synced
@@ -416,7 +416,7 @@ def test_an_answer_against_a_question_that_could_not_be_encoded_is_refused(synce
 
 
 def test_adoption_covers_answers_steps_and_evidence(proj):
-    ensure_signing(proj)
+    ensure_keys(proj)
     t = tickets.create(proj, "Before sync", "human:tester")
     tid = t["id"]
     tickets.check_add(proj, tid, "Step one", "agent:claude")
@@ -473,7 +473,7 @@ def test_footer_never_drops_demoted_lines_as_own(synced, monkeypatch):
 
 
 def test_never_adopt_when_tickets_show_sync(proj):
-    ensure_signing(proj)
+    ensure_keys(proj)
     t = tickets.create(proj, "Came over sync", "human:tester")
     _plant(proj, t["id"], lambda d: d.setdefault("ext", {}).setdefault("sync", {"old_keys": []}))
     assert history.sync_enabled(proj)  # the ticket itself shows sync: enabled already

@@ -177,6 +177,13 @@ elif args[0] == "ask":
         print(json.dumps({"error": "Ask unavailable.", "code": "not_available"}))
         sys.exit(2)
     t = load(args[1])
+    if "--take-back" in args:  # core's take-back: settled with "Taken back: <reason>", answered by the caller
+        q = next(x for x in t["questions"] if x["id"] == flag("--take-back"))
+        q.update(answer="Taken back: " + args[2], answered_by=by, taken_back={"by": by, "reason": args[2]})
+        t["revision"] += 1
+        save(t)
+        print(json.dumps(q))
+        sys.exit(0)
     options = [args[i + 1] for i, a in enumerate(args) if a == "--option"]
     result = next(
         (

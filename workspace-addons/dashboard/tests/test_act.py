@@ -303,7 +303,7 @@ import json, sys
 a = sys.argv[1:]
 if a[:1] == ["needs"]: print(json.dumps([{{"id": "question:t_1:q1", "title": "x"}}]))
 elif a[:1] == ["status"]: print(json.dumps([{{"workspace": {str(ws.resolve())!r}, "name": "w", "addons": [{{"addon": "automation", "running": False}}]}}]))
-elif a[:2] == ["run", "status"]: print(json.dumps({{"ticket": a[2], "running": False, "pending": 0}}))
+elif a[:2] == ["run", "status"]: print(json.dumps({{"runs": {{t: {{"ticket": t, "running": False, "pending": 0}} for t in a[2:-1]}}}}))
 else: sys.exit(2)
 """)
     script.chmod(0o755)
@@ -347,7 +347,7 @@ import json, sys, pathlib
 a = sys.argv[1:]
 if a[:2] == ["run", "status"]:
     open(pathlib.Path(__file__).parent / "n", "a").write("x")
-    print(json.dumps({{"running": True}}))
+    print(json.dumps({{"runs": {{t: {{"running": True}} for t in a[2:-1]}}}}))
 else: sys.exit(2)
 """)
     script.chmod(0o755)

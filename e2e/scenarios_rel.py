@@ -174,7 +174,7 @@ def r6(e):
     asking = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("allow_message") == mid]
     check(len(asking) == 1 and asking[0]["status"] == "waiting", f"one waiting allow-question ticket expected: {asking}")
     check(_agent_runs(log) == 0 and len(tickets(e, "Reports")) == before + 1, "automation acted before the human allowed")
-    e.orch("Reports", "relay", "allow", mid, "--once")
+    e.person("Reports", "relay", "allow", mid, "--once")
     allow = [m for m in inbox(e, "Pilatus") if m["type"] == "allow"]
     check(allow and allow[-1]["reply_to"] == mid, f"allow message back to Pilatus: {allow}")
     _sched_once(e, "Reports")
@@ -195,20 +195,28 @@ def r7(e):
     _automation_on(e, "Reports")
     i = ids(e)
     log = _fake_agent(e, e.ws("Reports"))
+    _sched_once(e, "Reports")  # work an earlier scenario left (R6 delegates a ticket) runs now, not inside the count below
+    time.sleep(4)
     base = _agent_runs(log)
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "run the weekly report")
     st = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"]["key"] == "weekly-report"]
     check(st and st[-1]["allowed"] is False, "first start must wait for the human")
-    e.orch("Reports", "relay", "allow", st[-1]["id"], "--permanent")
+    e.person("Reports", "relay", "allow", st[-1]["id"], "--permanent")
     inbox(e, "Pilatus")  # stores the received allow token
     _sched_once(e, "Reports")
     # the message that was just allowed runs right away (like --once) ...
-    check(_agent_runs(log) == base + 1, "the message allowed with --permanent did not run")
+    def runs_reach(n):  # the agent takes 3 s and a slow runner a bit more: wait for its end line
+        end = time.time() + 40
+        while time.time() < end and _agent_runs(log) < n:
+            time.sleep(1)
+        return _agent_runs(log)
+
+    check(runs_reach(base + 1) == base + 1, f"the message allowed with --permanent did not run ({_agent_runs(log)} of {base + 1}): {log.read_text()[-600:]!r}")
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "second time")
     st2 = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"].get("text") == "second time"]
     check(st2 and st2[-1]["allowed"] is True, f"second start with token must be allowed: {st2}")
     _sched_once(e, "Reports")
-    check(_agent_runs(log) == base + 2, "second start (with token) did not run")
+    check(runs_reach(base + 2) == base + 2, f"second start (with token) did not run ({_agent_runs(log)} of {base + 2})")
     keyed = [t for t in tickets(e, "Reports") if (t.get("ext", {}).get("relay") or {}).get("start_key") == "weekly-report"]
     check(len(keyed) == 1, f"second start made another ticket: {len(keyed)}")
     al = e.rel.admin.call("GET", "/admin/api/allows").json()["items"]
@@ -357,7 +365,8 @@ def r15(e):
     e.orch("Pilatus", "ask", t, "Ship it?", "--option", "yes", "--option", "no", "--phone")
     got = [x["message"]["body"]["text"] for x in phone(e, ph, "GET", "/v1/phone/messages").json()["items"]]
     # ask --phone also sends the ticket snapshot as a quiet note (mobile chat, V2-M1)
-    check(got[:5] == ["Waiting for your answer", "by name too", "yes, I can answer your phone", "Got it: can you answer my phone", "can you answer my phone"], f"phone messages: {got}")
+    check(got[:4] == ["Waiting for your answer", "by name too", "yes, I can answer your phone", "Got it: can you answer my phone"]
+          and any("can you answer my phone" in x for x in got[4:]), f"phone messages: {got}")  # then the quiet ticket notes
     qs = [q for q in phone(e, ph, "GET", "/v1/phone/questions").json()["items"] if q["message"].get("ticket") == t]
     check(len(qs) == 1, f"phone questions: {qs}")
     # Home is not on this phone's list: refused with what to do, and its directory lists no such phone
@@ -477,6 +486,13 @@ def r17(e):
             raise Skip(f"xfail #799: relay connect from the CLI is refused ({str(exc)[:80]})") from None
         raise
     me = "human:e2e"
+    # the reply needs a rule too (relay_all only lets Pilatus write to Reports)
+    cur = e.rel.admin.call("GET", "/admin/api/rules").json() or {"rules": []}
+    old = cur.get("rules", [])
+    r = e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old + [
+        {"from": i["Reports"], "to": i["Pilatus"], "text": True, "files": False, "delegate": False, "start": False}]})
+    check(r.status == 200, f"rule for the reply: {r}")
+    e.cleanup.append(lambda: e.rel.admin.call("PUT", "/admin/api/rules", {"rules": old}))
     for n in ("Pilatus", "Reports"):
         e.orch(n, "relay", "refresh")
     text, back = "R17 hello from Pilatus", "R17 reply from Reports"

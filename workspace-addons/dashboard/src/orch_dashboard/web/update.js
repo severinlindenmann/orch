@@ -64,5 +64,8 @@
       if (t !== shown) { shown = t; banner(t, s.state === "finished"); }
     }).catch(function () { tell("unreachable"); updateOverdue(true); });
   }
-  updateStatus(); setInterval(updateStatus, 4000);
+  // A hidden tab does not poll (nobody sees the answer); it asks once when it is shown again.
+  function whenShown(fn) { return function () { if (document.visibilityState !== "hidden") fn(); }; }
+  updateStatus(); setInterval(whenShown(updateStatus), 4000);
+  document.addEventListener("visibilitychange", whenShown(updateStatus));
 })();

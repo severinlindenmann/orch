@@ -88,7 +88,7 @@ function chatListRow(g) {
   const id = g?.id || 'chat', messages = chatObjects(state?.chat?.messages), last = messages[messages.length - 1];
   return h('button', {type:'button', className:'chat-list-row', 'data-key':'row-' + id, 'data-chat-action':'select', 'data-id':id,
     'aria-current':(chatUi.open === id || (id === 'chat' && chatUi.open !== 'history' && !chatGroup() && !chatDmId(chatUi.open))) ? 'true' : null},
-    g ? h('span', {className:'chat-stack'}, chatObjects(g.members).slice(0, 3).map(m => chatAvatar(m))) : h('span', {className:'chat-avatar chat-helper-mark', 'aria-hidden':'true'}, '✧'),
+    g ? h('span', {className:'chat-stack'}, chatObjects(g.members).slice(0, 3).map(m => chatAvatar(m))) : chatAvatar('Helper'),
     h('span', {className:'chat-row-text'}, chatText('strong', '', g ? g.title : CHAT_HELPER),
       g ? chatText('small', 'chat-row-meta', [chatHelpers(g), g.started ? 'started ' + chatWhen(g.started) : ''].filter(Boolean).join(' · ')) : null,
       chatText('small', '', chatPreview(g ? g.last : last?.text) || (g ? '' : 'No messages yet.'))),
@@ -169,7 +169,7 @@ function chatHeader(g, history) {
   // The helper conversation has no title row of its own: the page heading above says "Chat" and who it is with.
   return h('header', {className:'chat-thread-head', 'data-key':'thread-head'},
     plain ? null : h('div', {className:'chat-head-top'}, chatRich() ? chatButton('‹ Chats', 'back', {className:'chat-button chat-back'}) : null,
-      helper ? h('span', {className:'chat-avatar chat-helper-mark', 'aria-hidden':'true'}, '✧') : null,
+      helper ? chatAvatar('Helper') : null,
       h('div', {className:'chat-head-text'}, g ? chatText('p', 'chat-eyebrow', 'Group · ' + others + (others === 1 ? ' workspace' : ' workspaces')) : null,
         h('h1', {'data-key':'chat-title', tabindex:'-1'}, clean(title))),
       g ? chatButton('Members', 'members', {id:'chat-members-button'}) : null, earlier),
@@ -528,6 +528,23 @@ new MutationObserver(() => {
 const chatDm = {contacts:[], threads:new Map(), pending:new Map(), loading:false, loaded:false, picker:null, error:false, lastFetch:-Infinity, timer:null};
 const chatDmId = id => typeof id === 'string' && /^ws_[a-z0-9]{10}$/.test(id);
 const chatDmContact = ws => chatDm.contacts.find(c => c.ws === ws);
+// A contact's name for a raw workspace id ("agent:ws_..." as who answered): known contacts first, read once if none is
+// loaded yet (the next render shows the name), else the plain "Another workspace" - never the id.
+let chatDmNamesAsked = false;
+function chatDmName(id) {
+  const ws = String(id ?? '').replace(/^(agent|human):/, '');
+  if (!chatDmId(ws)) return '';
+  const c = chatDmContact(ws);
+  if (c?.name) return clean(c.name);
+  if (!chatDm.loaded && !chatDmNamesAsked && !snapshot) {
+    chatDmNamesAsked = true;
+    fetch('/api/chat/contacts').then(r => r.ok ? r.json() : null).then(list => {
+      if (!Array.isArray(list) || chatDm.loaded) return;
+      chatDm.contacts = chatObjects(list).filter(x => chatDmId(x.ws)); chatDm.loaded = true; render();
+    }).catch(() => {});
+  }
+  return 'Another workspace';
+}
 function chatDmMessages(ws) {
   const saved = chatObjects(chatDm.threads.get(ws)?.messages), ids = new Set(saved.map(m => m.id));
   return [...saved, ...array(chatDm.pending.get(ws)).filter(m => !ids.has(m.id))];
@@ -655,7 +672,7 @@ function chatDmThread() {
         m.by !== 'you' && (m.shown_at || m.at) ? chatText('small', 'chat-message-time', time(m.shown_at || m.at)) : null,
         m.by === 'you' ? h('small', {className:'chat-delivery'},
           m.state === 'failed' ? fragment('Not sent · ', chatButton('Try again', 'retry-send', {'data-id':m.id})) :
-          m.state === 'delivered' ? 'Delivered — their helper answers when it runs' : 'Sending…') : null))),
+          m.state === 'delivered' ? 'Delivered' : 'Sending…') : null))),
     !snapshot && c?.can?.chat ? h('form', {className:'chat-compose', 'data-key':'form-' + ws},
       h('textarea', {rows:1, maxLength:2000, className:'chat-draft', 'data-key':'draft-' + ws, 'data-chat-input':'draft', 'data-thread':ws,
         'aria-label':'Message ' + title, placeholder:'Message ' + title}, draft),

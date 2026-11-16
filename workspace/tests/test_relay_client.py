@@ -486,11 +486,11 @@ def test_answer_rejected_unless_it_matches_a_question_we_sent(proj, run, new_tic
 
 
 def test_a_phone_answer_to_a_question_changed_after_it_was_sent_is_not_applied(proj):
-    from conftest import ensure_signing
+    from conftest import ensure_keys
 
     from orch import relay, tickets
 
-    ensure_signing(proj)
+    ensure_keys(proj)
     tid = tickets.create(proj, "Deploy", "human:tester")["id"]
     tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")
     shown = tickets.question_digest(tickets.load(proj, tid)["questions"][0])
@@ -1421,7 +1421,7 @@ def test_allow_question_always_and_ignore(proj, run, rel):
 def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
     """Authority: once sync is on, an answered relay:allow question counts only when its answer was made on
     this machine (history.answer_proven); a peer's synced answer allows (and ignores) nothing here."""
-    from conftest import ensure_signing
+    from conftest import ensure_keys
 
     from orch import history, tickets
 
@@ -1430,7 +1430,7 @@ def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
     for mid in (local_mid, peer_mid, deny_mid):
         rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
     run("relay", "inbox")
-    ensure_signing(proj)
+    ensure_keys(proj)
     history.enable_sync(proj, adopt=True)  # as the sync add-on does
     by_msg = {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
     run("answer", by_msg[local_mid]["id"], "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
@@ -1476,7 +1476,7 @@ def test_a_synced_allow_answer_is_not_applied_a_local_one_is(proj, run, rel):
 
 
 def _synced_allow_tickets(proj, run, rel, *mids):
-    from conftest import ensure_signing
+    from conftest import ensure_keys
 
     from orch import history
 
@@ -1484,7 +1484,7 @@ def _synced_allow_tickets(proj, run, rel, *mids):
     for mid in mids:
         rel.inbox.append(msg(mid, "delegate", {"title": f"Task {mid[-2:]}", "text": "x"}))
     run("relay", "inbox")
-    ensure_signing(proj)
+    ensure_keys(proj)
     history.enable_sync(proj, adopt=True)  # as the sync add-on does
     return {t["ext"]["relay"]["allow_message"]: t for t in _tickets(run)}
 
@@ -2137,13 +2137,48 @@ def test_view_names_the_real_sender_of_phone_messages(proj, run, rel):
             "to": "phones",
             "type": "text",
             "created_at": "2026-11-04T10:00:00Z",
-            "body": {"text": "Tasks: 3 of 3 done"},
+            "body": {"text": "All three tasks are done"},
         },
     )
     v = json.loads(run("relay", "view", "--json")[1])
     titles = {i["title"] for i in v["blocks"][0]["items"]}
     assert "Helper → your phone" in titles
     assert not any("the phones" in t or t.startswith("you →") for t in titles)
+
+
+def test_view_folds_automatic_updates_behind_one_row(proj, run, rel):
+    """F30/F27: people's messages stay in the list; status notes sit behind "Show updates (n)"; a bare
+    "Tasks:" is said in words."""
+    from orch import relay_view
+
+    connect(run, rel)
+    for i, (text, upd) in enumerate(
+        [
+            ("Lunch at noon?", None),
+            ("Tasks: 1 of 3 done", {"kind": "note"}),
+            ("Tasks:", {"kind": "note"}),
+            ("Seen", None),
+        ]
+    ):
+        body = {"text": text} | ({"update": upd} if upd else {})
+        relay_view.record_sent(
+            proj,
+            {
+                "id": f"m_fold00000000{i}",
+                "to": "phones",
+                "type": "text",
+                "created_at": f"2026-11-04T10:0{i}:00Z",
+                "body": body,
+            },
+        )
+    items = json.loads(run("relay", "view", "--json")[1])["blocks"][0]["items"]
+    assert [i["title"] for i in items[:1]] == ["Helper → your phone"] and "Lunch at noon?" in items[0][
+        "subtitle"
+    ]
+    assert len(items) == 2 and items[1]["title"] == "Show updates (3)"
+    values = " ".join(d["value"] for d in items[1]["detail"])
+    assert "No tasks yet" in values and "1 of 3 done" in values
+    assert not any(d["value"].rstrip().endswith("Tasks:") for d in items[1]["detail"])
 
 
 def _dry_state(proj):

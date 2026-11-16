@@ -37,6 +37,11 @@
     const list = rows || [], q = oldest(list.filter(needsYou)), r = oldest(list.filter(t => t.status === 'review' && !needsYou(t)));
     return q ? {ticket: q, hash: ''} : r ? {ticket: r, hash: '#results'} : null;
   }
+  /* "Tickets in focus": tickets a helper is working on first, then the most recently updated. */
+  function listOrder(rows) {
+    const at = t => Date.parse(t.updated_at) || 0, run = t => t.status === 'active' ? 1 : 0;
+    return (rows || []).map((t, i) => [t, i]).sort((a, b) => run(b[0]) - run(a[0]) || at(b[0]) - at(a[0]) || a[1] - b[1]).map(x => x[0]);
+  }
   /* "2 agents are working. One question needs you." The agent part is left out while no agent works. */
   function pickerLine(agents, attention) {
     const n = Number(agents) || 0;
@@ -106,6 +111,6 @@
     const asking = (t.questions || []).some(q => q.answer == null) || (v && v.state === 'needs');
     return t.status === 'review' && !asking && !(v && v.run && v.run.running);
   }
-  root.FocusHelpers = {reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, nextNeeding, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
+  root.FocusHelpers = {reviewBarShown, plainFileName, cleanOutcome, outcome, phase, completedAt, needsYou, attentionText, nextNeeding, listOrder, pickerLine, fileIcon, ago, agentColor, holdText, sessionState, nextStepText, limitGroup, resultCount};
   if (typeof module !== 'undefined') module.exports = root.FocusHelpers;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -318,25 +318,31 @@ function liveLinkFor(t) {
   const a = addons().find(a => a.page?.live_session === true && array(state.services).some(s => s.addon === a.name && s.running === true));
   if (!a) return null;
   const own = (t.ext || {})[a.name]?.page;
-  return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : a.page.path)};
+  // no page of its own for this ticket: the live-session page opens on this ticket (/t/<ticket>, its Live tab is the default)
+  const id = typeof t.id === 'string' && /^[A-Za-z0-9_.-]+$/.test(t.id) && !t.id.includes('..') ? t.id : '';
+  return {label:addonLabel(a), url:pageHash(a.name, typeof own === 'string' && /^[A-Za-z0-9_./-]+$/.test(own) && !own.includes('..') ? own : id ? 't/' + id : a.page.path)};
 }
-// Live session: two commands to copy. Watch cannot type; Take over can (the agent waits while you type).
+// Live session: the main click opens the live screen; the two terminal commands stay behind one small "Copy command".
+// Watch cannot type; Take over can (the agent waits while you type).
 function liveSessionStrip(t) {
   const run = state.runs?.[t.id];
   if (snapshot || !run?.running || run.claim?.mode === 'oneshot') return null;
   const ref = typeof t.key === 'string' && t.key ? t.key : t.id;
+  const liveLink = liveLinkFor(t);
   const copy = (label, command) => {
-    const control = button('', 'outline', async () => {
+    const control = button('', 'menu-item', async () => {
       try { await navigator.clipboard.writeText(command); window.orch.toast('Copied', 'ok'); }
       catch (_) { window.orch.toast('Could not copy. Select the text and copy it.', 'error'); }
     });
     control.dataset.key = 'live-copy-' + (command.includes('--watch') ? 'watch' : 'take');
     control.title = command;
-    control.append(iconEl('copy'), label, h('span', {className:'meta'}, 'Copy'));
+    control.append(iconEl('copy'), label);
     return control;
   };
+  const commands = h('details', {className:'menu', 'data-key':'live-commands'}, h('summary', {className:'btn ghost sm'}, 'Copy command'),
+    h('div', {className:'menu-pop', role:'menu'}, copy('Watch (read only)', 'orch run attach ' + ref + ' --watch'), copy('Take over (you can type)', 'orch run attach ' + ref)));
   return h('section', {className:'card live-strip', 'data-key':'live-session'}, h('h2', {}, 'Live session'),
-    copy('Watch (read only)', 'orch run attach ' + ref + ' --watch'), copy('Take over (you can type)', 'orch run attach ' + ref));
+    liveLink ? h('a', {className:'btn primary sm', href:liveLink.url, 'data-key':'live-open'}, 'Watch live') : null, commands);
 }
 function agentBar(t) {
   const liveLink = liveLinkFor(t), run = state.runs?.[t.id], alive = window.DashHelpers.helperAlive(t, run);
@@ -697,6 +703,7 @@ function artifactsPanel(t) {
   return [all.length >= FILES_TOOLBAR_FROM ? filesToolbar(all.length) : null, filesPanelBody(t, all)];
 }
 function ticketActor(by) {
+  if (typeof chatDmName === 'function' && chatDmName(by)) return chatDmName(by);  // another workspace answered: its contact name
   return /^agent:/.test(by || '') || array(state.settings?.agents).some(a => a.name === by) ? window.DashHelpers.agentLabel(state.settings, {agent:String(by).replace(/^agent:/, '')}) : name(by);
 }
 function ticketTaskOutcome(task) {
@@ -1342,7 +1349,7 @@ function detail(t) {
   const working = !fresh && !planQ && !['done', 'review'].includes(t.status);
   const filled = f => t[f] != null && String(t[f]).trim() !== '';
   const answeredRow = q => h('div', {className:'card-row', 'data-key':'answered-' + q.id},
-    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
+    h('div', {className:'grow'}, h('h3', {}, clean(q.text), ticketPhone(q)), h('p', {className:'preserve-lines' + (q.taken_back ? ' muted' : '')}, clean(q.answer)), h('p', {className:'meta'}, [q.taken_back ? 'Taken back' : 'Answered', (typeof chatDmName === 'function' && chatDmName(q.answered_by)) || name(q.answered_by), surface(q.via)].filter(Boolean).join(' · '))));
   const answered = ticketAnswerNodes(t, answeredRow);
   const note = snapshot ? (filled('note') ? h('p', {className:'muted preserve-lines', 'data-key':'note'}, clean(t.note)) : null) : h('div', {className:'ticket-note', 'data-key':'ticket-note'}, inlineField(t, 'note'));
   const menu = snapshot || (t.status === 'done' && !repeatsAddon()) ? null : h('details', {className:'menu', 'data-key':'ticket-menu-' + t.id}, h('summary', {className:'btn ghost icon sm', 'aria-label':'More ticket actions'}, iconEl('more')),

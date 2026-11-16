@@ -5,7 +5,7 @@
 (() => {
   const ASK_OFF_KEY = 'orch.mobileMode.dontAsk';
   const HOURS = [4, 8, 12, 24];
-  let mm = null, busy = false, asking = false;
+  let mm = null, busy = false, asking = false, toastedEnd = '';
   const needsPhone = () => !!mm && !mm.on && mm.phones === 0;
   const bar = document.getElementById('mm-bar');
   const toggle = document.getElementById('mm-toggle');
@@ -31,8 +31,8 @@
   const btn = (text, cls, action, testid, extra = {}) =>
     node('button', {type: 'button', className: 'btn ' + cls, 'data-mm': action, 'data-testid': testid, disabled: busy, ...extra}, text);
 
-  // While it is on, the top-bar chip says so (click: a small menu). The banner is only for the first-click ask, the
-  // "ended" notice and the last five minutes.
+  // While it is on, the top-bar chip says so (click: a small menu). The banner is only for the first-click ask and the
+  // last five minutes ("ended" is a one-time toast).
   const SOON_MS = 5 * 60 * 1000;
   const endsSoon = () => {
     const t = mm?.ends_at ? new Date(mm.ends_at).getTime() : NaN;
@@ -90,11 +90,6 @@
         node('div', {className: 'mm-actions actions'}, btn('Turn on', 'primary sm', 'confirm', 'mobile-mode-confirm'), btn('Cancel', 'ghost sm', 'cancel', 'mobile-mode-cancel'),
           node('label', {className: 'mm-chk', for: 'mm-dont'}, dont, "Don't ask again"))));
       bar.hidden = false;
-    } else if (mm.ended && mm.ended.text) {
-      bar.className = 'mm-bar banner center';
-      bar.setAttribute('data-testid', 'mobile-mode-ended');
-      bar.append(node('div', {className: 'grow'}, mm.ended.text), btn('OK', 'outline sm', 'ack', 'mobile-mode-ended-ok'));
-      bar.hidden = false;
     } else bar.hidden = true;
     paintChip();
     // No phone paired: nothing to send to, so the switch is not shown at all (an On switch always stays, to turn it off).
@@ -148,6 +143,13 @@
   window.addEventListener('orch:state', event => {
     mm = event.detail?.mobile_mode || null;
     if (mm?.on) asking = false;
+    // The "ended" notice is one toast, shown once, then marked seen (no banner that stays until OK).
+    const endedText = !mm?.on && mm?.ended?.text ? mm.ended.text : '';
+    if (endedText && toastedEnd !== endedText) {
+      toastedEnd = endedText;
+      window.orch?.toast(endedText, 'ok');
+      if (typeof window.orchAct === 'function') window.orchAct('mobile.ack', {});
+    } else if (!endedText) toastedEnd = '';
     paint();
   });
 
