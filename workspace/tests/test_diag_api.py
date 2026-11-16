@@ -1,6 +1,7 @@
 """Problem reports in the dashboard: the page's action trail (POST /api/diag), Report a problem
 (POST /api/diag/report), the Settings card ops and the traceparent echo (D3)."""
 
+import base64
 import http.client
 import json
 import os
@@ -300,3 +301,36 @@ def test_delete_command_deletes_reports_and_notes(proj, run):
     assert diag.stats(proj)["reports"]["count"] == 0
     assert run("diag", "delete", "notes")[0] == 0
     assert any(e["ev"] == "diag.notes_deleted" for e in diag.read_events(proj))
+
+
+def test_report_takes_more_details_and_added_files(live):
+    root, port = live
+    ck = session(root, port)
+    shot = base64.b64encode(b"\x89PNG\x00").decode()
+    body = {"note": "x", "more": "it worked yesterday", "files": [{"name": "../shot.png", "data": shot}]}
+    code, _, out = post(port, "/api/diag/report", body, {"Cookie": ck})
+    assert code == 200, out
+    folder = Path(json.loads(out)["path"])
+    assert (folder / "attachments" / "shot.png").read_bytes() == b"\x89PNG\x00"
+    assert json.loads((folder / "manifest.json").read_text())["more"] == "it worked yesterday"
+    for bad in (
+        {"files": [{"name": "a", "data": "not base64!"}]},
+        {"files": [{"name": "a"}]},
+        {"files": [{"name": f"f{i}", "data": ""} for i in range(11)]},
+        {"more": 5},
+        {"share": "yes"},
+    ):
+        assert post(port, "/api/diag/report", bad, {"Cookie": ck})[0] == 400, bad
+
+
+def test_share_without_a_relay_keeps_the_report_and_says_why(live):
+    root, port = live
+    assert post(port, "/api/diag/share", {"ref": "r-1116-1200-ws"})[0] == 403  # the person's session only
+    ck = session(root, port)
+    code, _, out = post(port, "/api/diag/report", {"note": "x", "share": True}, {"Cookie": ck})
+    r = json.loads(out)
+    assert code == 200 and "shared" not in r and "not connected" in r["share_error"]
+    assert Path(r["path"]).is_dir()
+    code, _, out = post(port, "/api/diag/share", {"ref": r["ref"]}, {"Cookie": ck})
+    assert code == 422 and b"not connected" in out
+    assert post(port, "/api/diag/share", {"ref": "../x"}, {"Cookie": ck})[0] == 400

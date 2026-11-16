@@ -38,3 +38,6 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-15: Lessons are written by helpers themselves: one list, 3 KB in the start text, local only (no questions, no proofs).
 - 2026-11-16 (ORCH-14): New user-facing noun "Epic" (owner approved): New ticket can make an epic with several tickets
   inside it, each with its own text and files. One run on the epic works through its tickets in order.
+- 2026-11-16 (ORCH-34): A problem report can be shared with the relay, only by an explicit tick in Report a problem
+  (or `orch relay problem share`). New relay admin page "Report a problem" (owner: the same name as the button). Only workspaces
+  the admin ticks there may pick problems up. Replaces "problem reports never go via the relay".

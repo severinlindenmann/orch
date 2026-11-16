@@ -54,6 +54,7 @@ pub fn router(app: AppState) -> Router {
             post(crate::transcribe::workspace)
                 .layer(DefaultBodyLimit::max(crate::transcribe::MAX_AUDIO + 1024)),
         )
+        .merge(crate::problems::router())
         .merge(crate::phone::router())
         .merge(crate::subs::router())
         .merge(icon_routes())

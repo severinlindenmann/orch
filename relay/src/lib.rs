@@ -8,6 +8,7 @@ pub mod look;
 pub mod mobile;
 pub mod onboarding;
 pub mod phone;
+pub mod problems;
 pub mod push;
 pub mod rules;
 pub mod shared;

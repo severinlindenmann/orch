@@ -84,6 +84,14 @@ pub fn webhook_limited(daily: bool) -> ApiError {
         },
     )
 }
+/// 429 for a workspace that shared its daily limit of problem reports.
+pub fn problem_limited() -> ApiError {
+    e(
+        StatusCode::TOO_MANY_REQUESTS,
+        "rate_limited",
+        "This workspace shared many problems today. Try again tomorrow.",
+    )
+}
 pub fn internal(m: impl std::fmt::Display) -> ApiError {
     tracing::error!("internal error: {m}");
     e(

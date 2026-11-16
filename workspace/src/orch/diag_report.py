@@ -30,6 +30,10 @@ TIMELINE_MAX = 20_000
 LOG_FILE_MAX = 5 * 1024 * 1024
 CONTENT_CUT = 4000
 PAGE_MAX = 2 * 1024 * 1024
+MORE_MAX = 4000
+ATTACH_MAX = 10
+ATTACH_FILE_BYTES = 8 * 1024 * 1024
+ATTACH_BYTES = 25 * 1024 * 1024
 INCIDENT_MAX = 20
 INCIDENT_BYTES = 50 * 1024 * 1024
 REPORTS = "reports"
@@ -60,6 +64,17 @@ class _Writer:
         fd = os.open(p, flags, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(self.hide(text))
+        self.files.append(rel)
+
+    def put_bytes(self, rel: str, data: bytes) -> None:
+        """A file the person picked, stored as it is (a picture cannot pass the hider)."""
+        p = self.folder / rel
+        p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        )
+        with os.fdopen(os.open(p, flags, 0o600), "wb") as f:
+            f.write(data)
         self.files.append(rel)
 
     def put_json(self, rel: str, obj) -> None:
@@ -164,6 +179,43 @@ def _one_line(r: dict) -> str:
     return f"{head} {who} {extra}".rstrip()
 
 
+def attachment_name(name, taken: set[str]) -> str:
+    """A plain file name for attachments/: no folders, no leading dot, no control characters; a name already
+    used gets -2, -3."""
+    base = re.sub(r"[\x00-\x1f\x7f]", "", str(name or "")).replace("\\", "/").rsplit("/", 1)[-1]
+    base = re.sub(r"[^\w. ()+-]", "_", base).strip(" .")[:80] or "file"
+    stem, dot, ext = base.rpartition(".")
+    stem, ext = (stem, dot + ext) if stem else (base, "")
+    out, n = base, 1
+    while out.lower() in taken:
+        n += 1
+        out = f"{stem}-{n}{ext}"
+    taken.add(out.lower())
+    return out
+
+
+def check_attachments(files) -> list[tuple[str, bytes]]:
+    """[(clean name, bytes)] of the files a person added, or Refused with what to do."""
+    files = list(files or [])
+    if len(files) > ATTACH_MAX:
+        raise Refused(f"A report takes at most {ATTACH_MAX} added files. Remove some and try again.")
+    taken: set[str] = set()
+    out = []
+    for name, data in files:
+        if len(data) > ATTACH_FILE_BYTES:
+            raise Refused(
+                f"{str(name)[:60]} is bigger than {ATTACH_FILE_BYTES // 1024 // 1024} "
+                f"MB. Leave it out or make it smaller."
+            )
+        out.append((attachment_name(name, taken), bytes(data)))
+    if sum(len(d) for _, d in out) > ATTACH_BYTES:
+        raise Refused(
+            f"The added files are bigger than {ATTACH_BYTES // 1024 // 1024} MB "
+            f"together. Remove some and try again."
+        )
+    return out
+
+
 def summary(
     ref: str,
     scope: dict,
@@ -177,6 +229,8 @@ def summary(
     expected,
     notes,
     content: bool,
+    more=None,
+    attachments=(),
 ) -> str:
     def build(n_timeline: int, n_errors: int) -> str:
         out = [f"# Diagnostic report {ref}", ""]
@@ -184,6 +238,10 @@ def summary(
             out += ["## What the person said", note[:600], ""]
         if expected:
             out += ["## What they expected", expected[:600], ""]
+        if more:
+            out += ["## More details from the person", more[:MORE_MAX], ""]
+        if attachments:
+            out += ["## Files the person added (attachments/)", *[f"- {n}" for n in attachments], ""]
         sc = ", ".join(f"{k} {v}" for k, v in scope.items() if v) or "whole workspace"
         out += [
             "## Scope and window",
@@ -261,6 +319,8 @@ def make(
     timeline_cap=TIMELINE_MAX,
     hide=None,
     page=None,
+    more=None,
+    files=None,
 ) -> dict:
     """Make a report (`kind` r) or an incident (`kind` i, structure only, a short window). Returns {ref,
     path, ...}."""
@@ -269,6 +329,8 @@ def make(
     if hide is None:
         raise Refused("Secrets cannot be hidden here, so no report was made.")
     scope = {"ticket": ticket, "run": run, "addon": addon}
+    added = check_attachments(files) if kind == "r" else []
+    more = (str(more).strip()[:MORE_MAX] or None) if more and kind == "r" else None
     collected = diag_collect.collect_all(root, scope, now)
     if since:
         lo = diag_query.window(since=since, now=now)[0]
@@ -310,8 +372,25 @@ def make(
     try:
         w.put(
             "SUMMARY.md",
-            summary(ref, scope, lo, hi, why, checks, errors, timeline, note, expected, gaps, bool(content)),
+            summary(
+                ref,
+                scope,
+                lo,
+                hi,
+                why,
+                checks,
+                errors,
+                timeline,
+                note,
+                expected,
+                gaps,
+                bool(content),
+                more,
+                [n for n, _ in added],
+            ),
         )
+        for name, data in added:
+            w.put_bytes(f"attachments/{name}", data)
         w.put_json("checks.json", checks)
         w.put_lines("timeline.jsonl", timeline)
         w.put_json("errors.json", errors)
@@ -353,6 +432,9 @@ def make(
                 "window": {"from": _iso(lo), "to": _iso(hi), "why": why},
                 "content": bool(content and kind == "r"),
                 "note": (note or "")[:600] or None,
+                "expected": (expected or "")[:600] or None,
+                "more": more,
+                "attachments": [{"name": n, "size": len(d)} for n, d in added],
                 "orch_version": __version__,
                 "python": platform.python_version(),
                 "os": f"{platform.system()} {platform.release()}",
