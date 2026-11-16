@@ -19,12 +19,12 @@ def test_manifest_names_agents_block_and_plain_description():
     assert not PRODUCTS.search(d)
 
 
-def test_agents_block_says_person_only_actions_need_proof():
+def test_agents_block_says_the_choices_are_the_persons():
     root = resources.files("orch_sync") / "skills" / "orch-sync"
     block = (root / "AGENTS-block.md").read_text()
     assert block.startswith("## orch-sync\n") and "orch:addon" not in block and len(block.splitlines()) <= 6
     assert "skills/orch-sync/SKILL.md" in block
-    for word in ("resolve", "approve", "take-remote", "keep-key", "proof", "Ask the person", "never run"):
+    for word in ("resolve", "approve", "take-remote", "keep-key", "Ask the person", "do not run"):
         assert word in block
     skill = (root / "SKILL.md").read_text()
     for cmd in (

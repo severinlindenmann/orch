@@ -35,9 +35,9 @@ def _orch_bin() -> str | None:
 def _open(root: Path, page: str) -> None:
     """Open the page; the launch token (URL fragment) goes only to an absolute-path opener (H1)."""
     try:
-        from orch import humanproof
+        from orch import pagelaunch
 
-        if humanproof.open_browser(humanproof.launch_url(root, "focus", page)):
+        if pagelaunch.open_browser(pagelaunch.launch_url(root, "focus", page)):
             return
     except ImportError:
         pass
@@ -47,9 +47,9 @@ def _open(root: Path, page: str) -> None:
 def _launch(root: Path, page: str) -> str:
     """The page address with a one-time launch token in the fragment (a person opens it: H1)."""
     try:
-        from orch import humanproof
+        from orch import pagelaunch
 
-        return humanproof.launch_url(root, "focus", page)
+        return pagelaunch.launch_url(root, "focus", page)
     except ImportError:
         return page
 

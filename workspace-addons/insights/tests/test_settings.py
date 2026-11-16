@@ -13,7 +13,7 @@ from conftest import SETTINGS, TICKETS, FakeSession, calls
 from test_overview import request
 
 from orch_insights import actions
-from orch_insights.settings import ERROR, PERSON, TICKETS_ERROR, build_settings, needs_person
+from orch_insights.settings import ERROR, PERSON, TICKETS_ERROR, build_settings
 
 PACKAGE = resources.files("orch_insights")
 WRITES = (["config", "set"], ["record", "delete-detail"])
@@ -96,10 +96,6 @@ def writes(fake):
     return [c for c in calls(fake) if any(c["args"][:2] == w for w in WRITES)]
 
 
-def with_proof(fake):
-    return [c for c in writes(fake) if "--proof-stdin" in c["args"] or c["stdin"]]
-
-
 def stored(fake):
     return json.loads((fake.parent / "settings.json").read_text())
 
@@ -127,41 +123,17 @@ def options(row):
 # -- the pure parts -------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "key,value,current,expected",
-    [
-        ("insights.keep_days", "365", "90", True),
-        ("insights.keep_days", "90", "90", False),
-        ("insights.keep_days", "30", "90", False),
-        ("insights.keep_days", "30", "12", True),
-        ("insights.max_mb", "4096", "2048", True),
-        ("insights.max_mb", "512", "2048", False),
-        ("insights.share_counts", "on", "off", True),
-        ("insights.share_counts", "off", "on", False),
-        ("insights.share_names", "on", "on", True),
-        ("insights.share_names", "off", "off", False),
-        ("insights.keep_days", "30", None, True),
-        ("insights.share_names", "off", None, True),
-    ],
-)
-def test_needs_person(key, value, current, expected):
-    assert needs_person(key, value, current) is expected
-
-
-def test_build_settings_rows_and_widening_flags(answer):
+def test_build_settings_rows(answer):
     view = build_settings(SETTINGS, answer, TICKETS, True)
     assert view["can_act"] is True
     keep = options(view["keep"])
     assert list(keep) == ["30", "90", "365"]
-    assert [keep[v]["needs_person"] for v in keep] == [False, False, True]
     assert keep["90"]["selected"] and not keep["30"]["selected"]
     assert view["keep"]["note"] == "up to 2048 MB, oldest detail first. Counts are kept."
     size = options(view["size"])
     assert [size[v]["label"] for v in size] == ["512 MB", "1 GB", "2 GB", "4 GB"]
-    assert [size[v]["needs_person"] for v in size] == [False, False, False, True]
     share = options(view["share_counts"])
-    assert share["on"]["needs_person"] and not share["off"]["needs_person"] and share["off"]["selected"]
-    assert options(view["share_names"])["on"]["needs_person"]
+    assert share["off"]["selected"]
     assert not any(
         o["disabled"] for row in ("keep", "size", "share_counts", "share_names") for o in view[row]["options"]
     )
@@ -172,15 +144,17 @@ def test_build_settings_rows_and_widening_flags(answer):
     assert view["share_names"]["note"] == "Your own skill, connection and key names are sent too."
 
 
-def test_build_settings_without_person_disables_widening(answer):
+def test_build_settings_without_person_disables_changes(answer):
     view = build_settings({**SETTINGS, "share_counts": True}, answer, TICKETS, False)
     assert view["can_act"] is False
     keep = options(view["keep"])
-    assert keep["365"]["disabled"] and not keep["30"]["disabled"] and not keep["90"]["disabled"]
+    assert (
+        keep["365"]["disabled"] and keep["30"]["disabled"] and not keep["90"]["disabled"]
+    )  # 90 is the value
     assert view["keep"]["person_note"] == PERSON
     share = options(view["share_counts"])
-    assert not share["on"]["disabled"] and not share["off"]["disabled"]  # on is already the value
-    assert view["share_counts"]["person_note"] is None
+    assert not share["on"]["disabled"] and share["off"]["disabled"]  # on is already the value
+    assert view["share_counts"]["person_note"] == PERSON
     assert options(view["share_names"])["on"]["disabled"]
     assert build_settings(SETTINGS, answer, TICKETS, "yes")["can_act"] is False
 
@@ -254,30 +228,28 @@ def test_tickets_titles_as_data_and_failure(answer):
     assert build_settings(SETTINGS, answer, None, True)["tickets"] == {"rows": [], "error": TICKETS_ERROR}
 
 
-# -- H1: nothing a person must do runs without the person ----------------------------------------------------
+# -- a change needs the page session; it runs once, as the person ---------------------------------------------
 
 
-@pytest.mark.parametrize("body", [setting(*w) for w in WIDENING] + [delete()])
-def test_widening_and_delete_without_session_refused(start_server, fake_orch, fake_session, body):
-    # the core decides widening: each click runs once WITHOUT a proof, the core says needs_person
+@pytest.mark.parametrize(
+    "body", [setting(*w) for w in WIDENING] + [setting(*w) for w in NARROWING] + [delete()]
+)
+def test_a_change_without_session_is_refused_and_runs_nothing(start_server, fake_orch, fake_session, body):
     for srv in (start_server(), start_server(session=fake_session)):
         code, _, text = post(srv, body)
         assert code == 403
         assert text.decode() == "Open Insights from the dashboard on this computer to do this."
-    assert len(writes(fake_orch)) == 2 and with_proof(fake_orch) == []
+    assert writes(fake_orch) == []
     assert stored(fake_orch) == SETTINGS
-    assert fake_session.minted == []
 
 
 SMUGGLED = [
     {**setting("insights.share_names", "on"), "by": "human:anna"},
     {"op": "settings.set", "args": {"key": "insights.share_names", "value": "on", "by": "human:anna"}},
-    {"op": "settings.set", "args": {"key": "insights.share_names", "value": "on", "proof": "hp1.x"}},
     {
         "op": "settings.set",
         "args": {"key": "insights.share_names", "value": "on", "flags": ["--by", "human:x"]},
     },
-    {**setting("insights.share_names", "on"), "--proof-stdin": True},
     {**setting("insights.share_names", "on"), "from": "local-page"},
     {"op": "settings.set", "args": {"key": "insights.keep_days", "value": "365", "widen": False}},
     {"op": "settings.set", "args": {"key": "insights.keep_days", "value": "365", "narrow": True}},
@@ -299,7 +271,6 @@ def test_smuggled_fields_rejected(start_server, fake_orch, fake_session, body):
     code, _, _ = person(srv, body)  # incl. client fields claiming widen/narrow: 400, never trusted
     assert code == 400
     assert calls(fake_orch) == []
-    assert fake_session.minted == []
 
 
 @pytest.mark.parametrize(
@@ -308,7 +279,7 @@ def test_smuggled_fields_rejected(start_server, fake_orch, fake_session, body):
 def test_delete_detail_ticket_regex(start_server, fake_orch, fake_session, ticket):
     srv = start_server(session=fake_session)
     assert person(srv, delete(ticket))[0] == 400
-    assert calls(fake_orch) == [] and fake_session.minted == []
+    assert calls(fake_orch) == []
 
 
 @pytest.mark.parametrize(
@@ -321,65 +292,34 @@ def test_delete_detail_ticket_regex(start_server, fake_orch, fake_session, ticke
         {"Cookie": ""},
     ],
 )
-def test_no_mint_without_a_clean_session(start_server, fake_orch, fake_session, headers):
+def test_no_change_without_a_clean_session(start_server, fake_orch, fake_session, headers):
     srv = start_server(session=fake_session)
     secret = link(srv)
     for key, value in WIDENING:
         assert post(srv, setting(key, value), headers=headers, cookie=True, secret=secret)[0] == 403
     assert post(srv, delete(), headers=headers, cookie=True, secret=secret)[0] == 403
-    assert with_proof(fake_orch) == [] and fake_session.minted == []
+    assert writes(fake_orch) == []
     assert stored(fake_orch) == SETTINGS
-    before = len(writes(fake_orch))
-    for (key, value), changed in zip(NARROWING, (True, False, True), strict=True):
-        code, _, body = post(srv, setting(key, value), headers=headers, cookie=True, secret=secret)
-        assert code == 200
-        assert json.loads(body) == {"result": {key: value, "changed": changed, "widened": False}}
-    done = writes(fake_orch)[before:]
-    assert [c["args"] for c in done] == [
-        set_argv("insights.keep_days", "30", "90"),
-        set_argv("insights.share_names", "off", "off"),
-        set_argv("insights.max_mb", "512", "2048"),
-    ]
-    assert all(c["stdin"] == "" for c in done)
-    assert fake_session.minted == []
 
 
-def test_narrowing_and_same_value_never_mint(start_server, fake_orch, fake_session):
+def test_narrowing_and_same_value_run_plainly(start_server, fake_orch, fake_session):
     srv = start_server(session=fake_session)
     for key, value in [*NARROWING, ("insights.max_mb", "512"), ("insights.share_counts", "off")]:
         assert person(srv, setting(key, value))[0] == 200
     same = json.loads(person(srv, setting("insights.keep_days", "30"))[2])
     assert same == {"result": {"insights.keep_days": "30", "changed": False, "widened": False}}
-    assert fake_session.minted == [] and with_proof(fake_orch) == []
+    assert all(c["stdin"] == "" for c in writes(fake_orch))  # nothing on stdin
     assert stored(fake_orch) == {**SETTINGS, "keep_days": 30, "max_mb": 512}
 
 
-class ReusedProof(FakeSession):
-    """Mints the same proof string every time (registered for each op/target): the core spends it once."""
-
-    def mint(self, op, target):
-        super().mint(op, target)
-        return "hp1.fakeproof1.mac"
-
-
-class WrongProof(FakeSession):
-    """Mints proofs the core never accepts (not registered: wrong key, op or target)."""
-
-    def mint(self, op, target):
-        self.minted.append((op, target))
-        return "hp1.notvalid.mac"
-
-
-def test_current_value_read_failure_counts_as_widening(start_server, fake_orch, fake_session):
+def test_current_value_read_failure_runs_without_a_guard(start_server, fake_orch, fake_session):
     (fake_orch.parent / "settings_exit").touch()
     srv = start_server(session=fake_session)
     assert post(srv, setting("insights.keep_days", "30"))[0] == 403  # no person: nothing runs
     assert writes(fake_orch) == []
-    # with the person the core still decides (narrowing: no proof); no --if-current: nothing observed
-    assert person(srv, setting("insights.keep_days", "30"))[0] == 200
+    assert person(srv, setting("insights.keep_days", "30"))[0] == 200  # no --if-current: nothing observed
     argv = ["config", "set", "insights.keep_days", "30", "--json"]
     assert [c["args"] for c in writes(fake_orch)] == [argv]
-    assert fake_session.minted == []
 
 
 def test_settings_read_env_is_the_human_env(start_server, fake_orch, fake_session, monkeypatch):
@@ -399,8 +339,8 @@ def test_read_fails_closed_without_human_env(start_server, fake_orch, fake_sessi
 
     srv = start_server(session=fake_session)
     monkeypatch.setattr(actions, "human_env", broken)
-    assert post(srv, setting("insights.keep_days", "30"))[0] == 403  # the read failed: counts as widening
-    assert calls(fake_orch) == []
+    assert person(srv, setting("insights.keep_days", "30"))[0] == 503  # the read failed: nothing runs
+    assert not writes(fake_orch)
 
 
 @pytest.mark.parametrize(
@@ -412,7 +352,6 @@ def test_read_fails_closed_without_human_env(start_server, fake_orch, fake_sessi
         ("tampered", 422, "The record could not be read. Nothing was deleted."),
         ("invalid", 422, "That value is not allowed."),
         ("not_allowed", 422, "This was refused."),
-        ("needs_person", 403, "Open Insights from the dashboard on this computer to do this."),
         ("weird", 422, "That did not work."),
         (None, 422, "That did not work."),
     ],
@@ -424,7 +363,7 @@ def test_core_refusals_mapped(start_server, fake_orch, fake_session, code, statu
     answer, _, body = person(srv, delete())
     assert answer == status
     assert body.decode() == text
-    assert len(writes(fake_orch)) == (2 if code == "needs_person" else 1)
+    assert len(writes(fake_orch)) == 1
 
 
 def test_no_child_stderr_or_core_text_in_answers(start_server, fake_orch, fake_session):
@@ -457,7 +396,6 @@ def test_external_change_in_between_is_changed(start_server, fake_orch, fake_ses
     code, _, text = person(srv, setting("insights.keep_days", "365"))
     assert code == 409 and text.decode() == "This changed in the meantime. Reloaded."
     assert stored(fake_orch)["keep_days"] == 30
-    assert fake_session.minted == [] and with_proof(fake_orch) == []
 
 
 def test_concurrent_posts_are_serialized(start_server, fake_orch, fake_session):
@@ -496,7 +434,7 @@ def test_admin_lock_refuses_sharing_on(start_server, fake_orch, fake_session, an
     assert code == 409
     expected = {"off_by_admin": "Switched off by your admin.", "not_connected": "Not connected to an admin."}
     assert text.decode() == expected.get(state, "Sharing could not be read. Nothing was changed.")
-    assert writes(fake_orch) == [] and fake_session.minted == []
+    assert writes(fake_orch) == []
     assert person(srv, setting("insights.share_counts", "off"))[0] == 200  # turning it off stays possible
 
 
@@ -506,7 +444,7 @@ def test_act_and_session_both_refuse_a_missing_sec_fetch_site(start_server, fake
     secret = link(srv)
     assert post_bare(srv, setting("insights.keep_days", "30")) == 403
     assert post_bare(srv, {"token": FakeSession.token}, path="/session") == 403
-    assert writes(fake_orch) == [] and fake_session.minted == []
+    assert writes(fake_orch) == []
     assert post(srv, setting("insights.share_counts", "off"), cookie=True, secret=secret)[0] == 200
 
 
@@ -630,45 +568,39 @@ def test_settings_target_is_the_core_form_byte_identical():
 
 def test_no_insights_page_server_in_core_is_watch_only(start_server, fake_orch, monkeypatch):
     import subprocess
-    import sys
 
-    import orch.pageproof
+    import orch.pagesession
 
     seen = []
 
     def run(argv, **kwargs):
         seen.append((argv, kwargs.get("input"), kwargs.get("stdin")))
-        out = json.dumps({"error": "Do this in the dashboard on this computer.", "code": "needs_person"})
-        return subprocess.CompletedProcess(argv, 2, out, "")
+        return subprocess.CompletedProcess(argv, 2, "{}", "")
 
-    monkeypatch.setattr(orch.pageproof, "SERVERS", ("focus", "dashboard"))
+    monkeypatch.setattr(orch.pagesession, "SERVERS", ("focus", "dashboard"))
     monkeypatch.setattr(actions, "_run", run)
     srv = start_server(orch_bin=None)
     assert srv.session is None
     assert request(srv, "/")[0] == 200
     code, _, text = post(srv, delete(), cookie=True)
     assert code == 403 and text.decode() == "Open Insights from the dashboard on this computer to do this."
-    # the core decided (one call, no proof, this interpreter's orch); nothing was minted or retried
-    assert seen == [
-        (
-            [sys.executable, "-I", "-P", "-m", "orch", "record", "delete-detail", "t_abc123", "--json"],
-            None,
-            subprocess.DEVNULL,
-        )
-    ]
+    assert seen == []  # no page session: nothing ran
     assert post(srv, {"token": FakeSession.token}, path="/session", headers=SAME_SITE)[0] == 403
     assert calls(fake_orch) == []
 
 
-def test_run_op_fake_bin_still_needs_a_mint(ws, fake_orch):
-    # the core decides now: delete-detail runs once without a proof and the core asks for the person
+def test_run_op_without_the_session_runs_nothing_and_with_it_runs_once(ws, fake_orch):
     with pytest.raises(actions.NeedsPerson):
         actions.run_op(ws, str(fake_orch), "record.delete_detail", {"ticket": "t_abc123"})
-    assert [c["args"] for c in calls(fake_orch)] == [["record", "delete-detail", "t_abc123", "--json"]]
-    # an unreadable current value (no reader given) without the person: nothing runs
     with pytest.raises(actions.NeedsPerson):
         actions.run_op(ws, str(fake_orch), "settings.set", {"key": "insights.keep_days", "value": "30"})
-    assert len(calls(fake_orch)) == 1
+    assert calls(fake_orch) == []
+    code, _, _ = actions.run_op(
+        ws, str(fake_orch), "record.delete_detail", {"ticket": "t_abc123"}, session=True
+    )
+    assert code == 200
+    assert [c["args"] for c in calls(fake_orch)] == [["record", "delete-detail", "t_abc123", "--json"]]
+    assert calls(fake_orch)[0]["stdin"] == ""  # a plain person action: nothing on stdin
 
 
 def test_human_env_refuses_without_the_list(ws, monkeypatch):
@@ -687,12 +619,12 @@ def test_human_env_refuses_without_the_list(ws, monkeypatch):
 
 @pytest.fixture
 def real_session(ws):
-    pageproof = pytest.importorskip("orch.pageproof")
+    pagesession = pytest.importorskip("orch.pagesession")
     try:
-        session = pageproof.PageSession(ws, "insights")
+        session = pagesession.PageSession(ws, "insights")
     except ValueError:  # this core has no Insights page server yet: the same class, for Focus (test only)
-        session = pageproof.PageSession(ws, "focus")
-    session.key = b"k" * 32  # can_mint also wants a key; this test never mints
+        session = pagesession.PageSession(ws, "focus")
+    session.active = True  # a test run inside an agent tool would make it watch-only
     session.cookie = "real-cookie-value-abcdefghijklmnopqrstuvwxyz"
     return session
 
@@ -724,24 +656,24 @@ def test_cookie_parsing_matches_the_core(real_session, session_kind):
         "",
     ]
     for cookie in good:
-        assert session.can_mint(cookie_headers(8431, cookie), 8431), cookie
+        assert session.can_act(cookie_headers(8431, cookie), 8431), cookie
     for cookie in bad:
-        assert not session.can_mint(cookie_headers(8431, cookie), 8431), cookie
+        assert not session.can_act(cookie_headers(8431, cookie), 8431), cookie
     good_cookie = f"{name}={value}"
-    assert not session.can_mint(cookie_headers(8432, good_cookie), 8431)  # wrong Host port
-    assert not session.can_mint({"Host": "evil.example:8431", "Cookie": good_cookie}, 8431)
+    assert not session.can_act(cookie_headers(8432, good_cookie), 8431)  # wrong Host port
+    assert not session.can_act({"Host": "evil.example:8431", "Cookie": good_cookie}, 8431)
     for proxy in ({"X-Forwarded-For": "10.0.0.1"}, {"X-Forwarded-Host": "x"}, {"Forwarded": "for=x"}):
-        assert not session.can_mint(cookie_headers(8431, good_cookie, **proxy), 8431)
+        assert not session.can_act(cookie_headers(8431, good_cookie, **proxy), 8431)
 
 
-def test_real_session_cookie_alone_cannot_mint(start_server, fake_orch, real_session):
+def test_real_session_cookie_alone_cannot_act(start_server, fake_orch, real_session):
     srv = start_server(session=real_session)
     srv.page_secret = "s" * 43  # as if /session succeeded; the request below does not send it
     cookie = {"Cookie": f"{real_session.cookie_name(srv.server_address[1])}={real_session.cookie}"}
     for body in (setting("insights.keep_days", "365"), delete()):
         code, _, text = post(srv, body, headers=cookie)
         assert code == 403 and text.decode() == actions.PERSON
-    assert with_proof(fake_orch) == [] and stored(fake_orch) == SETTINGS
+    assert writes(fake_orch) == [] and stored(fake_orch) == SETTINGS
 
 
 # -- the page --------------------------------------------------------------------------------------------------
@@ -810,7 +742,11 @@ def test_lock_wait_gives_busy(monkeypatch):
     actions._LOCK.acquire()
     try:
         code, text, _ = actions.run_op(
-            Path("/nonexistent"), None, "settings.set", {"key": "insights.keep_days", "value": "30"}
+            Path("/nonexistent"),
+            None,
+            "settings.set",
+            {"key": "insights.keep_days", "value": "30"},
+            session=True,
         )
     finally:
         actions._LOCK.release()

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const web = path.join(__dirname, '../src/orch_dashboard/web/');
-const handoff = fs.readFileSync(web + 'handoff.js', 'utf8');
+const handoff = fs.readFileSync(web + 'update.js', 'utf8');  // the update banner poll (the hand-off card is gone)
 const fn = handoff.slice(handoff.indexOf('function whenShown'), handoff.indexOf('\n', handoff.indexOf('function whenShown')));
 
 test('a hidden tab does not poll, a shown one does', () => {
@@ -19,7 +19,6 @@ test('a hidden tab does not poll, a shown one does', () => {
 });
 
 test('every page poller goes through the visibility guard and a shown tab refreshes once', () => {
-  assert.match(handoff, /setInterval\(whenShown\(poll\), 4000\)/);
   assert.match(handoff, /setInterval\(whenShown\(updateStatus\), 4000\)/);
   assert.match(handoff, /addEventListener\("visibilitychange"/);
   const app = fs.readFileSync(web + 'app.js', 'utf8');

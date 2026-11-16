@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from orch import humanproof, net, publish, relay, templates, term, tickets
+from orch import cardtext, net, publish, relay, templates, term, tickets
 from orch.errors import Refused
 from orch.text import clean_untrusted
 
@@ -550,7 +550,7 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "group":
         return run_group(args, root, out)
     if sub == "connect":
-        humanproof.server_address(args.url)  # refuses a URL with a name or password in it
+        cardtext.server_address(args.url)  # refuses a URL with a name or password in it
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
             args,

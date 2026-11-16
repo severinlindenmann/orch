@@ -602,8 +602,8 @@ function settingsPage() {
   ));
 }
 // ---- About & updates (Settings): the installed release, the newest one, what changed, one Update button, the steps.
-// Data: GET /api/update-info (orch asks its install source; nothing is sent). The click runs the same detached update
-// as "Continue" on a request from the terminal. The phase comes from handoff.js ("orch-update-state" events).
+// Data: GET /api/update-info (orch asks its install source; nothing is sent). The click runs a detached `orch update`.
+// The phase comes from update.js ("orch-update-state" events).
 const updUi = {info:null, loading:false, phase:'idle', from:null, to:null, reason:''};
 const UPD_STEPS = ['Downloading', 'Installing', 'Restarting', 'Done'];
 function updLoad(force = false) {

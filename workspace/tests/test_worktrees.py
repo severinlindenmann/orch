@@ -776,11 +776,11 @@ def test_workdir_for_survives_odd_records_and_prefers_the_callers_ticket(repo):
 
 @pytest.fixture(autouse=True)
 def _copies_test_home(monkeypatch):
-    from orch import humanproof
+    from orch import home as orch_home
 
     # Legacy proj fixtures live outside the fake account's .orch-test directory.
     # Keep the real private-directory, file, and key checks on their isolated home.
-    monkeypatch.setattr(humanproof, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
+    monkeypatch.setattr(orch_home, "guarded_home", lambda root: Path(os.environ["ORCH_HOME"]))
 
 
 # ---------------------------------------------------------------- copies made before 14 Nov 2026

@@ -421,6 +421,10 @@ are not hidden. File identity checks (above) do not authenticate content; the re
 
 ## Authenticated record (Gate G1 H1, issue #563)
 
+> **Superseded by #833 (15 Nov 2026).** The record chain is plain: run lines are written as plain JSON, `seq` is
+> the last line's `seq` + 1, there is no MAC, no record key, no head, cutover or reject counter. A line an older orch
+> wrote with an `auth` suffix still loads: the field is ignored and dropped. The text below is history.
+
 Slice S1 defined the contract and the pure core (`workspace/src/orch/record_auth.py`, independent reference in
 `validate.py`, vectors `record_auth` in `vectors/activity-v1.json`). Slice S2 adopts it in the writer
 (`record.RecordWriter._commit`, the only place that seals a run line) and in the one read path
@@ -550,10 +554,7 @@ prefix whose hash differs) is `changed`, reason `content`, not shown. Vectors `r
 **Readers (S2).** `orch record tail` shows the events of the verified view with a computed `checked` (false for
 `via: hook` and for every line of a legacy run, true otherwise; never stored), the cursor is the verified seq, and
 one marker per change of `(reason, changed, removed)`. `query` and `counts` use the same view; any run with changed,
-removed or unchecked lines makes `counts` `complete: false`. `run_model` has `complete` and `protected`: `protected`
-is false for a run by a tool orch cannot give deny rules (codex, generic: the adapter's `deny.format` is `none`) and
-whenever the tool is not known from a checked line of orch's own collector (`via: log`, sealed; never a hook line); those
-runs show "Records from this helper can't be fully checked." (`record.UNPROTECTED_TEXT`). `--detail` takes the
+removed or unchecked lines makes `counts` `complete: false`. `run_model` has `complete`. `--detail` takes the
 `detail_hash` from the verified line that points at the file (never from the caller): a file with other bytes, or a
 sealed line that has a detail pointer but no `detail_hash`, is refused as `swapped` ("Details changed outside orch.");
 only a legacy run reads a detail with no hash.
@@ -618,10 +619,7 @@ only a legacy run reads a detail with no hash.
 
 The MAC turns "append a line" into "run code that loads orch's key". It does not stop:
 
-- **Code run as the same user.** An agent that executes code importing orch, or that reads `human.key` by a path form
-  the text-based deny rules miss (secrets.md), or that runs under an adapter whose deny format is `none` (codex,
-  generic), can seal anything. Records from such helpers show a plain marker ("Records from this helper can't be fully
-  checked.").
+- **Code run as the same user.** An agent that executes code importing orch, or that reads `human.key` (there is no agent fence), can seal anything.
 - **Level 2** is the key held by a separate process or OS user that seals on request. Not built.
 - **Head deleted.** The head lives in the guarded home; deleting it (or leaving one of another key id) means "no
   head": a tail truncation of the run file is then not detected (the chain still verifies from genesis).

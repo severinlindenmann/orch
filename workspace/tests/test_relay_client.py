@@ -13,11 +13,11 @@ PEER = "ws_reports001"
 def ghome(proj, monkeypatch):
     """A usable guarded orch home for the proj workspace (the real pairing rules are tested in
     test_secret_store.py and test_humanproof.py)."""
-    from orch import humanproof as hp
+    from orch import home as orch_home
 
     h = proj.parent / f"{proj.name}_ghome"
     h.mkdir(mode=0o700)
-    monkeypatch.setattr(hp, "guarded_home", lambda root: h)
+    monkeypatch.setattr(orch_home, "guarded_home", lambda root: h)
     return h
 
 
@@ -1504,10 +1504,10 @@ def test_a_proven_answer_allows_only_the_message_its_question_was_asked_for(proj
     asked, other = "m_deleg00000000021", "m_deleg00000000022"
     by_msg = _synced_allow_tickets(proj, run, rel, asked, other)
     tid = by_msg[asked]["id"]
-    from orch import humanproof
+    from orch import home as orch_home
 
-    assert humanproof.relay_allow_get(proj, tid, "q1") == {"message": asked, "applied": False}
-    assert not humanproof.relay_allow_set(proj, tid, "q1", other)  # a recorded message is never replaced
+    assert orch_home.relay_allow_get(proj, tid, "q1") == {"message": asked, "applied": False}
+    assert not orch_home.relay_allow_set(proj, tid, "q1", other)  # a recorded message is never replaced
     _peer_edits(proj, tid, lambda d: d["ext"]["relay"].update(allow_message=other))
     run("answer", tid, "q1", "Always", "--via", "dashboard", "--by", "human:Marco")
     run("relay", "inbox")
@@ -1545,7 +1545,8 @@ def test_a_reset_allow_applied_does_not_apply_an_answer_again(proj, run, rel):
 def test_a_decoy_question_with_the_same_id_proves_no_other_answer(proj, run, rel):
     """Opus PR B #2: the person answered q1 "Allow once" here; a peer puts a plain decoy q1 with that answer
     first and changes the real relay:allow q1 to "Always". The decoy's proof never lets "Always" act."""
-    from orch import humanproof, relay
+    from orch import home as orch_home
+    from orch import relay
 
     mid = "m_deleg00000000024"
     tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
@@ -1561,7 +1562,7 @@ def test_a_decoy_question_with_the_same_id_proves_no_other_answer(proj, run, rel
     run("relay", "inbox")
     assert not [m for m in rel.sent if m["type"] == "allow"]
     assert not relay.allows(proj)["given"]
-    assert humanproof.relay_allow_get(proj, tid, "q1")["applied"] is False
+    assert orch_home.relay_allow_get(proj, tid, "q1")["applied"] is False
     shown = json.loads(run("ticket", "show", tid, "--json")[1])
     assert "allow_applied" not in shown["ext"]["relay"] and shown["status"] != "dropped"
     assert sum("same id" in h["text"] for h in shown["history"]) == 1  # said once
@@ -1585,7 +1586,8 @@ def test_the_same_place_answer_word_must_match_the_proven_one(proj, run, rel):
 def test_an_allow_given_here_proves_no_synced_answer_word(proj, run, rel, word):
     """Allowed here with `orch relay allow --once`; a peer then sets the answer to Always / Ignore. The allow
     given here only marks the binding applied: the synced word neither widens nor drops anything."""
-    from orch import humanproof, relay
+    from orch import home as orch_home
+    from orch import relay
 
     mid = "m_deleg00000000026"
     tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
@@ -1608,7 +1610,7 @@ def test_an_allow_given_here_proves_no_synced_answer_word(proj, run, rel, word):
     given = relay.allows(proj)["given"]
     assert [(g["message_id"], g["mode"]) for g in given] == [(mid, "once")]
     assert [m["body"]["mode"] for m in rel.sent if m["type"] == "allow"] == ["once"]
-    assert humanproof.relay_allow_get(proj, tid, "q1")["applied"] is True
+    assert orch_home.relay_allow_get(proj, tid, "q1")["applied"] is True
     shown = json.loads(run("ticket", "show", tid, "--json")[1])
     assert shown["status"] != "dropped"
     assert not (proj / ".orch/inbox-notes.json").exists() or mid not in json.loads(
@@ -1617,7 +1619,8 @@ def test_an_allow_given_here_proves_no_synced_answer_word(proj, run, rel, word):
 
 
 def test_the_applied_binding_is_written_before_the_allow(proj, run, rel, monkeypatch):
-    from orch import humanproof, relay
+    from orch import home as orch_home
+    from orch import relay
 
     mid = "m_deleg00000000027"
     tid = _synced_allow_tickets(proj, run, rel, mid)[mid]["id"]
@@ -1628,7 +1631,7 @@ def test_the_applied_binding_is_written_before_the_allow(proj, run, rel, monkeyp
         relay,
         "give_allow",
         lambda root, *a, **k: (
-            states.append(humanproof.relay_allow_get(root, tid, "q1")["applied"]) or real(root, *a, **k)
+            states.append(orch_home.relay_allow_get(root, tid, "q1")["applied"]) or real(root, *a, **k)
         ),
     )
     relay.apply_allow_answers(proj)
@@ -1639,18 +1642,19 @@ def test_the_applied_binding_is_written_before_the_allow(proj, run, rel, monkeyp
     run("relay", "inbox")
     tid2 = next(t["id"] for t in _tickets(run) if t["ext"]["relay"]["allow_message"] == mid2)
     run("answer", tid2, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
-    monkeypatch.setattr(humanproof, "relay_allow_set", lambda *a, **k: False)
+    monkeypatch.setattr(orch_home, "relay_allow_set", lambda *a, **k: False)
     notes = relay.apply_allow_answers(proj)
     assert any("could not record" in n for n in notes) and len(states) == 1
 
 
 def test_a_sync_free_allow_question_writes_no_binding(proj, run, rel):
-    from orch import addons, history, humanproof
+    from orch import addons, history
+    from orch import home as orch_home
 
     def binding_file() -> bool:
         ws = addons.workspace_id(proj, create=False)
         return (
-            ws is not None and (humanproof.guarded_home(proj) / "keys" / ws / humanproof.RELAY_ALLOW).exists()
+            ws is not None and (orch_home.guarded_home(proj) / "keys" / ws / orch_home.RELAY_ALLOW).exists()
         )
 
     connect(run, rel)
@@ -1658,7 +1662,7 @@ def test_a_sync_free_allow_question_writes_no_binding(proj, run, rel):
     run("relay", "inbox")
     tid = _allow_ticket_of(run)["id"]
     assert not history.sync_enabled(proj)
-    assert humanproof.relay_allow_get(proj, tid, "q1") is None and not binding_file()
+    assert orch_home.relay_allow_get(proj, tid, "q1") is None and not binding_file()
     run("answer", tid, "q1", "Allow once", "--via", "dashboard", "--by", "human:Marco")
     run("relay", "inbox")
     assert [m["reply_to"] for m in rel.sent if m["type"] == "allow"] == ["m_deleg00000000029"]  # as before
@@ -2394,10 +2398,12 @@ def test_receiver_keeps_the_card_as_data(proj, run, rel):
 
 def test_question_times_sent_at_and_answered_at(proj, monkeypatch):
     """#692.5: a question sent to the phones carries sent_at once; any answer carries answered_at."""
-    from orch import addons, humanproof, relay, tickets
+    from conftest import ensure_keys
+
+    from orch import addons, relay, tickets
 
     addons.workspace_id(proj, create=True)
-    humanproof.human_key(proj, create=True)
+    ensure_keys(proj)
     _stub_send(monkeypatch, "m_q60000000000007")
     tid = tickets.create(proj, "Deploy", "human:tester")["id"]
     tickets.ask(proj, tid, "Deploy to staging?", ["yes", "no"], None, "agent:claude")

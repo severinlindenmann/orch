@@ -642,37 +642,22 @@ def test_broken_tracked_ticket_kept_on_remote(machines, broken, artifact_change)
     assert (b / ".orch" / ART).read_bytes() == b"original artifact"
 
 
-def signed_wont(root, monkeypatch):
-    from orch import humanproof
-
-    # Use the real key, MAC and current-ledger helpers in an isolated guarded home.
-    monkeypatch.setattr(humanproof, "guarded_home", lambda root: root.parent / "proof-home")
-    humanproof.human_key(root)
-    check = {
+def plain_wont():
+    return {
         "id": "c1",
         "text": "Email finance",
         "done": False,
         "evidence": [],
         "wont_do": True,
         "reason": "Not needed",
-        "wont_nonce": "test-decision",
-        "by": "human:Pat",
+        "wont_by": "human:Pat",
     }
-    check["wont_mac"] = humanproof.wont_sign(root, "t_abc123", check)
-    assert check["wont_mac"]
-    assert humanproof.wont_verifier(root)(check, "t_abc123")
-    return check
 
 
-@pytest.mark.parametrize("mac", ["valid", "forged", "absent"])
 @pytest.mark.parametrize("side", ["local", "remote"])
-def test_synced_wont_do_requires_receivers_current_mac(machines, monkeypatch, mac, side):
+def test_synced_wont_do_is_a_plain_field_merged_under_the_ticket_lock(machines, monkeypatch, side):
     a, b, _ = both(machines)
-    check = signed_wont(b, monkeypatch)
-    if mac == "forged":
-        check["wont_mac"] = "forged"
-    elif mac == "absent":
-        check.pop("wont_mac")
+    check = plain_wont()
     edit(a, title="Remote change")
     edit(b, note="Local change")
     edit(b if side == "local" else a, checklist=[check])
@@ -710,52 +695,9 @@ def test_synced_wont_do_requires_receivers_current_mac(machines, monkeypatch, ma
     success(b)
     assert checked["written"]
     result = load(b)
-    assert bool(result["checklist"][0].get("wont_do")) == (mac == "valid")
+    assert result["checklist"][0]["wont_do"] is True and result["checklist"][0]["wont_by"] == "human:Pat"
     assert result["title"] == "Remote change" and result["note"] == "Local change"
     assert (b / ".orch" / TICKET).read_bytes() == repo.git(b, "show", "HEAD:" + TICKET).stdout
-
-
-@pytest.mark.parametrize("recover", [False, True])
-@pytest.mark.parametrize("decision", ["wont", "verdict"])
-def test_ledger_changes_before_apply_fail_closed(machines, monkeypatch, recover, decision):
-    from orch import humanproof
-
-    a, b, bare = both(machines)
-    check = signed_wont(b, monkeypatch)
-    if decision == "wont":
-        edit(a, checklist=[check], title="Remote change")
-        text = "Marked c1 as won't do"
-    else:
-        doc = load(a) | {"status": "done"}
-        entry = humanproof.verdict_sign(b, doc, "person")
-        edit(a, status="done", verdicts=[entry], title="Remote change")
-        text = "Status review -> done"
-    edit(a, history=[{"at": NOW, "by": "human:Pat", "text": text}])
-    success(a)
-    before, head, tip = (b / ".orch" / TICKET).read_bytes(), step.oid(b, "HEAD"), remote_sha(bare)
-    apply = step.apply
-
-    def revoke(root, old, new, state, merges=None):
-        if decision == "wont":
-            assert humanproof._ledger_set(root, "t_abc123", "c1", None)
-        else:
-            assert humanproof._verdict_ledger_put(root, "t_abc123", None)
-        if recover:
-            raise Crash("crash")
-        return apply(root, old, new, state, merges)
-
-    with monkeypatch.context() as m:
-        m.setattr(step, "apply", revoke)
-        if recover:
-            with pytest.raises(Crash, match="crash"):
-                run(b)
-        else:
-            assert "busy" in run(b)["last_error"]
-    if recover:
-        assert "busy" in run(b)["last_error"]
-    assert (b / ".orch" / TICKET).read_bytes() == before
-    assert step.oid(b, "HEAD") == head and remote_sha(bare) == tip
-    assert not (b / ".orch/run/sync/pending.json").exists()
 
 
 def test_idle_syncs_and_one_edit_converge_without_churn(machines, monkeypatch):
@@ -801,18 +743,17 @@ def test_idle_syncs_and_one_edit_converge_without_churn(machines, monkeypatch):
     assert (a / ".orch" / TICKET).read_bytes() == (b / ".orch" / TICKET).read_bytes()
 
 
-def test_new_remote_ticket_history_is_not_shared_history(machines):
+def test_new_remote_ticket_history_is_kept_as_written(machines):
     a, b, _ = machines
     line = {"at": NOW, "by": "human:lindenmann", "text": "Looks good"}
     save(b, value=ticket() | {"history": [line], "status": "done"})
     success(b)
     success(a)
-    expected = {**line, "by": "agent:sync", "text": "(synced, not verified here) Looks good"}
-    assert load(a)["history"] == [expected]
+    assert load(a)["history"] == [line]  # kept as written
     success(b)
     success(a)
-    assert load(a)["history"] == [expected]
-    assert line in load(b)["history"] and expected in load(b)["history"]
+    assert load(a)["history"] == [line]
+    assert load(b)["history"] == [line]
 
 
 def test_first_sync_marks_ownership_before_import(machines, monkeypatch):

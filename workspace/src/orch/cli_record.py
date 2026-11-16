@@ -1,7 +1,7 @@
 """`orch record tail | query | counts | settings | delete-detail` (contracts/activity.md, counts.md).
 
 Every view reads the record through these commands (add-ons never read the files). The views write nothing
-(but `settings` may record a lowered retention value, humanproof.retention) and need no proof. `delete-detail`
+(but `settings` may record a lowered retention value) and need no proof. `delete-detail`
 is a person's own decision (op `record.delete_detail`, invariant H1).
 """
 
@@ -827,11 +827,7 @@ def _window(args) -> tuple[str, str]:
 
 def run_model(run: str, events: list[dict], *, root=None, problem: bool = False) -> dict:
     """One run as counts.md sees it: ticket, day started, what its agent tool can report, uses. `complete` is
-    false when the run had lines changed, removed or unchecked (activity.md, Authenticated record);
-    `protected` is false for a run by a tool orch cannot give deny rules (record.UNPROTECTED_TEXT is shown
-    for it) and when the tool is not known from a verified line."""
-    from orch import adapters
-
+    false when the run had lines changed, removed or unchecked (activity.md, Authenticated record)."""
     uses: dict[tuple, dict] = {}
     sees = None
     partial = False
@@ -871,17 +867,9 @@ def run_model(run: str, events: list[dict], *, root=None, problem: bool = False)
     if sees is None:  # no capability list was written: only what the run actually used is known to be seen
         sees = sorted({i["kind"] for i in items})
     first = events[0]["at"] if events else None
-    # the tool only from a checked line orch's own collector wrote (via log, sealed, not a hook line): a hook
-    # line or a claim file is the agent's word and could claim another tool. Unknown means "not protected":
-    # the marker is shown.
-    harness = next(
-        (e.get("harness") for e in events if e.get("via") == "log" and record.is_checked(e)),
-        None,
-    )
     return {
         "run": run,
         "complete": not problem,
-        "protected": bool(adapters.can_deny(harness, root)) if isinstance(harness, str) else False,
         "ticket": events[0].get("ticket") if events else None,
         "day": first[:10] if first else None,
         "sees": sees,
@@ -1016,11 +1004,6 @@ def counts(root: Path, args) -> dict:
             "last_sent": None,
             "queued": 0,
         },
-        "per_run": [
-            {"run": m["run"], "protected": m["protected"]}
-            | ({} if m["protected"] else {"note": record.UNPROTECTED_TEXT})
-            for m in runs
-        ],
         "unavailable": unavailable,
         "complete": not unavailable,
     }

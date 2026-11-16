@@ -22,7 +22,6 @@ from orch import (
     diag,
     harness,
     history,
-    humanproof,
     keystore,
     net,
     review,
@@ -31,6 +30,9 @@ from orch import (
     skillrender,
     skills,
     tickets,
+)
+from orch import (
+    home as orch_home,
 )
 from orch.errors import Refused
 from orch.text import clean_untrusted
@@ -2515,7 +2517,7 @@ def _ensure_allow_question(root: Path, msg: dict, notify: bool = True) -> str:
     # history.adopt_local_objects). Not written: the question is not "ours" and its answer is never applied
     # (apply_allow_answers says so on the ticket): fail closed.
     if history.sync_enabled(root):
-        humanproof.relay_allow_set(root, tid, q["id"], msg["id"])
+        orch_home.relay_allow_set(root, tid, q["id"], msg["id"])
     if (
         grouped and notify
     ):  # a task from a group: the host hears "waiting for approval", our phones the question
@@ -2574,7 +2576,7 @@ def apply_allow_answers(root: Path) -> list[str]:
             # (guarded home, made when the question was asked here), never from the synced ext.relay: a peer
             # can swap allow_message or reset allow_applied. Without sync (no peer) a question asked before
             # the binding existed still goes by allow_applied, as before.
-            bound = humanproof.relay_allow_get(root, t["id"], q["id"])
+            bound = orch_home.relay_allow_get(root, t["id"], q["id"])
             if (bound or {}).get("applied") or (not synced and r.get("allow_applied") == q["id"]):
                 continue
 
@@ -2616,7 +2618,7 @@ def apply_allow_answers(root: Path) -> list[str]:
                     # allowed here already (orch relay allow): the binding is marked applied, nothing more; an
                     # allow given here never proves this (maybe synced) answer word
                     if synced or bound is not None:
-                        humanproof.relay_allow_set(root, t["id"], q["id"], mid, applied=True)
+                        orch_home.relay_allow_set(root, t["id"], q["id"], mid, applied=True)
                     continue
                 # an answer this machine cannot prove (e.g. synced from another computer) decides nothing here
                 skip(
@@ -2653,7 +2655,7 @@ def apply_allow_answers(root: Path) -> list[str]:
             # applied once: recorded in the binding FIRST (the synced allow_applied below is shown, never
             # trusted); what cannot be recorded is not applied (else it would be applied again each pass).
             # Sync-free: no binding is written (allow_applied decides, as before).
-            if (synced or bound is not None) and not humanproof.relay_allow_set(
+            if (synced or bound is not None) and not orch_home.relay_allow_set(
                 root, t["id"], q["id"], mid, applied=True
             ):
                 notes.append(f"could not record that the answer to {mid} is applied, so it was not applied")
@@ -3332,7 +3334,7 @@ def _admin_keys(root: Path, cred: dict, skipped: list[str]) -> None:
     safe)."""
     paired = False
     try:
-        humanproof.guarded_home(root)
+        orch_home.guarded_home(root)
         paired = True
     except Refused:
         if cred:
@@ -3359,7 +3361,7 @@ def _commit(root: Path, stage: Path, snap: dict, names: list[str], skipped: list
     for fn in ("credentials.json", "mcp.json", "shared.json"):
         harness.check_private_path(root, sec / fn)  # refuse before changing anything
     try:
-        humanproof.guarded_home(root)
+        orch_home.guarded_home(root)
         pairs = True
     except Refused:
         if snap["credentials"]:

@@ -21,7 +21,7 @@ import pytest
 from conftest import seal_lines
 from jsonschema import Draft202012Validator
 
-from orch import hider, record, record_auth
+from orch import hider, record
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN = "r_8k2m01"
@@ -68,12 +68,6 @@ def store(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     return ws, record.RecordWriter(ws, hider=hider.Hider({"key": "a-long-secret-value"}))
-
-
-def record_auth_home(ws):
-    from orch import humanproof
-
-    humanproof.record_key(ws)  # makes the key folder (the fixture creates keys on first use)
 
 
 def runfile(ws):
@@ -137,6 +131,7 @@ SAFE_ATTRIBUTE_CALLS = {
     "events.append",
     "found.append",
     "hashlib.sha256",
+    "hashlib.sha256(data).hexdigest",
     "hashlib.sha256(b'orch.id.hook/1\\x00' + eid.encode()).hexdigest",
     "hiding._check",
     "hiding.current_hider",
@@ -187,73 +182,27 @@ SAFE_ATTRIBUTE_CALLS = {
     "time.time_ns",
     "unreadable.append",
     "uuid.uuid4",
-    "(head or {}).get",
     "_BODY_VALIDATOR.is_valid",
     "_MESSAGES.get",
     "_SPOOL_NAME.fullmatch",
-    "_VERIFIED.clear",
-    "_VERIFIED.get",
     "_json(entry).encode",
-    "body.setdefault",
-    "body.update",
-    "hashlib.sha256(whole).digest",
-    "hashlib.sha256(whole[:hit[1]]).digest",
-    "head.get",
-    "hit[3].copy",
-    "humanproof.record_head_read",
-    "humanproof.record_head_try_write",
-    "humanproof.record_key",
     "pending.get",
     "pending.items",
     "re.compile",
-    "record_auth.State",
-    "record_auth.Verified",
-    "record_auth.detail_hash",
-    "record_auth.drain_ok",
-    "record_auth.finish",
-    "record_auth.genesis",
-    "record_auth.legacy_split",
-    "record_auth.scan",
-    "record_auth.seal",
-    "record_auth.split",
-    "record_auth.spool_mac",
-    "record_auth.spool_name",
-    "record_auth.spool_name_ok",
-    "record_auth.spool_old_ok",
-    "humanproof.record_upgrade_ns",
+    "record.detail_hash",
     "sealed.rfind",
-    "self._move_head",
     "self._reject",
-    "state.copy",
     "e.get",
-    "humanproof.record_head_state",
     "lines[-1].get",
-    "hashlib.sha256(whole[:record_auth.prefix_cut(whole, n)]).hexdigest",
     "raw.strip",
-    "record_auth.legacy_prefix",
-    "record_auth.prefix_cut",
-    "record_auth.start_state",
-    "self._sealed_tail",
     "whole.split",
-    "gone.append",
-    "humanproof.record_head_names",
-    "humanproof.record_cutover_ensure",
-    "humanproof.record_cutover_read",
-    "humanproof.record_reject_names",
-    "humanproof.record_rejects_bump",
-    "humanproof.record_rejects_read",
     "name.startswith",
     "run.get",
     "raw.split",
-    "humanproof.record_cutover_at",
-    "humanproof.record_head_carry",
-    "humanproof.record_head_old_live",
     "point.split",
-    "carry.get",
     "os.stat",
     "out.add",
     "source.get",
-    "humanproof.record_upgrade_old",
 }
 SAFE_ATTRIBUTE_VALUES = {
     "busy.alert",
@@ -278,19 +227,10 @@ SAFE_ATTRIBUTE_VALUES = {
     "stored.reason",
     "uuid.uuid4().hex",
     "read.legacy",
-    "record_auth.SUFFIX_LEN",
     "stored.hash",
-    "verified.changed",
-    "verified.events",
-    "verified.last_mac",
-    "verified.last_seq",
-    "verified.reason",
-    "verified.removed",
     "view.changed",
     "view.events",
-    "view.last_mac",
     "view.last_seq",
-    "view.legacy",
     "view.reason",
     "view.removed",
     "view.unchecked",
@@ -334,12 +274,10 @@ ERROR_BOUNDARIES = {
     "list_jobs",
     "append_job",
     "_reject",
-    "_sealed_tail",
     "_reject_bad_spool",
     "_reject_entry",
     "_flat_size",
     "_counted_mb",
-    "_move_head",
 }
 
 
@@ -360,7 +298,6 @@ from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 from jsonschema import Draft202012Validator, FormatChecker
 from orch import hider as hiding
-from orch import humanproof, record_auth
 from orch.collect_execjson import _hash, detail_name
 from orch.errors import Refused
 from orch.hider import Hider, NoHiderError
@@ -626,10 +563,6 @@ def test_03_symlink_each_level(store, part):
     if "/detail/" in part:
         kept = writer.append(event(), detail=DETAIL)
         assert kept["detail"] is None and kept["detail_lost"]
-    elif part == ".orch":
-        # a linked .orch folder holds no local id orch may read: no key, no recording, nothing written
-        with pytest.raises(record.RecordOff):
-            writer.append(event(), detail=DETAIL)
     else:
         with pytest.raises(record.RecordTampered) as caught:
             writer.append(event(), detail=DETAIL)
@@ -637,7 +570,7 @@ def test_03_symlink_each_level(store, part):
         expected = "lock" if part.endswith(".lock") else "meta" if part.endswith("meta.json") else None
         if expected:
             assert caught.value.alert["target"] == expected
-    assert [p.name for p in outside.iterdir() if p.name != ".local-id"] == []  # only the workspace id
+    assert [p.name for p in outside.iterdir()] == []
     if "runs" in part and not part.endswith(".lock") or part in (".orch", ".orch/record"):
         assert record.read_run(ws, RUN).reason == "link"
 
@@ -677,19 +610,13 @@ def test_05_foreign_owner(store, monkeypatch, target):
         fields["st_uid"] = real if info.st_ino == chosen_ino else real + 1
         return SimpleNamespace(**fields)
 
-    from orch import humanproof
-
-    key = humanproof.record_key(ws)  # the key is resolved before the owner is faked (the guarded home
-    # is not what this test is about); an own patcher: the record-key fixture patches the same name
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(humanproof, "record_key", lambda *a, **k: key)
-        monkeypatch.setattr(os, "fstat", selected_owner)
-        monkeypatch.setattr(os, "geteuid", lambda: real + 1)
-        result = record.read_run(ws, RUN)
-        assert result.reason == "foreign_owner"
-        assert result.message == record._MESSAGES["tampered"] and result.alert
-        with pytest.raises(record.RecordTampered):
-            writer.append(event(id="new"))
+    monkeypatch.setattr(os, "fstat", selected_owner)
+    monkeypatch.setattr(os, "geteuid", lambda: real + 1)
+    result = record.read_run(ws, RUN)
+    assert result.reason == "foreign_owner"
+    assert result.message == record._MESSAGES["tampered"] and result.alert
+    with pytest.raises(record.RecordTampered):
+        writer.append(event(id="new"))
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires FIFO")
@@ -819,7 +746,6 @@ def test_11_line_failure_removes_new_detail(store, monkeypatch):
 @pytest.mark.parametrize("mode", ["missing", "io", "tampered"])
 def test_12_public_read_statuses(store, monkeypatch, mode):
     ws, writer = store
-    record_auth_home(ws)  # a clean guarded home: only then is "no such run" a plain "missing"
     if mode != "missing":
         writer.append(event())
     if mode == "io":
@@ -1025,7 +951,7 @@ def test_planted_detail_file_at_the_name_is_replaced_and_hashed(store):
     target.parent.mkdir(parents=True)
     target.write_text(json.dumps(dict(run=RUN, kind="usage", id="other", ticket=event()["ticket"])))
     kept = writer.append(event(), detail=DETAIL)
-    assert kept["detail"] and kept["detail_hash"] == record_auth.detail_hash(target.read_bytes())
+    assert kept["detail"] and kept["detail_hash"] == record.detail_hash(target.read_bytes())
     assert json.loads(target.read_text())["input"] == "hello"
 
 
@@ -1207,9 +1133,9 @@ def test_pending_tampering_is_alerted_and_skipped(store, monkeypatch):
     writer.append(event())
     pending = record.record_dir(ws) / "pending" / RUN
     pending.mkdir(parents=True)
-    target = pending / ("9" * 19 + "1_" + "a" * 32 + ".json")  # newer than the upgrade: never read
+    target = pending / ("9" * 19 + "1_" + "a" * 32 + ".json")
     target.symlink_to(ws / "outside")
-    planted = pending / ("9" * 19 + "2_" + "b" * 32 + ".json")  # orch's name, but no MAC: planted
+    planted = pending / ("9" * 19 + "2_" + "b" * 32 + ".json")  # orch's name, but not a valid entry
     planted.write_text(json.dumps(dict(event=event(id="bad"), payload="{}", default_id=False)))
     assert writer.append(event(id="good"))["seq"] == 2
     assert not planted.exists()  # deleted by its exact path, never committed (M4)
@@ -1220,7 +1146,7 @@ def test_pending_tampering_is_alerted_and_skipped(store, monkeypatch):
         for p in (record.record_dir(ws) / "alerts").glob("*")
         for line in p.read_text().splitlines()
     ]
-    assert {a["reason"] for a in alerts} == {"content"}  # a name without its proof is refused unread
+    assert {a["reason"] for a in alerts} == {"content", "link"}  # a bad entry is refused, a link is reported
 
 
 def test_actual_unreadable_directory(store):
@@ -1607,32 +1533,6 @@ def test_a_planted_invalid_log_line_does_not_make_the_writer_drop_the_real_line(
     assert [e["id"] for e in record.read_run(ws, RUN).unwrap()] == ["first", "toolu_next"]
 
 
-def test_a_planted_wrong_seq_line_is_not_trusted_by_the_writer(store):
-    ws, writer = store
-    writer.append(event(id="first"))
-    planted = dict(event(id="toolu_next", via="log"), run=RUN, seq=10**18)
-    with runfile(ws).open("a") as f:
-        f.write(json.dumps(planted) + "\n")
-    stored = writer.append(event(id="toolu_next", via="log"))
-    assert stored is not None and stored["seq"] == 2
-
-
-def test_a_planted_huge_id_does_not_move_the_collectors_seq_start(store):
-    from orch import run_record
-
-    ws, writer = store
-    writer.append(event(id="first"))
-    writer.append(
-        event(id=f"{RUN}:999999999999999999", via="log")
-    )  # a line that passes every check but its id
-    with runfile(ws).open("a") as f:
-        f.write(json.dumps(dict(event(id="x"), run=RUN, seq=10**18)) + "\n")
-    seq, _ = run_record._so_far(ws, RUN)
-    assert seq < 100
-    alerts = "".join(p.read_text() for p in (record.record_dir(ws) / "alerts").glob("*.jsonl"))
-    assert '"reason":"content"' in alerts
-
-
 def test_ids_that_ran_ahead_by_dropped_events_stay_numbered_after_many_turns(store):
     from orch import run_record
 
@@ -1660,18 +1560,6 @@ def test_a_planted_line_with_another_id_cannot_decide_about_a_detail_file(store)
     )
     assert finished["detail"] == started["detail"]
     assert "new-output" in (record.record_dir(ws) / started["detail"]).read_text()
-
-
-def test_planted_helper_names_do_not_crash_or_skew_the_collector(store):
-    from orch import run_record
-
-    ws, writer = store
-    writer.append(event(id="first"))
-    writer.append(event(id="p1", via="log", agent="h_3", parent="main"))
-    with runfile(ws).open("a") as f:
-        for n, agent in enumerate(("h_5", "h_" + "9" * 5000, "h_99999999", "h_" + "٣" * 3), 3):
-            f.write(json.dumps(dict(event(id=f"p{n}"), run=RUN, seq=n, via="log", agent=agent)) + "\n")
-    assert run_record._so_far(ws, RUN)[1] == 3
 
 
 def test_a_planted_line_of_another_ticket_cannot_decide_about_a_detail_file(store):

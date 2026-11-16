@@ -43,9 +43,6 @@ def test_approve_binds_ticket_tip_and_control_count():
         "--paths-hash",
         "12345678",
     ]
-    op, target = actions.PROOF_OPS["copies.approve"]
-    assert op == "copy.retry"
-    assert target(args) == f"approve:t_abcdef:{'a' * 40}:2:12345678"
     for bad in ({**args, "control_paths": True}, {**args, "tip": "HEAD"}, {**args, "paths_hash": "x"}):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("copies.approve", bad)
@@ -100,7 +97,6 @@ def test_done_click_sends_the_displayed_review_tip():
     argv = actions.build_argv("ticket.patch", args)
     assert argv[:4] == ["ticket", "patch", "t_abcdef", "--if-revision=3"]
     assert f"--shown-tip={'a' * 40}" in argv
-    assert actions.proof_for("ticket.patch", args) == ("ticket.verdict", "t_abcdef")  # same proof as before
     assert "--shown-tip=" + "b" * 64 in actions.build_argv("ticket.patch", {**args, "review_tip": "b" * 64})
     other = actions.build_argv("ticket.patch", {**args, "data": {"status": "active"}})
     assert not any(a.startswith("--shown-tip") for a in other)

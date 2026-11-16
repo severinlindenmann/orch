@@ -7,7 +7,7 @@ import stat
 import sys
 from pathlib import Path
 
-from orch import humanproof as hp
+from orch import home as orch_home
 from orch import keystore, secretrun, secretscan, term, tickets
 from orch.errors import Refused
 
@@ -82,7 +82,7 @@ def _change_profile(root, args, who):
     """Returns the extra fields for the answer (the resolved command, warnings)."""
     name, action = args.name, args.profile_action
     extra: dict = {}
-    with hp._key_lock(hp.key_dir(root)):
+    with orch_home._key_lock(orch_home.key_dir(root)):
         profiles = keystore.read_profiles(root)  # a damaged file refuses here
         if action == "set":
             profile = {section: _pairs(getattr(args, section)) for section in ("env", "files", "set")}

@@ -88,25 +88,12 @@ def save_settings(root, settings):
         Path(f.name).unlink(missing_ok=True)
 
 
-REMOTE_TARGET = "sync:set-remote:"
-PUBLIC_TARGET = "sync:use-public:"
-
-
-def remote_target(address, public=False):
-    """The proof target of choosing exactly this sync address (the whole address as it is used): use-public for a
-    public address the person chose anyway, set-remote for any other."""
-    return (PUBLIC_TARGET if public else REMOTE_TARGET) + hashlib.sha256(address.encode()).hexdigest()
-
-
-ADDRESS = "run/sync/address.json"  # the address the person's signed set-remote / use-public choice applied
-ADDRESS_KIND = (
-    "sync-remote-address"  # its local1 domain: only apply_set writes (signs) it, after the person's proof
-)
+ADDRESS = "run/sync/address.json"  # the address the person chose (set / use-public), written by apply_set
 UNCONFIRMED = "Sync found an address you did not choose and did not use it. Choose where to sync in Settings."
 
 
 class Unconfirmed(repo.RemoteRefused):
-    """settings.json names a remote the person never chose with a signed choice (it is agent-writable): no network."""
+    """settings.json names a remote the person never chose (no address record for it): no network."""
 
     def __init__(self):
         super().__init__(UNCONFIRMED)
@@ -117,67 +104,32 @@ def _address_record(address):
 
 
 def approve_address(root, address):
-    """Record exactly the address a person's signed choice applies: pinned in the guarded home (humanproof.pin_next:
-    a counter + the digest of the ONE current body, so an older signed copy of this file never counts again), then
-    local1-signed. Only apply_set calls it."""
-    from orch import humanproof
-
+    """Record exactly the address the person's choice applies. Only apply_set calls it."""
     from .step import encoded, write
 
-    body = humanproof.pin_next(root, ADDRESS_KIND, _address_record(address))
-    mac = humanproof.local_sign(root, ADDRESS_KIND, body) if body else None
-    if not mac:
-        raise repo.Refused("orch could not sign this choice; nothing was changed")
-    write(root, ADDRESS, encoded({**body, "mac": mac}))
+    write(root, ADDRESS, encoded(_address_record(address)))
 
 
 def revoke_address(root):
-    """The person left remote: pin an empty body (every earlier signed address record is now older than the pin,
-    so a restored copy confirms nothing) and remove the file. Fails closed: without a pin the file still goes."""
-    from orch import humanproof
-
+    """The person left remote: remove the address record (sync stops using the address)."""
     try:
-        repo.safe(root, ADDRESS).unlink(
-            missing_ok=True
-        )  # stops sync now either way (address_confirmed is false)
-        failed = None
-    except (
-        OSError,
-        repo.Refused,
-    ) as e:  # a planted folder or link: the pin still moves, the person sees the error
-        failed = e
-    pin = humanproof.record_pin(root, ADDRESS_KIND)
-    # unreadable (None: e.g. a damaged .orch/.local-id, which an agent can write) or a pin that can't move: the old
-    # pin may still name the old record, and a restored copy would count again once the pin reads again (N-1).
-    # {}: no pin was ever made, so no address record can ever pass pin_ok
-    if pin is None or (pin != {} and not humanproof.pin_next(root, ADDRESS_KIND, {"sha256": None})):
-        raise repo.Refused("orch could not record that sync left this address. Sync is stopped; try again.")
-    if failed is not None:
+        repo.safe(root, ADDRESS).unlink(missing_ok=True)
+    except (OSError, repo.Refused):  # a planted folder or link
         raise repo.Refused(
             "orch could not remove the sync address record. Sync is stopped; ask the owner to clear it."
-        )
+        ) from None
 
 
 def address_confirmed(root, address):
-    """True only when `address` is exactly the one the record names and the record is as this core signed it. A
-    missing, planted, edited or unreadable record confirms nothing."""
-    from orch import humanproof
-
+    """True only when `address` is exactly the one the address record names. A missing or unreadable record
+    confirms nothing. An old record with mac or counter fields loads as before (those fields are ignored)."""
     if not isinstance(address, str) or not address:
         return False
     try:
         data = json.loads(repo.safe(root, ADDRESS).read_text())
     except (ValueError, OSError, RecursionError):
         return False
-    if not isinstance(data, dict):
-        return False
-    body = {k: v for k, v in data.items() if k != "mac"}
-    return (
-        {k: v for k, v in body.items() if k != "counter"} == _address_record(address)
-        and type(body.get("counter")) is int
-        and humanproof.local_ok(root, ADDRESS_KIND, body, data.get("mac"))
-        and humanproof.pin_ok(root, ADDRESS_KIND, body)  # the current record, never a restored older one
-    )
+    return isinstance(data, dict) and data.get("sha256") == _address_record(address)["sha256"]
 
 
 def confirmed_remote(root, settings):
@@ -197,15 +149,15 @@ class PublicAddress(repo.Refused):
     def __init__(self, address):
         super().__init__(
             "This sync address is public. Anyone can read your tickets. Choose it in the dashboard "
-            "(Settings, General, Sync), or add --public with a person's proof"
+            "(Settings, General, Sync), or add --public"
         )
         self.address = address
 
 
 def _remote_gate(root, address, args, public):
-    """Every path that sets a remote passes here (gate parity): the address's visibility is probed every time (a
-    cached answer is agent-writable, M1), a public address is only ever used on the person's use-public choice,
-    and the choice itself is a person's proof bound to that exact address (M4). Returns the probed visibility."""
+    """Every path that sets a remote passes here: the address's visibility is probed every time (a cached answer
+    is agent-writable, M1) and a public address is only ever used on the person's use-public choice. Returns the
+    probed visibility."""
 
     from .visibility import remote_visibility
 
@@ -220,9 +172,8 @@ def apply_set(
 ):
     """`orch sync set` (also `orch sync act set` and `use-public`): check, save and wake the loop. Returns
     (settings, notice): the notice is the visibility line for a remote address seen for the first time, else None.
-    Choosing or changing the remote address (`remote`, or turning remote on with the stored one) is a person's
-    signed choice (_remote_gate); `public` = the caller is the person's use-public choice. Mode off, mode local
-    and the interval need no proof."""
+    Choosing or changing the remote address (`remote`, or turning remote on with the stored one) records that
+    address (_remote_gate); `public` = the caller is the person's use-public choice."""
     if mode is None and interval is None:
         raise repo.Refused("Say what to change: --mode off|local|remote or --interval 5|15|60")
     if interval is not None and interval not in (5, 15, 60):
@@ -244,9 +195,7 @@ def apply_set(
     chosen = remote or (settings.get("remote") if mode == "remote" and settings["mode"] != "remote" else None)
     visibility = None
     if chosen:
-        visibility = _remote_gate(
-            root, chosen, args, public
-        )  # everything that can refuse ran before the proof
+        visibility = _remote_gate(root, chosen, args, public)
     if mode != "off":
         repo.ensure(root)
     notice = None
@@ -266,16 +215,16 @@ def apply_set(
                 else "Make sure this repository is private"
             )
     if chosen:
-        approve_address(root, chosen)  # the address this signed choice applies (checked at every use)
+        approve_address(root, chosen)  # the address this choice applies (checked at every use)
     elif mode in ("off", "local"):
-        # leaving remote revokes the signed address: planting mode=remote in settings.json later can't bring the old
-        # approval back (nor can a restored copy: the pin moved on); turning remote on again is a new signed choice
+        # leaving remote removes the address record: planting mode=remote in settings.json later can't bring the
+        # old address back; turning remote on again is a new choice
         settings.pop(
             "remote", None
         )  # off or local: no stored address that could look unconfirmed later (N-3)
         save_settings(
             root, {**settings, "mode": mode}
-        )  # stop using the address first, then revoke (fails closed)
+        )  # stop using the address first, then remove the record
         revoke_address(root)
     settings.update(mode=mode, kind=kind, interval=interval or settings["interval"])
     save_settings(root, settings)
@@ -312,7 +261,7 @@ def status_result(root, settings):
 
 
 def deleted(root, ticket, keep, args):
-    """A missing ticket notice: OK (keep it restored) or leave it deleted on every computer (a person's proof)."""
+    """A missing ticket notice: OK (keep it restored) or leave it deleted on every computer."""
     from orch import syncgate
 
     from .step import encoded, entries, step_lock, write
@@ -387,10 +336,7 @@ def main(argv=None):
             p.add_argument("--remote")
             p.add_argument("--interval", type=int, help="minutes between remote syncs: 5, 15 or 60")
             p.add_argument("--kind", choices=("private", "team"), default="private")
-            # choosing the remote address is a person's signed choice (sync:set-remote:<sha256(address)>; a public
-            # address: --public and sync:use-public:<sha256(address)>)
             p.add_argument("--public", action="store_true")
-            p.add_argument("--proof-stdin", action="store_true")
             p.add_argument("--by")
     p = sub.add_parser("resolve")
     p.add_argument("path")
@@ -399,30 +345,25 @@ def main(argv=None):
     # a name that differs from this machine's only in case: keep my file name, or rename my file
     choice.add_argument("--keep-local-name", action="store_true")
     choice.add_argument("--rename-local", metavar="NEW_NAME")
-    p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("keep-key")
     p.add_argument("key")
     p.add_argument("ticket")
-    p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("take-remote")  # a history pause: the other computer's history becomes the base
-    p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("approve")
     p.add_argument("ticket")
     p.add_argument("addon")
     p.add_argument("--ignore", action="store_true")
-    p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("deleted")
     p.add_argument("ticket")
     p.add_argument("--keep", action="store_true")
-    p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
     # what the dashboard's Sync card and Needs rows do: `orch sync act <verb> [--value V] -- <target>` (act.py)
@@ -430,10 +371,6 @@ def main(argv=None):
     p.add_argument("verb", choices=ACT_VERBS)
     p.add_argument("target")
     p.add_argument("--value")
-    p.add_argument(
-        "--proof-target", action="store_true", help="say what a signed verb needs proven; changes nothing"
-    )
-    p.add_argument("--proof-stdin", action="store_true")
     p.add_argument("--by")
     p.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)

@@ -1402,8 +1402,6 @@ def test_review_answer_is_checked(act_server, act_orch, args):
 
 def test_review_answer_has_no_proof_and_no_by():
     q = {"ticket": "t_abcdef", "key": "q3", "verdict": "ok", "digest": D64}
-    assert actions.proof_for("review.answer", q) is None
-    assert actions.proof_for("review.answer", {**q, "key": "review"}) is None
     argv = actions.build_argv("review.answer", q)
     assert "--by" not in argv and "--proof-stdin" not in argv and argv[-1] == "--json"
     assert argv[:4] == ["review", "answer", "t_abcdef", "q3"] and argv[argv.index("--via") + 1] == "dashboard"
@@ -1411,7 +1409,7 @@ def test_review_answer_has_no_proof_and_no_by():
 
 
 def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
-    from orch.pageproof import SELF
+    from orch.pagesession import SELF
 
     seen = {}
 
@@ -1421,14 +1419,14 @@ def test_review_answer_needs_the_page_session_but_no_proof(ws, monkeypatch):
     monkeypatch.setattr(actions, "_run", lambda argv, **k: seen.update(argv=argv) or R())
     args = {"ticket": "t_abcdef", "key": "review", "verdict": "ok", "digest": D64}
     with pytest.raises(actions.NeedsPerson):  # watch-only: no page session, nothing runs
-        actions.run_op(ws, SELF, "review.answer", args, mint=None)
+        actions.run_op(ws, SELF, "review.answer", args)
     assert seen == {}
-    code, _, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: pytest.fail("no proof"))
+    code, _, _ = actions.run_op(ws, SELF, "review.answer", args, session=True)
     assert code == 200 and "review" in seen["argv"] and "--by" not in seen["argv"]
 
 
 def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):
-    from orch.pageproof import SELF
+    from orch.pagesession import SELF
 
     for code_in, code_out in (("changed", "changed"), ("needs_person", "needs_person"), ("weird", "refused")):
 
@@ -1439,7 +1437,7 @@ def test_review_error_codes_become_the_json_the_page_reads(ws, monkeypatch):
 
         monkeypatch.setattr(actions, "_run", lambda argv, **k: R())
         args = {"ticket": "t_abcdef", "key": "q1", "verdict": "ok", "digest": D64}
-        status, text, _ = actions.run_op(ws, SELF, "review.answer", args, mint=lambda op, t: "hp1.x")
+        status, text, _ = actions.run_op(ws, SELF, "review.answer", args, session=True)
         assert status == 422
         assert json.loads(text) == {"ok": False, "error": {"code": code_out, "message": "It changed."}}
 
@@ -1461,7 +1459,6 @@ def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
     argv = actions.build_argv("workspace.set", {"field": "name", "text": " Newsletter "})
     assert argv[:3] == ["config", "set", "workspace.name"] and argv[-2:] == ["--", "Newsletter"]
     assert actions.build_argv("workspace.set", {"field": "description", "text": ""})[-2:] == ["--", ""]
-    assert actions.proof_for("workspace.set", {"field": "name", "text": "x"}) is None
     assert actions.needs_session("workspace.set") and actions.needs_session(
         "look.profile"
     )  # a login, no proof
