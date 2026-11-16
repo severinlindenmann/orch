@@ -443,7 +443,7 @@ def test_visibility_never_persists_userinfo(root, monkeypatch):
 
 
 @pytest.mark.parametrize("winner", ["t_local1", "t_evil01"])
-def test_keep_key_remote_only_uses_verified_merge(machines, monkeypatch, winner):
+def test_keep_key_remote_only_merges_plain_fields(machines, monkeypatch, winner):
     from test_step import ticket
 
     a, b, bare = both(machines)
@@ -495,7 +495,7 @@ def test_keep_key_remote_only_uses_verified_merge(machines, monkeypatch, winner)
     success(b)
     for data in (repo.safe(b, evil).read_bytes(), repo.git(b, "show", "HEAD:" + evil).stdout):
         doc = json.loads(data)
-        assert "wont_do" not in doc["checklist"][0]
+        assert doc["checklist"][0]["wont_do"] is True  # plain: the remote's won't-do is kept as it came
         assert (doc["key"] == "DM1-5") == (winner == "t_evil01")
     # Convergence for two honest machines is covered by
     # test_person_keeps_key_without_live_duplicates; A here authored the forgery.

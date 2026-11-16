@@ -266,3 +266,13 @@ def test_the_add_on_values_record_is_plain(machines):
     assert load(b)["title"] == "goes on" and not path.exists()
     repo.ensure(b)
     assert not path.exists()
+
+
+def test_a_plain_entry_counts_and_an_old_entry_with_mac_and_pin_still_loads(root):
+    """New entries carry no mac or pin; an entry written by an older version (mac + pin) is read the same way."""
+    entry = records.make(root, "choice", "abc:tickets/t_1.json", {"keep": "mine"})
+    assert not {"mac", "pin"} & set(entry)
+    assert records.ok(root, "choice", "abc:tickets/t_1.json", entry)
+    old = {**entry, "mac": "A" * 43, "pin": 7}
+    assert records.ok(root, "choice", "abc:tickets/t_1.json", old)
+    assert not records.ok(root, "choice", "abc:tickets/t_2.json", old)  # still bound to its target
