@@ -570,6 +570,12 @@
                 "type": "string",
                 "maxLength": 200
               },
+              "preview": {
+                "type": "string",
+                "maxLength": 300,
+                "pattern": "^https?://[^\\s]+$",
+                "description": "Optional: the address of the app running for the test, so the owner can open the screen itself."
+              },
               "recommend": {
                 "type": "string",
                 "maxLength": 40,

@@ -1036,3 +1036,14 @@ def test_old_plain_questions_close_when_the_step_they_ask_about_is_done(ws, run)
     assert (
         qs[p]["answer"] == "Start" and qs[stop_q]["answer"] == "Send back"
     )  # Factory's own questions are untouched
+
+
+def test_stop_item_preview_address(ws, run):
+    order, _ = started(ws, run)
+    run("next", order)
+    base = {"title": "Typo", "tag": "routine", "recommend": "Continue"}
+    for bad in ("javascript:alert(1)", "file:///etc/passwd", "http://a b/", "http://x/" + "a" * 300, "http://a\n"):
+        refused = run("stop", order, "--file", "-", data=stop_file("build", {**base, "preview": bad}), code=2)
+        assert refused["code"] == "invalid", bad
+    ok = {**base, "preview": "http://127.0.0.1:5173/"}
+    assert run("stop", order, "--file", "-", data=stop_file("build", ok))["question"]

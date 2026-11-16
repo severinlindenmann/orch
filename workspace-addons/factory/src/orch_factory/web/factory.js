@@ -69,6 +69,13 @@
     if (href.startsWith('/#')) el.target = '_top';
     return el;
   }
+  // The optional address of the app running for the test: only a plain http(s) address becomes a link.
+  function previewLink(value) {
+    if (typeof value !== 'string' || value.length > 300 || !/^https?:\/\/\S+$/.test(value)) return null;
+    let url; try { url = new URL(value); } catch { return null; }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const el = link('Open the preview', url.href); el.target = '_blank'; el.rel = 'noopener noreferrer'; return el;
+  }
   function ticket(id, label = 'Answer in the ticket', primary = true) {
     return validId(id) ? link(label, '/#ticket/' + id, primary) : meta('Ticket reference unavailable.');
   }
@@ -600,6 +607,8 @@
         range.addEventListener('input', () => { const split = Number(range.value); compare.style.gridTemplateColumns = 'minmax(0,' + split + 'fr) minmax(0,' + (100 - split) + 'fr)'; });
         label.append(range); c.append(label);
       }
+      const tryIt = previewLink(item.preview);
+      if (tryIt) c.append(group('actions', tryIt));
       if (item.recommend) c.append(meta('Your agent suggests: ' + item.recommend));
       c.append(meta('Review images and pins are view-only here. Add feedback on the order ticket.')); view.append(c);
     }
