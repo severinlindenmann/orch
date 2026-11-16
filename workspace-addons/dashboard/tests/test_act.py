@@ -1472,6 +1472,10 @@ def test_workspace_set_builds_one_config_set_argv_and_needs_no_proof():
         {"field": "description", "text": "x" * 281},
         {"field": "name", "text": 5},
         {"field": "name", "text": "x", "extra": 1},
+        {"field": "tags", "text": "Bad Tag"},
+        {"field": "tags", "text": ["a"]},
     ):
         with pytest.raises(actions.BadRequest):
             actions.build_argv("workspace.set", bad)
+    argv = actions.build_argv("workspace.set", {"field": "tags", "text": "web,shop"})
+    assert argv[:3] == ["config", "set", "workspace.tags"] and argv[-2:] == ["--", "web,shop"]

@@ -76,6 +76,8 @@ text and the tags are sent to the first one that is connected, through the **sam
 shows "Waiting for relay approval" while `whoami.pending` is set and "Live on relay" after; the name on the relay is
 shown read only. Only the first connected service gets the proposal (relay before publish): the profile is one text with
 one owner answer, and a workspace rarely runs both; the card shows that service's state. Icon and colour apply at once (`look set`). Relay rows appear only when the relay is on (AGENTS.md R1.1).
+
+The name, the description and the tags are kept in `.orch/config.toml` `[workspace] name`, `description`, `tags = "a,b"` (up to 4 tags, `[a-z0-9-]{1,24}`), so the Tags row shows without a relay too. Like the look, an agent may set them (`orch config set workspace.name|description|tags`) while nobody has, and change its own choice; once a person set one (or it was set before orch kept track) an agent is refused. Who set each field is kept per machine in `profile-set-by.json` in the orch home, keyed by the workspace's real path. A first `orch init` run by a person at a terminal adds the starter task "Set up this workspace" that has the helper fill these in (`--starter` / `--no-starter`; off in scripts and `--json`).
 No new endpoint, no new trust path.
 
 ## Body rules (`PATCH /v1/me`, admin PATCH)
