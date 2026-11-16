@@ -209,7 +209,7 @@ def r7(e):
             time.sleep(1)
         return _agent_runs(log)
 
-    check(runs_reach(base + 1) == base + 1, f"the message allowed with --permanent did not run ({_agent_runs(log)} of {base + 1})")
+    check(runs_reach(base + 1) == base + 1, f"the message allowed with --permanent did not run ({_agent_runs(log)} of {base + 1}): {log.read_text()[-600:]!r}")
     e.orch("Pilatus", "relay", "start", i["Reports"], "weekly-report", "second time")
     st2 = [m for m in inbox(e, "Reports") if m["type"] == "start" and m["body"].get("text") == "second time"]
     check(st2 and st2[-1]["allowed"] is True, f"second start with token must be allowed: {st2}")
