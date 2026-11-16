@@ -378,6 +378,7 @@ def test_a_set_limit_of_four_and_the_fifth_starts_when_one_closes(proj, run, lab
     assert rec["mode"] == "live" and len(runs_live.live_alive(proj)) == 4
 
 
+@needs_tmux
 def test_no_limit_by_default_the_fifth_starts_at_once(proj, run, lab, tmp_path, monkeypatch):
     _fake_claude(tmp_path, monkeypatch)
     _claude_live(proj)
