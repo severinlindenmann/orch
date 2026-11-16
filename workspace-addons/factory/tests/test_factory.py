@@ -436,3 +436,20 @@ def test_act_idea_keeps_a_three_sentence_idea_whole_in_the_note(ws):
     assert len(t["title"]) <= 81 and t["title"] != idea
     assert idea in t["note"] and "Factory order" in t["note"]
     assert Store(ws).path(f"drafts/{r['order']}/v1.md").read_text() == idea + "\n"
+
+
+def test_skill_asks_routine_choices_with_options_and_cleans_up_its_own_checks():
+    import orch_factory
+
+    text = (Path(orch_factory.__file__).parent / "skills/orch-factory/SKILL.md").read_text()
+    # 49: the link lifetime is four buttons with a suggestion, not a typed answer
+    assert (
+        '--option "7 days" --option "30 days" --option "90 days" --option "Permanent" --recommend "7 days"'
+        in text
+    )
+    # 51: the check data of the ship step is removed before the hand-over
+    assert "remove\neverything you created only to check the live result" in text
+    # 50: plurals in built apps
+    assert '"1 point", "2 points", never "1 pts"' in text
+    # 43: draft questions are asked as ticket questions, not listed in the draft
+    assert "Open questions do NOT go into the draft as a list" in text
