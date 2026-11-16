@@ -1,0 +1,600 @@
+{
+ "note": "PR 978, first commit, recorded from the GitHub check-runs of 16 Nov: banned-words (workflow rules) FAILURE while gate (workflow ci) SUCCESS. Must be NOT green.",
+ "repo": "severinlindenmann/orch",
+ "pr": 978,
+ "head": "3dece32a6d9c29a91871a2fbc222cb176c0ef068",
+ "isDraft": false,
+ "required": [
+  "gate"
+ ],
+ "polls": [
+  {
+   "at": "2026-11-16T09:59:32Z",
+   "checks": [
+    {
+     "name": "workspace / windows-standard-user",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / insights",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / automation",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / dashboard",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "mobile / test",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / page-smoke",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / factory",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / py311",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / focus",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / tool-name-scan",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / lessons",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / sync",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "workspace / test (ubuntu-latest)",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "relay / test",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "publish / test",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke / smoke (windows-latest)",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke / smoke (macos-15)",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "contracts / validate",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "brand",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "changes",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "relay",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "workspace",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "contracts",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "publish",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "mobile",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "gate",
+     "state": "FAILURE",
+     "bucket": "fail",
+     "workflow": "ci"
+    },
+    {
+     "name": "banned-words",
+     "state": "FAILURE",
+     "bucket": "fail",
+     "workflow": "rules"
+    }
+   ],
+   "runs": [
+    {
+     "name": "ci",
+     "id": 43844667417,
+     "status": "in_progress"
+    },
+    {
+     "name": "rules",
+     "id": 43844645894,
+     "status": "completed"
+    },
+    {
+     "name": "ci",
+     "id": 43844646037,
+     "status": "completed"
+    }
+   ]
+  },
+  {
+   "at": "2026-11-16T10:10:32Z",
+   "checks": [
+    {
+     "name": "workspace / windows-standard-user",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / insights",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / automation",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / dashboard",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "mobile / test",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / page-smoke",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / factory",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / py311",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / focus",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / tool-name-scan",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / lessons",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / sync",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "workspace / test (ubuntu-latest)",
+     "state": "IN_PROGRESS",
+     "bucket": "pending",
+     "workflow": "ci"
+    },
+    {
+     "name": "relay / test",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "publish / test",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke / smoke (windows-latest)",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke / smoke (macos-15)",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "contracts / validate",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "brand",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "changes",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "relay",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "workspace",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "contracts",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "publish",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "mobile",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "gate",
+     "state": "FAILURE",
+     "bucket": "fail",
+     "workflow": "ci"
+    },
+    {
+     "name": "banned-words",
+     "state": "FAILURE",
+     "bucket": "fail",
+     "workflow": "rules"
+    }
+   ],
+   "runs": [
+    {
+     "name": "ci",
+     "id": 43844667417,
+     "status": "in_progress"
+    },
+    {
+     "name": "rules",
+     "id": 43844645894,
+     "status": "completed"
+    },
+    {
+     "name": "ci",
+     "id": 43844646037,
+     "status": "completed"
+    }
+   ]
+  },
+  {
+   "at": "2026-11-16T10:21:32Z",
+   "checks": [
+    {
+     "name": "gate",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "workspace / windows-standard-user",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / insights",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / automation",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / dashboard",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "mobile / test",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / page-smoke",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / factory",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / py311",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / focus",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / tool-name-scan",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / lessons",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons / sync",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "workspace / test (ubuntu-latest)",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "relay / test",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "publish / test",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke / smoke (windows-latest)",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke / smoke (macos-15)",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "contracts / validate",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "brand",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "changes",
+     "state": "SUCCESS",
+     "bucket": "pass",
+     "workflow": "ci"
+    },
+    {
+     "name": "relay",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "addons",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "cli-smoke",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "workspace",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "contracts",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "publish",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "mobile",
+     "state": "SKIPPED",
+     "bucket": "skipping",
+     "workflow": "ci"
+    },
+    {
+     "name": "banned-words",
+     "state": "FAILURE",
+     "bucket": "fail",
+     "workflow": "rules"
+    }
+   ],
+   "runs": [
+    {
+     "name": "ci",
+     "id": 43844667417,
+     "status": "completed"
+    },
+    {
+     "name": "rules",
+     "id": 43844645894,
+     "status": "completed"
+    },
+    {
+     "name": "ci",
+     "id": 43844646037,
+     "status": "completed"
+    }
+   ]
+  }
+ ]
+}

@@ -132,17 +132,9 @@ function ticketNext(t) {
   } else if (status === 'review') {
     action = h('a', {className:'btn outline sm', href:href(t.id)}, 'Check result');
   } else if (['open', 'ready'].includes(status) && !state.runs?.[t.id]?.running && !starting.has(t.id)) {
-    const paused = ticketIsPaused(t);
-    if (paused) text = 'Paused' + (t.updated_at ? ' ' + localDay(t.updated_at) : '');
-    if (!snapshot) action = button(paused ? 'Resume' : 'Start helper', 'outline sm', async event => {
-      if (changeUnavailable()) return;
-      const control = event.currentTarget;
-      if (control.disabled) return;
-      control.disabled = true;
-      const result = await act('run.start', {ticket:t.id});
-      control.disabled = false;
-      if (!result.ok) window.orch.toast(changeError(result), 'error');
-    });
+    // ORCH-69 (owner picked A, 16 Nov): no Start helper / Resume button on board and list cards; starting a helper
+    // costs budget, so it is never the easiest click. Start it from the ticket page or from Home.
+    if (ticketIsPaused(t)) text = 'Paused' + (t.updated_at ? ' ' + localDay(t.updated_at) : '');
   }
   return text || action ? h('div', {className:'row ticket-next'}, text ? h('span', {className:'meta'}, clean(text)) : null, action) : null;
 }

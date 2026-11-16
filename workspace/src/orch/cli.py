@@ -717,6 +717,19 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--head", required=True, metavar="COMMIT", help="merge only while this is its newest commit"
     )
 
+    x = lk.add_parser(
+        "wait",
+        parents=[common],
+        help="wait for the ticket's pull requests' checks (no AI call), write the verdict, merge on green",
+    )
+    x.add_argument("id")
+    x.add_argument(
+        "targets", nargs="*", metavar="target", help="numbers from `orch ref list` or addresses, in order "
+        "(default: every pull request not merged or closed yet)"
+    )  # fmt: skip
+    x.add_argument("--merge", action="store_true", help="merge each one on green, one after the other")
+    x.add_argument("--timeout", type=int, default=60, metavar="MIN", help="give up after this (default 60)")
+
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
     x.add_argument("id")
@@ -1345,6 +1358,67 @@ def _ref_merge(args, root: Path, who: str) -> None:
     _out(args, {"merged": True, "already": got["already"], "url": url}, line)
 
 
+def _ref_wait(args, root: Path, who: str) -> None:
+    """Wait for the ticket's pull requests' checks one after the other, without an AI call (prwait). Each
+    verdict goes on the ticket (a history line and the reference's state); with --merge each one is merged on
+    green before the next is waited for. Stops at the first that is not green (or not merged). Exit 1 then."""
+    from orch import prwait, stuck
+
+    t = tickets.load(root, args.id)
+    key = t.get("key") or t["id"]
+    rows = refs.all_refs(root, t)
+    if args.targets:
+        urls = []
+        for target in args.targets:
+            ref = next(
+                (r for n, r in rows if (str(n) == target if target.isdigit() else r.get("url") == target)),
+                None,
+            )
+            if ref is None or not prwait.is_pr_url(ref.get("url")):
+                raise Refused(f"{key} has no GitHub pull request {target}. Link it: orch ref add {key} <url>")
+            urls.append(ref["url"])
+    else:
+        urls = stuck.open_pulls(t)
+        if not urls:
+            raise Refused(f"{key} has no open GitHub pull request. Link one: orch ref add {key} <url>")
+    if args.merge:
+        for q in t.get("questions") or []:
+            if q.get("answer") is None and review.merge_url(q) in urls:
+                url = review.merge_url(q)
+                raise Refused(f"A person merges {url} with the Merge card on {key}; it is not merged here.")
+    if args.timeout < 1:
+        raise Refused("--timeout is a number of minutes, at least 1.")
+    done = []
+    for url in urls:
+        o = prwait.run_one(url, args.merge, timeout=args.timeout * 60)
+        done.append(o)
+        if not args.json:
+            for name, state in o.verdict.checks if o.verdict else []:
+                print(f"  {name}\t{state}")
+            print(o.line)
+        with contextlib.suppress(Refused, OSError):  # the verdict is said; the ticket lines are extras
+            tickets.note_history(root, t["id"], who, o.line)
+            if o.status:
+                tickets.ref_set(root, t["id"], url, o.status, who)
+        if not o.ok:
+            break
+    args._exit = 0 if all(o.ok for o in done) and len(done) == len(urls) else 1
+    shown = [
+        {
+            "url": o.url,
+            "ok": o.ok,
+            "status": o.status,
+            "line": o.line,
+            "green": bool(o.verdict and o.verdict.green),
+        }
+        for o in done
+    ]
+    if args.json:
+        _out(args, shown, "")
+    else:
+        nextstep.remember(args, shown)
+
+
 def _ref(args, root: Path, by) -> None:
     kinds = refs.active_kinds(root)
     if args.sub == "add":
@@ -1375,6 +1449,8 @@ def _ref(args, root: Path, by) -> None:
                 )
     elif args.sub == "merge":
         _ref_merge(args, root, by())
+    elif args.sub == "wait":
+        _ref_wait(args, root, by())
     elif args.sub == "set":
         t, ref, changed = tickets.ref_set(root, args.id, args.target, args.status, by())
         d = refs.describe(ref, kinds, root)
@@ -1527,4 +1603,4 @@ def main(argv: list[str] | None = None, watchdog=None) -> int:
     except Exception as e:  # an unexpected crash: freeze what is there before the traceback ends the program
         diag_incident.on_crash(diag._state.get("root"), e, argv)
         raise
-    return 0
+    return getattr(args, "_exit", 0)  # 1: a waited-for check is not green (orch ref wait)

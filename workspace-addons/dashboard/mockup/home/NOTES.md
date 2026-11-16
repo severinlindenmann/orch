@@ -46,3 +46,10 @@ Home: the question is body text; answering moves the card out, the next one in, 
   "The helper has been idle for 14 min with nothing running." has `Nudge` and `Start fresh`.
   A click answers with a toast and the row leaves. Hidden without the flag, so the shared demo count (3) stays.
 - A set of review cards on one ticket (16 Nov, ORCH-65): one row with the set name (the helper's group, else the ticket), "N cards to look at", the first three proposal pictures with their card titles, and "Look at all N", which opens Review at the first card (`#card-set`).
+
+## Factory start question (16 Nov 2026, ORCH-60)
+
+- `home.html?factory=1`: a Factory start question is a few lines, as the owner accepted on 16 Nov: "Factory proposal",
+  `Start "<title>"?`, the one-line goal, "Runs about … · needs you for about … · up to … of helper time", who asked and
+  "Read the whole proposal" (the proposal on the Factory page). Buttons Not now, Change it, Start: same weight, Start
+  last, Change it answers Edit. Never the whole proposal text on Home. Lower in the list: one row with "Read proposal".

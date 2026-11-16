@@ -395,6 +395,27 @@
     return {state: 'new', agent, status: 'not started yet', primary: start('Start'), items: []};
   }
 
+  /* A Factory start question (kind factory:start) in a few lines for Home (ORCH-60). The question's text is the frozen
+     proposal Factory wrote ("Start '<title>'? ~10 h · target $5 · you're needed for ~15 min. Goal: … . Done means: …
+     Cap: 13 h active. …"); Home shows its title, goal and time only and links to the whole proposal. Null when the
+     text is not in that shape (the card then shows the question as it always did). */
+  function factoryStart(text) {
+    const m = /^Start '(.+?)'\? ~([^.]+?)\. Goal: (.+?)\. Done means: /s.exec(String(text || ''));
+    if (!m) return null;
+    const head = m[2].split(' · '), cap = /\. Cap: (.+?) active\. /.exec(String(text))?.[1];
+    const usd = head.map(x => /^target \$([0-9.]+)$/.exec(x)?.[1]).find(Boolean);
+    const owner = head.map(x => /^you're needed for ~(.+)$/.exec(x)?.[1]).find(Boolean);
+    const meta = ['Runs about ' + head[0], owner ? 'needs you for about ' + owner : '', usd ? 'about $' + usd : '', cap ? 'up to ' + cap + ' of helper time' : ''];
+    return {title: m[1], goal: /[.!?…]$/.test(m[3]) ? m[3] : m[3] + '.', meta: meta.filter(Boolean).join(' · ')};
+  }
+  /* Its buttons as drawn (owner, 16 Nov): Not now, Change it, Start, Start last; each sends Factory's own option word. */
+  const FACTORY_START_ORDER = ['Not now', 'Edit', 'Start'], FACTORY_START_LABEL = {Edit: 'Change it'};
+  function factoryStartOptions(options) {
+    const opts = arr(options);
+    return opts.slice().sort((a, b) => (FACTORY_START_ORDER.indexOf(a) + 1 || 99) - (FACTORY_START_ORDER.indexOf(b) + 1 || 99))
+      .map(o => ({answer: o, label: FACTORY_START_LABEL[o] || o}));
+  }
+
   /* The line under an agent's "waiting" chip, in plain words: no command text, a login named as signing in. */
   function plainWhy(why, label) {
     const w = String(why || '');
@@ -571,5 +592,5 @@
     return hours < 24 ? 'Updated ' + hours + (hours === 1 ? ' hour ago' : ' hours ago') : 'Updated ' + Math.floor(hours / 24) + (hours < 48 ? ' day ago' : ' days ago');
   }
 
-  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
+  return {ticketKey, keyTag, helperState, helperRows, HELPER_WORDS, dueWords, quietWords, dueLate, stepsText, updatedText, resolved, agentLabel, childrenOf, creationOrder, parentOf, plainFileName, cleanOutcome, outcome, plainNames, scrubText, historyWho, historyView, dedupeHistory, footerState, STATUS_WORD, STATUS_ORDER, STATUS_CHOICES, MOVE_CHOICES, statusWord, columnOf, helperAlive, needsYou, needsYouCount, isNotice, isBringBack, uniqueNeeds, inNeeds, firstColumnWithTickets, columnChipLabel, phoneParts, cronHuman, flushPending, historyLine, winningAnswer, needAction, agentRows, serviceLinks, agentLine, startFailure, plainStartReason, plainWhy, factoryStart, factoryStartOptions, questionPreview, shownStatus, showsAnswerChip, treeRows, proofMark, fileProofLabel, stamp, ago};
 });
