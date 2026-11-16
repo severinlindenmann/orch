@@ -165,10 +165,11 @@ def head_of(url: str) -> str:
     return head
 
 
-def merge(url: str, head: str) -> dict:
+def merge(url: str, head: str, add_review: bool = True) -> dict:
     """Merge the pull request at `url` as the person signed in to gh, only while its newest commit is still
     `head` (what the card showed). Returns {"login", "already"}: already is True when it was merged before (a
-    second click, or a retry after a crash), which is not an error."""
+    second click, or a retry after a crash), which is not an error. add_review False (`orch ref merge`): the
+    person's review is never added; where the branch rules want one, GitHub refuses and says so."""
     repo, num = _parts(url)
     if not isinstance(head, str) or not SHA.fullmatch(head):
         raise Refused("This merge card has no commit to merge. Ask the helper for a new card.")
@@ -187,7 +188,7 @@ def merge(url: str, head: str) -> dict:
     if now != head:
         raise Refused(CHANGED)
     if (
-        review == "REVIEW_REQUIRED"
+        add_review and review == "REVIEW_REQUIRED"
     ):  # the branch rules want a review: the click is the person's, on THIS commit
         _gh(  # the person's own pull request: GitHub says no, and the merge below tells what is missing
             gh,

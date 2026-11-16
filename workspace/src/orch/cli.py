@@ -1243,7 +1243,15 @@ def _ref_merge(args, root: Path, who: str) -> None:
     if ref is None or not ghmerge.is_pr_url(ref.get("url")):
         raise Refused(f"{key} has no GitHub pull request {args.target}. See them: orch ref list {key}")
     url = ref["url"]
-    got = ghmerge.merge(url, args.head)
+    # What the row said is checked again now, at GitHub: the kept look is a file any helper can write.
+    now = ghmerge.checks(url)
+    if now is None:
+        raise Refused(f"GitHub did not show the pull request, so nothing was merged. {ghmerge.OPEN_IT}")
+    if now["state"] == "OPEN" and now["head"] != args.head:
+        raise Refused("The pull request changed after it was shown. Look at it again, then merge.")
+    if now["state"] == "OPEN" and not now["green"]:
+        raise Refused(f"Its checks have not all passed right now, so nothing was merged. {ghmerge.OPEN_IT}")
+    got = ghmerge.merge(url, args.head, add_review=False)  # one click never adds the person's review
     line = (
         f"The pull request was merged already on GitHub ({got['login']}): {url}"
         if got["already"]

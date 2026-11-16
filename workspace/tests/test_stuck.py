@@ -269,19 +269,31 @@ def test_a_broken_run_record_never_breaks_needs(proj, run, new_ticket, monkeypat
 
 class FakeGh:
     def __init__(self):
-        self.calls, self.state = [], "OPEN"
+        self.calls, self.state, self.review, self.rollup = [], "OPEN", "", [OK]
 
     def __call__(self, argv, env=None, **kw):
         args = argv[1:]
         self.calls.append(args)
         if args[:2] == ["api", "user"]:
             return subprocess.CompletedProcess(argv, 0, "pat-gh\n", "")
+        if args[:2] == ["pr", "view"] and "--jq" not in args:  # the look at its checks
+            data = {
+                "state": self.state,
+                "isDraft": False,
+                "headRefOid": HEAD,
+                "statusCheckRollup": self.rollup,
+            }
+            return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
         if args[:2] == ["pr", "view"]:
-            return subprocess.CompletedProcess(argv, 0, f"{self.state}\t\t{HEAD}\n", "")
+            return subprocess.CompletedProcess(argv, 0, f"{self.state}\t{self.review}\t{HEAD}\n", "")
         if args[:2] == ["pr", "merge"]:
             self.state = "MERGED"
             return subprocess.CompletedProcess(argv, 0, "", "")
         raise AssertionError(args)
+
+    @property
+    def merges(self):
+        return [c for c in self.calls if c[:2] == ["pr", "merge"]]
 
 
 @pytest.fixture
@@ -314,11 +326,30 @@ def test_ref_merge_refuses_a_helper_and_a_changed_pull_request(proj, run, new_ti
     assert code == 2 and "Only a person merges this" in out + err
     monkeypatch.delenv("CLAUDECODE")
     code, out, err = run("ref", "merge", tid, "1", "--head", "b" * 40, "--by", "human:pat")
-    assert code == 2 and "changed after" in out + err
+    assert code == 2 and "changed after it was shown" in out + err
     code, out, err = run("ref", "merge", tid, "https://github.com/acme/app/pull/99", "--head", HEAD)
     assert code == 2
-    assert [c for c in gh.calls if c[:2] == ["pr", "merge"]] == []
+    assert gh.merges == []
     assert tickets.load(proj, tid)["refs"][0].get("status") is None
+
+
+def test_ref_merge_asks_github_again_and_never_trusts_the_kept_look(proj, run, new_ticket, gh):
+    """The kept look is a file a helper can write: a row made from a faked "passed" merges nothing."""
+    tid = _in_review(proj, run, new_ticket)
+    _seen(proj)  # the file says passed
+    gh.rollup = [OK, {"status": "COMPLETED", "conclusion": "FAILURE"}]  # GitHub says a check failed
+    code, out, err = run("ref", "merge", tid, PR, "--head", HEAD, "--by", "human:pat")
+    assert code == 2 and "checks have not all passed" in out + err and gh.merges == []
+    gh.rollup = [{"status": "IN_PROGRESS", "conclusion": ""}]
+    assert run("ref", "merge", tid, PR, "--head", HEAD, "--by", "human:pat")[0] == 2 and gh.merges == []
+
+
+def test_ref_merge_never_adds_the_persons_review(proj, run, new_ticket, gh):
+    tid = _in_review(proj, run, new_ticket)
+    gh.review = "REVIEW_REQUIRED"  # the Merge card adds a review here; one click on Home does not
+    code, out, err = run("ref", "merge", tid, PR, "--head", HEAD, "--by", "human:pat")
+    assert code == 0, out + err
+    assert [c for c in gh.calls if c[:3] == ["api", "-X", "POST"]] == [] and len(gh.merges) == 1
 
 
 # ---------------------------------------------------------------- the helper's finish step
