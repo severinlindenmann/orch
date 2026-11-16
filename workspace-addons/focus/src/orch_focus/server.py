@@ -674,9 +674,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST" and self.headers.get("Origin") is None:
             return "This request was refused (no origin)."
         port = self.server.server_address[1]
-        signed_in = at_login or bool(
-            self.session is not None and self.session.cookie_ok(self.headers, port)
-        )
+        signed_in = at_login or bool(self.session is not None and self.session.cookie_ok(self.headers, port))
         return check_request(method, self.headers, port, api=api, signed_in=signed_in)
 
     def do_GET(self):

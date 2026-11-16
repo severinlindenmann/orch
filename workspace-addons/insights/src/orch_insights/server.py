@@ -154,9 +154,7 @@ class Handler(BaseHTTPRequestHandler):
         except ImportError:
             return "Insights is not available in this install."
         port = self.server.server_address[1]
-        signed_in = at_login or bool(
-            self.session is not None and self.session.cookie_ok(self.headers, port)
-        )
+        signed_in = at_login or bool(self.session is not None and self.session.cookie_ok(self.headers, port))
         why = check_request(method, self.headers, port, api=api, signed_in=signed_in)
         if method == "POST" and self.headers.get("Origin") is None:
             return why or "This request was refused (no origin)."
