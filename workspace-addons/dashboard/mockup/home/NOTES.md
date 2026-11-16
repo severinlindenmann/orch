@@ -45,3 +45,4 @@ Home: the question is body text; answering moves the card out, the next one in, 
   "The pull request passed its checks but was not merged, and no helper is working on it." has `Merge` (the person's own GitHub login, exactly the commit shown) and `Start helper` (`Nudge` when a helper sits idle on it).
   "The helper has been idle for 14 min with nothing running." has `Nudge` and `Start fresh`.
   A click answers with a toast and the row leaves. Hidden without the flag, so the shared demo count (3) stays.
+- A set of review cards on one ticket (16 Nov, ORCH-65): one row with the set name (the helper's group, else the ticket), "N cards to look at", the first three proposal pictures with their card titles, and "Look at all N", which opens Review at the first card (`#card-set`).

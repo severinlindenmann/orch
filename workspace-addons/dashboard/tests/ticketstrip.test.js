@@ -89,3 +89,11 @@ test('G2: a quiet ticket shows one line, "No news since" replaces "Updated"', ()
   assert.match(text(sentence), /^No news since .+\.$/);
   assert.doesNotMatch(text(sentence), /Updated/);
 });
+
+test('Needs you: the strip names the agent that asked (as Home does), not always "Helper" (ORCH-65)', () => {
+  const c = ctx({state:{runs:{t_one:{claim:{agent:'manager', label:'Manager'}}}}});
+  const tree = c.detail({...base, status:'waiting', questions:[{id:'q1', text:'Build the new card look?'}]});
+  const strip = nodes(tree).find(n => /(^| )strip( |$)/.test(n.attrs.className || ''));
+  assert.match(text(strip), /Manager asks: Build the new card look\?/);
+  assert.doesNotMatch(text(strip), /Helper asks/);
+});

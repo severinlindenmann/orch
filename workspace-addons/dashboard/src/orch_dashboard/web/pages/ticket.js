@@ -1097,9 +1097,23 @@ function ticketChangesEditor(t) {
   row.append(...[done, open, uncovered, shown].filter(Boolean)); host.append(row); return host;
 }
 function ticketQuestion(t, q, next = false) {
+  const card = q.card && typeof q.card === 'object' ? q.card : null;
   return h('section', {className:next ? 'card next-step next-question' : 'ticket-question'},
-    h('div', {className:'meta ticket-eyeline'}, (next ? 'Next step · ' : '') + clean(q.title || 'Your answer'), ticketPhone(q)),
-    h('h2', {}, clean(q.text)), snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+    h('div', {className:'meta ticket-eyeline'}, (next ? 'Next step · ' : '') + clean((card && card.title) || q.title || 'Your answer'), ticketPhone(q)),
+    h('h2', {}, clean(q.text)), card ? ticketCardShown(t, q, card) : snapshot ? h('p', {className:'meta'}, 'Waiting for an answer') : h('div', {'data-key':'question-' + q.id, 'data-question':q.id, 'data-ticket':t.id}));
+}
+// A question with a card (orch ask --draft/--choose/...): the text and the card's pictures together, answered on the
+// card itself (Review opens at this card), so the answer keeps what was picked, the comment and the marked spots.
+function ticketCardShown(t, q, card) {
+  const api = typeof reviewApi === 'function' ? reviewApi() : null;
+  const pv = card.preview?.type === 'options'  // the suggested option is marked on its picture, as on the card
+    ? {...card.preview, options:array(card.preview.options).map(o => ({...o, suggested:o.id === q.recommended}))} : card.preview;
+  const tiles = window.UI?.cardShown ? window.UI.cardShown({card:{...card, preview:pv}, ticket:t.id}, {fileUrl:api ? api.fileUrl : () => ''}) : null;
+  const sug = q.recommended === 'ok' ? 'Suggested: ' + (card.ok_label || 'Looks good') : q.recommended === 'no' ? "Suggested: Don't do" : '';
+  const go = snapshot ? h('p', {className:'meta'}, 'Waiting for an answer')
+    : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + t.id + ':' + q.id), 'data-key':'card-go-' + q.id}, 'Look and answer');
+  return h('div', {className:'stack', 'data-key':'card-shown-' + q.id}, tiles, card.why ? h('p', {className:'meta'}, clean(card.why)) : null, h('div', {className:'row'}, go, sug ? h('span', {className:'swipe-sug'}, sug) : null,
+    array(q.links).filter(l => l && /^https?:\/\//i.test(String(l.url || ''))).slice(0, 5).map((l, i) => h('a', {className:'btn ghost sm', href:String(l.url), target:'_blank', rel:'noopener', 'data-key':'card-link-' + q.id + '-' + i}, iconEl('link'), clean(l.label)))));
 }
 // A step is named by its title only; the ticket key is a quiet line under Properties.
 const partName = p => clean(p.title);
@@ -1291,7 +1305,9 @@ function ticketStripModel(t, run, fresh) {
   }
   if (q) {
     const ask = clean(q.text || '').replace(/\s+/g, ' ').trim();
-    return {pill:'needs', word:'Needs you', sentence:'Helper asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask)};
+    // who asked: the agent on the ticket by its own name (as Home says it), "Helper" only when none is known
+    const asker = window.DashHelpers?.agentLabel ? window.DashHelpers.agentLabel(state?.settings, (run || state?.runs?.[t.id])?.claim) : 'Helper';
+    return {pill:'needs', word:'Needs you', sentence:asker + ' asks: ' + (ask.length > 110 ? ask.slice(0, 107) + '…' : ask)};
   }
   if (t.status === 'review') return {pill:'check', word:'Check', sentence:'Helper finished' + (at ? ' ' + at : '') + '.'};
   if (t.bring_back?.state === 'waiting') return {pill:'needs', word:'Needs you', sentence:'Helper has changes waiting for you.'};

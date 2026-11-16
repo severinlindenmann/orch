@@ -64,6 +64,9 @@ test('the All cards list: the card on screen in bold, answered ones quiet with t
   const item = (id, title) => ({id, title, icon:'page', kind:'draft', okLabel:'Build it', preview:{type:'page'}});
   const deck = {items:[item('a', 'First'), item('b', 'Second'), item('c', 'Third')], index:1, answers:{a:{verdict:'ok', item:item('a', 'First'), note:null}, c:{verdict:'no', item:item('c', 'Third')}}, jump(i) { deck.index = i; }};
   c.document = {createElement: t => h(t)}; c.reviewDrawSide(queue, deck);
+  assert.equal(rows.length, 1, 'one set: one section without a heading');
+  assert.ok(!nodes(rows[0]).some(n => /review-group-head/.test(n.attrs?.className || '')));
+  rows.splice(0, 1, ...rows[0].children);
   assert.equal(rows.length, 3);
   assert.match(rows[0].attrs.className, /is-done/); assert.match(text(rows[0]), /Build it/);
   assert.match(rows[1].attrs.className, /is-now/); assert.match(text(rows[1]), /Now/);
@@ -138,4 +141,22 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
   const list = vm.runInContext('ticketReviewAnswers', c)(t);
   assert.deepEqual(list.map(e => e.id), ['core:q:t_abcdef:q3', 'core:q:t_abcdef:q1'], 'an answer without a decision is not one');
   assert.equal(vm.runInContext('ticketReviewAnswers', c)({id:'t_abcdef', questions:[{id:'q4', answer:'x'}]}).length, 0);
+});
+
+test('the All cards list: one section per set (group, else ticket) with its own count (ORCH-65)', () => {
+  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
+  const secs = []; const queue = {replaceChildren(...r) { secs.push(...r); }};
+  const item = (id, extra) => ({id, title:'Card ' + id, icon:'page', kind:'draft', preview:{type:'page'}, ticketTitle:'Home look', ...extra});
+  const deck = {items:[item('a', {group:'Phone'}), item('b', {group:'Phone'}), item('c')], index:1, answers:{a:{verdict:'ok', item:item('a'), note:null}}, jump() {}};
+  c.reviewDrawSide(queue, deck);
+  assert.equal(secs.length, 2);
+  assert.match(text(secs[0]), /^Phone1 of 2 waiting/); assert.match(text(secs[1]), /^Home look1 of 1 waiting/);
+});
+
+test('Review opens at the card the ticket page asked for (#review?card=...)', () => {
+  const calls = [];
+  const c = ctx({}, {location:{hash:'#review?card=' + encodeURIComponent('core:q:t_abcdef:q2')}, window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const host = h('div'), main = {querySelectorAll: sel => sel === '[data-review-host]' ? [host] : [], querySelector: () => h('div')};
+  c.mountReview(main);
+  assert.equal(calls[0].startId, 'core:q:t_abcdef:q2');
 });

@@ -8,3 +8,9 @@
 - The product page also has the Waiting / Answered switch above the deck (kit `UI.reviewPage`); this static page shows the Waiting side only.
 - No Decisions tab: the ticket page shows card answers under its questions ("Earlier answers"), with "What applies now" on top: `../ticket/ticket-answers.html`.
 - No extra chip on a card: an answer is a plain click.
+- 16 Nov (ORCH-65): cards carry the whole question text, a marked suggestion ("Suggested: Build it" on the card and under
+  the button; "Suggested" on an option), a Today tile beside the options of a choice, the helper's links in the footer
+  (Mockup, Issue …), pictures that fit their pane on a dark ground with a zoom button per side, and sets
+  ("Home look") in the All cards list with "n of m waiting".
+- No swipe (owner 16 Nov): the card does not move with the finger or mouse and does not fly away; answers are the
+  buttons and the arrow keys, the answered card fades.

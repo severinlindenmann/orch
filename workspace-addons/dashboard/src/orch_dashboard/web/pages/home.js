@@ -255,6 +255,31 @@ function shortQuestion(text) {
   const first = String(text || '').split(/(?<=[?.])\s/)[0].trim();
   return first.length > 110 ? first.slice(0, 107) + '…' : first;
 }
+// The card on a question (orch ask --draft/--choose/...), else null.
+function needCardQuestion(row) {
+  const q = array(ticketOf(row.ticket)?.questions).find(x => x.id === row.answer?.question);
+  return q && q.card && typeof q.card === 'object' ? q : null;
+}
+// Cards that wait on one ticket (a design review is often a set of them): one row with the set's name, how many,
+// the first pictures, and one button that opens Review at the first card.
+function cardSetRow(row) {
+  const t = ticketOf(row.ticket), open = array(t?.questions).filter(q => q.answer == null && !q.taken_back && q.card && typeof q.card === 'object');
+  const names = [...new Set(open.map(q => q.group).filter(Boolean))], n = open.length || 1, key = 'need-set-' + (t?.id || row.id);
+  const title = names.length === 1 ? names[0] : clean(t?.title || 'Cards to look at');
+  const api = typeof reviewApi === 'function' ? reviewApi() : null, o = {fileUrl:api ? api.fileUrl : () => ''};
+  const pics = window.UI?.cardShown ? open.slice(0, 3).map(q => {
+    const g = window.UI.cardShown({card:q.card, ticket:t.id}, o), tiles = g ? [...g.children] : [];
+    const pick = tiles.find(x => x.dataset.on === 'after') || tiles.find(x => x.dataset.on !== 'before') || tiles[0];  // the proposal, not how it is
+    if (!pick) return null;
+    const cap = pick.querySelector('b');
+    if (cap) cap.textContent = clean(q.card.title || '');
+    return pick;
+  }).filter(Boolean) : [];
+  const meta = [n === 1 ? '1 card to look at' : n + ' cards to look at', names.length === 1 && t && clean(t.title) !== title ? clean(t.title) : '', typeof age === 'function' ? age(row.since) : ''].filter(Boolean).join(' · ');
+  const go = snapshot ? null : h('a', {className:'btn outline sm', href:'#review?card=' + encodeURIComponent('core:q:' + row.ticket + ':' + (open[0]?.id || row.answer?.question)), 'data-key':key + '-go'}, n === 1 ? 'Look at it' : 'Look at all ' + n);
+  return h('div', {className:'card-row', 'data-key':key, 'data-need-row':row.id},
+    h('div', {className:'grow stack'}, h('div', {}, h('h3', {}, title), h('p', {className:'meta'}, meta)), pics.length ? h('div', {className:'decision-shown'}, pics) : null), go);
+}
 // A further question, startable failure or add-on row: the same one button the full card would open.
 function needListRow(row, count, same) {
   const t = ticketOf(row.ticket), choice = window.DashHelpers.needAction(row), key = 'need-' + row.id;
@@ -454,8 +479,8 @@ function home() {
       card('finished-today', 'Finished', '', finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.')), changedCard);
   }
   const first = groupedNeeds.slice().sort((a, b) => (Date.parse(a.row.since) || Infinity) - (Date.parse(b.row.since) || Infinity))
-    .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length);
-  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
+    .find(g => g.row.answer?.question && array(g.row.answer.options).length && !needActs(g.row).length && !needCardQuestion(g.row));
+  const further = groupedNeeds.filter(g => g !== first).map(({row, count, same}) => needCardQuestion(row) ? cardSetRow(row) : needActs(row).length || isHelperRow(row) || (!row.ticket && array(row.answer?.options).length) ? needRow(row, newest, count, same) : needListRow(row, count, same));
   const list = [first ? needRow(first.row, newest, first.count, first.same) : null, ...further, ...failed.map(([t, sf]) => startFailedRow(t, sf)),
     ...results.map(resultRow), ...changes.map(changeRow), ...notes];
   const finishedBody = finished.length ? finished.map(ticketRow) : emptyRow(lastFinished(all) ? 'Nothing finished today. ' + lastFinished(all) : 'Nothing finished yet.');
