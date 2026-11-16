@@ -54,3 +54,26 @@ test('changed since the check: the line and a button that sends one fixed text',
   assert.deepEqual(sent, [['t_1', 'Please run the checks again and record them with orch check record.']]); // fixed text, not the stored command
   assert.equal(find(c.ticketProofLine({...t, status:'active'})), undefined);
 });
+const nodesOf = n => n && typeof n === 'object' ? [n, ...(n.children || []).flatMap(nodesOf)] : [];
+test('in Check each step shows its evidence: completion note, what ran, the pull request link', () => {
+  const ev = [{type:'command', ref:'pr-green.sh 1012', exit:0}, {type:'note', summary:'Merged on green CI.', ref:'pr-green: GREEN, 4 checks SUCCESS; merged as 0c49e136'},
+    {type:'pr', ref:'https://github.com/o/r/pull/1012'}, {type:'command', ref:'pytest', exit:1}];
+  const t = {id:'t_1', status:'review', checklist:[{id:'c1', text:'Ship it', done:true, evidence:ev}], proof:{line:'1 check passed', level:'ok', uncovered:[], per_item:{c1:'passed'}}};
+  const out = line(t), all = text(out);
+  for (const bit of ['Merged on green CI.', 'merged as 0c49e136', 'Ran: pr-green.sh 1012', 'Ran: pytest (failed, exit 1)', 'PR #1012']) assert.ok(all.includes(bit), bit);
+  const a = nodesOf(out).find(n => n.tag === 'a');
+  assert.equal(a.attrs.href, 'https://github.com/o/r/pull/1012');
+  assert.ok(!text(line({...t, status:'done'})).includes('Ran: '), 'a Done ticket keeps its short rows');
+});
+test('#n mentions link to GitHub through the ticket\'s own links; no GitHub link anywhere keeps plain text', () => {
+  const t = {id:'t_1', status:'review', refs:[{url:'https://github.com/o/r/issues/5'}], checklist:[], done_when:'Answers from #681 and #5 are on the issue',
+    proof:{line:'1 part of "Done when" has no task', level:'warn', uncovered:['Answers from #681 and #5 are on the issue'], per_item:{}}};
+  const links = nodesOf(line(t)).filter(n => n.tag === 'a').map(n => n.attrs.href);
+  assert.deepEqual(links, ['https://github.com/o/r/issues/681', 'https://github.com/o/r/issues/5']);
+  assert.equal(nodesOf(line({...t, refs:[]})).filter(n => n.tag === 'a').length, 0);
+  const c = vm.createContext({h:(tag, attrs, ...ch) => ({tag, attrs, children:ch.flat(Infinity).filter(x => x != null)}), array:v => Array.isArray(v) ? v : [], clean:v => v, snapshot:false,
+    tickets:() => [{refs:[{url:'https://github.com/x/y/pull/9'}]}]});
+  vm.runInContext(src.slice(start, end), c);
+  const other = c.linkRefs({id:'t_2'}, 'see #12, not a&#13; or x#14');
+  assert.deepEqual(Array.from(other.filter(n => typeof n !== 'string'), n => n.attrs.href), ['https://github.com/x/y/issues/12'], 'another ticket here names the repository');
+});

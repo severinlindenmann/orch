@@ -67,6 +67,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const okWord=it=>{if(!isOpt(it))return it.okLabel||'Looks good';const p=picked[it.id];return p?'Use '+p:'Pick one'};
  const ansWord=a=>!a?'':a.verdict==='ok'?(a.note&&a.note.picked?'Use '+a.note.picked+(a.note.changes?' with changes':''):(a.item.okLabel||'Looks good')):a.verdict==='no'?noWord(a.item):a.verdict==='talk'?'Sent back for changes':'Later';
  /* previews */
+ const hasPreview=it=>{const p=it&&it.preview;if(!p||typeof p!=='object'||!p.type)return false;if(p.type==='doc')return !!(p.heading||(p.paras||[]).length||(p.steps||[]).length);return true};
  const frame=(src,title)=>{const fr=el('iframe');fr.src=src;fr.title=title;fr.setAttribute('sandbox','');fr.tabIndex=-1;fr.loading='lazy';fr.classList.add('loading');fr.addEventListener('load',()=>fr.classList.remove('loading'),{once:true});return fr};
  const buildPreview=(it,big)=>{const p=it.preview||{},f=document.createDocumentFragment();
   if(p.type==='compare'){f.append(buildCompare(it,big));return f}
@@ -112,9 +113,10 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
  const card=(it,layer)=>{const c=el('article','swipe-card'+(layer?' '+layer:''));c.setAttribute('aria-label',it.title);
   const h=el('header','swipe-head'),m=el('div','swipe-meta'),k=el('span','swipe-kind');k.append(ic(it.icon||'file',14),it.kindLabel||it.kind);m.append(k);if(it.need)m.append(el('span','swipe-need',it.need));if(it.ticket)m.append(el('span','',it.ticket));if(it.when)m.append(el('span','',it.when));
   h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));h.append(el('h3','',it.title));if(it.why)h.append(el('p','',it.why));
-  const pv=el('div','swipe-preview');pv.append(buildPreview(it,false));
+  const pv=hasPreview(it)?el('div','swipe-preview'):null;/* nothing to preview: no empty box */
+  if(pv){pv.append(buildPreview(it,false));
   const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex);
-  (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));
+  (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const ft=el('footer','swipe-foot');
   if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
   const row=el('div','swipe-foot-row');
@@ -122,7 +124,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(it.open){const a=el('a','btn ghost sm');a.href=it.open;a.target='_blank';a.rel='noopener';a.append(ic('external',14),'Open');a.addEventListener('pointerdown',e=>e.stopPropagation());row.append(a)}
   ft.append(row);
   [['right',okWord(it)==='Pick one'?'Pick one first':okWord(it)],['left',noWord(it)],['down','Comment'],['up','Later']].forEach(([d,t])=>{c.append(el('div','swipe-edge '+d),el('div','swipe-stamp '+d,t))});
-  c.append(h,pv,ft);return c};
+  c.append(...[h,pv,ft].filter(Boolean));return c};
  /* order: waiting cards first (Later ones at the end), then answered */
  const waiting=()=>{const w=items.map((_,i)=>i).filter(i=>!ans[items[i].id]);return w.filter(i=>!later.has(items[i].id)).concat(w.filter(i=>later.has(items[i].id)))};
  const nextIdx=from=>{const w=waiting();const pos=w.indexOf(from);return w.length?(pos>=0?w[pos]:w.find(i=>i>from&&!later.has(items[i].id))??w[0]):items.length};
@@ -275,7 +277,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
    if((e.key==='b'||e.key==='B')&&!t.closest('input,textarea')){const w=overlay.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}return}
   if(e.repeat)return;if(t!==host&&t.closest('button,a,input,textarea,select'))return;
   const k=e.key;if(k==='ArrowRight'){e.preventDefault();fly('ok')}else if(k==='ArrowLeft'){e.preventDefault();fly('no')}else if(k==='ArrowDown'){e.preventDefault();fly('talk')}else if(k==='ArrowUp'){e.preventDefault();fly('later')}
-  else if(k===' '){e.preventDefault();cur&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
+  else if(k===' '){e.preventDefault();cur&&hasPreview(items[idx])&&openViewer()}else if(k==='z'||k==='Z'){e.preventDefault();undo()}else if(k==='o'||k==='O'){e.preventDefault();openOverview()}
   else if((k==='b'||k==='B')&&cur){const w=cur.querySelector('.swipe-compare');if(w){e.preventDefault();w.cycle()}}});
  if(!o.start&&items[idx]&&ans[items[idx].id]){const w=waiting();idx=w.find(i=>!later.has(items[i].id))??w[0]??items.length}
  render();ready=true;Promise.resolve().then(()=>o.onChange&&o.onChange());

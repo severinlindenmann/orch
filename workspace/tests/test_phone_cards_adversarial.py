@@ -271,7 +271,7 @@ def test_check_digest_covers_wont_do_like_the_check_card():
         "checklist": [{"id": "c1", "text": "Step", "done": False}],
     }
     before = review.check_digest(t)
-    t["checklist"][0]["wont_do"] = True  # check_card shows it as Done
+    t["checklist"][0]["wont_do"] = True  # check_card shows it as Won't do
     assert review.check_digest(t) != before
 
 
@@ -283,3 +283,36 @@ def test_a_secret_in_a_card_file_name_never_reaches_the_phone(proj, new_ticket, 
     sent = json.dumps([m["body"] for m in conn.sent if m["type"] == "question"])
     assert SECRET not in sent
     assert "card_files" not in json.loads(sent)[0]
+
+
+def test_check_card_shows_each_steps_evidence_and_no_empty_preview():
+    t = {
+        "id": "t_x",
+        "title": "T",
+        "status": "review",
+        "summary": "Merged in PR 12 on green CI.",
+        "done_when": "Tests pass; the phone shows it",
+        "checklist": [
+            {
+                "id": "c1",
+                "text": "Tests pass",
+                "done": True,
+                "covers": "Tests pass",
+                "evidence": [
+                    {"type": "command", "ref": "pytest -q", "exit": 0, "summary": "12 tests pass."},
+                    {"type": "note", "summary": "Merged on green CI.", "ref": "pr-green: GREEN, 4 checks"},
+                    {"type": "pr", "ref": "https://github.com/o/r/pull/12"},
+                ],
+            }
+        ],
+    }
+    card = review.check_card(t)
+    (step,) = card["preview"]["steps"]
+    assert step.startswith("Done: Tests pass — ")
+    for bit in ("12 tests pass.", "Ran: pytest -q", "Merged on green CI.", "pr-green: GREEN, 4 checks", "PR #12"):
+        assert bit in step
+    assert card["preview"]["paras"] == ["In short: Merged in PR 12 on green CI.", "No task covers: “the phone shows it”"]
+    assert card["open"] == "https://github.com/o/r/pull/12" and card["need"]
+    review.check_wire_card(review.wire_card(card, {}), 0)  # still a valid phone card
+    bare = review.check_card({"id": "t_y", "title": "T", "status": "review", "checklist": []})
+    assert "preview" not in bare and "open" not in bare and "need" not in bare

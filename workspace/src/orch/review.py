@@ -707,11 +707,56 @@ def check_digest(ticket: dict) -> str:
     return _sha(_canon(shown).encode())
 
 
+_PR_NUMBER = re.compile(r"/pull/(\d+)")
+
+
+def _step_evidence(c: dict) -> str:
+    """What a step's evidence says, in one plain line: the completion note, what was run, the pull request."""
+    bits: list[str] = []
+    for ev in c.get("evidence") or []:
+        if not isinstance(ev, dict):
+            continue
+        kind, ref = ev.get("type") or ev.get("kind"), str(ev.get("ref") or ev.get("text") or "").strip()
+        said = [str(ev.get("summary") or "").strip()]
+        if kind == "note":
+            said.append(ref)
+        elif kind == "command" and ref:
+            failed = isinstance(ev.get("exit"), int) and ev["exit"] != 0
+            said.append(f"Ran: {ref}" + (f" (failed, exit {ev['exit']})" if failed else ""))
+        elif kind == "pr":
+            m = _PR_NUMBER.search(ref)
+            said.append(f"PR #{m.group(1)}" if m else "Pull request")
+        bits += [x for x in said if x and x not in bits]
+    return " · ".join(bits)
+
+
+def _check_open(ticket: dict) -> str | None:
+    """The newest pull request in the steps' evidence: the card's Open button."""
+    for c in reversed(ticket.get("checklist") or []):
+        evs = c.get("evidence") if isinstance(c, dict) else None
+        for ev in reversed(evs if isinstance(evs, list) else []):
+            if not isinstance(ev, dict):
+                continue
+            ref = ev.get("ref")
+            if ev.get("type") == "pr" and isinstance(ref, str) and len(ref) <= 500 and _OPEN.fullmatch(ref):
+                return ref
+    return None
+
+
 def check_card(ticket: dict) -> dict:
-    items = [
-        f"{'Done' if c.get('done') or c.get('wont_do') else 'Open'}: {c.get('text', '')}"
-        for c in ticket.get("checklist", [])
-    ]
+    """A Check result as a card: the summary, every step with its evidence (note, what was run, pull request)
+    and the parts of Done when no step covers. No preview when there is nothing to show (an empty box)."""
+    steps = []
+    for c in ticket.get("checklist") or []:
+        if not isinstance(c, dict):
+            continue
+        state = "Won't do" if c.get("wont_do") else "Done" if c.get("done") else "Open"
+        said = _step_evidence(c)
+        steps.append(_clip(f"{state}: {c.get('text', '')}" + (f" — {said}" if said else ""), 1200))
+    summary_text = str(ticket.get("summary") or "").strip()
+    paras = [_clip(f"In short: {summary_text}", 1200)] if summary_text else []
+    uncovered = tickets.proof_state(ticket)["uncovered"]
+    paras += [_clip(f"No task covers: “{p}”", 600) for p in uncovered[:10]]
     card = {
         "kind": "check",
         "title": ticket.get("title", ticket["id"]),
@@ -719,8 +764,17 @@ def check_card(ticket: dict) -> dict:
         "then": "The ticket is done.",
         "ok_label": "Looks good",
     }
-    if items:
-        card["preview"] = {"type": "doc", "heading": "Steps", "steps": [_clip(i, 300) for i in items[:50]]}
+    if uncovered:
+        card["need"] = "Done when is not fully covered"
+    url = _check_open(ticket)
+    if url:
+        card["open"] = url
+    if steps or paras:
+        card["preview"] = {"type": "doc", "heading": "What was done"}
+        if paras:
+            card["preview"]["paras"] = paras
+        if steps:
+            card["preview"]["steps"] = steps[:50]
     return card
 
 
