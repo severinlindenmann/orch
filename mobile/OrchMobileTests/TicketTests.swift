@@ -272,6 +272,14 @@ final class TicketTests: XCTestCase {
         _ = try await m.answer(questionMessageId: q.id, answer: "Once")   // the raw option is what is sent
         let left = try await m.questions(); XCTAssertEqual(left.count, 2)
     }
+
+    func testLightViewKeepsTheDue() throws {
+        let full = TicketSnapshot(title: "Fix login", status: "active", running: true, due: "2026-11-20T18:30")
+        let light = TicketSnapshot(status: "waiting", light: true)
+        let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: full), lightViewUpdate("2", view: light)],
+                                                     questions: [], answers: [:]).first)
+        XCTAssertEqual(ticket.view?.due, "2026-11-20T18:30")
+    }
 }
 
 enum MockRelayTestsFixtures {
@@ -431,11 +439,4 @@ final class TicketModelTests: XCTestCase {
         XCTAssertEqual(again.due, with.due)
     }
 
-    func testLightViewKeepsTheDue() throws {
-        let full = TicketSnapshot(title: "Fix login", status: "active", running: true, due: "2026-11-20T18:30")
-        let light = TicketSnapshot(status: "waiting", light: true)
-        let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: full), lightViewUpdate("2", view: light)],
-                                                     questions: [], answers: [:]).first)
-        XCTAssertEqual(ticket.view?.due, "2026-11-20T18:30")
-    }
 }
