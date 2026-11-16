@@ -712,7 +712,8 @@ def test_detect_finds_binaries_and_versions(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- the tool-name rule
 
 NAME = re.compile(r"claude|codex", re.I)
-SKIP_DIRS = {"agents", "tests", ".venv", "node_modules", "__pycache__", ".pytest_cache", "templates"}
+# mockup: sample screens for the person (account names such as a provider's API key), not code that runs
+SKIP_DIRS = {"agents", "tests", ".venv", "node_modules", "__pycache__", ".pytest_cache", "templates", "mockup"}
 SKIP_FILES = {"adapters.py", "uv.lock"}
 
 

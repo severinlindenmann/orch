@@ -1,0 +1,10 @@
+# Usage: accounts, limits, order and history. Stage 1 part 1: store, readers and commands; the page comes next.
+schema = "orch.addon/1"
+orch_api = 1
+name = "usage"
+version = "0.1.0"
+description = "Every account the helpers spend on, its limits, its order and a history of every change."
+run = "orch_usage"
+skill = "skills/orch-usage"
+agents_block = "skills/orch-usage/AGENTS-block.md"
+gitignore = [".orch/addons/usage/"]
