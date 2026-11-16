@@ -596,3 +596,11 @@ test('Live session card: the main click opens the live screen, the commands sit 
   assert.match(json, /Copy command/);
   assert.doesNotMatch(json, /"Copy"/);
 });
+test('Looks good says when part of Done when has no task; nothing when all is covered', () => {
+  const node = (tag, attrs = {}, ...children) => ({tag, attrs, children:children.flat(Infinity).filter(x => x != null && x !== false), append(...kids) { this.children.push(...kids); }});
+  const c = context({h:node, clean:v => String(v ?? ''), locks:new Set(), moveTicket:() => Promise.resolve()});
+  const say = n => !n ? '' : typeof n === 'string' ? n : n.children.map(say).join('');
+  assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a', 'b']}})), /2 parts of “Done when” have no task/);
+  assert.match(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:['a']}})), /1 part of “Done when” has no task/);
+  assert.doesNotMatch(say(c.ticketChangesEditor({id:'t_abc123', status:'review', proof:{uncovered:[]}})), /Done when/);
+});

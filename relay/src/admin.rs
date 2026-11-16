@@ -68,6 +68,7 @@ pub fn router(app: AppState) -> Router {
         )
         .merge(crate::api::icon_routes())
         .merge(crate::subs::admin_router())
+        .merge(crate::problems::admin_router())
         .route("/admin/api/workspaces", get(list_ws).post(add_ws))
         .route(
             "/admin/api/workspaces/:id",
@@ -405,6 +406,7 @@ async fn del_ws(
         "DELETE FROM assign WHERE ws=?1",
         "DELETE FROM ws_group WHERE ws=?1",
         "DELETE FROM webhooks WHERE workspace=?1",
+        "DELETE FROM problem_readers WHERE ws=?1",
     ] {
         c.execute(sql, [&id])?;
     }

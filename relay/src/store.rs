@@ -48,7 +48,12 @@ pub fn init(c: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS mcp(name TEXT PRIMARY KEY, config BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS creds(name TEXT PRIMARY KEY, value BLOB NOT NULL);
         CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v BLOB NOT NULL);
-        CREATE TABLE IF NOT EXISTS assign(ws TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(ws,kind,name));",
+        CREATE TABLE IF NOT EXISTS assign(ws TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(ws,kind,name));
+        CREATE TABLE IF NOT EXISTS problems(id TEXT PRIMARY KEY, ref TEXT NOT NULL, from_ws TEXT NOT NULL, from_name TEXT NOT NULL,
+            created_at TEXT NOT NULL, shared_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'new', taken_by TEXT, taken_by_name TEXT,
+            blob_id TEXT NOT NULL, files INTEGER NOT NULL, attachments INTEGER NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+            data BLOB NOT NULL, UNIQUE(from_ws, ref));
+        CREATE TABLE IF NOT EXISTS problem_readers(ws TEXT PRIMARY KEY);",
     )?;
     // Older databases: add the profile columns (ignore "duplicate column"). Existing rows count as written by the workspace.
     for col in [
@@ -709,9 +714,11 @@ pub fn purge(c: &Connection, data_dir: &Path, at: i64) -> rusqlite::Result<(usiz
         )?;
     }
     // Phone uploads never named in a sent text go after 24 hours.
+    // A blob a stored problem names goes with that problem (crate::problems::purge), not by its own age.
+    crate::problems::purge(c, data_dir, cutoff)?;
     let mut st = c.prepare(
-        "SELECT id FROM blobs WHERE created_at<?1 OR (uploader LIKE 'ph\\_%' ESCAPE '\\' AND created_at<?2
-           AND id NOT IN (SELECT blob_id FROM phone_blobs))",
+        "SELECT id FROM blobs WHERE (created_at<?1 OR (uploader LIKE 'ph\\_%' ESCAPE '\\' AND created_at<?2
+           AND id NOT IN (SELECT blob_id FROM phone_blobs))) AND id NOT IN (SELECT blob_id FROM problems)",
     )?;
     let ids: Vec<String> = st
         .query_map([cutoff, at - 86400], |r| r.get(0))?

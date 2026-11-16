@@ -43,6 +43,15 @@
       "propertyNames": { "pattern": "^[a-z][a-z0-9-]{0,31}$" },
       "additionalProperties": { "type": "object" }
     },
+    "model": {
+      "type": "object", "required": ["name", "by"],
+      "description": "Optional (ORCH-49). The model this ticket's helper runs on, passed to adapters that declare model_args. by 'orch' = orch's pick before a start (why = its reason, picked again on every start); any other by = a person's choice (orch ticket model, person only), kept until set back to auto (field removed). A name orch does not know counts as no choice.",
+      "properties": {
+        "name": { "enum": ["sonnet", "opus"] },
+        "by": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "why": { "type": "string", "maxLength": 200 }
+      }
+    },
     "owner": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The person who owns the ticket, free text (a name), e.g. 'Severin'. Not a login." },
     "due": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?$", "description": "Optional. Due day, YYYY-MM-DD, or day and time, YYYY-MM-DDTHH:MM (local wall time on that day, no seconds, no zone). A day-only value means the whole day." },
     "note": { "type": "string", "maxLength": 2000, "description": "Optional. Free note from people, shown on the ticket. Plain text." },
@@ -73,7 +82,7 @@
     "title_auto": { "type": "boolean", "description": "Optional. True while the title is only a placeholder (the first words of what a person wrote); the agent writes the real title (orch ticket title), which clears it. A person's own title edit clears it too." },
     "plan_first": { "type": "boolean", "description": "Optional. True when the person chose \"Show plan first\": the agent makes the plan (parent and steps), asks one question \"Plan ready\" and waits for the answer before work starts. Set at creation only." },
     "epic": { "type": "boolean", "description": "Optional. True when the person made this ticket with several tickets inside it at once (New ticket, Add a ticket to this epic): its sub-tickets are the work and one run goes through them in order. Set at creation only." },
-    "start_requires": { "type": "object", "additionalProperties": false, "required": ["ticket", "question", "answer"], "properties": { "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "question": { "type": "string", "pattern": "^q[A-Za-z0-9_-]{0,31}$" }, "answer": { "type": "string", "minLength": 1, "maxLength": 60 } }, "description": "Optional. Set at creation only (orch ticket new --start-requires): no run starts or claims this ticket until a person (answered_by human:) answered that question of that ticket with that answer. Add-ons use it as a start gate (Factory crew tickets wait for the person's Start)." },
+    "start_requires": { "type": "object", "additionalProperties": false, "required": ["ticket", "question", "answer"], "properties": { "ticket": { "type": "string", "pattern": "^t_[a-z0-9]{6,16}$" }, "question": { "type": "string", "pattern": "^q[A-Za-z0-9_-]{0,31}$" }, "answer": { "type": "string", "minLength": 1, "maxLength": 60 } }, "description": "Optional, no longer read. Older orch versions set it at creation (orch ticket new --start-requires) as a start check; the owner dropped that check (ORCH-29). Old tickets may still carry it." },
     "parent": { "oneOf": [{ "$ref": "#/$defs/tid" }, { "type": "null" }], "description": "Optional. Id of the parent ticket (sub-tickets). Set at creation. Children are not stored on the parent: they are found by reading every ticket's parent." },
     "work": {
       "type": "object",

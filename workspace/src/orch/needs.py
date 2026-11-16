@@ -1,7 +1,8 @@
 """`orch needs`: what waits for a person. One list for every surface (contracts/needs.schema.json).
 
-Core rows come from tickets and services alone: open questions, waits past their `until`, active background
-add-ons that are not running. An active add-on with `needs = true` adds rows through
+Core rows come from tickets, runs and services alone: open questions, waits past their `until`, active
+background add-ons that are not running, and work that stopped short (stuck.py: a pull request left open
+after its checks passed, a helper idle at its prompt). An active add-on with `needs = true` adds rows through
 `orch <name> needs --json` (2 s timeout, last good result cached; on failure the cached rows come back
 with stale = true).
 The core names no add-on.
@@ -73,7 +74,8 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
     now = now or _now()
     rows = []
     seen = set()
-    for t in history.shown_json(root, tickets.list_all(root)):  # every person field as proven here
+    shown = history.shown_json(root, tickets.list_all(root))  # every person field as proven here
+    for t in shown:
         seen.add(t["id"])
         back = (t.get("work") or {}).get("bring_back") or {}
         if back.get("state") == "waiting":
@@ -129,6 +131,12 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
     for item in worktrees._pending(root)["kept"]:
         if item.get("bring_back") and item["ticket"] not in seen:
             rows.append(_bring_back_row(item["ticket"], item["ticket"], item, now))
+    from orch import stuck
+
+    rows += stuck.rows(root, shown)  # a pull request left open, a helper idle at its prompt
+    from orch import health
+
+    health.soon(root)  # tool logins: a stale result is checked again in the background (ORCH-44)
     for r in services.workspace_rows(root):
         if not r["running"] and not r.get("idle"):
             rows.append(

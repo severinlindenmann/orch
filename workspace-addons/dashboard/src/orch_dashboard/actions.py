@@ -408,6 +408,17 @@ def _ticket_edit(a):
     return ["ticket", "edit", _tid(a.get("ticket"))], flags, []
 
 
+MODELS = ("sonnet", "opus", "auto")
+
+
+def _ticket_model(a):
+    """A person picks the helper's model for this ticket (or lets orch pick again): `orch ticket model`."""
+    _only(a, ("ticket", "model"))
+    if a.get("model") not in MODELS:
+        raise BadRequest("Pick Sonnet, Opus or let orch pick.")
+    return ["ticket", "model", _tid(a.get("ticket")), a["model"]], [], []
+
+
 def _check_add(a):
     """Add a task: `orch check add <ticket> --by ... -- <text>` (text up to 500 characters)."""
     _only(a, ("ticket", "text"))
@@ -681,6 +692,21 @@ def _run_take_back(a):
     return ["run", "take-back", _tid(a.get("ticket")), pid], [], []
 
 
+PULL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,9}")
+
+
+def _pull_merge(a):
+    """Home: Merge on a pull request a helper left open. `orch ref merge` merges only the commit the row showed,
+    with the person's own GitHub login, and only for a person."""
+    _only(a, ("ticket", "url", "head"))
+    url, head = a.get("url"), a.get("head")
+    if not isinstance(url, str) or not PULL.fullmatch(url):
+        raise BadRequest("That is not a pull request.")
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise BadRequest("This pull request changed or can't be checked. Open it to merge it there.")
+    return ["ref", "merge", _tid(a.get("ticket")), url], ["--head", head], []
+
+
 def _run_stop(a):
     _only(a, ("ticket",))
     return ["run", "stop", _tid(a.get("ticket"))], [], []
@@ -739,6 +765,10 @@ def _addon_act(a):
             if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9]{1,4}", a["value"])):
                 raise BadRequest("Set takes a whole number.")
             value = a["value"]
+        elif verb == "allow-script":  # the key (hash) of the script entry the person was shown
+            if not (isinstance(a["value"], str) and re.fullmatch(r"[0-9a-f]{64}", a["value"])):
+                raise BadRequest("Look at the command again.")
+            value = a["value"]
         elif verb == "edit":  # one line of plain text (Lessons: edit a lesson), 1 to 200 characters
             value = _text(a["value"], "text").strip()
             if HIDDEN_CHARS.search(value):
@@ -794,12 +824,12 @@ def addon_review_target(
         out = None
     if not isinstance(out, dict) or r.returncode != 0 or "target" not in out:
         err = out.get("error") if isinstance(out, dict) else None
-        raise BadRequest(str(err or "This can't be signed right now. Nothing was changed.")[:300])
+        raise BadRequest(str(err or "This can't be confirmed right now. Nothing was changed.")[:300])
     target, review = out["target"], _review(out.get("review"))
     if target is None:
         return None, review
     if not (isinstance(target, str) and PROOF_TARGET.fullmatch(target) and target.startswith(addon + ":")):
-        raise BadRequest("This can't be signed right now. Nothing was changed.")
+        raise BadRequest("This can't be confirmed right now. Nothing was changed.")
     return target, review
 
 
@@ -946,6 +976,7 @@ OPS = {
     "ticket.patch": _ticket_patch,
     "ticket.changes": _ticket_changes,
     "ticket.edit": _ticket_edit,
+    "ticket.model": _ticket_model,
     "log": _log,
     "chat.say": _chat_say,
     "chat.make_ticket": _chat_make_ticket,
@@ -959,6 +990,7 @@ OPS = {
     "run.stop": _run_stop,
     "run.send": _run_send,
     "run.take_back": _run_take_back,
+    "pull.merge": _pull_merge,
     "addon.start": _addon_start,
     "addon.act": _addon_act,
     "config.agent": _config_agent,

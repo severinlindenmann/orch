@@ -131,6 +131,14 @@ def an_agent() -> str | None:
     return tickets.agent_tool()
 
 
+def shown(argv: list[str]) -> str:
+    """The command as a person reads it: each argument quoted where needed, so the text maps back to exactly one argv
+    (["rm -rf ~"] and ["rm", "-rf", "~"] never look the same)."""
+    import shlex
+
+    return shlex.join(argv)
+
+
 def showable(argv: list[str]) -> bool:
     """Plain printable text only (what is shown is exactly what is hashed); core's rule for agent commands."""
     import unicodedata

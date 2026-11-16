@@ -29,13 +29,21 @@
  <!-- 2: form -->
  <div class="dlg-h dstate st-form"><h2 id="dt">Report a problem</h2><button class="btn ghost sm" aria-label="Close">✕</button></div>
  <div class="dstate st-form stack-sm">
-  <p class="muted" style="margin:0">orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. Nothing is sent.</p>
+  <p class="muted" style="margin:0">orch saves what happened around <strong>DT-41</strong> since the helper started, on this computer. Nothing is sent unless you tick the last box.</p>
   <label class="field"><span>What happened? <span class="meta">(optional)</span></span>
    <input class="input" placeholder="For example: stuck since 10:00, nothing happens" value="Stuck on checking links since 10:00"></label>
   <label class="field"><span>What did you expect? <span class="meta">(optional)</span></span>
    <input class="input" placeholder="For example: the newsletter is sent" value=""></label>
+  <label class="field"><span>Anything else? <span class="meta">(optional)</span></span>
+   <textarea class="input" rows="2" placeholder="For example: it worked yesterday, and what you tried"></textarea></label>
+  <div class="row"><button class="btn outline sm" type="button">Add pictures or files</button><span class="meta">Pick, drop or paste them. Up to 10.</span></div>
+  <ul class="report-checks stack-sm" aria-label="Added files"><li class="report-check"><span class="grow">Screenshot 12-26.png <span class="meta">64 KB</span></span><button class="btn ghost xs" type="button">Remove</button></li></ul>
   <label class="check-label"><input type="checkbox" checked> Add a picture of this page</label>
-  <p class="meta" style="margin:0">The picture can show ticket text. You see everything before anything is shared.</p>
+  <p class="meta" style="margin:0">The picture can show ticket text.</p>
+  <label class="check-label"><input type="checkbox" checked> Include ticket text and helper conversation</label>
+  <!-- only when this workspace is connected to a relay -->
+  <label class="check-label"><input type="checkbox"> Send this report to the admin of <strong>relay.example.com</strong></label>
+  <p class="meta" style="margin:0">Everything in the report goes along, with the files you added. The admin and the workspaces they choose can read it.</p>
  </div>
  <div class="dlg-f dstate st-form"><button class="btn outline">Cancel</button><button class="btn primary" onclick="show('busy')">Create report</button></div>
 
@@ -56,6 +64,8 @@
    <li class="row" style="gap:8px;align-items:flex-start"><span class="chip" style="flex:none"><span class="dot-ok"></span> OK</span><span>Disk space, dashboard, phone link.</span></li>
    <li class="row" style="gap:8px;align-items:flex-start"><span class="chip" style="flex:none">Couldn't check</span><span>Shared links (publish not reachable).</span></li>
   </ul>
+  <!-- only when "Send this report" was ticked -->
+  <p role="status" style="margin:0"><span class="dot-ok"></span> Sent to the admin of <strong>relay.example.com</strong>.</p>
   <p style="margin:8px 0 0"><strong>Give it to a helper</strong></p>
   <p class="muted" style="margin:0">Paste this into a helper chat:</p>
   <div class="row" style="gap:8px"><input class="input" readonly value="Investigate orch report r-1114-1014-DT41" style="flex:1"><button class="btn outline" onclick="show('copied')">Copy</button></div>

@@ -801,41 +801,6 @@ def parse_ext_args(pairs: list[str] | None, schema_for=None) -> dict[str, dict]:
     return out
 
 
-START_REQUIRES = re.compile(r"(t_[a-z0-9]{6,16}):(q[A-Za-z0-9_-]{0,31})=([^\x00-\x1f\x7f]{1,60})")
-
-
-def parse_start_requires(root: Path, value: str) -> dict:
-    """Parse "<ticket>:<question>=<answer>" into {"ticket", "question", "answer"}; the ticket and its question
-    must exist."""
-    m = START_REQUIRES.fullmatch(value or "")
-    if not m:
-        raise Refused(
-            "--start-requires looks like t_abc123:q1=Start (a ticket, its question and the answer)."
-        )
-    other = load(root, m[1])
-    if not any(q.get("id") == m[2] for q in other.get("questions", [])):
-        raise Refused(f"{m[1]} has no question {m[2]}.")
-    return {"ticket": m[1], "question": m[2], "answer": m[3]}
-
-
-def start_blocked(root: Path, ticket: dict) -> str | None:
-    """Why no run may start on this ticket yet, or None. A ticket made with start_requires starts only once a
-    PERSON (answered_by human:, which core accepts only with the person's proof) answered that question with
-    that answer. Generic: core knows nothing about who set it (Factory sets it on crew tickets)."""
-    req = ticket.get("start_requires")
-    if not req:
-        return None
-    why = f'This ticket starts only after a person answers "{req.get("answer")}" on {req.get("ticket")}.'
-    try:  # shown: a synced answer core cannot prove here is not a person's (history.shown_ticket)
-        other = history.shown_ticket(root, load(root, str(req.get("ticket"))))
-    except Refused:
-        return why
-    q = next((q for q in other.get("questions", []) if q.get("id") == req.get("question")), None)
-    if q and q.get("answer") == req.get("answer") and history.is_person_line({"by": q.get("answered_by")}):
-        return None
-    return why
-
-
 def create(
     root: Path,
     title: str,
@@ -848,11 +813,8 @@ def create(
     title_auto: bool = False,
     plan_first: bool = False,
     epic: bool = False,
-    start_requires: str | None = None,
 ) -> dict:
-    """`start_requires` ("<ticket>:<question>=<answer>", set at creation only): no run starts on this ticket
-    until a person answered that question with that answer (see start_blocked).
-    `title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
+    """`title_auto`: the title is only a placeholder (first words of what a person wrote); the agent
     writes the real one (`orch ticket title`). The flag clears when anyone sets the title.
     tid lets callers persist a reserved id before this write."""
     if tid is not None:
@@ -888,10 +850,6 @@ def create(
         ticket["plan_first"] = True
     if epic:  # several tickets made at once: its sub-tickets are the work, one run goes through them in order
         ticket["epic"] = True
-    if (
-        start_requires is not None
-    ):  # a gate an add-on sets (Factory: a crew task waits for the person's Start)
-        ticket["start_requires"] = parse_start_requires(root, start_requires)
     for k, v in fields.items():  # owner, due, note, done_when: part of the one "Created" line
         _set_field(ticket, k, v)
     if ext:  # add-on data in the same write as the ticket (no half-made ticket)
@@ -1299,7 +1257,7 @@ def set_status(root: Path, tid: str, status: str, by: str) -> dict:
 
 
 # orch writes these itself
-PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by")
+PROTECTED_FIELDS = ("title_auto", "plan_first", "epic", "description", "description_by", "model")
 
 
 DUE_MSG = "due must be a date like 2026-11-10 or a time like 18:30."
@@ -1530,13 +1488,19 @@ def tidied(root: Path, ticket: dict) -> bool:
     return any(t.startswith((TIDY_LINE, "Ticket tidied")) for t in texts)
 
 
-def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) -> dict:
+def tidy(
+    root: Path, tid: str, title: str, by: str, fields: dict | None = None, description: str | None = None
+) -> dict:
     """Tidy a new ticket when work starts, without asking: a short clear title (the person's own words stay in
     the history: "Title tidied from: ...") and owner / due / done_when,
-    filled only where still empty. Once."""
+    filled only where still empty, and the agent's description (what and why, its own field, never the
+    person's note) when there is none yet. Once."""
     title = title.strip()
     if not title or len(title) > 200:
         raise Refused("A title needs 1 to 200 characters.")
+    description = (description or "").strip() or None
+    if description is not None:
+        clean_field("note", description)  # the same plain-text rules and 2000 characters
     fields = {k: v for k, v in (fields or {}).items() if k in ("owner", "due", "done_when") and v}
     for k, v in fields.items():
         clean_field(k, v)
@@ -1558,10 +1522,66 @@ def tidy(root: Path, tid: str, title: str, by: str, fields: dict | None = None) 
             _set_field(ticket, k, fields[k])
         if filled:
             add_history(ticket, by, "Details filled in: " + ", ".join(filled))
-        if (title == old or edited) and not filled:
+        wrote = bool(description and not ticket.get("description"))
+        if wrote:
+            ticket["description"] = description
+            ticket["description_by"] = by[:100]
+            add_history(ticket, by, f"Description written by {by[:100]}")
+        if (title == old or edited) and not filled and not wrote:
             add_history(ticket, by, "Ticket tidied: nothing to change")
 
     return apply_op(root, tid, op, by=by)[0]
+
+
+def set_model(root: Path, tid: str, name: str, by: str) -> dict:
+    """A person's model for this ticket's helper (sonnet or opus), or auto: orch picks again next start."""
+    from orch import modelpick
+
+    name = (name or "").strip().lower()
+    if name not in (*modelpick.MODELS, "auto"):
+        raise Refused("Pick sonnet, opus or auto.")
+    if not _is_person(by):
+        raise Refused(
+            f'Only a person picks the model. Ask instead: orch ask {tid} "Run this ticket on Opus?" '
+            "--option yes --option no"
+        )
+
+    def op(ticket):
+        if name == "auto":
+            ticket.pop("model", None)
+            add_history(ticket, by, "Model: orch picks it again on the next start")
+        else:
+            ticket["model"] = {"name": name, "by": by[:100]}
+            add_history(ticket, by, f"Model set to {modelpick.LABELS[name]}")
+
+    return apply_op(root, tid, op, by=by)[0]
+
+
+def pick_model(root: Path, tid: str, by: str) -> str:
+    """Before a start: keep a person's choice, else let orch pick from the ticket as it is now (a history line
+    only when the pick changes). Returns the model name."""
+    from orch import modelpick
+
+    out: dict = {}
+
+    def op(ticket):
+        cur = modelpick.chosen(ticket)
+        if cur and modelpick.by_person(ticket):
+            out["name"] = cur["name"]
+            return
+        name, why = modelpick.pick(ticket)
+        out["name"] = name
+        if cur and cur["name"] == name:
+            return
+        ticket["model"] = {"name": name, "by": modelpick.BY_ORCH, "why": why[:200]}
+        add_history(ticket, by, f"Model picked: {modelpick.LABELS[name]} ({why[:200]})")
+
+    t = load(root, tid)
+    cur = modelpick.chosen(t)
+    if cur and (modelpick.by_person(t) or cur["name"] == modelpick.pick(t)[0]):
+        return cur["name"]  # nothing to write
+    apply_op(root, tid, op, by=by)
+    return out["name"]
 
 
 def set_plan(root: Path, tid: str, goal: str, not_included: str | None, by: str) -> dict:
@@ -1688,14 +1708,14 @@ def parse_evidence(raw: str) -> dict:
     if not isinstance(ev.get("ref"), str) or not ev["ref"].strip():
         raise Refused("Evidence needs a ref (PR, commit, file, URL, command or note text).")
     if "role" in ev and ev["role"] not in ROLES:
-        raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
+        raise Refused(f"An evidence role is one of: {', '.join(ROLES)}.")
     if "text" in ev and not isinstance(ev["text"], str):
         raise Refused("Evidence text must be a string.")
     if "summary" in ev:
         raw = ev["summary"]
         line = " ".join(raw.split()) if isinstance(raw, str) else ""
         if not 1 <= len(line) <= 200 or not line.isprintable():
-            raise Refused("A proof summary is one line of 1 to 200 printable characters.")
+            raise Refused("An evidence summary is one line of 1 to 200 printable characters.")
         ev["summary"] = line
     _check_record_fields(ev)
     return ev
@@ -1814,7 +1834,7 @@ def check_done(root: Path, tid: str, cid: str, evidence: list[str], by: str) -> 
     ticket = load(root, tid)  # a missing ticket is reported before anything else
     if not evidence:
         raise Refused(
-            "A check is done only with proof. Say what shows it, for example "
+            "A check is done only with evidence. Say what shows it, for example "
             f'`orch check done {tid} {cid} --command "pytest -q"` or `--note "what you saw"` '
             "(also --pr, --commit, --file, --url)."
         )
@@ -2003,7 +2023,9 @@ def check_remove(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         proof = ", ".join(proof_label(e) for e in item.get("evidence", []))
         state = "was done" if item.get("done") else "was open"
         add_history(
-            t, by, f"Removed step {cid} '{item['text']}' ({state}" + (f"; proof: {proof})" if proof else ")")
+            t,
+            by,
+            f"Removed step {cid} '{item['text']}' ({state}" + (f"; evidence: {proof})" if proof else ")"),
         )
         return item
 
@@ -2028,7 +2050,7 @@ def check_reopen(root: Path, tid: str, cid: str, by: str) -> tuple[dict, dict]:
         item["done"] = False
         item["evidence"] = []
         _clear_doing(item)
-        add_history(t, by, f"Reopened {cid}" + (f" (old proof: {proof})" if proof else ""))
+        add_history(t, by, f"Reopened {cid}" + (f" (old evidence: {proof})" if proof else ""))
         return item
 
     return apply_op(root, tid, op, by=by)
@@ -2995,7 +3017,7 @@ def _size_text(n: int) -> str:
 
 
 def _too_big(name: str) -> str:
-    return f"{name} is too big. A proof file can be at most 25 MB. Use --url or --note."
+    return f"{name} is too big. An evidence file can be at most 25 MB. Use --url or --note."
 
 
 def attach_file(
@@ -3037,9 +3059,9 @@ def _attach_file(
     Only regular files inside the workspace, no link followed anywhere on the way, at most 25 MB."""
     load(root, tid)
     if role is not None and role not in ROLES:
-        raise Refused(f"A proof role is one of: {', '.join(ROLES)}.")
+        raise Refused(f"An evidence role is one of: {', '.join(ROLES)}.")
     if title is not None and not 1 <= len(title.strip()) <= 120:
-        raise Refused("A proof title needs 1 to 120 characters.")
+        raise Refused("An evidence title needs 1 to 120 characters.")
     refuse_secret_in_evidence(
         root,
         [{"type": "file", "ref": os.path.basename(path), "title": title or "", "summary": summary or ""}],
@@ -3065,14 +3087,14 @@ def _attach_file(
                     break
                 except ValueError:
                     continue
-    inside = Refused("proof files must be inside this workspace or this ticket's own working copy.")
+    inside = Refused("evidence files must be inside this workspace or this ticket's own working copy.")
     if rel is None or ".." in rel.parts:
         raise inside
     cur = src_base
     for part in rel.parts:
         cur = cur / part
         if cur.is_symlink():
-            raise Refused("proof files cannot be refs. Give the real file.")
+            raise Refused("evidence files cannot be refs. Give the real file.")
     low = tuple(x.lower() for x in rel.parts)
     if low[:2] == (".orch", "secrets") or ".git" in low:
         raise inside
@@ -3084,21 +3106,22 @@ def _attach_file(
     size = cur_src.stat().st_size
     if size > MAX_PROOF_BYTES:
         raise Refused(
-            f"{cur_src.name} is {_size_text(size)}. A proof file can be at most 25 MB. Use --url or --note."
+            f"{cur_src.name} is {_size_text(size)}. "
+            "An evidence file can be at most 25 MB. Use --url or --note."
         )
     dest_dir = base / ".orch" / "tickets" / tid / "evidence"
     cur = base
     for part in (".orch", "tickets", tid, "evidence"):
         cur = cur / part
         if cur.is_symlink():
-            raise Refused("The proof folder of this ticket is a link. orch will not copy into it.")
+            raise Refused("The evidence folder of this ticket is a link. orch will not copy into it.")
         if cur.exists() and not cur.is_dir():
-            raise Refused("The proof folder of this ticket is blocked by a file. Move that file away.")
+            raise Refused("The evidence folder of this ticket is blocked by a file. Move that file away.")
         if not cur.exists():
             cur.mkdir()
     real_dir = Path(os.path.realpath(dest_dir))
     if real_dir != dest_dir or not str(real_dir).startswith(str(base / ".orch" / "tickets") + os.sep):
-        raise Refused("The proof folder of this ticket is not inside this workspace.")
+        raise Refused("The evidence folder of this ticket is not inside this workspace.")
     name = _proof_name(cur_src.name)
     dest, n = dest_dir / name, 1
     while True:
@@ -3114,7 +3137,7 @@ def _attach_file(
     except OSError:
         os.close(fd)
         os.unlink(dest)
-        raise Refused("proof files cannot be refs. Give the real file.") from None
+        raise Refused("evidence files cannot be refs. Give the real file.") from None
     try:
         with os.fdopen(src_fd, "rb") as src, os.fdopen(fd, "wb") as out:
             if os.fstat(src.fileno()).st_size > MAX_PROOF_BYTES:

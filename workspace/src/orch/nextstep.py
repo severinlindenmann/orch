@@ -144,6 +144,12 @@ def _doctor(data, args) -> str:
     return "orch ticket list"
 
 
+def _logins(data, args) -> str:
+    if any(r.get("state") == "renew" for r in (data or {}).get("items") or []):
+        return "renew it with the tool's own login, then run orch logins again"
+    return "orch ticket list"
+
+
 def _status_cmd(data, args) -> str:
     return "orch stop  (when you are done)" if data else "orch ticket list"
 
@@ -180,6 +186,7 @@ HINTS = {
     "ticket changes": _on_ticket,
     "ticket patch": _on_ticket,
     "doctor": _doctor,
+    "logins": _logins,
     "pause": "turn it back on with: orch resume",
     "resume": "orch needs",
     "wait": "keep working on other tickets: orch ticket list",
@@ -191,6 +198,7 @@ HINTS = {
     "check start": _start_task,
     "check stop": _on_ticket,
     "check wont-do": _on_ticket,
+    "ticket model": _on_ticket,
     "check record": _record,
     "check done": _on_ticket,
     "log": _on_ticket,
@@ -200,6 +208,7 @@ HINTS = {
     "ref list": _on_ticket,
     "ref rm": _on_ticket,
     "ref set": _on_ticket,
+    "ref merge": _on_ticket,
     "ext set": _on_ticket,
     "ext unset": _on_ticket,
     "needs": "keep working on what does not wait: orch ticket list",
@@ -212,6 +221,17 @@ HINTS = {
     "publish new": lambda d, a: f"orch publish app {a.folder}",
     "publish *": "carry on with your ticket: orch ticket list",
     "relay connect": 'describe this workspace: orch relay profile --description "..." --tags a,b',
+    "relay problem share": "carry on with your ticket: orch ticket list",
+    "relay problem list": lambda d, a: (
+        "take one: orch relay problem get <id>" if d else "nothing to pick up; carry on with your ticket."
+    ),
+    "relay problem get": lambda d, a: (
+        f"read .agents/skills/orch-diagnose/SKILL.md, then investigate orch report {d.get('ref')}"
+        if isinstance(d, dict)
+        else None
+    ),
+    "relay problem done": "orch relay problem list",
+    "relay problem back": "orch relay problem list",
     "relay *": "carry on; a reply comes in on your next run.",
 }
 

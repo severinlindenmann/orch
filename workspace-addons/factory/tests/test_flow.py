@@ -886,14 +886,16 @@ def test_cant_undo_is_derived_from_a_fixed_action_list_not_only_the_agents_tag(w
         autopilot.check(entry, "Continue", [], None)
 
 
-def test_crew_tickets_carry_cores_start_gate_on_the_persons_start(ws, run):
-    """#681: every crew ticket is made with --start-requires <order>:<start question>=Start, so core itself refuses a
-    direct `orch run start` on it until the person's Start is there (not only Factory's own crew start)."""
-    order, q = started(ws, run)
-    run("crew", "add", order, "booking-form")
+def test_crew_tickets_are_plain_sub_tickets_factory_still_finds(ws, run):
+    """ORCH-29: the person's Start only tells the manager agent to go; core holds no start check on crew tickets.
+    `crew add` makes a plain sub-ticket, and Factory finds it again by order, parent and task (a second add reuses it)."""
+    order, _q = started(ws, run)
+    first = run("crew", "add", order, "booking-form")
     calls = [json.loads(x) for x in (ws / "calls.jsonl").read_text().splitlines()]
     new = [c["args"] for c in calls if c["args"][:2] == ["ticket", "new"] and "--parent" in c["args"]]
-    assert new and f"--start-requires={order}:{q}=Start" in new[-1]
+    assert new and not any(a.startswith("--start-requires") for a in new[-1])
+    again = run("crew", "add", order, "booking-form")
+    assert first["created"] is True and again == {**first, "created": False}
 
 
 def test_used_time_is_measured_from_cores_record_and_waiting_never_counts(ws, run):
@@ -928,25 +930,10 @@ def test_used_time_is_measured_from_cores_record_and_waiting_never_counts(ws, ru
     assert core(ws, "ticket", "show", order)["ext"]["factory"]["budget"]["active_min_used"] == 10  # kept
 
 
-def test_a_sub_ticket_without_cores_gate_is_no_crew_and_unmeasured_budget_refuses(ws, run):
-    """#681 review: a sub-ticket an agent made with Factory's crew data but no core start gate is ignored (no crew);
-    crew start refuses when the record can't be measured (the synced cache never decides)."""
+def test_unmeasured_budget_refuses_crew_start(ws, run):
+    """#681 review: crew start refuses when the record can't be measured (the synced cache never decides)."""
     order, _ = started(ws, run)
     run("next", order)
-    rogue = core(ws, "ticket", "new", "Booking form", "--parent", order)
-    core(
-        ws,
-        "ext",
-        "set",
-        rogue["id"],
-        "factory",
-        json.dumps({"role": "crew", "order": order, "task": "booking-form"}),
-        "--if-revision",
-        "1",
-    )
-    assert (
-        run("crew", "start", order, "booking-form", code=2)["code"] == "invalid"
-    )  # "add the crew ticket first"
     run("crew", "add", order, "booking-form")
     (ws / "fail-record").write_text("")
     refused = run("crew", "start", order, "booking-form", code=2)

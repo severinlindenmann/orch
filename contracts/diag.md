@@ -6,7 +6,7 @@ something is stuck or wrong (`orch diag query` and the report, later steps). It 
 numbers, ids and places in the code. Never ticket text, never a conversation, never the value of a key.
 
 Schema: `diag.schema.json` (one event). Examples: `examples/diag/`. Vectors: `vectors/diag-v1.json` (whole events and the
-event-name rule). T0: `uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py diag`.
+event-name rule). T0: `uv run --python ">=3.11" --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py diag`.
 Writer: `workspace/src/orch/diag.py`, the only one. The core names no add-on or agent tool here.
 
 ## Where
@@ -93,6 +93,7 @@ of the dashboard (`diag_enabled`). Off = no new lines; existing files stay until
 | `diag.dropped` | `count`, `n_<reason>` |
 | `diag.report_failed` | (error event; `err` has the class) the dashboard could not make a report |
 | `diag.report_made` | `ref`, `scope` (`ticket`, `add-on` or `workspace`), `content`, `page` (a page snapshot was added); written when the dashboard makes a report |
+| `diag.report_shared` | `ref` (the person or a helper sent this report to the connected relay; relay-api.md, Problems) |
 | `diag.reports_deleted` | `count` (Settings > Delete all) |
 | `diag.notes_deleted` | `files` (Settings > Delete notes; the first line of the new log) |
 | `ui.error` | `kind` (`error` or `rejection`), `what` (the error class or name, cut), `file`, `line`, `col` (script file name, no query) |
@@ -119,7 +120,8 @@ resolves the orch home itself (it must not be called from inside that resolution
 
 Nothing in `orch diag` changes a ticket, run, claim, lock or the record, and nothing repairs: no collector calls
 `runs.settle_orphan` or any helper that fixes things as a side effect (a test hashes `.orch/` before and after).
-`report` writes only into `.orch/diag/reports/`. Nothing uploads anything.
+`report` writes only into `.orch/diag/reports/`. Nothing in `orch diag` uploads anything: sharing a report with the
+relay is a separate, explicit step of the relay client (relay-api.md, Problems), and only where a relay is connected.
 
 - `inspect [--ticket T] [--run R] [--json]`: collectors (tickets, runs, services, queues, locks, env, disk, diag; 5 s and
   256 KB each, `{collected_at, revision?, data, gaps[]}`) plus the checks, now. Structure only.
@@ -137,6 +139,11 @@ Nothing in `orch diag` changes a ticket, run, claim, lock or the record, and not
   `record/<run>.jsonl` (normalized events), `content/` only with content on (default on: that ticket's text and
   helper excerpts). The window starts at the scoped run's start, else the ticket's last successful change.
   Every file passes the key hider; without a hider no report is made.
+  `--more "<text>"` (at most 4000 characters) adds further details to `SUMMARY.md` and the manifest (`more`).
+  `--file <path>` (up to 10 times; the dashboard dialog sends the same as `files: [{name, data: base64}]`) copies files the
+  person picked into `attachments/` (each at most 8 MB, 25 MB together; a cleaned file name, no folders, no leading dot,
+  a second file of the same name gets `-2`). They are the person's own files and are stored as they are (a picture cannot
+  pass the hider); the manifest lists them in `attachments: [{name, size}]`. Nothing in them is ever run or followed.
 - Incidents (`reports/i-...`): the same layout, structure only, 15-minute window, frozen BEFORE a recovery runs (in front of
   `settle_orphan` and the start-failure path), on a crash of a command, on a check turning `problem`, and when the same
   delivery failure happens 3 times. One per fingerprint per 15 minutes, at most 20 and 50 MB. Reports and incidents count

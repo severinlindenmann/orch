@@ -54,11 +54,11 @@ test('Run now for own schedule, Allow on this computer for a synced one', {timeo
     await page.getByRole('button', {name: 'Run now'}).click();
     assert.deepEqual(calls.at(-1), {op: 'addon.act', args: {addon: 'automation', verb: 'run', target: 't_made0001'}});
     await page.getByRole('button', {name: 'Allow on this computer'}).click();
-    const dialog = page.locator('dialog.sign-step');
+    const dialog = page.locator('dialog.confirm-step');
     await dialog.waitFor();
     await page.waitForTimeout(300);
     assert.deepEqual(calls.at(-1).args, {addon: 'sync', verb: 'allow', target: 't_sync0001:automation', review: true});
-    assert.match(await dialog.textContent(), /Allow automation to use this change.*The change from the other computer is used here\..*You sign this as/);
+    assert.match(await dialog.textContent(), /Allow automation to use this change.*The change from the other computer is used here\..*You confirm this as/);
     await page.screenshot({path: path.join(OUT, 'allow-sign-step.png')});
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }

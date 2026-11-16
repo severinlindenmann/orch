@@ -4,7 +4,7 @@ crypto vectors, the workspace look (look.json, look/icons, vectors/look-v1.json)
 phone-api.schema.json, plus vectors/phone-v3-v1.json), and Chat + group chat (vectors/chat-groups/*.json against message.schema.json,
 chat-groups.schema.json and the host rules in cg_rules). Every examples/<kind>/ folder needs at least one valid-* and one invalid-* file.
 
-Run: uv run --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
+Run: uv run --python ">=3.11" --with jsonschema --with rfc3339-validator --with cryptography python contracts/validate.py [<kind> ...]
 With kinds (review-card, activity, secrets, jobs, blocks, phone-results, inventory, addon-manifest, screen, counts, human, proposal, diag) only those draft-02 checks run.
 """
 import base64
@@ -13,7 +13,11 @@ import json
 import re
 import struct
 import sys
-import tomllib
+
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    sys.exit("contracts/validate.py needs Python 3.11 or newer. Run it with the uv line at the top of this file.")
 import types
 import unicodedata
 import urllib.parse

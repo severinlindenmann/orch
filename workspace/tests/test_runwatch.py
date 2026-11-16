@@ -150,7 +150,7 @@ def test_list_shows_every_run_without_writing(proj, new_ticket, run, monkeypatch
     after = _files(proj)
     assert after == before  # read-only
     code, out, _ = run("run", "list")
-    assert out.splitlines()[0].split()[:4] == ["TICKET", "RUN", "AGE", "SIGNAL"]
+    assert out.splitlines()[0].split()[:5] == ["TICKET", "RUN", "MODEL", "AGE", "SIGNAL"]
     assert _key(proj, a) in out and "pr-green.sh" in out and _key(proj, b) not in out
 
 

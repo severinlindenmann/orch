@@ -18,6 +18,7 @@ from orch import (
     cli_config,
     cli_conn,
     cli_diag,
+    cli_health,
     cli_job,
     cli_leave,
     cli_look,
@@ -164,7 +165,7 @@ def _chip(root: Path | None, ev: dict) -> str:
 
 def _who_added(t: dict, c: dict, ev: dict) -> str:
     """`t` is a SHOWN ticket (history.shown_ticket): unproven synced evidence is the sync role there."""
-    return "● You" if history.evidence_author(t, c, ev) == "person" else "○ Agent says"
+    return "● You" if history.evidence_author(t, c, ev) == "person" else "○ Helper says"
 
 
 def _check_lines(root: Path | None, t: dict, c: dict, open_q: list[dict]) -> list[str]:
@@ -216,10 +217,14 @@ def _show(t: dict, root: Path) -> str:
             if tickets.checks_split(t)[1] == 0
             else f"✓ All resolved · {_progress(t)}"
         )
-    out.append(f"Proof: {tickets.proof_state(t, root)['line']}")
+    out.append(f"Evidence: {tickets.proof_state(t, root)['line']}")
     extra = [f"Owner: {t['owner']}"] if t.get("owner") else []
     if t.get("due"):
         extra.append(tickets.due_label(t["due"], t["status"]) or f"Due: {t['due']}")
+    from orch import modelpick
+
+    if modelpick.label(t):
+        extra.append(f"Model: {modelpick.label(t)}")
     if extra:
         out.append("  ".join(extra))
     if t.get("note"):
@@ -423,6 +428,7 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     cli_addons.add_parsers(sub, common)
     cli_diag.add_parsers(sub, common)
     cli_leave.add_parsers(sub, common)
+    cli_health.add_parsers(sub, common)
 
     t = sub.add_parser("ticket", help="tickets").add_subparsers(dest="sub", required=True)
     x = t.add_parser("new", parents=[common])
@@ -444,11 +450,6 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         "--epic",
         action="store_true",
         help="an epic: its sub-tickets (--parent) are the work; a run goes through them in order",
-    )
-    x.add_argument(
-        "--start-requires",
-        metavar="TICKET:QUESTION=ANSWER",
-        help="no run starts on it until a person gave this answer to that question (set once, here)",
     )
     x.add_argument(
         "--ext",
@@ -513,6 +514,12 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("--owner")
     x.add_argument("--due", metavar="DAY[ HH:MM]|HH:MM")
     x.add_argument("--done-when", dest="done_when")
+    x.add_argument("--description", help="what it is about and why, 1 to 3 sentences (the agent's own field)")
+    x = t.add_parser(
+        "model", parents=[common], help="which model this ticket's helper runs on: sonnet, opus or auto"
+    )
+    x.add_argument("id")
+    x.add_argument("name", choices=("sonnet", "opus", "auto"))
     x = t.add_parser("plan", parents=[common], help="write the goal and what is not included of a plan")
     x.add_argument("id")
     x.add_argument("--goal", required=True)
@@ -587,8 +594,8 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("check")
     x.add_argument("--evidence", action="append", default=[], metavar="JSON", help=argparse.SUPPRESS)
     for k in ("command", "note", "pr", "commit", "file", "url"):
-        x.add_argument(f"--{k}", metavar="TEXT", help=f"proof: a {k}")
-    x.add_argument("--title", help="short name of the proof")
+        x.add_argument(f"--{k}", metavar="TEXT", help=f"evidence: a {k}")
+    x.add_argument("--title", help="short name of the evidence")
     x.add_argument("--role", help="result, check or support")
     x.add_argument("--summary", help="one line: what came out of this step (shown on the task)")
 
@@ -667,6 +674,16 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     x.add_argument("id")
     x.add_argument("target", help="the number from `orch ref list`, or the address")
     x.add_argument("--status", required=True, metavar="WORD", help='a short lower-case word; "" clears it')
+    x = lk.add_parser(
+        "merge",
+        parents=[common],
+        help="a person merges the ticket's GitHub pull request with their own GitHub login",
+    )
+    x.add_argument("id")
+    x.add_argument("target", help="the number from `orch ref list`, or the address")
+    x.add_argument(
+        "--head", required=True, metavar="COMMIT", help="merge only while this is its newest commit"
+    )
 
     e = sub.add_parser("ext", help="add-on data on a ticket").add_subparsers(dest="sub", required=True)
     x = e.add_parser("set", parents=[common])
@@ -863,6 +880,7 @@ def run(args: argparse.Namespace) -> None:
         or cli_addons.dispatch(args, root)
         or cli_diag.dispatch(args, root)
         or cli_leave.dispatch(args, root)
+        or cli_health.dispatch(args, root)
     ):
         pass
     elif (
@@ -892,7 +910,6 @@ def run(args: argparse.Namespace) -> None:
             title_auto=args.title_auto,
             plan_first=args.plan_first,
             epic=args.epic,
-            start_requires=args.start_requires,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(
@@ -943,6 +960,10 @@ def run(args: argparse.Namespace) -> None:
         t = tickets.set_status(root, args.id, args.status, who)
         warn = _child_warning(root, t)
         shown = _with_notice(t, warn, looked)
+        if not hint and who.startswith("agent:"):
+            from orch import stuck
+
+            hint = stuck.finish_hint(t)  # its pull request is still open
         if hint and t["status"] == "review":
             shown = {**shown, "next_step": hint}
         text = (
@@ -983,8 +1004,19 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t, f'Title written: "{t["title"]}"')
     elif cmd == "ticket" and sub == "tidy":
         fields = {k: getattr(args, k) for k in ("owner", "due", "done_when") if getattr(args, k)}
-        t = tickets.tidy(root, args.id, args.title, by(), fields)
+        t = tickets.tidy(root, args.id, args.title, by(), fields, args.description)
         _out(args, t, f'Tidied: "{t["title"]}"')
+    elif cmd == "ticket" and sub == "model":
+        from orch import modelpick
+
+        t = tickets.set_model(root, args.id, args.name, by())
+        _out(
+            args,
+            t,
+            f"Model: {modelpick.label(t)}. It applies from the next start."
+            if modelpick.label(t)
+            else "orch picks the model again on the next start.",
+        )
     elif cmd == "ticket" and sub == "plan":
         t = tickets.set_plan(root, args.id, args.goal, args.not_included, by())
         _out(args, t, "Plan written.")
@@ -1052,10 +1084,10 @@ def run(args: argparse.Namespace) -> None:
             msg = f"{c['id']} now follows {args.after}."
         elif sub == "remove":
             t, c = tickets.check_remove(root, args.id, args.check, who)
-            msg = f"{c['id']} removed. It and its proof are kept in the history."
+            msg = f"{c['id']} removed. It and its evidence are kept in the history."
         elif sub == "reopen":
             t, c = tickets.check_reopen(root, args.id, args.check, who)
-            msg = f"{c['id']} is open again. Its proof stays in the history."
+            msg = f"{c['id']} is open again. Its evidence stays in the history."
         elif sub == "start":
             t, c = tickets.check_start(root, args.id, args.check, who)
             msg = f"{c['id']}: {who} is on it."
@@ -1083,8 +1115,8 @@ def run(args: argparse.Namespace) -> None:
         _out(
             args,
             history.shown_item(root, t, "checklist", c),
-            f"Done: {c['text']} (proof: {ev['ref']})"
-            + (f"\nProof copied: {ev['ref']} ({ev['text']})" if copied else ""),
+            f"Done: {c['text']} (evidence: {ev['ref']})"
+            + (f"\nEvidence copied: {ev['ref']} ({ev['text']})" if copied else ""),
         )
     elif cmd == "log":
         t = tickets.log(root, args.id, args.text, by())
@@ -1207,6 +1239,54 @@ def run(args: argparse.Namespace) -> None:
         _out(args, t["ext"][args.addon], f"ext.{args.addon} set on {t['id']}")
 
 
+def _ref_merge(args, root: Path, who: str) -> None:
+    """A person's Merge on a pull request left open (Home, `orch needs`): the same merge as the Merge card
+    (ghmerge: the person's own GitHub login, only the commit that was shown); the reference then says
+    merged."""
+    from orch import ghmerge
+
+    if not who.startswith("human:") or tickets.agent_tool():
+        raise Refused("Only a person merges this. Ask the human to press Merge on Home.")
+    t = tickets.load(root, args.id)
+    rows = refs.all_refs(root, t)
+    ref = next(
+        (
+            r
+            for n, r in rows
+            if (str(n) == args.target if args.target.isdigit() else r.get("url") == args.target)
+        ),
+        None,
+    )
+    key = t.get("key") or t["id"]
+    if ref is None or not ghmerge.is_pr_url(ref.get("url")):
+        raise Refused(f"{key} has no GitHub pull request {args.target}. See them: orch ref list {key}")
+    url = ref["url"]
+    # What the row said is checked again now, at GitHub: the kept look is a file any helper can write.
+    now = ghmerge.checks(url)
+    if now is None:
+        raise Refused(f"GitHub did not show the pull request, so nothing was merged. {ghmerge.OPEN_IT}")
+    if now["state"] != "MERGED":  # merged before (a second click) is fine; anything else must be ready
+        if now["state"] != "OPEN":
+            raise Refused(f"The pull request is not open on GitHub, so nothing was merged. {ghmerge.OPEN_IT}")
+        if now["head"] != args.head:
+            raise Refused("The pull request changed after it was shown. Look at it again, then merge.")
+        if now["green"] is not True:
+            raise Refused(
+                f"Its checks have not all passed right now, so nothing was merged. {ghmerge.OPEN_IT}"
+            )
+    # the merge itself takes only this commit (--match-head-commit), so nothing newer than what was checked
+    got = ghmerge.merge(url, args.head, add_review=False)  # one click never adds the person's review
+    line = (
+        f"The pull request was merged already on GitHub ({got['login']}): {url}"
+        if got["already"]
+        else f"Merged the pull request on GitHub as {got['login']}: {url}"
+    )
+    with contextlib.suppress(Refused, OSError):  # merged on GitHub; the note and the shown state are extras
+        tickets.ref_set(root, t["id"], url, "merged", who)
+        tickets.note_history(root, t["id"], who, line)
+    _out(args, {"merged": True, "already": got["already"], "url": url}, line)
+
+
 def _ref(args, root: Path, by) -> None:
     kinds = refs.active_kinds(root)
     if args.sub == "add":
@@ -1235,6 +1315,8 @@ def _ref(args, root: Path, by) -> None:
                     f"  {n}  {d['type']}  {value}{suffix}"
                     + (f"  {d['status'].capitalize()}" if d["status"] else "")
                 )
+    elif args.sub == "merge":
+        _ref_merge(args, root, by())
     elif args.sub == "set":
         t, ref, changed = tickets.ref_set(root, args.id, args.target, args.status, by())
         d = refs.describe(ref, kinds, root)

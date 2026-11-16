@@ -180,7 +180,7 @@ def test_covers_add_edit_and_show(proj, run, validate, new_ticket):
     assert run("check", "edit", tid, "c2")[0] == 2  # nothing to change
     assert run("check", "add", tid, "x", "--covers", "y" * 301)[0] == 2
     code, out, _ = run("ticket", "show", tid)
-    assert code == 0 and "Proof: No checks recorded" in out
+    assert code == 0 and "Evidence: No checks recorded" in out
 
 
 # ---- recorded checks (B8): record, files_sig, changed since, failed ----
@@ -815,7 +815,7 @@ def test_fresh_prompt_summary_names_writer_and_proof(repo, run, new_ticket):
     _done_with_record(repo, run, tid, 0)
     tickets.set_summary(repo, tid, "Half done", "agent:claude")
     prompt = runs.fresh_prompt(tickets.load(repo, tid), [], repo)
-    assert "Where things stand, written by the last run (proof: 1 check passed;" in prompt
+    assert "Where things stand, written by the last run (evidence: 1 check passed;" in prompt
     assert "Half done" in prompt and "how you know it works" in prompt and "orch check record" in prompt
     assert len(prompt) <= 12000
 

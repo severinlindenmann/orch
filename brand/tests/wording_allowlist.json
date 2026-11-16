@@ -1,1 +1,21 @@
-{}
+{
+ "relay/web/portal.html": {
+  "Signature": 1
+ },
+ "workspace-addons/automation/src/orch_automation/cli.py": {
+  "Scheduler": 3
+ },
+ "workspace-addons/dashboard/src/orch_dashboard/actions.py": {
+  "Sign": 2,
+  "signed": 1
+ },
+ "workspace-addons/sync/src/orch_sync/step.py": {
+  "Artifact": 1
+ },
+ "workspace/src/orch/jobs.py": {
+  "Job": 1
+ },
+ "workspace/src/orch/record.py": {
+  "proof": 2
+ }
+}

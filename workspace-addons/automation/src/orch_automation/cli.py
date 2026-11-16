@@ -228,6 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     ac.add_argument("verb", choices=actions.VERBS)
     ac.add_argument("target", help="ticket id")
     ac.add_argument("--by", help="who pressed the button (recorded on the ticket); the add-on act contract")
+    ac.add_argument(
+        "--proof-target", action="store_true", help="say what the person confirms (the dashboard asks first)"
+    )
     args = ap.parse_args(argv)
     try:
         root = find_workspace(Path(args.dir))
@@ -305,6 +308,11 @@ def _run(args, root: Path) -> int:
         from .view import build
 
         print(json.dumps(build(root)))
+    elif args.cmd == "act" and args.proof_target:
+        try:
+            print(json.dumps(actions.review(root, args.verb, args.target)))
+        except actions.Bad as e:
+            raise Refused(str(e)) from None
     elif args.cmd == "act":
         try:
             res = actions.act(root, args.verb, args.target, args.by, args.value)
@@ -373,7 +381,7 @@ def _script(args, root: Path, out) -> int:
         out(
             rows,
             "\n".join(
-                f"{r['script']}  {' '.join(r['command'])}"
+                f"{r['script']}  {scripts.shown(r['command'])}"
                 + (
                     ""
                     if r["allowed"]

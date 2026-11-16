@@ -672,6 +672,8 @@ class Handler(BaseHTTPRequestHandler):
         code, out = (
             diagapi.make_report(self.root, body)
             if path == "/api/diag/report"
+            else diagapi.share_report(self.root, body)
+            if path == "/api/diag/share"
             else diagapi.open_folder(self.root, body)
         )
         if code != 200:
@@ -779,7 +781,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._session_reopen()
         if path == "/api/term/keys":
             return self._term_keys()
-        if path in ("/api/diag", "/api/diag/report", "/api/diag/open"):
+        if path in ("/api/diag", "/api/diag/report", "/api/diag/open", "/api/diag/share"):
             return self._diag_post(path)
         px = PROXY.fullmatch(path)
         if path != "/api/act" and not (px and px.group(2) == "/api/act"):

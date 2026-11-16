@@ -3,6 +3,8 @@
 One line per decision, newest first. Agents never reopen a decision without the owner (AGENTS.md R9.5).
 Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 
+- 2026-11-16 (ORCH-29): No core start check on tickets: `start_requires` (#777) is removed. The person's Factory Start
+  only tells the manager agent to go; an agent can start a crew ticket itself.
 - 2026-11-16: `orch uninstall` has no option to delete tickets: it always keeps `.orch/tickets`, `.orch/config.toml`
   and `.orch/secrets`.
 - 2026-11-16: The person's own "when to ask" list is the file `.orch/ask-when.md`.
@@ -38,3 +40,6 @@ Older decisions: `owner-decisions.md` (4 Nov 2026) and `owner-plan.md`.
 - 2026-11-15: Lessons are written by helpers themselves: one list, 3 KB in the start text, local only (no questions, no proofs).
 - 2026-11-16 (ORCH-14): New user-facing noun "Epic" (owner approved): New ticket can make an epic with several tickets
   inside it, each with its own text and files. One run on the epic works through its tickets in order.
+- 2026-11-16 (ORCH-34): A problem report can be shared with the relay, only by an explicit tick in Report a problem
+  (or `orch relay problem share`). New relay admin page "Report a problem" (owner: the same name as the button). Only workspaces
+  the admin ticks there may pick problems up. Replaces "problem reports never go via the relay".

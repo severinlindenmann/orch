@@ -23,7 +23,9 @@ HUMAN_ONLY = {
     "review answer",  # a person decides a card (agents are refused: needs_person)
     "ticket changes",  # a person sends a Review ticket back (agents are refused)
     "run take-back",  # a person takes back a waiting message (agents are refused)
+    "ref merge",  # a person's Merge on a pull request a helper left open (agents are refused)
     "check wont-do",  # a person decides a step will not be done (agents ask with orch ask)
+    "ticket model",  # a person's choice of model (agents are refused; orch picks by itself)
     "chat",  # the dashboard and the Chat helper (its prompt names the commands)
     "copy clean",  # a person's call (the dashboard's "Clean up now"); `orch copy` is hidden from help
     "copy retry",  # a person's "Try again" (agents are refused)
@@ -36,6 +38,7 @@ HUMAN_ONLY = {
     "private",  # a person's approvals and Move to private (agents are refused)
     "update",
     "doctor",  # a person's check of the install
+    "logins",  # a person's check of the tool logins (the dashboard and phone show the same)
     "uninstall",  # a person takes orch out of a folder
     "start",
     "stop",

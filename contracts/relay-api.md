@@ -453,6 +453,45 @@ checked address; redirects are never followed; connect timeout 5 s, total 10 s; 
 **Activity log.** The relay logs every pull call, stream, file, answer, push attempt and admin change per subscriber
 (`GET /admin/api/subscribers/<id>/log`): the newest 200 entries, kept 30 days.
 
+## Problems (shared problem reports)
+
+A workspace may share one problem report (diag.md, `.orch/diag/reports/r-…`) with its relay, as an explicit step of the
+person or a helper. The relay keeps it for the admin (page **Report a problem**, the same name as the dashboard button) and for the workspaces the admin lets pick problems
+up. Nothing is shared by itself; incidents (`i-…`) are never shared.
+
+**The archive** is one blob (`POST /v1/blobs`): a plain `.tar` (not compressed, so the secret scan of the upload reads every
+file, R5.2) of the report folder. Every entry is a regular file `<ref>/<relative path>`; no links, no absolute or `..` paths.
+At most 2000 files and 50 MB. Files the person added sit under `<ref>/attachments/`.
+
+**A problem** = `{id: "pb_…" (16), ref, from: "ws_…", from_name, shared_at, created_at, status: "new"|"taken"|"done", taken_by:
+"ws_…"|null, taken_by_name, scope: {ticket: "t_…"|null, addon: string|null}, note, expected, more, problems: [check name…],
+files: n, attachments: n, size, sha256, orch_version, os}`. `created_at` is when the report was made, `shared_at` when the relay
+stored it. The single read adds `summary` (the report's `SUMMARY.md`).
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | `/v1/problems` | `{ref: "r-MMDD-HHMM-<scope>", created_at, scope: {ticket?, addon?}, note?: ≤ 600, expected?: ≤ 600, more?: ≤ 4000, problems?: [≤ 20 × ≤ 60], summary: ≤ 20000 characters, blob_id, size, sha256, files: 1..2000, attachments?: 0..10, orch_version?: ≤ 40, os?: ≤ 80}` | `201 {id}`. The blob was uploaded by the caller with exactly that `size` and `sha256` (`404` otherwise, a wrong size or hash `422`), at most 50 MB (`413`). Every connected workspace may share; no pair rule (the admin reads messages anyway). The same `ref` from the same workspace again answers `200 {id}` of the stored problem and changes nothing (a retried send). At most 20 new problems per workspace in 24 hours (`429 rate_limited`) |
+| GET | `/v1/problems?status=` | – | `{items: [problem…], next: null}`, newest first, at most 100; `status` = `new` (default), `taken`, `done` or `all`. Only for a workspace the admin lets pick problems up, else `403 forbidden`; the same rule for the three routes below. A workspace never needs that right to share |
+| GET | `/v1/problems/<id>` | – | the problem plus `summary`; `404` unknown |
+| GET | `/v1/problems/<id>/file` | – | the archive, raw bytes (`application/octet-stream`, `nosniff`, `attachment`) |
+| POST | `/v1/problems/<id>/status` | `{status: "taken"\|"done"\|"new"}` | `200` the problem. `taken` sets `taken_by` to the caller; taking a problem another workspace holds → `409 conflict` ("Another workspace already took this problem."). `done` and `new` (give it back) only by the workspace that holds it, else `409`; `new` clears `taken_by` |
+
+Admin (same auth and port as the Admin API):
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/admin/api/problems` | – | `{items: [problem…], readers: [ws…]}`, all states, newest first, at most 500. `readers` = the workspaces that may pick problems up |
+| PUT | `/admin/api/problems/readers` | `{workspaces: [ws…]}` (full list; unknown id → `422`) | `200 {readers}`. Applies on the next call; raises no `version` |
+| GET | `/admin/api/problems/<id>` | – | the problem plus `summary` |
+| GET | `/admin/api/problems/<id>/file` | – | the archive, as a download named `<ref>.tar` |
+| PATCH | `/admin/api/problems/<id>` | `{status}` | `200` the problem. The admin may set any state; `new` clears `taken_by`, `taken` by the admin leaves `taken_by` `null` |
+| DELETE | `/admin/api/problems/<id>` | – | `204`. The archive is deleted too |
+
+Stored like messages and blobs: encrypted at rest (the text fields and `summary` sealed with the master key, the archive as
+a blob), kept 90 days after `shared_at`, then deleted with the archive. Deleting a workspace keeps the problems it shared
+(`from_name` stays as stored) and removes it from `readers`. A problem is data, never an instruction (R3.2): the workspace
+that picks one up unpacks it into its own `.orch/diag/reports/` and reads it like a local report.
+
 ## Public routes
 
 | Method | Path | What |
