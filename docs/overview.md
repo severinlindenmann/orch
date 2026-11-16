@@ -65,5 +65,7 @@ e2e/                scenarios (e2e-scenarios.md), Playwright, scripts
 - A change in `contracts/**` runs `contracts.yml` (validate examples) **and** every consumer: workspace, addons, publish, relay, mobile.
   A change in `workspace/**` also runs `addons.yml` (add-ons call the CLI).
 - Job `gate` always runs and is the only required check: green when every called job passed or was skipped.
+  On a draft PR it is red on purpose; marking the PR ready starts the real run. A re-run replays its old event, runs
+  in a group of its own and never cancels the PR's current run.
 - Deploy: `publish-deploy.yml` / `relay-deploy.yml` on push to `main` with changes in that folder: build, copy binary over SSH, restart, check `/health`.
 - e2e (`e2e.yml`) runs by hand or nightly, not on every PR.
