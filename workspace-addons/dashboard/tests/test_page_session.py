@@ -353,6 +353,7 @@ ACT_ARGS = {
     "live.set": {"max": 3},
     "copies.set": {"mode": "off"},
     "workspace.set": {"field": "name", "text": "Demo"},
+    "workspace.propose": {},
     "look.profile": {"service": "relay", "description": "Demo", "tags": ["a"]},
     "copies.clean": {},
     "diag.set": {"on": False},

@@ -46,8 +46,8 @@
       const list = payload.tickets;
       const next = INAPP ? window.FocusHelpers.nextNeeding(list) : null;
       const crumb = root.querySelector('.fx-workspace'); if (crumb) crumb.textContent = payload.workspace + ' / Focus';
-      S.state.pickAttention = window.FocusHelpers.attentionText(list) + (INAPP && list.some(window.FocusHelpers.needsYou) ? ' They are on Home too.' : '');
-      pickerSub();
+      S.state.pickList = list;
+      pickAttention();
       const box = root.querySelector('.fx-pick');
       box.querySelector('.fx-skel')?.remove();
       if (!list.some(t => t.status !== 'done')) box.append(emptyState());
@@ -116,6 +116,24 @@
   function emptyState() {
     return h('div', {class: 'fx-empty'}, h('p', {class: 'muted', text: 'No open tickets.'}),
       INAPP ? h('div', {class: 'row'}, h('a', {class: 'btn primary sm', href: '/#new', target: '_top', text: 'Create a ticket'}), homeLink()) : null);
+  }
+
+  /* What needs the person, in the picker line. Inside the dashboard it is the dashboard's own number (the top bar's,
+     sent by postMessage), so both say the same (ORCH-63); alone, Focus counts open questions and results itself. */
+  function pickAttention() {
+    const list = S.state.pickList;
+    if (INAPP && Number.isInteger(S.state.dashNeeds)) S.state.pickAttention = window.FocusHelpers.dashCountText(S.state.dashNeeds) + (S.state.dashNeeds ? ' They are on Home.' : '');
+    else if (list) S.state.pickAttention = window.FocusHelpers.attentionText(list) + (INAPP && list.some(window.FocusHelpers.needsYou) ? ' They are on Home too.' : '');
+    pickerSub();
+  }
+  if (INAPP) {
+    window.addEventListener('message', e => {
+      const d = e.data;
+      if (e.origin !== location.origin || e.source !== window.parent || !d || d.type !== 'orch.needs.count' || !Number.isInteger(d.count) || d.count < 0) return;
+      if (S.state.dashNeeds === d.count) return;
+      S.state.dashNeeds = d.count; pickAttention();
+    });
+    try { window.parent.postMessage({orch: 'needs-count'}, location.origin); } catch (e) { /* not framed */ }
   }
 
   /* "2 agents are working. One question needs you." The agent count comes from the live cards, the rest from the tickets. */

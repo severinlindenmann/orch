@@ -305,3 +305,141 @@ def test_link_without_a_server(tk, run):
     assert code == 0 and "No review page runs. Start it in your terminal: orch review" in out
     code, out, _ = run("review", "link", "--json")
     assert json.loads(out)["running"] is False
+
+
+# ---------------------------------------------------------------- a design review on cards (ORCH-65)
+
+
+def test_the_question_text_and_group_reach_the_review_list(tk, run):
+    root, tid = tk
+    code, out, err = run(
+        "ask", tid, "Now: three counts. Proposal: one list.", "--draft", "Home list", "--then", "I build it.",
+        "--group", "  Home   look ", "--json", "--by", "agent:x",
+    )  # fmt: skip
+    assert code == 0, out + err
+    q = json.loads(out)
+    assert q["group"] == "Home look" and "group" not in q["card"]
+    (c,) = [c for c in json.loads(run("review", "list", "--json")[1])["cards"] if c["ticket"] == tid]
+    assert c["text"] == "Now: three counts. Proposal: one list." and c["group"] == "Home look"
+    assert c["digest"] == _digest(root, tid, "q1")  # the group is not part of what the digest covers
+
+
+def test_group_goes_only_with_a_card_and_is_short(tk, run):
+    _, tid = tk
+    code, out, err = run("ask", tid, "Plain?", "--group", "Set", "--by", "agent:x")
+    assert code == 2 and "go with a card" in out + err
+    code, out, err = _add(run, tid, "--draft", "T", "--then", "x", "--group", "x" * 81)
+    assert code == 2 and "at most 80" in out + err
+
+
+def test_a_draft_card_can_suggest_ok_or_no(tk, run):
+    _, tid = tk
+    code, out, err = _add(run, tid, "--draft", "T", "--then", "x", "--suggest", "ok")
+    assert code == 0, out + err
+    assert json.loads(out)["recommended"] == "ok"
+    code, out, err = _add(run, tid, "--plan", "P", "--then", "x", "--suggest", "no")
+    assert code == 0 and json.loads(out)["recommended"] == "no", out + err
+    code, out, err = _add(run, tid, "--draft", "U", "--then", "x", "--suggest", "B")
+    assert code == 2 and "ok (approve) or no" in out + err
+
+
+def test_a_choice_can_show_how_it_is_today(tk, run):
+    root, tid = tk
+    for n in ("today", "a", "b"):
+        (root / f"{n}.png").write_bytes(b"\x89PNG\r\n\x1a\n" + n.encode())
+    code, out, err = _add(
+        run, tid, "--choose", "Which?", "--before", "today.png", "--option", "A=One:a.png",
+        "--option", "B=Two:b.png", "--suggest", "A", "--then", "x",
+    )  # fmt: skip
+    assert code == 0, out + err
+    pv = json.loads(out)["card"]["preview"]
+    assert pv["type"] == "options" and pv["before"]["src"].startswith("reviewed/")
+    code, out, err = _add(
+        run, tid, "--choose", "W2", "--before", "today.png", "--after", "a.png",
+        "--option", "A=One", "--option", "B=Two", "--then", "x",
+    )  # fmt: skip
+    assert code == 2 and "--before FILE" in out + err
+
+
+def test_the_phone_card_leaves_out_the_today_picture():
+    ref = "reviewed/aaaaaaaaaaaa/"
+    opts = [
+        {"id": "A", "title": "One", "preview": {"type": "img", "src": ref + "a.png"}},
+        {"id": "B", "title": "Two"},
+    ]
+    before = {"type": "img", "src": ref + "t.png"}
+    card = {
+        "kind": "choice",
+        "title": "T",
+        "then": "x",
+        "preview": {"type": "options", "before": before, "options": opts},
+    }
+    files = review.card_files_of(card)
+    assert files == ["reviewed/aaaaaaaaaaaa/a.png"]
+    wire = review.wire_card(card, {f: i for i, f in enumerate(files)})
+    assert "before" not in wire["preview"] and wire["preview"]["options"][0]["preview"]["src"] == {"file": 0}
+
+
+def test_a_typed_comment_from_the_page_is_kept_with_the_answer(tk, run):
+    # the dashboard turns the page's {text, pins} into {words: {text}, pins} (actions._review_answer)
+    root, tid = tk
+    q = _draft(run, tid)
+    note = json.dumps({"words": {"text": "Make the rows taller."}, "pins": []})
+    code, out, err = run(
+        "review",
+        "answer",
+        tid,
+        q["id"],
+        "--verdict",
+        "talk",
+        "--note",
+        note,
+        "--via",
+        "dashboard",
+        "--by",
+        ME,
+    )
+    assert code == 0, out + err
+    saved = next(x for x in tickets.load(root, tid)["questions"] if x["id"] == q["id"])
+    assert saved["decision"]["action"] == "send_back" and saved["via"] == "dashboard"
+    assert saved["decision"]["words"]["text"] == "Make the rows taller."
+    assert "Make the rows taller." in saved["answer"]
+
+
+def test_a_card_carries_links_and_option_descriptions(tk, run):
+    root, tid = tk
+    code, out, err = _add(
+        run, tid, "--choose", "Which?", "--option", "A=One", "--option", "B=Two",
+        "--describe", "A=Keeps the menu as it is", "--ref", "Mockup=http://127.0.0.1:8780/home.html",
+        "--ref", "Issue=https://example.com/issues/12", "--then", "x",
+    )  # fmt: skip
+    assert code == 0, out + err
+    q = json.loads(out)
+    assert q["card"]["preview"]["options"][0]["text"] == "Keeps the menu as it is"
+    assert "text" not in q["card"]["preview"]["options"][1]
+    assert q["links"] == [
+        {"label": "Mockup", "url": "http://127.0.0.1:8780/home.html"},
+        {"label": "Issue", "url": "https://example.com/issues/12"},
+    ]
+    (c,) = [c for c in json.loads(run("review", "list", "--json")[1])["cards"] if c["ticket"] == tid]
+    assert c["links"] == q["links"] and c["digest"] == _digest(root, tid, "q1")
+    saved = tickets.load(root, tid)["questions"][0]
+    assert tickets.question_digest(saved) != tickets.question_digest(
+        {**saved, "links": []}
+    )  # links are shown
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--draft", "T", "--then", "x", "--ref", "Mockup=javascript:alert(1)"],
+        ["--draft", "T", "--then", "x", "--ref", "no-equals"],
+        ["--draft", "T", "--then", "x", *sum([["--ref", f"L{i}=https://e.com/{i}"] for i in range(6)], [])],
+        ["--draft", "T", "--then", "x", "--describe", "A=x"],
+        ["--choose", "T", "--option", "A=One", "--option", "B=Two", "--describe", "Z=x", "--then", "x"],
+    ],
+)
+def test_links_and_descriptions_are_checked(tk, run, extra):
+    _, tid = tk
+    code, out, err = _add(run, tid, *extra)
+    assert code == 2, out + err

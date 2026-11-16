@@ -3,6 +3,7 @@
 ## settings.html — General
 
 - One "Workspace profile" card comes first: name, one description (the same text goes to the relay as a proposal), tags (kept in the workspace, shown without a relay too; with a relay on they go along as a proposal), icon and colour; until a person sets them, a helper may fill in name, description, tags, icon and colour (the starter task of a first `orch init`, ORCH-7); the relay rows (name on relay, waiting for relay approval / live on relay) appear only when the relay is on; folder paths sit behind Details (SN-08, SN-15, SN-17; BP-49, BP-79).
+- **Suggest** (ORCH-36) sits in the profile card header: orch works out name, description, tags and an icon from the folder (README, guide files, ticket titles); they land in the edit fields with "Suggested: <icon> · saved with the rest" and Keep current; Cancel drops it, Save keeps it as edited. Nothing is saved before Save; an icon the person picked is never replaced.
 - Phone, helper, shared links and sync are compact summaries with direct destinations (SN-08, SN-13, SN-16).
 - Advanced groups team sharing, finished-work policy and copies; edits save locally with visible feedback (SN-18; BP-48).
 - Product data: Needs rename, appearance and policy write endpoints, current helper label, share count and cache timestamps.
@@ -241,6 +242,7 @@ Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty
 
 ### settings-about.html (owner feedback 14 Nov, fb1)
 - New tab "About & updates": installed release, newest release, "What changed" (max 5 plain lines), one Update button, steps (Downloading / Installing / Restarting / Done) and "Updated 16 → 17". Click the button to see the steps.
+- 16 Nov (ORCH-89): the About card (Style guide row) moved here from General, below Automatic.
 
 - Owner 14 Nov (fb11/fb24): Set up relay is no longer a button/dialog; when no relay is connected the card lists the 3 plain steps (admin page, paste the orch relay connect line, Check again); Pair a phone shows only once connected.
 

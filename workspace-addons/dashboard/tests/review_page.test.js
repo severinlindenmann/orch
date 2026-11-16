@@ -64,6 +64,9 @@ test('the All cards list: the card on screen in bold, answered ones quiet with t
   const item = (id, title) => ({id, title, icon:'page', kind:'draft', okLabel:'Build it', preview:{type:'page'}});
   const deck = {items:[item('a', 'First'), item('b', 'Second'), item('c', 'Third')], index:1, answers:{a:{verdict:'ok', item:item('a', 'First'), note:null}, c:{verdict:'no', item:item('c', 'Third')}}, jump(i) { deck.index = i; }};
   c.document = {createElement: t => h(t)}; c.reviewDrawSide(queue, deck);
+  assert.equal(rows.length, 1, 'one set: one section without a heading');
+  assert.ok(!nodes(rows[0]).some(n => /review-group-head/.test(n.attrs?.className || '')));
+  rows.splice(0, 1, ...rows[0].children);
   assert.equal(rows.length, 3);
   assert.match(rows[0].attrs.className, /is-done/); assert.match(text(rows[0]), /Build it/);
   assert.match(rows[1].attrs.className, /is-now/); assert.match(text(rows[1]), /Now/);
@@ -98,6 +101,35 @@ test('"Review all" is a link to #review with the card count, and never changes t
   assert.equal(withCards.reviewCount(), 1);
   assert.equal(withCards.needsToday().count, without.needsToday().count, 'cards are the questions and results Home already counts');
 });
+test('ORCH-63: the Review subtitle, the top bar and the Review menu entry say one number: the cards (questions + results)', () => {
+  const base = {settings:{}, runs:{}, services:[]};
+  const t1 = {id:'t_abcdef', title:'Newsletter', status:'waiting', questions:[{id:'q3', text:'Home block'}]};
+  const t2 = {id:'t_fffaaa', title:'Services', status:'waiting', questions:[{id:'q1', text:"Start 'Services'?", kind:'factory:start'}]};
+  const rows = [
+    {id:'core:q:t_abcdef:q3', source:'core', ticket:'t_abcdef', since:'2026-11-15T09:00:00Z', title:'Newsletter', answer:{question:'q3', digest:ID, options:['A', 'B']}},
+    {id:'core:q:t_fffaaa:q1', source:'core', kind:'factory:start', ticket:'t_fffaaa', since:'2026-11-15T10:00:00Z', title:'Services', answer:{question:'q1', digest:ID, options:['Start', 'Edit', 'Not now']}}];
+  const factory = {...CARD, id:'core:q:t_fffaaa:q1', ticket:'t_fffaaa', key:'q1', kind:'choice', card:{kind:'choice', title:"Start 'Services'?"}};
+  const c = home({...base, review:{cards:[CARD, factory], answered:[]}}, [t1, t2], rows);
+  assert.equal(c.needsToday().count, 2);
+  assert.equal(c.reviewSubtitle(), '2 things wait on you, most urgent first.');
+  // owner 16 Nov: the number is open questions plus results to check, so it equals the cards here. A helper idle at its
+  // prompt, or a ticket that only waits for another ticket, has no card and is not counted.
+  const idle = {id:'core:stuck:t_ccccdd', source:'core', kind:'stuck:idle', ticket:'t_ccccdd', since:'2026-11-15T11:00:00Z', title:'Docs', text:'The helper waits at its prompt', tone:'warn'};
+  const waits = {id:'t_ddddee', title:'Later', status:'waiting', waiting_on:{kind:'ticket', ref:'t_abcdef'}, questions:[]};
+  const check = {...CARD, id:'core:review:t_eeeeff', ticket:'t_eeeeff', key:'review', kind:'check', card:{kind:'check', title:'Report'}};
+  const cards = [CARD, factory, check];
+  const more = home({...base, review:{cards, answered:[]}}, [t1, t2, {id:'t_ccccdd', title:'Docs', status:'active', questions:[]}, waits, {id:'t_eeeeff', title:'Report', status:'review', questions:[]}], [...rows, idle]);
+  assert.equal(more.needsToday().count, 3); assert.equal(more.needsToday().count, more.reviewCount());
+  assert.equal(more.reviewSubtitle(), '3 things wait on you, most urgent first.');
+  assert.equal(home({...base, review:{cards:[], answered:[]}}, [], []).reviewSubtitle(), 'Nothing waits for you.');
+});
+test('ORCH-63: the dashboard sends the one count to the shown add-on page of its own (Focus), and on request', () => {
+  const src = read('app.js');
+  assert.match(src, /postMessage\(\{type:'orch\.needs\.count', count:n\}, location\.origin\)/);
+  assert.match(src, /menuToggle\.textContent = [^\n]+\n\s*postNeedsCount\(needCount\);/);
+  assert.match(src, /e\.data\?\.orch !== 'needs-count'/);
+  assert.match(src, /\.shipped\) return null;/, 'only an add-on orch ships gets the number');
+});
 test('"Review all" is not shown in a shared copy', () => {
   assert.ok(home({review:{cards:[CARD]}}).reviewAllButton());
   const c = home({review:{cards:[CARD]}}); c.snapshot = true; assert.equal(c.reviewAllButton(), null);
@@ -109,4 +141,22 @@ test('Review answers on a ticket: only those with a card answer, newest first', 
   const list = vm.runInContext('ticketReviewAnswers', c)(t);
   assert.deepEqual(list.map(e => e.id), ['core:q:t_abcdef:q3', 'core:q:t_abcdef:q1'], 'an answer without a decision is not one');
   assert.equal(vm.runInContext('ticketReviewAnswers', c)({id:'t_abcdef', questions:[{id:'q4', answer:'x'}]}).length, 0);
+});
+
+test('the All cards list: one section per set (group, else ticket) with its own count (ORCH-65)', () => {
+  const c = ctx({}, {iconEl:n => h('span', {}, 'ic-' + n)});
+  const secs = []; const queue = {replaceChildren(...r) { secs.push(...r); }};
+  const item = (id, extra) => ({id, title:'Card ' + id, icon:'page', kind:'draft', preview:{type:'page'}, ticketTitle:'Home look', ...extra});
+  const deck = {items:[item('a', {group:'Phone'}), item('b', {group:'Phone'}), item('c')], index:1, answers:{a:{verdict:'ok', item:item('a'), note:null}}, jump() {}};
+  c.reviewDrawSide(queue, deck);
+  assert.equal(secs.length, 2);
+  assert.match(text(secs[0]), /^Phone1 of 2 waiting/); assert.match(text(secs[1]), /^Home look1 of 1 waiting/);
+});
+
+test('Review opens at the card the ticket page asked for (#review?card=...)', () => {
+  const calls = [];
+  const c = ctx({}, {location:{hash:'#review?card=' + encodeURIComponent('core:q:t_abcdef:q2')}, window:{DashHelpers:helpers, UI:{reviewPage:(host, api, o) => { calls.push(o); return {destroy() {}, tick() {}}; }}}});
+  const host = h('div'), main = {querySelectorAll: sel => sel === '[data-review-host]' ? [host] : [], querySelector: () => h('div')};
+  c.mountReview(main);
+  assert.equal(calls[0].startId, 'core:q:t_abcdef:q2');
 });

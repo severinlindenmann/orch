@@ -59,6 +59,7 @@ def add_parsers(sub, common) -> None:
     s.add_argument(
         "--if-current", dest="if_current", metavar="OLD", help="insights.*: refuse unless it is OLD"
     )
+    c.add_parser("propose", parents=[common], help="a proposal for the workspace name, description and tags")
     a = c.add_parser("agent", parents=[common])
     a.add_argument("name_or_add", metavar="add|NAME")
     a.add_argument("name", nargs="?")
@@ -244,6 +245,19 @@ def _shown(v) -> str:
 
 
 def _config(args, root: Path) -> None:
+    if args.sub == "propose":  # read-only: the person accepts or edits it in Settings, then it is saved
+        from orch import profile_propose
+
+        p = profile_propose.propose(root)
+        lines = [
+            f"Name: {p['name']}",
+            f"Description: {p['description'] or '(none found)'}",
+            f"Tags: {', '.join(p['tags']) or '(none found)'}",
+            f"Icon: {p['icon'] or '(none found)'}",
+            "Nothing was saved. Save it with orch config set workspace.name|description|tags.",
+        ]
+        _out(args, p, "\n".join(lines))
+        return
     if args.sub == "get":
         getters = {
             "workspace.agent": lambda: config.agent_name(root),

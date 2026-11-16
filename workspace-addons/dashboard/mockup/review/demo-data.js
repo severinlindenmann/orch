@@ -3,6 +3,25 @@
    shows why it waits on you (need). Order: most urgent first. */
 window.SWIPE_KIT='../../../../workspace/src/orch_ui/static/';
 window.SWIPE_ITEMS=[
+ /* A design review as one set of cards (16 Nov, ORCH-65): the question text on the card, full-page pictures that fit the
+    pane on a dark ground with a zoom per side, a marked suggestion, a choice with how it is today. */
+ {id:'g1',kind:'draft',kindLabel:'Draft',icon:'page',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:02',title:'Home: one list of what needs you',
+  text:'Now: Home shows questions, results to check and a factory start in three places, and the count on top does not match the list. Proposal: one list, most urgent first, each row with its picture and one button. The count on top is the length of this list.',
+  why:'Found in the dashboard look review.',okLabel:'Build it',suggest:'ok',
+  links:[{label:'Mockup',url:'../proposals/fb23-home-what-changed.html'},{label:'Issue 1290',url:'https://github.com/'}],
+  then:'The helper builds it. You check it again before anyone sees it.',
+  preview:{type:'compare',before:{type:'img',src:'assets/home-today.jpg',alt:'Home today'},after:{type:'img',src:'assets/home-proposal.jpg',alt:'Home as proposed'}}},
+ {id:'g2',kind:'choice',kindLabel:'Choose',icon:'cards',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:03',title:'Home: where the review sets go',
+  text:'Several cards that belong together should show as one row on Home with their pictures. Which place?',
+  then:'The helper builds the one you pick.',
+  preview:{type:'options',before:{type:'img',src:'assets/home-today.jpg',alt:'Home today'},options:[
+   {id:'A',title:'Top of Home',suggested:true,preview:{type:'img',src:'assets/home-proposal.jpg',alt:'Sets on top'},text:'One row per set, above everything else.'},
+   {id:'B',title:'Inside Needs you',preview:{type:'page',src:'../home/home.html'},text:'The set is one row in the list.'}]}},
+ {id:'g3',kind:'plan',kindLabel:'Plan',icon:'note',group:'Home look',ticket:'DT-50',ticketId:'DT-50',ticketTitle:'Home look',when:'today 11:04',title:'Drop the old “Review all” button',
+  text:'With sets on Home, the separate “Review all” button repeats the same thing. Proposal: remove it; the menu keeps Review.',
+  okLabel:'Remove it',suggest:'no',
+  then:'The button goes; Review stays in the menu.',
+  preview:{type:'doc',heading:'What changes',paras:['Home: the “Review all” button is removed.','Menu: Review stays, with its count.']}},
  {id:'d1',kind:'draft',kindLabel:'Draft',icon:'page',ticket:'DT-41',ticketId:'DT-41',ticketTitle:'Home update',task:'d1',about:'Draw the “What changed today” block',when:'today 09:12',need:'Blocks the Home update',title:'Home: “What changed today” block',
   why:'The helper drew a new block for the top of Home.',okLabel:'Build it',
   then:'The helper builds it. You check it again before anyone sees it.',

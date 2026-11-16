@@ -56,19 +56,19 @@ test('home renders one need card per ticket with question count and yellow chip'
   const c = context([t], {needsList:() => needs});
   const home = c.home(), text = JSON.stringify(home);
   assert.equal(nodes(home, n => n.attrs?.['data-need-row']).length, 1);
-  assert.match(text, /2 questions/); assert.match(text, /1 thing needs you/); assert.match(text, /Needs you · 1/); assert.doesNotMatch(text, /questions? for you/);
+  assert.match(text, /2 questions/); assert.match(text, /2 things need you/); assert.match(text, /Needs you · 2/);  // one per question (ORCH-63) assert.doesNotMatch(text, /questions? for you/);
   assert.match(text, /First\?/); assert.doesNotMatch(text, /Second\?/);
   assert.equal(nodes(home, n => /chip/.test(n.attrs?.className || '')).length, 0); // the section heading already says it
   needs.shift();
   assert.match(JSON.stringify(c.home()), /Second\?/);
 });
-test('home: the Needs you heading shows the count (one per ticket plus failed starts)', () => {
+test('home: the Needs you heading shows the count (one per open question plus results to check, ORCH-63)', () => {
   const items = ['a', 'b', 'c'].map(id => ({id, title:'T ' + id, status:'active', questions:[{id:id + '1', text:'One?'}, {id:id + '2', text:'Two?'}]}));
   const needs = items.flatMap(t => t.questions.map(q => ({id:q.id, ticket:t.id, title:q.text, answer:{question:q.id}})));
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
-  assert.match(text, /3 things need you/);
-  assert.equal(helpers.needsYouCount(needs, []), 3);
-  assert.equal(helpers.needsYouCount([{id:'x'}, {id:'y', ticket:'a'}, {id:'z', ticket:'a'}], [['b']]), 3);
+  assert.match(text, /6 things need you/);
+  assert.equal(helpers.needsYouCount(needs), 6);
+  assert.equal(helpers.needsYouCount([{id:'x'}, {id:'y', ticket:'a'}, {id:'z', ticket:'a', answer:{question:'q1'}}], [{id:'r'}]), 2, 'rows without a question are not counted');
   assert.equal(helpers.needsYouCount([], []), 0);
 });
 test('home: the badge and Menu count (needsToday) equal the Needs you heading and skip rows put off until later today', () => {
@@ -77,17 +77,19 @@ test('home: the badge and Menu count (needsToday) equal the Needs you heading an
   const later = {a1:'2026-11-12', a2:'2026-11-12'};
   const c = context(items, {needsList:() => needs, today:() => '2026-11-12', localStorage:{getItem:() => JSON.stringify(later)}, button:label => ({tag:'button', children:[label]})});
   const text = JSON.stringify(c.home());
-  assert.equal(c.needsToday().count, 2);
-  assert.match(text, /2 things need you/);
+  assert.equal(c.needsToday().count, 4);
+  assert.match(text, /4 things need you/);
   const app = fs.readFileSync(path.join(__dirname, '../src/orch_dashboard/web/app.js'), 'utf8');
   assert.match(app, /const needCount = needsYouTotal\(\)/); assert.doesNotMatch(app, /needsList\(\)\.length/);
 });
-test('home: Needs you counts a failed start on the page', () => {
+test('home: a failed start is on the page but not in the number (ORCH-63)', () => {
   const items = [{id:'a', title:'T a', status:'active'}, {id:'f', title:'T f', status:'waiting', waiting_on:{start:true, ref:'x'}}];
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
   const text = JSON.stringify(context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})}).home());
   assert.match(text, /could not start/);
-  assert.match(text, /2 things need you/);
+  assert.match(text, /1 thing needs you/);
+  const only = JSON.stringify(context([items[1]], {needsList:() => [], button:label => ({tag:'button', children:[label]})}).home());
+  assert.match(only, /could not start/); assert.match(only, /Things to look at/); assert.doesNotMatch(only, /All clear/);
 });
 
 // Real /api/state shape from the test network (sanitized): `children` is a list of ids, `parent` an id.
@@ -448,7 +450,7 @@ test('home needs: three identical questions are one row, not folded', () => {
   assert.doesNotMatch(text, /more question/); assert.doesNotMatch(text, /needs-hide/);
   assert.equal(nodes(home, n => n.attrs?.className === 'card-row home-need').length, 1);
 });
-test('needs count: questions + results + changes + failed starts; notices and bring-back rows are not counted', () => {
+test('needs count: open questions + results; notices, bring-back rows and rows without a ticket question are not counted', () => {
   const q = id => ({id, source:'core', kind:'question', ticket:'t' + id, answer:{question:'q1', options:['A']}});
   const sync = id => ({id:'sync:deleted:' + id, source:'sync', kind:'sync:deleted', ticket:'s' + id, tone:'needs-you', answer:{question:'q9', options:['Leave deleted', 'OK']}, actions:[{label:'Leave deleted', verb:'x', sign:true}, {label:'OK', verb:'restored'}]});
   const warn = {id:'sync:unapplied:z', source:'sync', kind:'sync:unapplied', ticket:null, tone:'warn'};
@@ -456,9 +458,10 @@ test('needs count: questions + results + changes + failed starts; notices and br
   const rows = [q('a'), q('b'), q('c'), sync('1'), sync('2'), warn, back];
   assert.equal(helpers.isNotice(sync('1')), true); assert.equal(helpers.isNotice(warn), true);
   assert.equal(helpers.isNotice(q('a')), false); assert.equal(helpers.isBringBack(back), true);
-  assert.equal(helpers.needsYouCount(rows, [], 0, 0), 3);
-  assert.equal(helpers.needsYouCount(rows, [['f']], 2, 1), 7);
-  assert.equal(helpers.needsYouCount(rows, [], [1, 2], [1]), 6, 'lists count by length');
+  assert.equal(helpers.needsYouCount(rows, 0), 3);
+  assert.equal(helpers.needsYouCount(rows, 2), 5);
+  assert.equal(helpers.needsYouCount(rows, [1, 2]), 5, 'lists count by length');
+  assert.equal(helpers.needsYouCount([q('a'), {...q('a'), id:'other'}]), 1, 'the same question of a ticket counts once');
 });
 test('home: notices fold into one quiet line, are not counted, and Show lists them', () => {
   const items = [{id:'a', title:'T a', status:'waiting', questions:[{id:'q1', text:'Which?'}]}];
@@ -535,14 +538,14 @@ test('ticket saved views filter by status and the board shows Changes to add', (
   assert.match(JSON.stringify(c.boardCard(items[2])), /Changes to add/);
   assert.doesNotMatch(JSON.stringify(c.boardCard(items[3])), /Changes to add/);
 });
-test('home: headline, subtitle and badge are one number (questions + things to look at + results + changes)', () => {
+test('home: headline and badge are one number (questions + results); changes to add are listed, not counted', () => {
   const items = [{id:'a', title:'T a', status:'active'}, {id:'r1', title:'R one', status:'review'}, {id:'r2', title:'R two', status:'review'},
     {id:'c1', title:'C one', status:'done', bring_back:{state:'waiting'}}];
   const needs = [{id:'a1', ticket:'a', title:'Q?', answer:{question:'a1'}}];
   const c = context(items, {needsList:() => needs, button:label => ({tag:'button', children:[label]})});
   const text = JSON.stringify(c.home());
-  assert.equal(c.needsToday().count, 4);
-  assert.match(text, /4 things need you/);
+  assert.equal(c.needsToday().count, 3);
+  assert.match(text, /3 things need you/);
   assert.match(text, /1 question · 2 results to check · 1 change to add/);
 });
 test('toasts: successes leave after 5 s even under the pointer, sit bottom-right and do not centre over the page', () => {

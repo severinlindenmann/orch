@@ -637,8 +637,33 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
     g.add_argument("--why", help="why this is asked (one line)")
     g.add_argument("--need", help="what is needed, e.g. 'before Friday'")
     g.add_argument("--ok", metavar="LABEL", help="the word on the approve button")
-    g.add_argument("--suggest", metavar="ID", help="the option you suggest (with --choose)")
-    g.add_argument("--before", metavar="FILE", help="the file as it is now (with --after)")
+    g.add_argument(
+        "--suggest", metavar="ID", help="the option you suggest (with --choose), or ok / no on another card"
+    )
+    g.add_argument(
+        "--before",
+        metavar="FILE",
+        help="the file as it is now (with --after, or beside the --choose options)",
+    )
+    g.add_argument(
+        "--ref",
+        action="append",
+        default=[],
+        metavar="LABEL=URL",
+        help="a link to look at beside the card, e.g. 'Mockup=http://...' (up to 5)",
+    )
+    g.add_argument(
+        "--describe",
+        action="append",
+        default=[],
+        metavar="ID=TEXT",
+        help="a description under one --choose option, e.g. 'A=Keeps the menu as it is'",
+    )
+    g.add_argument(
+        "--group",
+        metavar="NAME",
+        help="cards that belong together, shown as one set on Review (e.g. 'Home look')",
+    )
     g.add_argument("--after", metavar="FILE", help="the file as it would become")
     g.add_argument("--file", metavar="FILE", help="one file to show (image, page, text)")
     g.add_argument("--open", metavar="URL", help="an http(s) address to look at")
@@ -1149,6 +1174,10 @@ def run(args: argparse.Namespace) -> None:
         card = cli_review.has_card_flags(args)
         if card and (args.phone or args.kind or args.action or args.check):
             raise Refused("A card does not go with --phone, --kind, --action or --check.")
+        if (args.group is not None or args.ref or args.describe) and not card:
+            raise Refused(
+                "--group, --ref and --describe go with a card (--draft, --choose, --plan or --link)."
+            )
         if args.merge and not card:
             raise Refused("--merge goes with a link card: --link TITLE --open <pull request address>.")
         if card:  # the card goes where every question goes; a phone shows it from the stack

@@ -369,6 +369,8 @@ dialog.sheet{position:fixed;inset:0 0 0 auto;margin:0;width:min(480px,calc(100% 
 .sidebar-top{display:flex;align-items:center;justify-content:space-between}
 .sidebar .brand{padding:0}
 .btn.mobile-menu{display:inline-flex}
+/* a top-bar button keeps only its icon on a phone (the word stays its aria-label) */
+.btn>.btn-word-wide{display:none}
 .sidebar .workspace,.sidebar .side-foot,.sidebar nav{display:none}
 .sidebar[data-open=true] .workspace,.sidebar[data-open=true] .side-foot{display:block}
 .sidebar[data-open=true] nav{display:grid}

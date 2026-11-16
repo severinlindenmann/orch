@@ -1,0 +1,16 @@
+<!doctype html>
+<!-- Self-test page for ux_checks.cjs: one known fault per check. Never copy anything from here. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ux checks self-test</title></head>
+<body style="margin:0;background:rgb(16,18,22);color:rgb(237,240,243);font:14px sans-serif">
+<h1>Self-test</h1>
+<p style="color:rgb(70,74,80)">Text that is too faint to read.</p>
+<div style="width:2000px;height:10px">wider than any phone</div>
+<p><button style="width:16px;height:16px;padding:0">a</button><button style="width:16px;height:16px;padding:0">b</button></p>
+<p><button id="nofocus" style="outline:none;box-shadow:none">No focus mark</button></p>
+<p><span id="spin" style="display:inline-block">moving</span></p>
+<script>
+  // keeps moving although the person asked for reduced motion
+  document.getElementById('spin').animate([{ transform: 'rotate(0)' }, { transform: 'rotate(360deg)' }], { duration: 1000, iterations: Infinity });
+  console.error('planted console error');
+</script>
+</body></html>

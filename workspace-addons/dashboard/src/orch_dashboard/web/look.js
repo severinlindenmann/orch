@@ -13,7 +13,7 @@
 
   let look = null, name = 'Workspace', owner = null;
   let open = false, more = false, short = [], draft = {icon: null, color: null}, cat = null, light = false;
-  let editing = false, pd = {name: '', description: '', tags: [], tag: ''}, ws = {name: '', description: '', tags: []}, busy = false, saving = false, status = '', statusTone = 'ok';
+  let editing = false, pd = {name: '', description: '', tags: [], tag: '', icon: null}, ws = {name: '', description: '', tags: []}, busy = false, saving = false, status = '', statusTone = 'ok';
 
   const clean = v => String(v == null ? '' : v).normalize('NFC').trim();
   function hash(text) {
@@ -183,8 +183,12 @@
     const tagsNow = shownTags();
     const foot = editing ? n('div', {className: 'card-row'}, n('div', {className: 'grow'}), n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'pf-cancel', 'data-key': 'pf-cancel'}, 'Cancel'),
       n('button', {type: 'button', className: 'btn primary sm', 'data-lk': 'pf-save', 'data-key': 'pf-save', disabled: busy}, svc ? 'Save and send' : 'Save')) : null;
+    // Suggest: orch works out name, description, tags and an icon from the folder; they land in the edit fields
+    // and nothing is saved until Save.
     return n('div', {className: 'stack', 'data-key': 'settings-profile', 'data-testid': 'settings-profile'},
-      n('h2', {className: 'set-sub'}, 'Workspace profile'),
+      n('div', {className: 'row'}, n('h2', {className: 'set-sub grow'}, 'Workspace profile'),
+        n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'pf-suggest', 'data-key': 'pf-suggest', 'data-testid': 'profile-suggest', disabled: busy,
+          title: 'Fill in name, description, tags and icon from what this workspace is about. Nothing is saved until you press Save.'}, 'Suggest')),
       n('div', {className: 'card'},
         profileRow('Name', n('div', {className: 'row'}, n('p', {className: 'grow', 'data-key': 'pf-name-value'}, ws.name || name),
           n('button', {type: 'button', className: 'btn sm', 'data-lk': 'pf-edit', 'data-key': 'pf-edit'}, 'Edit')),
@@ -198,7 +202,10 @@
             n('button', {type: 'button', className: 'btn sm', 'data-lk': 'tag-add', 'data-key': 'pf-tag-add'}, 'Add')) : null,
             n('p', {className: 'meta'}, (svc ? 'Two to four short words, so others find this workspace.' : 'Two to four short words about this workspace.') + ' Lowercase letters, digits and hyphens.')], 'tags'),
         foot,
-        n('div', {className: 'card-row', 'data-key': 'lk-look-row'}, n('span', {className: 'set-label'}, 'Icon and colour'),
+        editing && pd.icon ? n('div', {className: 'card-row', 'data-key': 'lk-look-row'}, n('span', {className: 'set-label'}, 'Icon and colour'),
+          n('div', {className: 'grow lk-current'}, badge({icon: pd.icon, color: look.color}, name, 32), n('span', {className: 'meta', 'data-testid': 'look-summary'}, 'Suggested: ' + D.icons[pd.icon].l + ' · saved with the rest')),
+          n('button', {type: 'button', className: 'btn ghost sm', 'data-lk': 'pf-icon-keep', 'data-key': 'pf-icon-keep'}, 'Keep current'))
+        : n('div', {className: 'card-row', 'data-key': 'lk-look-row'}, n('span', {className: 'set-label'}, 'Icon and colour'),
           n('div', {className: 'grow lk-current'}, badge(open ? draft : look, name, 32), n('span', {className: 'meta', 'data-testid': 'look-summary'}, lookText(open ? draft : look))),
           open ? null : n('button', {type: 'button', className: 'btn sm', 'data-lk': 'open', 'data-key': 'lk-open', 'data-testid': 'look-change'}, 'Change')),
         open ? picker() : null,
@@ -243,6 +250,12 @@
         look.waiting = true;
         sent.push(svc === 'publish' ? 'publish' : 'relay');
       }
+    }
+    if (pd.icon && pd.icon !== look.icon) {  // the suggested icon, kept by the person: saved like a Change > Save
+      const r = await run('look.set', {icon: pd.icon, color: look.color || null});
+      if (!r || !r.ok) return;
+      remember(pd.icon); Object.assign(look, {icon: pd.icon, set_by: 'human'}); paintFavicon();
+      window.dispatchEvent(new CustomEvent('orch:look-saved'));
     }
     editing = false;
     status = sent.length ? 'Saved. Sent to the ' + sent[0] + ' for approval; it goes live when the owner approves.' : 'Saved.';
@@ -326,8 +339,21 @@
         if (r && r.ok) { remember(draft.icon); Object.assign(look, {icon: draft.icon, color: draft.color, set_by: 'human'}); open = false; status = 'Saved. Your phone and shared pages show it at their next refresh.'; statusTone = 'ok'; paintFavicon(); repaint(); window.dispatchEvent(new CustomEvent('orch:look-saved')); }
         break;
       }
-      case 'pf-edit': editing = true; pd = {name: ws.name, description: shownDescription(), tags: [...shownTags()], tag: ''}; status = ''; repaint(); document.querySelector('[data-key="pf-name"]')?.focus(); break;
-      case 'pf-cancel': editing = false; repaint(); break;
+      case 'pf-suggest': {
+        const r = await run('workspace.propose', {});
+        const p = r && r.ok && r.state && r.state.proposal;
+        if (!p) { if (r && r.ok) { status = 'No suggestion this time. Press Edit to fill it in yourself.'; statusTone = 'bad'; repaint(); } break; }
+        const tags = (Array.isArray(p.tags) ? p.tags : []).map(tagClean).filter(Boolean).slice(0, TAGMAX);
+        editing = true; open = false;
+        pd = {name: clean(p.name) || ws.name, description: clean(p.description) || shownDescription(), tags: tags.length ? tags : [...shownTags()], tag: '',
+          icon: p.icon && D.icons[p.icon] && p.icon !== look.icon && look.set_by !== 'human' ? p.icon : null};
+        status = 'Here is a suggestion. Change what you like, then press ' + (look.service ? 'Save and send' : 'Save') + '. Nothing is saved until then.'; statusTone = 'ok';
+        repaint(); document.querySelector('[data-key="pf-name"]')?.focus();
+        break;
+      }
+      case 'pf-icon-keep': pd.icon = null; repaint(); break;
+      case 'pf-edit': editing = true; pd = {name: ws.name, description: shownDescription(), tags: [...shownTags()], tag: '', icon: null}; status = ''; repaint(); document.querySelector('[data-key="pf-name"]')?.focus(); break;
+      case 'pf-cancel': editing = false; pd.icon = null; status = ''; repaint(); break;
       case 'tag-add': addTag(); repaint(); document.querySelector('[data-key="pf-tag"]')?.focus(); break;
       case 'tag-del': pd.tags = pd.tags.filter(x => x !== v); repaint(); break;
       case 'pf-save': await saveProfile(); break;

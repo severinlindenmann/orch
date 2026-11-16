@@ -14,6 +14,8 @@ from orch.errors import Refused
 
 SUBS = ("list", "answer", "wait", "link")
 CARD_KINDS = ("draft", "link", "plan", "choose")
+SUGGEST_VERDICTS = ("ok", "no")
+LINKS_MAX = 5  # what a card without options can suggest: approve or don't do
 KEY_RE = re.compile(r"review|q[0-9]+")
 
 
@@ -119,6 +121,36 @@ def _option(root: Path, spec: str) -> dict:
     return out
 
 
+def _describe(specs: list[str], ids: list[str]) -> dict[str, str]:
+    """--describe "A=text": a description under one option."""
+    out: dict[str, str] = {}
+    for spec in specs:
+        ident, eq, text = spec.partition("=")
+        ident, text = ident.strip(), " ".join(text.split())
+        if not eq or ident not in ids or not text:
+            raise Refused(f'--describe is "ID=Text" with one of the option ids, got "{spec[:40]}".')
+        if len(text) > 500:
+            raise Refused("An option description is at most 500 characters.")
+        out[ident] = text
+    return out
+
+
+def links_of(specs: list[str]) -> list[dict] | None:
+    """--ref "Label=https://...": links shown beside the card (a mockup, a reference). At most 5."""
+    if not specs:
+        return None
+    if len(specs) > LINKS_MAX:
+        raise Refused(f"A card takes at most {LINKS_MAX} --ref links.")
+    out = []
+    for spec in specs:
+        label, eq, url = spec.partition("=")
+        label, url = " ".join(label.split()), url.strip()
+        if not eq or not label or len(label) > 60 or not review.is_plain_url(url):
+            raise Refused(f'--ref is "Label=https://address" (label up to 60 characters), got "{spec[:40]}".')
+        out.append({"label": label, "url": url})
+    return out
+
+
 def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
     kind, title = next((k, getattr(args, k)) for k in CARD_KINDS if getattr(args, k, None) is not None)
     kind = "choice" if kind == "choose" else kind
@@ -131,10 +163,20 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
         opts = [_option(root, o) for o in args.option]
         if len(opts) < 2:
             raise Refused('A choice needs at least two --option "ID=Title[:file]".')
+        if args.after or args.file:
+            raise Refused("A choice shows its options; add how it is today with --before FILE.")
+        about = _describe(getattr(args, "describe", None) or [], [o["id"] for o in opts])
+        for o in opts:
+            if o["id"] in about:
+                o["text"] = about[o["id"]]
         card["preview"] = {"type": "options", "options": opts}
+        if args.before:  # how it is today, beside the options (the person compares, then picks one)
+            card["preview"]["before"] = _file_preview(root, args.before, "before")
         options = [o["id"] for o in opts]
     elif args.option:
         raise Refused("A card takes --option only with --choose.")
+    elif getattr(args, "describe", None):
+        raise Refused("--describe goes with the options of --choose.")
     elif bool(args.before) != bool(args.after):
         raise Refused("--before and --after go together.")
     elif args.before and args.file:
@@ -165,8 +207,10 @@ def build_card(root: Path, args) -> tuple[dict, list[str], str | None, str]:
         }
         card["ok_label"] = "Merge"  # the button says what the click does (review.merge_url checks it)
         card.setdefault("why", "Your click merges it on GitHub with your own GitHub login.")
-    if args.suggest is not None and args.suggest not in options:
+    if args.suggest is not None and kind == "choice" and args.suggest not in options:
         raise Refused("--suggest must be one of the --option ids.")
+    if args.suggest is not None and kind != "choice" and args.suggest not in SUGGEST_VERDICTS:
+        raise Refused("On this card --suggest is ok (approve) or no (don't do).")
     return card, options, args.suggest, title
 
 
@@ -179,6 +223,7 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
     if not args.then:
         raise Refused("A card needs --then: what happens after the answer.")
     card, options, suggest, _title = _guard(build_card, root, args)
+    links = _guard(links_of, getattr(args, "ref", None) or [])
     card, shown = _guard(review.prepare_card, root, tid, card)
     action = None
     if getattr(args, "merge", False):
@@ -194,6 +239,8 @@ def ask_card(args, root: Path, tid: str, by: str) -> tuple[dict, dict]:
         action=action,
         card=card,
         shown=shown,
+        group=getattr(args, "group", None),
+        links=links,
     )
 
 

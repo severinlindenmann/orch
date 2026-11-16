@@ -176,13 +176,12 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 /* Swipe review deck (draft 15 Nov, owner idea): one card at a time; right = Looks good, left = Don't do / Send back,
    down = Comment (voice or text). Buttons + keys (← ↓ →) always do the same as the swipe. UI.swipeDeck() builds it. */
 .swipe{position:relative;display:flex;flex-direction:column;gap:var(--s4);min-height:0;outline:none;--swipe-card-h:560px}
-.swipe:focus,.swipe:focus-visible{outline:none;box-shadow:none}
+.swipe:focus{outline:none}.swipe:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:var(--radius-card)}
 .swipe-top{display:flex;align-items:center;gap:var(--s3);font-size:13px;line-height:18px;color:var(--text-muted)}
 .swipe-top .progress{flex:1;height:4px}
-.swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:none}
-.swipe-card{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;cursor:grab;user-select:none;will-change:transform;transition:transform var(--dur-slow) var(--ease-move),opacity var(--dur-slow) var(--ease-move);box-shadow:var(--lift-shadow)}
-.swipe-card.dragging{transition:none;cursor:grabbing}
-.swipe-card.leaving{transition:transform var(--dur-slow) var(--ease-exit),opacity var(--dur-slow) var(--ease-exit);opacity:0}
+.swipe-stage{position:relative;flex:1;min-height:var(--swipe-card-h);touch-action:pan-y}
+.swipe-card{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);overflow:hidden;cursor:default;user-select:none;transition:opacity var(--dur-base) var(--ease-out);box-shadow:var(--lift-shadow)}
+.swipe-card.leaving{transition:opacity var(--dur-exit) var(--ease-exit);opacity:0}
 .swipe-card.under{transform:scale(.96) translateY(10px);box-shadow:none;pointer-events:none}
 .swipe-card.under2{transform:scale(.92) translateY(20px);opacity:.6;box-shadow:none;pointer-events:none}
 .swipe-head{display:grid;gap:var(--s1);padding:var(--s4) var(--s4) var(--s3)}
@@ -394,7 +393,7 @@ dialog.sheet .sheet-h{display:flex;justify-content:space-between;align-items:cen
 .swipe{container-type:inline-size}
 .swipe-need{color:var(--warning);font-weight:500}
 .swipe-foot{flex-direction:column;align-items:stretch;gap:6px}
-.swipe-foot-row{display:flex;align-items:center;gap:var(--s2)}
+.swipe-foot-row{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
 .swipe-then{font-size:13px;line-height:18px;color:var(--text)}.swipe-then b{font-weight:600}
 .swipe-was{display:flex;align-items:center;gap:6px;font-size:13px;line-height:18px;color:var(--brand)}
 .swipe-later-row{display:flex;justify-content:center;margin-top:calc(var(--s2)*-1)}
@@ -427,6 +426,31 @@ iframe.loading{opacity:0}
  .swipe-actions{gap:var(--s5)}
  .swipe-act kbd{display:none}
 }
+/* A design review on cards (16 Nov, ORCH-65): the question text on the card, a marked suggestion, pictures that fill
+   their pane on a dark ground with a zoom per side, a Today tile on a choice, groups in the list beside the deck. */
+.swipe-desk{--swipe-card-h:clamp(560px,calc(100vh - 300px),1000px)}
+.swipe-head{max-height:45%;overflow:auto}
+.swipe-head .swipe-text{color:var(--text);white-space:pre-line}
+.swipe-sug{font-size:12px;line-height:16px;font-weight:500;color:var(--brand);border:1px solid var(--brand);border-radius:999px;padding:0 6px;white-space:nowrap}
+.swipe-act .act-sug{justify-self:center;margin-top:-2px}
+.swipe-act.suggested .ring{box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--brand)}
+.swipe-preview{background:var(--ink)}
+.swipe-preview>img{background:var(--ink)}
+.swipe-compare{background:var(--border-strong)}
+.swipe-compare .cmp-pane{background:var(--ink)}
+.cmp-pane>img{background:var(--ink)}
+.swipe-zoomed .cmp-pane>img,.swipe-zoomed>img{background:var(--ink)}
+.swipe-preview:has(.swipe-compare)>.swipe-expand{display:none}
+.cmp-zoom{position:absolute;right:8px;bottom:8px;z-index:3;background:var(--surface-2)!important;border-color:var(--border)!important}
+.opt-thumb>img{display:block;width:100%;height:100%;object-fit:contain;background:var(--ink)}
+.swipe-opt.today{cursor:default;border-style:dashed;background:var(--bg)}
+.swipe-opt.today .opt-letter{display:grid;place-items:center;color:var(--text-muted)}
+.review-group{display:grid;gap:2px}
+.review-group+.review-group{margin-top:var(--s3)}
+.review-group-head{display:flex;align-items:baseline;gap:var(--s2);margin:0;padding:0 var(--s2);font-size:13px;line-height:18px;font-weight:600;color:var(--text)}
+.review-group-head>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.review-group-head .meta{font-weight:400}
+.swipe-group{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
 /* Review page served by orch itself (no dashboard): one bar, the deck centred, Answered list. */
 .review-solo-bar{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap;padding:var(--s3) var(--s5);border-bottom:1px solid var(--border);background:var(--sidebar)}
 .review-solo-brand{display:flex;align-items:center;gap:var(--s2)}.review-solo-note{margin-left:auto}
@@ -491,7 +515,7 @@ dialog.report-dialog .actions{margin-top:12px}
 .ref-list>li.ref-sep{border-top:1px solid var(--border);margin-top:var(--s1);padding-top:var(--s1)}
 .ref-row{display:flex;align-items:center;gap:var(--s2);height:var(--s6);padding:0 var(--s2);margin:0 calc(-1 * var(--s2));border-radius:var(--r1);color:var(--text);text-decoration:none;font-size:var(--fs-2);line-height:20px;min-width:0}
 .ref-row:hover{background:var(--surface-2)}
-.ref-row:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
+.ref-row:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 .ref-row:hover .ref-text,.ref-row:focus-visible .ref-text{text-decoration:underline;text-underline-offset:2px}
 .ref-row .ic{flex:none;width:16px;height:16px;color:var(--text-muted)}
 .ref-key{flex:none;color:var(--text-muted);font-variant-numeric:tabular-nums}
