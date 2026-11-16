@@ -14,3 +14,5 @@
   ("Home look") in the All cards list with "n of m waiting".
 - No swipe (owner 16 Nov): the card does not move with the finger or mouse and does not fly away; answers are the
   buttons and the arrow keys, the answered card fades.
+- 16 Nov (ORCH-110): a choice whose options have no pictures (a plain question) shows plain option rows with the whole
+  title and its description: no dark frame, no empty picture box, no zoom, and the letter chip only for short ids (A, B).

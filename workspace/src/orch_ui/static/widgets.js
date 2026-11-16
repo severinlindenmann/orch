@@ -123,14 +123,18 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   if(p.note)w.append(el('span','cmp-note',p.note));
   w.cycle=()=>{const i=views.findIndex(([v])=>v===w.dataset.view);set(views[(i+1)%views.length][0])};w.view=set;
   set(big?'slide':(mode==='phone'||(host.clientWidth&&host.clientWidth<560)?'after':'both'));return w};
+ /* An option's letter chip only for a short id of its own (A, B, 2); a plain question's option has id = its text. */
+ const optLetter=op=>{const id=String(op&&op.id||'');return id&&id.length<=2&&id!==op.title?id:''};
+ /* Options with no picture at all (a plain orch ask --option question): plain rows, title and description, no frame. */
+ const plainOpts=it=>{const p=it&&it.preview;return !!(p&&p.type==='options'&&!p.before&&!(p.options||[]).some(op=>op.preview))};
  /* Options A / B / C: tap to pick (ring + Picked). On the card a drag that starts on a tile still swipes; a tap picks. */
- const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':''));w.style.setProperty('--n',String((p.options||[]).length+(p.before?1:0)));
+ const buildOptions=(it,big)=>{const p=it.preview,w=el('div','swipe-opts'+(big?' big':'')+(plainOpts(it)?' plain':''));w.style.setProperty('--n',String((p.options||[]).length+(p.before?1:0)));
   if(p.before){const t=el('div','swipe-opt today');t.dataset.on='before';const h=el('span','opt-h');h.append(el('b','opt-letter',''),el('span','opt-title','Today'));h.firstChild.append(ic('clock',14));
    const th=el('span','opt-thumb');th.append(buildPreview({title:'Today',preview:p.before},big));t.append(h,th);if(p.beforeText)t.append(el('span','opt-text',p.beforeText));w.append(t)}
-  (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label','Option '+op.id+': '+op.title+(op.suggested?' (suggested)':''));
-   const h=el('span','opt-h');h.append(el('b','opt-letter',op.id),el('span','opt-title',op.title));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
-   const th=el('span','opt-thumb');if(op.preview)th.append(buildPreview({title:op.title,preview:op.preview},big));
-   b.append(h,th);if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
+  (p.options||[]).forEach(op=>{const b=btn('swipe-opt',[]),lt=optLetter(op);b.dataset.opt=op.id;b.dataset.on='option '+op.id;b.setAttribute('aria-pressed',String(picked[it.id]===op.id));b.setAttribute('aria-label',(lt?'Option '+lt+': ':'')+(op.title||op.id)+(op.suggested?' (suggested)':''));
+   const h=el('span','opt-h');if(lt)h.append(el('b','opt-letter',lt));h.append(el('span','opt-title',op.title||op.id));if(op.suggested)h.append(el('span','opt-sug','Suggested'));
+   b.append(h);if(op.preview){const th=el('span','opt-thumb');th.append(buildPreview({title:op.title,preview:op.preview},big));b.append(th)}/* no picture: no empty box */
+   if(op.text)b.append(el('span','opt-text',op.text));const pk=el('span','opt-picked');pk.append(ic('check',14),'Picked');b.append(pk);
    b.onclick=e=>{e.stopPropagation();if(b.closest('.swipe-card')&&e.detail!==0)return;/* the card's tap handler picks on pointer taps */pick(it,picked[it.id]===op.id?null:op.id)};
    w.append(b)});
   return w};
@@ -149,9 +153,9 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   h.append(m);if(it.about)h.append(el('p','swipe-about','About: '+it.about));h.append(el('h3','',it.title));
   if(it.text&&it.text!==it.title)h.append(el('p','swipe-text',it.text));/* the whole question; a long one scrolls inside the head */
   if(it.why)h.append(el('p','swipe-why',it.why));
-  const pv=hasPreview(it)?el('div','swipe-preview'):null;/* nothing to preview: no empty box */
+  const pv=hasPreview(it)?el('div','swipe-preview'+(plainOpts(it)?' plain':'')):null;/* nothing to preview: no empty box */
   if(pv){pv.append(buildPreview(it,false));
-  const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex);
+  if(!plainOpts(it)){const ex=btn('btn icon sm swipe-expand',[ic('expand',16)],'Make bigger');ex.onclick=e=>{e.stopPropagation();openViewer()};pv.append(ex)}
   (pins[it.id]||[]).forEach((pn,i)=>pv.append(pinEl(pn,i)));}
   const ft=el('footer','swipe-foot');
   if(it.then){const t=el('span','swipe-then');t.append(el('b','',(isOpt(it)?'If you pick one: ':'If you approve: ')),it.then);ft.append(t)}
@@ -189,7 +193,7 @@ UI.swipeDeck=(host,items,o)=>{o=o||{};const mode=o.mode||'desk',ic=(n,z)=>{const
   c.addEventListener('pointermove',e=>{if(e.pointerId!==id)return;dx=e.clientX-sx;dy=e.clientY-sy});/* the card does not move: answers are buttons and keys (owner 16 Nov) */
   const end=e=>{pts.delete(e.pointerId);if(e.pointerId!==id)return;id=null;c.classList.remove('dragging');const dt=performance.now()-t0,dist=Math.hypot(dx,dy);
    if(dist<8&&dt<400){reset(c);const opt=start&&start.closest&&start.closest('.swipe-opt');if(opt){pick(items[idx],picked[items[idx].id]===opt.dataset.opt?null:opt.dataset.opt);return}
-    if(start&&start.closest&&start.closest('.swipe-preview')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
+    if(start&&start.closest&&start.closest('.swipe-preview:not(.plain)')){const pn=start.closest('.cmp-pane');openViewer(pn?pn.dataset.on:null)}return}
    reset(c)};
   c.addEventListener('pointerup',end);c.addEventListener('pointercancel',e=>{pts.delete(e.pointerId);if(e.pointerId===id){id=null;c.classList.remove('dragging');reset(c)}})};
  const nudge=(c,msg)=>{reset(c);c.classList.remove('nudge');void c.offsetWidth;c.classList.add('nudge');live.textContent=msg;if(UI.toast&&!o.quiet)UI.toast(msg)};
