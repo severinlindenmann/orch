@@ -172,7 +172,9 @@ def test_mobile_mode_tint_tracks_state_and_banner_keeps_end_time():
 def test_mobile_mode_palette_has_aa_contrast():
     from .webjs import WEB
 
-    css = (WEB / "style.css").read_text().split("/* v3-pages: switcher + mobile mode */")[1]
+    # the palette lives in the master since #795 A2b; the page rules stay in style.css
+    master = (WEB.parents[4] / "workspace" / "src" / "orch_ui" / "static" / "widgets.css").read_text()
+    css = master.split("/* from dashboard style.css (#795 A2b) */")[1] + (WEB / "style.css").read_text()
 
     def luminance(hex_color):
         channels = [int(hex_color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
