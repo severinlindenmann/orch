@@ -35,8 +35,10 @@ _BINARY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _ARG = re.compile(r"-{0,2}[A-Za-z0-9][A-Za-z0-9._:=/@-]{0,63}")
 # a recipe names a tool's own status command, never a shell or a script runner
 _NOT_A_TOOL = frozenset(
-    "sh bash zsh fish dash ksh csh tcsh pwsh powershell cmd env sudo doas xargs nohup python python3 node "
-    "deno bun perl ruby php osascript awk sed eval exec uv uvx npx".split()
+    "sh bash zsh fish dash ksh csh tcsh ash busybox pwsh powershell cmd env sudo doas su xargs nohup nice "
+    "timeout script time watch exec eval command builtin start open python py pypy node deno bun perl ruby "
+    "php lua tclsh osascript wscript cscript awk gawk sed find make cmake git npm npx pnpm yarn uv uvx pip "
+    "pipx cargo go java dotnet docker podman ssh scp curl wget rm mv cp".split()
 )
 _FIELD = re.compile(r"[A-Za-z_]{1,32}")
 _LABEL = re.compile(r"[^\x00-\x1f\x7f]{1,40}")
@@ -64,6 +66,12 @@ def _end(value) -> str | None:
 # ------------------------------------------------------------------------------------------------ recipes
 
 
+def _runner(binary: str) -> bool:
+    """A shell, script runner or general tool, also with a version or .exe on its name (python3.12, bash5)."""
+    base = binary.lower().removesuffix(".exe").rstrip("0123456789.-_")
+    return base in _NOT_A_TOOL or binary.lower().removesuffix(".exe") in _NOT_A_TOOL
+
+
 def _recipe(name, doc) -> dict | None:
     """A checked workspace recipe, or None when it is not one (a bad entry is left out, never run)."""
     if not (isinstance(name, str) and _NAME.fullmatch(name) and isinstance(doc, dict)):
@@ -73,7 +81,7 @@ def _recipe(name, doc) -> dict | None:
         return None
     if not (_BINARY.fullmatch(cmd[0]) and all(_ARG.fullmatch(a) for a in cmd[1:])):
         return None
-    if cmd[0].lower().removesuffix(".exe") in _NOT_A_TOOL:
+    if _runner(cmd[0]):
         return None
     if not (isinstance(label, str) and _LABEL.fullmatch(label)):
         return None
@@ -98,7 +106,15 @@ def recipes_path(root: Path) -> Path:
 
 
 def workspace_recipes(root: Path) -> list[dict]:
-    doc = net.read_json(recipes_path(root), {})
+    """The person's own recipes. A file the project's git tracks came from someone else: none of it is run."""
+    path = recipes_path(root)
+    if not path.is_file() or path.is_symlink():
+        return []
+    from orch import harness
+
+    if harness._tracked(Path(root), ".orch/local/checks.json"):
+        return []
+    doc = net.read_json(path, {})
     items = doc.get("checks") if isinstance(doc, dict) else None
     if not isinstance(items, dict):
         return []

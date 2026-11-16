@@ -121,6 +121,11 @@ def test_exit_code_recipe_reads_nothing_the_command_prints(monkeypatch, code, wa
         ("t", {"command": ["bash", "-c", "x"]}, False),  # never a shell or a script runner
         ("t", {"command": ["python3", "x.py"]}, False),
         ("t", {"command": ["PowerShell.exe", "x"]}, False),
+        ("t", {"command": ["python3.12", "x.py"]}, False),
+        ("t", {"command": ["bash5", "x"]}, False),
+        ("t", {"command": ["git", "status"]}, False),
+        ("t", {"command": ["timeout", "5", "x"]}, False),
+        ("t", {"command": ["databricks2", "auth", "describe"]}, True),
         ("t", {"command": []}, False),
         ("t", {"command": ["t"] * 10}, False),
         ("T!", {"command": ["t"]}, False),
@@ -205,6 +210,14 @@ def test_a_committed_checks_file_is_never_run(proj, monkeypatch):
     )
     assert health.workspace_recipes(proj) == []
     assert "local/" in harness.ORCH_IGNORE  # the place recipes do count is never committed
+
+
+def test_a_tracked_local_recipe_file_is_never_run(proj, monkeypatch):
+    monkeypatch.setattr(health.shutil, "which", lambda b: f"/bin/{b}")
+    _own(proj, {"x": {"command": ["x"]}})
+    assert [r["name"] for r in health.workspace_recipes(proj)] == ["x"]
+    monkeypatch.setattr(harness, "_tracked", lambda root, rel: rel == ".orch/local/checks.json")
+    assert health.workspace_recipes(proj) == []
 
 
 def test_check_keeps_the_last_result(proj, tools):
