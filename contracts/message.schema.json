@@ -315,7 +315,7 @@
       "required": ["title", "status", "running"],
       "if": { "not": { "required": ["light"], "properties": { "light": { "const": true } } } },
       "then": { "required": ["checklist", "done", "total", "history_tail", "attachments"] },
-      "allOf": [{ "if": { "required": ["light"], "properties": { "light": { "const": true } } }, "then": { "not": { "required": ["results"] } } }],
+      "allOf": [{ "if": { "required": ["light"], "properties": { "light": { "const": true } } }, "then": { "not": { "anyOf": [{ "required": ["results"] }, { "required": ["due"] }] } } }],
       "description": "Optional, only next to body.update: a snapshot of the ticket for the phone's ticket chat (title, tasks, the last history lines, proof and references). Written by the sending workspace; the relay stores it with the text, never interprets it, and refuses a text whose ticket_view is over 16384 bytes as compact UTF-8 JSON (422 invalid). The newest one of a ticket wins. Plain text everywhere, never HTML; secrets are removed by the workspace before sending.",
       "properties": {
         "light": { "type": "boolean", "description": "true = a LIGHT status update for a ticket the phone already lists (quiet, update kind note, never pushed). It carries only title, status, started, running, summary, agent and updated_at; checklist, done, total, history_tail, attachments, refs and results are absent (results: refused by the schema) and the phone overlays the present fields on its last full snapshot (never wipes them). No flag (or false) = a full snapshot as before, which replaces the stored one." },
@@ -325,6 +325,7 @@
         "started": { "type": "boolean", "description": "The ticket was started by an agent at least once; with status open/ready the phone says \"Paused\", else \"Not started\"." },
         "agent": { "type": "string", "minLength": 1, "maxLength": 64, "description": "Optional. The agent working on it now or last, as a display name (e.g. Claude)." },
         "summary": { "type": "string", "maxLength": 200 },
+        "due": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?$", "description": "Optional, full snapshots only (never light): the ticket's due, the same value as ticket.schema.json due: YYYY-MM-DD (the whole day) or YYYY-MM-DDTHH:MM (local wall time of the workspace, no seconds, no zone). Absent when the ticket has none. The phone shows \"Due 18:30\" or \"Late since 18:30\"; it never edits it." },
         "running": { "type": "boolean", "description": "An agent runs on the ticket now (the phone says \"Goes in after this step\"), else \"Saved for the next run\"." },
         "checklist": {
           "type": "array", "maxItems": 200,

@@ -411,6 +411,7 @@ def load_tickets(root: Path, orch_bin: str | None = None) -> tuple[list[dict], i
     phone_delivery.mark(root, tickets)
     add_proof_state(tickets, root)
     add_artifact_marks(tickets)
+    add_quiet(tickets)
     tickets.sort(key=lambda t: str(t.get("updated_at", "")), reverse=True)
     by_id = {t["id"]: t for t in tickets}
     for t in tickets:
@@ -437,6 +438,23 @@ def add_proof_state(tickets: list[dict], root: Path | None = None) -> None:
             t["proof"] = core.proof_state(t, root, cache=True)
         except (KeyError, TypeError, ValueError):
             t.pop("proof", None)
+
+
+def add_quiet(tickets: list[dict]) -> None:
+    """`quiet_since` on a Working ticket with no news for 6 h (G2): the core's one rule, asked here for the CLI
+    listing and the file fallback alike. Not stored; no field on the ticket file."""
+    try:
+        from orch import tickets as core
+    except ImportError:
+        return
+    for t in tickets:
+        t.pop("quiet_since", None)
+        try:
+            since = core.quiet_since(t)
+        except (TypeError, ValueError, AttributeError):
+            since = None
+        if since:
+            t["quiet_since"] = since
 
 
 def add_artifact_marks(tickets: list[dict]) -> None:
