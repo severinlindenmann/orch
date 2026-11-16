@@ -452,11 +452,6 @@ def build_parser(show_all: bool = False, addon_lines: list[str] | None = None) -
         help="an epic: its sub-tickets (--parent) are the work; a run goes through them in order",
     )
     x.add_argument(
-        "--start-requires",
-        metavar="TICKET:QUESTION=ANSWER",
-        help="no run starts on it until a person gave this answer to that question (set once, here)",
-    )
-    x.add_argument(
         "--ext",
         action="append",
         default=[],
@@ -915,7 +910,6 @@ def run(args: argparse.Namespace) -> None:
             title_auto=args.title_auto,
             plan_first=args.plan_first,
             epic=args.epic,
-            start_requires=args.start_requires,
         )
         part = f" (step of: {_lookup(root, args.parent)['title']})" if args.parent else ""
         _out(

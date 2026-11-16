@@ -603,9 +603,6 @@ def claim(
     folder: where the agent works when that is not the workspace root (a separate copy); it goes in the
     record."""
     ticket = tickets.load(root, tid)
-    blocked = tickets.start_blocked(root, ticket)  # also a direct `orch run claim`, not only `run start`
-    if blocked:
-        raise Refused(blocked)
     with locked(root, tid):
         cur = read(root, tid)
         if cur:
@@ -1322,9 +1319,7 @@ def start(
     else one turn at a time (oneshot). agent: a registry name for this run instead of [workspace] agent."""
     from orch import runs_live, worktrees
 
-    blocked = tickets.start_blocked(root, tickets.load(root, tid))  # before anything is planned or spawned
-    if blocked:
-        raise Refused(blocked)
+    tickets.load(root, tid)  # an unknown ticket is refused before anything is planned or spawned
     brake.check_start(root, tid, by)  # R8.6: paused, or over the daily cap, for an automatic start
     if by != runs_live.AUTOMATION_BY:  # an explicit start (any caller) ends a person's stop hold
         runs_live.clear_held(root, tid)
