@@ -22,7 +22,7 @@ test('Share a file keeps the dialog open, shows the link and copies it', () => {
 // "Share by link…" in the file viewer: same flow for a ticket file, only when sharing is on
 test('the viewer shows "Share by link…" only when the caller can share, and it opens the same dialog', () => {
   assert.match(viewer, /typeof opts\.share === 'function'[^\n]*'Share by link…'/);
-  assert.match(ticket, /isPublish\('publish'\) \? f => shareDialog\(\{name:/);
+  assert.match(ticket, /addons\(\)\.some\(a => a\.active !== false && isPublish\(a\.name\)\) \? f => shareDialog\(\{name:/);
   assert.match(ticket, /FileViewer\.open\(\{files, index, context:[^\n]*share\}\)/);
   assert.match(dialog(), /function shareDialog\(start = null\)/);
   assert.match(dialog(), /act\('link\.share'/);

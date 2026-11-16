@@ -521,8 +521,8 @@ function addonDetailPage(addon) {
   const settingsRows = [
     row('Add-on', settingsText('p', {}, addon.description || label),
       fragment(switchBusy(addon), h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':!!addon.active, 'aria-label':label + ' on or off', 'data-key':'settings-switch-' + addon.name, 'data-action':'settings-addon', 'data-name':addon.name, disabled:snapshot || settingsBusy.has('addon-' + addon.name)}, addon.active ? 'On' : 'Off')), 'addon-detail-switch'),
-    addon.name === 'focus' && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
-      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'focus-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('focus-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
+    addon.page?.live_session === true && addon.active && typeof state.settings?.typing_on === 'boolean' ? row('Typing', h('div', {}, settingsText('p', {}, 'Let me type into the helper\u2019s screen'), settingsText('p', {className:'meta'}, 'When on, you can click the helper\u2019s live screen and type into it.')),
+      h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':state.settings.typing_on, 'aria-label':'Let me type into the helper\u2019s screen', 'data-action':'session-typing', 'data-key':'addon-detail-typing', disabled:snapshot || settingsBusy.has('session-typing')}, state.settings.typing_on ? 'On' : 'Off'), 'addon-detail-typing-row') : null,
     addon.active && d ? row('Connection', connected ? h('span', {className:'on-dot', 'data-key':'addon-detail-status'}, 'Connected') : h('span', {className:'off-dot', 'data-key':'addon-detail-status'}, 'Not connected yet'), null, 'addon-detail-connection') : null,
     links && shown !== null ? row('Shared pages', settingsText('p', {}, 'Show workspace name and icon'),
       h('button', {type:'button', className:'switch', role:'switch', 'aria-checked':shown, 'aria-label':'Show workspace name and icon on shared pages', 'data-action':'addon-shared', 'data-on':String(!shown), 'data-key':'addon-detail-shared', disabled:snapshot || settingsBusy.has('shared')}, shown ? 'On' : 'Off'), 'addon-detail-shared-row') : null,
@@ -1314,7 +1314,7 @@ function shareDialog(start = null) {
     if (!row) { window.orch.toast('Link created. Copy it from the list.', 'ok'); await window.orch.close(d); return; }
     const copied = await window.UI.copyText(row.link);
     const box = h('input', {className:'input', type:'text', readOnly:true, value:row.link, 'aria-label':'Link'});
-    box.addEventListener('focus', () => box.select());
+    box.addEventListener('focusin', () => box.select());
     const again = button('Copy', 'outline sm', async () => { if (await window.UI.copyText(row.link)) { note.textContent = 'Copied'; } else { box.focus(); box.select(); note.textContent = 'Press Ctrl+C (Cmd+C on a Mac) to copy.'; } });
     result.replaceChildren(h('p', {className:'muted'}, 'Your link is ready. It works for 7 days.'), h('div', {className:'row'}, box, again));
     result.hidden = false;

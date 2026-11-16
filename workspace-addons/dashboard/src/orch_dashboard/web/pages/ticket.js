@@ -588,7 +588,7 @@ function previewFile(tid, kind, fileName) {
     files = [fileEntry(t || {id:tid}, {kind}, known)]; index = 0;
   }
   // "Share by link…" only when the sharing add-on is on (no hint otherwise); it opens the same Share a file window for this file.
-  const share = isPublish('publish') ? f => shareDialog({name:f.name.split('/').pop(), url:window.FileViewer.urlOf(f)}) : null;
+  const share = addons().some(a => a.active !== false && isPublish(a.name)) ? f => shareDialog({name:f.name.split('/').pop(), url:window.FileViewer.urlOf(f)}) : null;
   window.FileViewer.open({files, index, context:t ? clean(t.title || '') : '', share});
 }
 // One compact file row: type badge, name, meta, Open / Download / Copy link.
