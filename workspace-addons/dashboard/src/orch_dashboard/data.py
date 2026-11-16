@@ -1162,12 +1162,20 @@ def load_state(
         "mobile_mode": mobile_mode,  # the live page only, never a snapshot
         "look": look_,  # the live page only, never a snapshot
         "settings": settings,  # only the live local server: it holds the folder path
+        # Home: the note after an automatic update (new version and what changed, or why it failed); live page only
+        "auto_update_note": _auto_update_note() if with_settings else None,
     }
     add_warmth(root, tickets, state["runs"])
     state["rev"] = hashlib.sha1(
         json.dumps({k: v for k, v in state.items() if k != "now"}, sort_keys=True).encode()
     ).hexdigest()[:12]
     return state
+
+
+def _auto_update_note() -> dict | None:
+    from . import update
+
+    return update.auto_note()
 
 
 def hide_unset_sharing(addons: list[dict], root: Path, orch_bin: str | None) -> list[dict]:

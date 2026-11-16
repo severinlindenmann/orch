@@ -813,6 +813,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, b"That request could not be read.", "text/plain; charset=utf-8")
         op_name = re.sub(r"[^A-Za-z0-9_.-]", "?", str(body.get("op"))[:40])
         self._act = (op_name, time.monotonic())
+        from . import update as _update
+
+        with _update.click():  # no automatic update starts during a person's click (or right after it)
+            return self._act_run(body, op_name)
+
+    def _act_run(self, body, op_name):
         self._act_log(f"{op_name} start")
         try:
             session = bool(
@@ -929,4 +935,8 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
             raise
     srv.revisions = Revisions(root)
     srv.state_cache = StateCache(root, orch_bin, srv.revisions)
+    if orch_bin == actions.SELF:  # the real server: the automatic update looks once a minute (off by default)
+        from . import update
+
+        update.start_ticker(root, orch_bin, lambda: actions.human_env(root, orch_bin))
     return srv
