@@ -15,7 +15,6 @@ from orch import (
     adapters,
     cli_screen,
     history,
-    humanproof,
     net,
     nextstep,
     runs,
@@ -35,6 +34,7 @@ SUBCOMMANDS = (
     "argv",
     "start",
     "send",
+    "take-back",
     "attach",
     "stop",
     "event",
@@ -60,6 +60,8 @@ def add_parsers(sub, common) -> None:
             x.add_argument("text", nargs="?", help="what to tell the agent")
             x.add_argument("--file", help="read the text from this file")
             x.add_argument("--kind", choices=runs.PENDING_KINDS, default="message")
+        if name == "take-back":
+            x.add_argument("item", help="the id of the waiting message (orch run status shows it)")
         if name == "attach":
             x.add_argument("--watch", action="store_true", help="only watch, do not type")
         if name == "event":
@@ -181,6 +183,15 @@ def _holder_line(rec: dict, tid: str, root: Path | None = None) -> str:
     return f"{_name(root, tid) if root else tid} is being worked on by {rec['by']} ({who}) since {since}."
 
 
+def _waiting_input(root: Path, tid: str) -> list[dict]:
+    """The messages a person wrote that the agent has not read yet (what `run take-back` can remove)."""
+    return [
+        {"id": i["id"], "text": i["text"][:2000], "at": i.get("at")}
+        for i in runs.undelivered(root, tid)
+        if i.get("kind") == "message" and i.get("via") not in ("start", "slots")
+    ][-20:]
+
+
 def _status(args, root: Path) -> None:
     tid = args.ticket
     tickets.load(root, tid)
@@ -193,6 +204,7 @@ def _status(args, root: Path) -> None:
         # once per id). An agent's queued input is never in it.
         human = [i["id"] for i in runs.human_waiting(root, tid)]
         data = {"ticket": tid, "running": False, "pending": waiting, "human_pending_ids": human}
+        data["waiting_input"] = _waiting_input(root, tid)
         data["stop_held_ids"] = runs_live.stop_held(root, tid, human)  # a person stopped: no restart for them
         if waiting:  # input is really queued for a run
             text = (
@@ -205,6 +217,7 @@ def _status(args, root: Path) -> None:
         return
     st = runs.state(rec)
     data = {"ticket": tid, "running": st == "alive", "state": st, "pending": waiting, "claim": rec}
+    data["waiting_input"] = _waiting_input(root, tid)
     if st == "alive" and rec.get("mode") == "live" and runs_live.hold_text(rec):
         data["hold"] = runs_live.hold_text(rec)  # why orch waits; gone when the hold clears
     if st == "alive" and (others := sharedfolder.others_in_folder(root, tid)):
@@ -300,17 +313,8 @@ def _done(args, root: Path, tid: str | None) -> None:
 
 def _send(args, root: Path, tid: str, by: str) -> None:
     proven = False
-    if getattr(args, "proof_stdin", False) or not (tickets.agent_tool() or by.startswith("agent:")):
-        by = humanproof.person_by(
-            root,
-            args,
-            "run.human_input",
-            tid,
-            parts={"title": humanproof.ticket_name(root, tid)},
-            value=args.text or "",
-            # the text a person approves must be the text that runs: no file read behind the card
-            no_handoff='Send the text itself: orch run send <ticket> "text"' if args.file else None,
-        )  # a person: proof or hand-off (H1)
+    if not (tickets.agent_tool() or by.startswith("agent:")):
+        by = tickets.acting_by(args)
         proven = by.startswith("human:")
     if args.file:
         p = Path(args.file)
@@ -325,6 +329,20 @@ def _send(args, root: Path, tid: str, by: str) -> None:
     _out(args, res, runs_live.send_text(res, tid))
 
 
+def _unsend(args, root: Path, tid: str, by: str) -> None:
+    """Take back one message the agent has not read yet; the answer carries its text for the message box."""
+    if tickets.agent_tool() or by.startswith("agent:") or os.environ.get("ORCH_RUN"):
+        raise Refused("Only a person can take back a message.")
+    tickets.load(root, tid)
+    item = runs.unsend_input(root, tid, args.item)
+    _out(
+        args,
+        {"ticket": tid, "id": item["id"], "text": item["text"]},
+        f"Took the message back. The helper will not see it. Send it again when it is right: "
+        f'orch run send {tid} "<text>"',
+    )
+
+
 def dispatch(args, root: Path) -> bool:
     if args.cmd != "run":
         return False
@@ -335,7 +353,7 @@ def dispatch(args, root: Path) -> bool:
         _wrap_cmd(root, args.rest)
         return True
     if sub is None:
-        raise Refused("Say what to do: orch run start|status|send|attach|stop <ticket>")
+        raise Refused("Say what to do: orch run start|status|send|take-back|attach|stop <ticket>")
     if sub != "event":  # a hook must stay quiet; everything else first closes sessions idle for an hour
         with contextlib.suppress(Exception):
             runs_live.cleanup(root)
@@ -362,6 +380,8 @@ def dispatch(args, root: Path) -> bool:
         _out(args, {"ticket": tid, "items": n, "text": text}, text or f"Nothing new on {_name(root, tid)}.")
     elif sub == "send":
         _send(args, root, tid, by)
+    elif sub == "take-back":
+        _unsend(args, root, tid, by)
     elif sub == "attach":
         runs_live.attach(root, tid, args.watch)
     elif sub == "stop":

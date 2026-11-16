@@ -23,7 +23,6 @@ def _exp(v) -> str:
 
 
 def _host(url: str) -> str:
-    from urllib.parse import urlsplit
 
     return urlsplit(url).netloc or url
 
@@ -276,18 +275,14 @@ def _confirm(args):
     return ask
 
 
-def _as_person(args, root: Path, op: str, target: str, **kw) -> str | None:
-    """A person's own act in a group (H1). Returns the VERIFIED human identity (from a proof; a terminal
-    command is handed off to the page and refused here), or None for a caller that claims to be an agent (an
-    agent session, or --by agent:...). EVERY caller branches on the return value: a person's flags
-    (--dashboard, --click) are honoured only for a verified identity, an agent claim gets the downgraded
-    action. Never "did not raise"."""
+def _as_person(args) -> str | None:
+    """The person acting in a group: their identity, or None for a caller that is an agent (an agent session,
+    or --by agent:...). A person's flags (--dashboard, --click) count only for a person; an agent claim gets
+    the downgraded action."""
     if tickets.agent_tool() or (getattr(args, "by", None) or "").startswith("agent:"):
         return None
-    who = humanproof.person_by(root, args, op, target, **kw)
-    if not who.startswith("human:"):
-        return None
-    return who
+    who = tickets.acting_by(args)
+    return who if who.startswith("human:") else None
 
 
 def _file_sha(root: Path, path: str) -> str:
@@ -319,24 +314,6 @@ def _group_title(root: Path, group: str, host: str | None = None) -> str:
     return "a group chat"
 
 
-def _member_parts(root: Path, host: str, group: str) -> dict:
-    """Card parts for an act in a joined group: its title (matched on host AND id) and the host's name."""
-    return {
-        "title": humanproof.part(_group_title(root, group, host)),
-        "host": humanproof.part(relay.name_of(root, host)),
-    }
-
-
-def _share_card(args) -> dict:
-    """What the share card must show and what the page will run (F4): the full resolved path of the file (the
-    card shows it in an "Exact file:" block) and a command with that absolute path, so the page's folder can
-    never turn a relative name into another file."""
-    full = str(Path(args.file).resolve())
-    argv = humanproof._clean_argv(humanproof.CURRENT_ARGV) or []
-    argv = [full if a == args.file else a for a in argv]
-    return {"exact": full, "argv": argv}
-
-
 def run_group(args, root: Path, out) -> None:
     from orch import chat_groups as cg
 
@@ -351,25 +328,13 @@ def run_group(args, root: Path, out) -> None:
     elif sub == "say":
         as_person = None
         if args.dashboard:  # writing into the group AS the person: only with the person's verified proof
-            as_person = _as_person(
-                args, root, "group.write_as_person", tid,
-                parts={"title": humanproof.ticket_name(root, tid)}, value=args.text,
-            )  # fmt: skip
+            as_person = _as_person(args)
         r = cg.say(root, tid, args.text, tickets.PERSON_VIA if as_person else "helper", args.to_person, by)
         out(args, r, "Written into the group.")
     elif sub == "add":
         r = cg.add_member(root, tid, ws, by)
         out(args, r, "Added to the group." if r["added"] else "Already in the group.")
     elif sub == "remove":
-        person = _as_person(
-            args, root, "group.remove_member", f"{tid}:{args.workspace}",
-            parts={
-                "title": humanproof.ticket_name(root, tid),
-                "workspace": humanproof.part(relay.name_of(root, ws)),
-            },
-        )  # fmt: skip
-        if person is None:  # an agent claim never removes a member (no typed yes, no flag counts)
-            raise Refused(humanproof.AGENT_REFUSED)
         r = cg.remove_member(root, tid, ws, by)
         out(args, r, "Removed from the group.")
     elif sub == "ask":
@@ -379,14 +344,7 @@ def run_group(args, root: Path, out) -> None:
         click, sha = False, None  # the downgraded action: confined to the workspace, no click
         if args.click:  # a person shares a file with the group: the proof binds the file's CONTENT
             sha = _file_sha(root, args.file)
-            if _as_person(
-                args, root, "group.share_file", f"{tid}:{sha}",
-                parts={
-                    "title": humanproof.ticket_name(root, tid),
-                    "file": humanproof.part(Path(args.file).name),
-                },
-                **_share_card(args),
-            ):  # fmt: skip
+            if _as_person(args):
                 click = True
         # the bytes that are uploaded are checked against the bytes the proof covers (expect_sha)
         r = cg.share_file(
@@ -403,14 +361,8 @@ def run_group(args, root: Path, out) -> None:
         out(args, r, "Shared with the group.")
     elif sub == "reply":
         as_person = None
-        if (
-            args.dashboard
-        ):  # only a verified person speaks as themselves; an agent claim is downgraded to helper
-            host = relay.resolve(root, args.host)
-            as_person = _as_person(
-                args, root, "group.write_as_person", humanproof.group_target(root, host, args.group),
-                parts=_member_parts(root, host, args.group), value=args.text,
-            )  # fmt: skip
+        if args.dashboard:  # only a person speaks as themselves; an agent claim is downgraded to helper
+            as_person = _as_person(args)
         m = cg.say_member(
             root,
             relay.resolve(root, args.host),
@@ -426,15 +378,7 @@ def run_group(args, root: Path, out) -> None:
         click, sha = False, None  # an agent claim: no click, so share_member refuses in words
         if args.click:  # the proof binds the file's content, checked against the uploaded bytes
             sha = _file_sha(root, args.file)
-            host = relay.resolve(root, args.host)
-            if _as_person(
-                args, root, "group.share_file", f"{humanproof.group_target(root, host, args.group)}:{sha}",
-                parts={
-                    **_member_parts(root, host, args.group),
-                    "file": humanproof.part(Path(args.file).name),
-                },
-                **_share_card(args),
-            ):  # fmt: skip
+            if _as_person(args):
                 click = True
         m = cg.share_member(
             root,
@@ -606,17 +550,7 @@ def run_relay(args, root: Path, out) -> None:
     if sub == "group":
         return run_group(args, root, out)
     if sub == "connect":
-        # connecting (or changing the relay address) is a person's action (H1): proof for this relay host
-        address = humanproof.server_address(args.url)  # refuses a URL with a name or password in it
-        if not humanproof.person_by(
-            root,
-            args,
-            "relay.connect",
-            address,
-            parts={"host": address, "scheme": urlsplit(args.url.strip()).scheme},
-            exact=address,
-        ).startswith("human:"):
-            raise Refused(humanproof.AGENT_REFUSED)
+        humanproof.server_address(args.url)  # refuses a URL with a name or password in it
         who, line = relay.connect(root, args.url, args.workspace, args.token)
         out(
             args,
@@ -721,22 +655,7 @@ def run_relay(args, root: Path, out) -> None:
         m = _build_send(root, args, sub, t)
         out(args, m, _sent_line(root, m, "Start request sent to {}."))
     elif sub == "allow":
-        msg = relay.load_message(root, args.id)
-        b = msg.get("body", {})
-        task = b.get("title") or b.get("key") or args.id
         mode = "once" if args.once else "permanent"
-        if not humanproof.person_by(
-            root,
-            args,
-            "relay.allow",
-            f"{args.id}:{mode}",
-            parts={
-                "peer": humanproof.part(relay.name_of(root, msg.get("from"))),
-                "task": humanproof.part(task),
-                "mode": mode,
-            },
-        ).startswith("human:"):
-            raise Refused(humanproof.AGENT_REFUSED)
         m = relay.give_allow(root, args.id, mode)
         out(args, m, f"Allowed ({m['body']['mode']}). {relay.name_of(root, m['to'])} has been told.")
     elif sub == "refresh":

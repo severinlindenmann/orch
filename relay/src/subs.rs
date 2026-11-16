@@ -440,7 +440,10 @@ fn event_of(
                 .cloned()
                 .unwrap_or_default()
                 .into();
-            e["answerable"] = (s.can_answer && answered.is_none()).into();
+            e["answerable"] = (s.can_answer
+                && answered.is_none()
+                && store::taken_back_reason(c, key, &m.id)?.is_none())
+            .into();
             e["answered"] = answered.unwrap_or(Value::Null);
             Some(e)
         }
@@ -727,6 +730,11 @@ async fn answer(
             return Err(already_answered(format!(
                 "This question was already answered: {}.",
                 b["answer"].as_str().unwrap_or("")
+            )));
+        }
+        if let Some(reason) = store::taken_back_reason(&c, &app.key, qid)? {
+            return Err(taken_back(format!(
+                "This question was taken back: {reason}"
             )));
         }
         let (qb, qextra) = store::open_payload(&app.key, &q);
