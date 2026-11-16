@@ -761,7 +761,7 @@ def decide(
 
 
 def merge_url(q: dict) -> str | None:
-    """The pull request a merge card merges on approval (`orch ask ... --merge`), else None."""
+    """The pull request a merge card merges on the Merge click (`orch ask ... --merge`), else None."""
     act = q.get("action")
     url = act.get("merge") if isinstance(act, dict) else None
     return url if isinstance(url, str) else None
