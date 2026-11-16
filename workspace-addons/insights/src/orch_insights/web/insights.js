@@ -111,6 +111,46 @@ function fillBars() {
   });
 }
 
+const short = (n, d, unit) => `${(n / d).toFixed(1).replace(/\.0$/, "")}${unit}`;
+const fmt = n => n >= 1e6 ? short(n, 1e6, "M") : n >= 1e3 ? short(n, 1e3, "k") : String(n);
+
+function renderModels(view) {
+  const host = byId('models');
+  if (!view || view.error) { host.hidden = true; return; }
+  host.hidden = false;
+  const bars = byId('models-bars'), rows = byId('models-rows');
+  bars.replaceChildren();
+  rows.replaceChildren();
+  rows.hidden = view.empty;
+  if (view.empty) { byId('models-text').textContent = view.text; return; }
+  byId('models-text').textContent = view.moved_text + '.';
+  const most = Math.max(...view.models.map(m => m.tokens));
+  view.models.forEach((m, index) => {
+    const bar = node('div', undefined, index ? 'bar-row secondary' : 'bar-row');
+    const head = node('div', undefined, 'row between');
+    head.append(node('span', m.label), node('strong', `${fmt(m.tokens)} tokens`));
+    const meter = node('div', undefined, 'progress');
+    meter.setAttribute('aria-label', `${m.label}: ${m.tokens} tokens`);
+    const fill = node('span');
+    fill.style.setProperty('--value', `${Math.round(100 * m.tokens / most)}%`);
+    meter.append(fill);
+    bar.append(head, meter);
+    bars.append(bar);
+  });
+  for (const t of view.tickets) {
+    const item = node('div', undefined, 'row between');
+    item.setAttribute('role', 'listitem');
+    const name = node('div', undefined, 'truncate');
+    name.append(node('strong', t.key), node('div', t.title, 'meta truncate'));
+    item.append(name, node('span', t.parts.map(p => `${p.label} ${fmt(p.tokens)}`).join(' · ') || fmt(t.tokens), 'meta'));
+    rows.append(item);
+  }
+}
+
+async function loadModels() {
+  try { renderModels(await read('/api/models')); } catch { renderModels(null); }
+}
+
 function stateBadge(row) {
   const badge = node('span', `${MARKS[row.health] || ''}${row.state.text}`, `badge ${BADGE[row.state.tone] || ''}`.trim());
   return badge;
@@ -277,6 +317,7 @@ async function refresh() {
     if (!await loadList('skills')) return;
     showView('overview');
     renderAll();
+    loadModels();
     for (const tab of ['connections', 'keys']) {
       if (overview.tabs[tab].count && await loadList(tab)) { renderServices(); if (tab === active) renderTable(); }
     }

@@ -114,6 +114,20 @@ To keep a text file or picture with a ticket yourself: `orch ticket attach <id> 
     orch check reopen <id> <c>            # a done step that turned out wrong
     orch check stop <id> <c>              # stop working on it without finishing
 
+**The work needs a bigger model**
+
+orch starts most tickets on Sonnet and hard ones (design, security, a migration, a crash or
+flaky test, part of a bigger plan) on Opus. When your plan shows design, security or several parts, or you
+failed twice at the same problem, move the ticket up; one history line says why:
+
+    orch ticket model <id> up --why "<what makes it hard, a few plain words>"
+
+In a live session finish your reply: orch switches the same conversation to Opus and you go on. orch also moves
+a ticket up by itself after two failed check runs on one step. It never moves down by itself, and a person's
+choice of model always stays (ask them instead). Your own subagents follow the same rule: the small model for
+searching, reading and first checks, Opus only for design, security, hard debugging and a final review.
+Tokens per model and per ticket, and how many tickets moved up: `orch usage` (Insights shows the same).
+
 **Need an answer or blocked**
 
     orch ask <id> "<question>" --option A --option B --recommend A

@@ -33,7 +33,7 @@ import time
 import unicodedata
 from pathlib import Path
 
-from orch import adapters, brake, diag, history, procs, runhooks, runs, tickets
+from orch import adapters, brake, diag, history, modelpick, procs, runhooks, runs, tickets
 from orch.errors import Refused
 
 CROWDED_AT = 4  # with no limit set: this many open sessions make idle ones on finished tickets close early
@@ -588,6 +588,7 @@ def deliver(root: Path, tid: str, stop=None) -> int:
                 runs._write(root, rec)
             return 0
         line = notice_line(tid, any(i.get("via") == "start" for i in items))
+        switch = _model_line(rec, root)
         why = _hold_reason(root, tid, _dialog_rule(rec["agent"], root), _prompt_box(rec["agent"], root))
         _note_hold(root, tid, rec, why)
         if why:
@@ -602,6 +603,13 @@ def deliver(root: Path, tid: str, stop=None) -> int:
             )
         if not runhooks.gate(root=root, tid=tid, run=rec["run"]):
             return 0
+        if switch:  # the ticket moved up: the same conversation goes on on the new model (a fixed line)
+            if not _type_line(root, tid, switch, QUICK):
+                return 0
+            time.sleep(MODEL_SWITCH_DELAY)
+            rec = runs.read(root, tid) or rec
+            rec["model"] = rec.pop("model_switch", {}).get("to")
+            runs._write(root, rec)
         if not _type_line(root, tid, line, QUICK):
             return 0
         rec = runs.read(root, tid) or rec
@@ -617,6 +625,37 @@ def deliver(root: Path, tid: str, stop=None) -> int:
         }
         runs._write(root, rec)
         return len(items)
+
+
+MODEL_SWITCH_DELAY = 1.0  # the tool redraws after a model change: the notice waits this long
+
+
+def _model_line(rec: dict, root: Path) -> str | None:
+    """The fixed line that switches a live session's model (adapter live.model_line), when a switch waits."""
+    to = (rec.get("model_switch") or {}).get("to")
+    tmpl = adapters.load(rec["agent"], root).get("live", {}).get("model_line")
+    if to not in modelpick.MODELS or not tmpl:
+        return None
+    return tmpl.replace("{model}", to)
+
+
+def switch_model(root: Path, tid: str, model: str, why: str) -> bool:
+    """The ticket moved up while a live session runs: at its next turn end orch types the adapter's fixed
+    model line, then the notice for one short message saying so. True when a live session will switch; False
+    when none runs or its tool cannot switch (then the next start uses the new model)."""
+    if model not in modelpick.MODELS:
+        return False
+    with runs.locked(root, tid):
+        rec = runs.read(root, tid)
+        if not rec or rec.get("mode") != "live" or runs.state(rec) != "alive":
+            return False
+        if not adapters.load(rec["agent"], root).get("live", {}).get("model_line"):
+            return False
+        rec["model_switch"] = {"to": model, "at": tickets.now()}
+        runs._write(root, rec)
+    text = f"Model moved up to {modelpick.LABELS[model]}: {why[:200]}. Go on with the ticket."
+    send(root, tid, "orch", text)
+    return True
 
 
 def read_input(root: Path, tid: str, run: str | None, agent: bool) -> tuple[str, int]:
