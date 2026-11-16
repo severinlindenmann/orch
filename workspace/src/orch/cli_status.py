@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from orch import history, humanproof, look, services, term
+from orch import history, humanproof, look, pagelaunch, services, term
 from orch.errors import Refused
 
 
@@ -107,15 +107,15 @@ def _launch_urls(root: Path, rows: list[dict]) -> list[tuple[str, str]]:
     out = []
     for r in rows:
         base = services.local_url(r.get("url"))
-        if base and r.get("addon") in humanproof.LAUNCH_SERVERS:
-            out.append((r["addon"], humanproof.printable_launch_url(root, r["addon"], base)))
+        if base and r.get("addon") in pagelaunch.LAUNCH_SERVERS:
+            out.append((r["addon"], pagelaunch.printable_launch_url(root, r["addon"], base)))
     return out
 
 
 def _services_cmd(args, root: Path) -> None:
     if args.cmd == "start":
         if args.print_launch_url:  # refuse before anything starts
-            if not humanproof.is_test_workspace(root):
+            if not pagelaunch.is_test_workspace(root):
                 raise Refused("--print-launch-url works only on a test install, in a test folder.")
         from orch import worktrees
 
@@ -140,7 +140,7 @@ def _services_cmd(args, root: Path) -> None:
         opens = not args.no_open and not args.print_launch_url and not args.json
         if url and opens and term.is_terminal(sys.stdout):
             # a person opens the page: the launch token (URL fragment) lets it start a proof session (H1)
-            humanproof.open_browser(humanproof.launch_url(root, row.get("addon"), url))
+            pagelaunch.open_browser(pagelaunch.launch_url(root, row.get("addon"), url))
         bad = [r for r in rows if r.get("error")]
         if bad:
             raise Refused(", ".join(r["addon"] for r in bad) + " did not start (see above).")

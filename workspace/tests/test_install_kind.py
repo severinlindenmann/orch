@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from orch import addons
+from orch import addons, pagelaunch
 from orch import humanproof as hp
 from orch.errors import Refused
 
@@ -146,12 +146,14 @@ def tws(tmp_path, monkeypatch):
 
 
 def test_launch_url_on_a_test_install(tws):
-    url = hp.printable_launch_url(tws, "focus", "http://127.0.0.1:8123")
+    url = pagelaunch.printable_launch_url(tws, "focus", "http://127.0.0.1:8123")
     token = url.split("#launch=")[1]
     assert url.startswith("http://127.0.0.1:8123/#launch=")
     tok, exp = (hp.key_dir(tws) / "launch-focus.token").read_text().split()  # the ONE format: token, expiry
     assert (
-        tok == token and 0 < int(exp) - __import__("time").time() <= hp.LAUNCH_LIFE and hp.LAUNCH_LIFE == 30
+        tok == token
+        and 0 < int(exp) - __import__("time").time() <= pagelaunch.LAUNCH_LIFE
+        and pagelaunch.LAUNCH_LIFE == 30
     )
     assert oct((hp.key_dir(tws) / "launch-focus.token").stat().st_mode & 0o777) == "0o600"
 
@@ -160,14 +162,14 @@ def test_launch_url_refused_on_dev_normal_and_outside_the_test_folder(tws, tmp_p
     for kind in ("dev", "normal"):
         monkeypatch.setattr(hp, "install_kind", lambda k=kind: k)
         with pytest.raises(Refused, match="only on a test install"):
-            hp.printable_launch_url(tws, "focus", "http://127.0.0.1:1")
+            pagelaunch.printable_launch_url(tws, "focus", "http://127.0.0.1:1")
     monkeypatch.setattr(hp, "install_kind", lambda: "test")
     other = tmp_path / "acct" / "real-ws"
     other.mkdir()
     with pytest.raises(Refused, match="only on a test install"):
-        hp.printable_launch_url(other, "focus", "http://127.0.0.1:1")
+        pagelaunch.printable_launch_url(other, "focus", "http://127.0.0.1:1")
     with pytest.raises(Refused):
-        hp.write_launch_token(tws, "evil")
+        pagelaunch.write_launch_token(tws, "evil")
 
 
 def test_start_refuses_print_launch_url_outside_test(proj, monkeypatch, run):
@@ -572,9 +574,9 @@ def test_finisher_applies_env_and_record(tmp_path):
 def test_start_json_with_launch_urls_is_valid_json(proj, monkeypatch, capsys):
     from orch import cli, services
 
-    monkeypatch.setattr(hp, "is_test_workspace", lambda r: True)
+    monkeypatch.setattr(pagelaunch, "is_test_workspace", lambda r: True)
     monkeypatch.setattr(services, "start", lambda root: [{"addon": "focus", "url": "http://127.0.0.1:9"}])
-    monkeypatch.setattr(hp, "printable_launch_url", lambda r, s, b: b + "/#launch=tok")
+    monkeypatch.setattr(pagelaunch, "printable_launch_url", lambda r, s, b: b + "/#launch=tok")
     assert cli.main(["start", "--json", "--print-launch-url"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["launch"] == [{"addon": "focus", "url": "http://127.0.0.1:9/#launch=tok"}]
@@ -677,13 +679,13 @@ def test_windows_is_test_workspace(win, monkeypatch):
     monkeypatch.setattr(hp, "account_home", lambda: Path(PROFILE))
     monkeypatch.setattr(hp, "install_kind", lambda: "test")
     monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
-    assert hp.is_test_workspace(Path(PROFILE + "\\.ORCH-TEST\\testnet\\ws"))
-    assert not hp.is_test_workspace(Path(PROFILE + "\\Documents\\ws"))
+    assert pagelaunch.is_test_workspace(Path(PROFILE + "\\.ORCH-TEST\\testnet\\ws"))
+    assert not pagelaunch.is_test_workspace(Path(PROFILE + "\\Documents\\ws"))
     monkeypatch.setattr(hp, "_lstat", lambda p: _St(hp.REPARSE))
-    assert not hp.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))
+    assert not pagelaunch.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))
     monkeypatch.setattr(hp, "_lstat", lambda p: _St(0))
     monkeypatch.setattr(hp, "install_kind", lambda: "dev")
-    assert not hp.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))  # test installs only
+    assert not pagelaunch.is_test_workspace(Path(PROFILE + "\\.orch-test\\testnet\\ws"))  # test installs only
 
 
 # ---------------------------------------------------------------- plain refusal first (before any hand-off)

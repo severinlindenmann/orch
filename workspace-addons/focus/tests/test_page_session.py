@@ -1,4 +1,4 @@
-"""H1 in the Focus server: launch token -> session cookie, loopback Host, no X-Forwarded-*, proof on stdin,
+"""The Focus page session: launch token -> session cookie + page secret, loopback Host, no X-Forwarded-*,
 the core run as `sys.executable -I -m orch` (never ORCH_BIN). Needs orch importable (runs from workspace/)."""
 
 import http.client
@@ -10,7 +10,8 @@ import pytest
 pytest.importorskip("orch")
 from orch import (
     addons,
-    pageproof,
+    pagelaunch,
+    pagesession,
 )
 from orch import humanproof as hp
 
@@ -43,8 +44,7 @@ def live(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(argv, 1, "", "")
 
     monkeypatch.setattr(actions, "_run", no_child)
-    monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **k: no_child(argv))
-    srv = make_server(root, 0, orch_bin=pageproof.SELF)
+    srv = make_server(root, 0, orch_bin=pagesession.SELF)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield root, srv.server_address[1]
     srv.shutdown()
@@ -72,7 +72,7 @@ def post(port, path, body, headers=None, host=None):
 
 
 def session(root, port):
-    tok = hp.write_launch_token(root, "focus")
+    tok = pagelaunch.write_launch_token(root, "focus")
     st, ck, body = post(port, "/session", {"token": tok})
     assert st == 200
     cookie = ck.split(";")[0]
@@ -82,7 +82,7 @@ def session(root, port):
 
 def test_launch_token_bootstraps_the_cookie_once(live):
     root, port = live
-    tok = hp.write_launch_token(root, "focus")
+    tok = pagelaunch.write_launch_token(root, "focus")
     st, ck, _ = post(port, "/session", {"token": tok})
     assert (
         st == 200
@@ -96,7 +96,7 @@ def test_launch_token_bootstraps_the_cookie_once(live):
 
 def test_session_refused_through_a_proxy_or_foreign_host(live):
     root, port = live
-    tok = hp.write_launch_token(root, "focus")
+    tok = pagelaunch.write_launch_token(root, "focus")
     assert post(port, "/session", {"token": tok}, {"X-Forwarded-For": "1.2.3.4"})[0] == 403
     assert post(port, "/session", {"token": tok}, {"Forwarded": "for=1.2.3.4"})[0] == 403
 
@@ -104,7 +104,7 @@ def test_session_refused_through_a_proxy_or_foreign_host(live):
 def test_click_without_a_session_is_watch_only(live, monkeypatch):
     _root, port = live
     ran = []
-    monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(actions, "_run", lambda *a, **k: ran.append(a))
     st, _, _body = post(
         port,
         "/api/act",
@@ -113,7 +113,7 @@ def test_click_without_a_session_is_watch_only(live, monkeypatch):
     assert st == 403 and ran == []
 
 
-def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
+def test_click_with_session_runs_core_as_the_person_with_no_proof(live, monkeypatch):
     root, port = live
     ck = session(root, port)
     seen = {}
@@ -121,11 +121,12 @@ def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
     class R:
         returncode, stdout, stderr = 0, "{}", ""
 
-    def fake(argv, proof, **kw):
-        seen.update(argv=argv, proof=proof, kw=kw)
+    def fake(argv, **kw):
+        if "answer" in argv and "argv" not in seen:  # the click's own command (later calls read the state)
+            seen.update(argv=argv, kw=kw)
         return R()
 
-    monkeypatch.setattr(actions, "run_with_proof", fake)
+    monkeypatch.setattr(actions, "_run", fake)
     st, _, _ = post(
         port,
         "/api/act",
@@ -133,10 +134,8 @@ def test_click_with_session_runs_core_with_proof_on_stdin(live, monkeypatch):
         {"Cookie": ck},
     )
     assert st == 200, seen
-    assert "--proof-stdin" not in seen["argv"] and "x" in seen["argv"]  # run_with_proof adds the flag itself
-    payload = json.loads(__import__("base64").urlsafe_b64decode(seen["proof"].split(".")[1] + "=="))
-    assert payload["op"] == "ticket.answer" and payload["target"] == "t_abc123:q1:" + "a" * 64
-    assert seen["kw"]["orch_bin"] == pageproof.SELF
+    assert "--proof-stdin" not in seen["argv"] and "x" in seen["argv"]  # a plain person action
+    assert "input" not in seen["kw"]  # nothing on stdin
     assert "ORCH_BIN" not in seen["kw"]["env"]
 
 
@@ -153,11 +152,11 @@ def test_click_with_session_but_forwarded_is_refused(live):
 
 
 def test_orch_bin_from_the_environment_is_ignored():
-    argv = pageproof.argv0(pageproof.SELF)
-    assert argv[1:5] == ["-I", "-P", "-m", "orch"] and argv[0] == pageproof.sys.executable
+    argv = pagesession.argv0(pagesession.SELF)
+    assert argv[1:5] == ["-I", "-P", "-m", "orch"] and argv[0] == pagesession.sys.executable
 
 
-def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session_proof(live):
+def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session(live):
     """An agent posting to Focus's act endpoint (no session cookie) can not change a person's Won't do."""
     _root, port = live
     for op, args in (
@@ -168,13 +167,6 @@ def test_focus_check_remove_edit_reopen_and_wont_do_need_a_session_proof(live):
     ):
         st, _, body = post(port, "/api/act", {"op": op, "args": args})
         assert st == 403, (op, body)
-    from orch_focus import actions
-
-    for action in ("edit", "remove", "reopen"):  # the ACTION is part of the proof target
-        assert actions.proof_for(f"check.{action}", {"ticket": "t_a", "check": "c1"}) == (
-            "check.wont_do_undo",
-            f"t_a:c1:{action}",
-        )
 
 
 # ---- #539: the cookie alone is never a session (browsers send it to every loopback port) -------------------------
@@ -184,7 +176,7 @@ ANSWER = {"op": "answer", "args": {"ticket": "t_abc123", "question": "q1", "dige
 
 def test_session_answer_hands_over_the_secret_in_the_body_not_in_a_cookie(live):
     root, port = live
-    tok = hp.write_launch_token(root, "focus")
+    tok = pagelaunch.write_launch_token(root, "focus")
     st, ck, body = post(port, "/session", {"token": tok})
     secret = json.loads(body)["secret"]
     assert st == 200 and len(secret) >= 40 and secret not in ck
@@ -193,11 +185,11 @@ def test_session_answer_hands_over_the_secret_in_the_body_not_in_a_cookie(live):
 @pytest.mark.parametrize(
     "body", [ANSWER, {"op": "area.accept", "args": {"area": "x"}}], ids=lambda b: b["op"]
 )
-def test_every_mint_route_refuses_the_cookie_alone(live, monkeypatch, body):
+def test_every_action_refuses_the_cookie_alone(live, monkeypatch, body):
     root, port = live
     ck = session(root, port)
     ran = []
-    monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(actions, "_run", lambda *a, **k: ran.append(a))
     for h in (
         {"Cookie": ck, "X-Orch-Page": None},  # a foreign local page that got the cookie
         {"Cookie": ck, "X-Orch-Page": "x" * 43},
@@ -207,7 +199,7 @@ def test_every_mint_route_refuses_the_cookie_alone(live, monkeypatch, body):
     assert ran == []
 
 
-def test_the_secret_with_the_cookie_still_mints(live, monkeypatch):
+def test_the_secret_with_the_cookie_still_acts(live, monkeypatch):
     root, port = live
 
     class R:
@@ -215,9 +207,9 @@ def test_the_secret_with_the_cookie_still_mints(live, monkeypatch):
 
     ck = session(root, port)
     ran = []
-    monkeypatch.setattr(actions, "run_with_proof", lambda argv, proof, **k: ran.append(proof) or R())
+    monkeypatch.setattr(actions, "_run", lambda argv, **k: ran.append(argv) or R())
     assert post(port, "/api/act", ANSWER, {"Cookie": ck})[0] == 200
-    assert len(ran) == 1 and ran[0].startswith("hp1.")
+    assert any("answer" in argv for argv in ran)
     assert post(port, "/api/act", ANSWER, {"X-Orch-Page": SECRETS[ck]})[0] == 403  # the secret alone: no
 
 
@@ -225,7 +217,7 @@ def test_a_page_on_another_port_cannot_act_even_with_cookie_and_secret(live, mon
     root, port = live
     ck = session(root, port)
     ran = []
-    monkeypatch.setattr(actions, "run_with_proof", lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(actions, "_run", lambda *a, **k: ran.append(a))
     foreign = {"Cookie": ck, "Origin": f"http://127.0.0.1:{port + 1}", "Sec-Fetch-Site": "cross-site"}
     assert post(port, "/api/act", ANSWER, foreign)[0] == 403 and ran == []
 
@@ -260,7 +252,7 @@ def _raw(port, method, path, body=None, headers=None):
 )
 def test_session_refused_for_foreign_origin_missing_origin_or_wrong_host(live, extra):
     root, port = live
-    tok = hp.write_launch_token(root, "focus")
+    tok = pagelaunch.write_launch_token(root, "focus")
     base = {"Origin": f"http://127.0.0.1:{port}"}
     extra = {k: (v.replace("{PORT}", str(port)) if isinstance(v, str) else v) for k, v in extra.items()}
     st, hdr, body = _raw(port, "POST", "/session", {"token": tok}, {**base, **extra})
@@ -292,7 +284,7 @@ def test_no_response_carries_cors_headers_and_preflight_is_refused(live):
 
 def test_the_secret_never_appears_in_logs_urls_redirects_or_gets(live, capfd):
     root, port = live
-    tok = hp.write_launch_token(root, "focus")
+    tok = pagelaunch.write_launch_token(root, "focus")
     st, hdr, body = _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
     secret = json.loads(body)["secret"]
     assert st == 200 and secret not in json.dumps(hdr)  # not in a header (Set-Cookie, Location, ...)
@@ -311,17 +303,17 @@ def test_the_secret_never_appears_in_logs_urls_redirects_or_gets(live, capfd):
 def test_secret_compare_is_constant_time_and_rotates_with_the_session(live):
     import inspect
 
-    src = inspect.getsource(pageproof.PageSession.authed)
+    src = inspect.getsource(pagesession.PageSession.authed)
     assert "compare_digest" in src and "self.secret" in src and "== self.secret" not in src
     root, port = live
-    tok = hp.write_launch_token(root, "focus")
+    tok = pagelaunch.write_launch_token(root, "focus")
     st, hdr, body = _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
     old_ck, old_secret = hdr["set-cookie"].split(";")[0], json.loads(body)["secret"]
     SECRETS[old_ck] = old_secret
     # a reused link revokes the session: the old cookie AND the old secret are dead, a new link gets a new secret
     st, hdr, _ = _raw(port, "POST", "/session", {"token": tok}, {"Origin": f"http://127.0.0.1:{port}"})
     assert st == 403 and "set-cookie" not in hdr
-    tok2 = hp.write_launch_token(root, "focus")
+    tok2 = pagelaunch.write_launch_token(root, "focus")
     st, hdr, body = _raw(port, "POST", "/session", {"token": tok2}, {"Origin": f"http://127.0.0.1:{port}"})
     new_secret = json.loads(body)["secret"]
     assert st == 200 and new_secret and new_secret != old_secret
@@ -343,28 +335,28 @@ def test_open_tab_hands_its_session_over_only_while_a_restart_is_armed(live):
     secret = SECRETS[ck]
     hdrs = {"Cookie": ck, "X-Orch-Page": secret}
     assert _raw(port, "GET", "/api/tickets", None, hdrs)[0] == 200
-    assert hp.take_resume_session(root, "focus") is None  # not armed: nothing is written
-    assert hp.restart_armed(root) is None
-    assert hp.arm_restart(root) and hp.restart_armed(root)
+    assert pagelaunch.take_resume_session(root, "focus") is None  # not armed: nothing is written
+    assert pagelaunch.restart_armed(root) is None
+    assert pagelaunch.arm_restart(root) and pagelaunch.restart_armed(root)
     # a request without a session (or with a wrong secret) writes nothing
     _raw(port, "GET", "/api/tickets", None, {"Cookie": ck, "X-Orch-Page": "x" * 43})
-    assert hp.take_resume_session(root, "focus") is None
+    assert pagelaunch.take_resume_session(root, "focus") is None
     import time
 
     time.sleep(2.1)  # the check runs at most once per 2 s
     assert _raw(port, "GET", "/api/tickets", None, hdrs)[0] == 200
-    got = hp.take_resume_session(root, "focus")
+    got = pagelaunch.take_resume_session(root, "focus")
     assert got is not None and got[1] == secret and got[0] == ck.split("=", 1)[1]
-    assert hp.take_resume_session(root, "focus") is None  # one use
-    hp.disarm_restart(root)
-    assert hp.restart_armed(root) is None  # a (re)started page server ends the window
+    assert pagelaunch.take_resume_session(root, "focus") is None  # one use
+    pagelaunch.disarm_restart(root)
+    assert pagelaunch.restart_armed(root) is None  # a (re)started page server ends the window
 
 
 def test_restart_marker_expires(live, monkeypatch):
     root, _ = live
-    assert hp.arm_restart(root)
+    assert pagelaunch.arm_restart(root)
     import time
 
     real = time.time
-    monkeypatch.setattr(hp.time, "time", lambda: real() + hp.RESTART_ARM_LIFE + 5)
-    assert hp.restart_armed(root) is None
+    monkeypatch.setattr(hp.time, "time", lambda: real() + pagelaunch.RESTART_ARM_LIFE + 5)
+    assert pagelaunch.restart_armed(root) is None

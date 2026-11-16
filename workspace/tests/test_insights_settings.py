@@ -10,7 +10,7 @@ import pytest
 from conftest import seal_append
 from jsonschema import Draft202012Validator, FormatChecker
 
-from orch import cli_record, config, hider, pageproof
+from orch import cli_record, config, hider, pagelaunch, pagesession
 from orch import humanproof as hp
 from orch.errors import Refused
 from orch.record import RecordWriter, record_dir
@@ -145,10 +145,10 @@ def test_relay_refresh_keeps_the_admin_policy(ws):
 
 
 def test_insights_is_a_page_server(ws):
-    assert "insights" in hp.LAUNCH_SERVERS and "insights" in pageproof.SERVERS
-    pageproof.PageSession(ws, "insights")  # accepted as a page server
-    token = hp.write_launch_token(ws, "insights")  # orch ships the add-on (its manifest)
-    assert token and hp.consume_launch_token(ws, "insights", token)
+    assert "insights" in pagelaunch.LAUNCH_SERVERS and "insights" in pagesession.SERVERS
+    pagesession.PageSession(ws, "insights")  # accepted as a page server
+    token = pagelaunch.write_launch_token(ws, "insights")  # orch ships the add-on (its manifest)
+    assert token and pagelaunch.consume_launch_token(ws, "insights", token)
 
 
 def test_insights_launch_token_refused_without_a_shipped_manifest(ws, monkeypatch):
@@ -158,24 +158,26 @@ def test_insights_launch_token_refused_without_a_shipped_manifest(ws, monkeypatc
 
     monkeypatch.setattr(addons, "SHIPPED_ADDONS", tuple(n for n in addons.SHIPPED_ADDONS if n != "insights"))
     assert "insights" not in addons.SHIPPED_ADDONS
-    assert not hp.launch_server_ok("insights")
+    assert not pagelaunch.launch_server_ok("insights")
     with pytest.raises(hp.Refused):
-        hp.write_launch_token(ws, "insights")
+        pagelaunch.write_launch_token(ws, "insights")
     assert not (hp.key_dir(ws) / "launch-insights.token").exists()
     hp._write_private(hp.key_dir(ws) / "launch-insights.token", f"{'a' * 32}\n{int(time.time()) + 30}\n")
-    assert hp.consume_launch_token(ws, "insights", "a" * 32) is False  # a planted token file does not count
-    assert hp.launch_url(ws, "insights", "http://127.0.0.1:1/") == "http://127.0.0.1:1/"
+    assert (
+        pagelaunch.consume_launch_token(ws, "insights", "a" * 32) is False
+    )  # a planted token file does not count
+    assert pagelaunch.launch_url(ws, "insights", "http://127.0.0.1:1/") == "http://127.0.0.1:1/"
     for server in ("focus", "dashboard"):
-        token = hp.write_launch_token(ws, server)
-        assert token and hp.consume_launch_token(ws, server, token)
+        token = pagelaunch.write_launch_token(ws, server)
+        assert token and pagelaunch.consume_launch_token(ws, server, token)
 
 
 def test_insights_never_resumes_a_page_session(ws):
-    assert hp.write_resume_cookie(ws, "insights", "c" * 40, "s" * 40) is False
+    assert pagelaunch.write_resume_cookie(ws, "insights", "c" * 40, "s" * 40) is False
     assert not (hp.key_dir(ws) / "resume-insights.cookie").exists()
     planted = f"{'c' * 40}\n{'s' * 40}\n{int(time.time()) + 60}\n"
     hp._write_private(hp.key_dir(ws) / "resume-insights.cookie", planted)
-    assert hp.take_resume_session(ws, "insights") is None  # a planted file is never adopted
+    assert pagelaunch.take_resume_session(ws, "insights") is None  # a planted file is never adopted
 
 
 def test_registry_drops_an_unshipped_builtin_insights(ws, monkeypatch):

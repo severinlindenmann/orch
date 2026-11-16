@@ -100,12 +100,12 @@ def test_uv_is_pinned_to_the_receipt_bin_dir(tmp_path, monkeypatch):
 
 
 def test_page_reason_from_the_update_log():
-    from orch import pageproof
+    from orch import pagesession
 
     tail = "uv failed: ...\nerror: Executable already exists: orch\nRefused: " + winfinish.plain_reason(
         "error: Failed to fetch", True
     )
-    assert pageproof._short_reason(tail).startswith("No internet connection to GitHub")
+    assert pagesession._short_reason(tail).startswith("No internet connection to GitHub")
 
 
 def test_finisher_restores_the_old_orch_when_uv_fails(tmp_path):

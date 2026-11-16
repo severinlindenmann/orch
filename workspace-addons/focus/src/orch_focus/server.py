@@ -604,7 +604,7 @@ class Tracker:
 
 
 def _link_msg(session, name: str) -> bytes:
-    from orch.pageproof import REVOKED_MSG
+    from orch.pagesession import REVOKED_MSG
 
     if session.revoked:
         return REVOKED_MSG.encode()
@@ -628,19 +628,19 @@ class Handler(BaseHTTPRequestHandler):
         like the dashboard's own hand-over), so the tab keeps working (#705). At most one check per 2 s."""
         s, srv = self.session, self.server
         now = time.monotonic()
-        if s is None or s.key is None or now - getattr(srv, "resume_checked", -10.0) < 2:
+        if s is None or not s.active or now - getattr(srv, "resume_checked", -10.0) < 2:
             return
         try:
             if not s.authed(self.headers, srv.server_address[1]):
                 return  # (an unauthenticated request must not use up the 2 s slot of the real tab)
             srv.resume_checked = now
-            from orch import humanproof
+            from orch import pagelaunch
 
-            exp = humanproof.restart_armed(self.root)
+            exp = pagelaunch.restart_armed(self.root)
             if (
                 exp
                 and exp != getattr(srv, "resume_written", None)
-                and humanproof.write_resume_cookie(self.root, s.server, s.cookie, s.secret)
+                and pagelaunch.write_resume_cookie(self.root, s.server, s.cookie, s.secret)
             ):
                 srv.resume_written = exp
         except Exception:  # noqa: BLE001, S110 - without it the tab shows "orch restarted. Reload" as before
@@ -809,7 +809,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(args, dict) or set(args) != {"area"} or not isinstance(args["area"], str):
             return bad()
         if self.orch_bin == actions.SELF and not (
-            self.session is not None and self.session.can_mint(self.headers, self.server.server_address[1])
+            self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
         ):
             return self._send(
                 403,
@@ -835,7 +835,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, why.encode(), "text/plain; charset=utf-8")
         if (self.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
             return self._send(403, b"This request came from another website and was refused.", "text/plain")
-        from orch.pageproof import forwarded, host_ok
+        from orch.pagesession import forwarded, host_ok
 
         if (
             self.session is None
@@ -898,14 +898,14 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("op") in ("area.accept", "area.remove"):
             return self._area_op(body["op"], args)
         try:
-            mint = None
-            if self.session is not None and self.session.can_mint(
-                self.headers, self.server.server_address[1]
-            ):
-                mint = self.session.mint
-            code, text, extra = actions.run_op(self.root, self.orch_bin, body.get("op"), args, mint=mint)
+            session = bool(
+                self.session is not None and self.session.can_act(self.headers, self.server.server_address[1])
+            )
+            code, text, extra = actions.run_op(
+                self.root, self.orch_bin, body.get("op"), args, session=session
+            )
         except actions.NeedsPerson as e:
-            from orch.pageproof import REVOKED_MSG
+            from orch.pagesession import REVOKED_MSG
 
             msg = REVOKED_MSG if self.session is not None and self.session.revoked else str(e)
             return self._send(403, msg.encode(), "text/plain; charset=utf-8")
@@ -984,7 +984,7 @@ def make_server(root: Path, port: int = DEFAULT_PORT, orch_bin: str | None = Non
     if (
         orch_bin == actions.SELF
     ):  # after the bind: a busy port must not spend the resume file (see the dashboard)
-        from orch.pageproof import PageSession
+        from orch.pagesession import PageSession
 
         try:
             handler.keywords["session"] = PageSession(root, "focus")

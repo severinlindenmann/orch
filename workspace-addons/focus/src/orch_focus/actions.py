@@ -33,11 +33,11 @@ class Unavailable(Exception):
 
 
 class NeedsPerson(Exception):
-    """A human-only click without a proof session (HTTP 403): the page is watch-only here."""
+    """A human-only click without a page session (HTTP 403): the page is watch-only here."""
 
 
 try:
-    from orch.pageproof import SELF, argv0, child_env, run_with_proof
+    from orch.pagesession import SELF, argv0, child_env
 except ImportError:  # no orch: nothing runs
     SELF = "orch:self"
 
@@ -47,30 +47,12 @@ except ImportError:  # no orch: nothing runs
     def child_env(env, orch_bin):
         return {**env, "ORCH_BIN": orch_bin}
 
-    run_with_proof = None
-
-# page op -> (core op, target): the clicks that are a person's (H1, contracts/human-proof.md)
-PROOF_OPS = {
-    "answer": ("ticket.answer", lambda a: f"{a.get('ticket')}:{a.get('question')}:{_question_digest(a)}"),
-    "ticket.done": ("ticket.verdict", lambda a: a.get("ticket")),
-    "run.send": ("run.human_input", lambda a: a.get("ticket")),
-    "check.wont_do": ("check.wont_do", lambda a: f"{a.get('ticket')}:{a.get('check')}"),
-    "check.reopen": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:reopen"),
-    "check.edit": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:edit"),
-    "check.remove": ("check.wont_do_undo", lambda a: f"{a.get('ticket')}:{a.get('check')}:remove"),
-}
-
-
-def proof_for(op, args):
-    hit = PROOF_OPS.get(op)
-    return (hit[0], hit[1](args)) if hit else None
-
 
 # What any scripted request may do without a page session: add or move a task (an agent does the same through
 # the CLI as itself), and, KNOWN GAP (follow-up), start/stop a run and the phone switch: an embedded Focus page
 # (under the dashboard, no session of its own) keeps its started-run bookkeeping in Focus, so these three stay
 # open until that has a session path. Every other op acts as the person and needs the page session (watch-only
-# without one); an op in PROOF_OPS also needs the person's proof.
+# without one).
 FREE_OPS = frozenset({"check.add", "check.move", "run.start", "run.stop", "mobile.set"})
 
 
@@ -350,21 +332,14 @@ def human_env(root: Path, orch_bin: str) -> dict:
     return child_env({**_without_agent(os.environ), "ORCH_ROOT": str(root), "ORCH_VIA": "focus"}, orch_bin)
 
 
-def orch(
-    root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60, proof: str | None = None
-) -> tuple[int, str, str]:
+def orch(root: Path, orch_bin: str | None, argv: list[str], timeout: int = 60) -> tuple[int, str, str]:
     if not orch_bin:
         raise Unavailable("The orch command is not available here.")
     try:
-        if proof:
-            r = run_with_proof(
-                argv, proof, orch_bin=orch_bin, cwd=root, env=human_env(root, orch_bin), timeout=timeout
-            )
-        else:
-            r = _run(
-                [*argv0(orch_bin), *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
-                stdin=subprocess.DEVNULL, env=human_env(root, orch_bin),
-            )  # fmt: skip
+        r = _run(
+            [*argv0(orch_bin), *argv], check=False, cwd=root, capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL, env=human_env(root, orch_bin),
+        )  # fmt: skip
     except subprocess.TimeoutExpired:
         return 124, "", "That took too long. Please try again."
     except OSError:
@@ -392,14 +367,13 @@ def _attach_all(root: Path, orch_bin: str | None, tid: str, files: list[tuple[st
     return {"saved": saved, "failed": failed}
 
 
-def run_op(root: Path, orch_bin: str | None, op, args, mint=None) -> tuple[int, str, dict | None]:
+def run_op(root: Path, orch_bin: str | None, op, args, session: bool = False) -> tuple[int, str, dict | None]:
     """Run one op. Returns (http status, plain text, parsed json or None)."""
     argv = build_argv(op, args)
-    need = proof_for(op, args) if orch_bin == SELF else None  # a test fake (explicit ORCH_BIN) needs none
-    if (need or (orch_bin == SELF and needs_session(op))) and mint is None:
+    if orch_bin == SELF and needs_session(op) and not session:
         raise NeedsPerson("Open Focus from this computer (orch focus open) to do this.")
     files = attachments(op, args)  # checked before anything is written
-    code, stdout, stderr = orch(root, orch_bin, argv, proof=mint(*need) if need else None)
+    code, stdout, stderr = orch(root, orch_bin, argv)
     if code == 124:
         return 504, stderr, None
     out = None

@@ -126,16 +126,16 @@ def test_typing_without_a_live_session_is_refused(helper, tmp_path):
 
 
 class Person:
-    """The person's dashboard session (cookie + page secret): the real check is PageSession.can_mint."""
+    """The person's dashboard session (cookie + page secret): the real check is PageSession.can_act."""
 
     def __init__(self, ok):
         self.ok = ok
 
-    def can_mint(self, headers, port):
+    def can_act(self, headers, port):
         return self.ok and headers.get("X-Orch-Page") == "secret"
 
     def authed(self, headers, port):
-        return self.can_mint(headers, port)
+        return self.can_act(headers, port)
 
 
 def typing_on(tmp_path, on=True):

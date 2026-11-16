@@ -149,8 +149,6 @@ def test_build_argv_unknown_and_types():
         with pytest.raises(actions.BadRequest):
             actions.build_argv("answer", {"ticket": "t_abc123", "question": "q1", "answer": "a", "digest": d})
     with pytest.raises(actions.BadRequest):
-        actions.proof_for("answer", {"ticket": "t_abc123", "question": "q1", "answer": "a"})
-    with pytest.raises(actions.BadRequest):
         actions.build_argv("run.stop", [])
 
 

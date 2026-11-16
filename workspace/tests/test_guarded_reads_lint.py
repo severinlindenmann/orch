@@ -11,7 +11,8 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "orch"
 MODULES = (
     "humanproof.py",
     "keystore.py",
-    "pageproof.py",
+    "pagelaunch.py",
+    "pagesession.py",
     "winacl.py",
 )  # absent ones are checked once they exist
 FORBIDDEN_ATTRS = {"read_text", "read_bytes", "open"}
