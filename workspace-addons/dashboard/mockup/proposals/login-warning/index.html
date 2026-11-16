@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>Login warning · orch (chosen)</title>
+<link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/tokens.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/components.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/motion.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/widgets.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/gallery.css"><link rel="stylesheet" href="../../../../../workspace/src/orch_ui/static/interaction.css">
+</head>
+<body><main class="page wide" aria-label="Login warning, chosen by the owner">
+<div class="page-heading"><div><h1>When something a helper needs stops working</h1><p>Owner chose this look and its words on 16 Nov 2026 (ORCH-43; words in the word list) · logins, connections and keys. "Main helper" stands for the tool's own name (from the helper list). Built only from parts the design system already has. Nothing here is in the product yet.</p></div></div>
+
+<section class="card"><header class="card-h"><h2>On the computer</h2></header>
+<div class="card-row"><div class="grow"><h3>1 · Runs out in three days</h3><p class="meta">One calm row in "Needs you": the end date, the tickets it stops, one Renew button.</p></div><a class="btn outline sm" href="../../home/home.html?login=soon">Open</a></div>
+<div class="card-row"><div class="grow"><h3>2 · Something stopped working</h3><p class="meta">One warning on top of Home: what stopped, which tickets stand still, one next action.</p></div><a class="btn outline sm" href="../../home/home.html?login=stopped">Open</a></div>
+<div class="card-row"><div class="grow"><h3>2b · Several at once</h3><p class="meta">Still one warning, with a count. Its button opens the list (step 4).</p></div><a class="btn outline sm" href="../../home/home.html?login=several">Open</a></div>
+<div class="card-row"><div class="grow"><h3>3a · Renew a tool login, step 1</h3><p class="meta">orch starts the tool's own sign-in and shows the link to open.</p></div><a class="btn outline sm" href="../../home/home.html?renew=main">Open</a></div>
+<div class="card-row"><div class="grow"><h3>3b · Step 2, paste the code</h3><p class="meta">Only if the sign-in page shows a code. Nothing is kept.</p></div><a class="btn outline sm" href="../../home/home.html?renew=main&amp;step=main-2">Open</a></div>
+<div class="card-row"><div class="grow"><h3>3c · Done</h3></div><a class="btn outline sm" href="../../home/home.html?renew=main&amp;step=main-done">Open</a></div>
+<div class="card-row"><div class="grow"><h3>3d · A tool orch cannot sign in for you (Databricks)</h3><p class="meta">One sentence on what the person does, then Check again.</p></div><a class="btn outline sm" href="../../home/home.html?renew=databricks">Open</a></div>
+<div class="card-row"><div class="grow"><h3>3e · A key</h3><p class="meta">Hands over to the key entry. No key entry exists in the mockup yet, so the second window is a placeholder to be replaced by the real one.</p></div><a class="btn outline sm" href="../../home/home.html?renew=key">Open</a><a class="btn outline sm" href="../../home/home.html?renew=key&amp;step=key-entry">Key entry</a></div>
+<div class="card-row"><div class="grow"><h3>4 · The list of everything</h3><p class="meta">A new card "What helpers need" at the top of Settings, Helper tab, because that tab already holds the helper's setup.</p></div><a class="btn outline sm" href="../../settings/settings-helper.html#needs">Open</a></div>
+</section>
+
+<section class="card"><header class="card-h"><h2>On the phone</h2></header><div class="pad">
+<div class="device-row">
+ <div class="device-cap"><h3>5a · The notification</h3><p>Sent three days before. The phone only tells you; you renew on the computer. The phone is already connected, no pairing is drawn.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><h2>Notifications</h2></div><div class="app-body">
+   <div class="banner attn"><div class="grow"><strong>Main helper login ends Monday</strong><p>Helpers then stop on 3 tickets. Renew it on your computer.</p></div></div>
+  </div></div>
+ </div>
+ <div class="device-cap"><h3>5b · Row in the workspace view</h3><p>A row on top of the Demo workspace until it is renewed.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><h2>Demo</h2></div><div class="app-body">
+   <a class="phone-review" href="#"><span class="tx"><strong>Main helper login ends Monday 22:24</strong><span>Helpers then stop on 3 tickets · renew it on your computer</span></span></a>
+   <a class="phone-row" href="#"><span class="av">D</span><span class="tx"><strong>Demo</strong><span>Helper: Survey summary is ready to check</span></span></a>
+  </div></div>
+ </div>
+ <div class="device-cap"><h3>5c · After something stopped (several)</h3><p>One row with a count, never a stack.</p>
+  <div class="device-phone"><div class="notch"><span>9:41</span><span>●●●</span></div><div class="app-bar"><h2>Demo</h2></div><div class="app-body">
+   <a class="phone-review" href="#"><span class="tx"><strong>3 things stopped working</strong><span>Helpers stopped on 4 tickets · fix them on your computer</span></span></a>
+   <a class="phone-row" href="#"><span class="av">D</span><span class="tx"><strong>Demo</strong><span>Helper: Survey summary is ready to check</span></span></a>
+  </div></div>
+ </div>
+</div></div></section>
+
+<section class="card"><header class="card-h"><h2>What I chose, and you can change</h2></header>
+<div class="card-row"><div class="grow"><h3>New words: see new-words.md</h3><p class="meta">Everything else is existing words: login, key, connection, Renew, helper, ticket.</p></div></div>
+<div class="card-row"><div class="grow"><h3>Early warning only where the tool gives an end date</h3><p class="meta">The main helper tells it, three days ahead. GitHub, Databricks and connections only work or do not, so they warn once they stopped.</p></div></div>
+<div class="card-row"><div class="grow"><h3>The phone warns, the computer renews</h3><p class="meta">Renewing from the phone is not part of this ticket.</p></div></div>
+<div class="card-row"><div class="grow"><h3>Never a secret on screen</h3><p class="meta">A key is replaced in the key entry and never shown. A pasted sign-in code goes straight to the tool.</p></div></div>
+</section>
+</main></body></html>
