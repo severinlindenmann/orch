@@ -54,11 +54,6 @@ class Verdict:
         return f"GREEN: {self.why}" if self.green else f"NOT green: {self.why}"
 
 
-def default_required(repo: str) -> list[str]:
-    """Required checks a recorded case without a `required` list had (the orch repositories' develop gate)."""
-    return ["gate"] if repo.endswith("/orch") or repo.endswith("orch-core") else []
-
-
 class Replay:
     """Plays a recorded case: {"repo", "isDraft", "required", "polls": [<checks list> | {"checks", "runs"}]}.
     Each poll counts as POLL_SECS; the last poll repeats. No GitHub, no waiting."""
@@ -76,7 +71,7 @@ class Replay:
 
     def required(self) -> list[str]:
         req = self.data.get("required")
-        return list(req) if isinstance(req, list) else default_required(self.repo)
+        return list(req) if isinstance(req, list) else []  # a recorded case lists its base branch's
 
     def look(self) -> tuple[list, str]:
         p = self.polls[min(self.n, len(self.polls) - 1)]

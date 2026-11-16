@@ -25,13 +25,13 @@ def _case(name: str) -> dict:
 # (recorded case, green?, text the verdict line must hold) - the pr-green-test.sh table, case for case
 REPLAYS = [
     ("pr978-first-run", False, "banned-words FAILURE"),
-    ("pr978-second-run", True, "all required checks SUCCESS (gate)"),
+    ("pr978-second-run", True, "all required checks SUCCESS"),
     ("late-second-workflow-fails", False, "banned-words FAILURE"),
-    ("late-second-workflow-passes", True, "all required checks SUCCESS (gate)"),
+    ("late-second-workflow-passes", True, "all required checks SUCCESS"),
     ("second-workflow-stuck", False, "unfinished workflow runs: rules"),
     ("draft", False, "draft"),
     ("no-checks", False, "no checks after"),
-    ("gate-missing", False, "still waiting"),
+    ("required-check-missing", False, "still waiting"),
     ("other-repo-skipped", False, "b SKIPPED"),
     ("other-repo-green", True, "all 1 checks SUCCESS"),
 ]
@@ -52,7 +52,7 @@ def test_every_recorded_case_is_tested():
 def test_a_late_second_workflow_is_waited_for():
     src = prwait.Replay(_case("late-second-workflow-fails"))
     prwait.wait(src)
-    assert src.n == 2  # gate was green on the first look, but the queued rules run was waited for
+    assert src.n == 2  # required check green at first, the queued rules run still waited for
 
 
 def test_a_case_without_polls_is_refused():
@@ -66,27 +66,27 @@ def _one(state, required=None, repo="acme/app"):
         "isDraft": False,
         "required": required,
         "polls": [[{"name": "build", "state": "SUCCESS", "bucket": "pass"},
-                   {"name": "gate", "state": "SUCCESS", "bucket": "pass"},
+                   {"name": "required", "state": "SUCCESS", "bucket": "pass"},
                    {"name": "lint", "state": state, "bucket": "fail" if state != "SKIPPED" else "skipping"}]],
     }  # fmt: skip
 
 
 @pytest.mark.parametrize("state", ["FAILURE", "CANCELLED", "TIMED_OUT", "NEUTRAL", "ACTION_REQUIRED"])
-@pytest.mark.parametrize("required", [None, ["gate"]])
+@pytest.mark.parametrize("required", [None, ["required"]])
 def test_no_unfinished_or_failed_state_is_ever_green(state, required):
     v = prwait.wait(prwait.Replay(_one(state, required)))
     assert not v.green and f"lint {state}" in v.why
 
 
 def test_skipped_is_green_only_with_required_checks_all_success():
-    assert prwait.wait(prwait.Replay(_one("SKIPPED", ["gate"]))).green
+    assert prwait.wait(prwait.Replay(_one("SKIPPED", ["required"]))).green
     assert not prwait.wait(prwait.Replay(_one("SKIPPED", None))).green
-    v = prwait.wait(prwait.Replay(_one("SKIPPED", ["gate", "deploy"])))
+    v = prwait.wait(prwait.Replay(_one("SKIPPED", ["required", "deploy"])))
     assert not v.green and "deploy" in v.why  # a required check never reported: waited for, then not green
 
 
 def test_unexpanded_draft_matrix_leftovers_are_ignored():
-    case = _one("SKIPPED", ["gate"])
+    case = _one("SKIPPED", ["required"])
     case["polls"][0].append({"name": "test (${{ matrix.os }})", "state": "SKIPPED", "bucket": "skipping"})
     v = prwait.wait(prwait.Replay(case))
     assert v.green and all("${{" not in n for n, _ in v.checks)

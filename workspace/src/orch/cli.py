@@ -1326,7 +1326,7 @@ def _ref_wait(args, root: Path, who: str) -> None:
     """Wait for the ticket's pull requests' checks one after the other, without an AI call (prwait). Each
     verdict goes on the ticket (a history line and the reference's state); with --merge each one is merged on
     green before the next is waited for. Stops at the first that is not green (or not merged). Exit 1 then."""
-    from orch import prwait, review, stuck
+    from orch import prwait, stuck
 
     t = tickets.load(root, args.id)
     key = t.get("key") or t["id"]
