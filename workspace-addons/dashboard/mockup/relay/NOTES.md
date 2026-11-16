@@ -54,3 +54,10 @@ Round 2 — working shared components.
 - Kept the shared shell, real demo content and Preview states; dialogs now close with a visible button, Escape or a backdrop click and return focus.
 
 Round 2 validation: the shared browser sweep passed all 171 loaded/loading/empty page checks and 144 dialog/viewer checks. Targeted phone, question, keyboard, calendar, full-screen and toolbar checks also passed. See `../system/COMPONENT-QA.md` for the complete inventory and results.
+
+
+## Fix wave 15 Nov (b3)
+
+- Recent messages lists what people wrote; automatic status notes sit behind one quiet "Show updates (n)" row.
+- A bare "Tasks:" is never shown: an empty task list reads "No tasks yet".
+- Chat: contact and helper avatars are an initial in a circle (no stray glyph); a sent message reads "Delivered".

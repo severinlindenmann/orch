@@ -139,7 +139,7 @@ def test_check_approve_makes_ticket_done(tk):
     assert item["id"] == f"core:review:{tid}"
     e = review.decide(root, tid, "review", "ok", by=ME, via="dashboard", digest=item["digest"])
     t = tickets.load(root, tid)
-    assert t["status"] == "done" and t["verdicts"]
+    assert t["status"] == "done" and "verdicts" not in t
     assert (
         e["card"]["kind"] == "check" and e["decision"]["action"] == "approve" and e["answer"] == "Looks good"
     )

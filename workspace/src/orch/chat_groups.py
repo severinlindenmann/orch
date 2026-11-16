@@ -1844,7 +1844,6 @@ def ask(root: Path, tid: str, ws: str, qid: str, by: str = "agent:relay") -> dic
         "group": gid,
         "question_digest": tickets.question_digest(q),  # the question as it was sent
     }
-    relay.sign_asked(root, mid, asked[mid])
     net.write_json(relay._asked_path(root), asked, True)
     _history(root, tid, by, f"Asked {ws} (group): {q['text']}"[:2000])
     return msg
@@ -3070,7 +3069,6 @@ def waiting_approval(root: Path, delegate_msg: dict, allow_tid: str, qid: str) -
                 "to": "phones",
                 "question_digest": tickets.question_digest(q),  # the question as it was sent
             }
-            relay.sign_asked(root, qm["id"], asked[qm["id"]])
             net.write_json(relay._asked_path(root), asked, True)
         _report(
             root,

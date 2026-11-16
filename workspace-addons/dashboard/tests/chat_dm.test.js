@@ -26,7 +26,7 @@ test('DM renders safe text, delivery states, read-only permissions and workspace
   vm.runInContext(`chatDm.threads.set('${WS}', {messages:[{id:'1',by:'you',text:'<script>hello</script>',state:'sending'},
     {id:'2',by:'you',text:'ok',state:'delivered'}, {id:'3',by:'you',text:'failed',state:'failed'}, {id:'4',by:'${WS}',text:'reply'}]});`, c);
   let view = JSON.stringify(c.chatDmThread());
-  assert.match(view, /Sending…/); assert.match(view, /Delivered — their helper answers when it runs/); assert.match(view, /Not sent · /);
+  assert.match(view, /Sending…/); assert.match(view, /Delivered/); assert.doesNotMatch(view, /helper answers/); assert.match(view, /Not sent · /);
   assert.match(view, /<script>hello<\/script>/); assert.match(view, /Try again/);
   assert.match(JSON.stringify(c.chatList()), /Other workspaces/);
   vm.runInContext('chatDm.contacts[0].can.chat = false', c);
@@ -169,7 +169,7 @@ test('workspace chat header: the name once, then one description line with tags;
   assert.doesNotMatch(view, /You \(.*\) · Shop/);
   assert.match(view, /Online orders and opening hours\./);
   assert.match(view, /orders/); assert.match(view, /website/);
-  assert.match(view, /Delivered — their helper answers when it runs/);
+  assert.match(view, /Delivered/); assert.doesNotMatch(view, /helper answers/);
 });
 test('workspace chat header without a description shows no empty line', () => {
   const c = context();
@@ -231,4 +231,18 @@ test('chat list: Other workspaces above Groups (placeholder while loading), newe
   assert.ok(view.indexOf('Pilatus') < view.indexOf('"Groups"'), 'the workspace chat is above the groups');
   vm.runInContext("chatDm.loaded = false; chatDm.contacts = []; chatDm.error = true", c);
   assert.match(text(), /Could not load · Try again/);
+});
+
+test('a raw workspace id as who answered reads as the contact name, never the id', () => {
+  const c = context();
+  assert.equal(c.chatDmName('agent:' + WS), 'Home');
+  assert.equal(c.chatDmName('agent:ws_zzzzzzzzzz'), 'Another workspace');
+  assert.equal(c.chatDmName('agent:codex'), '');
+});
+
+test('the helper rows show an initial in a circle, no stray glyph', () => {
+  const c = context();
+  const row = JSON.stringify(c.chatListRow(null));
+  assert.doesNotMatch(row, /✧|chat-helper-mark/);
+  assert.match(row, /avatar chat-avatar/);
 });
