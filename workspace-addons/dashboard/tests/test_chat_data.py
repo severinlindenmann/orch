@@ -132,6 +132,7 @@ def test_workspace_dm_reads_and_endpoints(ws, orch, monkeypatch):
 
     contact = {"ws": "ws_abcdefghij", "name": "Home", "can": {"chat": True, "tasks": False, "files": True}}
     calls = []
+    data._CHAT.clear()
 
     def command(binary, argv, root):
         calls.append(argv)
@@ -235,3 +236,32 @@ def test_general_history_hides_legacy_automation_prompt(ws):
     assert data["history"] == history[1:]
     assert "orch relay send" not in json.dumps(data)
     assert "waiting for you. Answer it" not in json.dumps(data)
+
+
+def test_chat_polls_start_no_orch_process_until_something_arrives(ws, orch, monkeypatch):
+    """The open Chat page polls every 2 s: N polls on an unchanged workspace start no `orch` process after the first."""
+    from orch_dashboard import data
+
+    contact = {"ws": "ws_abcdefghij", "name": "Home", "can": {"chat": True}}
+    calls = []
+
+    def command(binary, argv, root):
+        calls.append(argv)
+        return [contact] if argv[1] in ("contacts", "sync") else {**contact, "messages": []}
+
+    data._CHAT.clear()
+    monkeypatch.setattr(data, "run_orch", command)
+    for _ in range(20):
+        data.load_chat_contacts(ws, orch)
+        data.load_chat_thread(ws, orch, contact["ws"])
+    assert len(calls) == 2
+    # a message that lands in the inbox is read at the very next poll
+    inbox = ws / ".orch" / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+    (inbox / "m_new0000000000001.json").write_text("{}")
+    data.load_chat_contacts(ws, orch)
+    data.load_chat_thread(ws, orch, contact["ws"])
+    assert len(calls) == 4
+    for _ in range(10):
+        data.load_chat_contacts(ws, orch)
+    assert len(calls) == 4

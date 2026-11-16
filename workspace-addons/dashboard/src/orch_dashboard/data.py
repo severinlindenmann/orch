@@ -1221,18 +1221,62 @@ def load_links(root: Path, orch_bin: str | None) -> dict:
 
 
 # Workspace DM reads use the same CLI boundary as Chat History.
+# The open Chat page asks every 2 s. A poll must not start an `orch` process each time (B1): the answer is kept while
+# nothing a message arrives in has changed (the inbox, the stored threads) and for CHAT_TTL seconds at most.
+CHAT_TTL = 30.0
+_CHAT: dict[tuple, tuple[float, tuple, object]] = {}
+_CHAT_LOCK = threading.Lock()
+
+
+def _chat_signature(root: Path) -> tuple:
+    rows = []
+    for folder in (root / ".orch" / "inbox", root / ".orch" / "chat" / "dm"):
+        try:
+            with os.scandir(folder) as it:
+                for e in it:
+                    if e.name.endswith(".json"):
+                        st = e.stat(follow_symlinks=False)
+                        rows.append((e.path, st.st_mtime_ns, st.st_size))
+        except OSError:
+            pass
+    return tuple(sorted(rows))
+
+
+def _chat_cached(key: tuple, root: Path, build):
+    sig = _chat_signature(root)
+    with _CHAT_LOCK:
+        hit = _CHAT.get(key)
+    if hit and hit[1] == sig and time.monotonic() - hit[0] < CHAT_TTL:
+        return hit[2]
+    data = build()
+    # the signature is taken before the read, so a message that lands meanwhile is picked up by the next poll
+    if data is not None:
+        with _CHAT_LOCK:
+            _CHAT[key] = (time.monotonic(), sig, data)
+            while len(_CHAT) > 64:
+                _CHAT.pop(next(iter(_CHAT)))
+    return data
+
+
 def load_chat_contacts(root: Path, orch_bin: str | None) -> list | None:
-    # `chat sync` imports new workspace texts first and prints the contacts; if that cannot run (busy lock), read as is.
-    data = run_orch(orch_bin, ["chat", "sync", "--json"], root)
-    if not isinstance(data, list):
-        data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
-    return data if isinstance(data, list) else None
+    def build():
+        # `chat sync` imports new workspace texts first and prints the contacts; if that cannot run (busy lock), read as is.
+        data = run_orch(orch_bin, ["chat", "sync", "--json"], root)
+        if not isinstance(data, list):
+            data = run_orch(orch_bin, ["chat", "contacts", "--json"], root)
+        return data if isinstance(data, list) else None
+
+    return _chat_cached(("contacts", orch_bin, str(root)), root, build)
 
 
 def load_chat_thread(root: Path, orch_bin: str | None, ws: str) -> dict | None:
     if not re.fullmatch(r"ws_[a-z0-9]{10}", ws):
         return None
-    data = run_orch(orch_bin, ["chat", "thread", ws, "--sync", "--json"], root)
-    if not isinstance(data, dict):
-        data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
-    return data if isinstance(data, dict) else None
+
+    def build():
+        data = run_orch(orch_bin, ["chat", "thread", ws, "--sync", "--json"], root)
+        if not isinstance(data, dict):
+            data = run_orch(orch_bin, ["chat", "thread", ws, "--json"], root)
+        return data if isinstance(data, dict) else None
+
+    return _chat_cached(("thread", orch_bin, str(root), ws), root, build)
