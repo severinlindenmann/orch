@@ -587,35 +587,42 @@ def test_an_agent_cannot_reopen_a_closed_ticket_a_person_can(proj, new_ticket, m
     assert tickets.check_add(proj, tid, "more work", "agent:claude")[1]["id"] == "c1"  # open again: allowed
 
 
-def test_a_done_repeat_still_takes_the_automation_hosts_own_writes(proj, new_ticket, monkeypatch):
-    """A repeat survives Done (#194): the automation host records its last run, writes its history line and
-    opens the ticket again for the next run. Only the host itself, only on a done ticket that repeats: a
-    helper, the host from inside a helper run, a dropped ticket or a ticket without a repeat stay refused."""
+def test_an_active_addon_keeps_up_a_done_ticket_with_its_own_data(proj, new_ticket, monkeypatch):
+    """A repeat survives Done (#194): the add-on that owns a ticket's ext block (agent:<add-on>) still records
+    its last run, writes its history line and opens the ticket again for the next run. A helper, the add-on
+    from inside a helper run, an add-on that is off, a dropped ticket or a ticket without its data: no."""
+    from orch import addons
+
+    monkeypatch.setattr(addons, "active", lambda root: {"rep": {}})
     msg = "This ticket is closed, so the agent can't change it."
     rep = new_ticket()
-    tickets.ext_set(proj, rep, "automation", '{"recurring": true, "cron": "*/15 * * * *"}', "human:t")
+    tickets.ext_set(proj, rep, "rep", '{"every": "15 min"}', "human:t")
     tickets.set_status(proj, rep, "done", "human:t")
-    tickets.ext_set(proj, rep, "automation", '{"last_run": "2026-11-16T19:30:00Z"}', "agent:automation")
-    tickets.log(proj, rep, "Opened again for the next run of this repeat.", "agent:automation")
-    auto = tickets.load(proj, rep)["ext"]["automation"]
-    assert auto == {"recurring": True, "cron": "*/15 * * * *", "last_run": "2026-11-16T19:30:00Z"}
-    with pytest.raises(Refused, match=msg):  # a helper still cannot touch it
-        tickets.ext_set(proj, rep, "automation", '{"last_run": "x"}', "agent:claude")
-    monkeypatch.setenv("ORCH_AGENT", "claude")  # a helper run cannot pass for the host
+    tickets.ext_set(proj, rep, "rep", '{"last_run": "2026-11-16T19:30:00Z"}', "agent:rep")
+    tickets.log(proj, rep, "Opened again for the next run of this repeat.", "agent:rep")
+    assert tickets.load(proj, rep)["ext"]["rep"] == {"every": "15 min", "last_run": "2026-11-16T19:30:00Z"}
+    for actor in ("agent:claude", "agent:other"):  # a helper or another add-on still cannot touch it
+        with pytest.raises(Refused, match=msg):
+            tickets.ext_set(proj, rep, "rep", '{"last_run": "x"}', actor)
+    monkeypatch.setenv("ORCH_AGENT", "claude")  # a helper run cannot pass for the add-on
     with pytest.raises(Refused, match=msg):
-        tickets.set_status(proj, rep, "open", "agent:automation")
+        tickets.set_status(proj, rep, "open", "agent:rep")
     monkeypatch.delenv("ORCH_AGENT")
-    assert tickets.set_status(proj, rep, "open", "agent:automation")["status"] == "open"
+    monkeypatch.setattr(addons, "active", lambda root: {})  # the add-on is off here
+    with pytest.raises(Refused, match=msg):
+        tickets.set_status(proj, rep, "open", "agent:rep")
+    monkeypatch.setattr(addons, "active", lambda root: {"rep": {}})
+    assert tickets.set_status(proj, rep, "open", "agent:rep")["status"] == "open"
 
-    plain = new_ticket()  # no repeat: closed stays closed for the host too
+    plain = new_ticket()  # none of its data: closed stays closed for the add-on too
     tickets.set_status(proj, plain, "done", "human:t")
     with pytest.raises(Refused, match=msg):
-        tickets.set_status(proj, plain, "open", "agent:automation")
-    off = new_ticket()  # a repeat whose ticket was dropped is not planned any more
-    tickets.ext_set(proj, off, "automation", '{"recurring": true, "cron": "*/15 * * * *"}', "human:t")
+        tickets.set_status(proj, plain, "open", "agent:rep")
+    off = new_ticket()  # a dropped ticket is not planned any more
+    tickets.ext_set(proj, off, "rep", '{"every": "15 min"}', "human:t")
     tickets.set_status(proj, off, "dropped", "human:t")
     with pytest.raises(Refused, match=msg):
-        tickets.set_status(proj, off, "open", "agent:automation")
+        tickets.set_status(proj, off, "open", "agent:rep")
 
 
 def test_closed_without_a_live_run_or_from_inside_its_own_run_stops_nothing(

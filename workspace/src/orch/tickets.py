@@ -480,21 +480,19 @@ def _agent_actor(by: str) -> bool:
     return by.startswith("agent:") or (by.startswith("human:") and bool(agent_tool()))
 
 
-REPEAT_HOST = "agent:automation"  # the automation host (orch_automation.orchcli.BY)
+def _addon_keeps_its_ticket(root: Path, ticket: dict, by: str) -> bool:
+    """An add-on's work can go on after its ticket is Done (a repeat survives Done, #194): an ACTIVE add-on,
+    writing as agent:<its name>, still keeps up a done ticket that carries its own ext block (its record, a
+    history line, opening it again for the next run). Never from inside an agent run (a run sets ORCH_AGENT),
+    never on a dropped ticket, never on a ticket the add-on has no data on."""
+    name = by.removeprefix("agent:")
+    if by == name or ticket.get("status") != "done" or agent_tool():
+        return False
+    if not isinstance((ticket.get("ext") or {}).get(name), dict):
+        return False
+    from orch import addons  # addons is a leaf here; imported late like the other helpers
 
-
-def _repeat_host_write(ticket: dict, by: str) -> bool:
-    """A repeat survives Done (#194): on a done ticket that repeats, the automation host still records its
-    last run, writes its history line and opens the ticket again for the next run. Only the host itself, never
-    from inside an agent run (a run sets ORCH_AGENT), and never on a dropped ticket."""
-    auto = (ticket.get("ext") or {}).get("automation")
-    return (
-        by == REPEAT_HOST
-        and ticket.get("status") == "done"
-        and isinstance(auto, dict)
-        and auto.get("recurring") is True
-        and not agent_tool()
-    )
+    return name in addons.active(root)
 
 
 def _refuse_closed_agent(root: Path, tid: str, by: str) -> None:
@@ -562,7 +560,7 @@ def _apply_op(root: Path, tid: str, fn, expect, if_revision, by: str, info: dict
         ticket = _load_raw(root, tid)
         eff_status = ticket.get("status")
         info.update(status=eff_status, revision=revision(ticket))
-        if eff_status in CLOSED and _agent_actor(by) and not _repeat_host_write(ticket, by):
+        if eff_status in CLOSED and _agent_actor(by) and not _addon_keeps_its_ticket(root, ticket, by):
             raise ClosedRefused(CLOSED_AGENT)
         if if_revision is not None and revision(ticket) != if_revision:
             raise _conflict(root, ticket, f"Ticket {tid}", {k: ticket.get(k) for k in PATCH_FIELDS})
