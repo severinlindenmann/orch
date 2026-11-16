@@ -18,7 +18,7 @@ Workspace tokens work only on `/v1/` workspace routes, phone tokens only on `/v1
 
 | Type | Allowed when |
 |---|---|
-| text with `body.ticket_view` | as text (a `ticket_view.light: true` update is a quiet status update of a ticket the phone already lists: only title, status, started, running, summary, agent, updated_at; the phone overlays them on its last full snapshot; the relay treats it like any other), and: `body.update` is set (schema), `body.ticket_view` is at most 16384 bytes as compact UTF-8 JSON (else `422 invalid`), and every attachment `blob_id` was uploaded by the sender with that `size` (another sender's or a missing blob → `404`, a wrong size → `422`). The relay never reads the snapshot otherwise; `ticket_view.results` (phone block snapshots, blocks.md Phone results) is checked only by the schema and the same 16 KB cap |
+| text with `body.ticket_view` | as text (a `ticket_view.light: true` update is a quiet status update of a ticket the phone already lists: only title, status, started, running, summary, agent, updated_at; the phone overlays them on its last full snapshot; the relay treats it like any other), and: `body.update` is set (schema), `body.ticket_view` is at most 16384 bytes as compact UTF-8 JSON (else `422 invalid`), and every attachment `blob_id` was uploaded by the sender with that `size` (another sender's or a missing blob → `404`, a wrong size → `422`). A full snapshot may carry `ticket_view.due` (the ticket's due: `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, local wall time, same pattern as ticket.schema.json; absent when none; a light update never has it), which the phone shows as "Due 18:30" / "Late since 18:30". The relay never reads the snapshot otherwise; `ticket_view.results` (phone block snapshots, blocks.md Phone results) is checked only by the schema and the same 16 KB cap |
 | text with `body.proposal_result` | as text, plus the rules in "Ticket proposal result" (a workspace result for a proposal answer; the relay checks `reply_to`, `to` and the shape) |
 | text with `body.review_result` | as text, plus the rules in "Review cards on the phone" (a workspace result for a phone verdict; the relay checks `reply_to`, `to`, `ticket` and the fixed text) |
 | text with `body.taken_back` | as text, plus the rules in "Question taken back" (a workspace tells the phones one of its questions was taken back; the relay checks `reply_to`, `to`, `ticket`, the fixed text and that no answer exists; never from a group, a phone or another workspace) |
@@ -279,7 +279,7 @@ stored it; until then it sits in the phone's Outbox and may be changed there (M4
 
 *Workspace rules* (vectors/review-card-v1.json `workspace`, review-question-v1.json `verdict_cases`). It acts on a verdict only
 as for every phone answer (human-proof.md "Phone actions"): fetched itself, `from` a phone of its `phones` list, not
-group-routed (`body.group`), `reply_to` a question it sent (its MAC'd asked record), never from a subscriber or a workspace;
+group-routed (`body.group`), `reply_to` a question it sent (its asked record), never from a subscriber or a workspace;
 otherwise nothing at all (no result). Ticket, question and card come only from its own record and ticket, never from the answer.
 Then, in this order:
 1. Already answered on the workspace (the computer first), a review question no longer in Review or not the current round →
@@ -361,10 +361,10 @@ WHATWG-compatible URL parser: it shows the host of THAT parse, and opens the par
 string) in the system browser; a string that does not parse, or parses to another scheme, is not offered. Card text is plain text, never markup.
 
 **RULE A (old messages stay byte-identical).** A question without `digest`, `card` and `card_files`, an answer without
-`verdict`, and their asked records are exactly as before: same bytes, same MACs, same digests (`tickets.question_digest` adds
-`card`/`shown` only when present). The workspace's signed asked record (`relay._asked_signed_fields`) gets `review_digest` (the
-`check_digest` a review question was sent with) appended as a 12th element **only when the record has it**; records without it
-sign the same 11 elements as today. A card question needs no new field: its `question_digest` already binds the card.
+`verdict`, and their asked records are exactly as before: same bytes, same digests (`tickets.question_digest` adds
+`card`/`shown` only when present). The workspace's asked record keeps `review_digest` (the `check_digest` a review question
+was sent with) **only when the record has it**. A card question needs no new field: its `question_digest` already binds the
+card. Asked records carry no MAC; an old record that still has a `question_mac` field loads and the field is ignored.
 
 Push for a new question (APNs): `{"aps": {"alert": {"title": "<workspace name>", "body": "<question text, max 120 chars>"}, "sound": "default"}, "message_id": "m_…", "workspace": "ws_…"}`. Tapping opens that question.
 Push for a new text to a phone (`ph_…` or `phones`): same `aps`, plus `"type": "text", "text_id": "m_…", "workspace": "ws_…"` (no `message_id`); tapping opens the messages with that workspace.

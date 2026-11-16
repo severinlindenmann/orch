@@ -173,7 +173,6 @@ def test_every_person_field_goes_through_the_one_rule(synced):
                 "via": "cli",
             }
         )
-        t["verdicts"] = [{"kind": "person", "nonce": "0" * 16, "mac": "x" * 43, "person": "human:alice"}]
         t["refs"].append({"kind": "url", "url": "https://x.example", "at": PEER["at"], "by": "human:alice"})
         t["description_by"] = "human:alice"
 
@@ -182,7 +181,6 @@ def test_every_person_field_goes_through_the_one_rule(synced):
     c = t["checklist"][0]
     assert c["wont_by"] == c["by"] == history.SYNC_BY
     assert t["questions"][-1]["answered_by"] == history.SYNC_BY
-    assert t["verdicts"][0]["person"] == history.SYNC_BY
     assert t["refs"][-1]["by"] == history.SYNC_BY
     assert t["description_by"] == history.SYNC_BY
     out = json.dumps(history.shown_json(root, {"tickets": [_raw(root, tid)]}))
@@ -264,12 +262,14 @@ def test_the_fail_closed_path_demotes_plan_and_description(synced, monkeypatch):
     assert t["plan"]["by"] == t["description_by"] == history.SYNC_BY
 
 
-def test_a_verified_wont_do_proves_only_its_own_by(synced):
+def test_a_local_wont_do_keeps_its_person_and_a_relabelled_one_does_not(synced):
     root, tid = synced
     tickets.check_wont_do(root, tid, "c1", "human:tester", "not needed")
+    c = history.shown_ticket(root, _raw(root, tid))["checklist"][0]
+    assert c["wont_by"] == c["by"] == "human:tester"  # core made this step mark here
     _plant(root, tid, lambda t: t["checklist"][0].update(by="human:alice"))  # relabelled by a peer
     c = history.shown_ticket(root, _raw(root, tid))["checklist"][0]
-    assert c["wont_by"] == "human:tester" and c["by"] == history.SYNC_BY
+    assert c["wont_by"] == c["by"] == history.SYNC_BY
 
 
 @pytest.mark.parametrize(
@@ -442,34 +442,16 @@ def test_a_sync_free_answer_is_authority_as_before(proj):
     assert history.answer_proven(proj, raw, raw["questions"][0])
 
 
-def test_a_verified_decision_line_is_matched_once(synced):
-    """Opus hard4 #5: copies of a verified decision's line (other times) are not the person's decision."""
+def test_copies_of_a_local_decision_line_are_not_the_persons(synced):
+    """Copies of a line core wrote (other times) are not the person's: only the written one is."""
     root, tid = synced
     tickets.check_wont_do(root, tid, "c1", "human:tester", "not needed")
-    store = Path(root, *history.OWN_LINES, f"{tid}.json")
-    store.unlink()  # only the decision path (b) can prove it now
     line = next(h for h in _raw(root, tid)["history"] if h["text"] == "Marked c1 as won't do")
     copy = {**line, "at": "2030-01-01T00:00:00Z"}
-    _plant(root, tid, lambda t: t["history"].extend([copy, dict(line)]))
+    _plant(root, tid, lambda t: t["history"].append(copy))
     shown = history.lines(root, _raw(root, tid))
     persons = [h for h in shown if h["by"] == "human:tester" and h["text"] == line["text"]]
     assert len(persons) == 1
-    assert history.shown_ticket(root, _raw(root, tid))["checklist"][0]["wont_by"] == "human:tester"
-
-
-def test_checker_and_ledger_are_read_once_per_call(synced, monkeypatch):
-    root, tid = synced
-    for i in range(5):
-        tickets.create(root, f"t{i}", "human:tester")
-    raws = [_raw(root, p.stem) for p in sorted(tickets.tickets_dir(root).glob("t_*.json"))]
-    for t in raws:
-        t["history"].append(PEER)
-        t["verdicts"] = [{"kind": "person", "nonce": "0" * 16, "mac": "x" * 43, "line": "0" * 64}]
-    made = []
-    real = humanproof.VerdictChecker
-    monkeypatch.setattr(humanproof, "VerdictChecker", lambda *a, **k: made.append(1) or real(*a, **k))
-    history.shown_json(root, raws)
-    assert len(made) == 1
 
 
 def test_reserved_sync_label_is_not_an_actor(proj):

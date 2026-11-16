@@ -74,7 +74,7 @@ def dispatch(args, root: Path) -> bool:
                 "Only a person writes as themselves in Chat. Use: orch chat reply ... --ticket <chat>."
             )
         who = tickets.acting_by(args)
-        r = chat.say(root, args.text, who, new=args.new, proven=who.startswith("human:"))
+        r = chat.say(root, args.text, who, new=args.new)
         _out(
             args, r, "Sent." if r["sent"] else "Saved. It reaches your phone once the workspace is connected."
         )

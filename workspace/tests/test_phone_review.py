@@ -320,17 +320,19 @@ def _file_says(proj, tid, status):
     p.write_text(json.dumps(t, indent=2))
 
 
-def test_an_unsigned_done_in_the_file_asks_the_phones_once(proj, run, new_ticket, conn):
+def test_a_review_in_the_file_asks_the_phones_once(proj, run, new_ticket, conn):
     tid = new_ticket()
-    _file_says(proj, tid, "done")  # raw done, no verdict: reads as Review
-    assert tickets.load(proj, tid)["status"] == "review"
+    _file_says(proj, tid, "done")  # a raw done is Done (no verdict needed): nothing to ask
+    assert tickets.load(proj, tid)["status"] == "done"
+    assert phone_view.sync_reviews(proj) == [] and not review_questions(conn)
+    _file_says(proj, tid, "review")
     assert phone_view.sync_reviews(proj) == [tid]
     (q,) = review_questions(conn)
     assert q["body"]["question_id"] == "review-1" and q["body"]["options"] == ["accept", "changes"]
     assert phone_view.sync_reviews(proj) == [] and len(review_questions(conn)) == 1  # not duplicated
     _file_says(proj, tid, "ready")  # leaves review: round closes
     assert phone_view.sync_reviews(proj) == []
-    _file_says(proj, tid, "done")  # enters again: a new round
+    _file_says(proj, tid, "review")  # enters again: a new round
     assert phone_view.sync_reviews(proj) == [tid]
     assert review_questions(conn)[-1]["body"]["question_id"] == "review-2"
 

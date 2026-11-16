@@ -272,6 +272,14 @@ final class TicketTests: XCTestCase {
         _ = try await m.answer(questionMessageId: q.id, answer: "Once")   // the raw option is what is sent
         let left = try await m.questions(); XCTAssertEqual(left.count, 2)
     }
+
+    func testLightViewKeepsTheDue() throws {
+        let full = TicketSnapshot(title: "Fix login", status: "active", running: true, due: "2026-11-20T18:30")
+        let light = TicketSnapshot(status: "waiting", light: true)
+        let ticket = try XCTUnwrap(TicketBuilder.build(updates: [lightViewUpdate("1", view: full), lightViewUpdate("2", view: light)],
+                                                     questions: [], answers: [:]).first)
+        XCTAssertEqual(ticket.view?.due, "2026-11-20T18:30")
+    }
 }
 
 enum MockRelayTestsFixtures {
@@ -385,4 +393,50 @@ final class TicketModelTests: XCTestCase {
         let q = model.questions[0]
         XCTAssertEqual(QuestionCardRules.context(q), "Rename field X in ingestion job")
     }
+
+    // MARK: due (G1b): the same words as the dashboard and the CLI
+
+    private var utc: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "UTC")!; return c }
+    private var sunday12: Date { utc.date(from: DateComponents(year: 2026, month: 11, day: 15, hour: 12, minute: 0))! }
+    private func due(_ value: String?, _ status: String? = "active") -> String? {
+        TicketDue.words(value, status: status, now: sunday12, calendar: utc)
+    }
+
+    func testDueWithATime() {
+        XCTAssertEqual(due("2026-11-15T18:30"), "Due 18:30")
+        XCTAssertEqual(due("2026-11-16T18:30", "open"), "Due Mon 18:30")
+        XCTAssertEqual(due("2026-12-01T09:05", "open"), "Due 1 Dec 2026, 09:05")
+        XCTAssertEqual(due("2026-11-15T09:00"), "Late since 09:00")
+        XCTAssertEqual(due("2026-11-14T18:30", "review"), "Late since Sat 18:30")
+        XCTAssertEqual(due("2026-11-15T09:00", "done"), "Due 09:00", "a closed ticket is never late")
+        XCTAssertEqual(due("2026-11-15T09:00", "dropped"), "Due 09:00")
+        XCTAssertEqual(due("2026-11-15T11:59"), "Late since 11:59")
+        XCTAssertEqual(due("2026-11-15T12:00"), "Due 12:00", "late from the minute after")
+    }
+
+    func testDueWithADayOnly() {
+        XCTAssertEqual(due("2026-11-15"), "Due today")
+        XCTAssertEqual(due("2026-11-15", "done"), "Due today")
+        XCTAssertEqual(due("2026-11-16"), "Due Mon 16 Nov")
+        XCTAssertEqual(due("2026-11-14"), "Late since Sat 14 Nov")
+        XCTAssertEqual(due("2026-11-14", "done"), "Due Sat 14 Nov")
+    }
+
+    func testNoDueOrABadOneGivesNoWords() {
+        for bad in [nil, "", "tomorrow", "2026-11-15 18:30", "2026-11-15T18:30:00Z", "2026-02-31", "2026-11-15T25:00", "2026-11-15T18:61", "15-11-2026"] as [String?] {
+            XCTAssertNil(due(bad), String(describing: bad))
+        }
+    }
+
+    func testDueDecodesAndOldSnapshotsStayTheSame() throws {
+        let with = try JSONCoding.decoder.decode(TicketSnapshot.self, from: Data(#"{"title":"T","status":"active","due":"2026-11-20T18:30","running":false}"#.utf8))
+        XCTAssertEqual(with.due, "2026-11-20T18:30")
+        let old = try JSONCoding.decoder.decode(TicketSnapshot.self, from: Data(#"{"title":"T","status":"active","running":false}"#.utf8))
+        XCTAssertNil(old.due)
+        let junk = try JSONCoding.decoder.decode(TicketSnapshot.self, from: Data(#"{"title":"T","due":42}"#.utf8))
+        XCTAssertNil(junk.due)
+        let again = try JSONCoding.decoder.decode(TicketSnapshot.self, from: JSONCoding.encoder.encode(with))
+        XCTAssertEqual(again.due, with.due)
+    }
+
 }

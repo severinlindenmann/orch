@@ -18,7 +18,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
 from . import actions, copychanges, diagapi, reffiles, selfupdate, ticketfiles
-from .data import load_addons, load_chat_day, load_chat_days, load_links, load_services, load_state
+from .data import (
+    forget_static,
+    load_addons,
+    load_chat_day,
+    load_chat_days,
+    load_links,
+    load_services,
+    load_state,
+)
 from .events import Revisions
 from .state_cache import StateCache
 from .views import ViewPuller
@@ -164,7 +172,10 @@ def _services_stamp():
 STATIC_EXT = (".css", ".js", ".svg", ".png", ".ico", ".woff", ".woff2")
 
 
-TYPING_OFF = "Typing into the helper's screen is off. Turn on 'Let me type' in Settings to allow it."
+TYPING_OFF = (
+    "Typing into the helper's screen is off. "
+    "Turn on 'Let me type into the helper's screen' in Settings \u2192 Add-ons, on the page of the add-on that shows this screen."
+)
 
 
 def _typing_allowed(root) -> bool:
@@ -451,6 +462,8 @@ class Handler(BaseHTTPRequestHandler):
             fresh = "fresh=1" in query.split(
                 "&"
             )  # the question card: the ticket as it is now, not a cached copy
+            if fresh:
+                forget_static()  # the add-on list too: a catalogue opened after a change made in the terminal
             state, age = self.server.state_cache.fresh() if fresh else self.server.state_cache.get()
             return self._send(
                 200, json.dumps(state).encode(), "application/json", {"X-State-Age-Ms": str(int(age * 1000))}

@@ -7,7 +7,7 @@ import signal
 import sys
 from pathlib import Path
 
-from . import autopilot, commands, flow, server, service, watch
+from . import ask, autopilot, commands, flow, server, service, watch
 from .store import Refused, field_list, read_bytes, schema_of
 from .view import view as render_view
 
@@ -85,7 +85,7 @@ def main(argv=None):
         p.add_argument("--ticket", help="turn this existing ticket (e.g. one made from Chat) into the order")
         # what the Factory page's idea box does through the dashboard (the add-on act contract)
         p = sub.add_parser("act", parents=[common])
-        p.add_argument("verb", choices=("idea",))
+        p.add_argument("verb", choices=("idea", "ask"))
         p.add_argument("target")
         p.add_argument("--by")
         kinds = {"propose": "proposal", "autopilot": "autopilot", "change": "change", "stop": "stop"}
@@ -96,6 +96,13 @@ def main(argv=None):
         def contract(command):
             return {"epilog": epilog(command), "formatter_class": argparse.RawDescriptionHelpFormatter}
 
+        p = sub.add_parser("ask", parents=[common])  # #816 A: ask another workspace for its view at a stop
+        p.add_argument("order")
+        p.add_argument("stop", type=int)
+        p.add_argument("ws")
+        p.add_argument("--item", type=int, action="append", default=[])
+        p.add_argument("--no-pictures", action="store_true")
+        p.add_argument("--by")
         p = sub.add_parser("draft", parents=[common])
         p.add_argument("order")
         p.add_argument("--file", required=True)
@@ -176,7 +183,9 @@ def main(argv=None):
             else:
                 result = fn(root, target, data)
         elif args.cmd == "act":
-            result = commands.idea_act(root, args.target, args.by)
+            result = (ask.act if args.verb == "ask" else commands.idea_act)(root, args.target, args.by)
+        elif args.cmd == "ask":
+            result = ask.ask(root, args.order, args.stop, args.ws, args.item, args.by, not args.no_pictures)
         elif args.cmd in ("next", "ship"):
             result = {"next": flow.next_step, "ship": flow.ship}[args.cmd](root, args.order)
         elif args.cmd == "crew":

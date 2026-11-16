@@ -1,6 +1,5 @@
 /* Ticket page: quiet content, one next action, comfortable pointer and keyboard targets. */
-.ticket-page{display:grid;gap:24px}
-.ticket-page .ticket-heading{gap:12px}
+.ticket-page{display:grid}
 .ticket-page .ticket-columns{display:grid;align-items:start;grid-template-columns:minmax(0,1fr) 248px;gap:24px}
 .ticket-page .ticket-main,.ticket-page .ticket-side{min-width:0}
 .ticket-page :is(button,summary,.ticket-part,.ab-actions a){min-height:44px}
@@ -64,7 +63,6 @@
 .ticket-result .ticket-preview { width: 100%; }
 .ticket-result .btn { justify-self: start; min-height: 44px; }
 .ticket-part, .ticket-heading > a, .ticket-details a { min-height: 44px; display: flex; align-items: center; }
-.ticket-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ticket-files h3 { margin: 0 0 8px; font-size: 14px; }
 .ticket-file-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .ticket-file-chips .chip { display: inline-flex; gap: 8px; cursor: pointer; max-width: 100%; }
@@ -165,7 +163,6 @@
 .ticket-page .properties .links-card{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
 
 /* ---- Files tab: aligned toolbar, grouped picture tiles, list mode (matches mockup/previews) ---- */
-.ticket-page .files-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
 .ticket-page .files-toolbar .files-search{flex:1 1 220px;min-width:180px;height:40px;padding:0 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg);color:var(--text);font:inherit}
 .ticket-page .files-toolbar .ui-select{flex:none}
 .ticket-page .files-toolbar .ui-select-trigger{height:40px;min-height:40px;white-space:nowrap}
@@ -195,7 +192,7 @@
 .ticket-page .ticket-layout.wide{grid-template-columns:minmax(0,1fr)}.ticket-page .ticket-layout.wide .ticket-side{display:none}
 .ticket-page .preview-body.live{max-height:none}
 .ticket-page .preview-body.live:after{content:none}
-.ticket-page .preview-live{display:block;width:100%;height:340px;border:0;background:#fff}
+.ticket-page .preview-live{display:block;width:100%;height:340px;border:0;background:var(--paper)}
 .ticket-page .preview-body.live .preview-expand{bottom:12px}
 .ticket-page .skeleton-tile{height:200px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:fv-shimmer 1.4s linear infinite}
 @media(prefers-reduced-motion:reduce){.ticket-page .skeleton-tile{animation:none}}
@@ -213,7 +210,7 @@
 .copy-file{width:100%;display:flex;gap:12px;justify-content:space-between;text-align:left}
 .copy-diff{max-height:320px;overflow:auto;font-size:12px;line-height:18px;padding:12px;border:1px solid var(--border);border-radius:8px;margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .copy-diff .diff-add{color:var(--success)}
-.copy-diff .diff-del{color:var(--danger,var(--error,#e5484d))}
+.copy-diff .diff-del{color:var(--danger)}
 
 /* Header strip (master .strip): title and sentence grow, actions sit right, tabs inside the strip. */
 .ticket-page .ticket-strip{margin-bottom:20px}
