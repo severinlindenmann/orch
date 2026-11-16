@@ -105,7 +105,7 @@ def taken_back(d):
         for e in d.get("ents", [])
         if e["row"]["kind"] == "factory:change"
         and e["q"].get("answer") == "Accept"
-        and str(e["q"].get("answered_by", "")).startswith("human:")
+        and authority.human(e["q"])
         and e["data"].get("takes_back") in names
     }
 

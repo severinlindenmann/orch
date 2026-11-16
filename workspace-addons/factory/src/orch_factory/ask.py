@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from . import commands, orchcli
+from . import authority, commands, orchcli
 from .render import clean
 from .store import Refused, Store
 
@@ -36,7 +36,8 @@ def _directory(root):
     """The relay's workspace list (a file orch writes into its skill folder); nothing when relay is off."""
     path = Path(root) / WORKSPACES
     try:
-        raw = path.read_bytes()  # core links this skill folder itself; the file only names workspaces[: DIRECTORY_MAX + 1]
+        # core links this skill folder itself; the file only names workspaces
+        raw = path.read_bytes()[: DIRECTORY_MAX + 1]
         value = json.loads(raw) if len(raw) <= DIRECTORY_MAX else None
     except (OSError, ValueError, UnicodeError, Refused):
         return []
@@ -250,7 +251,7 @@ def texts(proposal, stage, stop_items, indexes):
 def _history_texts(ticket):
     return [
         h["text"]
-        for h in ticket.get("history") or []
+        for h in authority.history(ticket)
         if isinstance(h, dict) and isinstance(h.get("text"), str)
     ]
 
@@ -390,13 +391,13 @@ def view(root, tickets, order, n, name_of, outbox=None):
         ws = _x(t).get("ws")
         name = name_of.get(ws) or clean(str(ws), 60)
         history = [
-            h for h in t.get("history") or [] if isinstance(h, dict) and isinstance(h.get("text"), str)
+            h for h in authority.history(t) if isinstance(h, dict) and isinstance(h.get("text"), str)
         ]
         at = next((h.get("at") for h in history if h.get("text", "").startswith(("Asked", "Created"))), None)
         replies = []
         q = next((x for x in t.get("questions") or [] if x.get("kind") is None), None)
         if q and q.get("answer") is not None:
-            helper = str(q.get("answered_by") or "").startswith("agent:")
+            helper = authority.who(q).startswith("agent:")
             when = next(
                 (h.get("at") for h in history if h.get("text") == f"Answered {q['id']}: {q['answer']}"), None
             )
