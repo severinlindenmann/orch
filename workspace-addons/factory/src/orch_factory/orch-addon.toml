@@ -34,3 +34,8 @@ format = "time"
 summary = "File the idea box's text as a new order and start your agent on its first draft"
 who = "people"
 writes = ["ext.factory"]
+
+[acts.ask]
+summary = "Ask another workspace for its view on a stop, with the items you picked"
+who = "people"
+writes = ["ext.factory"]

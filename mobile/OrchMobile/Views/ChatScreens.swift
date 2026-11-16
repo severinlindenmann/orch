@@ -203,6 +203,9 @@ struct ConversationView: View {
                 if ConversationRules.showsStepsRow(total: ticket.view?.totalCount ?? 0, wontDo: ticket.view?.wontDoCount ?? 0) {
                     summary(ticket)
                 }
+                if let due = TicketDue.words(ticket.view?.due, status: ticket.view?.status, now: now) {
+                    dueLine(due)
+                }
                 if let banner = ConversationRules.questionsBanner(in: items),
                    let first = ConversationRules.openQuestionIds(in: items).first {
                     questionsBanner(banner, first: first)
@@ -325,6 +328,14 @@ struct ConversationView: View {
                 }
             }.themeFont(13).foregroundStyle(Theme.muted)
         }
+    }
+    /// "Due 18:30" / "Late since 18:30": one quiet line under the status (G1b); read only, the phone never edits a due.
+    private func dueLine(_ text: String) -> some View {
+        HStack { Text(text); Spacer(minLength: 8) }
+            .themeFont(13).foregroundStyle(Theme.muted).padding(.horizontal, 18).frame(minHeight: 32)
+            .background(Theme.bg, ignoresSafeAreaEdges: .top)
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+            .accessibilityElement(children: .combine).accessibilityIdentifier("ticket-due")
     }
     private func summary(_ ticket: Ticket) -> some View {
         let text = ConversationRules.summaryText(done: ticket.view?.doneCount ?? 0, total: ticket.view?.totalCount ?? 0, status: TopicStatus(ticket).label, wontDo: ticket.view?.wontDoCount ?? 0)

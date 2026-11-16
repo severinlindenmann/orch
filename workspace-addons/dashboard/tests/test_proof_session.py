@@ -425,6 +425,7 @@ ACT_ARGS = {
     "look.profile": {"service": "relay", "description": "Demo", "tags": ["a"]},
     "copies.clean": {},
     "diag.set": {"on": False},
+    "typing.set": {"on": True},
     "diag.delete_reports": {},
     "copies.remove_orphaned": {"ws8": "abcd1234"},
     "copies.retry": {"ticket": TID},

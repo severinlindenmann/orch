@@ -587,7 +587,9 @@ function previewFile(tid, kind, fileName) {
     const known = array(artifactData.get(tid)?.data?.files).find(f => f.name === fileName) || {name:fileName};
     files = [fileEntry(t || {id:tid}, {kind}, known)]; index = 0;
   }
-  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : ''});
+  // "Share by link…" only when the sharing add-on is on (no hint otherwise); it opens the same Share a file window for this file.
+  const share = addons().some(a => a.active !== false && isPublish(a.name)) ? f => shareDialog({name:f.name.split('/').pop(), url:window.FileViewer.urlOf(f)}) : null;
+  window.FileViewer.open({files, index, context:t ? clean(t.title || '') : '', share});
 }
 // One compact file row: type badge, name, meta, Open / Download / Copy link.
 function ticketFileActions(t, kind, file) {
@@ -1311,6 +1313,8 @@ function missingTicket(id) {
 // The header strip (master .strip): pill, title, one sentence, the main action, then the tabs.
 function ticketStrip(t, run, fresh, planQ, menu, tabs, selected) {
   const m = ticketStripModel(t, run, fresh), actions = [];
+  const quiet = t.quiet_since ? window.DashHelpers.quietWords(t.quiet_since, now()) : '';  // G2
+  if (quiet) m.sentence = (/^Updated /.test(m.sentence || '') || !m.sentence ? '' : m.sentence + ' ') + quiet + '.';  // one line: No news since replaces Updated
   if (!snapshot) {
     if (t.status === 'done') actions.push(ticketButton('Reopen', 'outline sm', () => moveTicket(t.id, 'active'), {'data-key':'ticket-reopen'}));
     else if (t.status === 'review') actions.push(ticketChangesEditor(t));
@@ -1680,6 +1684,34 @@ async function fileEmbedIdea(req) {
   } finally { embedIdeaBusy = false; }
 }
 addEventListener('message', e => { const req = embedIdeaRequest(e); if (req) fileEmbedIdea(req); });
+
+// Ask another workspace at a stop (Factory, 816 A): modelled on the idea box. The shown shipped add-on page names a
+// target ("<order>:s<N>:<workspace>:<items>"); the dashboard runs that add-on's `ask` act (a person's click with this
+// page's session) and tells the page whether it went out. Same origin and shipped-frame fences as orch.idea.
+const EMBED_ASK_TARGET = /^t_[a-z0-9]{6,16}:s[1-9][0-9]{0,3}:ws_[a-z0-9]{6,32}:(-|[0-9]{1,2}(,[0-9]{1,2}){0,11})$/;
+function embedAskRequest(e) {
+  const data = e && e.data;
+  if (!data || typeof data !== 'object' || data.type !== 'orch.ask') return null;
+  const shown = shippedFrame(e);
+  if (!shown || typeof data.id !== 'string' || !EMBED_IDEA_ID.test(data.id)) return null;
+  if (typeof data.target !== 'string' || !EMBED_ASK_TARGET.test(data.target)) return null;
+  return {...shown, id:data.id, target:data.target};
+}
+let embedAskBusy = false;  // one ask at a time: a second click while sending is dropped
+async function fileEmbedAsk(req) {
+  const reply = msg => { try { req.frame.contentWindow?.postMessage({...msg, id:req.id}, location.origin); } catch (_) { /* The page was left. */ } };
+  if (embedAskBusy) return;
+  embedAskBusy = true;
+  try {
+    const result = await act('addon.act', {addon:req.addon, verb:'ask', target:req.target});
+    const answer = result.ok ? result.state?.act_answer : null;
+    const state = answer && answer.addon === req.addon ? answer.answer?.state : null;
+    if (state === 'delivered' || state === 'queued') reply({type:'orch.ask.done', state});
+    else if (state === 'partial') reply({type:'orch.ask.done', state, said:String(answer.answer?.said || '').slice(0, 300)});
+    else reply({type:'orch.ask.failed', error:result.ok ? 'orch did not confirm that it was sent.' : String(result.text || '').slice(0, 300)});
+  } finally { embedAskBusy = false; }
+}
+addEventListener('message', e => { const req = embedAskRequest(e); if (req) fileEmbedAsk(req); });
 
 // Plan the run / Ask for changes on a Factory draft: the shown shipped add-on page names a ticket of ITS OWN (one that
 // carries that add-on's data) and the words. The dashboard sends them as the person's message with its own proven op

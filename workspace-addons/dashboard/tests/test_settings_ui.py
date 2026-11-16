@@ -1,5 +1,7 @@
 """Settings contracts shared with delegated shell handlers and the API lane."""
 
+import pytest
+
 from tests import webjs
 
 
@@ -66,7 +68,10 @@ def test_repeat_window_offers_plain_choices_and_open_tickets():
         in src
     )
     assert "tickets().filter(t => only ? t.id === only : !['done', 'dropped'].includes(t.status))" in src
-    assert "{addon:addonName || route().id, verb:'repeat', target:ticket.value, value:plan.phrase}" in src
+    assert (
+        "addon = addonName || route().id" in src
+        and "{addon, verb:'repeat', target, value:plan.phrase}" in src
+    )
     assert "verb:'copy', target:ticket.value" in src
     assert "if (route().kind === 'addon') await loadAddon(route().id)" in src
 
@@ -297,13 +302,39 @@ def test_settings_splits_installed_and_available(ws, monkeypatch):
     assert f["description"] == "Shows the plan." and "Adds a dashboard tab: Factory" in f["consent"]
 
 
+def test_settings_rows_say_what_can_be_removed_and_the_label_is_never_lower_case(ws, monkeypatch):
+    """core refuses `orch addon uninstall` for relay/publish: the row says removable false; a label never falls back to the package name."""
+    from orch_dashboard import data
+
+    rows = [
+        {"name": "relay", "installed": True, "active": False, "description": "R"},
+        {"name": "factory", "installed": True, "active": False, "description": "F"},
+        {"name": "insights", "installed": False, "active": False, "description": "I"},
+    ]
+    monkeypatch.setattr(
+        data, "run_orch", lambda b, args, root: rows if args == ["addon", "list", "--json"] else None
+    )
+    out = data.load_settings(ws, "orch")
+    assert {a["name"]: a["removable"] for a in out["addons"]} == {"relay": False, "factory": True}
+    assert out["available"][0]["label"] == "Insights"
+
+
+def test_a_fresh_state_read_forgets_the_cached_add_on_list():
+    """The catalogue opens with /api/state?fresh=1: an add-on removed in the terminal must not wait for the 10 s cache."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "src/orch_dashboard/server.py").read_text(encoding="utf-8")
+    block = src[src.index("if fresh:") :][:200]
+    assert "forget_static()" in block
+
+
 def test_catalogue_dialog_uses_the_switch_op_and_plain_states():
     src = webjs.all_js()
     start = src.index("function addonCatalog()")
     body = src[start : src.index("function settingsConfirm", start)]
     assert "addonSet(name, true)" in body  # same op as the switch (addon.set), recovered after a restart
     assert "act('addon.set', {name, on})" in src[src.index("async function addonSet(") :][:400]
-    assert "'Every add-on that comes with orch is already here.'" in body
+    assert "'Every add-on that comes with orch is already here and turned on.'" in body
     assert (
         "'Turned on.'" in body and "It starts with orch start" not in body
     )  # its service starts with the add
@@ -328,3 +359,21 @@ def test_shared_links_tab_hidden_until_sharing_is_set_up(monkeypatch):
     monkeypatch.setattr(data, "publish_connected", lambda root, orch_bin: True)
     out = data.hide_unset_sharing(data.load_addons(None, None, rows), None, None)
     assert all(a["dashboard"] for a in out)
+
+
+def test_typing_on_is_a_plain_setting_the_dashboard_can_switch(ws, monkeypatch):
+    """885: the refusal names a real switch (Settings > Add-ons > Focus); the op is `orch config set focus.session_typing`."""
+    from orch_dashboard import actions, data, server
+
+    assert actions.build_argv("typing.set", {"on": True})[:4] == [
+        "config",
+        "set",
+        "focus.session_typing",
+        "on",
+    ]
+    assert actions.build_argv("typing.set", {"on": False})[3] == "off"
+    with pytest.raises(actions.BadRequest):
+        actions.build_argv("typing.set", {"on": "yes"})
+    assert "Let me type into the helper's screen" in server.TYPING_OFF and "Add-ons" in server.TYPING_OFF
+    monkeypatch.setattr(data, "run_orch", lambda b, args, root: [] if args[:2] == ["addon", "list"] else None)
+    assert data.load_settings(ws, "orch")["typing_on"] is False
