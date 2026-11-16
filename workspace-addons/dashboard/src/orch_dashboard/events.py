@@ -12,8 +12,14 @@ class Revisions:
         self.condition = threading.Condition()
         self.clients = 0
         self.thread = None
-        self.rev = ""
+        self.rev = (
+            ""  # what the event stream sends: the files' signature, or the state copy once it is stored
+        )
+        self.seen = ""  # the files' signature the watcher saw last
         self.closed = False
+        # set by the state cache: a file change starts its background build, and the pages are told by publish()
+        # when the new copy is ready (told at the change itself, every page asked while the copy was old)
+        self.on_change = None
 
     def signature(self):
         rows = []
@@ -62,7 +68,9 @@ class Revisions:
                 return False
             self.clients += 1
             if self.thread is None:
-                self.rev = first
+                self.seen = first
+                if self.on_change is None:
+                    self.rev = first
                 self.thread = threading.Thread(target=self.watch, daemon=True)
                 self.thread.start()
             return True
@@ -75,14 +83,33 @@ class Revisions:
     def watch(self):
         while True:
             rev = self.signature()  # the folder walk happens outside the lock; the lock only publishes
+            changed = None
             with self.condition:
                 if not self.clients or self.closed:
                     self.thread = None
                     return
-                if rev != self.rev:
-                    self.rev = rev
-                    self.condition.notify_all()
+                if rev != self.seen:
+                    self.seen = rev
+                    if self.on_change is None:
+                        self.rev = rev
+                        self.condition.notify_all()
+                    else:
+                        changed = self.on_change
+            if changed is not None:
+                with contextlib.suppress(Exception):  # the watcher keeps running whatever the cache does
+                    changed(rev)
+            with self.condition:
+                if not self.clients or self.closed:
+                    self.thread = None
+                    return
                 self.condition.wait(0.25)
+
+    def publish(self, rev):
+        """The state cache stored a new copy: the open pages fetch it now."""
+        with self.condition:
+            if rev != self.rev:
+                self.rev = rev
+                self.condition.notify_all()
 
     def close(self):
         with self.condition:

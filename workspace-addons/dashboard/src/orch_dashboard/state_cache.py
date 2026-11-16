@@ -1,4 +1,9 @@
-"""The last /api/state answer, served at once; a stale copy is rebuilt by one background thread."""
+"""The last /api/state answer, served at once; a stale copy is rebuilt by one background thread.
+
+A request never waits for a build once a copy exists (issue: 4 to 20 s per answer with five helpers, every helper
+step changed a file and every page request rebuilt the whole state). A change starts one background build; the
+open pages are told "changed" (Revisions.publish) only when the new copy is stored, so the answer they then fetch
+already holds it."""
 
 import threading
 import time
@@ -10,6 +15,9 @@ from .data import load_state
 MAX_AGE = 2.0  # without a revision watcher the copy is this old at most
 # with a watcher: a poll that changed nothing costs no process; time-based values refresh this often
 SAFETY_AGE = 120.0
+# rest between two background builds: helpers that change files every second do not keep a build running
+# without a pause (one build is a dozen `orch` processes)
+MIN_GAP = 0.5
 
 
 class StateCache:
@@ -24,6 +32,12 @@ class StateCache:
         self.closed = False
         self.rebuild = threading.Lock()  # single flight for a synchronous rebuild after a change
         self.gen = 0  # bumped by every put(): a rebuild started earlier never overwrites a newer copy
+        self.dirty = False  # a change arrived: the background builder builds (once more)
+        self.ended = 0.0  # when the last background build ended (MIN_GAP)
+        if revisions is not None:
+            revisions.on_change = (
+                self.kick
+            )  # the watcher's file changes start a build instead of a page refresh
 
     def _signature(self):
         try:
@@ -41,6 +55,9 @@ class StateCache:
                 return
             self.gen += 1
             self.state, self.at, self.sig = state, time.monotonic(), sig
+            gen = self.gen
+        if self.revisions is not None and hasattr(self.revisions, "publish"):
+            self.revisions.publish(f"s{gen}-{sig or ''}")  # the pages fetch now, and get this copy
 
     def _served(self):
         state, age = self.state, time.monotonic() - self.at
@@ -62,18 +79,11 @@ class StateCache:
         with self.lock:
             served = self._served()
             stale = served[1] >= (MAX_AGE if self.revisions is None else SAFETY_AGE)
-            start = not self.busy and not self.closed
-            gen = self.gen
-        if self.revisions is not None and not self.closed and self._signature() != self.sig:
-            # A file that matters changed (new question, new helper request): the page asks because it was told so,
-            # and a stale copy would be the last answer it gets. Rebuild now, once; others wait for that build.
-            return self.fresh()
-        if start and stale:
-            with self.lock:
-                if self.busy or gen != self.gen:
-                    return served
-                self.busy = True
-            threading.Thread(target=self._refresh, args=(gen,), daemon=True).start()
+            busy = self.busy
+        if stale or (not busy and self.revisions is not None and self._signature() != self.sig):
+            # Changed or old: build in the background and answer with the copy now. With an open event stream the
+            # page is told when the new copy is ready; without one its next poll gets it.
+            self.kick()
         return served
 
     def fresh(self) -> tuple[dict, float]:
@@ -91,11 +101,34 @@ class StateCache:
             with self.lock:
                 return self._served()
 
-    def _refresh(self, gen):
+    def kick(self, *_ignored):
+        """A change (or an old copy): one background build; a change during that build makes one more after it."""
+        with self.lock:
+            if self.closed:
+                return
+            self.dirty = True
+            if self.busy:
+                return
+            self.busy = True
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
         try:
-            self._store(*self._build(), gen=gen)
-        except Exception:  # noqa: BLE001, S110 - keep the old copy; a later request tries again
-            pass
+            while True:
+                with self.lock:
+                    if not self.dirty or self.closed:
+                        return
+                    self.dirty = False
+                    gen = self.gen
+                    rest = MIN_GAP - (time.monotonic() - self.ended)
+                if rest > 0:
+                    time.sleep(rest)
+                try:
+                    self._store(*self._build(), gen=gen)
+                except Exception:  # noqa: BLE001, S110 - keep the old copy; a later change or request tries again
+                    pass
+                finally:
+                    self.ended = time.monotonic()
         finally:
             with self.lock:
                 self.busy = False
