@@ -111,7 +111,7 @@ def sim(e):
         p = e.ws("Pilatus") / f"{tid}-deck.pdf"
         p.write_bytes(pdf.replace("|", "\n").encode())
         e.orch("Pilatus", "check", "done", tid, c, "--file", str(p), "--title", title, "--role", "result")
-        e.orch("Pilatus", "ticket", "status", tid, "done")
+        e.person("Pilatus", "ticket", "status", tid, "done")
         ws_send(f"{title} is done.", "--ticket", tid, "--update", "result")
         return tid
 
