@@ -7,6 +7,8 @@ permissions:
   contents: read
 jobs:
   banned-words:
+    # release/* -> main only carries lines that already passed this check on develop: skip it there
+    if: ${{ !(startsWith(github.head_ref, 'release/') && github.base_ref == 'main') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
