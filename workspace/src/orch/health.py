@@ -1,16 +1,17 @@
 """Does everything a helper needs here still work? One generic check, a small recipe per thing.
 
 A recipe says which command to run and how to read its answer:
-  - a helper tool (built-in adapter with a `login` part, agents/login.json): the tool's own status command, which
-    prints one JSON object. orch keeps exactly two facts from it: works or not, and the end time (re-written as a
-    UTC time). The helpers it stops are the live runs on that tool.
-  - a workspace recipe (.orch/checks.json, written by a person): {"checks": {name: {"label", "command", "works"?,
-    "ends"?}}}. Without "works" the exit code alone answers: 0 = works, anything else = needs renewing.
+  - a helper tool (built-in adapter with a `login` part, agents/login.json): the tool's own status
+    command, which prints one JSON object. orch keeps exactly two facts from it: works or not, and the
+    end time (re-written as a UTC time). The helpers it stops are the live runs on that tool.
+  - a workspace recipe (.orch/checks.json, written by a person):
+    {"checks": {name: {"label", "command", "works"?, "ends"?}}}. Without "works" the exit code alone
+    answers: 0 = works, anything else = needs renewing.
 
-States: works | soon (runs out within WARN_DAYS) | renew (stopped working, a person renews it) | unreachable (the
-command could not run or gave no readable answer). Nothing else the command prints is kept, shown or logged, so no
-key and no account detail can leave through here (R5.2). The last result is kept in .orch/run/health.json for the
-dashboard and the phone; it holds the same few facts.
+States: works | soon (runs out within WARN_DAYS) | renew (stopped working, a person renews it) |
+unreachable (the command could not run or gave no readable answer). Nothing else the command prints is
+kept, shown or logged, so no key and no account detail can leave through here (R5.2). The last result
+is kept in .orch/run/health.json for the dashboard and the phone; it holds the same few facts.
 """
 
 from __future__ import annotations
@@ -74,7 +75,14 @@ def _recipe(name, doc) -> dict | None:
             return None
     if ends and not works:
         return None
-    return {"name": name, "label": label.strip(), "command": cmd, "works": works, "ends": ends, "helper": None}
+    return {
+        "name": name,
+        "label": label.strip(),
+        "command": cmd,
+        "works": works,
+        "ends": ends,
+        "helper": None,
+    }
 
 
 def workspace_recipes(root: Path) -> list[dict]:
@@ -182,8 +190,9 @@ def stops(root: Path, adapter: str | None) -> list[dict]:
 
 
 def overview(root: Path, now: datetime | None = None) -> list[dict]:
-    """One row per thing set here: {name, label, state, ends_at, helper, chosen, stops}. A helper tool that is
-    not installed is not set here and is left out; a workspace recipe whose command is missing is unreachable."""
+    """One row per thing set here: {name, label, state, ends_at, helper, chosen, stops}. A helper tool
+    that is not installed is not set here and is left out; a workspace recipe whose command is missing
+    is unreachable."""
     try:
         chosen = adapters.load(adapters.chosen(root), root)["adapter"]
     except Exception:  # noqa: BLE001  no agent chosen or found: nothing is "the helper here"
@@ -225,7 +234,9 @@ def save(root: Path, rows: list[dict], now: datetime | None = None) -> dict:
 def last(root: Path) -> dict | None:
     """The last saved result, or None (never checked, or the file is not one)."""
     doc = net.read_json(_path(root), None)
-    if not (isinstance(doc, dict) and doc.get("schema") == "orch.health/1" and isinstance(doc.get("items"), list)):
+    if not (
+        isinstance(doc, dict) and doc.get("schema") == "orch.health/1" and isinstance(doc.get("items"), list)
+    ):
         return None
     return doc
 

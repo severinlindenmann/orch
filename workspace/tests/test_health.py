@@ -63,7 +63,12 @@ def test_state(works, ends, want):
 
 def test_ask_keeps_two_facts_and_runs_the_fixed_command(monkeypatch):
     seen = []
-    doc = {"loggedIn": True, "loginExpiresAt": "2026-11-17T21:24:57.990Z", "email": "a@b.example", "other": HIDDEN}
+    doc = {
+        "loggedIn": True,
+        "loginExpiresAt": "2026-11-17T21:24:57.990Z",
+        "email": "a@b.example",
+        "other": HIDDEN,
+    }
     _answers(monkeypatch, json.dumps(doc), seen)
     assert health.ask("/bin/claude", CLAUDE) == (True, "2026-11-17T21:24:57Z")
     argv, kw = seen[0]
@@ -88,7 +93,10 @@ def test_ask_survives_a_tool_that_fails(monkeypatch):
 
 def test_tool_without_end_field(monkeypatch):
     _answers(monkeypatch, json.dumps({"loggedIn": True}))
-    assert health.ask("/bin/t", {"command": ["t", "status"], "works": "loggedIn", "ends": None}) == (True, None)
+    assert health.ask("/bin/t", {"command": ["t", "status"], "works": "loggedIn", "ends": None}) == (
+        True,
+        None,
+    )
 
 
 @pytest.mark.parametrize(("code", "want"), [(0, True), (1, False), (4, False)])
@@ -122,6 +130,7 @@ def test_workspace_recipe_shape(name, doc, ok):
 
 
 def _own(proj, checks):
+    (proj / ".orch").mkdir(exist_ok=True)
     (proj / ".orch" / "checks.json").write_text(json.dumps({"checks": checks}), encoding="utf-8")
 
 
@@ -179,6 +188,7 @@ def test_overview_skips_helper_tools_that_are_not_installed(proj, monkeypatch):
 
 def test_broken_checks_file_is_ignored(proj, monkeypatch):
     monkeypatch.setattr(health.shutil, "which", lambda b: None)
+    (proj / ".orch").mkdir(exist_ok=True)
     (proj / ".orch" / "checks.json").write_text("{not json", encoding="utf-8")
     assert health.overview(proj, NOW) == []
 
@@ -224,7 +234,10 @@ def test_command_with_nothing_set(proj, run, monkeypatch):
             {"state": "renew", "ends_at": None, "stops": [], "chosen": True},
             "The Tool login no longer works. No new work starts until it is renewed.",
         ),
-        ({"state": "renew", "ends_at": None, "stops": [], "chosen": False}, "The Tool login no longer works. Renew it."),
+        (
+            {"state": "renew", "ends_at": None, "stops": [], "chosen": False},
+            "The Tool login no longer works. Renew it.",
+        ),
     ],
 )
 def test_line(row, want):
@@ -233,7 +246,13 @@ def test_line(row, want):
 
 def test_line_soon_names_the_time_and_the_tickets():
     stops = [{"key": "DM-1", "title": "A"}, {"key": "DM-2", "title": "B"}]
-    row = {"label": "Tool", "state": "soon", "ends_at": "2030-01-05T10:00:00Z", "stops": stops, "chosen": False}
+    row = {
+        "label": "Tool",
+        "state": "soon",
+        "ends_at": "2030-01-05T10:00:00Z",
+        "stops": stops,
+        "chosen": False,
+    }
     line = cli_health.line(row)
     assert line.startswith("The Tool login runs out ") and "5 Jan" in line
     assert line.endswith(" The helper then stops on 2 tickets: DM-1 A; DM-2 B.")

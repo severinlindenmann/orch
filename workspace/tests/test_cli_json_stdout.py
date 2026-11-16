@@ -15,8 +15,9 @@ from orch import cli, skillrender
 # commands that run an agent, wait, read a terminal, or change the machine: not run here
 SKIP = {
     "init", "update", "uninstall", "leave", "start", "stop", "pause", "resume", "wait", "review wait",
-    "ticket wait", "run", "job run", "record hook", "work-check", "doctor", "logins", "secret exec", "secret env",
-    "secret file", "secret scan", "relay mobile keeper", "relay start", "relay send", "relay download",
+    "ticket wait", "run", "job run", "record hook", "work-check", "doctor", "logins", "secret exec",
+    "secret env", "secret file", "secret scan", "relay mobile keeper", "relay start", "relay send",
+    "relay download",
 }  # fmt: skip
 
 
