@@ -931,6 +931,8 @@ def watch_submit(root: Path, tid: str, run: str, proc: subprocess.Popen, guard=N
                 with guard if guard is not None else contextlib.nullcontext():
                     if not (stop is not None and stop.is_set()):
                         retry_deliver(root, tid, run, memo, end=proc.terminate, stop=stop)
+                    if not (stop is not None and stop.is_set()):
+                        check_attention(root, tid, run, memo, stop=stop)
         except Exception:  # never take the wrapper down
             continue
 
@@ -946,7 +948,57 @@ def _set_state(root: Path, tid: str, run: str, state: str) -> bool:
         rec["renewed_at"] = tickets.now()
         rec.pop("maybe_stale_since", None)
         runs._write(root, rec)
+    diag.log("run.live_state", "info", root=root, ticket=tid, run=run, state=state)
     runhooks.fire("run_state", root=root, tid=tid, run=run, state=state)  # after the lock is released
+    return True
+
+
+ATTENTION_CLEAR_SECONDS = 3.0  # the dialog must stay gone this long before a person's OK no longer counts
+
+
+def check_attention(root: Path, tid: str, run: str, memo: dict, now: float | None = None, stop=None) -> bool:
+    """The tool asked for a person's OK on the screen after it was up (attention, no first-run screen) and the
+    dialog went away without a Stop or a new prompt: the tool took a decision by itself (it blocked the call
+    after a while) or a person answered in the session, and it went on working. When the pane shows no dialog
+    for ATTENTION_CLEAR_SECONDS the run counts as working again, so `orch run list` and Needs you stop asking
+    for an OK nobody can give (report r-1116-1738-ws). An unreadable or scrolled pane changes nothing.
+    memo: the caller's state between polls. True when the state was changed."""
+    t = time.time() if now is None else now
+    rec = runs.read(root, tid)
+    live = (rec or {}).get("live") or {}
+    if (
+        not rec
+        or rec["run"] != run
+        or live.get("state") != "attention"
+        or live.get("why")
+        or not rec.get("up")
+    ):
+        memo.pop("attention_gone", None)
+        return False
+    if (stop is not None and stop.is_set()) or not session_exists(root, tid):
+        return False
+    why = _hold_reason(root, tid, _dialog_rule(rec["agent"], root), _prompt_box(rec["agent"], root))
+    if why in ("dialog", "unreadable", "scrolled"):
+        memo.pop("attention_gone", None)
+        return False
+    since, first = memo.get("attention_gone") or (None, None)
+    if since != live.get("since"):
+        memo["attention_gone"] = (live.get("since"), t)
+        return False
+    if t - first < ATTENTION_CLEAR_SECONDS:
+        return False
+    memo.pop("attention_gone", None)
+    with runs.locked(root, tid):
+        cur = runs.read(root, tid)
+        lv = (cur or {}).get("live") or {}
+        if not cur or cur["run"] != run or lv.get("state") != "attention" or lv.get("since") != since:
+            return False  # a hook wrote a newer state in the meantime: it wins
+        cur["live"] = {"state": "working", "since": tickets.now()}
+        cur["renewed_at"] = tickets.now()
+        cur.pop("maybe_stale_since", None)
+        runs._write(root, cur)
+    diag.log("run.live_state", "info", root=root, ticket=tid, run=run, state="working", why="dialog_gone")
+    runhooks.fire("run_state", root=root, tid=tid, run=run, state="working")
     return True
 
 
