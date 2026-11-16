@@ -152,11 +152,11 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
         assert.equal((await page.locator('[data-key="sync-status"]').textContent()).trim(), 'Paused, review below');
         await shot(page, card, `A-paused-public-${width}`);
         await warn.getByRole('button', {name: 'Use public location'}).click();
-        const dialog = page.locator('dialog.sign-step');
+        const dialog = page.locator('dialog.confirm-step');
         await dialog.waitFor();
         await page.waitForTimeout(300);  // the 200 ms open animation (kit/motion.css) has ended
-        assert.match(await dialog.textContent(), /Use a public location\?.*https:\/\/github\.com\/mia\/orch.*Anyone who knows the address can read your tickets\..*You sign this as me\./);
-        assert.equal((await dialog.locator('[data-key="sign-value"]').textContent()).trim(), 'https://github.com/mia/orch');
+        assert.match(await dialog.textContent(), /Use a public location\?.*https:\/\/github\.com\/mia\/orch.*Anyone who knows the address can read your tickets\..*You confirm this as me\./);
+        assert.equal((await dialog.locator('[data-key="confirm-value"]').textContent()).trim(), 'https://github.com/mia/orch');
         await page.screenshot({path: path.join(OUT, `sign-public-${width}.png`)});
         await page.keyboard.press('Escape');
         assert.equal(await noSideways(page), true, `paused-${width}: no sideways scroll`);
@@ -187,16 +187,16 @@ test('Sync card: open Settings, pick On this computer only, review, Save, status
       const rows = page.locator('.home-need.need-acts');
       await rows.first().waitFor();
       assert.equal(await rows.count(), 3);
-      assert.deepEqual((await rows.locator('.sig').allTextContents()).map(t => t.trim()), ['Needs your signature', 'Needs your signature', 'Needs your signature']);
+      assert.deepEqual((await rows.locator('.sig').allTextContents()).map(t => t.trim()), ['Needs your OK', 'Needs your OK', 'Needs your OK']);
       await page.locator('#needs-you').screenshot({path: path.join(OUT, `needs-${width}.png`)});
       await rows.nth(0).getByRole('button', {name: 'Keep theirs'}).click();
-      const dialog = page.locator('dialog.sign-step');
+      const dialog = page.locator('dialog.confirm-step');
       await dialog.waitFor();
       await page.waitForTimeout(300);  // the 200 ms open animation (kit/motion.css) has ended
-      assert.match(await dialog.textContent(), /Here:.*Other computer:.*You sign this as me\./);
+      assert.match(await dialog.textContent(), /Here:.*Other computer:.*You confirm this as me\./);
       await page.screenshot({path: path.join(OUT, `sign-keep-theirs-${width}.png`)});
-      await dialog.getByRole('button', {name: 'Sign'}).click();
-      await page.waitForFunction(() => !document.querySelector('dialog.sign-step'));
+      await dialog.getByRole('button', {name: 'Confirm'}).click();
+      await page.waitForFunction(() => !document.querySelector('dialog.confirm-step'));
       assert.deepEqual(fake.calls.slice(-2), [
         {op: 'addon.act', args: {addon: 'sync', verb: 'keep-theirs', target: 'tickets/t_q3x8k1.json', review: true}},
         {op: 'addon.act', args: {addon: 'sync', verb: 'keep-theirs', target: 'tickets/t_q3x8k1.json', sign: true, seen: 'sync:keep-theirs:' + 'e'.repeat(64)}}]);

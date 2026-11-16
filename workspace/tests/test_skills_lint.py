@@ -37,6 +37,7 @@ HUMAN_ONLY = {
     "private",  # a person's approvals and Move to private (agents are refused)
     "update",
     "doctor",  # a person's check of the install
+    "logins",  # a person's check of the tool logins (the dashboard and phone show the same)
     "uninstall",  # a person takes orch out of a folder
     "start",
     "stop",

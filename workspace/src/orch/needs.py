@@ -134,6 +134,9 @@ def core_rows(root: Path, now: str | None = None) -> list[dict]:
     from orch import stuck
 
     rows += stuck.rows(root, shown)  # a pull request left open, a helper idle at its prompt
+    from orch import health
+
+    health.soon(root)  # tool logins: a stale result is checked again in the background (ORCH-44)
     for r in services.workspace_rows(root):
         if not r["running"] and not r.get("idle"):
             rows.append(

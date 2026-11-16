@@ -439,7 +439,7 @@ async function signedAct(args, done, after) {
   const asked = await act('addon.act', {...args, review:true});
   const got = asked.ok && asked.state?.act_answer?.addon === args.addon ? asked.state.act_answer.answer : null;
   if (!got || !got.review || typeof got.review.title !== 'string') {
-    window.orch.toast(asked.text || 'This can’t be signed right now. Nothing was changed.', 'error');
+    window.orch.toast(asked.text || 'This can’t be confirmed right now. Nothing was changed.', 'error');
     return null;
   }
   const {title, body, here, there, value} = got.review;
@@ -450,13 +450,13 @@ async function signedAct(args, done, after) {
   }});
 }
 // The person's sign step (the draft's modal): what will happen, the exact value signed (an address, a file, a peer's
-// value), both versions when there are two, "You sign this as <name>", then Sign. No typed word.
+// value), both versions when there are two, "You confirm this as <name>", then Confirm. No typed word.
 function signStep({title, body, here, there, value, done, run}) {
-  const {d, actions} = dialog(String(title || ''), 'dialog sign-step');
-  const sides = here || there ? h('ul', {className:'sign-sides'}, h('li', {}, h('b', {}, 'Here:'), ' ', String(here || '')), h('li', {}, h('b', {}, 'Other computer:'), ' ', String(there || ''))) : null;
-  const shown = value ? settingsText('p', {className:'mono sign-value', 'data-key':'sign-value'}, String(value)) : null;
+  const {d, actions} = dialog(String(title || ''), 'dialog confirm-step');
+  const sides = here || there ? h('ul', {className:'confirm-sides'}, h('li', {}, h('b', {}, 'Here:'), ' ', String(here || '')), h('li', {}, h('b', {}, 'Other computer:'), ' ', String(there || ''))) : null;
+  const shown = value ? settingsText('p', {className:'mono confirm-value', 'data-key':'confirm-value'}, String(value)) : null;
   const who = name(state?.who) || 'you';
-  const sign = h('button', {type:'button', className:'btn primary', 'data-key':'sign-ok'}, iconEl('shield'), 'Sign');
+  const sign = h('button', {type:'button', className:'btn primary', 'data-key':'confirm-ok'}, iconEl('shield'), 'Confirm');
   let pending = false;
   d.addEventListener('cancel', event => { if (pending) event.preventDefault(); });
   sign.addEventListener('click', async () => {
@@ -465,10 +465,10 @@ function signStep({title, body, here, there, value, done, run}) {
     actions.querySelectorAll('button').forEach(b => { b.disabled = true; });
     const result = await run();
     await window.orch.close(d);
-    window.orch.toast(result?.ok ? 'Signed. ' + (done || '') : result?.text || 'That did not work.', result?.ok ? 'ok' : 'error');
+    window.orch.toast(result?.ok ? 'Confirmed. ' + (done || '') : result?.text || 'That did not work.', result?.ok ? 'ok' : 'error');
   });
   actions.append(sign);
-  d.append(...[shown, sides, body ? settingsText('p', {className:'meta'}, body) : null, settingsText('p', {className:'meta'}, 'You sign this as ' + who + '.'), actions].filter(Boolean));
+  d.append(...[shown, sides, body ? settingsText('p', {className:'meta'}, body) : null, settingsText('p', {className:'meta'}, 'You confirm this as ' + who + '.'), actions].filter(Boolean));
   window.orch.open(d);
   return d;
 }

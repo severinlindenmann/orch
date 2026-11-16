@@ -186,6 +186,15 @@
           "additionalProperties": { "type": "string", "pattern": "^orch record hook$" },
           "description": "Optional. Tool hook event (before/after a tool call, after a failed one) -> exactly `orch record hook` (activity.md, The hook entry is narrow): the tool's own hook payload with its tool-call id goes to the record. In the same settings blob as reminder_hooks (one --settings: per-run hooks file for live, inline for oneshot), for every tool, absolute interpreter like reminder_hooks. The command always exits 0."
         },
+        "login": {
+          "type": "object", "required": ["status", "logged_in"], "additionalProperties": false,
+          "description": "Optional, built-in adapters only. How orch learns when the tool's login on this computer runs out: the tool's own status command, which must print one JSON object. orch keeps two facts from it (logged in or not, the end time) and nothing else of the output.",
+          "properties": {
+            "status": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "pattern": "^-{0,2}[a-z][a-z0-9-]{0,31}$" }, "description": "Arguments after the detect binary. Fixed words only, no placeholders." },
+            "logged_in": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Field of the JSON answer that is true while the login works." },
+            "ends": { "type": "string", "pattern": "^[A-Za-z_]{1,32}$", "description": "Optional. Field with the end time (an ISO time, or seconds or milliseconds since 1970). Absent = the tool tells no end time: no early warning." }
+          }
+        },
         "reminder": {
           "type": "object", "required": ["settings_file", "output"], "additionalProperties": false,
           "properties": {

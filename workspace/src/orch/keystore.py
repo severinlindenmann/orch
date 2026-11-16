@@ -100,7 +100,8 @@ def set_name_ok(var: str) -> bool:
     return isinstance(var, str) and bool(SET_NAME_RE.fullmatch(var)) and not env_denied(var)
 
 
-RECORDS = frozenset({"relay", "dev"})  # allowlist: the other files of the key folder have other owners
+# allowlist: the other files of the key folder have other owners; checks = login checks (health.py)
+RECORDS = frozenset({"relay", "dev", "checks"})
 
 TOO_SHORT = "This key is too short to hide safely in records: at least 8 characters."
 BAD_NAME = "A key name uses letters, digits, dot, dash and underscore, and starts with a letter or digit."

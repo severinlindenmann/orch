@@ -21,14 +21,17 @@ ALLOWLIST = Path(__file__).with_name("wording_allowlist.json")
 NEVER = [
     "Request", "Requests", "Job", "Issue", "Todo", "Subtask", "Inbox", "Over to you", "Approval",
     "Sign-off", "Recommended", "Proof", "Artifact", "Scheduler", "Cron", "Schedule", "Bot", "NetBird",
-    "Peer", "Node",
+    "Peer", "Node", "Sign", "Signed", "Signature", "signed", "signature",
 ]  # fmt: skip
 # "Issue" alone is banned; an outside item keeps its tool's own word ("GitHub issue", "Jira Issue"): see wording.md
 TOOLS = ("GitHub", "GitLab", "Jira", "Linear", "Trello")
 _ISSUE = "".join(f"(?<!{t} )" for t in TOOLS) + "Issue"
+# the page login keeps its words ("Sign in", "signed out"): only confirming a choice must not use them
+_LOGIN = r"(?![ -]?(?:in|out|up|on)(?![A-Za-z]))"
+_SPECIAL = {"Issue": _ISSUE, "Sign": "Sign" + _LOGIN, "Signed": "Signed" + _LOGIN, "signed": "signed" + _LOGIN}
 WORD = re.compile(
     r"(?<![A-Za-z])("
-    + "|".join(sorted((_ISSUE if w == "Issue" else re.escape(w) for w in NEVER), key=len, reverse=True))
+    + "|".join(sorted((_SPECIAL.get(w, re.escape(w)) for w in NEVER), key=len, reverse=True))
     + r")(?![A-Za-z])"
 )
 # lowercase never-words that are only ever the screen word in a sentence; a key-like neighbour (proof-chip,
@@ -164,3 +167,8 @@ def test_python_text_is_checked_but_keys_and_docstrings_are_not():
 def test_lowercase_proof_only_as_a_word():
     assert never_words("No proof yet") == ["proof"] and never_words("done only with proof.") == ["proof"]
     assert never_words("chip proof-chip") == [] and never_words("task_proof") == [] and never_words("proof.js") == []
+
+
+def test_confirm_words_replace_the_old_ones():
+    assert WORD.findall('"Sign" "Signed. Saved." "Needs your signature" "You have signed this"') == ["Sign", "Signed", "signature", "signed"]
+    assert WORD.findall('"Sign in" "Signed out" "signed in as Mia" "Sign-in" "Confirm" "Needs your OK" "design" "assigned"') == []
